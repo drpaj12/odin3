@@ -16,6 +16,10 @@ all of it is testable with a fake ``run_inner``:
 7. ``table --legs P,Oprime,Pprime,O --label <label>`` (with ``--seeds 2,3`` after step 6 ran);
 8. ``gate <table dir>``.
 
+Since 2026-10-20 ``gate`` is the 15 group A designs and ``offload`` (mcml, LU32PEEng, bgm,
+LU8PEEng) is shipped out (``tools/vtr-qor/offload/``): steps 1 to 4 and 6 never run them, and
+``rerun-check --set gate`` (step 4) and the seed reruns (step 6) cover group A only.
+
 A step that ended with every job run (exit 0 or 1) is recorded in
 ``<out>/exit-run/<label>/state.json`` and not repeated when ``exit-run`` is started again with
 the label; the job cache and each held verdict (``--resume``) make a repeated step cheap anyway.

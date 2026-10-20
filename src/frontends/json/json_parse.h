@@ -3,7 +3,8 @@
  *
  * RFC 8259 JSON with: integers in the int64 range only (a fraction or exponent is an error),
  * \uXXXX decoded to UTF-8 (a lone surrogate and \u0000 are errors), a leading byte-order mark
- * skipped, no raw control byte in a string, no trailing comma, no duplicate key in one object.
+ * skipped, no raw control byte in a string, the Yosys form \uFFFFFFxx of a byte >= 0x80 restored
+ * to that byte (a bare \uFFFF is an error), no trailing comma, no duplicate key in one object.
  * Strings keep invalid UTF-8 as is. The parser and the free never recurse: depth costs heap, not
  * stack.
  */
@@ -56,10 +57,11 @@ typedef struct odin3_json_doc {
  * kept: strings are copied into doc->arena.
  *
  * Returns ODIN3_OK; ODIN3_ERR_PARSE for malformed input or a limit exceeded, with doc->error
- * naming the line and column of the offending value, key or byte (end of file for a truncated
- * file); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a NULL doc or a NULL text with len > 0. On
- * any failure doc->root is NULL and the doc must still be passed to odin3_json_doc_free. Nothing
- * is logged. The tree lives until odin3_json_doc_free.
+ * naming the line and column of the offending value, key or byte (the end of the file for a
+ * truncated file, the opening quote for an unterminated string; a duplicate key is reported when
+ * its object closes, at the later key); ODIN3_ERR_NO_MEMORY; ODIN3_ERR_INVALID_ARG for a NULL doc
+ * or a NULL text with len > 0. On any failure doc->root is NULL and the doc must still be passed to
+ * odin3_json_doc_free. Nothing is logged. The tree lives until odin3_json_doc_free.
  */
 odin3_status odin3_json_parse(const uint8_t *text, size_t len, const odin3_json_limits *lim,
                               odin3_json_doc *doc);
@@ -67,7 +69,13 @@ odin3_status odin3_json_parse(const uint8_t *text, size_t len, const odin3_json_
 /* Frees the arena and empties the doc. Safe on a zeroed doc and twice. */
 void odin3_json_doc_free(odin3_json_doc *doc);
 
-/* Test hook (not ABI): the limits used when lim is NULL. NULL restores the defaults. */
+/* The default limits (limits.h). max_bytes and max_string above UINT32_MAX are clamped to it. */
+odin3_json_limits odin3_json_default_limits(void);
+
+/*
+ * Test hook (not ABI, not thread safe: set it before any parse and from one thread): the limits
+ * used when lim is NULL. NULL restores the defaults.
+ */
 void odin3_json_test_set_limits(const odin3_json_limits *lim);
 
 odin3_json_kind odin3_json_kind_of(const odin3_json_node *node);

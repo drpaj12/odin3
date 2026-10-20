@@ -25,7 +25,8 @@ used, never edited (decision 15). Decisions are numbered **QH-n**.
 
 ## 1. Purpose and scope (QH-1)
 
-`tools/vtr-qor` runs Odin III and the Parmys baseline through VTR on the 19 VTR 7.0 benchmarks,
+`tools/vtr-qor` runs Odin III and the Parmys baseline through VTR on the 19 VTR 7.0 benchmarks (the local gate is the 15 of group A since 2026-10-20; the other 4
+are run on a bigger machine, PHASE3 decision 54),
 collects VTR's own QoR metrics, and produces the table and verdict of the Phase 3 exit (PHASE3
 exit item 4, decision 3), under the WSL limits of decision 17 and the heavy-run rule.
 
@@ -46,7 +47,10 @@ VTR change; a cloud or self-hosted runner (decision 17c, 18c); VPR in GitHub CI 
 
 ## 2. Designs, order and arches (QH-2)
 
-**Gate set** (decision 2a): the 19. **Extra** (non-gating rows): `arm_core`, `spree`. **Smoke**
+**Gate set** (decision 2a, amended 2026-10-20 by decision 54): the 15 group A designs. The 4 group
+B designs (`LU8PEEng`, `bgm`, `mcml`, `LU32PEEng`) are the **offload** set (`--set offload`,
+`sets.json` `offload`, rank null): they are not run locally ("untested here: too big for this
+machine, shipped out") and are run by `tools/vtr-qor/offload/run-offload`. **Extra** (non-gating rows): `arm_core`, `spree`. **Smoke**
 (EArch, nightly): the 5 smallest. **Order** (decision 17a): ascending size of the Parmys golden
 BLIF on k6_frac (`~/odin3-ws/golden/k6_frac_N10_frac_chain_mem32K_40nm/vtr/<d>/<d>.parmys.blif`,
 odin3-golden `3931cf4`); the extras slot in by the same rule. Group A runs at `-j3`, group B at
@@ -317,7 +321,7 @@ P′'s cross-checks never need a 3–4 h rerun): about 120 MB gzipped for all 21
 writes four files. Numbers: integers as is; `critical_path_delay_ns` 3 decimals; `fmax_mhz` 1;
 times 1 (s); memory 0 (MiB); ratios and geomeans 3, or 4 when the value lies within 0.005 of a
 gate bound (the gate compares unrounded values, so 1.2004 must not print as "1.200" next to a
-FAIL); empty cell = not available. Rows follow the §2 order; extras after the 19. The header's
+FAIL); empty cell = not available. Rows follow the §2 order; extras after the gate designs. The header's
 date and host come from the inputs (the newest job end time and the host recorded in
 `job.json`), never from the clock, so two runs give identical bytes (T7).
 
@@ -330,7 +334,7 @@ VTR's parser prints the pattern default or `-1` for a missing key (and the last 
 both values are present and > 0; otherwise it is undefined and the gate fails (§6.2 rule 2). For
 report-only metrics the ratio is defined when both are present, X ≥ 0 and Y > 0, and is 1 when
 both are 0. The **geomean** over a design set S is `exp(mean_{d∈S} ln r_d)` over the
-designs with a defined ratio, printed with `(n/|S|)` when n < |S|. S is the 19 for gate rows, the
+designs with a defined ratio, printed with `(n/|S|)` when n < |S|. S is the 15 gate designs for gate rows, the
 2 extras separately, never mixed. Lower is better for every gated metric.
 
 ### 6.2 The gate (decision 3b; `tests/vtr/qor/bands.json`)
@@ -350,7 +354,7 @@ which jobs to rerun. Otherwise PASS iff all of:
 1. every gate design's O job is `ok` with `vpr_status=success` (else FAIL);
 2. every gated metric is present and > 0 for O and P on every gate design (§6.1); a missing or
    nonpositive value is `gate: FAIL: <metric> missing for <d> (<leg>)` (ruling H2);
-3. for each gated metric, geomean ≤ 1.20 (inclusive) over all 19 (n = 19) and every ratio ≤ 1.50
+3. for each gated metric, geomean ≤ 1.20 (inclusive) over all 15 (n = 15) and every ratio ≤ 1.50
    (inclusive), compared unrounded;
 4. for `num_mult` and `num_memories`, O = P or a row `<design>\t<metric>\t<text>` exists in
    `tests/vtr/qor/explanations.tsv`;
@@ -617,8 +621,9 @@ exceptions PR is expected. `sha` and `blob_merge` have no such fallback.
 ### 8.3 Byte-identical reruns (exit item 3)
 
 `vtr-qor rerun-check --leg O` runs the O front end again into `<J>/rerun.blif` (a fresh process)
-and compares SHA-256 with the job's `<d>.blif.sha256`: `same` or `differs`. The exit run does all
-19; nightly does group A.
+and compares SHA-256 with the job's `<d>.blif.sha256`: `same` or `differs`. The exit run does the
+15 of the gate set (group A; the 4 offload designs are repeated on the bigger machine);
+nightly does group A.
 
 ## 9. CLI (QH-9)
 
@@ -656,7 +661,7 @@ replace these figures with measured ones:
 |---|---|---|
 | three legs (O′, P′, O) on 21 designs | ≈ 12–13 h | per leg: group A ≈ 16 min, `LU8PEEng` + `bgm` ≈ 0.5 h, `mcml` ≈ 2 h, `LU32PEEng` ≈ 1.5 h |
 | fcheck on P and O | ≈ 3–6 h | group A ≈ 1–1.5 h; group B Verilator builds at `-j1`, 4 designs × 2 legs, unmeasured |
-| `rerun-check` on the 19 O front ends | ≈ 3–4 h | `mcml` and `LU32PEEng` repeat linked ABC (≈ 1.5 h for `mcml`) |
+| `rerun-check` on the 15 O front ends | ≈ 1 h | group A only; `mcml` and `LU32PEEng` (≈ 1.5 h for `mcml`) are shipped out |
 | `equiv` | ≈ 1–1.5 h | 9 designs × ≤ 600 s |
 | EArch smoke | ≈ 0.3 h | 5 designs × 4 legs |
 | M3 seed reruns | 0–6+ h | 4 full runs per big design near a bound |

@@ -10,13 +10,16 @@
 
 enum {
     ODIN3_JSON_MAX_BYTES = 1 << 30,  /* file size: 1 GiB */
-    ODIN3_JSON_MAX_STRING = 1 << 20, /* decoded string length: 1 MiB */
+    ODIN3_JSON_MAX_STRING = 1 << 26, /* decoded string length: 64 MiB (a Yosys $mem INIT is
+                                        one bit per memory bit; a 64Kx32 ROM is 2 Mi chars) */
+    ODIN3_JSON_MAX_NODES = 1 << 25,  /* values in the tree: 32 Mi, about 1.5 GiB of nodes */
     ODIN3_JSON_MAX_DEPTH = 32        /* nesting depth of arrays and objects */
 };
 
 typedef struct odin3_json_limits {
     size_t max_bytes;
     size_t max_string;
+    size_t max_nodes;
     uint32_t max_depth;
 } odin3_json_limits;
 

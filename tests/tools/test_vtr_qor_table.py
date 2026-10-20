@@ -3,8 +3,9 @@ plan Tasks 8 and 9; spec §6, T3, T7).
 
 The runs are synthetic: built in the test, written as a small job tree under a temporary
 directory, or copied from the committed fixture tree ``fixtures/vtr_qor/table/runs`` (P, O', P'
-and O on the 19 + 2; its README records the hand-computed geomeans). Nothing here runs VTR or
-writes ``~/odin3-ws/golden``: ``publish`` runs with ``HOME`` pointed at a temporary directory.
+and O on the 15 + 2 + 4 offload designs; its README records the hand-computed geomeans).
+Nothing here runs VTR or writes ``~/odin3-ws/golden``: ``publish`` runs with ``HOME`` pointed at
+a temporary directory.
 """
 
 from __future__ import annotations
@@ -132,9 +133,9 @@ class RatioTest(unittest.TestCase):
         self.assertEqual(qor_table.geomean_n([qor_table.ratio(0.0, 5.0, False), 1.0]), (0.0, 2))
         runs = replace(table(1.1), run("O", "sha", override={"num_clb": -1}))
         ratios = qor_table.pair_ratios(runs, ("O", "P"), "num_clb", GATE, gated=True)
-        self.assertEqual(len(ratios), 19)
+        self.assertEqual(len(ratios), 15)
         mean, n = qor_table.geomean_n(ratios)
-        self.assertEqual(n, 18)
+        self.assertEqual(n, 14)
         assert mean is not None
         self.assertAlmostEqual(mean, 1.1, places=12)
         self.assertEqual(qor_table.geomean_n([None, None]), (None, 0))
@@ -196,7 +197,7 @@ class GateTest(unittest.TestCase):
 
     def test_gate_boundaries_decimal(self) -> None:
         """Review I1: values are taken as the decimals VTR printed, so CPD 3.6 / 2.4 is exactly
-        1.50 and 19 × 3.6 / 3.0 is a geomean of exactly 1.20; both meet the inclusive bounds."""
+        1.50 and 15 × 3.6 / 3.0 is a geomean of exactly 1.20; both meet the inclusive bounds."""
         cpd = "critical_path_delay_ns"
         runs = replace(replace(table(), run("P", "sha", override={cpd: 2.4})),
                        run("O", "sha", override={cpd: 3.6}))
@@ -242,37 +243,37 @@ class GateTest(unittest.TestCase):
             state="FAIL", violations=("gate: FAIL: min_chan_width missing for sha (P)",)))
 
     def test_gate_missing_design(self) -> None:
-        got = verdict(drop(table(), "O", "bgm"))
-        self.assertVerdict(got, "FAIL", "table: bgm has no ok O job")
-        got = verdict(replace(table(), run("O", "bgm", status="failed",
+        got = verdict(drop(table(), "O", "raygentop"))
+        self.assertVerdict(got, "FAIL", "table: raygentop has no ok O job")
+        got = verdict(replace(table(), run("O", "raygentop", status="failed",
                                            override={"vpr_status": None})))
-        self.assertVerdict(got, "FAIL", "table: bgm has no ok O job")
+        self.assertVerdict(got, "FAIL", "table: raygentop has no ok O job")
 
     def test_gate_incomplete_reference(self) -> None:
-        runs = replace(table(), run("P", "mcml", status="capped"))
+        runs = replace(table(), run("P", "or1200", status="capped"))
         self.assertEqual(verdict(runs), Verdict(
             state="INCOMPLETE",
-            violations=("gate: INCOMPLETE: mcml P is capped (reference); rerun it",)))
+            violations=("gate: INCOMPLETE: or1200 P is capped (reference); rerun it",)))
         runs = replace(runs, run("O", "sha", override={"min_chan_width": -1}))
         self.assertVerdict(verdict(runs), "INCOMPLETE",
-                           "gate: INCOMPLETE: mcml P is capped (reference); rerun it",
+                           "gate: INCOMPLETE: or1200 P is capped (reference); rerun it",
                            "gate: FAIL: min_chan_width missing for sha (O)")
-        self.assertVerdict(verdict(drop(table(), "P", "bgm")), "INCOMPLETE",
-                           "gate: INCOMPLETE: bgm P is missing (reference); rerun it")
+        self.assertVerdict(verdict(drop(table(), "P", "raygentop")), "INCOMPLETE",
+                           "gate: INCOMPLETE: raygentop P is missing (reference); rerun it")
 
     def test_gate_reference_excluded_from_rules_2_to_4(self) -> None:
         """Review M2: a capped P's metrics are not judged (no duplicate "(P)" lines)."""
-        runs = replace(table(), run("P", "mcml", status="capped",
+        runs = replace(table(), run("P", "or1200", status="capped",
                                     override={"min_chan_width": None, "num_mult": 9}))
         self.assertEqual(verdict(runs), Verdict(state="INCOMPLETE", violations=(
-            "gate: INCOMPLETE: mcml P is capped (reference); rerun it",)))
+            "gate: INCOMPLETE: or1200 P is capped (reference); rerun it",)))
 
     def test_gate_incomplete_attribution_reference(self) -> None:
         runs = table(legs=("P", "Oprime", "O"))
         self.assertEqual(verdict(runs).state, "PASS")
-        runs = replace(runs, run("Oprime", "bgm", status="timeout"))
+        runs = replace(runs, run("Oprime", "raygentop", status="timeout"))
         self.assertVerdict(verdict(runs), "INCOMPLETE",
-                           "gate: INCOMPLETE: bgm Oprime is timeout (reference); rerun it")
+                           "gate: INCOMPLETE: raygentop Oprime is timeout (reference); rerun it")
 
     def test_gate_no_o_leg(self) -> None:
         self.assertEqual(verdict(table(legs=("P",))), Verdict(
@@ -310,7 +311,7 @@ class GateTest(unittest.TestCase):
         self.assertEqual(verdict(fail, divergences=rows).state, "PASS")
         rows = [("sha", "async-reset-made-sync", "decision 19")]
         self.assertEqual(verdict(fail, divergences=rows).state, "PASS")
-        rows = [("bgm", "mem-init-dropped", "another design")]
+        rows = [("raygentop", "mem-init-dropped", "another design")]
         self.assertEqual(verdict(fail, divergences=rows).state, "FAIL")
         rows = [("sha", "baseline-fails", "P's log")]
         self.assertEqual(verdict(fail, divergences=rows).state, "FAIL")
@@ -372,7 +373,7 @@ class GateTest(unittest.TestCase):
         for word in ("timeout", "multiclock", "error"):
             runs = replace(table(), run("O", "stereovision3", override={"equiv": word}))
             self.assertEqual(verdict(runs, exceptions=listed).state, "PASS", word)
-        ram = replace(table(), run("O", "mcml", override={"equiv": "ram"}))
+        ram = replace(table(), run("O", "or1200", override={"equiv": "ram"}))
         self.assertEqual(verdict(ram).state, "PASS")
         skipped = replace(table(), run("O", "sha", override={"equiv": "skipped"}))
         self.assertEqual(verdict(skipped, exceptions=listed), Verdict(
@@ -384,16 +385,16 @@ class GateTest(unittest.TestCase):
     def test_gate_equiv_scope(self) -> None:
         """PHASE3 #16: equivalence gates only the small set. A big design's missing, timed-out,
         errored or capped equiv neither fails nor holds the gate; ``differs`` still fails."""
-        for design in ("mcml", "LU8PEEng", "bgm"):
+        for design in ("or1200", "boundtop", "raygentop"):
             for word in ("skipped", "timeout", "error", "capped", "multiclock"):
                 runs = replace(table(), run("O", design, override={"equiv": word}))
                 self.assertEqual(verdict(runs).state, "PASS", (design, word))
             absent = replace(table(), run("O", design, override={"equiv": None}))
             self.assertEqual(verdict(absent), Verdict(state="PASS", violations=()))
-        timed = verdict(replace(table(), run("O", "mcml", override={"equiv": "timeout"})))
+        timed = verdict(replace(table(), run("O", "or1200", override={"equiv": "timeout"})))
         self.assertEqual(timed.notes, (
-            "gate: note: mcml equiv timeout; not required (PHASE3 #16)",))
-        differs = replace(table(), run("O", "mcml", override={"equiv": "differs"}))
+            "gate: note: or1200 equiv timeout; not required (PHASE3 #16)",))
+        differs = replace(table(), run("O", "or1200", override={"equiv": "differs"}))
         self.assertEqual(verdict(differs).state, "FAIL")
         # ... and a small-set design is still held to it.
         small = replace(table(), run("O", "sha", override={"equiv": "timeout"}))
@@ -412,12 +413,12 @@ class GateTest(unittest.TestCase):
         """PHASE3 #16: a capped or timed-out fcheck on a big design is a note; a mismatch fails;
         the same on a small design still holds or fails the gate."""
         for word in ("capped", "timeout"):
-            runs = replace(table(), run("O", "mcml", override={"fcheck": word}))
+            runs = replace(table(), run("O", "or1200", override={"fcheck": word}))
             got = verdict(runs)
             self.assertEqual((got.state, len(got.notes)), ("PASS", 1), word)
-            p_side = replace(table(), run("P", "mcml", override={"fcheck": word}))
+            p_side = replace(table(), run("P", "or1200", override={"fcheck": word}))
             self.assertEqual(verdict(p_side).state, "PASS", word)
-        fail = replace(table(), run("O", "mcml", override={"fcheck": "fail"}))
+        fail = replace(table(), run("O", "or1200", override={"fcheck": "fail"}))
         self.assertEqual(verdict(fail).state, "FAIL")
         capped = replace(table(), run("O", "sha", override={"fcheck": "capped"}))
         self.assertEqual(verdict(capped).state, "FAIL")
@@ -440,18 +441,18 @@ class GateTest(unittest.TestCase):
             self.assertEqual(verdict(runs), Verdict(state="INCOMPLETE", violations=(
                 f"gate: INCOMPLETE: sha O rerun {word or 'missing'} (not run); run it",)))
         # Ruling D1 does not hide a failure: a FAIL elsewhere is still listed.
-        runs = replace(rerun, run("O", "bgm", override={"rerun": "skipped"}))
+        runs = replace(rerun, run("O", "boundtop", override={"rerun": "skipped"}))
         self.assertEqual(verdict(runs).violations, (
             "gate: FAIL: sha rerun differs",
-            "gate: INCOMPLETE: bgm O rerun skipped (not run); run it"))
+            "gate: INCOMPLETE: boundtop O rerun skipped (not run); run it"))
 
     def test_gate_collects_in_rule_order(self) -> None:
-        runs = drop(table(), "O", "bgm")
+        runs = drop(table(), "O", "raygentop")
         runs = replace(runs, run("O", "sha", override={"num_mult": 5, "rerun": "differs"}))
         runs = replace(runs, run("O", "diffeq1", 1.6))
         got = verdict(runs)
         self.assertEqual(got.violations, (
-            "table: bgm has no ok O job",
+            "table: raygentop has no ok O job",
             "gate: FAIL: num_clb diffeq1 O/P 1.600 > 1.50",
             "gate: FAIL: min_chan_width diffeq1 O/P 1.600 > 1.50",
             "gate: FAIL: critical_path_delay_ns diffeq1 O/P 1.600 > 1.50",
@@ -548,17 +549,18 @@ class LoadRunsTest(unittest.TestCase):
 
     def test_status_and_partial_attempts(self) -> None:
         key = "aaaaaaaaaaaa"
-        write_job(self.root, "P", key, "mcml", status="capped")
+        write_job(self.root, "P", key, "mkSMAdapter4B", status="capped")
         write_job(self.root, "P", key, "sha")  # status ok, no metrics.json: partial
-        stale = {**metrics("P", "bgm"), "status": "failed"}
-        write_job(self.root, "P", key, "bgm", data=stale)  # ok word, a failed record
+        stale = {**metrics("P", "raygentop"), "status": "failed"}
+        write_job(self.root, "P", key, "raygentop", data=stale)  # ok word, a failed record
         write_job(self.root, "P", key, "diffeq1", data=metrics("P", "diffeq2"))  # wrong design
         good = write_job(self.root, "P", key, "or1200", status="failed",
                          data=metrics("P", "or1200"))
         self.latest("P", key)
         got = {r.design: r.status for r in qor_table.load_runs(self.root, VTR12, ARCH, {})}
-        self.assertEqual(got, {"mcml": "capped", "sha": "incomplete", "bgm": "incomplete",
-                               "diffeq1": "incomplete", "or1200": "failed"})
+        self.assertEqual(got, {"mkSMAdapter4B": "capped", "sha": "incomplete",
+                               "raygentop": "incomplete", "diffeq1": "incomplete",
+                               "or1200": "failed"})
         (good / "status").unlink()
         got = {r.design: r.status for r in qor_table.load_runs(self.root, VTR12, ARCH, {})}
         self.assertEqual(got["or1200"], "missing")
@@ -685,9 +687,9 @@ class TableCliTest(unittest.TestCase):
         ratios = (table_dir / "ratios.csv").read_text(encoding="utf-8").split("\n")
         self.assertEqual(runs[0], RUNS_CSV_HEADER)
         self.assertEqual(ratios[0], RATIOS_CSV_HEADER)
-        self.assertEqual(len(runs), 84 + 2)  # 21 designs x 4 legs, the header, the last "\n"
-        # 4 pairs (O/P, O'/P, P'/P, O/O'): 21 design rows and 2 geomean rows each.
-        self.assertEqual(len(ratios), 4 * (21 + 2) + 2)
+        self.assertEqual(len(runs), 68 + 2)  # 17 designs x 4 legs, the header, the last "\n"
+        # 4 pairs (O/P, O'/P, P'/P, O/O'): 17 design rows and 2 geomean rows each.
+        self.assertEqual(len(ratios), 4 * (17 + 2) + 2)
         self.assertNotIn("\r", (table_dir / "runs.csv").read_text(encoding="utf-8"))
 
     def test_gate_cli(self) -> None:
@@ -697,11 +699,11 @@ class TableCliTest(unittest.TestCase):
         (self.job("O", "sha") / "metrics.json").write_text(json.dumps(data), encoding="utf-8")
         self.assertEqual(self.gate(self.made("fail")), (1, [
             "Gate (decision 3): FAIL", "gate: FAIL: num_clb sha O/P 2.000 > 1.50"]))
-        (self.job("P", "mcml") / "status").write_text("capped\n", encoding="utf-8")
+        (self.job("P", "or1200") / "status").write_text("capped\n", encoding="utf-8")
         code, lines = self.gate(self.made("incomplete"))
         self.assertEqual(code, 3)
         self.assertEqual(lines, ["Gate (decision 3): INCOMPLETE",
-                                 "gate: INCOMPLETE: mcml P is capped (reference); rerun it",
+                                 "gate: INCOMPLETE: or1200 P is capped (reference); rerun it",
                                  "gate: FAIL: num_clb sha O/P 2.000 > 1.50"])
         code, out, err = run_main(vtr_qor.main, ["gate", str(self.root)])
         self.assertEqual(code, 2)
@@ -800,30 +802,30 @@ class TableCliTest(unittest.TestCase):
             self.assertEqual(list(real.iterdir()), [])
 
     def test_smoke_and_extra_sets(self) -> None:
-        """Ruling N1 (review addendum's reproduction): on k6, decision 3 needs all 19, so a
+        """Ruling N1 (review addendum's reproduction): on k6, decision 3 needs all 15, so a
         table narrowed by --set is not gated and INCOMPLETE (exit 3), never a 5-design PASS."""
-        for sets, n in (("smoke", 5), ("extra", 0), ("gate", 19)):
+        for sets, n in (("smoke", 5), ("extra", 0), ("gate", 15)):
             code, out, err = self.table("P,O',P',O", f"set-{sets}", "--set", sets)
             self.assertEqual(code, 0, err)
             table_dir = Path(out.strip())
             md = (table_dir / "qor.md").read_text(encoding="utf-8")
-            if n == 19:
+            if n == 15:
                 self.assertEqual(self.gate(table_dir), (0, ["Gate (decision 3): PASS"]))
                 self.assertIn("## Gate (decision 3): PASS\n", md)
                 continue
-            reason = f"decision 3 needs the 19 (this table has {n})"
+            reason = f"decision 3 needs the 15 (this table has {n})"
             self.assertIn(f"## Gate (decision 3): not gated — {reason}\n", md)
             self.assertNotIn("**geomean (", md.split("## Netlist")[0])
             self.assertNotIn("## Gate (decision 3): PASS", md)
             self.assertEqual(self.gate(table_dir), (3, [
                 "Gate (decision 3): INCOMPLETE", f"gate: INCOMPLETE: {reason}"]))
             ratios = (table_dir / "ratios.csv").read_text(encoding="utf-8")
-            self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,{n},", ratios)  # n of the 19
+            self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,{n},", ratios)  # n of the 15
             geomeans = json.loads((table_dir / "runs.json").read_text(encoding="utf-8"))
             want = ("O/P", "GEOMEAN_GATE", "num_clb")
             gate_rows = [g for g in geomeans["geomeans"]
                          if (g["pair"], g["set"], g["metric"]) == want]
-            self.assertEqual([(g["n"], g["of"]) for g in gate_rows], [(n, 19)])
+            self.assertEqual([(g["n"], g["of"]) for g in gate_rows], [(n, 15)])
 
     def test_earch_table(self) -> None:
         """Review M1: an EArch table gates over the smoke set and has no k6 cross-check."""
@@ -853,7 +855,7 @@ class TableCliTest(unittest.TestCase):
         self.assertIn("| ch_intrinsics | P | 1000 | 100 | 10 | 2 | 4 | 5 | 5 |  |", md)
         self.assertIn("| ch_intrinsics | 200 | 160 | 1.250 | 50 | 50 | 1.000 | 2.500 | 2.500 | "
                       "1.000 | 1000 | 1000 | 1.000 | num_clb |", md)
-        self.assertIn("| **geomean (19)** |  |  | 1.012 |  |  | 1.012 |  |  | 1.000 (18/19) |"
+        self.assertIn("| **geomean (15)** |  |  | 1.015 |  |  | 1.015 |  |  | 1.000 (14/15) |"
                       "  |  | 1.000 |  |", md)
         self.assertNotIn("| O |", md)
         self.assertIn("legs P 111111111111\n", md)
@@ -883,7 +885,7 @@ class TableCliTest(unittest.TestCase):
         code, out, err = self.table("P", "keyed", "--keys", "P=111111111111", "--set", "gate")
         self.assertEqual(code, 0, err)
         runs = (Path(out.strip()) / "runs.csv").read_text(encoding="utf-8").splitlines()
-        self.assertEqual(len(runs), 1 + 19)
+        self.assertEqual(len(runs), 1 + 15)
         self.assertNotIn("spree", "".join(runs))
 
 
@@ -900,7 +902,7 @@ class WriterTest(unittest.TestCase):
             qor_table.write_md(runs, verdict_, header(runs), self.dir / "qor.md", golden=None)
             qor_table.write_csv(runs, self.dir / "runs.csv", self.dir / "ratios.csv")
             md = (self.dir / "qor.md").read_text(encoding="utf-8")
-            self.assertIn(f"| **geomean (19)** |  |  | **{text}** |", md)
+            self.assertIn(f"| **geomean (15)** |  |  | **{text}** |", md)
             gm = [line for line in (self.dir / "ratios.csv").read_text(encoding="utf-8")
                   .splitlines() if ",GEOMEAN_GATE," in line]
             self.assertEqual(len(gm), 1)
@@ -963,7 +965,8 @@ class WriterTest(unittest.TestCase):
         self.assertEqual(state({"pass": False, "violations": ["gate: FAIL: x"]}), "FAIL")
         self.assertEqual(state({"pass": False, "violations": [
             "gate: FAIL: x", "gate: INCOMPLETE: no O leg in the table"]}), "INCOMPLETE")
-        for verdict_ in (Verdict("PASS", ()), Verdict("FAIL", ("table: bgm has no ok O job",)),
+        for verdict_ in (Verdict("PASS", ()), Verdict("FAIL",
+                                                    ("table: raygentop has no ok O job",)),
                          Verdict("INCOMPLETE", ("gate: INCOMPLETE: no P leg in the table",))):
             got = qor_table.verdict_json(verdict_)
             assert got is not None
@@ -977,44 +980,44 @@ class WriterTest(unittest.TestCase):
         self.assertEqual(row, f"{ARCH},sha,O,0123456789ab,failed,true" + "," * 27
                          + qor_legs.VTR_PIN + ",")
         ratios = (self.dir / "ratios.csv").read_text(encoding="utf-8").splitlines()
-        self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,18,", "\n".join(ratios))
+        self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,14,", "\n".join(ratios))
 
     def test_noise_floor_and_name_style(self) -> None:
         """Review I2/M5: both sections render; the noise floor shows min and max."""
         runs = table(legs=("P", "O"))
         for design in GATE:
-            scale = {"sha": 0.95, "bgm": 1.05}.get(design, 1.0)
+            scale = {"sha": 0.95, "raygentop": 1.05}.get(design, 1.0)
             runs.append(run("R", design, scale))
             runs.append(run("Oprov", design, override={"vpr_time_s": 2.0}
                             if design == "sha" else None))
         qor_table.write_md(runs, verdict(runs), header(runs), self.dir / "qor.md", golden=None)
         md = (self.dir / "qor.md").read_text(encoding="utf-8")
         self.assertIn("## Noise floor\n", md)
-        self.assertIn("| metric | R/P geomean (19) | min | max |", md)
-        self.assertIn("| num_clb | 1.000 | 0.950 (sha) | 1.050 (bgm) |", md)
+        self.assertIn("| metric | R/P geomean (15) | min | max |", md)
+        self.assertIn("| num_clb | 1.000 | 0.950 (sha) | 1.050 (raygentop) |", md)
         self.assertIn("## Name style\n", md)
         self.assertIn("| sha | 1.0 | 2.0 | 2.000 |  |  |  |", md)
-        self.assertIn("| bgm | 1.0 | 1.0 | 1.000 |  |  |  |", md)
+        self.assertIn("| raygentop | 1.0 | 1.0 | 1.000 |  |  |  |", md)
 
     def test_md_shows_the_baseline_defect_never_a_pass(self) -> None:
         runs = replace(table(), run("P", "sha", override={"fcheck": "fail"}))
-        runs = replace(runs, run("P", "bgm", override={"fcheck": "untested"}))
+        runs = replace(runs, run("P", "raygentop", override={"fcheck": "untested"}))
         divergences = [("sha", "baseline-fails", "D2b: subtract pad"),
                        ("sha", "baseline-fails", "dropped-latches: RTL latches"),
-                       ("bgm", "baseline-fails", "x-state: unreset pipeline")]
+                       ("raygentop", "baseline-fails", "x-state: unreset pipeline")]
         qor_table.write_md(runs, verdict(runs), header(runs), self.dir / "qor.md", golden=None,
                            divergences=divergences, equiv_exceptions=())
         md = (self.dir / "qor.md").read_text(encoding="utf-8")
         self.assertIn("| sha | fail (baseline: D2b, dropped-latches) | pass |", md)
-        self.assertIn("| bgm | untested (baseline: x-state) | pass |", md)
-        self.assertEqual(qor_table.baseline_tags(divergences, "mcml"), [])
+        self.assertIn("| raygentop | untested (baseline: x-state) | pass |", md)
+        self.assertEqual(qor_table.baseline_tags(divergences, "or1200"), [])
 
     def test_md_checks_divergences_marks(self) -> None:
         """Review I2: divergence rows, the equiv exception note, the ? mark, -dirty."""
         runs = replace(table(), run("O", "sha", override={"fcheck": "skipped"}))
-        runs = replace(runs, run("O", "mcml", override={"fcheck": "fail"}))
+        runs = replace(runs, run("O", "or1200", override={"fcheck": "fail"}))
         runs = replace(runs, run("O", "stereovision3", override={"equiv": "multiclock"}))
-        o_bgm = run("O", "bgm")
+        o_bgm = run("O", "raygentop")
         dirty = {**o_bgm.metrics, "odin3_commit": "f" * 40 + "-dirty", "odin3_build": "e" * 64}
         runs = replace(runs, Run(o_bgm.leg, o_bgm.design, o_bgm.arch, o_bgm.key12, o_bgm.status,
                                  o_bgm.gating, dirty))
@@ -1029,8 +1032,8 @@ class WriterTest(unittest.TestCase):
         rows = {line.split(" | ")[0][2:]: line for line in md.splitlines()
                 if line.startswith("| ") and line.endswith((" ✓ |", " ✗ |", " ? |"))}
         self.assertTrue(rows["sha"].endswith(" ? |"))
-        self.assertTrue(rows["mcml"].endswith(" ✗ |"))
-        self.assertTrue(rows["bgm"].endswith(" ✓ |"))
+        self.assertTrue(rows["or1200"].endswith(" ✗ |"))
+        self.assertTrue(rows["raygentop"].endswith(" ✓ |"))
         self.assertIn("| stereovision3 | pass | pass | multiclock (exception: multiclock) | same |",
                       md)
         self.assertIn("## Declared divergences\n\n| design | class | text |\n|---|---|---|\n"

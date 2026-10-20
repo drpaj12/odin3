@@ -25,7 +25,10 @@ enum {
     LEAD_2 = 0xC0,
     LEAD_3 = 0xE0,
     LEAD_4 = 0xF0,
-    FIRST_PRINTABLE = 0x20
+    FIRST_PRINTABLE = 0x20,
+    UNIT_NONCHAR = 0xFFFF,
+    BYTE_BITS = 8,
+    BYTE_MAX = 0xFF
 };
 
 static const uint8_t k_bom[BOM_LEN] = {0xEF, 0xBB, 0xBF};
@@ -78,40 +81,27 @@ odin3_status json_fail(json_lex *lex, odin3_json_loc pos, odin3_status code, con
     return code;
 }
 
-static odin3_status push_byte(json_lex *lex, uint8_t byte) {
-    uint8_t *slot = odin3_vec_push(&lex->scratch);
-    if (slot == NULL) {
-        return json_fail(lex, json_here(lex), ODIN3_ERR_NO_MEMORY, "out of memory");
-    }
-    *slot = byte;
-    return ODIN3_OK;
+/* The decoded bytes go to lex->out; it holds as many bytes as the raw string, which is enough. */
+static void push_byte(json_lex *lex, uint8_t byte) {
+    lex->out[lex->out_len++] = byte;
 }
 
-static odin3_status push_utf8(json_lex *lex, uint32_t cp) {
-    uint8_t buf[4];
-    size_t count = 0;
+static void push_utf8(json_lex *lex, uint32_t cp) {
     if (cp < UTF8_2) {
-        buf[count++] = (uint8_t)cp;
-    } else if (cp < UTF8_3) {
-        buf[count++] = (uint8_t)(LEAD_2 | (cp >> CONT_BITS));
+        push_byte(lex, (uint8_t)cp);
+        return;
+    }
+    if (cp < UTF8_3) {
+        push_byte(lex, (uint8_t)(LEAD_2 | (cp >> CONT_BITS)));
     } else if (cp < UTF8_4) {
-        buf[count++] = (uint8_t)(LEAD_3 | (cp >> (2 * CONT_BITS)));
-        buf[count++] = (uint8_t)(CONT_MARK | ((cp >> CONT_BITS) & CONT_MASK));
+        push_byte(lex, (uint8_t)(LEAD_3 | (cp >> (2 * CONT_BITS))));
+        push_byte(lex, (uint8_t)(CONT_MARK | ((cp >> CONT_BITS) & CONT_MASK)));
     } else {
-        buf[count++] = (uint8_t)(LEAD_4 | (cp >> (3 * CONT_BITS)));
-        buf[count++] = (uint8_t)(CONT_MARK | ((cp >> (2 * CONT_BITS)) & CONT_MASK));
-        buf[count++] = (uint8_t)(CONT_MARK | ((cp >> CONT_BITS) & CONT_MASK));
+        push_byte(lex, (uint8_t)(LEAD_4 | (cp >> (3 * CONT_BITS))));
+        push_byte(lex, (uint8_t)(CONT_MARK | ((cp >> (2 * CONT_BITS)) & CONT_MASK)));
+        push_byte(lex, (uint8_t)(CONT_MARK | ((cp >> CONT_BITS) & CONT_MASK)));
     }
-    if (cp >= UTF8_2) {
-        buf[count++] = (uint8_t)(CONT_MARK | (cp & CONT_MASK));
-    }
-    for (size_t i = 0; i < count; i++) {
-        odin3_status st = push_byte(lex, buf[i]);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    return ODIN3_OK;
+    push_byte(lex, (uint8_t)(CONT_MARK | (cp & CONT_MASK)));
 }
 
 static int hex_value(int ch) {
@@ -143,6 +133,21 @@ static odin3_status read_hex4(json_lex *lex, uint32_t *unit) {
     return ODIN3_OK;
 }
 
+/*
+ * Yosys write_json writes a byte >= 0x80 as "￿" + "FFxx" (a sign-extended char printed with
+ * %04X). Its own reader refuses it; this reader restores the byte xx. After "￿".
+ */
+static odin3_status read_yosys_byte(json_lex *lex, odin3_json_loc esc) {
+    uint32_t tail = 0;
+    bool ok = read_hex4(lex, &tail) == ODIN3_OK;
+    if (!ok || (tail >> BYTE_BITS) != BYTE_MAX || (tail & BYTE_MAX) < UTF8_2) {
+        return json_fail(lex, esc, ODIN3_ERR_PARSE,
+                         "\\uFFFF is not a character (Yosys writes a byte >= 0x80 as \\uFFFFFFxx)");
+    }
+    push_byte(lex, (uint8_t)(tail & BYTE_MAX));
+    return ODIN3_OK;
+}
+
 /* After "\u": one code point, combining a surrogate pair. */
 static odin3_status read_unicode(json_lex *lex, odin3_json_loc esc) {
     uint32_t unit = 0;
@@ -152,6 +157,9 @@ static odin3_status read_unicode(json_lex *lex, odin3_json_loc esc) {
     }
     if (unit == 0) {
         return json_fail(lex, esc, ODIN3_ERR_PARSE, "\\u0000 is not allowed in a string");
+    }
+    if (unit == UNIT_NONCHAR) {
+        return read_yosys_byte(lex, esc);
     }
     if (unit >= SURR_LO_FIRST && unit <= SURR_LO_LAST) {
         return json_fail(lex, esc, ODIN3_ERR_PARSE, "lone low surrogate in \\u escape");
@@ -171,7 +179,8 @@ static odin3_status read_unicode(json_lex *lex, odin3_json_loc esc) {
         }
         unit = SURR_PLANE + (((unit - SURR_HI_FIRST) << SURR_BITS) | (low - SURR_LO_FIRST));
     }
-    return push_utf8(lex, unit);
+    push_utf8(lex, unit);
+    return ODIN3_OK;
 }
 
 static int simple_escape(int ch) {
@@ -209,63 +218,87 @@ static odin3_status read_escape(json_lex *lex) {
         return json_fail(lex, esc, ODIN3_ERR_PARSE, "bad escape in string");
     }
     json_advance(lex);
-    return push_byte(lex, (uint8_t)plain);
-}
-
-static odin3_status check_string_len(json_lex *lex, odin3_json_loc start, size_t len) {
-    if (len > lex->lim.max_string) {
-        return json_fail(lex, start, ODIN3_ERR_PARSE, "string longer than %zu bytes",
-                         lex->lim.max_string);
-    }
+    push_byte(lex, (uint8_t)plain);
     return ODIN3_OK;
 }
 
-/* Copies the decoded bytes in the scratch buffer into the arena. */
-static odin3_status copy_string(json_lex *lex, odin3_json_loc start, char **out, uint32_t *len) {
-    size_t size = lex->scratch.len;
-    odin3_status st = check_string_len(lex, start, size);
-    if (st != ODIN3_OK) {
-        return st;
+/*
+ * Cursor on the opening quote. Finds the closing quote without decoding: *raw is the number of
+ * bytes between the quotes and *escaped tells whether any backslash occurs. A control byte or the
+ * end of the text is an error (an unterminated string is located at its opening quote).
+ */
+static odin3_status scan_string(json_lex *lex, size_t *raw, bool *escaped) {
+    size_t at = lex->pos + 1;
+    *escaped = false;
+    while (at < lex->len && lex->text[at] != '"') {
+        uint8_t byte = lex->text[at];
+        if (byte < FIRST_PRINTABLE) {
+            lex->pos = at;
+            return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "control byte 0x%02X in string",
+                             (unsigned)byte);
+        }
+        if (byte == '\\') {
+            *escaped = true;
+            at++;
+        }
+        at++;
     }
-    *out = odin3_arena_strndup(lex->arena, lex->scratch.data, size);
-    if (*out == NULL) {
-        return json_fail(lex, start, ODIN3_ERR_NO_MEMORY, "out of memory");
+    if (at >= lex->len) {
+        return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "unterminated string");
     }
-    *len = (uint32_t)size;
+    *raw = at - (lex->pos + 1);
     return ODIN3_OK;
+}
+
+/* Decodes escapes from the cursor (after the opening quote) up to the closing quote. */
+static odin3_status decode_string(json_lex *lex) {
+    for (;;) {
+        int ch = json_peek(lex);
+        if (ch == '"') {
+            json_advance(lex);
+            return ODIN3_OK;
+        }
+        if (ch == '\\') {
+            odin3_status st = read_escape(lex);
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        } else {
+            push_byte(lex, (uint8_t)ch);
+            json_advance(lex);
+        }
+    }
 }
 
 odin3_status json_lex_string(json_lex *lex, char **out, uint32_t *len) {
     odin3_json_loc start = json_here(lex);
-    odin3_vec_clear(&lex->scratch);
-    json_advance(lex);
-    for (;;) {
-        int ch = json_peek(lex);
-        odin3_status st = ODIN3_OK;
-        if (ch < 0) {
-            return json_fail(lex, start, ODIN3_ERR_PARSE, "unterminated string");
-        }
-        if (ch == '"') {
-            json_advance(lex);
-            return copy_string(lex, start, out, len);
-        }
-        if (ch < FIRST_PRINTABLE) {
-            return json_fail(lex, json_here(lex), ODIN3_ERR_PARSE, "control byte 0x%02X in string",
-                             (unsigned)ch);
-        }
-        if (ch == '\\') {
-            st = read_escape(lex);
-        } else {
-            st = push_byte(lex, (uint8_t)ch);
-            json_advance(lex);
-        }
-        if (st == ODIN3_OK) {
-            st = check_string_len(lex, start, lex->scratch.len);
-        }
-        if (st != ODIN3_OK) {
-            return st;
-        }
+    size_t raw = 0;
+    bool escaped = false;
+    odin3_status st = scan_string(lex, &raw, &escaped);
+    if (st != ODIN3_OK) {
+        return st;
     }
+    uint8_t *buf = odin3_arena_alloc(lex->arena, raw + 1);
+    if (buf == NULL) {
+        return json_fail(lex, start, ODIN3_ERR_NO_MEMORY, "out of memory");
+    }
+    lex->out = buf;
+    lex->out_len = 0;
+    json_advance(lex);
+    if (escaped) {
+        st = decode_string(lex);
+    } else {
+        memcpy(buf, lex->text + lex->pos, raw);
+        lex->out_len = raw;
+        lex->pos += raw + 1;
+    }
+    if (st == ODIN3_OK && lex->out_len > lex->lim.max_string) {
+        st = json_fail(lex, start, ODIN3_ERR_PARSE, "string longer than %zu bytes",
+                       lex->lim.max_string);
+    }
+    *out = (char *)buf;
+    *len = (uint32_t)lex->out_len;
+    return st;
 }
 
 /* Adds digit to the magnitude; false on overflow past limit. */

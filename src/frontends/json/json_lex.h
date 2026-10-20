@@ -6,7 +6,6 @@
 
 #include "frontends/json/json_parse.h"
 #include "util/attr.h"
-#include "util/vec.h"
 
 typedef struct json_lex {
     const uint8_t *text;
@@ -14,7 +13,8 @@ typedef struct json_lex {
     uint32_t line;
     odin3_json_limits lim;
     odin3_arena *arena;
-    odin3_vec scratch; /* decoded string bytes (uint8_t) */
+    uint8_t *out; /* decode target of the string being read (arena memory) */
+    size_t out_len;
     odin3_json_error *err;
 } json_lex;
 
