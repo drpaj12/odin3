@@ -2,16 +2,8 @@
 # Parmys goldens of controller step C1. Pass tests/hardmap/diff_expect.txt (the k6 entries, which
 # hold with the same numbers on this arch) and tests/hardmap/vtr_expect.txt too.
 #
-# pending-F (not a divergence: known, to be fixed), until PR F (Task 14, the oversize split X-4) lands: a `$mul` wider than the
-# multiplier W = 27 stays soft in Odin III, where Parmys splits it into smaller multiply and adder
-# cells. diffeq1 and diffeq2 multiply 32-bit operands (`u_var * DXport`, `[31:0]`), or1200 `x * y`
-# at 32 bits. PR F's author removes these lines (they go stale when the split exists).
-diffeq1.v counts:-13 multiply pending-F: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
-diffeq1.v counts:-48 adder pending-F: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F
-diffeq2.v counts:-13 multiply pending-F: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
-diffeq2.v counts:-92 adder pending-F: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F
-or1200.v counts:-4 multiply pending-F: 32-bit `$mul` above W = 27 left soft until PR F (X-4), Parmys splits
-or1200.v counts:-72 adder pending-F: adders of Parmys's split of the 32-bit `$mul`, Odin III leaves it soft until PR F
+# The 4.3 oversize split (PR F, X-4) is in: diffeq1, diffeq2 and or1200 need no counts line.
+diffeq2.v D19 Parmys sign-extends the low product of a B split (2x32 constant multiplies): wrong when its top bit is set; partial_map zero-extends. Equivalent to the golden when rerun with `hardmap --parmys-split-ext`
 
 # unproven: equiv-check cannot decide; the hard-block and latch counts equal Parmys's.
 raygentop.v unproven ABC dsec undecided within the 600 s equiv-check budget; hard-block and latch counts equal Parmys's

@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# pm-diff-micro: the 26 hardmap micros of tests/hardmap/micros.txt against the Parmys golden of one
+# sweep arch (4.2 spec T-3; plan Task 16). It runs tools/hardmap-check/hardmap-diff with
+# `--arch <the arch's XML>` (read_arch in place of read_techlib) and the expect file of that arch.
+#
+# Usage: pm-diff-micro <arch> <odin3> [<golden-root>]
+#   <arch>   k6_frac_N10_frac_chain_mem32K_40nm, k6_frac_N10_4add_2chains_depop50_mem20K_22nm or
+#            k4_N4_90nm (the directory names under ~/odin3-ws/golden)
+#   <odin3>  the odin3 binary
+# Exit 77 (skipped) without VTR_ROOT, without the arch XML or without the golden tree; else the exit
+# of hardmap-diff (0 every design identical, equivalent or listed; 1 a difference or a stale entry).
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+repo="$here/../.."
+arch="${1:?usage: pm-diff-micro <arch> <odin3> [<golden-root>]}"
+odin3="${2:?usage: pm-diff-micro <arch> <odin3> [<golden-root>]}"
+golden="${3:-${ODIN3_GOLDEN_DIR:-$HOME/odin3-ws/golden}}/$arch"
+if [ -z "${VTR_ROOT:-}" ] || [ ! -d "$golden" ]; then
+    echo "pm-diff-micro: skipped: need VTR_ROOT and $golden" >&2
+    exit 77
+fi
+xml="$(find "$VTR_ROOT/vtr_flow/arch" -name "$arch.xml" 2>/dev/null | sort | head -n 1 || true)"
+if [ -z "$xml" ]; then
+    echo "pm-diff-micro: skipped: no $arch.xml under $VTR_ROOT/vtr_flow/arch" >&2
+    exit 77
+fi
+case "$arch" in
+    k6_frac_N10_frac_chain_mem32K_40nm) expect=(tests/hardmap/diff_expect.txt) ;;
+    k6_frac_N10_4add_2chains_depop50_mem20K_22nm)
+        expect=(tests/hardmap/diff_expect.txt tests/partial_map/diff_expect_k6_COFFE_mem20K.txt) ;;
+    k4_N4_90nm) expect=(tests/partial_map/diff_expect_k4_N4_90nm.txt) ;;
+    *) echo "pm-diff-micro: unknown arch '$arch'" >&2; exit 2 ;;
+esac
+args=()
+for file in "${expect[@]}"; do
+    args+=(--expect "$repo/$file")
+done
+designs=()
+while IFS= read -r name; do
+    designs+=("$repo/tests/micro/verilog/$name")
+done < <(grep -v '^#' "$repo/tests/hardmap/micros.txt" | grep -v '^$')
+exec "$repo/tools/hardmap-check/hardmap-diff" --odin3 "$odin3" --golden-root "$golden" \
+    --arch "$xml" "${args[@]}" "${designs[@]}"
