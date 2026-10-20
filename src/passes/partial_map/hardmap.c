@@ -330,6 +330,7 @@ static void setup_rules(hm_ctx *hc, const odin3_partial_map_opts *opts) {
         info_absent(arch, "single_port_ram", count_cells(hc, "$mem"), "$mem");
         info_bits(hc);
     }
+    carry_report(arch, hc->rules.have_adder);
 }
 
 /* R-8, S-5: `--mem-width arch` needs a record with RAM modes; without one it is a no-op. */
@@ -344,7 +345,6 @@ static void setup_mem_width(hm_ctx *hc, const odin3_partial_map_opts *opts) {
                   "partial_map: --mem-width arch needs an architecture record with RAM models; "
                   "ignored");
     }
-    carry_report(arch, hc->rules.have_adder);
 }
 
 static void report(hm_ctx *hc) {
