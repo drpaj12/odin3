@@ -62,7 +62,8 @@ enum {
     ODIN3_FSM_REF_IN = 1,
     ODIN3_FSM_REF_OUT = 2,
     ODIN3_FSM_REF_UNKNOWN = 4,
-    ODIN3_FSM_REF_SEQ = 8
+    ODIN3_FSM_REF_SEQ = 8,
+    ODIN3_FSM_PAIRS_STRICT = 0x100 /* odin3_fsm_ix_pairs: unknown nodes count by direction only */
 };
 
 typedef struct odin3_fsm_ref {
@@ -137,8 +138,9 @@ odin3_status odin3_fsm_ix_port_sigs(const odin3_fsm_index *ix, odin3_node_id nod
 /*
  * Appends to vec (elements uint32_t) the (node, port) pairs that drive (want = ODIN3_FSM_REF_OUT)
  * or read (ODIN3_FSM_REF_IN) a bit of sigs, node then port, sorted and without repeats: Yosys's
- * sig2driver.find and sig2user.find. An unknown node counts for both. *count gets the number of
- * pairs added. Constant bits have none. NO_MEMORY with vec as it was.
+ * sig2driver.find and sig2user.find. An unknown node counts for both, unless want also has
+ * ODIN3_FSM_PAIRS_STRICT (fsm_extract, whose CellTypes knows the design's modules). *count gets the
+ * number of pairs added. Constant bits have none. NO_MEMORY with vec as it was.
  */
 odin3_status odin3_fsm_ix_pairs(const odin3_fsm_index *ix, odin3_fsm_sigref sigs, uint32_t want,
                                 odin3_vec *vec, uint32_t *count);
@@ -147,6 +149,15 @@ odin3_status odin3_fsm_ix_pairs(const odin3_fsm_index *ix, odin3_fsm_sigref sigs
 static inline const uint32_t *odin3_fsm_pair_at(const odin3_vec *vec, size_t first, uint32_t idx) {
     return (const uint32_t *)vec->data + first + (size_t)idx * 2U;
 }
+
+/* Yosys's SigBit order: constants first (by value), then nets by ID. <0, 0 or >0. */
+int odin3_fsm_sig_cmp(odin3_fsm_sig lhs, odin3_fsm_sig rhs);
+
+/* Sorts a vec of signal bits in that order and drops the repeats (SigSpec::sort_and_unify). */
+void odin3_fsm_sigvec_sort_unify(odin3_vec *vec);
+
+/* True when bit is in the vec (linear). */
+bool odin3_fsm_sigvec_has(const odin3_vec *vec, odin3_fsm_sig bit);
 
 /* The type ID of node (0 for a dead node). */
 uint32_t odin3_fsm_ix_type(const odin3_fsm_index *ix, uint32_t node);

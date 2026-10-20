@@ -269,10 +269,11 @@ typedef struct ref_query {
 } ref_query;
 
 static odin3_status push_matching(const odin3_fsm_index *ix, ref_query query, odin3_vec *vec) {
-    const uint32_t want = query.want;
+    const bool strict = (query.want & ODIN3_FSM_PAIRS_STRICT) != 0;
+    const uint32_t want = query.want & (ODIN3_FSM_REF_IN | ODIN3_FSM_REF_OUT);
     odin3_fsm_refs span = odin3_fsm_ix_refs(ix, query.net);
     for (uint32_t k = 0; k < span.count; k++) {
-        if ((span.refs[k].flags & (want | ODIN3_FSM_REF_UNKNOWN)) == 0) {
+        if ((span.refs[k].flags & (strict ? want : (want | ODIN3_FSM_REF_UNKNOWN))) == 0) {
             continue;
         }
         if (odin3_kit_push_u32(vec, span.refs[k].node) != ODIN3_OK ||
@@ -312,4 +313,42 @@ odin3_status odin3_fsm_ix_pairs(const odin3_fsm_index *ix, odin3_fsm_sigref sigs
     odin3_kit_truncate(vec, kept);
     *count = (uint32_t)((kept - first) / 2);
     return ODIN3_OK;
+}
+
+int odin3_fsm_sig_cmp(odin3_fsm_sig lhs, odin3_fsm_sig rhs) {
+    bool lhs_const = odin3_fsm_sig_is_const(lhs);
+    bool rhs_const = odin3_fsm_sig_is_const(rhs);
+    if (lhs_const != rhs_const) {
+        return lhs_const ? -1 : 1;
+    }
+    return (lhs > rhs) - (lhs < rhs);
+}
+
+static int cmp_sig_qsort(const void *lhs, const void *rhs) {
+    return odin3_fsm_sig_cmp(*(const odin3_fsm_sig *)lhs, *(const odin3_fsm_sig *)rhs);
+}
+
+void odin3_fsm_sigvec_sort_unify(odin3_vec *vec) {
+    if (vec->len == 0) {
+        return;
+    }
+    odin3_fsm_sig *bits = vec->data;
+    qsort(bits, vec->len, sizeof *bits, cmp_sig_qsort);
+    size_t kept = 1;
+    for (size_t i = 1; i < vec->len; i++) {
+        if (bits[i] != bits[kept - 1]) {
+            bits[kept++] = bits[i];
+        }
+    }
+    odin3_kit_truncate(vec, kept);
+}
+
+bool odin3_fsm_sigvec_has(const odin3_vec *vec, odin3_fsm_sig bit) {
+    const odin3_fsm_sig *bits = vec->data;
+    for (size_t i = 0; i < vec->len; i++) {
+        if (bits[i] == bit) {
+            return true;
+        }
+    }
+    return false;
 }

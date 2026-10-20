@@ -26,6 +26,7 @@
 #include "passes/fsm/index.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct odin3_fsm_ceval odin3_fsm_ceval;
@@ -54,9 +55,16 @@ void odin3_fsm_ceval_destroy(odin3_fsm_ceval *ce);
 /* Adds count bits to the stop signals (constants are ignored). */
 void odin3_fsm_ceval_stop(odin3_fsm_ceval *ce, const odin3_fsm_sig *sig, uint32_t count);
 
+/* True when the net sig was added to the stop signals. */
+bool odin3_fsm_ceval_is_stop(const odin3_fsm_ceval *ce, odin3_fsm_sig sig);
+
 /* Yosys push() and pop(): pop forgets every value set since the matching push. NO_MEMORY. */
 odin3_status odin3_fsm_ceval_push(odin3_fsm_ceval *ce);
 void odin3_fsm_ceval_pop(odin3_fsm_ceval *ce);
+
+/* The number of pushes not yet popped, and pop until only `depth` are left. */
+size_t odin3_fsm_ceval_depth(const odin3_fsm_ceval *ce);
+void odin3_fsm_ceval_unwind(odin3_fsm_ceval *ce, size_t depth);
 
 /*
  * Yosys set(): bit k of sig takes bits[k] (odin3_fsm_bit 0, 1, x or z; other values are skipped).

@@ -140,6 +140,9 @@ add_library(odin3_core OBJECT
     src/passes/fsm/common.c
     src/passes/fsm/sigcache.c
     src/passes/fsm/detect.c
+    src/passes/fsm/extract.c
+    src/passes/fsm/extract_trans.c
+    src/passes/fsm/info.c
     src/passes/fsm/fsm.c
     src/passes/fsm/register.c
     src/passes/opt/dff_gates.c
@@ -822,6 +825,10 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_fsm_detect)
     target_sources(test_fsm_detect PRIVATE tests/unit/proc_build.c)
     target_compile_definitions(test_fsm_detect PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+    odin3_add_unit_test(test_fsm_extract)
+    target_sources(test_fsm_extract PRIVATE tests/unit/proc_build.c)
+    target_compile_definitions(test_fsm_extract PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_fsm_ceval)
     target_sources(test_fsm_ceval PRIVATE tests/unit/proc_build.c)

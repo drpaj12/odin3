@@ -108,6 +108,10 @@ void odin3_fsm_ceval_stop(odin3_fsm_ceval *ce, const odin3_fsm_sig *sig, uint32_
     }
 }
 
+bool odin3_fsm_ceval_is_stop(const odin3_fsm_ceval *ce, odin3_fsm_sig sig) {
+    return !odin3_fsm_sig_is_const(sig) && ce->stop[sig] != 0;
+}
+
 odin3_status odin3_fsm_ceval_push(odin3_fsm_ceval *ce) {
     uint32_t *mark = odin3_vec_push(&ce->marks);
     if (mark == NULL) {
@@ -126,6 +130,16 @@ void odin3_fsm_ceval_pop(odin3_fsm_ceval *ce) {
         odin3_vec_pop(&ce->journal);
     }
     odin3_vec_pop(&ce->marks);
+}
+
+size_t odin3_fsm_ceval_depth(const odin3_fsm_ceval *ce) {
+    return ce->marks.len;
+}
+
+void odin3_fsm_ceval_unwind(odin3_fsm_ceval *ce, size_t depth) {
+    while (ce->marks.len > depth) {
+        odin3_fsm_ceval_pop(ce);
+    }
 }
 
 static odin3_status set_one(odin3_fsm_ceval *ce, odin3_fsm_sig net, uint8_t bit) {

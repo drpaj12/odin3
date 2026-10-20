@@ -15,7 +15,9 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
+#include "passes/fsm/fsmdata.h"
 #include "passes/fsm/index.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -72,10 +74,56 @@ const char *odin3_fsm_wire_encoding(const odin3_fsm_mod *fm, odin3_wire_id wire)
 odin3_status odin3_fsm_wire_set_str(odin3_fsm_mod *fm, odin3_wire_id wire, uint32_t key,
                                     const char *text);
 
+/* --- one extracted FSM (the `$fsm` cell of Yosys, kept inside the pass) --------------------- */
+
+enum { ODIN3_FSM_ENC_MAX = 32 };
+
+typedef struct odin3_fsm_inst {
+    odin3_wire_id wire;      /* the state wire */
+    uint32_t dff_node;       /* the old state register */
+    odin3_vec dff_out;       /* odin3_fsm_sig: the wire's bits (Q) */
+    odin3_vec ctrl_in;       /* odin3_fsm_sig, sorted */
+    odin3_vec ctrl_out;      /* odin3_fsm_sig, sorted; opt removes bits */
+    odin3_vec mux_cells;     /* uint32_t node IDs of the selection tree, ascending */
+    odin3_vec out_drivers;   /* uint32_t node IDs that drove ctrl_out, ascending */
+    odin3_fsm_sig clk, arst; /* arst is a constant 0 when the register has no async reset */
+    bool clk_pol, arst_pol;
+    char encoding[ODIN3_FSM_ENC_MAX]; /* the wire's fsm_encoding when extracted */
+    odin3_fsm_data data;
+} odin3_fsm_inst;
+
+/* Frees an instance (safe on a zeroed one). */
+void odin3_fsm_inst_free(odin3_fsm_inst *inst);
+
+/*
+ * fsm_extract on one module (spec X-1 to X-6): every wire with an fsm_encoding other than
+ * `none` is extracted into an odin3_fsm_inst appended to insts (elements odin3_fsm_inst); a
+ * wire that fails is logged and left as it is. The IR is not changed (X-5). A wire whose
+ * transition search exceeds the evaluation cap is warned of and skipped. NO_MEMORY leaves the
+ * instances appended so far in insts (the caller frees them).
+ */
+odin3_status odin3_fsm_extract_module(odin3_fsm_mod *fm, odin3_vec *insts);
+
+/* --- info (fsm_info.cc, FsmData::log_info; spec I-1) -------------------------------------- */
+
+/* Logs the tables of inst at INFO level, one message per line, each starting "fsm: ". */
+void odin3_fsm_info(const odin3_fsm_mod *fm, const odin3_fsm_inst *inst);
+
+/* The label of a signal bit in a log line: "name", "name [k]", "$n<ID>" or a constant. */
+void odin3_fsm_sig_label(const odin3_fsm_mod *fm, odin3_fsm_sig sig, char *buf, size_t size);
+
 /* --- the passes (fsm.c, register.c) ---------------------------------------------------------- */
 
 /* fsm_detect over every module of design, in creation order (the `fsm_detect` pass). */
 odin3_status odin3_fsm_detect_run(odin3_design *design, const odin3_fsm_opts *opts);
+
+/*
+ * The `fsm` driver (fsm.cc:138-160): detect (unless nodetect), extract, opt, the unused-output
+ * query and opt again, recode (unless norecode), info, map (unless nomap) over the whole
+ * design, each stage over every module before the next. ODIN3_ERR_NO_MEMORY from a stage before
+ * map leaves the IR as it was (detect's attributes aside).
+ */
+odin3_status odin3_fsm_run(odin3_design *design, const odin3_fsm_opts *opts);
 
 /* --- detect (fsm_detect.cc) --------------------------------------------------------------- */
 
