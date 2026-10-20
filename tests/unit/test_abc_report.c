@@ -134,10 +134,10 @@ static void abc_then_blif(const char *file, char *text) {
     read_data("keep_net");
     run_abc();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_write(design, path));
-    FILE *f = fopen(path, "rb");
-    TEST_ASSERT_NOT_NULL(f);
-    size_t len = fread(text, 1U, BLIF_TEXT - 1U, f);
-    (void)fclose(f);
+    FILE *fp = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(fp);
+    size_t len = fread(text, 1U, BLIF_TEXT - 1U, fp);
+    (void)fclose(fp);
     text[len] = '\0';
     TEST_ASSERT_TRUE(len > 0);
 }
