@@ -473,9 +473,10 @@ static odin3_status emit_node(emit_ctx *ec) {
     odin3_elab2 *e2 = ec->e2;
     const odin3_symbol *rec = odin3_symbol_get(e2->st, ec->mem->sym);
     odin3_elab2_prov_req req = {rec->declarator, {0}, rec->scope.v};
+    odin3_elab2_nl_extra nl = {rec->decl, NULL};
     odin3_node_spec spec = {
         .type = e2->types[ODIN3_E2T_MEM], .params = ec->params, .n_params = N_PARAMS};
-    odin3_status st = odin3_elab2_prov(e2, &req, &spec.prov);
+    odin3_status st = odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);
     odin3_node_id node = {0};
     st = st != ODIN3_OK ? st : odin3_node_create_connected(e2->mod, &spec, ec->ports, &node);
     if (st != ODIN3_OK) {

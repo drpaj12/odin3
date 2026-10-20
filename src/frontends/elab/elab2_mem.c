@@ -409,7 +409,8 @@ static odin3_status word_wire(odin3_elab2 *e2, const word_ctx *wc, uint32_t pos,
 static odin3_status mem_make_words(odin3_elab2 *e2, odin3_elab_mem *mem, const odin3_symbol *rec) {
     word_ctx wc = {mem, rec, {0}};
     odin3_elab2_prov_req req = {rec->declarator, {0}, rec->scope.v};
-    odin3_status st = odin3_elab2_prov(e2, &req, &wc.prov);
+    odin3_elab2_nl_extra nl = {rec->decl, NULL};
+    odin3_status st = odin3_elab2_prov_nl(e2, &req, &nl, &wc.prov);
     for (uint32_t pos = 0; st == ODIN3_OK && pos < mem->size && !e2->stopped; pos++) {
         odin3_wire_id *slot = odin3_vec_push(&mem->words);
         if (slot == NULL) {
