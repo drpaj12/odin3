@@ -25,7 +25,7 @@ mkDelayWorker32B.v unproven equiv-check undecided in the time limit; hard-block 
 blob_merge.v D16 4.8 `fsm`: the same result as on k6 (tests/hardmap/vtr_expect.txt): one-hot register from the all-zero start
 mkSMAdapter4B.v counts:+4 latch bit-level opt_dff, the same delta as on k6
 #
-# Open, not listed (each fails the sweep; the first two are the same on the k6 mem32K golden, so they
+# Open, unexplained (each fails the sweep; no D-id; the first two are the same on the k6 mem32K golden, so they
 # are not caused by the arch or by PR D; tests/hardmap/vtr_expect.txt: "the next sweep decides"):
 #   boundtop.v      counts-differ, latch +6
 #   stereovision0.v differs (counts equal)

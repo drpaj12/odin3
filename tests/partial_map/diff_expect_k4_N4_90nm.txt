@@ -8,13 +8,13 @@
 #
 # no-golden: Parmys has no golden for the design on this arch (C1 run, 2026-10-20).
 #
-# Not run on this arch, D22 (new): an explicit instance of a hard block the arch has no model for
+# Not run on this arch, D18 (3C table, PR E): an explicit instance of a hard block the arch has no model for
 # (common/spram.v, common/dpram.v: `single_port_ram`; micro/multiply_hard_block.v: `multiply`) is
 # an Odin III error (`unresolved_module`, the record has no such model). Parmys builds the
 # instance from its own soft modules (spram: 4096 latches). Needs Peter: either leave the error or
 # give Odin III soft models of the four blocks for an arch without them.
 #
-# D23 (new): a memory left soft on an arch without RAM. Parmys's soft expansion of a synchronous
+# D17 (3C table, PR E): a memory left soft on an arch without RAM. Parmys's soft expansion of a synchronous
 # read has no read register (common/mem.v: 128 latches, all memory cells, the read data is
 # combinational), so its read is not the RTL's (equiv-check: not equivalent; Odin III keeps the
 # read-data flops). `counts:+N latch` is the read register Odin III keeps (width x read ports,
@@ -24,11 +24,11 @@
 # no-golden (the k4 Parmys run failed, C1): common/mult_const.v, diffeq1, diffeq2, stereovision2
 # (ERROR BUF_NODE), mkDelayWorker32B (capped at 6144 MB).
 #
-# D22 on the VTR designs: ch_intrinsics, mkPktMerge, raygentop, boundtop, mkSMAdapter4B, or1200
+# D18 on the VTR designs: ch_intrinsics, mkPktMerge, raygentop, boundtop, mkSMAdapter4B, or1200
 # instantiate `single_port_ram` / `dual_port_ram` / `multiply`, which the arch lacks: the same
 # `unresolved_module` error, so they are not run here.
 #
-# Open, not listed (each fails the sweep): the latch counts of designs that have no memory, only
+# Open, unexplained (each fails the sweep; no D-id): the latch counts of designs that have no memory, only
 # soft adders and multipliers: sha +1, stereovision0 -19, stereovision1 +1, blob_merge +14
 # (counts equal Parmys's on k6 and COFFE, so this comes from the soft `$add`/`$mul` path of `lower`
 # against Parmys's, not from memories); stereovision3 is unproven (several clock domains).
@@ -36,13 +36,13 @@ stereovision3.v unproven equiv-check: more than one clock domain; same as on k6
 operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 common/mult_const.v no-golden Parmys fails on k4_N4_90nm (no multiplier): ERROR BUF_NODE
-common/mem.v counts:+8 latch D23: Parmys's soft memory has no read register, Odin III keeps the 8 read-data flops
-common/rom.v counts:+8 latch D23: D15 read-only memory, Parmys deletes it and its read register (opt_mem); Odin III keeps 8 flops
-common/bram.v counts:+8 latch D23: Parmys's soft memory has no read register, Odin III keeps the 8 read-data flops (the enable is exact, R-10 is not used without RAM)
-common/1r2w.v counts:+32 latch D23: soft memory, Parmys has no read registers, Odin III keeps them
-common/2r1w.v counts:+64 latch D23: soft memory, Parmys has no read registers, Odin III keeps them
-common/2r2w.v counts:+16 latch D23: soft memory, Parmys has no read registers, Odin III keeps them
-common/nr.v counts:+24 latch D23: three read-only memories, Parmys deletes them and their read registers (D15), Odin III keeps 3 x 8 flops
+common/mem.v counts:+8 latch D17: Parmys's soft memory has no read register, Odin III keeps the 8 read-data flops
+common/rom.v counts:+8 latch D17: D15 read-only memory, Parmys deletes it and its read register (opt_mem); Odin III keeps 8 flops
+common/bram.v counts:+8 latch D17: Parmys's soft memory has no read register, Odin III keeps the 8 read-data flops (the enable is exact, R-10 is not used without RAM)
+common/1r2w.v counts:+32 latch D17: soft memory, Parmys has no read registers, Odin III keeps them
+common/2r1w.v counts:+64 latch D17: soft memory, Parmys has no read registers, Odin III keeps them
+common/2r2w.v counts:+16 latch D17: soft memory, Parmys has no read registers, Odin III keeps them
+common/nr.v counts:+24 latch D17: three read-only memories, Parmys deletes them and their read registers (D15), Odin III keeps 3 x 8 flops
 diffeq1.v no-golden Parmys has no golden on k4_N4_90nm (C1 run, 2026-10-20)
 diffeq2.v no-golden Parmys has no golden on k4_N4_90nm (C1 run, 2026-10-20)
 stereovision2.v no-golden Parmys has no golden on k4_N4_90nm (C1 run, 2026-10-20)
