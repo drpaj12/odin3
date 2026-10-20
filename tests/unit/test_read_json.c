@@ -346,6 +346,27 @@ static void test_port_bit_errors(void) {
         "offset 2147483647 is out of range");
 }
 
+/* An offset near the int64 or int32 limits is the located error, never an overflow. */
+static void test_offset_overflow(void) {
+    static const char *const k_offsets[] = {"9223372036854775807", "-9223372036854775808",
+                                            "2147483648", "-2147483649"};
+    for (size_t i = 0; i < sizeof k_offsets / sizeof k_offsets[0]; i++) {
+        for (int up = 0; up < 2; up++) {
+            char json[512];
+            (void)snprintf(json, sizeof json,
+                           "{\"modules\": {\"top\": {\"ports\": {\"a\": {\"direction\": "
+                           "\"input\", \"bits\": [2, 3], \"offset\": %s, \"upto\": %d}}}}}",
+                           k_offsets[i], up);
+            rj_expect_error(json, "modules.top.ports.a.offset: offset");
+            (void)snprintf(json, sizeof json,
+                           "{\"modules\": {\"top\": {\"netnames\": {\"n\": {\"bits\": [2, 3], "
+                           "\"offset\": %s, \"upto\": %d}}}}}",
+                           k_offsets[i], up);
+            rj_expect_error(json, "modules.top.netnames.n.offset: offset");
+        }
+    }
+}
+
 /* An input port bit may be shared with an output port: the output port reads the input net. */
 static void test_shared_port_bit(void) {
     rj_expect_ok(TOP_OPEN "\"y\": {\"direction\": \"output\", \"bits\": [2]}}, "
@@ -425,6 +446,7 @@ int main(void) {
     RUN_TEST(test_creator_in_run_info);
     RUN_TEST(test_structural_errors);
     RUN_TEST(test_port_bit_errors);
+    RUN_TEST(test_offset_overflow);
     RUN_TEST(test_shared_port_bit);
     RUN_TEST(test_syntax_error_is_located);
     RUN_TEST(test_missing_file);

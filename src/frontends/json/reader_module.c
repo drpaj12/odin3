@@ -21,18 +21,21 @@ static const jr_mod *mod_at(const jr *rd, uint32_t index) {
 
 /* --- ports --------------------------------------------------------------------------------- */
 
-odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, uint32_t width,
-                      odin3_wire_spec *spec) {
+odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, const char *section,
+                      jr_shape_out out) {
+    const uint32_t width = out.width;
+    odin3_wire_spec *spec = out.spec;
     const odin3_json_node *off = jr_member(obj, "offset");
     const odin3_json_node *upto = jr_member(obj, "upto");
     const odin3_json_node *sign = jr_member(obj, "signed");
     int64_t offset = off != NULL && jr_kind(off) == ODIN3_JSON_INT ? jr_int(off) : 0;
     bool up = upto != NULL && jr_kind(upto) == ODIN3_JSON_INT && jr_int(upto) != 0;
-    int64_t high = offset + (int64_t)width - 1;
-    if (offset < INT32_MIN || high > INT32_MAX) {
-        return jr_error(rd, off, &(jr_where){NULL, NULL, "offset"}, "offset %lld is out of range",
-                        (long long)offset);
+    if (offset < INT32_MIN || offset > INT32_MAX ||
+        offset + (int64_t)width - 1 > INT32_MAX) { /* offset is in int32 range: no overflow */
+        return jr_error(rd, off, &(jr_where){section, odin3_json_key(obj), "offset"},
+                        "offset %lld is out of range", (long long)offset);
     }
+    int64_t high = offset + (int64_t)width - 1;
     spec->msb = (int32_t)(up ? offset : high);
     spec->lsb = (int32_t)(up ? high : offset);
     spec->is_signed = sign != NULL && jr_kind(sign) == ODIN3_JSON_INT && jr_int(sign) != 0;
@@ -77,7 +80,7 @@ static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node
                            false, &width);
     }
     if (st == ODIN3_OK) {
-        st = jr_shape(rd, port, width, &shape);
+        st = jr_shape(rd, port, "ports", (jr_shape_out){width, &shape});
     }
     if (st == ODIN3_OK) {
         st = jr_prov(rd, port, &spec.prov);

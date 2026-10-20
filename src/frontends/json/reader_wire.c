@@ -97,7 +97,7 @@ static odin3_status check_port_netname(const jr *rd, odin3_wire_id wire,
 static odin3_status make_wire(jr *rd, const odin3_json_node *name, uint32_t width,
                               odin3_wire_id *wire) {
     odin3_wire_spec spec = {0};
-    odin3_status st = jr_shape(rd, name, width, &spec);
+    odin3_status st = jr_shape(rd, name, "netnames", (jr_shape_out){width, &spec});
     if (st == ODIN3_OK) {
         st = jr_prov(rd, name, &spec.prov);
     }

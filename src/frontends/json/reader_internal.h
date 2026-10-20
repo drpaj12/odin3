@@ -225,9 +225,15 @@ bool jr_lookup_type(const jr *rd, const char *name, odin3_celltype_id *id);
 
 odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj);
 odin3_status jr_read_memories(jr *rd, const odin3_json_node *obj);
-/* The range of a wire from offset/upto and its width. */
-odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, uint32_t width,
-                      odin3_wire_spec *spec);
+/* The width of a port or netname and the spec whose msb, lsb and sign jr_shape sets. */
+typedef struct jr_shape_out {
+    uint32_t width;
+    odin3_wire_spec *spec;
+} jr_shape_out;
+/* The range of a wire from offset/upto and its width; an offset out of range is a located error
+ * in the section (ports or netnames) of obj. */
+odin3_status jr_shape(const jr *rd, const odin3_json_node *obj, const char *section,
+                      jr_shape_out out);
 
 /* --- reader_cell.c: cells ---------------------------------------------------------------- */
 
