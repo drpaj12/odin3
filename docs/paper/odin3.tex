@@ -560,7 +560,10 @@ override.
 Cost is logged from the agents' transcripts (Table~\ref{tab:cost}). From the first session to the
 v1.0 close, 317.6\,h of wall-clock time, 211.4\,h of it active, 63,540 requests used 15.1 billion
 tokens, 95\% of them prompt-cache reads and 65.8 million of them output, across 16 main sessions
-and 880 subagent runs; 226 pull requests merged. The work ran on a Claude Max subscription.
+and 880 subagent runs; 226 pull requests merged. Subagents used 82\% of the tokens and the
+controller sessions 18\%. My own part was about 414 messages (about 9,400 words): the
+specification, the decisions and the reviews. Active time passed 20\,h on six of the 14 days
+because agents worked through the night (Sec.~\ref{sec:time-agents}). The work ran on a Claude Max subscription.
 Controller sessions may also run on DeepSeek's Anthropic-compatible API; no DeepSeek window fell
 before v1.0.
 
@@ -2134,6 +2137,54 @@ v1.0 count frozen in \code{docs/log\_cost\_of\_tokens\_and\_time-v1.0.md};
 Sec.~\ref{sec:results} gives the totals. Controller sessions can run on Claude or on DeepSeek's
 Anthropic-compatible API, and because the transcripts record Claude model names either way, the
 DeepSeek windows are listed by hand in \code{docs/token\_backends.txt}.
+
+\subsection{Time and agents}
+\label{sec:time-agents}
+Table~\ref{tab:days} gives the 14 days from the first commit to the v1.0.0 tag. Wall-clock time
+was 317.6\,h and active time 211.4\,h, counting a gap of more than 15 minutes between requests as
+idle. On six days the active time passed 20\,h: those are the days when sweeps and implementer
+agents ran overnight while I slept, and I reviewed their results in the morning. The quiet day,
+2026-10-16, followed a pause when the weekly usage limit was nearly spent (92\%); the token-saving
+setup was installed that day.
+
+\begin{table}[t]
+\caption{Active time and tokens by day (UTC), 2026-10-08 to the v1.0.0 tag}
+\label{tab:days}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Day & Active & Tokens & Main model \\
+\midrule
+10-08 & 7.7\,h & 0.36\,G & Opus 92\% \\
+10-09 & 9.9\,h & 0.67\,G & Opus 94\% \\
+10-10 & 7.4\,h & 0.77\,G & Opus 89\% \\
+10-11 & 8.6\,h & 1.84\,G & Opus 96\% \\
+10-12 & 22.5\,h & 4.37\,G & Opus 80\% \\
+10-13 & 17.4\,h & 1.65\,G & Sonnet 84\% \\
+10-14 & 23.4\,h & 1.08\,G & Sonnet 76\% \\
+10-15 & 14.0\,h & 0.40\,G & Sonnet 86\% \\
+10-16 & 3.0\,h & 0.05\,G & Sonnet 62\% \\
+10-17 & 7.8\,h & 0.42\,G & Sonnet 84\% \\
+10-18 & 23.3\,h & 0.44\,G & Sonnet 67\% \\
+10-19 & 22.3\,h & 1.02\,G & Sonnet 88\% \\
+10-20 & 21.9\,h & 1.36\,G & Sonnet 80\% \\
+10-21 & 20.6\,h & 0.68\,G & Sonnet 62\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The agents divide as follows. Sixteen main sessions, all on Claude Opus~5.5, acted as the
+controller: they wrote the specifications and plans with me, wrote the task briefs, dispatched
+and reviewed the other agents, and owned git. They made 7,168 requests and used 2.70\,G tokens,
+18\% of the total. The 880 subagent runs did the implementation, the reviews, the fix rounds and
+the sweeps: Sonnet~5.5 used 6.47\,G tokens (43\%), Opus~5.5 5.65\,G (37\%), Fable~5.1 0.28\,G and
+Haiku~5.5 almost none. A subagent run used 14.1\,M tokens on average; the largest, a Phase~3
+implementation lane, used 171\,M. Opus did most of the work in the first five days, when the IR,
+the pass manager and the front end were built; from 2026-10-13 implementer agents were Sonnet by
+default, with Opus kept for specifications, mapping algorithms and reviews of them. My own part
+was about 414 messages over the 14 days (a median of 33 a day, about 9,400 words in all), counted
+from the main-session transcripts: approvals, design answers, corrections and new directions.
 
 % ------------------------------------------------------------------------------------------
 \section{Status and After v1.0}
