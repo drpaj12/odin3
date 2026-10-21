@@ -4,6 +4,7 @@
  * outlives the original and that leaves nothing behind when it runs out of memory.
  */
 #include "ir/celltype.h"
+#include "ir/design.h"
 #include "odin3/odin3.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -83,6 +84,20 @@ static char *json_of(odin3_design *design) {
     char args[ARGS_CAP];
     (void)snprintf(args, sizeof args, "\"%s\" --odin3", path);
     run(design, "write_json", args);
+    char *text = slurp(path);
+    (void)remove(path);
+    return text;
+}
+
+/* The text write_blif --vtr gives; the caller frees it. */
+static char *blif_of(odin3_design *design) {
+    char path[] = "/tmp/odin3_design_copy_blif_XXXXXX";
+    int fd = mkstemp(path);
+    TEST_ASSERT_TRUE(fd >= 0);
+    (void)close(fd);
+    char args[ARGS_CAP];
+    (void)snprintf(args, sizeof args, "--vtr \"%s\"", path);
+    run(design, "write_blif", args);
     char *text = slurp(path);
     (void)remove(path);
     return text;
@@ -252,7 +267,7 @@ static void test_copy_oom_leaves_nothing(void) {
     TEST_ASSERT_TRUE(failures < OOM_LIMIT);
 }
 
-/* A local type with a width expression is not copied by this function (it cannot be). */
+/* A local type with a width expression is copied: the copy keeps the (shared, immutable) rule. */
 static bool wexpr_check(const odin3_width_expr *wexpr, const odin3_celltype_def *def,
                         odin3_width_why *why) {
     (void)wexpr;
@@ -269,19 +284,23 @@ static odin3_status wexpr_eval(const odin3_width_expr *wexpr, const odin3_width_
     return ODIN3_OK;
 }
 
-static void test_copy_refuses_width_expression(void) {
+static void test_copy_takes_width_expression(void) {
     static const odin3_width_expr wexpr = {wexpr_check, wexpr_eval, NULL};
     const odin3_port_def ports[1] = {{"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, &wexpr, false}};
     const odin3_celltype_def def = {
         "copy_wexpr_type", ODIN3_GRAN_BLACKBOX, 0, ports, 1, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(g_src, &def, &id));
-    odin3_design *out = g_src;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_copy(g_src, &out));
-    TEST_ASSERT_NULL(out);
+    copy_ok();
+    odin3_design_destroy(g_src);
+    g_src = NULL;
+    const odin3_celltype_def *have = odin3_celltype_get(g_copy, id);
+    TEST_ASSERT_NOT_NULL(have);
+    TEST_ASSERT_EQUAL_STRING("copy_wexpr_type", have->name);
+    TEST_ASSERT_EQUAL_PTR(&wexpr, have->ports[0].width_expr);
 }
 
-static void test_copy_refuses_techlib_data(void) {
+static void test_copy_takes_techlib_data(void) {
     static const int stand_in = 0;
     const odin3_celltype_def def = {
         "copy_lib_type", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL};
@@ -289,9 +308,139 @@ static void test_copy_refuses_techlib_data(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(g_src, &def, &id));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_celltype_set_lib(g_src, id, (const odin3_techlib_cell *)&stand_in));
-    odin3_design *out = g_src;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_copy(g_src, &out));
-    TEST_ASSERT_NULL(out);
+    copy_ok();
+    odin3_design_destroy(g_src);
+    g_src = NULL;
+    TEST_ASSERT_EQUAL_PTR(&stand_in, odin3_celltype_lib(g_copy, id));
+}
+
+/* A design read with a tech library (a hard block through hardmap) is copied; the copy outlives
+ * the source and writes the same BLIF and JSON as the source did before it was destroyed. */
+static void test_copy_with_techlib_outlives_source(void) {
+    run(g_src, "read_techlib", "\"" ODIN3_SOURCE_DIR "/lib/vtr.o3lib\"");
+    run(g_src, "read_verilog", "--lib \"" ODIN3_SOURCE_DIR "/tests/hardmap/adder_lib.v\"");
+    run(g_src, "read_verilog",
+        "--nolatches --vtr-compat \"" ODIN3_SOURCE_DIR "/tests/hardmap/add_8x6.v\"");
+    run(g_src, "proc", "");
+    run(g_src, "opt", "");
+    run(g_src, "flatten", "");
+    run(g_src, "opt", "-full");
+    run(g_src, "hardmap", "");
+    char *json = json_of(g_src);
+    char *blif = blif_of(g_src);
+    TEST_ASSERT_NOT_NULL(strstr(blif, ".subckt"));
+    copy_ok();
+    odin3_design_destroy(g_src);
+    g_src = NULL;
+    char *json_copy = json_of(g_copy);
+    char *blif_copy = blif_of(g_copy);
+    TEST_ASSERT_EQUAL_STRING(json, json_copy);
+    TEST_ASSERT_EQUAL_STRING(blif, blif_copy);
+    free(json);
+    free(blif);
+    free(json_copy);
+    free(blif_copy);
+}
+
+/* hardmap on a copy of a design that has an architecture gives what it gives on the source. */
+static void test_copy_keeps_arch_for_hardmap(void) {
+    run(g_src, "read_arch", "\"" ODIN3_SOURCE_DIR "/tests/unit/data/arch/adder_chain.xml\"");
+    run(g_src, "read_verilog", "--lib \"" ODIN3_SOURCE_DIR "/tests/hardmap/adder_lib.v\"");
+    run(g_src, "read_verilog",
+        "--nolatches --vtr-compat \"" ODIN3_SOURCE_DIR "/tests/hardmap/add_8x6.v\"");
+    run(g_src, "proc", "");
+    run(g_src, "opt", "");
+    run(g_src, "flatten", "");
+    run(g_src, "opt", "-full");
+    copy_ok();
+    TEST_ASSERT_NOT_NULL(odin3_design_arch(g_copy));
+    odin3_design_destroy(g_src); /* the copy's arch outlives the source's design */
+    g_src = NULL;
+    run(g_copy, "hardmap", "");
+    char *got = blif_of(g_copy);
+    TEST_ASSERT_NOT_NULL(strstr(got, ".subckt adder"));
+    odin3_design *again = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(again);
+    g_src = again;
+    run(g_src, "read_arch", "\"" ODIN3_SOURCE_DIR "/tests/unit/data/arch/adder_chain.xml\"");
+    run(g_src, "read_verilog", "--lib \"" ODIN3_SOURCE_DIR "/tests/hardmap/adder_lib.v\"");
+    run(g_src, "read_verilog",
+        "--nolatches --vtr-compat \"" ODIN3_SOURCE_DIR "/tests/hardmap/add_8x6.v\"");
+    run(g_src, "proc", "");
+    run(g_src, "opt", "");
+    run(g_src, "flatten", "");
+    run(g_src, "opt", "-full");
+    run(g_src, "hardmap", "");
+    char *want = blif_of(g_src);
+    TEST_ASSERT_EQUAL_STRING(want, got);
+    free(want);
+    free(got);
+}
+
+/* Reads text (Verilog) into g_src through a temporary file. */
+static void load_verilog_text(const char *text) {
+    char path[] = "/tmp/odin3_design_copy_text_XXXXXX";
+    int fd = mkstemp(path);
+    TEST_ASSERT_TRUE(fd >= 0);
+    (void)close(fd);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_TRUE(fputs(text, file) >= 0);
+    (void)fclose(file);
+    char args[ARGS_CAP];
+    (void)snprintf(args, sizeof args, "\"%s\"", path);
+    run(g_src, "read_verilog", args);
+    (void)remove(path);
+    run(g_src, "proc", "");
+}
+
+/* Attributes, STRING/BITS/PROC parameters, tombstones, a declared model and a black-box
+ * definition: every one is the copy's own once the source is gone. */
+static void test_copy_rich_design_outlives_source(void) {
+    static const char text[] =
+        "(* blackbox *) module bb #(parameter W = 1, parameter S = \"ab\", parameter B = 4'b10x1)"
+        " (input [W-1:0] a, output [W-1:0] y);\nendmodule\n"
+        "(* keep, note = \"hi\" *) module top(input [3:0] i, input [3:0] j, input k,"
+        " output [3:0] o, output [3:0] p, output q);\n"
+        "  (* inst_attr = 5 *) bb #(.W(4), .S(\"xyz\")) u1 (.a(i), .y(o));\n"
+        "  bb #(.W(4), .B(4'b0101)) u2 (.a(j), .y(p));\n"
+        "  reg r; always @(*) begin if (k) r = i[0]; else r = j[1]; end\n"
+        "  assign q = r & (i[1] | 1'b0) & (i[2] | j[2]);\n"
+        "endmodule\n";
+    load_verilog_text(text);
+    run(g_src, "opt", "-full");
+    run(g_src, "compact", "");
+    char *want = json_of(g_src);
+    copy_ok();
+    odin3_design_destroy(g_src);
+    g_src = NULL;
+    char *have = json_of(g_copy);
+    TEST_ASSERT_EQUAL_STRING(want, have);
+    free(want);
+    free(have);
+}
+
+/* An elaborated design with a parametric black box whose port widths differ per instance: the
+ * width rule is in the shared cell-type arena, and the copy outlives the source. */
+static void test_copy_parametric_blackbox_outlives_source(void) {
+    static const char text[] =
+        "(* blackbox *) module bb #(parameter W = 1) (input [W-1:0] a, output [W-1:0] y);\n"
+        "endmodule\n"
+        "module top(input [3:0] i, input [1:0] j, output [3:0] o, output [1:0] p);\n"
+        "  bb #(.W(4)) u1 (.a(i), .y(o));\n"
+        "  bb #(.W(2)) u2 (.a(j), .y(p));\n"
+        "endmodule\n";
+    load_verilog_text(text);
+    copy_ok();
+    odin3_design_destroy(g_src);
+    g_src = NULL;
+    run(g_copy, "opt", "");
+    run(g_copy, "check", "");
+    odin3_design *second = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_copy(g_copy, &second));
+    odin3_design_destroy(g_copy);
+    g_copy = second;
+    run(g_copy, "check", "");
 }
 
 int main(void) {
@@ -307,7 +456,11 @@ int main(void) {
     RUN_TEST(test_copy_of_empty_design);
     RUN_TEST(test_copy_invalid_args);
     RUN_TEST(test_copy_oom_leaves_nothing);
-    RUN_TEST(test_copy_refuses_width_expression);
-    RUN_TEST(test_copy_refuses_techlib_data);
+    RUN_TEST(test_copy_takes_width_expression);
+    RUN_TEST(test_copy_takes_techlib_data);
+    RUN_TEST(test_copy_with_techlib_outlives_source);
+    RUN_TEST(test_copy_keeps_arch_for_hardmap);
+    RUN_TEST(test_copy_rich_design_outlives_source);
+    RUN_TEST(test_copy_parametric_blackbox_outlives_source);
     return UNITY_END();
 }

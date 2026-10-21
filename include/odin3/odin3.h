@@ -207,15 +207,18 @@ void odin3_design_destroy(odin3_design *design);
  * provenance records, the design's strings and cell types, the source manager, the top module and
  * the pass-run table. Every ID (module, node, pin, net, wire, provenance record, string, cell type)
  * is the same in the copy, so an ID read from one design names the same object in the other, and
- * a pass on the copy never touches src (they share no memory, and the copy may outlive src). Not
- * copied: held AST stores, the project record and the architecture record (they describe how src
- * was read, not the netlist), and the change journals (off in the copy).
+ * a pass on the copy never touches src; the copy may outlive src. Shared, not copied: the
+ * cell-type arena (tech-library data, width expressions) and the architecture record, both
+ * immutable once registered and reference counted, so a read_techlib or read_arch design copies
+ * and hardmap, partial_map and the writers work on the copy. Not copied: held AST stores (passes
+ * that need the AST see none; provenance resolves through the copied source manager), the project
+ * record (defaults apply on the copy) and the change journals (off in the copy). src must not be
+ * mutated during the call. A black-box or tech-library read on the copy allocates in the shared
+ * cell-type arena, which is not thread safe: do not do that on two designs of one family at once.
  *
  * The caller owns *out and frees it with odin3_design_destroy. *out is NULL on failure. Failures:
- * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or when a design-local cell type holds a
- * width expression or tech-library data (read_techlib types, some black boxes), which live in
- * src's own memory and cannot be copied; ODIN3_ERR_NO_MEMORY on out of memory, with nothing left
- * allocated. src is not changed.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument; ODIN3_ERR_NO_MEMORY on out of memory, with
+ * nothing left allocated. src is not changed.
  */
 odin3_status odin3_design_copy(const odin3_design *src, odin3_design **out);
 

@@ -2,6 +2,7 @@
 #include "ir/celltype.h"
 #include "ir/ir_internal.h"
 #include "ir/value.h"
+#include "util/alloc.h"
 #include "util/arena.h"
 #include "util/attr.h"
 #include "util/hash.h"
@@ -12,6 +13,7 @@
 
 #include <assert.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
@@ -324,12 +326,36 @@ static bool lookup(const odin3_design *design, const char *name, odin3_celltype_
     return odin3_celltype_find(design, str, out);
 }
 
+/* A new store with a new arena and one reference; NULL on out of memory. */
+static odin3_type_store *type_store_create(void) {
+    odin3_type_store *store = odin3_util_calloc(sizeof *store);
+    if (store == NULL) {
+        return NULL;
+    }
+    store->arena = odin3_arena_create(0);
+    if (store->arena == NULL) {
+        odin3_util_free(store);
+        return NULL;
+    }
+    atomic_init(&store->refs, 1);
+    return store;
+}
+
+/* Drops one reference; the last one frees the arena and the store. NULL is a no-op. */
+static void type_store_release(odin3_type_store *store) {
+    if (store != NULL && atomic_fetch_sub_explicit(&store->refs, 1, memory_order_acq_rel) == 1) {
+        odin3_arena_destroy(store->arena);
+        odin3_util_free(store);
+    }
+}
+
 odin3_status odin3_celltype_table_init(odin3_design *design) {
     uint32_t count = global_count();
     odin3_vec_init(&design->celltypes, sizeof(odin3_celltype_entry));
     odin3_vec_init(&design->declared, sizeof(odin3_declared_entry));
+    design->types = type_store_create();
     design->celltype_names = odin3_u64map_create(count);
-    if (design->celltype_names == NULL ||
+    if (design->types == NULL || design->celltype_names == NULL ||
         odin3_vec_reserve(&design->celltypes, (size_t)count + 1) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -342,16 +368,6 @@ odin3_status odin3_celltype_table_init(odin3_design *design) {
         }
     }
     return ODIN3_OK;
-}
-
-/* True when a port of def uses a width expression, which no copy of def can carry. */
-static bool def_has_width_expr(const odin3_celltype_def *def) {
-    for (uint32_t i = 0; i < def->n_ports; i++) {
-        if (def->ports[i].width_expr != NULL) {
-            return true;
-        }
-    }
-    return false;
 }
 
 /* The local entries of dst get their definitions: a module's own, else a copy of src's. */
@@ -372,13 +388,8 @@ static odin3_status clone_local_defs(odin3_design *dst, const odin3_design *src)
             continue;
         }
         const odin3_celltype_def *from = entry_at(src, (odin3_celltype_id){(uint32_t)i})->def;
-        if (entry->lib != NULL || def_has_width_expr(from)) {
-            odin3_log(ODIN3_LOG_ERROR,
-                      "design_copy: cell type '%s' holds a width expression or tech-library data "
-                      "that a copy cannot take",
-                      from->name);
-            return ODIN3_ERR_INVALID_ARG;
-        }
+        /* width expressions stay shared (the retained type store); entry->lib was copied by
+         * vec_copy and points into the same store */
         entry->def = copy_def(dst->arena, from);
         if (entry->def == NULL) {
             return ODIN3_ERR_NO_MEMORY;
@@ -404,15 +415,14 @@ static odin3_status clone_declared(odin3_design *dst, odin3_declared_entry *entr
         }
         entry->params = params;
     }
-    if (def_has_width_expr(entry->decl)) {
-        odin3_log(ODIN3_LOG_ERROR, "design_copy: a declared model holds a width expression");
-        return ODIN3_ERR_INVALID_ARG;
-    }
     entry->decl = copy_def(dst->arena, entry->decl);
     return entry->decl != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
 }
 
 odin3_status odin3_celltype_table_clone(odin3_design *dst, const odin3_design *src) {
+    /* dst shares src's type store (immutable once registered); destroy releases it */
+    atomic_fetch_add_explicit(&src->types->refs, 1, memory_order_relaxed);
+    dst->types = src->types;
     odin3_vec_init(&dst->celltypes, sizeof(odin3_celltype_entry));
     odin3_vec_init(&dst->declared, sizeof(odin3_declared_entry));
     dst->celltype_names = odin3_u64map_clone(src->celltype_names);
@@ -433,6 +443,8 @@ void odin3_celltype_table_free(odin3_design *design) {
     odin3_vec_free(&design->declared);
     odin3_u64map_destroy(design->celltype_names);
     design->celltype_names = NULL;
+    type_store_release(design->types);
+    design->types = NULL;
 }
 
 /* --- public API ---------------------------------------------------------------------------- */
@@ -568,7 +580,7 @@ static odin3_status add_copy(odin3_design *design, const odin3_celltype_def *def
 }
 
 odin3_arena *odin3_celltype_arena(const odin3_design *design) {
-    return design->arena;
+    return design->types->arena;
 }
 
 odin3_status odin3_celltype_set_lib(odin3_design *design, odin3_celltype_id id,

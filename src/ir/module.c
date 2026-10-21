@@ -685,7 +685,8 @@ static bool clone_nets_and_attrs(odin3_module *dup) {
     for (uint32_t id = 1; id < odin3_pagevec_len(dup->nets); id++) {
         odin3_net_rec *rec = odin3_pagevec_at(dup->nets, id);
         const odin3_pin_id *from = rec->pins;
-        if (from == NULL) {
+        if (from == NULL || rec->dead) { /* a dead net holds no pins (count 0): no stale block */
+            rec->pins = NULL;
             continue;
         }
         rec->pins = odin3_pinpool_alloc(&dup->pinpool, rec->cls);

@@ -20,6 +20,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -99,9 +100,20 @@ odin3_status odin3_tombstone_own(odin3_design *design, odin3_tombstone *tomb);
  */
 odin3_status odin3_tombstone_append(odin3_design *design, const odin3_tombstone *tomb);
 
+/*
+ * The cell-type arena: what a local cell type points to without a copy (width expressions,
+ * tech-library data, fnsim programs). Shared and reference counted: odin3_design_clone retains it,
+ * destroy releases it, the last release frees it. Its contents are immutable after registration.
+ */
+typedef struct odin3_type_store {
+    atomic_uint refs;
+    odin3_arena *arena;
+} odin3_type_store;
+
 struct odin3_design {
     odin3_prov_store *prov;        /* provenance records, pass runs, tombstones */
-    odin3_arena *arena;            /* local cell-type definitions */
+    odin3_arena *arena;            /* local cell-type definitions (copied) */
+    odin3_type_store *types;       /* shared cell-type arena (odin3_celltype_arena) */
     odin3_strtab *strtab;          /* design-global names and string values */
     odin3_vec celltypes;           /* odin3_celltype_entry; slot 0 reserved */
     odin3_u64map *celltype_names;  /* name strtab ID -> celltype ID */

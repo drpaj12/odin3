@@ -248,6 +248,13 @@ spec §5.2. An entry declares:
   `simulate` (1E), writer hooks (1C/1F).
 - per type, a local type may carry opaque tech-library data (1G: `odin3_celltype_set_lib`; the
   cell's `fn`/`seq`/`memory` functions, port modifiers, area/delay) for 1E and Phase 4.
+- the cell-type arena (`odin3_celltype_arena`: width expressions, tech-library data, fnsim
+  programs, black-box width tables) is a shared, immutable, reference-counted object separate from
+  the design's own arena (`odin3_type_store`, C11 atomic count). `odin3_design_clone` (so
+  `odin3_design_copy`) retains it and destroy releases it; a copy shares it read-only, and so shares
+  the architecture record (same rule). Nothing mutates its contents after registration; new
+  allocations go through it and are not thread safe. A copy has no AST stores or project record
+  (defaults apply) and its journals are off; the source must not change during the copy.
 - simulation flags (1E): `ODIN3_CT_SEQ_EDGE` (edge-triggered storage whose outputs depend only on
   its state, so it cuts the simulator's combinational graph: `$_DFF_P_`, `$_DFF_N_`, `$_FF_`),
   `ODIN3_CT_SEQ_LEVEL` (a level latch, transparent while enabled; it does *not* cut the graph, so
