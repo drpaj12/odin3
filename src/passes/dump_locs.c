@@ -123,9 +123,12 @@ static odin3_status dump_nodes(dump *state, const odin3_module *module) {
             const odin3_celltype_def *def =
                 state->types ? odin3_celltype_get(state->design, odin3_node_type(module, node))
                              : NULL;
-            dump_line line = {
-                "node", odin3_node_name(module, node), 'c',
-                i,      odin3_node_prov(module, node), def != NULL ? def->name : NULL};
+            const char *type = NULL;
+            if (state->types) {
+                type = def != NULL ? def->name : ""; /* never mix plain and typed lines */
+            }
+            dump_line line = {"node", odin3_node_name(module, node), 'c',
+                              i,      odin3_node_prov(module, node), type};
             st = add_line(state, &line);
         }
     }
@@ -156,15 +159,24 @@ typedef struct dump_args {
     odin3_bytes path; /* ptr NULL: stdout */
 } dump_args;
 
-/* Reads `[--types] [<file>]`; INVALID_ARG for another `--` word, an empty or a second path. */
+/* Reads `[--types] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated --types, an
+ * empty or a second path. A literal `--` ends the options, so a path may start with `--`. */
 static odin3_status parse_args(odin3_bytes args, dump_args *out) {
     *out = (dump_args){false, {NULL, 0}};
+    bool options = true;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
-        if (word.len == strlen("--types") && memcmp(word.ptr, "--types", word.len) == 0) {
+        if (options && word.len == 2 && memcmp(word.ptr, "--", 2) == 0) {
+            options = false;
+        } else if (options && word.len == strlen("--types") &&
+                   memcmp(word.ptr, "--types", word.len) == 0) {
+            if (out->types) {
+                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --types given twice");
+                return ODIN3_ERR_INVALID_ARG;
+            }
             out->types = true;
         } else if (out->path.ptr != NULL || word.len == 0 ||
-                   (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
+                   (options && word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
             return ODIN3_ERR_INVALID_ARG;
         } else {
             out->path = word;
@@ -179,7 +191,8 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     (void)user;
     dump_args parsed;
     if (parse_args(args, &parsed) != ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR, "dump_locs: expects [--types] and at most one non-empty path");
+        odin3_log(ODIN3_LOG_ERROR,
+                  "dump_locs: expects [--types] [--] and at most one non-empty path");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_bytes path = parsed.path;
@@ -211,7 +224,8 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 
 const odin3_pass_def odin3_pass_dump_locs = {
     "dump_locs",
-    "dump_locs [--types] [<file>]: list every module, wire, net and node with its HDL locations, "
+    "dump_locs [--types] [--] [<file>]: list every module, wire, net and node with its HDL "
+    "locations, "
     "one "
     "`module|kind|name|SRC` line each, `node:TYPE` as the node kind with --types (stdout without a "
     "file)",

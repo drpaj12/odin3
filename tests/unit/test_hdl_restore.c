@@ -430,8 +430,8 @@ static void add_typed_node(odin3_module *mod, const char *type_name, const char 
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(mod, &spec, &node));
 }
 
-/* A module "t" with located nodes of several types; the dump_locs output with the given args. */
-static char *dump_typed_design(const char *args_prefix) {
+/* A module "t" with located nodes of several types. */
+static void build_typed_design(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
     odin3_prov_begin_op(&run);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
@@ -444,17 +444,27 @@ static char *dump_typed_design(const char *args_prefix) {
     add_typed_node(mod, "$_DFF_P_", "u2", got.prov);
     add_typed_node(mod, "lpm_add_sub", "u3", netlist_prov());
     add_typed_node(mod, "a:b|c\\d", "u4", got.prov);
+    add_typed_node(mod, "x\ny", "u5", got.prov);
+}
+
+/* The dump_locs output of the typed design: args_prefix, then a temp file path, then suffix. */
+static char *dump_typed_design_ex(const char *args_prefix, const char *suffix) {
+    build_typed_design();
     char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
     char path[PATH_MAX_LEN];
     char args[PATH_MAX_LEN + 16];
     TEST_ASSERT_NOT_NULL(mkdtemp(dir));
     (void)snprintf(path, sizeof path, "%s/locs.txt", dir);
-    (void)snprintf(args, sizeof args, "%s%s", args_prefix, path);
+    (void)snprintf(args, sizeof args, "%s%s%s", args_prefix, path, suffix);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(args)));
     char *text = read_whole(path);
     (void)remove(path);
     (void)rmdir(dir);
     return text;
+}
+
+static char *dump_typed_design(const char *args_prefix) {
+    return dump_typed_design_ex(args_prefix, "");
 }
 
 /* Without --types the kind field is the bare `node` (byte-identical output). */
@@ -474,6 +484,7 @@ static void test_dump_locs_types(void) {
     expect_line(text, "t|node:$_DFF_P_|u2|a.v:7.1-7.9\n");
     expect_line(text, "t|node:lpm_add_sub|u3|\n");
     expect_line(text, "t|node:a:b\\|c\\\\d|u4|a.v:7.1-7.9\n");
+    expect_line(text, "t|node:x\\ny|u5|a.v:7.1-7.9\n");
     expect_line(text, "t|net|n|a.v:7.1-7.9\n");
     expect_line(text, "t|module|t|a.v:7.1-7.9\n");
     odin3_util_free(text);
@@ -503,6 +514,86 @@ static void test_dump_locs_unknown_option(void) {
     TEST_ASSERT_TRUE(errors_seen > 0);
 }
 
+/* Runs dump_locs with args and expects INVALID_ARG plus a logged error. */
+static void expect_invalid_args(const char *args) {
+    errors_seen = 0;
+    odin3_log_set_sink(error_sink, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(args)));
+    TEST_ASSERT_TRUE(errors_seen > 0);
+}
+
+static void test_dump_locs_types_after_path(void) {
+    char *text = dump_typed_design_ex("", " --types");
+    expect_line(text, "t|node:$lut|u1|a.v:7.1-7.9\n");
+    TEST_ASSERT_NULL(strstr(text, "|node|"));
+    odin3_util_free(text);
+}
+
+static void test_dump_locs_types_twice(void) {
+    build_typed_design();
+    expect_invalid_args("--types --types /tmp/odin3_dumplocs_never");
+}
+
+static void test_dump_locs_second_path(void) {
+    build_typed_design();
+    expect_invalid_args("--types /tmp/odin3_dumplocs_a /tmp/odin3_dumplocs_b");
+}
+
+static void test_dump_locs_empty_path(void) {
+    build_typed_design();
+    expect_invalid_args("\"\"");
+    expect_invalid_args("--types \"\"");
+}
+
+/* A literal `--` ends the options: a path starting with `--` is usable. */
+static void test_dump_locs_double_dash(void) {
+    char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
+    char path[PATH_MAX_LEN];
+    char args[PATH_MAX_LEN + 16];
+    build_typed_design();
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/--locs.txt", dir);
+    (void)snprintf(args, sizeof args, "--types -- %s", path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "dump_locs", odin3_bytes_cstr(args)));
+    char *text = read_whole(path);
+    expect_line(text, "t|node:$lut|u1|a.v:7.1-7.9\n");
+    odin3_util_free(text);
+    (void)remove(path);
+    (void)rmdir(dir);
+    expect_invalid_args("-- -- x");
+}
+
+/* Runs `dump_locs --types` with stdout redirected to the file at path; the pass status. */
+static odin3_status types_to_stdout_file(const char *path) {
+    (void)fflush(stdout);
+    int saved = dup(STDOUT_FILENO);
+    TEST_ASSERT_TRUE(saved >= 0);
+    TEST_ASSERT_NOT_NULL(freopen(path, "w", stdout));
+    odin3_status st = odin3_pass_run(design, "dump_locs", odin3_bytes_cstr("--types"));
+    (void)fflush(stdout);
+    TEST_ASSERT_TRUE(dup2(saved, STDOUT_FILENO) >= 0);
+    (void)close(saved);
+    clearerr(stdout);
+    return st;
+}
+
+/* --types with no path writes the typed text to stdout. */
+static void test_dump_locs_types_stdout(void) {
+    char dir[] = "/tmp/odin3_dumplocs_XXXXXX";
+    char path[PATH_MAX_LEN];
+    build_typed_design();
+    TEST_ASSERT_NOT_NULL(mkdtemp(dir));
+    (void)snprintf(path, sizeof path, "%s/out.txt", dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, types_to_stdout_file(path));
+    char *text = read_whole(path);
+    expect_line(text, "t|node:$lut|u1|a.v:7.1-7.9\n");
+    expect_line(text, "t|node:x\\ny|u5|a.v:7.1-7.9\n");
+    odin3_util_free(text);
+    (void)remove(path);
+    (void)rmdir(dir);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_record_shape);
@@ -524,5 +615,11 @@ int main(void) {
     RUN_TEST(test_dump_locs_kind_field_plain);
     RUN_TEST(test_dump_locs_kind_field_typed);
     RUN_TEST(test_dump_locs_unknown_option);
+    RUN_TEST(test_dump_locs_types_after_path);
+    RUN_TEST(test_dump_locs_types_twice);
+    RUN_TEST(test_dump_locs_second_path);
+    RUN_TEST(test_dump_locs_empty_path);
+    RUN_TEST(test_dump_locs_double_dash);
+    RUN_TEST(test_dump_locs_types_stdout);
     return UNITY_END();
 }
