@@ -259,11 +259,12 @@ static uint32_t implicit_key(const odin3_elab2 *e2, const odin3_symbol *rec) {
 /* Under -netlist, a module-level wire named `\\hier/short@file:line ` takes SHORT (L-5, D-3c), made
  * unique (IR-14); nl_name carries the decoded name for its record. */
 static odin3_status netlist_wire_name(odin3_elab2 *e2, const odin3_symbol *rec,
-                                      odin3_wire_spec *spec, odin3_netlist_name *nl_name) {
+                                      odin3_wire_spec *spec, odin3_netlist_name *nl_name,
+                                      odin3_loc at) {
     if (!e2->opts.netlist || spec->name != rec->name) {
         return ODIN3_OK;
     }
-    odin3_status st = odin3_netlist_name_decode(e2, rec->name, nl_name);
+    odin3_status st = odin3_netlist_name_decode(e2, rec->name, at, nl_name);
     return st != ODIN3_OK || !nl_name->matched
                ? st
                : odin3_netlist_unique_wire(e2, nl_name->short_str, &spec->name);
@@ -303,7 +304,7 @@ static odin3_status wire_one(odin3_elab2 *e2, const wire_decl *wd) {
         return ODIN3_OK;
     }
     odin3_netlist_name nl_name = {0};
-    st = st != ODIN3_OK ? st : netlist_wire_name(e2, rec, &spec, &nl_name);
+    st = st != ODIN3_OK ? st : netlist_wire_name(e2, rec, &spec, &nl_name, loc);
     odin3_elab2_prov_req req = {declarator, {0}, rec->scope.v};
     odin3_elab2_nl_extra nl = {decl, &nl_name};
     st = st != ODIN3_OK ? st : odin3_elab2_prov_nl(e2, &req, &nl, &spec.prov);

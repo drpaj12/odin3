@@ -60,6 +60,8 @@ enum {
  */
 uint64_t odin3_elab_default_max_bytes(void);
 
+struct odin3_name_resolver;
+
 /* The options of one elaboration (§2.2, EL-3). */
 typedef struct odin3_elab_opts {
     uint32_t top;       /* strtab ID of "[lib.]mod" (CLI --top, else the project top); 0 = auto */
@@ -70,6 +72,8 @@ typedef struct odin3_elab_opts {
     bool icells;        /* Yosys -icells (5.2): an instance of a `$` name is that registered cell */
     bool netlist; /* read_verilog -netlist (5.4c): the file is a netlist; records are IMPORTED and
                      `src` attributes, assign comments and L-5 names restore HDL locations */
+    struct odin3_name_resolver *names; /* -netlist -name-map (5.4f-c, H-6): hash names of module
+                                          declarators become full names first; NULL: none */
     bool vtr_compat;  /* VTR/Parmys compatibility: `initial x = <non-constant>` is `assign x = ...`
                          (Peter 2026-10-13; EL-40) */
     double stage1_ms; /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */

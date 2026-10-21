@@ -129,6 +129,7 @@ typedef struct odin3_blif_read_stats {
 typedef struct odin3_blif_read_opts {
     bool hdl_locs;                /* decode HDL locations: names, `.attr src`, D-5 */
     odin3_blif_read_stats *stats; /* may be NULL; zeroed by the call */
+    const char *name_map;         /* H-6: path of a name map; hash names become full names first */
 } odin3_blif_read_opts;
 
 /*

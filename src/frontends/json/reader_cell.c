@@ -41,7 +41,10 @@ static jr_where member_where(const jr_cell *cell, const char *path) {
 static odin3_status cell_begin(jr *rd, const odin3_json_node *node, jr_cell *cell) {
     *cell = (jr_cell){
         .node = node, .key = odin3_json_key(node), .where = {"cells", odin3_json_key(node), NULL}};
-    jr_audit(rd, node, CELL_KEYS, sizeof CELL_KEYS / sizeof CELL_KEYS[0]);
+    odin3_status audited = jr_audit(rd, node, CELL_KEYS, sizeof CELL_KEYS / sizeof CELL_KEYS[0]);
+    if (audited != ODIN3_OK) {
+        return audited;
+    }
     const odin3_json_node *type = jr_member(node, "type");
     cell->type_name = jr_text(type, NULL);
     cell->params = jr_member(node, "parameters");
@@ -334,13 +337,14 @@ static odin3_status create_node(jr *rd, const jr_cell *cell, odin3_node_id *node
                             .params = cell->def->n_params > 0 ? rd->cur.params.data : NULL,
                             .n_params = cell->def->n_params};
     odin3_prov_id imported = {0};
-    odin3_status st = jr_prov(rd, cell->node, &imported);
+    jr_named named = {0};
+    odin3_status st = jr_name_key(rd, cell->node, JR_NAME_NODE, &named);
+    spec.name = named.name;
+    st = st == ODIN3_OK ? jr_prov(rd, cell->node, &imported) : st;
     if (st == ODIN3_OK) {
         st = jr_restore_src(
-            rd, &(jr_restore_in){jr_member(cell->node, "attributes"), imported, true}, &spec.prov);
-    }
-    if (st == ODIN3_OK) {
-        st = jr_intern(rd, cell->key, &spec.name);
+            rd, &(jr_restore_in){jr_member(cell->node, "attributes"), imported, true, &named},
+            &spec.prov);
     }
     if (st == ODIN3_OK) {
         st = odin3_node_create_connected(rd->cur.module, &spec, rd->cur.conn_ports.data, node);
@@ -403,6 +407,9 @@ static odin3_status build_cell(jr *rd, const odin3_json_node *node) {
     if (st == ODIN3_OK) {
         st = jr_set_attrs(rd, rd->cur.module, (odin3_objref){ODIN3_OBJ_NODE, made.v},
                           jr_member(node, "attributes"), &cell.where);
+    }
+    if (st == ODIN3_OK) {
+        st = jr_apply_ext(rd, rd->cur.module, (odin3_objref){ODIN3_OBJ_NODE, made.v});
     }
     return st == ODIN3_OK ? check_drivers(rd, &cell, made) : st;
 }

@@ -360,6 +360,7 @@ class _Flattener:
         self.netlist = netlist
         self.blackbox = blackbox  # models cut and paired by .cname or occurrence (--blackbox)
         self.occurrence: dict[str, int] = {}
+        self.buffer_maps: dict[str, dict[str, str]] = {}
         self.cut = cut
         self.normalize = normalize
         self.match_unnamed = match_unnamed
@@ -513,12 +514,53 @@ class _Flattener:
             return f"{LISTED_PREFIX}{cell.model}:{self.occurrence[cell.model]}"
         if self.match_unnamed:
             return None
+        buffered = self.port_buffers(frame)
         for formal, net in pins.items():
-            if is_out[formal] and _SEP not in net and not net.startswith("$"):
+            if not is_out[formal]:
+                continue
+            if net.startswith("$"):  # a generated net: name it through its port buffer
+                net = buffered.get(net, net)
+            if _SEP not in net and not net.startswith("$"):
                 base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
                 return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
         raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
                          f"{cell.model}: no .cname and no named output net to match it by")
+
+    def port_buffers(self, frame: _Frame) -> dict[str, str]:
+        """Flat net -> flat net for each generated net (``$...``) that has one reader in the
+        frame's model, a one-input ``.names`` buffer (row ``1 1``), and no other pin but its
+        driver's; the value is the buffer's output. write_blif --vtr puts a hard block's
+        primary output on its own ``$n<ID>`` net behind such a buffer; the box is then named by
+        the buffer's output. A net with any other reader maps to nothing, so the box stays
+        unnameable (an error, never a silent pass)."""
+        cached = self.buffer_maps.get(frame.prefix)
+        if cached is not None:
+            return cached
+        readers: dict[str, int] = {}
+        pins_on: dict[str, int] = {}
+        for cell in frame.model.cells:
+            if isinstance(cell, blif.Names):
+                reads = cell.inputs
+            elif isinstance(cell, blif.Latch):
+                reads = [cell.input]
+            else:  # a box pin: the one that drives the net counts once, below
+                reads = [a for _, a in cell.conns]
+                for net in reads:
+                    pins_on[net] = pins_on.get(net, 0) + 1
+                continue
+            for net in reads:
+                readers[net] = readers.get(net, 0) + 1
+        for net in frame.model.outputs:
+            readers[net] = readers.get(net, 0) + 1
+        found: dict[str, str] = {}
+        for cell in frame.model.cells:
+            if (isinstance(cell, blif.Names) and len(cell.inputs) == 1
+                    and cell.rows == [("1", "1")] and cell.inputs[0].startswith("$")
+                    and readers.get(cell.inputs[0]) == 1
+                    and pins_on.get(cell.inputs[0], 0) <= 1):
+                found[frame.resolve(cell.inputs[0])] = frame.resolve(cell.output)
+        self.buffer_maps[frame.prefix] = found
+        return found
 
     def expand_adder(self, model: blif.Model, conns: dict[str, str]) -> None:
         """Replace a VTR ``adder`` hard block (ripple of full adders) with logic."""

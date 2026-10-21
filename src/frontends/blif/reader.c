@@ -4,6 +4,7 @@
 #include "frontends/blif/lexer.h"
 #include "frontends/blif/param_text.h"
 #include "frontends/blif/reader_locs.h"
+#include "frontends/blif/reader_names.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -158,6 +159,7 @@ typedef struct blif_reader {
     odin3_strbuf cover;    /* rows of the open .names */
     odin3_u64map *formals; /* formal key -> port << 32 | bit (see TYPE_SHIFT) */
     blif_locs *locs;       /* the --hdl-locs state, NULL without the option */
+    blif_names *nmap;      /* the --name-map state (H-6), NULL without the option */
 } blif_reader;
 
 /* --- errors ------------------------------------------------------------------------------ */
@@ -419,8 +421,12 @@ static odin3_status scan_file(blif_reader *rd) {
     }
     odin3_blif_line ln;
     odin3_status st = ODIN3_OK;
+    if (rd->nmap != NULL) {
+        blif_names_begin(rd->nmap, false);
+    }
     while (st == ODIN3_OK && odin3_blif_lexer_next(lx, &ln)) {
-        st = scan_line(rd, &ln);
+        st = rd->nmap != NULL ? rd_fail(rd, blif_names_apply(rd->nmap, &ln)) : ODIN3_OK;
+        st = st == ODIN3_OK ? scan_line(rd, &ln) : st;
     }
     if (st == ODIN3_OK) {
         st = odin3_blif_lexer_status(lx);
@@ -1691,8 +1697,12 @@ static odin3_status read_bodies(blif_reader *rd) {
         return st == ODIN3_OK ? ODIN3_ERR_IO : st;
     }
     odin3_blif_line ln;
+    if (rd->nmap != NULL) {
+        blif_names_begin(rd->nmap, true);
+    }
     while (st == ODIN3_OK && odin3_blif_lexer_next(lx, &ln)) {
-        st = body_line(rd, &ln);
+        st = rd->nmap != NULL ? rd_fail(rd, blif_names_apply(rd->nmap, &ln)) : ODIN3_OK;
+        st = st == ODIN3_OK ? body_line(rd, &ln) : st;
     }
     if (st == ODIN3_OK) {
         st = odin3_blif_lexer_status(lx);
@@ -1781,6 +1791,22 @@ static odin3_status read_passes(blif_reader *rd) {
     return st == ODIN3_OK ? read_bodies(rd) : st;
 }
 
+/* Both passes with the --name-map state of opts (H-6), reporting what the map lacked. */
+static odin3_status read_mapped(blif_reader *rd, const odin3_blif_read_opts *opts) {
+    odin3_status st = ODIN3_OK;
+    if (opts != NULL && opts->name_map != NULL) {
+        const blif_names_files files = {opts->name_map, rd->path, opts->hdl_locs};
+        rd->nmap = blif_names_create(&files, &st);
+    }
+    st = st == ODIN3_OK ? read_passes(rd) : st;
+    if (st == ODIN3_OK && rd->nmap != NULL) {
+        blif_names_report(rd->nmap, rd->path);
+    }
+    blif_names_destroy(rd->nmap);
+    rd->nmap = NULL;
+    return st;
+}
+
 /* Reads path into design; ctx is the caller's pass run (its op is advanced), or NULL for the
  * reader's own run. */
 static odin3_status read_file(odin3_design *design, const char *path, odin3_pass_ctx *ctx,
@@ -1805,7 +1831,7 @@ static odin3_status read_file(odin3_design *design, const char *path, odin3_pass
         rd.locs = blif_locs_create(&rd.ctx, stats, path);
         st = rd.locs == NULL ? rd_fail(&rd, ODIN3_ERR_NO_MEMORY) : st;
     }
-    st = st == ODIN3_OK ? read_passes(&rd) : st;
+    st = st == ODIN3_OK ? read_mapped(&rd, opts) : st;
     if (ctx != NULL) {
         ctx->op = rd.ctx.op;
     }
