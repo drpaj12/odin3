@@ -61,7 +61,7 @@ static odin3_status ext_prov(jr *rd, const odin3_json_node *value) {
         return jr_error(rd, value, NULL,
                         "odin3_prov is not {kind: SOURCE|IMPORTED|DERIVED, hier: text, hdl: up to "
                         "%d texts}",
-                        (int)PROV_HDL_MAX);
+                        PROV_HDL_MAX);
     }
     rd->n_prov++;
     return ODIN3_OK;
@@ -105,8 +105,7 @@ odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj) {
     return st;
 }
 
-odin3_status jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known,
-                      size_t count) {
+odin3_status jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count) {
     odin3_status st = ODIN3_OK;
     rd->ext_level = NULL;
     for (const odin3_json_node *member = jr_first(obj); st == ODIN3_OK && member != NULL;
@@ -143,7 +142,8 @@ odin3_status jr_check_version(const jr *rd, const odin3_json_node *root) {
                         (long long)jr_int(version));
     }
     if (jr_int(version) != 1) {
-        return jr_error(rd, version, NULL, "odin3_version %lld: not a version (this reader knows 1)",
+        return jr_error(rd, version, NULL,
+                        "odin3_version %lld: not a version (this reader knows 1)",
                         (long long)jr_int(version));
     }
     return ODIN3_OK;

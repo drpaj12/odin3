@@ -14,7 +14,9 @@ or inout pin of a cell, or an output or inout module port.
                    them odin3_level (cells only) and odin3_prov.
   edge attributes: net (the net name), net_bit (the bit of that name), driver_port, sink_port.
 
-Version policy (E-8): a file with `odin3_version` above 1 is refused.
+Version policy (E-8, J-9): a file whose `odin3_version` is present and is not the integer 1 is
+refused. A malformed file raises GraphError. A cell key equal to a port name raises GraphError too
+(one node id for two nodes would merge them).
 
 Run: python3 plugins/python/odin3_graph.py FILE.json [MODULE]   (prints the node and edge counts)
 """
@@ -58,12 +60,18 @@ class _Pin(NamedTuple):
 
 
 def _check_version(doc: dict[str, Any]) -> None:
-    version = doc.get("odin3_version")
-    if isinstance(version, int) and version > SUPPORTED_VERSION:
+    if "odin3_version" not in doc:
+        return
+    version = doc["odin3_version"]
+    if type(version) is not int:  # a bool is an int in Python: refuse it too
+        raise GraphError(f"odin3_version {version!r} is not an integer")
+    if version > SUPPORTED_VERSION:
         raise GraphError(
             f"odin3_version {version}: written by a newer Odin III (this loader knows "
             f"{SUPPORTED_VERSION})"
         )
+    if version != SUPPORTED_VERSION:
+        raise GraphError(f"odin3_version {version} is not a version (this loader knows 1)")
 
 
 def _pick_module(doc: dict[str, Any], module: str | None) -> tuple[str, dict[str, Any]]:
@@ -159,14 +167,29 @@ def _pins(body: dict[str, Any]) -> dict[int, tuple[list[_Pin], list[_Pin]]]:
 
 def parse_graph(path: str | Path, module: str | None = None) -> tuple[list[Node], list[Edge]]:
     """The nodes and edges of one module of the JSON file at path (E-4), in file order."""
-    with open(path, encoding="utf-8") as handle:
-        doc = json.load(handle)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            doc = json.load(handle)
+    except ValueError as err:  # JSONDecodeError and UnicodeDecodeError
+        raise GraphError(f"not JSON: {err}") from err
     if not isinstance(doc, dict):
         raise GraphError("the root is not an object")
     _check_version(doc)
+    try:
+        return _graph_of(doc, module)
+    except (AttributeError, TypeError, KeyError, IndexError) as err:
+        raise GraphError(f"not a netlist: {err!r}") from err
+
+
+def _graph_of(doc: dict[str, Any], module: str | None) -> tuple[list[Node], list[Edge]]:
     _, body = _pick_module(doc, module)
     nodes = [_port_node(name, port, body) for name, port in body.get("ports", {}).items()]
     nodes += [_cell_node(key, cell) for key, cell in body.get("cells", {}).items()]
+    seen: set[str] = set()
+    for node in nodes:
+        if node.ident in seen:
+            raise GraphError(f"'{node.ident}' names both a port and a cell")
+        seen.add(node.ident)
     names = _net_names(body)
     edges: list[Edge] = []
     pins = _pins(body)
@@ -241,7 +264,7 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         nodes, edges = parse_graph(argv[0], argv[1] if len(argv) > 1 else None)
-    except (GraphError, OSError, json.JSONDecodeError) as err:
+    except (GraphError, OSError) as err:
         print(f"odin3_graph: {err}", file=sys.stderr)
         return 1
     print(f"nodes {len(nodes)} edges {len(edges)}")

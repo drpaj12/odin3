@@ -256,30 +256,27 @@ static void test_unknown_odin3_member_is_counted(void) {
 }
 
 /* Finding 4: a malformed odin3_prov or odin3_level is a located error. */
-static void expect_module_member_error(const char *member, const char *text) {
+static void expect_module_member_error(const char *member) {
     char json[1024];
     (void)snprintf(json, sizeof json,
                    "{\"modules\": {\"m\": {\"attributes\": {}, \"ports\": {}, \"cells\": {}, "
                    "\"netnames\": {\"n\": {\"bits\": [ 2 ], %s}}}}}\n",
                    member);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rj_read(json));
-    rj_log_has(text);
+    rj_log_has(strstr(member, "odin3_level") != NULL ? "odin3_level" : "odin3_prov");
     rj_log_has("in.json:1:");
 }
 
 static void test_bad_prov_is_an_error(void) {
-    expect_module_member_error("\"odin3_prov\": {\"kind\": \"BOGUS\", \"hier\": \"\", \"hdl\": []}",
-                               "odin3_prov");
-    expect_module_member_error("\"odin3_prov\": 3", "odin3_prov");
-    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": 1, \"hdl\": []}",
-                               "odin3_prov");
-    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\"}", "odin3_prov");
-    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": [1]}",
-                               "odin3_prov");
     expect_module_member_error(
-        "\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": "
-        "[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]}",
-        "odin3_prov");
+        "\"odin3_prov\": {\"kind\": \"BOGUS\", \"hier\": \"\", \"hdl\": []}");
+    expect_module_member_error("\"odin3_prov\": 3");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": 1, \"hdl\": []}");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\"}");
+    expect_module_member_error(
+        "\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": [1]}");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": "
+                               "[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]}");
 }
 
 static void test_good_prov_with_eight_hdl_is_read(void) {
@@ -290,10 +287,10 @@ static void test_good_prov_with_eight_hdl_is_read(void) {
 }
 
 static void test_bad_level_is_an_error(void) {
-    expect_module_member_error("\"odin3_level\": \"2\"", "odin3_level");
-    expect_module_member_error("\"odin3_level\": true", "odin3_level");
-    expect_module_member_error("\"odin3_level\": -1", "odin3_level");
-    expect_module_member_error("\"odin3_level\": 2147483648", "odin3_level");
+    expect_module_member_error("\"odin3_level\": \"2\"");
+    expect_module_member_error("\"odin3_level\": true");
+    expect_module_member_error("\"odin3_level\": -1");
+    expect_module_member_error("\"odin3_level\": 2147483648");
 }
 
 static void test_level_bounds_are_accepted(void) {
@@ -303,7 +300,8 @@ static void test_level_bounds_are_accepted(void) {
 }
 
 /* Finding 3 and E-2 placement: the level is a key of cells and netnames only; a module keeps its
- * level attribute under attributes. Level then prov are the last two members, never in attributes. */
+ * level attribute under attributes. Level then prov are the last two members, never in attributes.
+ */
 static void test_level_key_placement(void) {
     build_design();
     odin3_module *mod = odin3_module_get(rj_design, (odin3_module_id){1});

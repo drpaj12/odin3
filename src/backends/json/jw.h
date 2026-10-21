@@ -32,19 +32,19 @@ typedef struct jw {
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;
-    uint8_t *init;         /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
-    uint32_t extra_bit;    /* next bit number no net uses (helper nets of OFF-set $sop) */
-    odin3_status status;   /* first failure; later output is skipped */
-    int write_errno;       /* errno of the failed write when status is ODIN3_ERR_IO */
-    odin3_hdl_ctx *hdl;    /* HDL locations of the objects (backends/common/hdl_loc.h) */
-    odin3_strbuf src;      /* scratch: the src text jw_src builds */
+    uint8_t *init;          /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
+    uint32_t extra_bit;     /* next bit number no net uses (helper nets of OFF-set $sop) */
+    odin3_status status;    /* first failure; later output is skipped */
+    int write_errno;        /* errno of the failed write when status is ODIN3_ERR_IO */
+    odin3_hdl_ctx *hdl;     /* HDL locations of the objects (backends/common/hdl_loc.h) */
+    odin3_strbuf src;       /* scratch: the src text jw_src builds */
     odin3_prov_id src_prov; /* the prov out->src holds the text of (0: none) */
     uint32_t src_written;   /* its HDL location count */
-    odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
-    odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
-    odin3_strtab *written; /* cell and netname keys written in the current module */
-    bool odin3_keys;       /* write_json --odin3: the Odin III keys (E-2) */
-    uint32_t level_key;    /* strtab ID of "odin3_level", 0 when the design has none */
+    odin3_strbuf key;       /* scratch: the key being built by jw_make_key */
+    odin3_wattr_seen seen;  /* keys written in the current attributes/parameters object */
+    odin3_strtab *written;  /* cell and netname keys written in the current module */
+    bool odin3_keys;        /* write_json --odin3: the Odin III keys (E-2) */
+    uint32_t level_key;     /* strtab ID of "odin3_level", 0 when the design has none */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */

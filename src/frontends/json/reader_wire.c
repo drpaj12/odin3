@@ -128,7 +128,8 @@ static odin3_status read_netname(jr *rd, const odin3_json_node *name) {
     if (jr_kind(name) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, name, &where, "the netname is not an object");
     }
-    odin3_status st = jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
+    odin3_status st =
+        jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
     const odin3_json_node *bits = jr_member(name, "bits");
     uint32_t width = 0;
     if (st == ODIN3_OK) {

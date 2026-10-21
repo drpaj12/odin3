@@ -336,8 +336,10 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
    belongs to a wire has no netname entry of its own); `levelize` writes it on nets, so those levels
    are not in the file. E-7 (cells) is unaffected.
 5. `read_json` counts a valid `odin3_prov` in its own INFO line (`validated N odin3_prov objects (not
-   restored)`); a malformed one, and `odin3_level` that is not an integer, stay in the skipped `odin3_`
-   count. `odin3_version` is still counted there as before (test_read_json unchanged).
+   restored)`). Fix round (agent default, since `--odin3` files are our own output): a malformed
+   `odin3_prov` (not an object, kind not SOURCE/IMPORTED/DERIVED, hier not text, hdl not an array of at
+   most 8 texts) or `odin3_level` (not an integer from 0 to INT32_MAX) is a located error, not a skipped
+   member. `odin3_version` is still counted in the skipped `odin3_` count as before.
 6. E-7: the C ABI has no getter for the registry flags (SEQ_EDGE, SEQ_LEVEL), and the lane may not
    change the ABI. The test exempts edges into a cell of level 0 (a register, latch or memory starts a
    path; a combinational cell with an input has level >= 1), into cut cells and into port nodes. No
@@ -352,3 +354,14 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
    and torch_geometric (optional, imported lazily).
 9. The Python CTests skip in an environment whose Python lacks cffi (`graph_export_counts`); they ran
    here with the repo venv's Python (cffi 2.1.1) and passed.
+10. Fix round: `odin3_version` must be exactly the integer 1 in both readers (Python `type(v) is int`,
+    so a bool is refused); 0, negative, above 1 and any other type are the J-9 error. An absent version
+    is still accepted (a plain Yosys file).
+11. Fix round: `odin3_level` is a key of cells and netnames only (E-2); a module with the attribute
+    keeps it under attributes as the default writer does. The loader refuses a cell key equal to a port
+    name with GraphError (node ids stay the plain key or name), and malformed JSON or structure raises
+    GraphError (`main` prints it, exit 1). The HDL text of an object is built once, so a file the SRC
+    writer skips warns once.
+12. Fix round, E-7 non-vacuity: every micro with a cell must have a cell above level 0 and compare at
+    least one edge. `hand_ports` has no cell at all (ports and black boxes only), so it is listed in
+    `CELLLESS` and asserted to compare nothing.

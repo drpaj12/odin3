@@ -48,6 +48,8 @@ MICROS = (
     "hand_writers",
 )
 # levelize refuses a word-level cell (V-1); pow.parmys has a $pow.
+# hand_ports has ports and black boxes but no cell: E-7 has nothing to compare there.
+CELLLESS = ("hand_ports",)
 LEVELIZABLE = tuple(micro for micro in MICROS if micro != "pow.parmys")
 CLI = os.environ.get("ODIN3_CLI")
 HAVE_LIB = bool(os.environ.get("ODIN3_LIB"))
@@ -175,6 +177,67 @@ class IsolatedLoaderTest(unittest.TestCase):
             nodes, _ = odin3_graph.parse_graph(path, "n")
         self.assertEqual(len(nodes), SIMPLE_NODES)
 
+    def write(self, tmp: str, doc: Any, raw: str | None = None) -> Path:
+        path = Path(tmp) / "x.json"
+        path.write_text(raw if raw is not None else json.dumps(doc), encoding="utf-8")
+        return path
+
+    def test_version_must_be_the_integer_one(self) -> None:
+        bad_versions: list[Any] = [True, False, None, "1", 1.0, [1], {}, 0, -1, 2]
+        for bad in bad_versions:
+            doc = json.loads(json.dumps(SIMPLE))
+            doc["odin3_version"] = bad
+            with (
+                tempfile.TemporaryDirectory() as tmp,
+                self.subTest(version=bad),
+                self.assertRaises(odin3_graph.GraphError),
+            ):
+                odin3_graph.parse_graph(self.write(tmp, doc))
+        doc = json.loads(json.dumps(SIMPLE))
+        del doc["odin3_version"]  # an absent version is a plain Yosys file
+        with tempfile.TemporaryDirectory() as tmp:
+            nodes, _ = odin3_graph.parse_graph(self.write(tmp, doc))
+        self.assertEqual(len(nodes), SIMPLE_NODES)
+
+    def test_cell_key_equal_to_port_name_is_refused(self) -> None:
+        doc = json.loads(json.dumps(SIMPLE))
+        doc["modules"]["m"]["cells"]["a"] = doc["modules"]["m"]["cells"]["g"]
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            self.assertRaises(odin3_graph.GraphError) as caught,
+        ):
+            odin3_graph.parse_graph(self.write(tmp, doc))
+        self.assertIn("'a'", str(caught.exception))
+
+    def test_malformed_files_raise_graph_error(self) -> None:
+        def mutated(change: Any) -> dict[str, Any]:
+            doc = json.loads(json.dumps(SIMPLE))
+            change(doc["modules"]["m"])
+            return doc  # type: ignore[no-any-return]
+
+        cases: list[Any] = [
+            mutated(lambda m: m.update(cells=[1])),
+            mutated(lambda m: m.update(cells={"g": 3})),
+            mutated(lambda m: m["cells"]["g"].update(connections=[1])),
+            mutated(lambda m: m["cells"]["g"].update(connections={"A": 5})),
+            mutated(lambda m: m.update(ports={"a": "x"})),
+            mutated(lambda m: m.update(netnames={"n": []})),
+            mutated(lambda m: m.update(attributes=7)),
+            {"modules": {"m": 3}},
+            {"modules": {"m": {"ports": {"a": {"bits": 4}}}}},
+        ]
+        for case in cases:
+            with tempfile.TemporaryDirectory() as tmp, self.subTest(case=case):
+                path = self.write(tmp, case)
+                with self.assertRaises(odin3_graph.GraphError):
+                    odin3_graph.parse_graph(path)
+                self.assertEqual(odin3_graph.main([str(path)]), 1)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self.write(tmp, None, raw="{not json")
+            with self.assertRaises(odin3_graph.GraphError):
+                odin3_graph.parse_graph(path)
+            self.assertEqual(odin3_graph.main([str(path)]), 1)
+
 
 def run_cli(script: str) -> str:
     """Run an odin3 script (-p) and return its stdout."""
@@ -284,16 +347,27 @@ class CountsTest(unittest.TestCase):
                 path, _ = self.export(micro, levelize=True)
                 with self.design(micro) as design:
                     names = [module.name for module in design.modules()]
+                compared = 0
+                deepest = 0
                 for name in names:
-                    self.check_levels(path, name)
+                    count, level = self.check_levels(path, name)
+                    compared += count
+                    deepest = max(deepest, level)
+                if micro in CELLLESS:
+                    self.assertEqual((deepest, compared), (0, 0), micro)
+                    continue
+                self.assertGreater(deepest, 0, f"{micro}: no cell above level 0 (vacuous)")
+                self.assertGreater(compared, 0, f"{micro}: no edge was compared (vacuous)")
 
-    def check_levels(self, path: Path, module: str) -> None:
+    def check_levels(self, path: Path, module: str) -> tuple[int, int]:
+        """Checks the module; returns (edges E-7 compared, the highest cell level)."""
         nodes, edges = odin3_graph.parse_graph(path, module)
         attrs = {node.ident: node.attrs for node in nodes}
         cells = [a for a in attrs.values() if a["kind"] == "cell"]
         self.assertTrue(all("odin3_level" in a for a in cells), "a cell has no odin3_level")
         self.assertTrue(all("odin3_level" not in a for a in attrs.values() if a["kind"] == "port"))
         self.assertTrue(all("odin3_level" not in a["attributes"] for a in cells))
+        compared = 0
         for edge in edges:
             target = attrs[edge.target]
             if target["kind"] == "port" or "odin3_level_cut" in target["attributes"]:
@@ -303,6 +377,8 @@ class CountsTest(unittest.TestCase):
             source = attrs[edge.source]
             level = source.get("odin3_level", 0)  # a port node counts as level 0
             self.assertLess(level, target["odin3_level"], f"{edge.source} -> {edge.target}")
+            compared += 1
+        return compared, max((a["odin3_level"] for a in cells), default=0)
 
 
 class PackagesTest(unittest.TestCase):
@@ -407,8 +483,11 @@ class RoundTripTest(unittest.TestCase):
                     out = Path(tmp) / f"{micro}.json"
                     run_cli(f"{read_micro(micro)}; write_json {out}")
                     done = subprocess.run(
-                        [CLI, "-p", f"read_json {out}"], capture_output=True, text=True,
-                        check=False, cwd=REPO_ROOT,
+                        [CLI, "-p", f"read_json {out}"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                        cwd=REPO_ROOT,
                     )
                     self.assertNotEqual(done.returncode, 0, micro)
 
