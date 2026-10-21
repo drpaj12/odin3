@@ -6,7 +6,8 @@
 #   <micro>/mapped_src.v  the same netlist with Yosys `src` attributes
 #   <micro>/mapped.blif   the same netlist as BLIF (Yosys `.subckt` form, spec G-5)
 # Flow: synth -flatten; dfflegalize to $_DFF_P_ and $_DFFSR_PPP_ only; abc -g NAND,NOR;
-# opt_clean, insbuf (a $_BUF_ for each wire-to-wire connection); techmap -map cells/cmos_map.v; check -assert (fails on any other cell type).
+# opt_clean, insbuf (a $_BUF_ for each wire-to-wire connection); techmap -map cells/cmos_map.v;
+# check -mapped -assert (fails on any cell that is not a cmos.v cell).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -55,7 +56,7 @@ for entry in "${micros[@]}"; do
                 insbuf -buf \$_BUF_ A Y
                 write_blif -icells mapped.blif.tmp
                 techmap -map ../cells/cmos_map.v
-                check -assert
+                check -mapped -assert
                 write_verilog $attr $out" >/dev/null
         done
         # The mapped.blif is the same netlist before techmap; $_DFFSR_PPP_ gets its model.

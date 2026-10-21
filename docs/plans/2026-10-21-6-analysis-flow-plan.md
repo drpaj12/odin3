@@ -308,3 +308,17 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
    mapped.v".
 8. Extra: `unknown/unknown.v` (a hand fixture) for G-7, because `--auto-blackbox` with the real
    fixtures fails (see Open issues in the lane result).
+9. 6.1 fix round: the equivalence leg proves the synchronous reading of `dffsr` and `adff` only. The
+   `$_DFFSR_PPP_` model appended to `mapped.blif` (item 4) is synchronous, the same as `lower`
+   makes it, so a netlist whose asynchronous set/reset differs from the synchronous one is not
+   told apart by `netlist_ingest_*`.
+10. `abc --lut 6` means functional equivalence of the LUT form: both sides go through the same ABC
+    and `equiv-check` compares the LUT netlists. It is not structural equality of the gate netlist.
+11. 6.1 fix round: `netlist_src_<micro>` compares the restored `rtl.v` locations of the top module,
+    its wires and its instances (not the derived `$n` and `$c` objects) with the `src` attributes
+    of `mapped_src.v` that start with `rtl.v:`; a value that names only `cmos_map.v` (the techmap)
+    has no RTL location. `dump_locs` rows whose location joins several (`a|b`) were dropped by the
+    row parser; it now splits at the first three `|`.
+12. `gen.sh` runs `check -mapped -assert`; the regenerated fixtures are byte-identical (the
+    `rtl.v` copies differ only by trailing whitespace that pre-commit strips, so they stay as
+    committed).
