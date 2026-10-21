@@ -77,3 +77,14 @@ the Phase 3 design set and the Phase 5 LPM micros.
    perspective; timing detail can be added later (no delays, arcs or criticality). Amendment to
    decision 2: `inherited` and `pad` are approved named exception classes (strict figure always
    reported).
+5. **`--auto-blackbox` infers port directions** (Peter, 2026-10-21; amends 2D EL-11, spec v4.32):
+   every port of an implicit black box was `inout`, so an unknown cell wired to a driven net failed
+   with "has two drivers", and reverse engineering reads netlists full of unknown library cells.
+   Per cell type: a port that drives an otherwise undriven net bit is an output, every other port
+   is an input, one WARNING per type lists the directions. Agent defaults inside the ruling (Peter
+   may override): a port that is an output at one instance and an input at another is an output
+   and the WARNING notes it; a net with several unknown ports and no known driver is driven by the
+   first in source order; two unknown ports driving one net bit, or a net bit with no known
+   direction (a module `inout`), keep the port `inout` and the WARNING says so; a constant, an
+   expression or an unconnected port is an input. `read_json --auto-blackbox` follows the same rule
+   when no cell gives `port_directions`.

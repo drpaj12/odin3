@@ -465,6 +465,14 @@ data kept, the wires dropped and the IEEE reading (§9.2 D3; §17 #79). Micro
 the option, every module below the top, and the cases where a dropped input is read or shared (a
 second warning) are unchanged.
 
+v4.32 (2026-10-21; Peter's ruling on `--auto-blackbox` directions, PHASE6 decision 5). EL-11 (§3.6): the
+ports of an implicit black box take their directions from their nets instead of all being `inout`
+(the rule is in §3.6; the unknown cells of a reverse-engineered netlist sit on driven nets, which
+all-`inout` ports reported as two drivers). Agent defaults inside the ruling: a net with several
+unknown ports is driven by the first in source order; two ports driving one net bit stay `inout`;
+a connection to a constant or expression is an input; an unconnected port is an input. The
+elaborated `MODULE` of an implicit black box (§5.1) now has `input`, `output` or `inout` ports.
+
 ## 1. Purpose and scope (EL-1)
 
 2D turns the parsed-form AST of one read run (2C: one store, every `UNIT` of the run's Verilog
@@ -598,7 +606,7 @@ before it emits anything. Kinds not listed keep their 2A meaning.
 | Kind | In the elaborated form |
 |---|---|
 | `UNIT` | exactly one; name = the top specialization's name; tail = `MODULE`s, the top first, then every other specialization in the order a breadth-first walk of instances (in source order) first reaches it |
-| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg` / `odin3_lib_vtr_compat`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports `inout`, at their EL-11 widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
+| `MODULE` | one per specialization (EL-9), name per EL-9; attributes kept (a specialization of a `read_verilog --lib` unit also carries the synthesized value-less `ATTR`s `odin3_lib` and, when its read had the flag, `odin3_lib_nolatches` / `odin3_lib_nomem2reg` / `odin3_lib_vtr_compat`: stage 2 uses them for that module instead of the run's options, v4.29, §3.1a); ports LIST of `PORT_DECL` (below); params LIST (absent when the source had none) of `PARAM_DECL[localparam]{IN_HEADER}` with the final values; items as below. **Black boxes** (v4.8): each `(* blackbox *)` definition reached (one `MODULE` for all its specializations, from its default one, v4.10) and each implicit black box (EL-11) is a ports-only `MODULE`: one `ATTR` `blackbox` without a value (synthesized, not the source's), named per EL-9 (an implicit one keeps its name), its ports LIST as for any `MODULE` but always written as `wire` ports (`NET` = 1 + `wire`, no `DT`: a `reg` port is a `wire`, an `integer` one `wire signed [31:0]`, v4.9; an implicit one's ports at their EL-11 directions and widths), the params LIST of a `(* blackbox *)` one with one bare `PARAM_DECL` per `parameter` holding its default value (none for an implicit one), and no items; `(* blackbox *)` ones in the `UNIT`'s breadth-first order where the default specialization is processed (queued after the first specialization with other values when no instance uses the defaults), then the **carriers** (v4.19: one more such `MODULE` per other parameter set an instance uses, named as a module's specialization, its `ATTR` `blackbox` valued with the definition's name as a `STRING`, its ports and `PARAM_DECL` values those of the set; none when the definition's name is a registered cell type), implicit ones after every specialization, in first-use order (their ports are known once every instance is seen); stage 2 registers a black-box cell type from the definition's (EL-11; the carriers give it its per-set widths), never an IR module |
 | `PORT_DECL` | only in the port LIST, `IN_HEADER` set, exactly one `DECLARATOR`, in port order; direction sub; `DT` = `reg`, `integer` or none; `NET` field = 1 + the net kind for a net port (never 0: an untyped port is `wire`, EL-24); `SIGNED`; `RANGE` with `NUMBER` bounds or absent (scalar); merged from the non-ANSI declarations (EL-24): the `DECLARATOR`'s `E?` is the value of the port's own declaration or of the merged `wire w = e` / `reg q = v` (v4.15: a net port's `E?` is its net declaration assignment, which the binder queues as `CONTINUOUS` and stage 2 drives the port's net with; a `reg`/`integer` port's is its initial value, as for an ANSI `output reg q = 1'b1`; a value on both declarations is an error), and the `PORT_DECL`'s attributes are those of both declarations (the later declaration wins a name both give) |
 | `PARAM_DECL` | sub `localparam` only; each `DECLARATOR` value is a `NUMBER` or a `STRING`: the `NUMBER` has the final value's bits and `SIGNED` flag, and its payload `width` is the value's width, or **0 (unsized, 2A §4.5) when the final value is still unsized** (EL-15, EL-16: Yosys keeps `is_unsized` on such a parameter, so stage 2 must extend it by repeating its top bit); `RANGE`, `SIGNED`, `DT` kept as declared (informational: the leaf already has the final type), except on a black-box `MODULE`, whose `PARAM_DECL`s are bare: no `RANGE`, `SIGNED` or `DT`, the value's `NUMBER` carrying the width and sign (v4.9) |
 | `NET_DECL` | sub ∈ `wire tri wand wor triand trior uwire supply0 supply1`; no `STRENGTH`, no `DELAY`, no `VECTORED`/`SCALARED`; `RANGE`/unpacked `RANGE`s with `NUMBER` bounds; a declarator's `E?` is a net declaration assignment (N7) |
@@ -1053,10 +1061,25 @@ and makes one specialization per level.
   port's width (from an instance array of N elements, a width W that N divides fixes W / N, the
   element's slice, else W: EL-10's two forms, read with the slice preferred; later instances must
   agree, an array's connection being one element's width or N times it; 1 bit when no connection
-  gives one; v4.10), all ports are
-  `inout`, an info line names it, and it is written as a ports-only black-box `MODULE` (EL-4,
-  v4.8).
-  This is coverage row I7's black box (B §2.23.1) without guessing directions.
+  gives one; v4.10), an info line names it, and it is written as a ports-only black-box `MODULE`
+  (EL-4, v4.8). **Port directions are inferred (v4.32, Peter 2026-10-21).** Stage 1 gives each port a
+  direction from the nets it connects to, bit by bit, in the elaborated modules (after every
+  specialization, before the black-box `MODULE`s are written): an **output** when a connected bit
+  has no other driver (no module input, no `assign` or `always` target, no output of a module, gate
+  or registered cell type, no earlier unknown port); an **inout** when a connected bit has no known
+  direction (a module `inout` port, or an `inout` of a known cell); an **input** otherwise (a bit
+  that something else drives, a constant or other expression, no connection). A port has one
+  direction per cell type: output if any instance needs one (an instance that connects it to a
+  driven net, such as a module input, then reports two drivers in stage 2), inout if any
+  instance is bidirectional. Two unknown ports on one undriven net: the first in source order
+  drives it. Two ports that drive the same net bit (two instances of one type on one net) are a
+  real conflict: the port stays `inout`. One WARNING per cell type, at its first instance, lists
+  the directions: `implicit black box 'm': inferred port directions: A input, Q output`, with a
+  note on a port that is an input at some instances but made an output, and on an `inout`
+  (`its net has no known direction`, or `another port also drives its net`). Coverage row I7's
+  black box keeps `inout` ports because its nets are module `inout` ports. The JSON reader
+  (`read_json --auto-blackbox`) follows the same rule on net labels when no cell gives
+  `port_directions`.
 - Cell-type instances keep their parameter values as node parameters; module instances keep the
   overridden values as node attributes `parameter:<NAME>` (BITS or STRING; IR-7's "source-level
   parameter values as attributes").

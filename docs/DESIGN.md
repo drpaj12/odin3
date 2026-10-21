@@ -247,7 +247,7 @@ would know (`dffeas`, `cyclonev_lcell_comb`, `cyclonev_io_ibuf`, `cyclonev_io_ob
 `cycloneive_lcell_comb`, `cycloneive_io_ibuf`, `cycloneive_io_obuf`; the VQM library would have grown in
 Phase 6, removed by D10) resolve through that library. Any other unresolved instance is `unresolved_module`,
 unless `read_verilog --auto-blackbox` makes it an implicit black box (2D EL-11: named
-connections, `inout` ports sized by the first instance, an info line naming it). `read_verilog -icells` (5.2) is the one
+connections, port directions inferred from the nets they connect to (output, input or inout) and sizes from the first instance, an info line naming it and a warning listing the directions). `read_verilog -icells` (5.2) is the one
 exception for names beginning with `$`: an instance of a registered cell type of that name (`\$mem`,
 `\$shiftx`, `\$dffsr`, ...) is that cell, as in Yosys; it is how the Verilog the writer emits at the
 word, gate, LUT and LPM levels reads back.
