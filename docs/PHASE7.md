@@ -14,16 +14,16 @@ clean-machine test passes.
 
 - [x] 7.1 CIRCT writer: dropped (D12).
 - [x] 7.2 JSON reader: moved to 5.3, done.
-- [ ] 7.3 `tools/flow/odin3_flow.py` (targets `vtr`, `lpm`; `--analysis`) and user docs
-  (`docs/user/`, Sphinx + MyST, CI `-W`). Done when a basic design goes from Verilog to a routed
+- [x] 7.3 `tools/flow/odin3_flow.py` (targets `vtr`, `lpm`; `--analysis`) and user docs
+  (`docs/user/`, Sphinx + MyST, CI `-W`) (#214, #219). Done when a basic design goes from Verilog to a routed
   VPR result and to LPM Verilog with one command.
-- [ ] 7.4a `submod` pass. Done when `flatten` after `submod` is equivalent on the micros.
-- [ ] 7.4b `odin3_design_copy` and `Design.copy()`.
-- [ ] 7.4c `cone_check` pass (combinational cones, linked ABC `cec`).
-- [ ] 7.4d `raise` pass (Peter reviews).
-- [ ] 7.4e ABI fitness review, `docs/RE-ARCHITECTURE.md` gaps, `plugins/python/re_round.py` in CTest.
+- [x] 7.4a `submod` pass (#216). Done when `flatten` after `submod` is equivalent on the micros.
+- [x] 7.4b (#217) `odin3_design_copy` and `Design.copy()`.
+- [x] 7.4c (#220) `cone_check` pass (combinational cones, linked ABC `cec`).
+- [x] 7.4d (#222) `raise` pass (Peter reviews).
+- [x] 7.4e (#223) ABI fitness review, `docs/RE-ARCHITECTURE.md` gaps, `plugins/python/re_round.py` in CTest.
 - [x] 7.5 EDIF writer: dropped (D10).
-- [ ] 7.6 Release: tarball with submodules, `cmake --install`, pip package, CHANGELOG, docs,
+- [x] 7.6 Release (#221, #225): tarball with submodules, `cmake --install`, pip package, CHANGELOG, docs,
   clean-machine test; tag `v1.0.0` pushed by Peter or after his go.
 
 ## Decisions log
@@ -44,3 +44,17 @@ clean-machine test passes.
    `lib/abc/vtr.abc`, `tools/flow`, `tools/vtr-qor`) and the console commands `odin3` (bundled CLI)
    and `odin3-flow`. `import odin3` registers the in-process ABC engine by loading
    `libodin3_abc.so` beside `libodin3.so` as a plugin, so `abc` works from Python.
+
+## Exit evidence
+
+- 7.6 clean-machine test (2026-10-21, head of `feat/7.6-release`, `ODIN3_HEAVY_OK=1 tools/heavy-run
+  tools/release/clean-check`, exit 0, 17 stages): fresh clone of HEAD into an empty temp dir,
+  submodules from the local checkouts, `env -i` with `PATH=/usr/bin:/bin`; Release configure and
+  build (`-j4`); `cmake --install` into a temp prefix; wheel built with scikit-build-core in one
+  venv and installed in a second (`import odin3` reads a BLIF); the installed `odin3 --version`
+  and `odin3-flow` run from outside the clone; the 4 shell blocks of `docs/user/getting-started.md`
+  (build, version, one design, LPM) run in order, none skipped (none needs `VTR_ROOT`).
+  Found by the first run: nothing; the doc's `odin3 --version` sample still said 0.0.0 and now
+  says 1.0.0. Also CTest `release_clean` (sweep label, local only).
+- Release text: `CHANGELOG.md`, `docs/RELEASE-NOTES-1.0.md` (known gaps and the wheel tag).
+- The tag `v1.0.0` and the GitHub release are not done: Peter, or the controller after his go.

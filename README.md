@@ -6,7 +6,8 @@ structural netlists into one hierarchical, provenance-tracked IR, performs archi
 partial mapping, links ABC for soft logic, and writes netlists for VTR, Intel/Altera FPGAs, and
 visualisation. Design: [`docs/DESIGN.md`](docs/DESIGN.md).
 
-**Status: Phase 0** — repository skeleton, oracles and tooling. No synthesis yet.
+**Status: version 1.0.0.** See [`CHANGELOG.md`](CHANGELOG.md) and
+[`docs/RELEASE-NOTES-1.0.md`](docs/RELEASE-NOTES-1.0.md); the manual is in `docs/user/`.
 
 ## Build
 
