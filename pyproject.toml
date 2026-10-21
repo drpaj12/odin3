@@ -13,7 +13,7 @@ src = ["tools/blif", "tools/netlist-compare", "tools/equiv-check", "tools/golden
        "tools/golden-blackboxes", "tools/token-cost",
        "tools/project-fixtures", "tools/pp-fuzz", "tools/pp-diff", "plugins/python", "tools/parse-check", "tools/elab-check", "tools/opt-check", "tools/flatten-check", "tools/lower-check", "tools/hardmap-check", "tools/partial-map-check", "tools/exit-check", "tools/proc-check", "tools/blif-vtr-check",
        "tools/vtr-models",
-       "tools/vtr-qor", "tools/fsm-check", "tools/vtr-read-check", "tools/abc-check",
+       "tools/vtr-qor", "tools/fsm-check", "tools/vtr-read-check", "tools/abc-check:tools/prov-cover",
        "tools/verilog-gen"]
 extend-exclude = ["third_party", "build"]
 
