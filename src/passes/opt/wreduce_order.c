@@ -43,7 +43,10 @@ static const char *const k_sources[] = {
 
 /* The gate-level flip-flops with a reset or an enable ($_DFFE_*, $_SDFF*; dffx.h), by prefix. */
 static bool is_dffx(const char *type) {
-    return strncmp(type, "$_DFF", 5) == 0 || strncmp(type, "$_SDFF", 6) == 0;
+    static const char k_dff[] = "$_DFF";
+    static const char k_sdff[] = "$_SDFF";
+    return strncmp(type, k_dff, sizeof k_dff - 1) == 0 ||
+           strncmp(type, k_sdff, sizeof k_sdff - 1) == 0;
 }
 
 bool wr_order_is_source(const char *type) {

@@ -86,15 +86,21 @@ static bool reset_on(const odin3_sim_cell *cell, const dffx_spec *spec) {
     return has_reset(spec) && active(cell, PORT_R, spec->rst_pos);
 }
 
+/* $_SDFFCE_: enable over reset. */
+static bool next_enable_first(const odin3_sim_cell *cell, const dffx_spec *spec, bool data) {
+    if (!enable_on(cell, spec)) {
+        return cell->state[0] != 0;
+    }
+    return reset_on(cell, spec) ? spec->rst_val : data;
+}
+
 /* What Q takes at the active clock edge. */
 static uint8_t next_state(const odin3_sim_cell *cell, const dffx_spec *spec) {
     bool data = odin3_cells_sim_in(cell, cell->n_ports - D_FROM_END);
-    bool held = cell->state[0] != 0;
-    bool reset = reset_on(cell, spec);
-    bool next = held;
+    bool next = cell->state[0] != 0;
     if (spec->kind == DX_KIND_SCE) {
-        next = !enable_on(cell, spec) ? held : (reset ? spec->rst_val : data);
-    } else if (reset) {
+        next = next_enable_first(cell, spec, data);
+    } else if (reset_on(cell, spec)) {
         next = spec->rst_val;
     } else if (enable_on(cell, spec)) {
         next = data;

@@ -464,6 +464,10 @@ static void put_params(rtl_writer *rw, odin3_node_id node, const odin3_celltype_
 static const char *const k_no_rtlil[] = {"$_DFF_P_", "$_DFF_N_", "$_DLATCH_P_", "$_DLATCH_N_",
                                          "$_FF_",    "$sop",     "$memrd",      "$memwr"};
 
+static bool has_prefix(const char *text, const char *prefix) {
+    return strncmp(text, prefix, strlen(prefix)) == 0;
+}
+
 /* Why node has no RTLIL form, or NULL: a type above, or a $mem with an empty MEMID. */
 static const char *no_rtlil_form(const rtl_writer *rw, odin3_node_id node,
                                  const odin3_celltype_def *def) {
@@ -477,7 +481,7 @@ static const char *no_rtlil_form(const rtl_writer *rw, odin3_node_id node,
     }
     /* The $_DFFE_*, $_DFF_<c><r><v>_ and $_SDFF* families (dffx.h) carry an INIT as well. */
     if (def->gran == ODIN3_GRAN_BIT &&
-        (strncmp(def->name, "$_DFF", 5) == 0 || strncmp(def->name, "$_SDFF", 6) == 0)) {
+        (has_prefix(def->name, "$_DFF") || has_prefix(def->name, "$_SDFF"))) {
         return "has no RTLIL form";
     }
     for (uint32_t param = 0; strcmp(def->name, "$mem") == 0 && param < def->n_params; param++) {

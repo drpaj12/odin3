@@ -251,6 +251,36 @@ class ScriptTests(unittest.TestCase):
         self.assertEqual(text, "read_techlib t; read_json F2.json; write_json F3.json")
 
 
+class GoldTests(unittest.TestCase):
+    """The read-back writer, and Yosys's gold for the gate-level flip-flops with reset or enable."""
+
+    def test_read_back_writer_lowers_before_blif(self) -> None:
+        self.assertEqual(jc.read_back_writer("word", Path("R.il")), "write_rtlil R.il")
+        for level in ("gate", "lut"):
+            self.assertEqual(
+                jc.read_back_writer(level, Path("R.blif")), "lower; write_blif --vtr R.blif"
+            )
+
+    def test_gold_is_legalised_only_for_the_new_families(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            for kind, legalised in (
+                ("$_SDFF_PP0_", True),
+                ("$_DFFE_PP_", True),
+                ("$_DFF_PN1_", True),
+                ("$_SDFFCE_NN1P_", True),
+                ("$_DFF_P_", False),
+                ("$_DFF_N_", False),
+                ("$_DLATCH_P_", False),
+            ):
+                fixture = Path(tmp) / "f.json"
+                fixture.write_text(f'{{"cells": {{"c": {{"type": "{kind}"}}}}}}', encoding="utf-8")
+                text = jc.gold_commands("gate", fixture, Path("g.blif"))
+                self.assertEqual("dfflegalize" in text, legalised, kind)
+                self.assertTrue(text.endswith("write_blif g.blif"), text)
+            word = jc.gold_commands("word", fixture, Path("g.il"))
+            self.assertEqual(word, f"read_json {fixture}; write_rtlil g.il")
+
+
 class MainTests(unittest.TestCase):
     def run_with(
         self, rows: Sequence[jc.Row], extra: Sequence[str] = ()

@@ -115,7 +115,13 @@ static void rules_free(lw_rules *rules) {
     rules->by_type = NULL;
 }
 
-/* Resolves every word type of the design to its rule once (plugin types get NULL). */
+/* True for a cell the pass lowers: a word cell, or one of the gate-level flip-flops of dffx.h. */
+static bool lowerable(const odin3_celltype_def *def) {
+    return def != NULL && (def->gran == ODIN3_GRAN_WORD ||
+                           (def->gran == ODIN3_GRAN_BIT && lw_ff_gate_name(def->name)));
+}
+
+/* Resolves every lowerable type of the design to its rule once (plugin types get NULL). */
 static odin3_status rules_build(const odin3_design *design, lw_rules *rules) {
     uint32_t count = 0;
     while (odin3_celltype_get(design, (odin3_celltype_id){count + 1}) != NULL) {
@@ -128,17 +134,17 @@ static odin3_status rules_build(const odin3_design *design, lw_rules *rules) {
     }
     for (uint32_t id = 1; id <= count; id++) {
         const odin3_celltype_def *def = odin3_celltype_get(design, (odin3_celltype_id){id});
-        rules->by_type[id].rule = def->gran == ODIN3_GRAN_WORD ? lw_rule_find(def->name) : NULL;
+        rules->by_type[id].rule = lowerable(def) ? lw_rule_find(def->name) : NULL;
     }
     return ODIN3_OK;
 }
 
-/* A node's rule when it is a live word cell: sets *is_word; NULL for "word cell without a rule". */
+/* A node's rule when it is a lowerable cell: sets *is_word; NULL for "word cell without a rule". */
 static const lw_rule *rule_of(const lw_ctx *lw, const lw_rules *rules, odin3_node_id node,
                               bool *is_word) {
     odin3_celltype_id type = odin3_node_type(lw->module, node);
     const odin3_celltype_def *def = odin3_celltype_get(lw->design, type);
-    *is_word = def != NULL && def->gran == ODIN3_GRAN_WORD;
+    *is_word = lowerable(def);
     return *is_word && type.v <= rules->n_types ? rules->by_type[type.v].rule : NULL;
 }
 
@@ -152,7 +158,7 @@ static odin3_status postcondition(const lw_ctx *lw) {
         }
         const odin3_celltype_def *def =
             odin3_celltype_get(lw->design, odin3_node_type(lw->module, node));
-        if (def != NULL && def->gran == ODIN3_GRAN_WORD) {
+        if (lowerable(def)) {
             char label[LW_LABEL_LEN];
             lw_node_label(lw, node, label, sizeof label);
             odin3_log(ODIN3_LOG_ERROR,

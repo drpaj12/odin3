@@ -74,8 +74,11 @@ static bool reference(const model *mod, bool q0, bool edge_on, const bool pins[3
     if (!edge_on) {
         return q0;
     }
+    if (mod->en_first && !en_on) {
+        return q0;
+    }
     if (mod->en_first) {
-        return !en_on ? q0 : (rst_on ? mod->rst_val : pins[2]);
+        return rst_on ? mod->rst_val : pins[2];
     }
     if (rst_on) {
         return mod->rst_val;
@@ -130,16 +133,19 @@ static uint32_t expected_names(char names[][NAME_LEN]) {
     uint32_t count = 0;
     for (const char *clk = k_pol; *clk != '\0'; clk++) {
         for (const char *en = k_pol; *en != '\0'; en++) {
-            snprintf(names[count++], NAME_LEN, "$_DFFE_%c%c_", *clk, *en);
+            (void)snprintf(names[count++], NAME_LEN, "$_DFFE_%c%c_", *clk, *en);
         }
         for (const char *rst = k_pol; *rst != '\0'; rst++) {
             for (const char *val = "01"; *val != '\0'; val++) {
-                snprintf(names[count++], NAME_LEN, "$_DFF_%c%c%c_", *clk, *rst, *val);
-                snprintf(names[count++], NAME_LEN, "$_SDFF_%c%c%c_", *clk, *rst, *val);
+                (void)snprintf(names[count++], NAME_LEN, "$_DFF_%c%c%c_", *clk, *rst, *val);
+                (void)snprintf(names[count++], NAME_LEN, "$_SDFF_%c%c%c_", *clk, *rst, *val);
                 for (const char *en = k_pol; *en != '\0'; en++) {
-                    snprintf(names[count++], NAME_LEN, "$_DFFE_%c%c%c%c_", *clk, *rst, *val, *en);
-                    snprintf(names[count++], NAME_LEN, "$_SDFFE_%c%c%c%c_", *clk, *rst, *val, *en);
-                    snprintf(names[count++], NAME_LEN, "$_SDFFCE_%c%c%c%c_", *clk, *rst, *val, *en);
+                    (void)snprintf(names[count++], NAME_LEN, "$_DFFE_%c%c%c%c_", *clk, *rst, *val,
+                                   *en);
+                    (void)snprintf(names[count++], NAME_LEN, "$_SDFFE_%c%c%c%c_", *clk, *rst, *val,
+                                   *en);
+                    (void)snprintf(names[count++], NAME_LEN, "$_SDFFCE_%c%c%c%c_", *clk, *rst, *val,
+                                   *en);
                 }
             }
         }
@@ -156,27 +162,30 @@ static const odin3_celltype_def *find(const char *name) {
     return NULL;
 }
 
+static void check_shape(const odin3_celltype_def *def, const char *name) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(def, name);
+    TEST_ASSERT_EQUAL_MESSAGE(ODIN3_GRAN_BIT, def->gran, name);
+    TEST_ASSERT_EQUAL_HEX32_MESSAGE(ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0, def->flags, name);
+    model mod = parse(name);
+    uint32_t want_ports = 3 + (mod.has_reset ? 1U : 0U) + (mod.has_en ? 1U : 0U);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(want_ports, def->n_ports, name);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("C", def->ports[0].name, name);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("Q", def->ports[def->n_ports - 1].name, name);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("D", def->ports[def->n_ports - 2].name, name);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(mod.has_reset ? 1U : UINT32_MAX, port_of(def, "R"), name);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(mod.has_en ? 1U + (mod.has_reset ? 1U : 0U) : UINT32_MAX,
+                                     port_of(def, "E"), name);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, def->n_params, name);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("INIT", def->params[0].name, name);
+    TEST_ASSERT_NOT_NULL_MESSAGE(def->simulate, name);
+}
+
 static void test_table(void) {
     static char names[MAX_TYPES][NAME_LEN];
     uint32_t count = expected_names(names);
     TEST_ASSERT_EQUAL_UINT32(68, count);
     for (uint32_t i = 0; i < count; i++) {
-        const odin3_celltype_def *def = find(names[i]);
-        TEST_ASSERT_NOT_NULL_MESSAGE(def, names[i]);
-        TEST_ASSERT_EQUAL_MESSAGE(ODIN3_GRAN_BIT, def->gran, names[i]);
-        TEST_ASSERT_EQUAL_HEX32_MESSAGE(ODIN3_CT_SEQ_EDGE | ODIN3_CT_CLOCK_PIN0, def->flags,
-                                        names[i]);
-        model mod = parse(names[i]);
-        uint32_t want_ports = 3 + (mod.has_reset ? 1U : 0U) + (mod.has_en ? 1U : 0U);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(want_ports, def->n_ports, names[i]);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("C", def->ports[0].name, names[i]);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("Q", def->ports[def->n_ports - 1].name, names[i]);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("D", def->ports[def->n_ports - 2].name, names[i]);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(mod.has_reset ? 1U : UINT32_MAX, port_of(def, "R"),
-                                         names[i]);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, def->n_params, names[i]);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("INIT", def->params[0].name, names[i]);
-        TEST_ASSERT_NOT_NULL_MESSAGE(def->simulate, names[i]);
+        check_shape(find(names[i]), names[i]);
         for (uint32_t j = 0; j < i; j++) {
             TEST_ASSERT_TRUE_MESSAGE(strcmp(names[i], names[j]) != 0, names[i]);
         }

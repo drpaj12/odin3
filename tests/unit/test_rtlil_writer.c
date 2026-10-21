@@ -880,7 +880,9 @@ static bool in_every_cell(const odin3_celltype_def *def) {
             return false;
         }
     }
-    return true;
+    /* The gate-level flip-flops of ir/cells/dffx.h carry an INIT, like $_DFF_P_: no RTLIL form. */
+    return strncmp(def->name, "$_DFF", strlen("$_DFF")) != 0 &&
+           strncmp(def->name, "$_SDFF", strlen("$_SDFF")) != 0;
 }
 
 /* def's defaults with every INT *WIDTH* parameter 1, into params. */
@@ -1032,6 +1034,19 @@ static void test_refuses_dlatch_n(void) {
 
 static void test_refuses_ff(void) {
     expect_cell_refused("$_FF_", NULL, 0, "has no RTLIL form");
+}
+
+/* The 68 gate-level flip-flops of ir/cells/dffx.h: one of each family. */
+static void test_refuses_dffx_sync_reset(void) {
+    expect_cell_refused("$_SDFF_PP0_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_dffx_enable(void) {
+    expect_cell_refused("$_DFFE_PN_", NULL, 0, "has no RTLIL form");
+}
+
+static void test_refuses_dffx_async_reset(void) {
+    expect_cell_refused("$_DFF_PN1_", NULL, 0, "has no RTLIL form");
 }
 
 /* A $sop that is not a constant (one input, cover "1 1"). */
@@ -1186,6 +1201,9 @@ int main(void) {
     RUN_TEST(test_refuses_dlatch_p);
     RUN_TEST(test_refuses_dlatch_n);
     RUN_TEST(test_refuses_ff);
+    RUN_TEST(test_refuses_dffx_sync_reset);
+    RUN_TEST(test_refuses_dffx_enable);
+    RUN_TEST(test_refuses_dffx_async_reset);
     RUN_TEST(test_refuses_sop);
     RUN_TEST(test_refuses_memrd);
     RUN_TEST(test_refuses_memwr);

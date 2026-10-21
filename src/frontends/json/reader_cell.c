@@ -61,6 +61,31 @@ static odin3_status cell_begin(jr *rd, const odin3_json_node *node, jr_cell *cel
 
 /* --- parameters (M-6) ---------------------------------------------------------------------- */
 
+/* True for Yosys's positional parameter name of an unresolved cell: `$` and digits only. */
+static bool positional_name(const char *name) {
+    if (name[0] != '$' || name[1] == '\0') {
+        return false;
+    }
+    for (const char *at = name + 1; *at != '\0'; at++) {
+        if (*at < '0' || *at > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* True when member is a positional parameter (`$1`, `$2`, ...) of a cell whose type has no
+ * parameter of that name and is a hard cell, black box or module: Yosys writes `#(2)` of a cell
+ * it could not resolve that way. It is kept as the attribute parameter:<NAME>, which the writer
+ * writes back as the parameter (R-5). */
+static bool positional_param(const jr_cell *cell, const odin3_json_node *member) {
+    const char *name = odin3_json_key(member);
+    odin3_granularity gran = cell->def->gran;
+    bool opaque =
+        gran == ODIN3_GRAN_HARD || gran == ODIN3_GRAN_BLACKBOX || gran == ODIN3_GRAN_MODULE;
+    return opaque && positional_name(name) && jr_find_param(cell->def, name) < 0;
+}
+
 /* One parameter of the cell, typed by the registry. */
 static odin3_status typed_param(jr *rd, const jr_cell *cell, const odin3_json_node *member) {
     char path[JR_NAME_BUF];
@@ -73,6 +98,9 @@ static odin3_status typed_param(jr *rd, const jr_cell *cell, const odin3_json_no
     }
     here = member_where(cell, path);
     int at = jr_find_param(cell->def, odin3_json_key(member));
+    if (at < 0 && positional_param(cell, member)) {
+        return ODIN3_OK; /* an attribute, set once the node exists (param_attrs) */
+    }
     if (at < 0) {
         return jr_error(rd, member, &here, "'%s' has no parameter '%s'", cell->type_name,
                         odin3_json_key(member));
@@ -110,8 +138,11 @@ static odin3_status cell_params(jr *rd, const jr_cell *cell) {
 /* The attributes parameter:<NAME> of an instance of a module or black box. */
 static odin3_status param_attrs(jr *rd, const jr_cell *cell, odin3_node_id node) {
     odin3_status st = ODIN3_OK;
-    for (const odin3_json_node *member = jr_first(cell->params);
-         cell->attr_params && st == ODIN3_OK && member != NULL; member = odin3_json_next(member)) {
+    for (const odin3_json_node *member = jr_first(cell->params); st == ODIN3_OK && member != NULL;
+         member = odin3_json_next(member)) {
+        if (!cell->attr_params && !positional_param(cell, member)) {
+            continue;
+        }
         char key[JR_NAME_BUF];
         char path[JR_NAME_BUF];
         const char *name = odin3_json_key(member);
