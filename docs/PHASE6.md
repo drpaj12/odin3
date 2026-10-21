@@ -21,26 +21,26 @@ the Phase 3 design set and the Phase 5 LPM micros.
 
 ## Checklist
 
-- [ ] 6.1 Gate-level netlist ingest (was 4.15): structural Verilog over a cell library (cells
+- [x] 6.1 (merged: #195) Gate-level netlist ingest (was 4.15): structural Verilog over a cell library (cells
   given as Verilog models through `read_verilog -v`/`-y`, kept as cells or flattened to IR
   primitives) and BLIF (`read_blif`), with hierarchy and names kept. Test: a micro mapped by
   Yosys to a small CMOS cell set (BUF, NOT, NAND2, NOR2, DFF, DFFSR) and the same micro as BLIF
   both read in and are equivalent to the RTL.
-- [ ] 6.2 `write_dot --color-by <attr>` and provenance on node labels (was 4.16): nodes
+- [x] 6.2 (merged: #190) `write_dot --color-by <attr>` and provenance on node labels (was 4.16): nodes
   coloured by the value of a named attribute (a legend per value), the HDL `file:line` on each
   node label when provenance has one. Test: a micro with an attribute set on some cells gives
   the expected colours and labels; the dot parses (Graphviz `nop`).
-- [ ] 6.3 Graph export (was 4.17): Yosys JSON (`write_json`) plus versioned Odin III keys per
+- [x] 6.3 (merged: #197) Graph export (was 4.17): Yosys JSON (`write_json`) plus versioned Odin III keys per
   cell and net (module path, attributes, level from 6.4, provenance), so Phase 5's `read_json`
   reads it and networkx and PyTorch Geometric load it without Odin III (a small loader in
   `plugins/python/`). Test: export of a micro reloads in Python with the same node and edge
   counts as the IR, and `read_json` reads it back identical.
 - Note (4.8): `fsm` leaves `odin3_fsm_states`, `odin3_fsm_encoding`, `odin3_fsm_orig_bits` and
   `odin3_fsm_orig_name` on a recoded state wire and its register, for the graph analysis here.
-- [ ] 6.4 `levelize` pass (was 4.18): the combinational level of each cell from inputs and
+- [x] 6.4 (merged: #191) `levelize` pass (was 4.18): the combinational level of each cell from inputs and
   register outputs, stored as an attribute; combinational loops reported. Test: levels on
   micros match a hand count; a loop gives a located warning.
-- [x] 6.5 Provenance coverage gate (was 4.19): the share of final-netlist objects (BLIF after
+- [x] 6.5 (merged: #193, #205, #207, #209, #215) Provenance coverage gate (was 4.19): the share of final-netlist objects (BLIF after
   `abc`, LPM Verilog, VPR block names from the `.place` file, and each after a Phase 5 read-back)
   that resolve to an HDL source location through the provenance chain (`DERIVED` records back
   to `SOURCE` spans, D9). Test (decision 2): every LUT, latch, hard block and LPM instance of
@@ -166,3 +166,8 @@ Source: `prov-cover --legs a,b|c|d --smallest-first` reports (`tests/prov/expect
    read-back driver of it is a port-buffer table; other drops stay `count-drop`. Each leg prints
    "port-driver K of N objects (P%)", so the share that leaves the coverage base is visible. Result: 0 defects on the 14 designs in legs a, b
    and d; the D1/D3 expect lines are removed.
+10. **Phase 6 closed** (controller, 2026-10-21; Peter: "let's tick off p5 and p6"). Exit test evidence:
+    6.1 to 6.4 pass their tests (#190, #191, #195, #197); the 6.5 gate passes on the 14-design Phase 3 set
+    at legs a, b and d with 0 defects and on the LPM micros at leg c (all 14 `prov_cover_*` CTests in
+    Release, #215); the `port-driver` share per design is printed (0.4% to 33%). Gaps for after v1.0:
+    leg d records no specificity; `not-helper` cannot fire for BLIF read-back (decision log 6.5b).
