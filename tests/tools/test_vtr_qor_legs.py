@@ -99,6 +99,8 @@ class CommandTest(unittest.TestCase):
             self.assertTrue(got.startswith(f"read_arch {k4}; read_verilog"))
         self.assertEqual(qor_legs.odin3_script("O", Path(SHA_V), out, 6, "short", arch_xml=k4),
                          want)
+        with self.assertRaises(ValueError):  # odin3 -p would split the path
+            qor_legs.odin3_script("O", Path(SHA_V), out, 6, "short", arch_xml=Path("/a b/k4.xml"))
         # the readers of a netlist keep the techlib (no hardmap)
         self.assertEqual(qor_legs.odin3_script("R", G, out, 6, "short", arch_xml=k4),
                          qor_legs.odin3_script("R", G, out, 6, "short"))

@@ -256,6 +256,8 @@ def _script(leg: str, design_v: Path | str, out_blif: Path | str, k: int, name_s
     body = _SCRIPT_BODY[leg].format(inp=design_v, k=k)
     # Only the legs that run hardmap need the arch's hard blocks; the netlist readers keep $LIB.
     hardmaps = "hardmap" in body
+    if arch_xml is not None and any(c in str(arch_xml) for c in " ;#\t"):
+        raise ValueError(f"arch path '{arch_xml}' has a blank, ';' or '#' (odin3 -p splits it)")
     head = f"read_arch {arch_xml}" if arch_xml is not None and hardmaps else f"read_techlib {lib}"
     return f"{head}; {body}write_blif --vtr --lut-k {k}{style} {out_blif}"
 
