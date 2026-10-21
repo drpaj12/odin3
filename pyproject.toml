@@ -18,6 +18,7 @@ cmake.version = ">=3.25"
 cmake.build-type = "Release"
 build.targets = ["libodin3", "odin3", "odin3_abc_exe"]
 wheel.packages = []
+wheel.py-api = "py3"
 sdist.include = ["third_party/abc", "third_party/unity"]
 
 [tool.scikit-build.cmake.define]

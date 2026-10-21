@@ -3,8 +3,9 @@
 The cdef is generated at import time from the block between ODIN3_CDEF_BEGIN and
 ODIN3_CDEF_END in odin3.h, so the binding never drifts from the header.
 
-The shared library is located via $ODIN3_LIB, else build/{debug,release}/libodin3.so
-in the repository.
+The shared library is located (find_library) as the bundled libodin3.so beside this module (the
+pip wheel), else $ODIN3_LIB, else build/{debug,release}/libodin3.so in the repository. The header
+is the bundled odin3.h beside this module, else include/odin3/odin3.h in the repository.
 
 The Pythonic layer (spec docs/specs/2026-10-09-1D-abi-design.md, "Python"):
 
@@ -29,6 +30,7 @@ call raises Odin3Error carrying its odin3_status; the library has already logged
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from collections.abc import Iterator, Sequence
@@ -40,8 +42,12 @@ from typing import Any, ClassVar, NamedTuple, TypeVar, Union
 
 import cffi
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-HEADER = REPO_ROOT / "include" / "odin3" / "odin3.h"
+PACKAGE_DIR = Path(__file__).resolve().parent
+REPO_ROOT = PACKAGE_DIR.parents[1]
+_BUNDLED_HEADER = PACKAGE_DIR / "odin3.h"
+HEADER = (_BUNDLED_HEADER if _BUNDLED_HEADER.is_file()
+          else REPO_ROOT / "include" / "odin3" / "odin3.h")
+LOG = logging.getLogger("odin3")
 
 
 def cdef_from_header(header: Path = HEADER) -> str:
@@ -54,12 +60,18 @@ def cdef_from_header(header: Path = HEADER) -> str:
 
 
 def find_library() -> Path:
-    """Locate libodin3.so: $ODIN3_LIB, then the debug and release build trees."""
+    """Locate libodin3.so: the library bundled beside this module (the pip wheel) first, then
+    $ODIN3_LIB, then the debug and release build trees. Logs (logger "odin3", INFO) which one it
+    chose and returns its path."""
     env = os.environ.get("ODIN3_LIB")
-    candidates = [Path(env)] if env else []
-    candidates += [REPO_ROOT / "build" / p / "libodin3.so" for p in ("debug", "release")]
-    for path in candidates:
+    candidates = [("bundled", PACKAGE_DIR / "libodin3.so")]
+    if env:
+        candidates.append(("$ODIN3_LIB", Path(env)))
+    candidates += [(f"build/{p}", REPO_ROOT / "build" / p / "libodin3.so")
+                   for p in ("debug", "release")]
+    for origin, path in candidates:
         if path.is_file():
+            LOG.info("libodin3: using the %s library %s", origin, path)
             return path
     raise FileNotFoundError("libodin3.so not found; build first or set ODIN3_LIB")
 
