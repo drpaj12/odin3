@@ -330,6 +330,34 @@ static void test_raise_drops_internal_wires(void) {
     check_clean();
 }
 
+/* A later module refused: an earlier module that holds a valid proof is left unchanged too. */
+static void test_raise_all_or_nothing_across_modules(void) {
+    use_real_abc();
+    read_blif(RIPPLE ".model m2\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
+    mark_all();
+    bind_adder(false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4), log_text);
+    odin3_module *second = odin3_module_get(design, (odin3_module_id){2});
+    TEST_ASSERT_NOT_NULL(second);
+    odin3_node_id found = {0};
+    for (uint32_t nid = 1; nid < odin3_module_node_end(second); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(second, node) &&
+            odin3_celltype_get(design, odin3_node_type(second, node))->gran != ODIN3_GRAN_PORT) {
+            found = node;
+        }
+    }
+    TEST_ASSERT_TRUE(found.v != 0);
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern("add4"), 0};
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_attr_set(second, (odin3_objref){ODIN3_OBJ_NODE, found.v}, intern("grp"), &value));
+    uint32_t live = live_count();
+    TEST_ASSERT_TRUE(live > 1);
+    REFUSED(ADD4, "no cone_check result");
+    TEST_ASSERT_EQUAL_UINT32(live, live_count());
+}
+
 static void test_raise_provenance_union(void) {
     prove_adder();
     leaves before = all_sources();
@@ -425,6 +453,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_raise_replaces_proven_group);
     RUN_TEST(test_raise_drops_internal_wires);
+    RUN_TEST(test_raise_all_or_nothing_across_modules);
     RUN_TEST(test_raise_provenance_union);
     RUN_TEST(test_raise_refuses_unproven);
     RUN_TEST(test_raise_refuses_stale_proof);

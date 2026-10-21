@@ -277,6 +277,17 @@ static odin3_status prepare(rs_job *job) {
     return st == ODIN3_OK ? make_ports(job) : st;
 }
 
+odin3_status raise_check_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
+                                bool *found) {
+    rs_job job;
+    job_init(&job, ctx, module, opts);
+    odin3_status st = cc_group_collect(&job.group, opts);
+    *found = st == ODIN3_OK && job.group.nodes.len > 0;
+    st = *found && st == ODIN3_OK ? prepare(&job) : st;
+    job_free(&job);
+    return st;
+}
+
 odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
                               bool *found) {
     rs_job job;
