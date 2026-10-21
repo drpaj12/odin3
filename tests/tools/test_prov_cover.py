@@ -112,6 +112,15 @@ class ClassTests(unittest.TestCase):
         self.assertEqual(rep.exceptions["const-table"], 1)
         self.assertEqual([d.name for d in rep.defects], ["$c2"])
 
+    def test_const_table_folded_by_write_json(self) -> None:
+        # write_json folds a zero-input table into a constant: no cell, a gnd net of constant bits
+        rows = dump(("$sop", "$c1", ""))
+        mod = pc.Mod({}, generators=frozenset({"gnd"}))
+        rep = pc.classify(rows, {"m": mod}, allow=frozenset())
+        self.assertEqual(rep.exceptions["const-table"], 1)
+        rep = pc.classify(rows, {"m": pc.Mod({})}, allow=frozenset())
+        self.assertEqual(len(rep.defects), 1)
+
     def test_port_buffer_output_and_input_side(self) -> None:
         rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""), ("$sop", "$c3", ""))
         f = facts(
@@ -285,6 +294,7 @@ JSON = json.dumps(
                     },
                 },
                 "netnames": {
+                    "gnd": {"hide_name": 0, "bits": ["0"]},
                     "x": {"hide_name": 0, "bits": [2]},
                     "$n1": {"hide_name": 1, "bits": [3]},
                     "o": {"hide_name": 0, "bits": [4]},
@@ -303,6 +313,7 @@ class FactsTests(unittest.TestCase):
         self.assertEqual(mod.cells["$c3"].ins, ())
         self.assertEqual((mod.port_in, mod.port_out), (frozenset({"2"}), frozenset({"4"})))
         self.assertEqual(mod.net_name("4"), "o")
+        self.assertEqual(mod.generators, frozenset({"gnd"}))
 
     def test_json_facts_feed_the_rules(self) -> None:
         rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""))

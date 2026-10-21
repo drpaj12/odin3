@@ -1,0 +1,16 @@
+# 6.5b prov-cover sweep: known leg-b defects on the 14 small VTR designs (see tests/prov/expect.txt
+# for D1). D2: a single_port_ram hard block has no location after BLIF VTR read-back (its
+# output nets are generated names); seen on ch_intrinsics.v. A listed leg that passes is stale.
+b single_ff.v D1: cell drives an output port bit (name has no location, X-8)
+b and_latch.v D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_separate_and_latch.v D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_output_and_latch.v D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_reader_writer.v D1: cell drives an output port bit (name has no location, X-8)
+b diffeq1.v D1: cell drives an output port bit (name has no location, X-8)
+b diffeq2.v D1: cell drives an output port bit (name has no location, X-8)
+b ch_intrinsics.v D1: cell drives an output port bit (name has no location, X-8); D2: single_port_ram without a location
+b ch_intrinsics_nolatches.v D1: cell drives an output port bit (name has no location, X-8)
+b stereovision3.v D1: cell drives an output port bit (name has no location, X-8)
+b sha.v D1: cell drives an output port bit (name has no location, X-8)
+b mkPktMerge.v D1: cell drives an output port bit (name has no location, X-8)
+b blob_merge.v D1: cell drives an output port bit (name has no location, X-8)

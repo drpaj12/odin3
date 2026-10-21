@@ -110,6 +110,9 @@ class Mod:
     port_in: frozenset[str] = frozenset()
     port_out: frozenset[str] = frozenset()
     names: Mapping[str, str] = field(default_factory=dict)  # net key -> its name
+    # gnd, vcc or unconn nets that hold a constant bit: write_json folds a zero-input table into
+    # the constant, so the cell has no entry in ``cells`` and only this net name remains
+    generators: frozenset[str] = frozenset()
 
     def net_name(self, net: str) -> str:
         return self.names.get(net, net)
@@ -249,9 +252,14 @@ class _Ctx:
 
 
 def _const_table(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
-    if cell is None or cell.ins or len(cell.outs) != 1:
+    mod = ctx.facts.get(row.module)
+    if mod is None:
         return False
-    return ctx.facts[row.module].net_name(cell.outs[0]) in GENERATOR_NETS
+    if cell is None:  # folded into a constant by write_json: a zero-input table
+        return bool(mod.generators)
+    if cell.ins or len(cell.outs) != 1:
+        return False
+    return mod.net_name(cell.outs[0]) in GENERATOR_NETS
 
 
 def _port_note(ctx: _Ctx, row: Obj, cell: Cell | None) -> str:

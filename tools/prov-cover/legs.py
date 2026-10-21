@@ -23,6 +23,7 @@ from typing import Any
 from loc_check import level_script, parse_techlibs
 
 from prov_cover import (
+    GENERATOR_NETS,
     ROOT_DIR,
     Cell,
     CrashError,
@@ -120,7 +121,13 @@ def _module_facts(mod: dict[str, Any]) -> Mod:
         if p.get("direction") == "output"
         for b in _bits(p["bits"])
     }
-    return Mod(cells, frozenset(port_in), frozenset(port_out), names)
+    consts = {"0", "1", "x", "z"}
+    generators = frozenset(
+        n
+        for n, net in mod.get("netnames", {}).items()
+        if n in GENERATOR_NETS and net.get("bits") and all(str(b) in consts for b in net["bits"])
+    )
+    return Mod(cells, frozenset(port_in), frozenset(port_out), names, generators)
 
 
 def facts_from_json(text: str) -> Facts:
