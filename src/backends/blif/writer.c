@@ -840,9 +840,9 @@ static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t
 
 /* VTR: true for a net on a port bit that a hard cell's output pin drives. It is written under a
  * name of its own (its user/provenance name when it has one and the port bit does not take it, else
- * `$n<ID>`; the port bit's name is the name of record), so the port bit gets a `.names` buffer (port_buffer): VTR's ABC step drops a
- * primary output that a .subckt drives directly, and the hard cells behind it with it (spec 3E
- * §9.2). */
+ * `$n<ID>`; the port bit's name is the name of record), so the port bit gets a `.names` buffer
+ * (port_buffer): VTR's ABC step drops a primary output that a .subckt drives directly, and the hard
+ * cells behind it with it (spec 3E §9.2). */
 static bool hard_port_net(const blif_writer *wr, odin3_net_id net) {
     uint64_t owner = 0;
     odin3_pin_id driver = odin3_net_driver(wr->module, net);
