@@ -214,6 +214,32 @@ static void test_neg_edge_default_inverts_the_clock(void) {
     lf_end(&low.fix);
 }
 
+static void test_enable_first_option_changes_async_gate_types(void) {
+    const char *type = "$_DFFE_PP1P_";
+    built plain;
+    built first;
+    build(&plain, type, 0);
+    build(&first, type, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lower(&plain, type, ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lower(&first, type, "--async-enable-first"));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, first_difference(&plain, &first, 77U));
+    lf_end(&plain.fix);
+    lf_end(&first.fix);
+}
+
+static void test_enable_first_option_leaves_sync_gate_types(void) {
+    const char *type = "$_SDFFE_PP1P_";
+    built plain;
+    built first;
+    build(&plain, type, 0);
+    build(&first, type, 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lower(&plain, type, ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lower(&first, type, "--async-enable-first"));
+    TEST_ASSERT_EQUAL_UINT32(0, first_difference(&plain, &first, 78U));
+    lf_end(&plain.fix);
+    lf_end(&first.fix);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_type_is_lowered);
@@ -221,5 +247,7 @@ int main(void) {
     RUN_TEST(test_sync_types_warn_nothing);
     RUN_TEST(test_async_error_refuses_the_gate_cell);
     RUN_TEST(test_neg_edge_default_inverts_the_clock);
+    RUN_TEST(test_enable_first_option_changes_async_gate_types);
+    RUN_TEST(test_enable_first_option_leaves_sync_gate_types);
     return UNITY_END();
 }

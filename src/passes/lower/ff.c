@@ -237,22 +237,33 @@ static lw_sel gate_sel(const lw_cell *cell, const char *port, bool high) {
     return (lw_sel){span.n > 0 ? span.nets[0] : (odin3_net_id){0}, high};
 }
 
-static void view_load_gate(const lw_cell *cell, const gate_ff *gate, ff_view *view) {
+static odin3_status view_load_gate(const lw_ctx *lw, const lw_cell *cell, const gate_ff *gate,
+                                   ff_view *view) {
     memset(view, 0, sizeof *view);
+    lw_span clk = lw_cell_span(cell, "C");
+    lw_span data = lw_cell_span(cell, "D");
+    if (clk.n == 0 || data.n == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "lower: gate-level FF '%s' has no %s pin", cell->def->name,
+                  clk.n == 0 ? "C" : "D");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     view->shape = &k_shapes[gate->shape];
     view->width = 1;
     view->clk_high = gate->clk_high;
-    view->clk = lw_cell_span(cell, "C").nets[0];
+    view->clk = clk.nets[0];
     view->en = gate_sel(cell, view->shape->has_en ? "E" : NULL, gate->en_high);
     view->ctl = gate_sel(cell, view->shape->ctl == FF_CTL_RESET ? "R" : NULL, gate->ctl_high);
-    view->data = lw_cell_span(cell, "D");
+    view->data = data;
     view->out = cell->port[cell->out_port];
     view->value = &k_gate_value[gate->value ? 1 : 0];
-    view->en_outer = view->shape->en_outer;
+    view->en_outer = view->shape->en_outer ||
+                     (view->shape->has_en && lw->opts->async_enable_first && view->shape->async &&
+                      view->shape->ctl != FF_CTL_NONE);
     view->gate_init =
         cell->params[0].kind == ODIN3_VAL_INT && cell->params[0].i >= 0 && cell->params[0].i <= 1
             ? (int)cell->params[0].i
             : -1;
+    return ODIN3_OK;
 }
 
 /* --- the next-state function (spec §6.1's table) ------------------------------------------------
@@ -455,7 +466,10 @@ odin3_status lw_build_gate_ff(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
         odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s'", cell->def->name);
         return ODIN3_ERR_INVALID_ARG;
     }
-    view_load_gate(cell, &gate, &view);
+    odin3_status st = view_load_gate(lw, cell, &gate, &view);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     return build_view(lw, cell, view, out);
 }
 
