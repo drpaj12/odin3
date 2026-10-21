@@ -188,6 +188,11 @@ class EquivError(Exception):
         self.detail = detail
 
 
+class _Unnameable(EquivError):
+    """A black box with no .cname, no named output net and no port buffer: it may still be
+    paired by its input signature (``pair_by_input_signature``); if not, this is the error."""
+
+
 class UnprovenError(EquivError):
     """No verdict, a tool limit and not a crash: ABC timed out (exit code 4)."""
 
@@ -272,6 +277,7 @@ class BlackBox:
     inputs: dict[str, str]
     outputs: dict[str, str]
     anon: bool = False  # no name: matched by simulation signature (``--match-unnamed``)
+    pending: str = ""  # no name yet (the reason); paired by input signature
     params: tuple[tuple[str, str], ...] = ()
     free: dict[str, str] = field(default_factory=dict)  # output pin -> its free input net
     probes: dict[str, str] = field(default_factory=dict)  # input pin -> its probe output net
@@ -472,14 +478,18 @@ class _Flattener:
             is_out = {names[f]: f in sub.outputs for f, _ in cell.conns}
         ordered = sorted(cell.conns, key=lambda c: _formal_order(names[c[0]]))
         pins = {names[f]: frame.resolve(a) for f, a in ordered}
-        key = self.instance_key(cell, frame, pins, is_out)
-        anon = key is None
+        pending = ""
+        try:
+            key = self.instance_key(cell, frame, pins, is_out)
+        except _Unnameable as exc:
+            key, pending = None, str(exc)
+        anon = key is None and not pending
         if key is None:  # a provisional key: it must be a legal BLIF net name, and unique
             self.anon_count += 1
-            key = f"?anon{self.anon_count}"
+            key = f"?{'pend' if pending else 'anon'}{self.anon_count}"
         box = BlackBox(cell.model, key, cell.line,
                        {f: n for f, n in pins.items() if not is_out[f]},
-                       {f: n for f, n in pins.items() if is_out[f]}, anon=anon,
+                       {f: n for f, n in pins.items() if is_out[f]}, anon=anon, pending=pending,
                        params=tuple(sorted(a for a in cell.attrs if a[0] != ".cname")))
         other = self.instances.get(box.key)
         if other is not None:
@@ -523,8 +533,8 @@ class _Flattener:
             if _SEP not in net and not net.startswith("$"):
                 base, bit = _formal_order(formal)  # width-independent: out[0] and out agree
                 return f"{base}{f'[{bit}]' if bit else ''}={norm(net)}"
-        raise EquivError(f"{self.netlist.path}:{cell.line}: cannot name black box "
-                         f"{cell.model}: no .cname and no named output net to match it by")
+        raise _Unnameable(f"{self.netlist.path}:{cell.line}: cannot name black box "
+                          f"{cell.model}: no .cname and no named output net to match it by")
 
     def port_buffers(self, frame: _Frame) -> dict[str, str]:
         """Flat net -> flat net for each generated net (``$...``) that has one reader in the
@@ -1295,11 +1305,90 @@ def pair_listed(flats: Sequence[Flat], models: frozenset[str]) -> int:
     return pairs
 
 
+def _driver_key(net: str, flat: Flat, drivers: dict[str, tuple[BlackBox, str]],
+                normalize: bool) -> str | None:
+    """How an input net of an unnamed box is told across the two files: the pin of the (named
+    or already paired) box that drives it, else its normalized name when it is a named net;
+    None for a generated net, a net inside a sub-model, or a pin of a box still unnamed."""
+    driver = drivers.get(net)
+    if driver is not None:
+        box, formal = driver
+        return None if box.pending else f"box:{box.key}:{formal}"
+    if net.startswith("$") or _SEP in net:
+        return None
+    name = normalize_io_name(net, flat.top) if normalize else net
+    return f"net:{name}"
+
+
+def _input_signature(box: BlackBox, flat: Flat, drivers: dict[str, tuple[BlackBox, str]],
+                     normalize: bool) -> tuple[str, ...] | None:
+    keys = [_driver_key(net, flat, drivers, normalize) for net in box.inputs.values()]
+    if any(k is None for k in keys):
+        return None
+    return (box.cell_type, *sorted(f"{f}={k}" for f, k in zip(box.inputs, keys, strict=True)))
+
+
+def pair_by_input_signature(flats: Sequence[Flat], normalize: bool = True) -> int:
+    """Pair the boxes that have no name at all (``BlackBox.pending``) across the two flats by
+    input signature: the model plus, per input pin, the named net or the named/paired box pin
+    that drives it.  A box fed by an unnamed box is signed once that box is paired (rounds, to a
+    fixpoint).  A signature shared by two boxes of one file, or found in one file only, is
+    EquivError (exit 2).  Each pair gets one key in both files and is cut like a named box.
+    Returns the number of pairs."""
+    pending = [[b for b in f.blackboxes if b.pending] for f in flats]
+    drivers = [{net: (box, formal) for box in f.blackboxes for formal, net in box.outputs.items()}
+               for f in flats]
+    pairs = 0
+    while any(pending):
+        sigs: list[dict[tuple[str, ...], list[BlackBox]]] = [{}, {}]
+        for side, flat in enumerate(flats):
+            for box in pending[side]:
+                sig = _input_signature(box, flat, drivers[side], normalize)
+                if sig is not None:
+                    sigs[side].setdefault(sig, []).append(box)
+            for sig, boxes in sigs[side].items():
+                if len(boxes) > 1:
+                    lines = ", ".join(f"line {b.line}" for b in boxes)
+                    raise EquivError(
+                        f"{flat.path}: cannot name black box {sig[0]}: no .cname, no named "
+                        f"output net, and {len(boxes)} boxes have the same input signature "
+                        f"({lines})")
+        both = sorted(s for s in sigs[0] if s in sigs[1])
+        if not both:
+            break
+        renames: list[dict[str, str]] = [{}, {}]
+        for sig in both:
+            pairs += 1
+            key = f"?sig:{sig[0]}:{pairs}"
+            for side in (0, 1):
+                box = sigs[side][sig][0]
+                renames[side][box.key] = key
+                box.pending = ""
+                notice(f"{box.cell_type} at {flats[side].path}:{box.line} has no name: paired "
+                       f"by input signature (pair {pairs})")
+        for side, flat in enumerate(flats):
+            _rekey(flat, renames[side])
+            pending[side] = [b for b in pending[side] if b.pending]
+    for side, flat in enumerate(flats):
+        for box in pending[side]:
+            sig = _input_signature(box, flat, drivers[side], normalize)
+            why = ("an input is a generated net or the pin of a box that has no name"
+                   if sig is None else "no box of the other file has the same input signature")
+            raise EquivError(f"{box.pending}; input signature: {why}")
+    if pairs:
+        notice(f"{pairs} unnamed black-box instance(s) paired by input signature")
+    return pairs
+
+
 def match_blackboxes(flats: Sequence[Flat]) -> None:
     """Require the cut black boxes of two flats to match one-to-one by name, type and ports.
 
     Raises EquivError (exit 2) listing every unmatched instance or mismatch."""
     fa, fb = flats
+    for flat in flats:
+        for box in flat.blackboxes:
+            if box.pending:
+                raise EquivError(box.pending)
     for flat in flats:
         _assert_unique_keys(flat)
     boxes_a = {box.key: box for box in fa.blackboxes}
@@ -1639,6 +1728,7 @@ def _check(args: argparse.Namespace) -> int:
              for n in nets]
     if listed:
         pair_listed(flats, listed)
+    pair_by_input_signature(flats, not args.no_io_normalize)
     paired, guessed, probed = _pair_boxes(flats, args)
     match_blackboxes(flats)
     for flat in flats:
