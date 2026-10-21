@@ -115,8 +115,9 @@ static void test_auto_blackbox(void) {
     TEST_ASSERT_EQUAL_UINT32(2, def->ports[0].width);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT,
-                          def->ports[2].dir); /* E: no port_directions, bit 5 undriven */
+    /* E: no port_directions; both cells drive bit 5, nothing else does: a real conflict */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, def->ports[2].dir);
+    rj_log_has("A input, Y output, E inout (another port also drives its net)");
     TEST_ASSERT_EQUAL_UINT32(2, odin3_celltype_instances(rj_design, type));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,

@@ -817,7 +817,7 @@ static void test_implicit_width_from_array(void) {
     expect_clean();
     odin3_ast_id module = expect_blackbox("foo", 2);
     expect_port(module, 0, "a output [1:0]");
-    expect_port(module, 1, "c output");
+    expect_port(module, 1, "c inout"); /* five instances drive clk: a real conflict */
 }
 
 /* A black box's body adds no port to an implicit black box's union (Task 12 review n3, Q10). */
@@ -904,6 +904,20 @@ static void test_implicit_dirs_ambiguous(void) {
     et_expect(&rs, ODIN3_LOG_WARN,
               "t.v:3:3: warning: implicit black box 'foo': inferred port directions: R output "
               "(an input at some instances, made an output)");
+}
+
+/* Two instances of one cell type driving one net is a real conflict: inout, and the WARNING says
+ * so. */
+static void test_implicit_dirs_conflict(void) {
+    run_req("module top (output y);\n  wire w;\n  foo u1 (.Q(w));\n  foo u2 (.Q(w));\n"
+            "  assign y = w;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"Q inout"};
+    expect_dirs("foo", want, 1);
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: Q inout "
+              "(another port also drives its net)");
 }
 
 /* A net with no known direction (a module inout) keeps the port inout, and the WARNING says so. */
@@ -1101,6 +1115,7 @@ int main(void) {
     RUN_TEST(test_implicit_dirs_first_drives);
     RUN_TEST(test_implicit_dirs_ambiguous);
     RUN_TEST(test_implicit_dirs_inout);
+    RUN_TEST(test_implicit_dirs_conflict);
     RUN_TEST(test_implicit_widths);
     RUN_TEST(test_implicit_width_from_array);
     RUN_TEST(test_blackbox_body_not_in_union);

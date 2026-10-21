@@ -70,6 +70,7 @@ typedef struct bd_run {
     uint8_t *is_out;
     uint8_t *is_inout;
     uint8_t *in_known; /* an instance where the port is an input to a driven net */
+    uint8_t *conflict; /* another unknown port also drives a net this port drives */
     odin3_status st;
 } bd_run;
 
@@ -81,6 +82,7 @@ typedef struct bd_mod {
     odin3_vec segs;  /* scratch: the segments of one expression */
     odin3_vec work;  /* scratch: expression ids to visit */
     odin3_vec stmts; /* scratch: statement ids to visit */
+    bool final;      /* the second sweep: look for ports that drive one net twice */
 } bd_mod;
 
 static int64_t lower(int64_t left, int64_t right) {
@@ -426,6 +428,20 @@ static void classify(bd_mod *mod, uint32_t tp) {
     }
 }
 
+/* Second sweep: a port that drives a net bit another unknown port drives is a real conflict. */
+static void check_conflict(bd_mod *mod, uint32_t tp) {
+    for (size_t at = 0; at < mod->segs.len; at++) {
+        const bd_seg *seg = odin3_vec_cat(&mod->segs, at);
+        const bd_net *net = odin3_vec_cat(&mod->netv, seg->net);
+        for (uint32_t i = 0; i < seg->count; i++) {
+            if ((net->bits[seg->first + i] & BD_UNK) != 0) {
+                mod->run->conflict[tp] = 1;
+            }
+        }
+        mark_seg(mod, seg, BD_UNK);
+    }
+}
+
 static void classify_instance(bd_mod *mod, uint32_t box, odin3_ast_id inst) {
     const bd_run *run = mod->run;
     odin3_ast_span conns = odin3_ast_children(run->ast, inst);
@@ -434,7 +450,11 @@ static void classify_instance(bd_mod *mod, uint32_t box, odin3_ast_id inst) {
         uint32_t tp = odin3_elab1_bbox_port(run->e1, box, odin3_ast_name(run->ast, conns.ids[pos]));
         if (tp != 0) {
             collect_segs(mod, odin3_ast_child(run->ast, conns.ids[pos], 0));
-            classify(mod, tp - 1);
+            if (!mod->final) {
+                classify(mod, tp - 1);
+            } else if (run->is_out[tp - 1] != 0) {
+                check_conflict(mod, tp - 1);
+            }
         }
     }
 }
@@ -495,6 +515,16 @@ static void scan_drivers(bd_mod *mod, odin3_ast_id item) {
     }
 }
 
+/* Forgets which bits an unknown port drives (the sweeps each start from the known drivers). */
+static void clear_unk(bd_mod *mod) {
+    for (size_t at = 0; at < mod->netv.len; at++) {
+        const bd_net *net = odin3_vec_cat(&mod->netv, at);
+        for (uint32_t bit = 0; bit < net->width; bit++) {
+            net->bits[bit] &= (uint8_t)~BD_UNK;
+        }
+    }
+}
+
 static void analyse_module(bd_run *run, odin3_ast_id module) {
     bd_mod mod = {.run = run, .nets = odin3_u64map_create(0)};
     odin3_vec_init(&mod.netv, sizeof(bd_net));
@@ -510,9 +540,13 @@ static void analyse_module(bd_run *run, odin3_ast_id module) {
     for (uint32_t i = 2; i < items.n && run->st == ODIN3_OK; i++) {
         scan_drivers(&mod, items.ids[i]);
     }
-    for (uint32_t i = 2; i < items.n && run->st == ODIN3_OK; i++) {
-        if (odin3_ast_kind_of(run->ast, items.ids[i]) == ODIN3_AST_INSTANTIATION) {
-            classify_instances(&mod, items.ids[i]);
+    for (int sweep = 0; sweep < 2; sweep++) {
+        mod.final = sweep == 1;
+        clear_unk(&mod);
+        for (uint32_t i = 2; i < items.n && run->st == ODIN3_OK; i++) {
+            if (odin3_ast_kind_of(run->ast, items.ids[i]) == ODIN3_AST_INSTANTIATION) {
+                classify_instances(&mod, items.ids[i]);
+            }
         }
     }
     odin3_u64map_destroy(mod.nets);
@@ -534,7 +568,7 @@ static const char *dir_text(odin3_dir dir) {
 /* The direction the flags of port idx settle on: inout if any instance is bidirectional, else
  * output if any needs one, else input. */
 static odin3_dir settled(const bd_run *run, uint32_t idx) {
-    if (run->is_inout[idx] != 0) {
+    if (run->is_inout[idx] != 0 || run->conflict[idx] != 0) {
         return ODIN3_DIR_INOUT;
     }
     return run->is_out[idx] != 0 ? ODIN3_DIR_OUT : ODIN3_DIR_IN;
@@ -545,7 +579,9 @@ static void settle_port(bd_run *run, odin3_elab1_bbport *port, uint32_t idx, odi
     odin3_dir dir = settled(run, idx);
     port->port.dir = (uint8_t)dir;
     const char *note = "";
-    if (dir == ODIN3_DIR_INOUT) {
+    if (dir == ODIN3_DIR_INOUT && run->is_inout[idx] == 0) {
+        note = " (another port also drives its net)";
+    } else if (dir == ODIN3_DIR_INOUT) {
         note = " (its net has no known direction)";
     } else if (dir == ODIN3_DIR_OUT && run->in_known[idx]) {
         note = " (an input at some instances, made an output)";
@@ -597,7 +633,7 @@ odin3_status odin3_elab1_infer_directions(odin3_elab1 *e1) {
     bd_run run = {.e1 = e1, .ast = e1->elab, .arena = odin3_arena_create(0)};
     run.modules = odin3_u64map_create(0);
     size_t n_ports = e1->bbports.len;
-    run.is_out = run.arena != NULL ? odin3_arena_alloc(run.arena, 3 * (n_ports + 1)) : NULL;
+    run.is_out = run.arena != NULL ? odin3_arena_alloc(run.arena, 4 * (n_ports + 1)) : NULL;
     if (run.modules == NULL || run.is_out == NULL) {
         odin3_u64map_destroy(run.modules);
         odin3_arena_destroy(run.arena);
@@ -605,6 +641,7 @@ odin3_status odin3_elab1_infer_directions(odin3_elab1 *e1) {
     }
     run.is_inout = run.is_out + n_ports + 1;
     run.in_known = run.is_inout + n_ports + 1;
+    run.conflict = run.in_known + n_ports + 1;
     odin3_ast_span pending = odin3_ast_pending_span(e1->elab, 0);
     odin3_ast_id *ids = odin3_arena_alloc(run.arena, (pending.n + 1) * sizeof *ids);
     if (ids == NULL) {

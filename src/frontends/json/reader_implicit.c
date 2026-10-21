@@ -142,19 +142,55 @@ odin3_status jr_note_implicit(jr *rd, const odin3_json_node *cell, const char *t
     return st;
 }
 
-/* The WARNING of one implicit type: the netlist with it is not equivalent to its source. */
-static void warn_implicit(const jr *rd, const char *name) {
+odin3_dir jr_role_dir(uint8_t role) {
+    if ((role & (JR_ROLE_BIDI | JR_ROLE_CONFLICT)) != 0) {
+        return ODIN3_DIR_INOUT;
+    }
+    return (role & JR_ROLE_OUT) != 0 ? ODIN3_DIR_OUT : ODIN3_DIR_IN;
+}
+
+static const char *dir_text(odin3_dir dir) {
+    if (dir == ODIN3_DIR_IN) {
+        return "input";
+    }
+    return dir == ODIN3_DIR_OUT ? "output" : "inout";
+}
+
+/* The directions of the type's ports, with a note on an inferred one that is ambiguous. */
+static odin3_status list_dirs(const jr *rd, const jr_implicit *entry, odin3_strbuf *text) {
+    odin3_status st = ODIN3_OK;
+    for (size_t pos = 0; st == ODIN3_OK && pos < entry->ports.len; pos++) {
+        const jr_iport *port = odin3_vec_cat(&entry->ports, pos);
+        const char *note = "";
+        if (!port->dir_known && (port->role & JR_ROLE_BIDI) != 0) {
+            note = " (its net has no known direction)";
+        } else if (!port->dir_known && (port->role & JR_ROLE_CONFLICT) != 0) {
+            note = " (another port also drives its net)";
+        } else if (!port->dir_known && port->def.dir == ODIN3_DIR_OUT &&
+                   (port->role & JR_ROLE_IN_KNOWN) != 0) {
+            note = " (an input at some cells, made an output)";
+        }
+        st = odin3_strbuf_appendf(text, "%s%s %s%s", pos > 0 ? ", " : "",
+                                  jr_str(rd, port->name_str), dir_text(port->def.dir), note);
+    }
+    return st;
+}
+
+/* The WARNING of one implicit type: the netlist with it is not equivalent to its source, and the
+ * port directions that were inferred from its connections (EL-11). */
+static void warn_implicit(const jr *rd, const char *name, const char *dirs) {
     if (name[0] == '$') {
         odin3_log(ODIN3_LOG_WARN,
                   "%s: '%s' is a Yosys internal cell type this tool has no cell for; it becomes "
-                  "an implicit black box and the netlist is not equivalent to its source",
-                  rd->path, name);
+                  "an implicit black box and the netlist is not equivalent to its source; port "
+                  "directions inferred from its connections: %s",
+                  rd->path, name, dirs);
     } else {
         odin3_log(ODIN3_LOG_WARN,
                   "%s: cell type '%s' is neither a module of the file nor a registered cell "
-                  "type; it becomes an implicit black box (every port inout unless "
-                  "port_directions says)",
-                  rd->path, name);
+                  "type; it becomes an implicit black box; port directions inferred from its "
+                  "connections: %s",
+                  rd->path, name, dirs);
     }
 }
 
@@ -184,9 +220,13 @@ static odin3_status make_implicit_one(jr *rd, jr_implicit *entry) {
         }
         st = st == ODIN3_ERR_PARSE ? st : jr_fail(rd, st);
     }
+    odin3_strbuf dirs;
+    odin3_strbuf_init(&dirs);
+    st = st == ODIN3_OK ? jr_fail(rd, list_dirs(rd, entry, &dirs)) : st;
     if (st == ODIN3_OK) {
-        warn_implicit(rd, name);
+        warn_implicit(rd, name, dirs.data != NULL ? dirs.data : "");
     }
+    odin3_strbuf_free(&dirs);
     odin3_vec_free(&defs);
     return st;
 }
