@@ -150,8 +150,9 @@ static odin3_status read_netname(jr *rd, const odin3_json_node *name) {
     } else if (st == ODIN3_OK) {
         st = make_wire(rd, name, (wire_shape_in){width, prov}, &wire);
     }
-    return st == ODIN3_OK ? name_attrs(rd, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, name, &where)
-                          : st;
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
+    st = st == ODIN3_OK ? name_attrs(rd, obj, name, &where) : st;
+    return st == ODIN3_OK ? jr_apply_ext(rd, rd->cur.module, obj) : st;
 }
 
 odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj) {

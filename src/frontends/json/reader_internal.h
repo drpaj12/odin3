@@ -93,22 +93,24 @@ typedef struct jr {
     odin3_pass_ctx ctx;
     odin3_json_opts opts;
     odin3_json_doc doc;
-    const odin3_json_node *modules; /* the root's "modules" object */
-    odin3_vec mods;                 /* jr_mod, file order */
-    odin3_u64map *mod_index;        /* module name str -> index in mods */
-    odin3_vec edges;                /* jr_edge */
-    odin3_vec implicit;             /* jr_implicit */
-    odin3_u64map *implicit_index;   /* type name str -> index in implicit */
-    odin3_u64map *implicit_port;    /* implicit type index << 32 | port name str -> port index */
-    const char *cur_name;           /* name of the module being read, for messages */
-    uint32_t n_unknown;             /* members skipped (J-8) */
-    uint32_t n_ext;                 /* odin3_-prefixed members skipped (J-9) */
-    uint32_t n_scopeinfo;           /* $scopeinfo cells dropped */
-    uint32_t n_bad_src;             /* `src` texts that are no location list (L-6) */
-    uint32_t n_capped_src;          /* restored texts of over 8 locations (D-7) */
-    odin3_json_loc bad_src_pos;     /* where the first bad one is */
-    char bad_src_text[JR_BAD_BUF];  /* its text, cut and escaped */
-    bool op_begun;                  /* the restore operation of this read has begun (D-1) */
+    const odin3_json_node *modules;   /* the root's "modules" object */
+    odin3_vec mods;                   /* jr_mod, file order */
+    odin3_u64map *mod_index;          /* module name str -> index in mods */
+    odin3_vec edges;                  /* jr_edge */
+    odin3_vec implicit;               /* jr_implicit */
+    odin3_u64map *implicit_index;     /* type name str -> index in implicit */
+    odin3_u64map *implicit_port;      /* implicit type index << 32 | port name str -> port index */
+    const char *cur_name;             /* name of the module being read, for messages */
+    uint32_t n_unknown;               /* members skipped (J-8) */
+    uint32_t n_ext;                   /* odin3_-prefixed members skipped (J-9) */
+    uint32_t n_prov;                  /* odin3_prov objects validated (6.3 E-3) */
+    const odin3_json_node *ext_level; /* the odin3_level member of the object being read */
+    uint32_t n_scopeinfo;             /* $scopeinfo cells dropped */
+    uint32_t n_bad_src;               /* `src` texts that are no location list (L-6) */
+    uint32_t n_capped_src;            /* restored texts of over 8 locations (D-7) */
+    odin3_json_loc bad_src_pos;       /* where the first bad one is */
+    char bad_src_text[JR_BAD_BUF];    /* its text, cut and escaped */
+    bool op_begun;                    /* the restore operation of this read has begun (D-1) */
     char first_unknown[JR_NAME_BUF];
     bool oom_logged;
     jr_cur cur;
@@ -207,6 +209,9 @@ void jr_report_src(const jr *rd);
 /* The members of obj that are not in known[] (n entries) are counted as skipped (an `odin3_`
  * prefixed one is offered to the extension table first). */
 void jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count);
+/* Sets the attribute odin3_level (INT) on obj when the object just audited had that member (6.3
+ * E-3: the same attribute `levelize` writes); nothing otherwise. */
+odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj);
 /* `odin3_version` of the root: above 1 is an error. */
 odin3_status jr_check_version(const jr *rd, const odin3_json_node *root);
 /* One INFO line with the counts, when anything was skipped. */

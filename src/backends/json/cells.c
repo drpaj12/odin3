@@ -51,6 +51,7 @@ static const char *cell_key(jw *out, const jw_cell_ref *ref) {
 void jw_cell_begin(jw *out, jw_list *cells, const jw_cell_ref *ref, jw_cell *cell) {
     const char *key = cell_key(out, ref);
     cell->cells = cells;
+    cell->node = ref->node;
     jw_item(out, cells);
     jw_string(out, odin3_bytes_cstr(key));
     jw_raw(out, ": {\n");
@@ -86,7 +87,10 @@ void jw_cell_conns(jw *out, jw_cell *cell) {
 }
 
 void jw_cell_end(jw *out, const jw_cell *cell) {
+    jw_list members = {true, cell->cells->depth + CELL_DEPTH_OFFSET};
     jw_close(out, &cell->conns);
+    jw_odin3_keys(out, &members, (odin3_objref){ODIN3_OBJ_NODE, cell->node.v},
+                  odin3_node_prov(out->module, cell->node));
     jw_raw(out, "\n");
     jw_indent(out, cell->cells->depth);
     jw_raw(out, "}");

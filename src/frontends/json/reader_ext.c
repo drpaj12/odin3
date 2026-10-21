@@ -7,14 +7,71 @@
 #include <stdio.h>
 #include <string.h>
 
-/* One handler of an extension key. Phase 6.3 fills the table; 5.3 has none, so every key is
- * skipped and counted. A handler returns true when it consumed the member. */
+/* One handler of an extension key (6.3 E-3). A handler returns true when it consumed the member;
+ * a key without one, or a member the handler cannot use, is skipped and counted. */
 typedef struct odin3_json_ext_key {
     const char *key;
     bool (*handler)(jr *rd, const odin3_json_node *value);
 } odin3_json_ext_key;
 
-static const odin3_json_ext_key odin3_json_ext_keys[] = {{NULL, NULL}};
+enum { PROV_HDL_MAX = 8 };
+
+/* odin3_version: an integer; a value above 1 is the error of jr_check_version. */
+static bool ext_version(jr *rd, const odin3_json_node *value) {
+    (void)rd;
+    return jr_kind(value) == ODIN3_JSON_INT;
+}
+
+/* odin3_level: an integer, set as the attribute odin3_level once the object exists. */
+static bool ext_level(jr *rd, const odin3_json_node *value) {
+    if (jr_kind(value) != ODIN3_JSON_INT) {
+        return false;
+    }
+    rd->ext_level = value;
+    return true;
+}
+
+static bool is_text(const odin3_json_node *node) {
+    return jr_kind(node) == ODIN3_JSON_STRING;
+}
+
+static bool prov_kind_ok(const odin3_json_node *kind) {
+    static const char *const k_kinds[] = {"SOURCE", "IMPORTED", "DERIVED"};
+    const char *text = jr_text(kind, NULL);
+    for (size_t i = 0; is_text(kind) && i < sizeof k_kinds / sizeof k_kinds[0]; i++) {
+        if (strcmp(text, k_kinds[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool prov_hdl_ok(const odin3_json_node *hdl) {
+    if (jr_kind(hdl) != ODIN3_JSON_ARRAY || jr_count(hdl) > PROV_HDL_MAX) {
+        return false;
+    }
+    for (const odin3_json_node *elem = jr_first(hdl); elem != NULL; elem = odin3_json_next(elem)) {
+        if (!is_text(elem)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* odin3_prov: {kind, hier, hdl} is validated and counted, not turned into a record (E-3). */
+static bool ext_prov(jr *rd, const odin3_json_node *value) {
+    if (jr_kind(value) != ODIN3_JSON_OBJECT || !prov_kind_ok(jr_member(value, "kind")) ||
+        !is_text(jr_member(value, "hier")) || !prov_hdl_ok(jr_member(value, "hdl"))) {
+        return false;
+    }
+    rd->n_prov++;
+    return true;
+}
+
+static const odin3_json_ext_key odin3_json_ext_keys[] = {{"odin3_version", ext_version},
+                                                         {"odin3_level", ext_level},
+                                                         {"odin3_prov", ext_prov},
+                                                         {NULL, NULL}};
 
 static const char EXT_PREFIX[] = "odin3_";
 
@@ -37,7 +94,18 @@ static bool ext_handled(jr *rd, const char *key, const odin3_json_node *value) {
     return false;
 }
 
+odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj) {
+    odin3_status st = ODIN3_OK;
+    if (rd->ext_level != NULL) {
+        odin3_value val = odin3_value_int(jr_int(rd->ext_level));
+        st = jr_set_attr_named(rd, module, obj, "odin3_level", &val);
+        rd->ext_level = NULL;
+    }
+    return st;
+}
+
 void jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count) {
+    rd->ext_level = NULL;
     for (const odin3_json_node *member = jr_first(obj); member != NULL;
          member = odin3_json_next(member)) {
         const char *key = odin3_json_key(member);
@@ -66,6 +134,10 @@ odin3_status jr_check_version(const jr *rd, const odin3_json_node *root) {
 }
 
 void jr_report_skipped(const jr *rd) {
+    if (rd->n_prov > 0) {
+        odin3_log(ODIN3_LOG_INFO, "%s: read_json validated %u odin3_prov objects (not restored)",
+                  rd->path, (unsigned)rd->n_prov);
+    }
     if (rd->n_unknown == 0 && rd->n_ext == 0 && rd->n_scopeinfo == 0) {
         return;
     }

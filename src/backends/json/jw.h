@@ -41,6 +41,8 @@ typedef struct jw {
     odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
     odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
     odin3_strtab *written; /* cell and netname keys written in the current module */
+    bool odin3_keys;       /* write_json --odin3: the Odin III keys (E-2) */
+    uint32_t level_key;    /* strtab ID of "odin3_level", 0 when the design has none */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */
@@ -106,6 +108,10 @@ void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val);
  * `|`; only SOURCE leaves, spec 5.4 W-2 to W-4), if it has one and no "src" was written to this
  * object yet (a user src attribute wins). */
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov);
+/* Under --odin3 (E-2), as further members of list: `odin3_level` when obj has the INT attribute of
+ * that name (the attribute is then not repeated under `attributes`), then `odin3_prov`
+ * {kind, hier, hdl} of prov (left out when prov is none). Nothing otherwise. */
+void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov);
 /* True (and recorded) when key is new in the current object; false after out of memory. */
 bool jw_claim(jw *out, odin3_wattr_role role, const char *key);
 /* The attributes of obj with the given role as members of list (odin3_attr_foreach order),
@@ -138,6 +144,7 @@ typedef struct jw_cell_ref {
 /* The state of one cell being written: its parent list and its three member lists. */
 typedef struct jw_cell {
     const jw_list *cells;
+    odin3_node_id node;
     jw_list params;
     jw_list dirs;
     jw_list conns;

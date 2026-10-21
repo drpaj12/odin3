@@ -404,6 +404,9 @@ static odin3_status build_cell(jr *rd, const odin3_json_node *node) {
         st = jr_set_attrs(rd, rd->cur.module, (odin3_objref){ODIN3_OBJ_NODE, made.v},
                           jr_member(node, "attributes"), &cell.where);
     }
+    if (st == ODIN3_OK) {
+        st = jr_apply_ext(rd, rd->cur.module, (odin3_objref){ODIN3_OBJ_NODE, made.v});
+    }
     return st == ODIN3_OK ? check_drivers(rd, &cell, made) : st;
 }
 

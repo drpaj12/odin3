@@ -360,22 +360,93 @@ bool jw_claim(jw *out, odin3_wattr_role role, const char *key) {
     return fresh && out->status == ODIN3_OK;
 }
 
+/* Builds the SRC text of prov's HDL locations in out->src; *written is how many it holds. Sets
+ * out->status on failure. */
+static void hdl_text(jw *out, odin3_prov_id prov, uint32_t *written) {
+    odin3_hdl_locs_out locs;
+    *written = 0;
+    odin3_status status = odin3_hdl_locs(out->hdl, prov, &locs);
+    odin3_hdl_print_req req = {&locs, false};
+    status = status == ODIN3_OK && locs.n > 0
+                 ? odin3_hdl_src_text(out->hdl, &req, &out->src, written)
+                 : status;
+    if (status != ODIN3_OK) {
+        out->status = status;
+    }
+}
+
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
     if (odin3_prov_get(out->design, prov) == NULL || out->status != ODIN3_OK) {
         return;
     }
-    odin3_hdl_locs_out locs;
     uint32_t written = 0;
-    odin3_status status = odin3_hdl_locs(out->hdl, prov, &locs);
-    odin3_hdl_print_req req = {&locs, false};
-    status = status == ODIN3_OK && locs.n > 0
-                 ? odin3_hdl_src_text(out->hdl, &req, &out->src, &written)
-                 : status;
-    if (status != ODIN3_OK) {
-        out->status = status;
-    } else if (written > 0 && jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "src")) {
+    hdl_text(out, prov, &written);
+    if (out->status == ODIN3_OK && written > 0 && jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "src")) {
         jw_key(out, list, "src");
         jw_string(out, (odin3_bytes){out->src.data, out->src.len});
+    }
+}
+
+/* --- Odin III keys (write_json --odin3, spec 6.3 E-2) -------------------------------------- */
+
+enum { PROV_DEPTH_OFFSET = 1 };
+
+static const char *prov_kind_text(odin3_prov_kind kind) {
+    switch (kind) {
+    case ODIN3_PROV_SOURCE:
+        return "SOURCE";
+    case ODIN3_PROV_IMPORTED:
+        return "IMPORTED";
+    case ODIN3_PROV_DERIVED:
+    default:
+        return "DERIVED";
+    }
+}
+
+/* `"hdl": [ "a", "b" ]` from the `|` separated text of out->src ([  ] for none; a file name
+ * never holds `|`, the SRC writer skips those). */
+static void put_hdl_array(jw *out, uint32_t written) {
+    const char *text = out->src.data;
+    jw_raw(out, "[ ");
+    for (uint32_t i = 0; i < written; i++) {
+        size_t len = strcspn(text, "|");
+        jw_string(out, (odin3_bytes){text, len});
+        jw_raw(out, i + 1 < written ? ", " : "");
+        text += len + 1;
+    }
+    jw_raw(out, " ]");
+}
+
+static void put_prov(jw *out, jw_list *list, odin3_prov_id prov) {
+    const odin3_prov_record *rec = odin3_prov_get(out->design, prov);
+    jw_list inner = {false, list->depth + PROV_DEPTH_OFFSET};
+    uint32_t written = 0;
+    hdl_text(out, prov, &written);
+    jw_key(out, list, "odin3_prov");
+    jw_open(out, &inner);
+    jw_key(out, &inner, "kind");
+    jw_string(out, odin3_bytes_cstr(prov_kind_text(rec->kind)));
+    jw_key(out, &inner, "hier");
+    jw_str_id(out, rec->hier);
+    jw_key(out, &inner, "hdl");
+    if (out->status == ODIN3_OK) {
+        put_hdl_array(out, written);
+    }
+    jw_close(out, &inner);
+}
+
+void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov) {
+    if (!out->odin3_keys || out->status != ODIN3_OK) {
+        return;
+    }
+    const odin3_value *level =
+        out->level_key != 0 ? odin3_attr_get(out->module, obj, out->level_key) : NULL;
+    if (level != NULL && level->kind == ODIN3_VAL_INT) {
+        jw_key(out, list, "odin3_level");
+        jw_fmt(out, "%lld", (long long)level->i);
+    }
+    if (odin3_prov_get(out->design, prov) != NULL) {
+        put_prov(out, list, prov);
     }
 }
 
@@ -412,6 +483,9 @@ typedef struct user_attrs {
 static odin3_status user_attr_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
     const user_attrs *ua = ctx;
     jw *out = ua->out;
+    if (out->odin3_keys && key_str == out->level_key && value->kind == ODIN3_VAL_INT) {
+        return out->status; /* E-2: under --odin3 the level is the Odin III key only */
+    }
     odin3_wattr attr = odin3_wattr_classify(out->strtab, key_str, value);
     if (attr.instance_param && !ua->is_node) {
         attr.role = ODIN3_WATTR_ATTRIBUTE;

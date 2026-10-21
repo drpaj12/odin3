@@ -31,6 +31,7 @@ typedef struct write_args {
     odin3_strbuf color;
     odin3_verilog_opts verilog;
     odin3_dot_opts dot;
+    odin3_json_wopts json;
 } write_args;
 
 /* The value word after option word (INVALID_ARG, logged, when there is none). */
@@ -144,6 +145,10 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
     bool verilog = strcmp(pass, "write_verilog") == 0;
     bool dot = strcmp(pass, "write_dot") == 0;
     odin3_bytes value = {0};
+    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--odin3")) {
+        out->json.odin3_keys = true;
+        return ODIN3_OK;
+    }
     if (dot && is_dot_option(word)) {
         return parse_dot_option(rest, word, out);
     }
@@ -197,7 +202,7 @@ static odin3_status write_format_run(odin3_design *design, odin3_bytes args, wri
                                    odin3_module_name(odin3_module_get(design, top))));
     }
     if (st == ODIN3_OK && format == WRITE_JSON) {
-        st = odin3_json_write(design, parsed.path.data);
+        st = odin3_json_write_opts(design, parsed.path.data, &parsed.json);
     } else if (st == ODIN3_OK && format == WRITE_VERILOG) {
         st = odin3_verilog_write(design, parsed.path.data, &parsed.verilog);
     } else if (st == ODIN3_OK && format == WRITE_RTLIL) {
@@ -240,9 +245,13 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 }
 
 const odin3_pass_def odin3_pass_write_json = {
-    "write_json",   "write_json <file>: write the design as Yosys-schema JSON (file - is stdout)",
-    write_json_run, NULL,
-    false,          ODIN3_PASS_PROCESSES_REFUSE};
+    "write_json",
+    "write_json <file> [--odin3]: write the design as Yosys-schema JSON (file - is stdout); "
+    "--odin3 adds odin3_version, and per module, cell and netname odin3_prov and odin3_level",
+    write_json_run,
+    NULL,
+    false,
+    ODIN3_PASS_PROCESSES_REFUSE};
 const odin3_pass_def odin3_pass_write_verilog = {
     "write_verilog",
     "write_verilog <file> [--name-style short|provenance]: write structural Verilog (file - is "
