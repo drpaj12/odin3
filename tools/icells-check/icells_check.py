@@ -6,7 +6,7 @@ Usage::
                  [--lib L] [--expect F] [--root R] [--work DIR] [--all] DESIGN.v...
 
 Per design and level, Odin III runs the level's script (``tests/icells/<level>.script``, the LPM
-level is the 5.1 ``tests/lpm/lpm.script``) that ends by writing the gold (``G.il`` by
+level is the 5.1 ``tools/flow/lpm.script``) that ends by writing the gold (``G.il`` by
 ``write_rtlil`` at the word and LPM levels, ``G.blif`` by ``write_blif`` at the gate and LUT
 levels: the netlist as it was written) and ``W.v`` (``write_verilog``). Then, with ``--check`` (the
 IR invariants), ``[read_techlib L;] read_verilog -icells W.v; proc; opt_clean`` writes
@@ -309,7 +309,7 @@ def level_script(template: str, subs: dict[str, str]) -> str:
 def lpm_template(text: str) -> str:
     """The 5.1 LPM script with ``write_rtlil @IL@`` put before its ``write_verilog @OUT@``."""
     if "write_verilog @OUT@" not in text:
-        raise ToolError("tests/lpm/lpm.script has no 'write_verilog @OUT@'")
+        raise ToolError("tools/flow/lpm.script has no 'write_verilog @OUT@'")
     text = text.replace("write_verilog @OUT@", "write_rtlil @IL@; write_verilog @OUT@")
     return "@TECHLIB@\n" + text
 
@@ -550,7 +550,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--yosys", default=os.environ.get("ODIN3_YOSYS055", "yosys"))
     ap.add_argument("--scripts", type=Path, default=ROOT / "tests" / "icells")
     ap.add_argument("--lib", type=Path, default=ROOT / "lib" / "lpm.o3lib")
-    ap.add_argument("--lpm-script", type=Path, default=ROOT / "tests" / "lpm" / "lpm.script")
+    ap.add_argument("--lpm-script", type=Path, default=ROOT / "tools" / "flow" / "lpm.script")
     ap.add_argument("--expect", type=Path)
     ap.add_argument("--work", type=Path, help="keep every file here")
     ap.add_argument("--abc", default=os.environ.get("ODIN3_ABC", ""), help="ABC for equiv-check")

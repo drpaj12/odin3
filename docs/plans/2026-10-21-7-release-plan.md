@@ -183,7 +183,7 @@ binding (`plugins/python/odin3.py`), Sphinx + myst-parser (docs only), scikit-bu
 
 ### Task 10: version, install, tarball
 
-**Files:** Modify `CMakeLists.txt` (project VERSION 1.0.0, `install()` rules), `src/api/common.c` or where `odin3_version_string` lives; Create `tools/release/make-tarball`; Test `tests/tools/test_release.py`.
+**Files:** Install layout (7.3 fix round): `share/odin3/{lib,tools/flow,tools/vtr-qor}` (`lib/*.o3lib`, `lib/abc/vtr.abc`, `tools/flow/{odin3_flow.py,odin3-flow,lpm.script}`, `tools/vtr-qor/*.py`); `odin3_flow.resource_root()` finds it via `$ODIN3_SHARE`, the source tree, then `<script dir>/../../share/odin3`. Modify `CMakeLists.txt` (project VERSION 1.0.0, `install()` rules), `src/api/common.c` or where `odin3_version_string` lives; Create `tools/release/make-tarball`; Test `tests/tools/test_release.py`.
 
 - [ ] Step 1: tests: `test_version_is_1_0_0` (`odin3 --version` and `odin3_version_string` print `1.0.0`); `test_install_tree` (`cmake --install` into a temp prefix: `bin/odin3`, `lib/libodin3.so`, `include/odin3/odin3.h`, `share/odin3/lib/*.o3lib`, `share/odin3/tools/flow/odin3_flow.py`); `test_tarball_has_submodules` (tarball lists `third_party/abc/` and `third_party/unity/` sources and a `SHA256SUMS`).
 - [ ] Step 2: run, expect failures.

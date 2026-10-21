@@ -5,7 +5,7 @@ section 2.1).
         [--family NAME] [--vpr | --no-vpr] [--analysis] [--odin3 PATH] [--out DIR]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
-copied) writes ``odin3/<top>.blif``. Target ``lpm``: the 5.1 LPM script (tests/lpm/lpm.script)
+copied) writes ``odin3/<top>.blif``. Target ``lpm``: the 5.1 LPM script (tools/flow/lpm.script)
 writes ``odin3/<top>.v`` and a read-back lint (``read_verilog -icells``) follows. Every step runs in
 its own subdirectory of ``--out`` with its log. Exit codes: 0 ok, 1 a step failed, 2 usage error.
 The module is importable with tools/vtr-qor on PYTHONPATH (the wrapper sets it):
@@ -30,14 +30,15 @@ import qor_legs
 import qor_parse
 from qor_heavy import HeavyError
 
-ROOT = Path(__file__).resolve().parents[2]
-LPM_SCRIPT = ROOT / "tests" / "lpm" / "lpm.script"
-LPM_LIB = ROOT / "lib" / "lpm.o3lib"
+HERE = Path(__file__).resolve().parent
+SHARE_ENV = "ODIN3_SHARE"
+LPM_SCRIPT_REL = Path("tools") / "flow" / "lpm.script"
+LPM_LIB_REL = Path("lib") / "lpm.o3lib"
 DEFAULT_ARCH = "k6"
 DEFAULT_K = 6
 STEP_TIMEOUT_S = 3600
 DOT_MAX_NODES = 100000
-NOT_HARD = ("clb", "io", "EMPTY")  # packer block types that are not hard blocks
+NOT_HARD = ("clb", "io", "EMPTY", "inpad", "outpad")  # packer block types that are not hard blocks
 TARGETS = ("vtr", "lpm")
 _MODULE = re.compile(r"^\s*module\s+\\?([A-Za-z_][A-Za-z0-9_$]*)", re.M)
 _HARD_BLOCKS = re.compile(r"^Netlist (\w+) blocks:\s*(\d+)", re.M)
@@ -99,14 +100,43 @@ def resolve_top(designs: Sequence[Path], top: str | None) -> str:
     raise UsageError(f"more than one top module ({', '.join(tops)}): give --top")
 
 
+def _has_data(root: Path) -> bool:
+    return (root / LPM_LIB_REL).is_file() and (root / LPM_SCRIPT_REL).is_file()
+
+
+def resource_root() -> Path:
+    """The tree holding the data the flow needs (``lib/*.o3lib``, ``lib/abc/vtr.abc``,
+    ``tools/flow/lpm.script``, ``tools/vtr-qor``): ``$ODIN3_SHARE``, else the source tree (two
+    levels above this script), else ``<script dir>/../../share/odin3`` (the install layout:
+    ``share/odin3/{lib,tools/flow,tools/vtr-qor}``). UsageError when none holds the data."""
+    given = os.environ.get(SHARE_ENV)
+    if given:
+        return Path(given)
+    for root in (HERE.parents[1], (HERE / ".." / ".." / "share" / "odin3").resolve()):
+        if _has_data(root):
+            return root
+    raise UsageError(f"cannot find the Odin III data files (lib/, tools/flow/lpm.script): "
+                     f"set {SHARE_ENV} to the share/odin3 directory")
+
+
+def quote(path: str | Path) -> str:
+    """``path`` as one script argument: double-quoted (a path may hold spaces)."""
+    text = os.fspath(path)
+    if '"' in text:
+        raise UsageError(f"{text}: a path cannot hold a double quote")
+    return f'"{text}"'
+
+
 def lpm_script(designs: Sequence[Path], out: Path, family: str) -> str:
-    """The text of tests/lpm/lpm.script with its placeholders filled, as lpm-check fills them."""
-    lines = [ln for ln in LPM_SCRIPT.read_text().splitlines()
+    """The text of tools/flow/lpm.script with its placeholders filled, as lpm-check fills them
+    (each path is quoted)."""
+    root = resource_root()
+    lines = [ln for ln in (root / LPM_SCRIPT_REL).read_text().splitlines()
              if ln.strip() and not ln.startswith("#")]
     fam = f'--family "{family}"' if family else ""
-    text = lines[0].replace("@LIB@", str(LPM_LIB))
-    text = text.replace("@DESIGN@", " ".join(str(d) for d in designs))
-    return text.replace("@FAMILY@", fam).replace("@OUT@", str(out)).replace("  ", " ")
+    text = lines[0].replace("@LIB@", quote(root / LPM_LIB_REL))
+    text = text.replace("@DESIGN@", " ".join(quote(d) for d in designs))
+    return text.replace("@FAMILY@", fam).replace("@OUT@", quote(out)).replace("  ", " ")
 
 
 def run_step(name: str, argv: Sequence[str], step_dir: Path, env: dict[str, str] | None = None,
@@ -134,6 +164,9 @@ def lut_k(args: FlowArgs, vtr_root: Path | None, log: Path) -> int:
     if arch is None and vtr_root is not None:
         arch = qor_legs.arch_xml_path(vtr_root, DEFAULT_ARCH)
     if arch is None or vtr_root is None:
+        if args.arch is not None:
+            print(f"WARNING: no VTR_ROOT: K = {DEFAULT_K} assumed; the LUT size of "
+                  f"{args.arch} is not read", file=sys.stderr)
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(f"NOTE: no VTR_ROOT or arch: LUT size K = {DEFAULT_K}\n")
         return DEFAULT_K
@@ -150,10 +183,13 @@ def odin3_command(args: FlowArgs, top: str, script: str) -> list[str]:
     return [str(args.odin3), "--diag-paths", "resolved", "--top", top, "-p", script]
 
 
+LUTS_NOTE = ".names with two or more inputs (constants and one-input buffers or inverters excluded)"
+
+
 def count_luts(blif: Path) -> int:
-    """The ``.names`` lines of a written BLIF: the LUTs (and constants) VPR will read."""
+    """The ``.names`` of a written BLIF with at least two inputs (``.names a b y`` has two)."""
     return sum(1 for line in blif.read_text(errors="replace").splitlines()
-               if line.startswith(".names"))
+               if line.startswith(".names") and len(line.split()) >= 4)
 
 
 def summary_from_vpr(parse: Mapping[str, str], qor: Mapping[str, str], vpr_out: str,
@@ -168,6 +204,7 @@ def summary_from_vpr(parse: Mapping[str, str], qor: Mapping[str, str], vpr_out: 
             if m.group(1) not in NOT_HARD}
     return {
         "luts": luts,
+        "luts_note": LUTS_NOTE,
         "clbs": packed["num_clb"],
         "hard_blocks": hard,
         "min_chan_width": routed["min_chan_width"],
@@ -203,7 +240,7 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
         raise UsageError("--vpr needs VTR_ROOT")
     arch = args.arch or qor_legs.arch_xml_path(vtr_root, DEFAULT_ARCH)
     ctx = qor_legs.LegContext(vtr_root, vtr_root / ".venv" / "bin" / "python", arch, args.odin3,
-                              ROOT, args.out / "vpr", k, "A")
+                              resource_root(), args.out / "vpr", k, "A")
     ctx.job_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(blif, ctx.job_dir / blif.name)  # build_commands reads <job_dir>/<design>.blif
     cmd = qor_legs.build_commands("O", blif.stem, ctx)[1]
@@ -224,8 +261,9 @@ def analysis_script(top: str, adir: Path) -> str:
     ``levelize`` (its info line goes to the log), ``write_dot --color-by --locs``,
     ``write_json --odin3`` and ``dump_locs --types``."""
     return (f"; levelize; write_dot --color-by @type --locs --max-nodes {DOT_MAX_NODES} "
-            f"{adir / (top + '.dot')}; write_json --odin3 {adir / (top + '.odin3.json')}; "
-            f"dump_locs --types {adir / 'locs.txt'}")
+            f"{quote(adir / (top + '.dot'))}; "
+            f"write_json --odin3 {quote(adir / (top + '.odin3.json'))}; "
+            f"dump_locs --types {quote(adir / 'locs.txt')}")
 
 
 def analysis_step(top: str, adir: Path, odin3_log: Path, result: FlowResult) -> None:
@@ -249,8 +287,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     vtr_root = vtr_root_from_env()
     k = lut_k(args, vtr_root, step_dir / "k.log")
     blif = step_dir / f"{top}.blif"
-    design = " ".join(str(d) for d in args.designs)
-    script = qor_legs.odin3_script("O", Path(design), blif, k, "short")
+    design = " ".join(quote(d) for d in args.designs)
+    script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     adir = args.out / "analysis"
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
@@ -260,6 +298,7 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     if not step.ok:
         return None
     result.summary["luts"] = count_luts(blif)
+    result.summary["luts_note"] = LUTS_NOTE
     if args.analysis:
         analysis_step(top, adir, step.log, result)
         if not result.steps[-1].ok:
@@ -278,7 +317,8 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     result.steps.append(step)
     if not step.ok:
         return None
-    back = f"read_techlib {LPM_LIB}; read_verilog -icells {written}"
+    back = f"read_techlib {quote(resource_root() / LPM_LIB_REL)}; " \
+           f"read_verilog -icells {quote(written)}"
     lint = run_step("readback", [str(args.odin3), "--check", "-p", back], args.out / "readback")
     result.steps.append(lint)
     return written if lint.ok else None
@@ -293,7 +333,11 @@ def run_flow(args: FlowArgs) -> FlowResult:
             raise UsageError(f"no such design file: {design}")
     if args.analysis and args.target != "vtr":
         raise UsageError("--analysis applies to --target vtr only (levelize needs bits)")
+    if not args.odin3.is_file():
+        raise UsageError(f"no odin3 binary at {args.odin3}: build it, put it on PATH or give "
+                         f"--odin3")
     top = resolve_top(args.designs, args.top)
+    qor_legs.REPO_ROOT = resource_root()  # the module seam: where $LIB (lib/vtr.o3lib) is
     result = FlowResult(ok=False)
     args.out.mkdir(parents=True, exist_ok=True)
     step_fn = vtr_steps if args.target == "vtr" else lpm_steps
@@ -327,20 +371,32 @@ def resolve_vpr(flag: bool | None, target: str) -> bool:
 
 def default_odin3() -> Path:
     found = shutil.which("odin3")
-    return Path(found) if found else ROOT / "build" / "release" / "odin3"
+    return Path(found) if found else HERE.parents[1] / "build" / "release" / "odin3"
 
 
 def parse_args(argv: Sequence[str]) -> FlowArgs:
-    ap = argparse.ArgumentParser(prog="odin3_flow", description=__doc__.split("\n")[0])
-    ap.add_argument("designs", nargs="+", type=Path)
-    ap.add_argument("--top")
-    ap.add_argument("--target", default="vtr", choices=TARGETS)
-    ap.add_argument("--arch", type=Path)
-    ap.add_argument("--family", default="")
-    ap.add_argument("--vpr", action=argparse.BooleanOptionalAction, default=None)
-    ap.add_argument("--analysis", action="store_true")
-    ap.add_argument("--odin3", type=Path, default=None)
-    ap.add_argument("--out", type=Path)
+    ap = argparse.ArgumentParser(
+        prog="odin3_flow", description=__doc__.split("\n")[0],
+        epilog="Targets: vtr (BLIF for VPR, the default) and lpm (Verilog with LPM cells). "
+               "Exit codes: 0 ok, 1 a step failed, 2 usage error.")
+    ap.add_argument("designs", nargs="+", type=Path, help="Verilog design file(s)")
+    ap.add_argument("--top", help="top module (default: the one uninstantiated module)")
+    ap.add_argument("--target", default="vtr", choices=TARGETS,
+                    help="vtr: BLIF (and VPR); lpm: LPM-cell Verilog plus a read-back lint "
+                         "(default: vtr)")
+    ap.add_argument("--arch", type=Path,
+                    help=f"VTR architecture XML (default: {DEFAULT_ARCH}); needs VTR_ROOT, "
+                         f"without it K = {DEFAULT_K} is assumed with a WARNING")
+    ap.add_argument("--family", default="",
+                    help="LPM device family for --target lpm (default: none, empty)")
+    ap.add_argument("--vpr", action=argparse.BooleanOptionalAction, default=None,
+                    help="run VPR after odin3 (default: on when VTR_ROOT is set); "
+                         "--target vtr only")
+    ap.add_argument("--analysis", action="store_true",
+                    help="also write the dot, JSON, levelize and locs files; needs --target vtr")
+    ap.add_argument("--odin3", type=Path, default=None,
+                    help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
+    ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
     ns = ap.parse_args(argv)
     out = ns.out
     if out is None:

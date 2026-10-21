@@ -247,7 +247,8 @@ def _script(leg: str, design_v: Path | str, out_blif: Path | str, k: int, name_s
     return f"read_techlib {lib}; {body}write_blif --vtr --lut-k {k}{style} {out_blif}"
 
 
-def odin3_script(leg: str, design_v: Path, out_blif: Path, k: int, name_style: str) -> str:
+def odin3_script(leg: str, design_v: Path | str, out_blif: Path | str, k: int,
+                name_style: str) -> str:
     """The odin3 script of an odin3 leg (spec §3.2-3.6; frozen for 3F).
 
     ``design_v`` is the leg's input: the ``.v`` for O, Oprime and Oprov, the verified golden BLIF
