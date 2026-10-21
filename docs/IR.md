@@ -272,6 +272,9 @@ the value 0 or 1), 143 types in all. Ports in the order `C` `[R]` `[E]` `D` `Q` 
 append-only table, the flags and the clock-pin rule are IR-8's. The simulator applies an asynchronous
 reset at every settle and at both clock edges, and it beats the clock edge; `$_SDFFE_` has the reset over
 the enable, `$_SDFFCE_` the enable over the reset.
+`opt` treats the 68 as plain cells (`odin3_ff_is_ff` is false for them, so the flip-flop optimisations
+and INIT handling skip them) until `lower` rewrites them; `fsm` sees `$_SDFF*` as sequential; the plain
+BLIF writer refuses them, as it does the word flip-flops of IR change D.
 IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT, ≥ 1),
 polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
 `ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.

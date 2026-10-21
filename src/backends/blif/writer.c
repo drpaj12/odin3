@@ -2095,6 +2095,14 @@ static bool lacks_blif_form(const blif_writer *wr, odin3_celltype_id type) {
     return false;
 }
 
+/* True for one of the 68 gate-level flip-flops with a reset or an enable (dffx.h): `$_SDFF*`,
+ * `$_DFFE_*`, and `$_DFF_<c><r><v>_` (longer than the plain `$_DFF_P_`/`$_DFF_N_`). */
+static bool is_gate_ff_x(const odin3_celltype_def *def) {
+    const char *name = def->name;
+    return strncmp(name, "$_SDFF", 6) == 0 || strncmp(name, "$_DFFE_", 7) == 0 ||
+           (strncmp(name, "$_DFF_", 6) == 0 && strlen(name) > 8);
+}
+
 /* VTR: one cell (spec 3E §6): a $sop, gate or $lut as .names, a $_CONST*_ as no line (its
  * readers read gnd/vcc/unconn, §9), $_DFF_P_ as .latch, a hard cell as .subckt (the preflight
  * refused every other cell). No .cname/.attr/.param: VPR reads them in extended BLIF only (R3). */
@@ -2124,6 +2132,12 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     if (lacks_blif_form(wr, type)) {
         return wr_refuse(
             wr, "word flip-flops and latches have no BLIF form; cannot write a cell of", def->name);
+    }
+    if (is_gate_ff_x(def)) {
+        return wr_refuse(wr,
+                         "gate-level flip-flops with a reset or an enable have no BLIF form; "
+                         "cannot write a cell of",
+                         def->name);
     }
     if (wr->vtr) {
         return write_cell_vtr(wr, node);

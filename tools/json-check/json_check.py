@@ -273,22 +273,25 @@ def read_back_script(libs: str, source: Path, outs: tuple[Path, str]) -> str:
     return f"{head}read_json {source}; write_json {outs[0]}{tail}"
 
 
-def read_back_writer(level: str, path: Path) -> str:
-    """The command that writes the read-back netlist: RTLIL at the word level; otherwise BLIF
-    after ``lower``, which makes the gate-level flip-flops with a reset or an enable (Yosys
-    ``$_SDFF_*``, ``$_DFFE_*``, ...) the plain ``$_DFF_P_`` plus logic that VPR takes (a no-op
-    on a netlist that is lowered already)."""
+def read_back_writer(level: str, path: Path, source_text: str = "") -> str:
+    """The command that writes the read-back netlist: RTLIL at the word level; otherwise BLIF,
+    after ``lower`` only when the source holds a gate-level flip-flop with a reset or an enable
+    (Yosys ``$_SDFF_*``, ``$_DFFE_*``, ...), which ``lower`` makes the plain ``$_DFF_P_`` plus
+    logic that VPR takes. Every other read-back is written as before, so ``lower`` cannot
+    normalise away a reader difference there."""
     if level in RTLIL_LEVELS:
         return f"write_rtlil {path}"
-    return f"lower; write_blif --vtr {path}"
+    lowered = "lower; " if GATE_FF_FAMILY.search(source_text) is not None else ""
+    return f"{lowered}write_blif --vtr {path}"
 
 
 def read_both(cfg: Config, level: str, flags: Sequence[str], paths: dict[str, Path]) -> Row | None:
     """Generations 2 and 3 (two odin3 runs); a Row when a read-back fails, else None. The first
     run also writes the read-back netlist (RTLIL at the word level, BLIF otherwise)."""
     libs = libs_text(cfg, paths["design"])
+    source_text = paths["F1"].read_text(encoding="utf-8")
     steps = (
-        (paths["F1"], (paths["F2"], read_back_writer(level, paths["R"]))),
+        (paths["F1"], (paths["F2"], read_back_writer(level, paths["R"], source_text))),
         (paths["F2"], (paths["F3"], "")),
     )
     for source, outs in steps:

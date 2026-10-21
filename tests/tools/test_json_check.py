@@ -254,12 +254,19 @@ class ScriptTests(unittest.TestCase):
 class GoldTests(unittest.TestCase):
     """The read-back writer, and Yosys's gold for the gate-level flip-flops with reset or enable."""
 
-    def test_read_back_writer_lowers_before_blif(self) -> None:
+    def test_read_back_writer_lowers_only_for_gate_ff_types(self) -> None:
         self.assertEqual(jc.read_back_writer("word", Path("R.il")), "write_rtlil R.il")
+        plain = '{"type": "$_DFF_P_"} {"type": "$_AND_"}'
         for level in ("gate", "lut"):
             self.assertEqual(
-                jc.read_back_writer(level, Path("R.blif")), "lower; write_blif --vtr R.blif"
+                jc.read_back_writer(level, Path("R.blif"), plain), "write_blif --vtr R.blif"
             )
+            for kind in ("$_SDFF_PP0_", "$_DFFE_PN1P_", "$_DFFE_NP_", "$_DFF_NN0_"):
+                self.assertEqual(
+                    jc.read_back_writer(level, Path("R.blif"), '{"type": "%s"}' % kind),
+                    "lower; write_blif --vtr R.blif",
+                    kind,
+                )
 
     def test_gold_is_legalised_only_for_the_new_families(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
