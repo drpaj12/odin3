@@ -106,21 +106,62 @@ jobs:
         if: always()
         run: ccache --show-stats
 
+  docs:
+    name: docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build ccache libreadline-dev bison flex
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - name: Install Sphinx and extensions
+        run: pip install -r requirements-docs.txt
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-docs-${{ github.sha }}
+          restore-keys: ccache-docs-
+      # The pass reference is generated from `odin3 --help` (docs/user/_ext/passes_ref.py).
+      - name: Build odin3
+        run: |
+          cmake --preset release
+          cmake --build --preset release --target odin3
+      - name: Build the documentation (warnings are errors)
+        run: sphinx-build -W -b html docs/user build/docs
+
   # Aggregator. Branch protection requires a check named exactly "ci"; the matrix job above is
   # reported as "build (gcc)" / "build (clang)", so this single job stands in for both.
   ci:
     name: ci
-    needs: [lint, build]
+    needs: [lint, build, docs]
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - name: Require lint and build to have succeeded
+      - name: Require lint, build and docs to have succeeded
         env:
           LINT_RESULT: ${{ needs.lint.result }}
           BUILD_RESULT: ${{ needs.build.result }}
+          DOCS_RESULT: ${{ needs.docs.result }}
         run: |
-          echo "lint=$LINT_RESULT build=$BUILD_RESULT"
-          if [ "$LINT_RESULT" != success ] || [ "$BUILD_RESULT" != success ]; then
-            echo "::error::lint and build must both succeed"
+          echo "lint=$LINT_RESULT build=$BUILD_RESULT docs=$DOCS_RESULT"
+          if [ "$LINT_RESULT" != success ] || [ "$BUILD_RESULT" != success ] \
+             || [ "$DOCS_RESULT" != success ]; then
+            echo "::error::lint, build and docs must all succeed"
             exit 1
           fi
