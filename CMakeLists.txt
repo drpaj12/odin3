@@ -2147,6 +2147,22 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # Phase 7 (7.4a, spec 3.1 S-6): submod then flatten on every second logic cell of the BLIF
+        # micros, equivalent to the input. Left out: pow.parmys (equiv-check cannot read $pow),
+        # hand_body (an unnamed black box equiv-check cannot pair) and hand_writers (the JSON round
+        # trip alone renames its black box ports, so the instance pairing fails).
+        set(_sm_dir ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        add_test(NAME submod_equiv_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/submod_equiv.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/submod_equiv
+                    ${_sm_dir}/ff.odin.blif ${_sm_dir}/ff.parmys.blif ${_sm_dir}/dffsre.parmys.blif
+                    ${_sm_dir}/hand_cname.blif ${_sm_dir}/hand_ports.blif ${_sm_dir}/hand_wide.blif
+                    ${_sm_dir}/adder_hard_block.parmys.blif ${_sm_dir}/ansiportlist_2.parmys.blif
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(submod_equiv_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).

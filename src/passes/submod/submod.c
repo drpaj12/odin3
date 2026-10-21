@@ -193,8 +193,7 @@ static odin3_status check_group(const sm_run *run) {
     }
     uint32_t name = 0;
     odin3_celltype_id clash;
-    if (odin3_design_intern(run->design, odin3_bytes_cstr(run->group->name), &name) !=
-        ODIN3_OK) {
+    if (odin3_design_intern(run->design, odin3_bytes_cstr(run->group->name), &name) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     if (odin3_celltype_find(run->design, name, &clash)) {
@@ -244,15 +243,14 @@ static odin3_status classify_net(sm_run *run, odin3_net_id net) {
         return sm_error(run, prov,
                         "submod: net '%s' of module '%s' crosses the boundary of group '%s' "
                         "through an inout pin; the port direction is not defined",
-                        net_label(run, net, buf, sizeof buf), module_text(run),
-                        run->group->value);
+                        net_label(run, net, buf, sizeof buf), module_text(run), run->group->value);
     }
     if (sum.in_drivers + sum.out_drivers > 1) {
         return sm_error(run, prov,
                         "submod: net '%s' of module '%s' crosses the boundary of group '%s' "
                         "and has %" PRIu32 " drivers; the port direction is not defined",
-                        net_label(run, net, buf, sizeof buf), module_text(run),
-                        run->group->value, sum.in_drivers + sum.out_drivers);
+                        net_label(run, net, buf, sizeof buf), module_text(run), run->group->value,
+                        sum.in_drivers + sum.out_drivers);
     }
     *state = sum.in_drivers == 1 ? SM_OUT : SM_IN;
     return ODIN3_OK;
@@ -291,9 +289,10 @@ static bool real_name(const char *text) {
     return text[0] != '\0' && text[0] != '$';
 }
 
-/* The text of the port for net `net` as port number k: a real net name, else the name of its
- * primary wire (`w` or `w[index]`), else `p<k>`; made unique among the new module's wires. */
-static odin3_status port_name(sm_run *run, odin3_net_id net, uint32_t k, uint32_t *out) {
+/* The text of the port for net `net` as port number `port_no`: a real net name, else the name of
+ * its primary wire (`w` or `w[index]`), else `p<port_no>`; made unique among the new module's
+ * wires. */
+static odin3_status port_name(sm_run *run, odin3_net_id net, uint32_t port_no, uint32_t *out) {
     const odin3_strtab *tab = odin3_design_strtab(run->design);
     odin3_strbuf text;
     odin3_strbuf_init(&text);
@@ -313,7 +312,7 @@ static odin3_status port_name(sm_run *run, odin3_net_id net, uint32_t k, uint32_
         st = odin3_strbuf_appendf(&text, "%s[%" PRId32 "]", wire,
                                   odin3_wire_index(run->src, wb.wire, wb.bit));
     } else {
-        st = odin3_strbuf_appendf(&text, "p%" PRIu32, k);
+        st = odin3_strbuf_appendf(&text, "p%" PRIu32, port_no);
     }
     size_t base = text.len;
     for (uint32_t tries = 1; st == ODIN3_OK; tries++) {
@@ -329,12 +328,11 @@ static odin3_status port_name(sm_run *run, odin3_net_id net, uint32_t k, uint32_
     return st;
 }
 
-/* Adds the port for boundary net `net` (number k) and maps the net to the port's net. */
-static odin3_status add_port(sm_run *run, odin3_net_id net, uint32_t k) {
+/* Adds the port for boundary net `net` (number port_no) and maps the net to the port's net. */
+static odin3_status add_port(sm_run *run, odin3_net_id net, uint32_t port_no) {
     odin3_port_spec spec = {0, ODIN3_DIR_IN, 1, true, run->prov, false, 0, 0, false};
-    spec.dir = *(uint8_t *)odin3_vec_at(&run->state, net.v) == SM_IN ? ODIN3_DIR_IN
-                                                                    : ODIN3_DIR_OUT;
-    odin3_status st = port_name(run, net, k, &spec.name);
+    spec.dir = *(uint8_t *)odin3_vec_at(&run->state, net.v) == SM_IN ? ODIN3_DIR_IN : ODIN3_DIR_OUT;
+    odin3_status st = port_name(run, net, port_no, &spec.name);
     odin3_node_id port = {0};
     st = st == ODIN3_OK ? odin3_module_add_port(run->dst, &spec, &port) : st;
     if (st != ODIN3_OK) {
@@ -350,7 +348,8 @@ static odin3_status add_port(sm_run *run, odin3_net_id net, uint32_t k) {
     return ODIN3_OK;
 }
 
-/* The key and value of an attribute copy: copies every attribute of one object but the group key. */
+/* The key and value of an attribute copy: copies every attribute of one object but the group key.
+ */
 typedef struct sm_attr_job {
     const sm_run *run;
     odin3_module *to;
@@ -365,9 +364,14 @@ static odin3_status copy_attr(void *user, uint32_t key, const odin3_value *value
     return odin3_attr_set(job->to, job->dst, key, value);
 }
 
-static odin3_status copy_attrs(const sm_run *run, odin3_objref from, odin3_objref to) {
-    sm_attr_job job = {run, run->dst, to};
-    return odin3_attr_foreach(run->src, from, copy_attr, &job);
+/* One object of the old module and its copy in the new one. */
+typedef struct sm_objpair {
+    odin3_objref from, to;
+} sm_objpair;
+
+static odin3_status copy_attrs(const sm_run *run, sm_objpair pair) {
+    sm_attr_job job = {run, run->dst, pair.to};
+    return odin3_attr_foreach(run->src, pair.from, copy_attr, &job);
 }
 
 /* New module, its ports (boundary nets in ID order) and the nets that move with the group. */
@@ -394,8 +398,7 @@ static odin3_status build_module(sm_run *run, odin3_module_id *id) {
                                   odin3_net_prov(run->src, net), &fresh);
             *(uint32_t *)odin3_vec_at(&run->map, nid) = fresh.v;
             st = st == ODIN3_OK
-                     ? copy_attrs(run, (odin3_objref){ODIN3_OBJ_NET, nid},
-                                  (odin3_objref){ODIN3_OBJ_NET, fresh.v})
+                     ? copy_attrs(run, (sm_objpair){{ODIN3_OBJ_NET, nid}, {ODIN3_OBJ_NET, fresh.v}})
                      : st;
         }
     }
@@ -416,9 +419,10 @@ static odin3_status gather_ports(sm_run *run, odin3_node_id node, const odin3_ce
                 return ODIN3_ERR_NO_MEMORY;
             }
             odin3_net_id old = odin3_pin_net(run->src, (odin3_pin_id){slice.first.v + bit});
-            *net = odin3_net_valid(old)
-                       ? (odin3_net_id){*(uint32_t *)odin3_vec_at(&run->map, old.v)}
-                       : (odin3_net_id){0};
+            *net = (odin3_net_id){0};
+            if (odin3_net_valid(old)) {
+                net->v = *(uint32_t *)odin3_vec_at(&run->map, old.v);
+            }
         }
     }
     const odin3_net_id *nets = run->nets.data;
@@ -445,19 +449,20 @@ static odin3_status move_node(sm_run *run, odin3_node_id node) {
         }
         *val = *odin3_node_param(run->src, node, i);
     }
-    odin3_node_spec spec = {type,        odin3_node_name(run->src, node),
-                            odin3_node_prov(run->src, node), run->vals.data, def->n_params};
+    odin3_node_spec spec = {type, odin3_node_name(run->src, node), odin3_node_prov(run->src, node),
+                            run->vals.data, def->n_params};
     odin3_node_id copy = {0};
     odin3_status st = gather_ports(run, node, def);
     st = st == ODIN3_OK ? odin3_node_create_connected(run->dst, &spec, run->netvecs.data, &copy)
                         : st;
-    st = st == ODIN3_OK ? copy_attrs(run, (odin3_objref){ODIN3_OBJ_NODE, node.v},
-                                     (odin3_objref){ODIN3_OBJ_NODE, copy.v})
-                        : st;
+    st = st == ODIN3_OK
+             ? copy_attrs(run, (sm_objpair){{ODIN3_OBJ_NODE, node.v}, {ODIN3_OBJ_NODE, copy.v}})
+             : st;
     return st == ODIN3_OK ? odin3_node_delete(run->src, node) : st;
 }
 
-/* Deletes the old copies of the nets that moved, when nothing else (a wire, an alias) holds them. */
+/* Deletes the old copies of the nets that moved, when nothing else (a wire, an alias) holds them.
+ */
 static void drop_moved_nets(sm_run *run) {
     for (uint32_t nid = 1; nid < odin3_module_net_end(run->src); nid++) {
         odin3_net_id net = {nid};
@@ -524,13 +529,13 @@ static odin3_status move_all(sm_run *run) {
     return make_instance(run, odin3_module_celltype(run->dst));
 }
 
-odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id m,
+odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id module_id,
                                         const odin3_submod_group *group, odin3_module_id *out) {
     sm_run run;
     run_init(&run);
     run.pass = ctx;
     run.design = ctx->design;
-    run.src = odin3_module_get(ctx->design, m);
+    run.src = odin3_module_get(ctx->design, module_id);
     run.group = group;
     odin3_module_id id = {0};
     odin3_status st = run.src != NULL ? collect_group(&run) : ODIN3_ERR_INVALID_ARG;
@@ -545,17 +550,17 @@ odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id m,
     return st;
 }
 
-odin3_status odin3_submod_extract_ctx(odin3_pass_ctx *ctx, odin3_module_id m, const char *key,
-                                      const char *value, odin3_module_id *out) {
+odin3_status odin3_submod_extract_ctx(odin3_pass_ctx *ctx, odin3_module_id module_id,
+                                      const char *key, const char *value, odin3_module_id *out) {
     odin3_submod_group group = {key, value, value};
-    return odin3_submod_extract_named(ctx, m, &group, out);
+    return odin3_submod_extract_named(ctx, module_id, &group, out);
 }
 
-odin3_status odin3_submod_extract(odin3_design *d, odin3_module_id m, const char *key,
+odin3_status odin3_submod_extract(odin3_design *design, odin3_module_id module_id, const char *key,
                                   const char *value, odin3_module_id *out) {
     uint32_t name = 0;
     odin3_pass_ctx ctx;
-    odin3_status st = odin3_design_intern(d, odin3_bytes_cstr("submod"), &name);
-    st = st == ODIN3_OK ? odin3_pass_run_begin(d, name, &ctx) : st;
-    return st == ODIN3_OK ? odin3_submod_extract_ctx(&ctx, m, key, value, out) : st;
+    odin3_status st = odin3_design_intern(design, odin3_bytes_cstr("submod"), &name);
+    st = st == ODIN3_OK ? odin3_pass_run_begin(design, name, &ctx) : st;
+    return st == ODIN3_OK ? odin3_submod_extract_ctx(&ctx, module_id, key, value, out) : st;
 }

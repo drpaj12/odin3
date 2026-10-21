@@ -17,7 +17,7 @@ typedef struct odin3_submod_group {
  * odin3_submod_extract_ctx with the new module named group->name instead of the value. Same
  * failures; *out (may be NULL) gets the new module.
  */
-odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id m,
+odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id module_id,
                                         const odin3_submod_group *group, odin3_module_id *out);
 
 #endif

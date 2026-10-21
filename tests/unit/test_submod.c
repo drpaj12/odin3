@@ -30,9 +30,9 @@
 enum { PATH_BUF = 512, DIR_BUF = 256, LOG_MAX = 16384, MAX_PINS = 16 };
 
 /* a, b, c in; n1 = a&b; n2 = n1&c; n3 = n2|a; y = n3^b. */
-#define FOUR_GATES                                                                      \
-    ".model m\n.inputs a b c\n.outputs y\n"                                             \
-    ".names a b n1\n11 1\n.names n1 c n2\n11 1\n.names n2 a n3\n1- 1\n-1 1\n"           \
+#define FOUR_GATES                                                                                 \
+    ".model m\n.inputs a b c\n.outputs y\n"                                                        \
+    ".names a b n1\n11 1\n.names n1 c n2\n11 1\n.names n2 a n3\n1- 1\n-1 1\n"                      \
     ".names n3 b y\n10 1\n01 1\n.end\n"
 
 static char dir[DIR_BUF];
@@ -114,9 +114,8 @@ static odin3_node_id driver_of(const odin3_module *module, const char *name) {
 
 static void mark_str(odin3_module *module, odin3_node_id node, const char *key, const char *val) {
     odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern(val), 0};
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_attr_set(module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, intern(key),
-                                 &value));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(module, (odin3_objref){ODIN3_OBJ_NODE, node.v},
+                                                   intern(key), &value));
 }
 
 static void mark_driver(const char *net, const char *group) {
@@ -201,12 +200,56 @@ static void test_submod_ports_from_boundary(void) {
     odin3_module *sub = module_named("g");
     TEST_ASSERT_NOT_NULL(sub);
     TEST_ASSERT_EQUAL_UINT32(5, port_count(sub));
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "a")); /* driven by a module input */
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "b")); /* read by both gates, one port */
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "n3")); /* driven outside the group */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "a"));   /* driven by a module input */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "b"));   /* read by both gates, one port */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "n3"));  /* driven outside the group */
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, port_dir(sub, "n1")); /* read outside */
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, port_dir(sub, "y")); /* read by the module output */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, port_dir(sub, "y"));  /* read by the module output */
     check_clean();
+}
+
+/* The one non-port node of module, none when there is not exactly one. */
+static odin3_node_id only_cell(const odin3_module *module) {
+    odin3_node_id found = {0};
+    uint32_t count = 0;
+    for (uint32_t nid = 1; nid < odin3_module_node_end(module); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(module, node) && !is_port_node(module, node)) {
+            found = node;
+            count++;
+        }
+    }
+    return count == 1 ? found : (odin3_node_id){0};
+}
+
+static void expect_derived(odin3_prov_id prov) {
+    const odin3_prov_record *rec = odin3_prov_get(design, prov);
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+}
+
+/* The instance of sub in the top module: named sub_i, provenance DERIVED. */
+static void expect_instance(const odin3_module *sub) {
+    odin3_node_id inst = {0};
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top()); nid++) {
+        if (odin3_node_live(top(), (odin3_node_id){nid}) &&
+            odin3_node_type(top(), (odin3_node_id){nid}).v == odin3_module_celltype(sub).v) {
+            inst = (odin3_node_id){nid};
+        }
+    }
+    TEST_ASSERT_TRUE(odin3_node_valid(inst));
+    expect_derived(odin3_node_prov(top(), inst));
+    TEST_ASSERT_EQUAL_STRING(
+        "sub_i", odin3_strtab_get(odin3_design_strtab(design), odin3_node_name(top(), inst)));
+}
+
+/* The tag attribute (7) came along; the group key did not. */
+static void expect_attrs(const odin3_module *sub, odin3_node_id moved) {
+    odin3_objref ref = {ODIN3_OBJ_NODE, moved.v};
+    const odin3_value *tag = odin3_attr_get(sub, ref, intern("tag"));
+    TEST_ASSERT_NOT_NULL(tag);
+    TEST_ASSERT_EQUAL_INT64(7, tag->i);
+    TEST_ASSERT_NULL(odin3_attr_get(sub, ref, intern("submod")));
 }
 
 static void test_submod_moves_prov_and_attrs(void) {
@@ -214,41 +257,18 @@ static void test_submod_moves_prov_and_attrs(void) {
     odin3_node_id gate = driver_of(top(), "n2");
     odin3_prov_id prov = odin3_node_prov(top(), gate);
     odin3_value seven = odin3_value_int(7);
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, gate.v}, intern("tag"),
-                                 &seven));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, gate.v},
+                                                   intern("tag"), &seven));
     mark_str(top(), gate, "submod", "sub");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
     odin3_module *sub = module_named("sub");
     TEST_ASSERT_NOT_NULL(sub);
-    odin3_node_id moved = {0};
-    for (uint32_t nid = 1; nid < odin3_module_node_end(sub); nid++) {
-        if (odin3_node_live(sub, (odin3_node_id){nid}) && !is_port_node(sub, (odin3_node_id){nid})) {
-            moved = (odin3_node_id){nid};
-        }
-    }
+    odin3_node_id moved = only_cell(sub);
     TEST_ASSERT_TRUE(odin3_node_valid(moved));
     TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_node_prov(sub, moved).v);
-    odin3_objref ref = {ODIN3_OBJ_NODE, moved.v};
-    const odin3_value *tag = odin3_attr_get(sub, ref, intern("tag"));
-    TEST_ASSERT_NOT_NULL(tag);
-    TEST_ASSERT_EQUAL_INT64(7, tag->i);
-    TEST_ASSERT_NULL(odin3_attr_get(sub, ref, intern("submod")));
-    const odin3_prov_record *rec = odin3_prov_get(design, odin3_module_prov(sub));
-    TEST_ASSERT_NOT_NULL(rec);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
-    for (uint32_t nid = 1; nid < odin3_module_node_end(top()); nid++) {
-        odin3_node_id node = {nid};
-        if (odin3_node_live(top(), node) &&
-            odin3_node_type(top(), node).v == odin3_module_celltype(sub).v) {
-            rec = odin3_prov_get(design, odin3_node_prov(top(), node));
-            TEST_ASSERT_NOT_NULL(rec);
-            TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
-            TEST_ASSERT_EQUAL_STRING("sub_i",
-                                     odin3_strtab_get(odin3_design_strtab(design),
-                                                      odin3_node_name(top(), node)));
-        }
-    }
+    expect_attrs(sub, moved);
+    expect_derived(odin3_module_prov(sub));
+    expect_instance(sub);
     check_clean();
 }
 
@@ -274,9 +294,8 @@ static void test_submod_port_node_refused(void) {
 
 static void test_submod_empty_group_refused(void) {
     read_blif(FOUR_GATES);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_submod_extract(design, (odin3_module_id){1}, "submod", "none",
-                                               NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_submod_extract(design, (odin3_module_id){1},
+                                                                      "submod", "none", NULL));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "is empty"));
     log_text[0] = '\0';
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("-name x"));
@@ -318,9 +337,8 @@ static void test_submod_multi_driver_refused(void) {
     mark_str(top(), gate, "submod", "sub");
     uint32_t nodes = odin3_module_node_end(top());
     /* odin3_pass_run's own check refuses a two-driver net first, so call the step directly. */
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_submod_extract(design, (odin3_module_id){1}, "submod", "sub",
-                                               NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_submod_extract(design, (odin3_module_id){1},
+                                                                      "submod", "sub", NULL));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "n3"));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "drivers"));
     TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(top()));
@@ -335,11 +353,13 @@ static void test_submod_two_groups_sorted_by_value(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
     TEST_ASSERT_EQUAL_UINT32(4, odin3_design_module_end(design));
     TEST_ASSERT_EQUAL_STRING(
-        "alpha", odin3_strtab_get(odin3_design_strtab(design),
-                                  odin3_module_name(odin3_module_get(design, (odin3_module_id){2}))));
+        "alpha",
+        odin3_strtab_get(odin3_design_strtab(design),
+                         odin3_module_name(odin3_module_get(design, (odin3_module_id){2}))));
     TEST_ASSERT_EQUAL_STRING(
-        "zeta", odin3_strtab_get(odin3_design_strtab(design),
-                                 odin3_module_name(odin3_module_get(design, (odin3_module_id){3}))));
+        "zeta",
+        odin3_strtab_get(odin3_design_strtab(design),
+                         odin3_module_name(odin3_module_get(design, (odin3_module_id){3}))));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text); /* the key is gone: no groups */
     TEST_ASSERT_EQUAL_UINT32(4, odin3_design_module_end(design));
     check_clean();

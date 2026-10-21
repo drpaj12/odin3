@@ -53,8 +53,9 @@ static odin3_status parse_args(odin3_bytes args, sm_opts *opts) {
             st = take_value(&args, "-name", &opts->name);
             opts->has_name = st == ODIN3_OK;
         } else {
-            odin3_log(ODIN3_LOG_ERROR, "submod: unknown option '%.*s' (options: -attr KEY, -name N)",
-                      (int)word.len, (const char *)word.ptr);
+            odin3_log(ODIN3_LOG_ERROR,
+                      "submod: unknown option '%.*s' (options: -attr KEY, -name N)", (int)word.len,
+                      (const char *)word.ptr);
             st = ODIN3_ERR_INVALID_ARG;
         }
     }
@@ -100,17 +101,17 @@ static odin3_status add_group(sm_groups *groups, const char *text) {
     return ODIN3_OK;
 }
 
-static odin3_status find_groups(odin3_module *module, const char *key, sm_groups *groups) {
-    odin3_design *design = odin3_module_design(module);
+static odin3_status find_groups(const odin3_module *module, const char *key, sm_groups *groups) {
+    const odin3_design *design = odin3_module_design(module);
     uint32_t key_str = 0;
     if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(key), &key_str)) {
         return ODIN3_OK;
     }
     for (uint32_t nid = 1; nid < odin3_module_node_end(module); nid++) {
-        const odin3_value *val = odin3_node_live(module, (odin3_node_id){nid})
-                                     ? odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_NODE, nid},
-                                                      key_str)
-                                     : NULL;
+        const odin3_value *val =
+            odin3_node_live(module, (odin3_node_id){nid})
+                ? odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_NODE, nid}, key_str)
+                : NULL;
         char buf[SM_INT_TEXT];
         const char *text = NULL;
         if (val != NULL && val->kind == ODIN3_VAL_STRING) {
@@ -134,7 +135,7 @@ static odin3_status find_groups(odin3_module *module, const char *key, sm_groups
 
 static odin3_status extract_groups(odin3_pass_ctx *ctx, odin3_module_id mid, const sm_opts *opts,
                                    uint32_t *moved) {
-    odin3_module *module = odin3_module_get(ctx->design, mid);
+    const odin3_module *module = odin3_module_get(ctx->design, mid);
     sm_groups groups;
     odin3_strbuf_init(&groups.pool);
     odin3_vec_init(&groups.order, sizeof(size_t));
@@ -142,7 +143,8 @@ static odin3_status extract_groups(odin3_pass_ctx *ctx, odin3_module_id mid, con
     const size_t *offs = groups.order.data;
     for (size_t i = 0; st == ODIN3_OK && i < groups.order.len; i++) {
         const char *value = groups.pool.data + offs[i];
-        odin3_submod_group group = {opts->key.data, value, opts->has_name ? opts->name.data : value};
+        odin3_submod_group group = {opts->key.data, value,
+                                    opts->has_name ? opts->name.data : value};
         st = odin3_submod_extract_named(ctx, mid, &group, NULL);
         *moved += st == ODIN3_OK ? 1U : 0U;
     }
@@ -159,7 +161,8 @@ static odin3_status count_groups(odin3_design *design, uint32_t end, const char 
         sm_groups groups;
         odin3_strbuf_init(&groups.pool);
         odin3_vec_init(&groups.order, sizeof(size_t));
-        odin3_status st = find_groups(odin3_module_get(design, (odin3_module_id){mid}), key, &groups);
+        odin3_status st =
+            find_groups(odin3_module_get(design, (odin3_module_id){mid}), key, &groups);
         *total += groups.order.len;
         odin3_vec_free(&groups.order);
         odin3_strbuf_free(&groups.pool);
@@ -209,6 +212,6 @@ static odin3_status submod_pass_run(odin3_pass_ctx *ctx, odin3_design *design, o
     return st;
 }
 
-const odin3_pass_def odin3_pass_submod = {
-    "submod", "submod [-attr KEY] [-name N]", submod_pass_run, NULL, false,
-    ODIN3_PASS_PROCESSES_REFUSE};
+const odin3_pass_def odin3_pass_submod = {"submod",        "submod [-attr KEY] [-name N]",
+                                          submod_pass_run, NULL,
+                                          false,           ODIN3_PASS_PROCESSES_REFUSE};
