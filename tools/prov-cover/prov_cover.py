@@ -131,6 +131,12 @@ class Mod:
     # gnd, vcc or unconn nets that hold a constant bit: write_json folds a zero-input table into
     # the constant, so the cell has no entry in ``cells`` and only this net name remains
     generators: frozenset[str] = frozenset()
+    # output port bit key -> its port bit name (``y`` or ``y[2]``): the name the same bit has in
+    # every leg, where a net's own name may be the whole bus in one and the single bit in another
+    port_bits: Mapping[str, str] = field(default_factory=dict)
+
+    def port_bit_name(self, net: str) -> str:
+        return self.port_bits.get(net, self.net_name(net))
 
     def net_name(self, net: str) -> str:
         return self.names.get(net, net)
@@ -372,7 +378,7 @@ def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     if cell is None or mod is None:
         return False
     return any(
-        o in mod.port_out and (row.module, mod.net_name(o)) in ctx.located for o in cell.outs
+        o in mod.port_out and (row.module, mod.port_bit_name(o)) in ctx.located for o in cell.outs
     )
 
 

@@ -137,6 +137,7 @@ def build_index(
                     )
         inputs.update(mod.net_name(b) for b in mod.port_in)
         outputs.update(mod.net_name(b) for b in mod.port_out)
+        outputs.update(mod.port_bit_name(b) for b in mod.port_out)
     return Index(
         frozenset(located),
         frozenset(driven),

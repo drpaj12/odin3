@@ -7,19 +7,3 @@
 #   location), so after read-back it is an unlocated identity table, classed port-buffer and
 #   removed from the LUT count. The object lost its location (same X-8 root as D1), seen on
 #   ch_intrinsics and ch_intrinsics_nolatches (32 and 40 LUTs).
-b single_ff.v unresolved/latch/drives-output-port@9125bd88 1 D1: cell drives an output port bit (name has no location, X-8)
-b and_latch.v unresolved/latch/drives-output-port@089b8a67 1 D1: cell drives an output port bit (name has no location, X-8)
-b multiclock_output_and_latch.v unresolved/lut/drives-output-port@a224e542 1 D1: cell drives an output port bit (name has no location, X-8)
-b multiclock_separate_and_latch.v unresolved/latch/drives-output-port@4052d632 2 D1: cell drives an output port bit (name has no location, X-8)
-b multiclock_reader_writer.v unresolved/latch/drives-output-port@dd102881 1 D1: cell drives an output port bit (name has no location, X-8)
-b ch_intrinsics.v count-drop/lut@8a5bb95e 32 D3: a located identity LUT at an output port bit is a port-buffer table after read-back
-b ch_intrinsics.v unresolved/latch/drives-output-port@fc60fd02 33 D1: cell drives an output port bit (name has no location, X-8)
-b ch_intrinsics_nolatches.v count-drop/lut@7cb75594 40 D3: a located identity LUT at an output port bit is a port-buffer table after read-back
-b ch_intrinsics_nolatches.v unresolved/latch/drives-output-port@3f2c0f14 34 D1: cell drives an output port bit (name has no location, X-8)
-b ch_intrinsics_nolatches.v unresolved/lut/drives-output-port@62e118b9 32 D1: cell drives an output port bit (name has no location, X-8)
-b diffeq1.v unresolved/latch/drives-output-port@92116ff8 96 D1: cell drives an output port bit (name has no location, X-8)
-b diffeq2.v unresolved/latch/drives-output-port@a745c4e9 96 D1: cell drives an output port bit (name has no location, X-8)
-b mkPktMerge.v unresolved/latch/drives-output-port@f5765543 3 D1: cell drives an output port bit (name has no location, X-8)
-b sha.v unresolved/latch/drives-output-port@9ac6f9bc 36 D1: cell drives an output port bit (name has no location, X-8)
-b blob_merge.v unresolved/latch/drives-output-port@987d65de 61 D1: cell drives an output port bit (name has no location, X-8)
-b stereovision3.v unresolved/latch/drives-output-port@2021597c 28 D1: cell drives an output port bit (name has no location, X-8)

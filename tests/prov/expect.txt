@@ -14,11 +14,3 @@
 #     hardmap; lower; abc --lut 6; write_blif --vtr --name-style provenance W.blif" \
 #   then "read_techlib lib/vtr.o3lib; read_blif --hdl-locs W.blif; dump_locs --types -" : the $sop
 #   that drives output f has an empty SRC.
-b plain_mux.v unresolved/lut/drives-output-port@faea02d3 4 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_2_1_mux.v unresolved/lut/drives-output-port@04f14ede 1 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_D_flipflop.v unresolved/latch/drives-output-port@d78fff8c 1 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_4_1_mux.v unresolved/lut/drives-output-port@667c03a4 1 D1: cell drives an output port bit (name has no location, X-8)
-b ff.v unresolved/latch/drives-output-port@6f11026c 1 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_2_cascaded_flip_flops.v unresolved/latch/drives-output-port@f28b1713 2 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_logic_w_Dff.v unresolved/latch/drives-output-port@13130edf 2 D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_structural_logic.v unresolved/lut/drives-output-port@bee34267 1 D1: cell drives an output port bit (name has no location, X-8)

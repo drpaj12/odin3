@@ -824,6 +824,19 @@ class PortDriverTests(unittest.TestCase):
         self.assertEqual(rep.exceptions["port-driver"], 1)
         self.assertEqual(rep.versus["lut"], (1, 1))
 
+    def test_proof_uses_the_port_bit_name_not_the_net_name(self) -> None:
+        # leg a names the whole bus `y`, the read-back names the bit `y[0]`
+        mod = {
+            "ports": {"y": {"direction": "output", "bits": [5, 6]}},
+            "netnames": {"y": {"bits": [5, 6], "hide_name": 0}},
+            "cells": {"c": {"type": "$lut", "parameters": {}, "port_directions": {"A": "input", "Y": "output"},
+                            "connections": {"A": [2], "Y": [6]}}},
+        }
+        f = legs.facts_from_json(json.dumps({"modules": {"m": mod}}))
+        self.assertEqual(f["m"].port_bit_name("6"), "y[1]")
+        rows = dump(("$lut", "c", A))
+        self.assertIn(("m", "y[1]"), legs.located_nets(rows, f))
+
     def test_place_leg_port_driver_needs_the_leg_a_net(self) -> None:
         rows = pc.parse_dump("m|node:$sop|g|\n")
         mod = pc.Mod({"g": cell("$sop", ("a",), ("o",))}, frozenset({"a"}), frozenset({"o"}))

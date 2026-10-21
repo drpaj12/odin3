@@ -130,7 +130,13 @@ def _module_facts(mod: dict[str, Any]) -> Mod:
         for n, net in mod.get("netnames", {}).items()
         if n in GENERATOR_NETS and net.get("bits") and all(str(b) in consts for b in net["bits"])
     )
-    return Mod(cells, frozenset(port_in), frozenset(port_out), names, generators)
+    port_bits = {
+        b: (pname if len(p["bits"]) == 1 else f"{pname}[{i}]")
+        for pname, p in mod.get("ports", {}).items()
+        if p.get("direction") == "output"
+        for i, b in enumerate(_bits(p["bits"]))
+    }
+    return Mod(cells, frozenset(port_in), frozenset(port_out), names, generators, port_bits)
 
 
 def facts_from_json(text: str) -> Facts:
@@ -148,6 +154,7 @@ def located_nets(rows: Sequence[Any], facts: Facts) -> set[tuple[str, str]]:
         cell = mod.cells.get(row.name) if mod else None
         if row.kind == "node" and row.src and mod and cell:
             found.update((row.module, mod.net_name(o)) for o in cell.outs)
+            found.update((row.module, mod.port_bit_name(o)) for o in cell.outs if o in mod.port_out)
     return found
 
 
