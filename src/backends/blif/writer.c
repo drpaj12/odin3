@@ -489,15 +489,15 @@ static bool prov_style(const blif_writer *wr) {
 /*
  * VTR with --name-style provenance (spec 3E §10 item 7): wr->cand, the net's short name, becomes
  * `hier/<short name>@file:line` from the net's provenance record. Unchanged for a net on a port
- * bit (pads, .inputs/.outputs and Verilator's port matcher depend on the short names), a
- * generator, and a net whose record has neither a hierarchy nor a location. VB-10 rules 1 to 4
+ * bit (pads, .inputs/.outputs and Verilator's port matcher depend on the short names; a hard cell's
+ * output net on a port bit is not: it is written apart from the port bit, hard), a generator, and a net whose record has neither a hierarchy nor a location. VB-10 rules 1 to 4
  * follow in the caller.
  */
-static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool *applied) {
+static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool hard, bool *applied) {
     uint64_t owner = 0;
     *applied = false;
     wr->last_applied = false;
-    if (!prov_style(wr) || odin3_u64map_get(wr->net_port, net.v, &owner) ||
+    if (!prov_style(wr) || (!hard && odin3_u64map_get(wr->net_port, net.v, &owner)) ||
         is_generator(wr, net, buf_bytes(&wr->cand))) {
         return ODIN3_OK;
     }
@@ -571,7 +571,8 @@ static odin3_status take_suffixed(blif_writer *wr, uint64_t key, odin3_net_id se
 
 /* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
  * wrapped by provenance_name; *found is set when the wrapped name replaces the candidate. */
-static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool *found) {
+static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool hard,
+                                        bool *found) {
     if (!prov_style(wr)) {
         return ODIN3_OK;
     }
@@ -583,7 +584,7 @@ static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool 
         }
     }
     bool applied = false;
-    odin3_status st = provenance_name(wr, net, &applied);
+    odin3_status st = provenance_name(wr, net, hard, &applied);
     *found = *found || applied;
     return st;
 }
@@ -609,7 +610,7 @@ static odin3_status generate(blif_writer *wr, uint64_t key) {
     wr->last_applied = false;
     odin3_status st = pin ? ODIN3_OK : wire_bit_name(wr, self, &found);
     if (st == ODIN3_OK && wr->vtr && !pin) {
-        st = generate_provenance(wr, self, &found);
+        st = generate_provenance(wr, self, false, &found);
     }
     if (st == ODIN3_OK && found && wr->vtr) {
         st = legalise(wr, &wr->cand, self, &changed);
@@ -878,7 +879,7 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     odin3_status st = odin3_strbuf_append(&wr->cand, own);
     if (st == ODIN3_OK && !is_generator(wr, net, own)) {
         bool applied = false;
-        st = provenance_name(wr, net, &applied);
+        st = provenance_name(wr, net, hard, &applied);
         st = st == ODIN3_OK ? legalise(wr, &wr->cand, net, &changed) : st;
     }
     if (st != ODIN3_OK) {
@@ -930,15 +931,16 @@ static bool hard_port_net(const blif_writer *wr, odin3_net_id net) {
            hard_type(wr->design, odin3_node_type(wr->module, odin3_pin_node(wr->module, driver)));
 }
 
-/* VTR: an unnamed net a hard cell drives onto a port bit. HASH names it by provenance when it
- * has such a name (as generate does); otherwise `$n<ID>` (the port bit keeps the name of record).
- */
+/* VTR: an unnamed net a hard cell drives onto a port bit. Provenance and hash name it by
+ * provenance when it has such a name (as generate does), so the read-back keeps the block's
+ * location (a taken name falls to `$n<ID>`, under HASH to `$N`); otherwise `$n<ID>` (the port bit
+ * keeps the name of record). */
 static odin3_status name_hard_unnamed(blif_writer *wr, odin3_net_id net) {
     bool found = false;
     wr->last_applied = false;
     odin3_status st = ODIN3_OK;
-    if (wr->opts->name_style == ODIN3_BLIF_NAMES_HASH) {
-        st = generate_provenance(wr, net, &found);
+    if (prov_style(wr)) {
+        st = generate_provenance(wr, net, true, &found);
         bool changed = false;
         st = st == ODIN3_OK && found ? legalise(wr, &wr->cand, net, &changed) : st;
     }
