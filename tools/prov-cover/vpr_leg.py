@@ -53,6 +53,7 @@ from pathlib import Path
 from prov_cover import (
     DEFAULT_ALLOW,
     GENERATOR_NETS,
+    PORT_TAG,
     CrashError,
     Defect,
     Facts,
@@ -114,7 +115,7 @@ def build_index(
     rows: Sequence[Obj], facts: Facts, a_located: Collection[tuple[str, str]] = frozenset()
 ) -> Index:
     """The net names of a typed dump joined with its connections (``write_json``).
-    ``a_located``: (module, net name) pairs a located leg-(a) node drives, the proof of the
+    ``a_located``: the ``located_nets`` of leg (a); its port-bit entries are the proof of the
     ``port-driver`` class."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
     where: dict[str, set[tuple[str, int]]] = {}
@@ -144,7 +145,7 @@ def build_index(
         frozenset(inputs),
         frozenset(outputs),
         {net: frozenset(locs) for net, locs in where.items()},
-        frozenset(net for _, net in a_located),
+        frozenset(net[len(PORT_TAG):] for _, net in a_located if net.startswith(PORT_TAG)),
     )
 
 
@@ -257,11 +258,11 @@ def place_check(
                 rep.exceptions["pad" if verdict == "pad" else "const-table"] += 1
         else:
             rep.objects[cls] += 1
-            if verdict == "port-driver":  # a cluster and its same-named atom: counted once
-                if name not in drivers:
+            if verdict == "port-driver":
+                rep.removed += 1  # every object of the class leaves the coverage base
+                if name not in drivers:  # a cluster and its same-named atom: one exception
                     drivers.add(name)
                     rep.exceptions["port-driver"] += 1
-                    rep.removed += 1
             elif verdict == "resolved":
                 rep.resolved[cls] += 1
                 rep.direct += 1

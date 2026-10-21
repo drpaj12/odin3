@@ -96,6 +96,7 @@ EXCEPTIONS = (
 APPROVED = frozenset({"inherited", "pad"})  # approved by Peter 2026-10-20 (PHASE6 decision 2)
 DEFAULT_ALLOW = APPROVED
 NAMED_DEFECTS = 10
+PORT_TAG = "port:"  # in the ``located`` set: (module, PORT_TAG + port bit name) of a located driver
 CONST_TYPES = frozenset({"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"})
 PORT_TYPES = frozenset({"$port_in", "$port_out", "$port_inout"})
 LUT_TYPES = frozenset({"$lut", "$sop"})
@@ -228,6 +229,7 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
     class after the write and read-back gets one ``count-drop`` defect per lost object: objects
     were lost, not only locations. A gain never offsets a drop in another module; it is only shown
     in ``versus`` (the writer adds buffer tables)."""
+    _port_driver_drops(first, second)
     for cls in OBJECT_CLASSES:
         before = sum(first.modules.get(m, {}).get(cls, 0) for m in second.modules)
         after = second.kept(cls)
@@ -236,6 +238,25 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
             lost = first.modules.get(mod, {}).get(cls, 0) - _kept_in(second, mod, cls)
             for n in range(1, lost + 1):
                 second.defects.append(Defect("count-drop", mod, f"{cls}-{n}", cls))
+
+
+def _port_driver_drops(first: LegReport, second: LegReport) -> None:
+    """D3 (Peter 2026-10-21): a located identity LUT at a port bit in leg (a) is written as a
+    ``.names net port`` table without a location, which the read-back counts as a ``port-buffer``
+    and takes out of the LUT count. As many LUT drops in a module as leg (a) had such LUTs, and
+    the read-back has port-buffer tables, are moved from ``port-buffer`` to ``port-driver``: the
+    object stays, at the count it had, in the same dump and the written-file cross-check."""
+    for mod in sorted(second.modules):
+        per = second.modules[mod]
+        lost = first.modules.get(mod, {}).get("lut", 0) - _kept_in(second, mod, "lut")
+        move = min(lost, first.modules.get(mod, {}).get("_pid", 0), per.get("_pbuf", 0))
+        if move <= 0:
+            continue
+        second.exceptions["port-buffer"] -= move
+        second.exceptions["port-driver"] += move
+        second.driver_buffers += move
+        per["_extra"] -= move
+        per["_pbuf"] -= move
 
 
 def defect_id(d: Defect) -> str:
@@ -372,13 +393,19 @@ def _port_buffer(ctx: _Ctx, row: Obj, cell: Cell | None) -> str | None:
     return "yes"
 
 
+def _drives_port(ctx: _Ctx, row: Obj, cell: Cell) -> bool:
+    mod = ctx.facts.get(row.module)
+    return mod is not None and any(o in mod.port_out for o in cell.outs)
+
+
 def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     """True when the object drives a module output port bit that a located leg-(a) node drove."""
     mod = ctx.facts.get(row.module)
     if cell is None or mod is None:
         return False
     return any(
-        o in mod.port_out and (row.module, mod.port_bit_name(o)) in ctx.located for o in cell.outs
+        o in mod.port_out and (row.module, PORT_TAG + mod.port_bit_name(o)) in ctx.located
+        for o in cell.outs
     )
 
 
@@ -430,6 +457,8 @@ def _count_node(
     per = rep.modules.setdefault(row.module, {})
     per[cls] = per.get(cls, 0) + 1
     if has:
+        if cls == "lut" and cell is not None and cell.identity and _drives_port(ctx, row, cell):
+            per["_pid"] = per.get("_pid", 0) + 1  # a located identity table at a port bit
         _count_located(row, rep, cls, allow, inherits)
         return
     if not readback:
@@ -443,14 +472,14 @@ def _count_node(
         rep.removed += 1
         return
     verdict = _port_buffer(ctx, row, cell) if cls == "lut" else None
-    if verdict != "yes" and _port_driver(ctx, row, cell):
+    if verdict is None and _port_driver(ctx, row, cell):
         rep.exceptions["port-driver"] += 1
-        rep.driver_buffers += verdict == "lost"  # the written file counts it as a buffer table
         rep.removed += 1
         return
     if verdict == "yes":
         rep.exceptions["port-buffer"] += 1
         per["_extra"] = per.get("_extra", 0) + 1
+        per["_pbuf"] = per.get("_pbuf", 0) + 1
         rep.removed += 1
         return
     kind = "lost-location" if verdict == "lost" else "unresolved"

@@ -26,6 +26,7 @@ from loc_check import level_script, parse_techlibs
 import vpr_leg
 from prov_cover import (
     GENERATOR_NETS,
+    PORT_TAG,
     ROOT_DIR,
     Cell,
     CrashError,
@@ -154,7 +155,8 @@ def located_nets(rows: Sequence[Any], facts: Facts) -> set[tuple[str, str]]:
         cell = mod.cells.get(row.name) if mod else None
         if row.kind == "node" and row.src and mod and cell:
             found.update((row.module, mod.net_name(o)) for o in cell.outs)
-            found.update((row.module, mod.port_bit_name(o)) for o in cell.outs if o in mod.port_out)
+            ports = (o for o in cell.outs if o in mod.port_out)
+            found.update((row.module, PORT_TAG + mod.port_bit_name(o)) for o in ports)
     return found
 
 
