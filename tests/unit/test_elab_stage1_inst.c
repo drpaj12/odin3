@@ -1013,6 +1013,64 @@ static void test_implicit_dirs_conflict(void) {
     check_conflict_both(src);
 }
 
+/* Three outputs on one net: each names the smallest other (type, port), whatever the order of the
+ * instances or of the connections of a cell; the port list is sorted by name. */
+static void check_conflict_three(const char *src) {
+    run_req(src, &k_auto, NULL);
+    expect_clean();
+    expect_warn_has("'bar': inferred port directions: Z=output; Z: its net is also driven by "
+                    "'baz.W'");
+    expect_warn_has("'baz': inferred port directions: W=output; W: its net is also driven by "
+                    "'bar.Z'");
+    expect_warn_has("'foo': inferred port directions: P=input, Q=output; Q: its net is also driven "
+                    "by 'bar.Z'");
+}
+
+static void test_implicit_dirs_conflict_three_orders(void) {
+    const char *const tails[] = {
+        "  foo b1 (.P(a), .Q(n));\n  bar b2 (.Z(n));\n  baz b3 (.W(n));\n",
+        "  baz b3 (.W(n));\n  bar b2 (.Z(n));\n  foo b1 (.Q(n), .P(a));\n",
+        "  bar b2 (.Z(n));\n  foo b1 (.Q(n), .P(a));\n  baz b3 (.W(n));\n",
+    };
+    const char *const heads[] = {
+        "  foo a1 (.P(a), .Q(w1));\n  bar a2 (.Z(w2));\n  baz a3 (.W(w3));\n",
+        "  baz a3 (.W(w3));\n  foo a1 (.Q(w1), .P(a));\n  bar a2 (.Z(w2));\n",
+        "  bar a2 (.Z(w2));\n  baz a3 (.W(w3));\n  foo a1 (.Q(w1), .P(a));\n",
+    };
+    for (size_t k = 0; k < 3; k++) {
+        char src[768];
+        (void)snprintf(src, sizeof src,
+                       "module top (input a, output y1, output y2, output y3, output y4);\n"
+                       "  wire w1, w2, w3, n;\n%s  assign y1 = w1;\n  assign y2 = w2;\n"
+                       "  assign y3 = w3;\n  assign y4 = n;\n%sendmodule\n",
+                       heads[k], tails[k]);
+        if (k > 0) {
+            reset_run();
+        }
+        check_conflict_three(src);
+    }
+}
+
+/* A port that is an input to two nets nothing drives names the smallest net, whatever the order. */
+static void check_two_nets(const char *src) {
+    run_req(src, &k_auto, NULL);
+    expect_clean();
+    expect_warn_has("'foo': inferred port directions: A=input, P=input; P: its net 'm1' has no "
+                    "driver");
+}
+
+static void test_implicit_dirs_undriven_two_nets_orders(void) {
+    check_two_nets("module top (input a, output y);\n  wire m1, m2;\n"
+                   "  foo u1 (.A(a), .P(m1));\n  bar v1 (.D(m1), .E(a));\n"
+                   "  foo u2 (.A(a), .P(m2));\n  bar v2 (.D(m2), .E(a));\n"
+                   "  assign y = a;\nendmodule\n");
+    reset_run();
+    check_two_nets("module top (input a, output y);\n  wire m1, m2;\n"
+                   "  bar v2 (.E(a), .D(m2));\n  foo u2 (.P(m2), .A(a));\n"
+                   "  bar v1 (.E(a), .D(m1));\n  foo u1 (.P(m1), .A(a));\n"
+                   "  assign y = a;\nendmodule\n");
+}
+
 /* A net with no known direction (a module inout) keeps the port inout, and the WARNING says so. */
 static void test_implicit_dirs_inout(void) {
     run_req("module top (inout p);\n  foo u (.A(p));\nendmodule\n", &k_auto, NULL);
@@ -1236,6 +1294,8 @@ static void run_implicit_tests(void) {
     RUN_TEST(test_implicit_dirs_ambiguous);
     RUN_TEST(test_implicit_dirs_inout);
     RUN_TEST(test_implicit_dirs_conflict);
+    RUN_TEST(test_implicit_dirs_conflict_three_orders);
+    RUN_TEST(test_implicit_dirs_undriven_two_nets_orders);
     RUN_TEST(test_implicit_widths);
     RUN_TEST(test_implicit_width_from_array);
 }

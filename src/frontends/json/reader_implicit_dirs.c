@@ -33,7 +33,16 @@ enum {
 static const uint64_t MANY = UINT64_MAX;
 
 /* What a visit of the cells does. */
-typedef enum { SW_COUNT, SW_VOTE, SW_OWN, SW_UNDRIVEN, SW_CAND, SW_PICK, SW_END } dirs_sweep;
+typedef enum {
+    SW_COUNT,
+    SW_VOTE,
+    SW_OWN,
+    SW_PEER,
+    SW_UNDRIVEN,
+    SW_CAND,
+    SW_PICK,
+    SW_END
+} dirs_sweep;
 
 /* The visits of the modules: the votes, the tie-break, the final visit. */
 enum { PL_VOTE, PL_TIE, PL_FINAL, PL_N };
@@ -42,7 +51,7 @@ enum { PL_VOTE, PL_TIE, PL_FINAL, PL_N };
 typedef struct dirs_mod {
     jr *rd;
     odin3_u64map *bits;  /* label -> DF_* */
-    odin3_u64map *owner; /* label -> ((type + 1) << 32) | (position + 1) of its first output */
+    odin3_u64map *owner; /* label -> ((type + 1) << 32) | (position + 1) of its smallest output */
     odin3_u64map *ports; /* label -> the same, of the unknown port on it (MANY: different ports) */
     odin3_u64map *cand;  /* label -> the same, of the tie-break candidate on it (MANY: several) */
     const odin3_json_node *cells;
@@ -228,14 +237,38 @@ static uint64_t pack_ref(const dirs_ref *ref) {
     return ((ref->entry + 1) << KEY_SHIFT) | (ref->pos + 1);
 }
 
-static void set_peer(jr_iport *port, uint64_t packed) {
-    if (port->peer_type == 0) {
+/* The cell type name and the port name of a port packed as the owner map keeps it. */
+typedef struct dirs_names {
+    const char *type;
+    const char *port;
+} dirs_names;
+
+static dirs_names names_of(const jr *rd, uint64_t packed) {
+    const jr_implicit *entry = odin3_vec_cat(&rd->implicit, (packed >> KEY_SHIFT) - 1);
+    const jr_iport *iport = odin3_vec_cat(&entry->ports, (packed & UINT32_MAX) - 1);
+    return (dirs_names){jr_str(rd, entry->name_str), jr_str(rd, iport->name_str)};
+}
+
+/* Whether port first sorts before port second: by cell type name, then port name (a total order).
+ */
+static bool ref_less(const jr *rd, uint64_t first, uint64_t second) {
+    dirs_names left = names_of(rd, first);
+    dirs_names right = names_of(rd, second);
+    int cmp = strcmp(left.type, right.type);
+    return (cmp != 0 ? cmp : strcmp(left.port, right.port)) < 0;
+}
+
+/* The port names packed as its peer if that sorts before the peer it has. */
+static void set_peer(const jr *rd, jr_iport *port, uint64_t packed) {
+    uint64_t cur = ((uint64_t)port->peer_type << KEY_SHIFT) | port->peer_port;
+    if (port->peer_type == 0 || ref_less(rd, packed, cur)) {
         port->peer_type = (uint32_t)(packed >> KEY_SHIFT);
         port->peer_port = (uint32_t)(packed & UINT32_MAX);
     }
 }
 
-/* Two settled outputs share a bit: each names the other. */
+/* Two settled outputs share a bit: each names the other (the smallest, so the order of the cells
+ * does not show). */
 static void link_peers(jr *rd, const dirs_ref *ref, uint64_t other) {
     uint64_t self = pack_ref(ref);
     if (other == self) {
@@ -243,11 +276,11 @@ static void link_peers(jr *rd, const dirs_ref *ref, uint64_t other) {
     }
     jr_implicit *type = odin3_vec_at(&rd->implicit, (other >> KEY_SHIFT) - 1);
     jr_iport *port = odin3_vec_at(&type->ports, (other & UINT32_MAX) - 1);
-    set_peer(ref->port, other);
-    set_peer(port, self);
+    set_peer(rd, ref->port, other);
+    set_peer(rd, port, self);
 }
 
-/* A settled output or inout takes its bits; an output on a bit another output has is a conflict. */
+/* A settled output or inout takes its bits; the owner of a bit is its smallest output. */
 static odin3_status own_conn(dirs_mod *dm, const dirs_ref *ref, const odin3_json_node *conn) {
     odin3_status st = ODIN3_OK;
     uint64_t label = 0;
@@ -258,15 +291,25 @@ static odin3_status own_conn(dirs_mod *dm, const dirs_ref *ref, const odin3_json
             continue;
         }
         uint64_t owner = 0;
-        if (out && (flags_of(dm, label) & DF_ROUT) != 0 &&
-            odin3_u64map_get(dm->owner, label, &owner)) {
-            link_peers(dm->rd, ref, owner);
-        } else if (out) {
+        bool have = out && odin3_u64map_get(dm->owner, label, &owner);
+        if (out && (!have || ref_less(dm->rd, pack_ref(ref), owner))) {
             st = odin3_u64map_put(dm->owner, (odin3_kv){label, pack_ref(ref)});
         }
         st = st == ODIN3_OK ? add_flags(dm, label, out ? DF_ROUT : DF_RINO) : st;
     }
     return st;
+}
+
+/* A settled output on a bit another output owns is a conflict: both name the other. */
+static void peer_conn(const dirs_mod *dm, const dirs_ref *ref, const odin3_json_node *conn) {
+    uint64_t label = 0;
+    for (const odin3_json_node *elem = jr_first(conn);
+         elem != NULL && ref->port->def.dir == ODIN3_DIR_OUT; elem = odin3_json_next(elem)) {
+        uint64_t owner = 0;
+        if (label_of(elem, &label) && odin3_u64map_get(dm->owner, label, &owner)) {
+            link_peers(dm->rd, ref, owner);
+        }
+    }
 }
 
 /* A settled input on an ambiguous bit that nothing, settled or known, drives. */
@@ -275,8 +318,8 @@ static void undriven_conn(const dirs_mod *dm, jr_iport *port, const odin3_json_n
     for (const odin3_json_node *elem = jr_first(conn); elem != NULL; elem = odin3_json_next(elem)) {
         uint64_t flags = label_of(elem, &label) ? flags_of(dm, label) : 0;
         bool bare = (flags & (DF_DRV | DF_BIDI | DF_ROUT | DF_RINO)) == 0;
-        if (bare && (flags & DF_UM) != 0 && port->def.dir == ODIN3_DIR_IN &&
-            (port->role & JR_ROLE_UNDRIVEN) == 0) {
+        bool less = (port->role & JR_ROLE_UNDRIVEN) == 0 || label < port->net;
+        if (bare && (flags & DF_UM) != 0 && port->def.dir == ODIN3_DIR_IN && less) {
             port->role |= JR_ROLE_UNDRIVEN;
             port->net = label;
         }
@@ -340,6 +383,8 @@ static odin3_status visit_conn(dirs_mod *dm, const dirs_ref *ref, const odin3_js
         vote_conn(dm, ref->port, conn);
     } else if (sweep == SW_OWN) {
         st = own_conn(dm, ref, conn);
+    } else if (sweep == SW_PEER) {
+        peer_conn(dm, ref, conn);
     } else {
         undriven_conn(dm, ref->port, conn);
     }
@@ -362,9 +407,9 @@ static odin3_status visit_cell(dirs_mod *dm, const odin3_json_node *cell, dirs_s
 /* The visits of a phase: 0 votes; 1 (with the settled directions) finds conflicts and nets that
  * nothing drives. */
 static const dirs_sweep k_plan[PL_N][SW_END] = {
-    {SW_COUNT, SW_VOTE, SW_END, SW_END, SW_END, SW_END},
-    {SW_COUNT, SW_OWN, SW_CAND, SW_PICK, SW_END, SW_END},
-    {SW_COUNT, SW_OWN, SW_UNDRIVEN, SW_END, SW_END, SW_END},
+    {SW_COUNT, SW_VOTE, SW_END, SW_END, SW_END, SW_END, SW_END},
+    {SW_COUNT, SW_OWN, SW_PEER, SW_CAND, SW_PICK, SW_END, SW_END},
+    {SW_COUNT, SW_OWN, SW_PEER, SW_UNDRIVEN, SW_END, SW_END, SW_END},
 };
 
 static odin3_status infer_module(jr *rd, const jr_mod *mod, int phase) {

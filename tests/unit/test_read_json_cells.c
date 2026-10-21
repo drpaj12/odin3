@@ -117,7 +117,7 @@ static void test_auto_blackbox(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
     /* E: no port_directions; both cells have it on bit 5, nothing else does: nothing drives it */
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[2].dir);
-    rj_log_has("A=input, Y=output, E=input; E: its net bit 5 has no driver");
+    rj_log_has("A=input, E=input, Y=output; E: its net bit 5 has no driver");
     TEST_ASSERT_EQUAL_UINT32(2, odin3_celltype_instances(rj_design, type));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
@@ -203,7 +203,7 @@ static void test_implicit_infers_known_and_inout(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
     const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT};
     expect_type_dirs("mystery", want, 3);
-    rj_log_has("A=input, Q=output, P=inout; P: its net has no known direction");
+    rj_log_has("A=input, P=inout, Q=output; P: its net has no known direction");
 }
 
 /* The directions do not depend on the order of the cells (Yosys writes them alphabetically, and a
@@ -278,9 +278,9 @@ static void test_implicit_infers_floating_slices_constants(void) {
     const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT, ODIN3_DIR_INOUT,
                               ODIN3_DIR_IN};
     expect_type_dirs("foo", want, 5);
-    rj_log_has("implicit black box 'foo': inferred port directions: A=input, Q=output, X=inout, "
-               "P=inout, K=input; X: an input at some instances, an output at others; "
-               "P: its net has no known direction");
+    rj_log_has("implicit black box 'foo': inferred port directions: A=input, K=input, P=inout, "
+               "Q=output, X=inout; P: its net has no known direction; X: an input at some "
+               "instances, an output at others");
 }
 
 /* Two ports that are outputs by their own cells and share a bit are a conflict: the warning names
@@ -306,6 +306,58 @@ static void test_implicit_infers_conflict_both_ports(void) {
     const char *bar = "\"b2\": {\"type\": \"bar\", \"connections\": {\"Z\": [5]}}";
     check_conflict(foo, bar);
     check_conflict(bar, foo);
+}
+
+/* Three outputs on one bit: each names the smallest other (type, port) and the port list is sorted
+ * by name, whatever the order of the cells, of their connections, or of the JSON keys. */
+static void check_conflict_three(const char *cells) {
+    const char *json = top_json(OUT_PORT("y", "[3, 4, 5, 6]"), cells);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rj_read_opts(json, &k_auto));
+    rj_log_has("implicit black box 'bar': inferred port directions: Z=output; Z: its net is also "
+               "driven by 'baz.W'");
+    rj_log_has("implicit black box 'baz': inferred port directions: W=output; W: its net is also "
+               "driven by 'bar.Z'");
+    rj_log_has("implicit black box 'foo': inferred port directions: P=input, Q=output; Q: its net "
+               "is also driven by 'bar.Z'");
+}
+
+static void test_implicit_conflict_three_orders(void) {
+    const char *foo1 = "\"a1\": {\"type\": \"foo\", \"connections\": {\"P\": [\"1\"], \"Q\": [3]}}";
+    const char *foo2 = "\"a1\": {\"type\": \"foo\", \"connections\": {\"Q\": [3], \"P\": [\"1\"]}}";
+    const char *bar = "\"a2\": {\"type\": \"bar\", \"connections\": {\"Z\": [4]}}";
+    const char *baz = "\"a3\": {\"type\": \"baz\", \"connections\": {\"W\": [5]}}";
+    const char *fs = "\"b1\": {\"type\": \"foo\", \"connections\": {\"Q\": [6], \"P\": [\"1\"]}}";
+    const char *fs2 = "\"b1\": {\"type\": \"foo\", \"connections\": {\"P\": [\"1\"], \"Q\": [6]}}";
+    const char *bs = "\"b2\": {\"type\": \"bar\", \"connections\": {\"Z\": [6]}}";
+    const char *zs = "\"b3\": {\"type\": \"baz\", \"connections\": {\"W\": [6]}}";
+    const char *order[3][6] = {
+        {foo1, bar, baz, fs, bs, zs}, {zs, bs, fs2, baz, foo2, bar}, {bs, fs, zs, bar, baz, foo1}};
+    for (size_t k = 0; k < 3; k++) {
+        char cells[2048];
+        (void)snprintf(cells, sizeof cells, "%s, %s, %s, %s, %s, %s", order[k][0], order[k][1],
+                       order[k][2], order[k][3], order[k][4], order[k][5]);
+        check_conflict_three(cells);
+    }
+}
+
+/* A port that is an input to two bits nothing drives names the smallest label, whatever the order
+ * of the cells and the connections. */
+static void check_two_bits(const char *cells) {
+    const char *json = top_json(IN_PORT("a", "[2]"), cells);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, P=input; P: its "
+               "net bit 3 has no driver");
+}
+
+static void test_implicit_undriven_two_bits_orders(void) {
+    check_two_bits("\"u1\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"P\": [3]}}, "
+                   "\"v1\": {\"type\": \"other\", \"connections\": {\"D\": [3], \"E\": [2]}}, "
+                   "\"u2\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"P\": [4]}}, "
+                   "\"v2\": {\"type\": \"other\", \"connections\": {\"D\": [4], \"E\": [2]}}");
+    check_two_bits("\"u2\": {\"type\": \"mystery\", \"connections\": {\"P\": [4], \"A\": [2]}}, "
+                   "\"v2\": {\"type\": \"other\", \"connections\": {\"E\": [2], \"D\": [4]}}, "
+                   "\"u1\": {\"type\": \"mystery\", \"connections\": {\"P\": [3], \"A\": [2]}}, "
+                   "\"v1\": {\"type\": \"other\", \"connections\": {\"E\": [2], \"D\": [3]}}");
 }
 
 /* A type the IR refuses (a port with an empty name) is a located error naming the first cell. */
@@ -900,6 +952,8 @@ int main(void) {
     RUN_TEST(test_implicit_tie_two_ports);
     RUN_TEST(test_implicit_infers_floating_slices_constants);
     RUN_TEST(test_implicit_infers_conflict_both_ports);
+    RUN_TEST(test_implicit_conflict_three_orders);
+    RUN_TEST(test_implicit_undriven_two_bits_orders);
     RUN_TEST(test_implicit_type_refused);
     RUN_TEST(test_long_names);
     RUN_TEST(test_scopeinfo_is_dropped);

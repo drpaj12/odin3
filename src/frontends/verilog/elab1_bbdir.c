@@ -62,7 +62,7 @@ typedef struct bd_span {
 
 /* One net of the module being analysed: bits lo .. lo + width - 1, one flag byte each (a net wider
  * than BD_MAX_BITS, or with a range that is not constant, is one bit, coarse), and the port + 1 of
- * the first settled output on each, and the tie-break candidate port + 1 on each (BD_MANY:
+ * the smallest settled output on each, and the tie-break candidate port + 1 on each (BD_MANY:
  * several). */
 typedef struct bd_net {
     int64_t lo;
@@ -83,7 +83,7 @@ typedef struct bd_seg {
 } bd_seg;
 
 /* What a visit of the implicit instances does. */
-typedef enum { BS_COUNT, BS_VOTE, BS_OWN, BS_UNDRIVEN, BS_CAND, BS_PICK, BS_END } bd_sweep;
+typedef enum { BS_COUNT, BS_VOTE, BS_OWN, BS_PEER, BS_UNDRIVEN, BS_CAND, BS_PICK, BS_END } bd_sweep;
 
 /* The visits of the modules: the votes, the tie-break, the final visit. */
 enum { BP_VOTE, BP_TIE, BP_FINAL, BP_N };
@@ -517,15 +517,36 @@ static void vote_conn(const bd_mod *mod, uint32_t tp) {
     }
 }
 
-/* Two settled outputs share a bit: each names the other. */
+/* Whether port first sorts before port second: by cell type name, then port name (a total order).
+ */
+static bool port_less(const bd_run *run, uint32_t first, uint32_t second) {
+    const odin3_elab1_bbport *pa = odin3_vec_cat(&run->e1->bbports, first);
+    const odin3_elab1_bbport *pb = odin3_vec_cat(&run->e1->bbports, second);
+    const odin3_elab1_bbox *ba = odin3_elab1_bbox_at(run->e1, run->ps[first].box - 1);
+    const odin3_elab1_bbox *bb = odin3_elab1_bbox_at(run->e1, run->ps[second].box - 1);
+    int cmp = strcmp(odin3_elab1_str(run->e1, ba->name), odin3_elab1_str(run->e1, bb->name));
+    cmp = cmp != 0 ? cmp
+                   : strcmp(odin3_elab1_str(run->e1, pa->port.name),
+                            odin3_elab1_str(run->e1, pb->port.name));
+    return cmp < 0;
+}
+
+/* Port tp names port other (+1) as its peer if that sorts before the peer it has. */
+static void name_peer(bd_run *run, uint32_t tp, uint32_t other) {
+    uint32_t cur = run->ps[tp].peer;
+    run->ps[tp].peer = cur == 0 || port_less(run, other - 1, cur - 1) ? other : cur;
+}
+
+/* Two settled outputs share a bit: each names the other (the smallest, so the order of the
+ * instances does not show). */
 static void link_ports(bd_run *run, uint32_t tp, uint32_t other) {
     if (other != tp + 1) {
-        run->ps[tp].peer = run->ps[tp].peer != 0 ? run->ps[tp].peer : other;
-        run->ps[other - 1].peer = run->ps[other - 1].peer != 0 ? run->ps[other - 1].peer : tp + 1;
+        name_peer(run, tp, other);
+        name_peer(run, other - 1, tp + 1);
     }
 }
 
-/* A settled output or inout takes its bits; an output on a bit another output has is a conflict. */
+/* A settled output or inout takes its bits; the owner of a bit is its smallest output. */
 static void own_conn(bd_mod *mod, uint32_t tp) {
     uint8_t dir = mod->run->ps[tp].dir;
     for (size_t at = 0; at < mod->segs.len && dir != ODIN3_DIR_IN; at++) {
@@ -534,12 +555,24 @@ static void own_conn(bd_mod *mod, uint32_t tp) {
         for (uint32_t i = 0; i < seg->count; i++) {
             uint8_t *flags = &net->bits[seg->first + i];
             uint32_t *owner = &net->own[seg->first + i];
-            if (dir == ODIN3_DIR_OUT && (*flags & BD_ROUT) != 0) {
-                link_ports(mod->run, tp, *owner);
-            } else if (dir == ODIN3_DIR_OUT) {
+            if (dir == ODIN3_DIR_OUT && (*owner == 0 || port_less(mod->run, tp, *owner - 1))) {
                 *owner = tp + 1;
             }
             *flags |= dir == ODIN3_DIR_OUT ? BD_ROUT : BD_RINO;
+        }
+    }
+}
+
+/* A settled output on a bit another output owns is a conflict: both name the other. */
+static void peer_conn(bd_mod *mod, uint32_t tp) {
+    for (size_t at = 0; at < mod->segs.len && mod->run->ps[tp].dir == ODIN3_DIR_OUT; at++) {
+        const bd_seg *seg = odin3_vec_cat(&mod->segs, at);
+        const bd_net *net = odin3_vec_cat(&mod->netv, seg->net);
+        for (uint32_t i = 0; i < seg->count; i++) {
+            uint32_t owner = net->own[seg->first + i];
+            if (owner != 0) {
+                link_ports(mod->run, tp, owner);
+            }
         }
     }
 }
@@ -553,7 +586,9 @@ static void undriven_conn(const bd_mod *mod, uint32_t tp) {
         for (uint32_t i = 0; i < seg->count; i++) {
             uint8_t flags = net->bits[seg->first + i];
             bool bare = (flags & (BD_DRV | BD_BIDI | BD_ROUT | BD_RINO)) == 0;
-            if (bare && (flags & BD_UM) != 0 && state->dir == ODIN3_DIR_IN && !state->has_net) {
+            bool less = !state->has_net || strcmp(odin3_elab1_str(mod->run->e1, net->name),
+                                                  odin3_elab1_str(mod->run->e1, state->net)) < 0;
+            if (bare && (flags & BD_UM) != 0 && state->dir == ODIN3_DIR_IN && less) {
                 state->has_net = true;
                 state->net = net->name;
             }
@@ -610,6 +645,8 @@ static void visit_conn(bd_mod *mod, uint32_t tp) {
         vote_conn(mod, tp);
     } else if (mod->sweep == BS_OWN) {
         own_conn(mod, tp);
+    } else if (mod->sweep == BS_PEER) {
+        peer_conn(mod, tp);
     } else {
         undriven_conn(mod, tp);
     }
@@ -688,9 +725,9 @@ static void scan_drivers(bd_mod *mod, odin3_ast_id item) {
 /* The visits of a phase: the first collects the votes; the second (with the settled directions)
  * finds conflicts and nets that nothing drives. */
 static const bd_sweep k_plan[BP_N][BS_END] = {
-    {BS_COUNT, BS_VOTE, BS_END, BS_END, BS_END, BS_END},
-    {BS_COUNT, BS_OWN, BS_CAND, BS_PICK, BS_END, BS_END},
-    {BS_COUNT, BS_OWN, BS_UNDRIVEN, BS_END, BS_END, BS_END},
+    {BS_COUNT, BS_VOTE, BS_END, BS_END, BS_END, BS_END, BS_END},
+    {BS_COUNT, BS_OWN, BS_PEER, BS_CAND, BS_PICK, BS_END, BS_END},
+    {BS_COUNT, BS_OWN, BS_PEER, BS_UNDRIVEN, BS_END, BS_END, BS_END},
 };
 
 static void analyse_module(bd_run *run, odin3_ast_id module) {
@@ -773,21 +810,48 @@ static void port_notes(bd_run *run, uint32_t tp, odin3_strbuf *text) {
     }
 }
 
-/* The black box's ports get their final directions; the WARNING lists them, then the notes. */
+/* The ports of the box (port + 1) sorted by name, so the text does not follow the order the
+ * instances named them in; NULL when out of memory. */
+static uint32_t *sorted_ports(bd_run *run, const odin3_elab1_bbox *box) {
+    uint32_t *list = odin3_arena_alloc(run->arena, (box->n_ports + 1) * sizeof *list);
+    uint32_t count = 0;
+    for (uint32_t at = box->first_port; list != NULL && at != 0;) {
+        const odin3_elab1_bbport *port = odin3_vec_cat(&run->e1->bbports, at - 1);
+        const char *name = odin3_elab1_str(run->e1, port->port.name);
+        uint32_t k = count++;
+        for (; k > 0; k--) {
+            const odin3_elab1_bbport *prev = odin3_vec_cat(&run->e1->bbports, list[k - 1] - 1);
+            if (strcmp(odin3_elab1_str(run->e1, prev->port.name), name) <= 0) {
+                break;
+            }
+            list[k] = list[k - 1];
+        }
+        list[k] = at;
+        at = port->next;
+    }
+    return list;
+}
+
+/* The black box's ports get their final directions; the WARNING lists them (by name), then the
+ * notes. */
 static void settle_box(bd_run *run, const odin3_elab1_bbox *box) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
+    const uint32_t *list = sorted_ports(run, box);
+    latch(run, list == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK);
     for (uint32_t at = box->first_port; at != 0 && run->st == ODIN3_OK;) {
         odin3_elab1_bbport *port = odin3_vec_at(&run->e1->bbports, at - 1);
         port->port.dir = run->ps[at - 1].dir;
+        at = port->next;
+    }
+    for (uint32_t k = 0; k < box->n_ports && run->st == ODIN3_OK; k++) {
+        const odin3_elab1_bbport *port = odin3_vec_cat(&run->e1->bbports, list[k] - 1);
         latch(run, odin3_strbuf_appendf(&text, "%s%s=%s", text.len > 0 ? ", " : "",
                                         odin3_elab1_str(run->e1, port->port.name),
                                         dir_text((odin3_dir)port->port.dir)));
-        at = port->next;
     }
-    for (uint32_t at = box->first_port; at != 0 && run->st == ODIN3_OK;) {
-        port_notes(run, at - 1, &text);
-        at = ((const odin3_elab1_bbport *)odin3_vec_cat(&run->e1->bbports, at - 1))->next;
+    for (uint32_t k = 0; k < box->n_ports && run->st == ODIN3_OK; k++) {
+        port_notes(run, list[k] - 1, &text);
     }
     if (run->st == ODIN3_OK && text.len > 0) {
         odin3_elab1_warn_once(run->e1, box->at,

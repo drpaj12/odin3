@@ -185,16 +185,34 @@ static odin3_status port_notes(const jr *rd, const jr_iport *port, odin3_strbuf 
     return st;
 }
 
-/* The directions of the type's ports ("a=input, y=output"), then the notes on the inferred ones. */
+/* The k-th port of the type by name (rank 0 is the smallest), so the text does not follow the order
+ * the cells named the ports in. */
+static const jr_iport *nth_by_name(const jr *rd, const jr_implicit *entry, size_t rank) {
+    for (size_t pos = 0; pos < entry->ports.len; pos++) {
+        const jr_iport *port = odin3_vec_cat(&entry->ports, pos);
+        size_t below = 0;
+        for (size_t other = 0; other < entry->ports.len; other++) {
+            const jr_iport *cmp = odin3_vec_cat(&entry->ports, other);
+            below += strcmp(jr_str(rd, cmp->name_str), jr_str(rd, port->name_str)) < 0 ? 1U : 0U;
+        }
+        if (below == rank) {
+            return port;
+        }
+    }
+    return odin3_vec_cat(&entry->ports, rank);
+}
+
+/* The directions of the type's ports ("a=input, y=output", by name), then the notes on the
+ * inferred ones. */
 static odin3_status list_dirs(const jr *rd, const jr_implicit *entry, odin3_strbuf *text) {
     odin3_status st = ODIN3_OK;
-    for (size_t pos = 0; st == ODIN3_OK && pos < entry->ports.len; pos++) {
-        const jr_iport *port = odin3_vec_cat(&entry->ports, pos);
-        st = odin3_strbuf_appendf(text, "%s%s=%s", pos > 0 ? ", " : "", jr_str(rd, port->name_str),
+    for (size_t rank = 0; st == ODIN3_OK && rank < entry->ports.len; rank++) {
+        const jr_iport *port = nth_by_name(rd, entry, rank);
+        st = odin3_strbuf_appendf(text, "%s%s=%s", rank > 0 ? ", " : "", jr_str(rd, port->name_str),
                                   dir_text(port->def.dir));
     }
-    for (size_t pos = 0; st == ODIN3_OK && pos < entry->ports.len; pos++) {
-        const jr_iport *port = odin3_vec_cat(&entry->ports, pos);
+    for (size_t rank = 0; st == ODIN3_OK && rank < entry->ports.len; rank++) {
+        const jr_iport *port = nth_by_name(rd, entry, rank);
         st = port->dir_known ? ODIN3_OK : port_notes(rd, port, text);
     }
     return st;
