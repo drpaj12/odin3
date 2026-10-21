@@ -3657,6 +3657,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         file(GLOB _loc_lpm ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_*.v
                            ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_s[dp]*.v)
         list(SORT _loc_lpm)
+        # A Debug and a Release build leave the same design: opt -full leaves no unread constant
+        # driver behind (the Debug-only settle sweep of opt_expr once made two; the micros sweep
+        # pins are Release counts). The micro has two FFs and nothing constant.
+        add_test(NAME opt_full_no_stray_consts
+            COMMAND sh -c "\"$0\" -p \"read_verilog $1; proc; opt; wreduce; opt_clean; opt -full; dump_locs --types $2\" && ! grep -q 'node:[$]_CONST' \"$2\""
+                    $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/bm_DL_logic_w_Dff.v
+                    ${PROJECT_BINARY_DIR}/loc_tmp/opt_full_consts.txt)
+        set_tests_properties(opt_full_no_stray_consts PROPERTIES LABELS "loc;unit")
         odin3_add_loc_test(loc_word LEVEL word SET default LABELS "loc;unit" FILES ${_json_default})
         odin3_add_loc_test(loc_lpm LEVEL lpm SET lpm LABELS "loc;unit" FILES ${_loc_lpm})
         odin3_add_loc_test(loc_micros_word LEVEL word SET micros LABELS "sweep;loc" FILES ${_json_micros})
