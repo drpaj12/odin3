@@ -239,11 +239,21 @@ class IsolatedLoaderTest(unittest.TestCase):
             self.assertEqual(odin3_graph.main([str(path)]), 1)
 
 
+def cli_env() -> dict[str, str]:
+    """Environment for a child odin3 CLI: no LD_PRELOAD (CMake preloads the ASan runtime for the
+    cffi library in this process; the CLI links its own runtime and aborts on a second one)."""
+    return {k: v for k, v in os.environ.items() if k not in ("LD_PRELOAD", "LD_AUDIT")}
+
+
 def run_cli(script: str) -> str:
     """Run an odin3 script (-p) and return its stdout."""
     assert CLI is not None
     done = subprocess.run(
-        [CLI, "-p", script], capture_output=True, text=True, check=False, cwd=REPO_ROOT
+        [CLI, "-p", script], capture_output=True,
+        text=True,
+        check=False,
+        cwd=REPO_ROOT,
+        env=cli_env(),
     )
     if done.returncode != 0:
         raise AssertionError(f"odin3 -p '{script}' failed:\n{done.stdout}\n{done.stderr}")
@@ -488,6 +498,7 @@ class RoundTripTest(unittest.TestCase):
                         text=True,
                         check=False,
                         cwd=REPO_ROOT,
+                        env=cli_env(),
                     )
                     self.assertNotEqual(done.returncode, 0, micro)
 
