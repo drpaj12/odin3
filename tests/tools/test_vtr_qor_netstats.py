@@ -28,9 +28,9 @@ from qor_netstats import (
     MalformedBlif,
     NetStats,
     abc_header,
+    dead_hardblocks,
     hardblocks_lost,
     netstats,
-    subckt_counts,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -76,33 +76,49 @@ class TempTest(unittest.TestCase):
 
 
 class HardBlocksLostTest(TempTest):
-    """subckt_counts and hardblocks_lost: the guard for hard blocks that VTR's ABC step drops."""
+    """dead_hardblocks and hardblocks_lost: the guard for hard blocks that lose every reader."""
 
     BEFORE = (
-        ".model top\n.inputs a\n.outputs o\n"
+        ".model top\n.inputs a\n.outputs o p\n"
         ".subckt single_port_ram clk=a out=o\n.subckt single_port_ram clk=a out=p\n"
-        ".subckt adder a=a\n.end\n.model adder\n.inputs a\n.outputs c\n.blackbox\n.end\n"
+        ".subckt adder a=a b=a cin=a cout=c sumout=s\n.names s q\n1 1\n.latch q r re a 0\n"
+        ".end\n.model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
     )
 
-    def test_counts_per_model_first_model_only(self) -> None:
-        got = subckt_counts(self.write(self.BEFORE))
-        self.assertEqual(got, {"single_port_ram": 2, "adder": 1})
-
-    def test_drop_is_reported(self) -> None:
-        after = self.BEFORE.replace(".subckt single_port_ram clk=a out=p\n", "")
+    def pair(self, after: str) -> tuple[Path, Path]:
         before_path = self.write(self.BEFORE)
-        after_path = before_path.with_name("after.blif")
-        after_path.write_bytes(after.encode("latin-1"))
-        self.assertEqual(hardblocks_lost(before_path, after_path), {"single_port_ram": (2, 1)})
+        after_path = self.write(after, "after.blif")
+        return before_path, after_path
+
+    def test_nothing_dead_when_every_output_is_read(self) -> None:
+        self.assertEqual(dead_hardblocks(self.write(self.BEFORE)), {})
+
+    def test_dropped_outputs_make_rams_dead(self) -> None:
+        after = self.BEFORE.replace(".outputs o p\n", ".outputs\n")
+        before_path, after_path = self.pair(after)
+        self.assertEqual(dead_hardblocks(after_path), {"single_port_ram": 2})
+        self.assertEqual(hardblocks_lost(before_path, after_path), {"single_port_ram": 2})
         self.assertEqual(hardblocks_lost(before_path, before_path), {})
 
-    def test_all_gone_and_extra_models_ignored(self) -> None:
-        before_path = self.write(self.BEFORE)
-        after_path = before_path.with_name("after.blif")
-        after_path.write_bytes(b".model top\n.inputs a\n.outputs o\n.subckt mult a=a\n.end\n")
+    def test_dead_before_is_not_a_loss_and_adder_needs_all_outputs_unread(self) -> None:
+        both = self.BEFORE.replace(".names s q\n1 1\n.latch q r re a 0\n", "")
+        before_path, after_path = self.pair(both)
+        self.assertEqual(dead_hardblocks(after_path), {"adder": 1})  # cout and sumout unread
+        self.assertEqual(hardblocks_lost(after_path, after_path), {})
+        self.assertEqual(hardblocks_lost(before_path, after_path), {"adder": 1})
+
+    def test_stub_outputs_and_dual_port_formals(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs o\n"
+            ".subckt dual_port_ram clk=a out1=o out2=x\n.subckt box i=a o[0]=u o[1]=v\n"
+            ".names u o2\n1 1\n.end\n.model box\n.inputs i\n.outputs o[0] o[1]\n"
+            ".blackbox\n.end\n"
+        )
+        self.assertEqual(dead_hardblocks(self.write(text)), {})
         self.assertEqual(
-            hardblocks_lost(before_path, after_path),
-            {"adder": (1, 0), "single_port_ram": (2, 0)},
+            dead_hardblocks(self.write(text.replace(".outputs o\n", ".outputs\n").replace(
+                ".names u o2\n1 1\n", ""), "d.blif")),
+            {"dual_port_ram": 1, "box": 1},
         )
 
 

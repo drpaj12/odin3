@@ -995,15 +995,15 @@ class WriterTest(unittest.TestCase):
         qor_table.write_csv(clean, self.dir / "runs.csv", self.dir / "ratios.csv")
         base = replace(clean, replace_job(run("O", "sha"), {}))
         flagged = replace(clean, replace_job(run("O", "sha"),
-                                             {"hardblocks_lost": "single_port_ram:32>0"}))
+                                             {"hardblocks_lost": "single_port_ram:32"}))
         qor_table.write_csv(flagged, self.dir / "runs.csv", self.dir / "ratios.csv")
         row = next(line for line in (self.dir / "runs.csv").read_text(encoding="utf-8")
                    .splitlines() if ",sha,O," in line)
-        self.assertTrue(row.endswith(",single_port_ram:32>0"), row)
+        self.assertTrue(row.endswith(",single_port_ram:32"), row)
         sha = next(r for r in flagged if (r.leg, r.design) == ("O", "sha"))
-        self.assertEqual(qor_table.hardblocks_lost(sha), "single_port_ram:32>0")
+        self.assertEqual(qor_table.hardblocks_lost(sha), "single_port_ram:32")
         layout = qor_table._layout(flagged, None, None)
-        self.assertEqual(sum("single_port_ram:32>0" in line
+        self.assertEqual(sum("single_port_ram:32" in line
                              for line in qor_table._lost_lines(layout)), 1)
         self.assertEqual(qor_table._lost_lines(qor_table._layout(base, None, None)), [])
 

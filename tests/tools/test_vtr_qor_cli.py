@@ -98,10 +98,10 @@ if start is None:
     (temp / "parmys.out").write_text({TIMEV!r})
 else:
     shutil.copyfile(circuit, pre)
-    drop = root / "drop"  # the designs whose ABC step loses every .subckt (hardblocks_lost)
+    drop = root / "drop"  # designs whose ABC step drops all POs
     if drop.exists() and design in drop.read_text().split():
-        keep = [l for l in pre.read_text().splitlines(True) if not l.startswith(".subckt")]
-        pre.write_text("".join(keep))
+        lines = pre.read_text().splitlines(True)
+        pre.write_text("".join(".outputs\\n" if l.startswith(".outputs") else l for l in lines))
 if start != "vpr":
     (temp / "abc0.out").write_text("top : lev = 3\\n" + {TIMEV!r})
 (temp / "vpr.out").write_text("The entire flow of VPR took 0.25 seconds\\n")
@@ -1012,8 +1012,9 @@ class ControlLegTest(CliTestBase):
         job.json hardblocks_lost; a clean run leaves it empty and says nothing."""
         self.golden_for("ch_intrinsics")
         (self.bin / "blif.txt").write_text(
-            BLIF.replace(".end\n", ".subckt single_port_ram clk=clk out=y\n"
-                                    ".subckt single_port_ram clk=clk out=z\n.end\n"))
+            BLIF.replace(".outputs y", ".outputs y z").replace(
+                ".end\n", ".subckt single_port_ram clk=clk out=z\n"
+                          ".subckt single_port_ram clk=clk out=w\n.end\n"))
         code, _, err = self.cli("run", "--leg", "Oprime", "--designs", "ch_intrinsics")
         self.assertEqual(code, 0, err)
         self.assertNotIn("hardblocks_lost", err)
@@ -1024,9 +1025,9 @@ class ControlLegTest(CliTestBase):
                                 "--rerun")
         self.assertEqual(code, 0, err)
         self.assertIn("WARNING", err)
-        self.assertIn("hardblocks_lost single_port_ram:2>0", err)
+        self.assertIn("hardblocks_lost single_port_ram:1", err)
         (job,) = self.job_dirs("Oprime", "ch_intrinsics")
-        self.assertEqual(self.load(job / "job.json")["hardblocks_lost"], "single_port_ram:2>0")
+        self.assertEqual(self.load(job / "job.json")["hardblocks_lost"], "single_port_ram:1")
 
     def test_pprime_parmys_part(self) -> None:
         """Point (o): the Parmys stage cost comes from the latest P job's parmys.out; without a P

@@ -470,16 +470,16 @@ def _netlist(job: Job, parse: Mapping[str, str], attempt_start: float) -> dict[s
 
 
 def _hardblocks_lost(job: Job) -> str:
-    """The hard blocks VTR's flow lost between the BLIF the job started from (``<J>/<d>.blif``:
-    Odin III's own, or its ABC output) and ``run/<d>.pre-vpr.blif``, as ``model:before>after``
-    joined by ``;``; empty when none dropped or either file is missing or unreadable. VTR's ABC
-    step once dropped every RAM behind an output port bit, silently."""
+    """The hard blocks left with no reader by VTR's flow: the instances of ``run/<d>.pre-vpr.blif``
+    that nothing reads and ``<J>/<d>.blif`` (what the flow started from) did not leave unread,
+    as ``model:count`` joined by ``;``; empty when none or either file is missing. VPR sweeps
+    them. VTR's ABC step once dropped every RAM behind a primary output, silently."""
     pre = job.job_dir / "run" / f"{job.design}.pre-vpr.blif"
     try:
         lost = qor_netstats.hardblocks_lost(job.job_dir / f"{job.design}.blif", pre)
     except (OSError, ValueError):
         return ""
-    return ";".join(f"{model}:{n}>{now}" for model, (n, now) in lost.items())
+    return ";".join(f"{model}:{n}" for model, n in lost.items())
 
 
 def _frontend_cost(job: Job) -> tuple[float | None, int | None, list[str]]:
@@ -561,8 +561,8 @@ def finish_job(job: Job, attempt_start: float, *, ctx: RunContext) -> dict[str, 
     _warn(ctx, warnings)
     lost = _hardblocks_lost(job)
     if lost:
-        _warn(ctx, [f"{PREFIX}WARNING: {label}: hardblocks_lost {lost}: hard blocks dropped "
-                    f"between {job.design}.blif and {job.design}.pre-vpr.blif"])
+        _warn(ctx, [f"{PREFIX}WARNING: {label}: hardblocks_lost {lost}: hard blocks with no "
+                    f"reader in {job.design}.pre-vpr.blif, VPR sweeps them"])
     inputs = job.inputs
     odin3 = job.leg != "P"
     metrics: dict[str, object] = {

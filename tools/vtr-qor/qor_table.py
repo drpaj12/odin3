@@ -1279,7 +1279,7 @@ def _with_ratios(layout: _Layout, rows: list[list[str]], names: Sequence[str],
 
 def hardblocks_lost(run: Run) -> str:
     """The hard blocks VTR's flow dropped in this run (job.json ``hardblocks_lost``, e.g.
-    ``single_port_ram:32>0``), empty when none."""
+    ``single_port_ram:32``), empty when none."""
     value = run.job.get("hardblocks_lost")
     return value if isinstance(value, str) else ""
 
@@ -1301,8 +1301,9 @@ def _lost_lines(layout: _Layout) -> list[str]:
             for run in layout.runs if hardblocks_lost(run)]
     if not lost:
         return []
-    return ["", "WARNING hardblocks_lost (model:before>after, `.subckt` count of the BLIF the "
-            "flow started from vs the pre-VPR BLIF):", "", *lost, ""]
+    note = ("WARNING hardblocks_lost (model:count of hard blocks with no reader in the pre-VPR "
+            "BLIF that the BLIF the flow started from had read; VPR sweeps them):")
+    return ["", note, "", *lost, ""]
 
 
 def _hard_blocks(layout: _Layout, run: Run) -> str:
