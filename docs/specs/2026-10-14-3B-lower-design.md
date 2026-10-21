@@ -55,7 +55,7 @@ The Phase 3 script (PHASE3 exit test item 3, with 3A's and this spec's recommend
 `+`):
 
 ```
-read_verilog --nolatches; proc; opt; flatten; +opt; [wreduce;] hardmap; lower; +opt -fast; +compact; abc; write_blif --vtr
+read_verilog --nolatches; proc; opt; flatten; +opt -full; [wreduce;] hardmap; lower; +opt -fast; +compact; abc; write_blif --vtr
 ```
 
 **Ordering rules** (each is enforced or checked by something, in the right-hand column):

@@ -61,7 +61,9 @@ fixed point (``%XX`` with upper-case hex is the byte, a leading ``%`` followed b
 dropped); a constant cover becomes a zero-input generator and a non-constant 1-input cover one
 row (§6); a net with readers and no driver reads `gnd` on a `.names` input, a latch D and a
 primary output (a buffer from `gnd` drives it) and `unconn` on a `.subckt` input (§9.2: x or
-undriven); a `.blackbox` model no `.subckt` uses is dropped (§8.3: used stubs only).
+undriven); the buffer `.names a y` / `1 1` the writer puts on a primary output `y` that a
+`.subckt` output `a` drives (and nothing else reads) is dropped, `y` on the box (§9.2); a
+`.blackbox` model no `.subckt` uses is dropped (§8.3: used stubs only).
 
 Everything is iterative (explicit worklists, no recursion).
 """
@@ -818,8 +820,35 @@ def vtr_normalize(model: blif.Model, models: dict[str, blif.Model] | None = None
     if filled:
         _ensure_generator(model, UNCONN, models)
     _tie_undriven(model, models or {})
+    _elide_po_buffers(model, models or {})
     _mark_open_generator(model)
     return model
+
+
+def _elide_po_buffers(model: blif.Model, models: dict[str, blif.Model]) -> None:
+    """Undoes `write_blif --vtr`'s buffer on a primary output a `.subckt` output pin drives (3E
+    §9.2): `.subckt ... out=a` and `.names a y` / `1 1` with `y` an output, `a` read by nothing
+    else, become `.subckt ... out=y`. VTR's ABC drops an output a hard block drives directly, so
+    the writer buffers it; a Parmys or Odin II golden has the output on the box."""
+    reads: dict[str, int] = {}
+    for cell in model.cells:
+        for net in blif.cell_io(cell, models)[0]:
+            reads[net] = reads.get(net, 0) + 1
+    boxes = {a: cell for cell in model.cells if isinstance(cell, blif.Subckt)
+             for a in blif.cell_io(cell, models)[1]}
+    outputs = set(model.outputs)
+    gone: list[blif.Cell] = []
+    for cell in model.cells:
+        if not (isinstance(cell, blif.Names) and len(cell.inputs) == 1
+                and cell.rows == [("1", "1")] and cell.output in outputs):
+            continue
+        net = cell.inputs[0]
+        box = boxes.get(net)
+        if box is None or net in outputs or reads.get(net, 0) != 1 or cell.output in boxes:
+            continue
+        box.conns = [(f, cell.output if a == net else a) for f, a in box.conns]
+        gone.append(cell)
+    model.cells = [c for c in model.cells if not any(c is g for g in gone)]
 
 
 OPEN_MARK = (".param", "open")

@@ -130,12 +130,12 @@ source or the parameters change (decision 17: "cached per VTR commit").
 
 ```
 /usr/bin/time -v -o <J>/frontend.time $O3 --diag-paths resolved -p "read_techlib $LIB; \
-  read_verilog --nolatches $V/vtr_flow/benchmarks/verilog/<d>.v; proc; opt; flatten; wreduce; \
-  hardmap; lower; opt -fast; compact; abc --lut <K>; write_blif --vtr --lut-k <K> <J>/<d>.blif" > <J>/frontend.log 2>&1
+  read_verilog --nolatches --vtr-compat $V/vtr_flow/benchmarks/verilog/<d>.v; proc; fsm; opt; flatten; opt -full; wreduce; \
+  hardmap; lower; abc --lut <K>; write_blif --vtr --lut-k <K> <J>/<d>.blif" > <J>/frontend.log 2>&1
 $PY run_vtr_flow.py <J>/<d>.blif <arch> -start vpr <common>
 ```
 
-The script is PHASE3 exit item 3's, with `wreduce` (decision 7b) and the ABC script left to the
+The script is PHASE3 exit item 3's up to `lower` (`opt -full` after `flatten` as Parmys: x mux data left by `flatten` otherwise hides RAM reads from the ABC cleanup, boundtop), with `wreduce` (decision 7b) and the ABC script left to the
 default (`lib/abc/vtr.abc`, decision 10). Front-end cost = `frontend.time`. Available once
 `odin3 --help` lists every pass in the script (§9, leg availability).
 

@@ -13,9 +13,9 @@
   b[9]=unconn b[10]=unconn b[11]=unconn b[12]=unconn b[13]=unconn b[14]=unconn b[15]=unconn \
   b[16]=unconn b[17]=unconn b[18]=unconn b[19]=unconn b[20]=unconn b[21]=unconn b[22]=unconn \
   b[23]=unconn b[24]=unconn b[25]=unconn b[26]=unconn b[27]=unconn b[28]=unconn b[29]=unconn \
-  b[30]=unconn b[31]=unconn b[32]=unconn b[33]=unconn b[34]=unconn b[35]=unconn out[0]=y[0] \
-  out[1]=y[1] out[2]=y[2] out[3]=y[3] out[4]=y[4] out[5]=y[5] out[6]=y[6] out[7]=y[7] out[8]=y[8] \
-  out[9]=y[9] out[10]=y[10] out[11]=y[11] out[12]=y[12] out[13]=y[13] out[14]=y[14] out[15]=$n47 \
+  b[30]=unconn b[31]=unconn b[32]=unconn b[33]=unconn b[34]=unconn b[35]=unconn out[0]=$n16 \
+  out[1]=$n17 out[2]=$n18 out[3]=$n19 out[4]=$n20 out[5]=$n21 out[6]=$n22 out[7]=$n23 out[8]=$n24 \
+  out[9]=$n25 out[10]=$n26 out[11]=$n27 out[12]=$n28 out[13]=$n29 out[14]=$n30 out[15]=$n47 \
   out[16]=$n48 out[17]=$n49 out[18]=$n50 out[19]=$n51 out[20]=$n52 out[21]=$n53 out[22]=$n54 \
   out[23]=$n55 out[24]=$n56 out[25]=$n57 out[26]=$n58 out[27]=$n59 out[28]=$n60 out[29]=$n61 \
   out[30]=$n62 out[31]=$n63 out[32]=$n64 out[33]=$n65 out[34]=$n66 out[35]=$n67 out[36]=$n68 \
@@ -24,6 +24,36 @@
   out[51]=$n83 out[52]=$n84 out[53]=$n85 out[54]=$n86 out[55]=$n87 out[56]=$n88 out[57]=$n89 \
   out[58]=$n90 out[59]=$n91 out[60]=$n92 out[61]=$n93 out[62]=$n94 out[63]=$n95 out[64]=$n96 \
   out[65]=$n97 out[66]=$n98 out[67]=$n99 out[68]=$n100 out[69]=$n101 out[70]=$n102 out[71]=$n103
+.names $n16 y[0]
+1 1
+.names $n17 y[1]
+1 1
+.names $n18 y[2]
+1 1
+.names $n19 y[3]
+1 1
+.names $n20 y[4]
+1 1
+.names $n21 y[5]
+1 1
+.names $n22 y[6]
+1 1
+.names $n23 y[7]
+1 1
+.names $n24 y[8]
+1 1
+.names $n25 y[9]
+1 1
+.names $n26 y[10]
+1 1
+.names $n27 y[11]
+1 1
+.names $n28 y[12]
+1 1
+.names $n29 y[13]
+1 1
+.names $n30 y[14]
+1 1
 .end
 
 .model multiply

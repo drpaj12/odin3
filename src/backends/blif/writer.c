@@ -870,7 +870,7 @@ static odin3_status take_named(blif_writer *wr, odin3_net_id net, bool taken) {
  * is_generator), unless a port bit of another net or an earlier net already has that form (VB-10
  * rule 4, legalisation before uniqueness): then `$n<ID>`….
  */
-static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t real) {
+static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t real, bool hard) {
     odin3_bytes own = str_bytes(wr, real);
     bool changed = false;
     odin3_strbuf_clear(&wr->cand);
@@ -887,11 +887,12 @@ static odin3_status name_named_vtr(blif_writer *wr, odin3_net_id net, uint32_t r
     uint32_t id = 0;
     uint64_t owner = 0;
     bool found = odin3_strtab_find(wr->gen_names, buf_bytes(&wr->cand), &id);
-    bool own_port = found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
+    bool own_port = !hard && found && odin3_u64map_get(wr->claims, id, &owner) && owner == net.v;
     st = take_named(wr, net, found && !own_port);
-    /* a net under its own port bit's name was counted with the port bit (port_renamed) */
-    return st == ODIN3_OK && changed && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v))
-                                                  : st;
+    /* a net under its own port bit's name was counted with the port bit (port_renamed); a hard
+     * port net keeps its own name unless the port bit has it (then `$n<ID>`, counted here) */
+    bool lost = changed || (hard && found);
+    return st == ODIN3_OK && lost && !own_port ? note_renamed(wr, net.v, gen_get(wr, net.v)) : st;
 }
 
 /*
@@ -917,6 +918,36 @@ static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t
     return ODIN3_OK;
 }
 
+/* VTR: true for a net on a port bit that a hard cell's output pin drives. It is written under a
+ * name of its own (its user/provenance name when it has one and the port bit does not take it, else
+ * `$n<ID>`; the port bit's name is the name of record), so the port bit gets a `.names` buffer
+ * (port_buffer): VTR's ABC step drops a primary output that a .subckt drives directly, and the hard
+ * cells behind it with it (spec 3E §9.2). */
+static bool hard_port_net(const blif_writer *wr, odin3_net_id net) {
+    uint64_t owner = 0;
+    odin3_pin_id driver = odin3_net_driver(wr->module, net);
+    return wr->vtr && odin3_pin_valid(driver) && odin3_u64map_get(wr->net_port, net.v, &owner) &&
+           hard_type(wr->design, odin3_node_type(wr->module, odin3_pin_node(wr->module, driver)));
+}
+
+/* VTR: an unnamed net a hard cell drives onto a port bit. HASH names it by provenance when it
+ * has such a name (as generate does); otherwise `$n<ID>` (the port bit keeps the name of record).
+ */
+static odin3_status name_hard_unnamed(blif_writer *wr, odin3_net_id net) {
+    bool found = false;
+    wr->last_applied = false;
+    odin3_status st = ODIN3_OK;
+    if (wr->opts->name_style == ODIN3_BLIF_NAMES_HASH) {
+        st = generate_provenance(wr, net, &found);
+        bool changed = false;
+        st = st == ODIN3_OK && found ? legalise(wr, &wr->cand, net, &changed) : st;
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return found ? take_generated(wr, net.v, net, true) : take_numbered(wr, net.v);
+}
+
 /* Chooses the name net is written under: its own name unless a port bit of another net or (plain)
  * a generator has it (then `$n<ID>`…, name_named_plain); for an unnamed net the first port bit name
  * on it, else a generated name. In the VTR dialect, each in its VB-10 form (name_named_vtr,
@@ -924,8 +955,12 @@ static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t
 static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
     uint32_t real = odin3_net_name(wr->module, net);
     uint64_t owner = 0;
+    bool hard = hard_port_net(wr, net);
+    if (hard && real == 0) {
+        return name_hard_unnamed(wr, net);
+    }
     if (real != 0) {
-        return wr->vtr ? name_named_vtr(wr, net, real) : name_named_plain(wr, net, real);
+        return wr->vtr ? name_named_vtr(wr, net, real, hard) : name_named_plain(wr, net, real);
     }
     if (odin3_u64map_get(wr->net_port, net.v, &owner)) {
         return set_gen(wr, net.v, (uint32_t)owner);
