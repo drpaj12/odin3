@@ -5,7 +5,7 @@
 #
 # Usage: pm-diff-micro <arch> <odin3> [<golden-root>]
 #   <arch>   k6_frac_N10_frac_chain_mem32K_40nm, k6_frac_N10_4add_2chains_depop50_mem20K_22nm or
-#            k4_N4_90nm (the directory names under ~/odin3-ws/golden)
+#            k4_N4_90nm or EArch (the directory names under ~/odin3-ws/golden)
 #   <odin3>  the odin3 binary
 # Exit 77 (skipped) without VTR_ROOT, without the arch XML or without the golden tree; else the exit
 # of hardmap-diff (0 every design identical, equivalent or listed; 1 a difference or a stale entry).
@@ -29,6 +29,7 @@ case "$arch" in
     k6_frac_N10_4add_2chains_depop50_mem20K_22nm)
         expect=(tests/hardmap/diff_expect.txt tests/partial_map/diff_expect_k6_COFFE_mem20K.txt) ;;
     k4_N4_90nm) expect=(tests/partial_map/diff_expect_k4_N4_90nm.txt) ;;
+    EArch) expect=(tests/hardmap/diff_expect.txt tests/partial_map/diff_expect_k6_COFFE_mem20K.txt) ;;
     *) echo "pm-diff-micro: unknown arch '$arch'" >&2; exit 2 ;;
 esac
 args=()
