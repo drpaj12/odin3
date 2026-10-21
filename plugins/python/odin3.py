@@ -76,6 +76,9 @@ def find_library() -> Path:
     raise FileNotFoundError("libodin3.so not found; build first or set ODIN3_LIB")
 
 
+_ABC_TRIED = False  # the abc adapter load was attempted in this process
+
+
 class Odin3Error(RuntimeError):
     """An ABI call returned a failure status (status: the odin3_status value)."""
 
@@ -106,6 +109,22 @@ class Odin3:
         self._object_cb = self.ffi.callback("odin3_prov_object_visit", _on_object(self))
         self._log_cb = self.ffi.callback("odin3_log_sink", _on_log(self))
         self._captures: list[Any] = []  # handles of the open capture_log blocks, innermost last
+        self._register_abc(Path(str(library or find_library())))
+
+    def _register_abc(self, library: Path) -> None:
+        """Register the in-process ABC engine, as the CLI does at start-up: load the adapter
+        libodin3_abc.so beside the library as a plugin (its odin3_plugin_init registers the
+        engine). Once per process (the registry is process-wide); without the adapter library,
+        or when an engine is already registered, the ``abc`` pass is simply unavailable."""
+        global _ABC_TRIED
+        adapter = library.resolve().parent / "libodin3_abc.so"
+        if _ABC_TRIED or not adapter.is_file():
+            return
+        _ABC_TRIED = True
+        try:
+            self.load_plugin(adapter)
+        except Odin3Error as exc:
+            LOG.warning("odin3: the abc engine was not registered: %s", exc)
 
     def version(self) -> str:
         return str(self.ffi.string(self.lib.odin3_version_string()).decode())

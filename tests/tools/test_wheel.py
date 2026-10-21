@@ -104,6 +104,20 @@ class WheelTest(unittest.TestCase):
             text = run([ipy, "-c", code, str(BLIF)], work / "read.log", env)
             self.assertIn("MODULE ", text)
             self.assertIn("site-packages/odin3/libodin3.so", text)
+            # The library alone registers the in-process ABC engine: abc runs from Python.
+            adder = work / "add.v"
+            adder.write_text("module top(input [3:0] a, b, output [4:0] y); assign y = a + b; "
+                             "endmodule\n")
+            abc_code = ("import odin3, sys; d = odin3.Design(); "
+                        "d.run_script('read_verilog ' + sys.argv[1] + '; proc; opt; lower; "
+                        "abc --lut 4'); print('ABC OK')")
+            self.assertIn("ABC OK", run([ipy, "-c", abc_code, str(adder)], work / "abc.log", env))
+            # The flow tools ship in the wheel: odin3-flow runs from outside the repo.
+            flow = install_venv / "bin" / "odin3-flow"
+            self.assertTrue(flow.is_file(), flow)
+            run([str(flow), "--target", "lpm", "--no-vpr", "--out", str(work / "flow-out"),
+                 str(adder)], work / "flow.log", env)
+            self.assertTrue((install_venv / "bin" / "odin3").is_file())
             cli = install_venv / "lib"
             found = list(cli.glob("python*/site-packages/odin3/bin/odin3"))
             self.assertEqual(len(found), 1)

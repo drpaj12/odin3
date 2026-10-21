@@ -10,6 +10,10 @@ license = "MIT"
 requires-python = ">=3.10"
 dependencies = ["cffi>=1.15"]
 
+[project.scripts]
+odin3 = "odin3._entry:odin3_main"
+odin3-flow = "odin3._entry:flow_main"
+
 [tool.scikit-build]
 # The wheel is built by CMake (CMakeLists.txt, SKBUILD branch): libodin3.so, the odin3 CLI and the
 # binding (plugins/python/odin3.py, installed as odin3/__init__.py) go into the odin3 package.

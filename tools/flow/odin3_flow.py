@@ -370,6 +370,11 @@ def resolve_vpr(flag: bool | None, target: str) -> bool:
 
 
 def default_odin3() -> Path:
+    """The CLI: the one bundled in the wheel (odin3/bin/odin3 beside odin3/data), else odin3 on
+    PATH, else build/release/odin3."""
+    bundled = HERE.parents[2] / "bin" / "odin3"
+    if HERE.parents[1].name == "data" and bundled.is_file():
+        return bundled
     found = shutil.which("odin3")
     return Path(found) if found else HERE.parents[1] / "build" / "release" / "odin3"
 
