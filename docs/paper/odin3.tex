@@ -143,7 +143,7 @@ the companies, I would suggest moving to a cloud service model as soon as possib
 is narrower. I wanted to run experiments that I could not do with Yosys, and I wanted the
 capabilities to run them. With Odin~III I now can.
 
-I call the suite that grows from Odin~III Yggdrasil, the world tree (Fig.~\ref{fig:yggdrasil}, in
+I call the suite that grows from Odin~III Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}, in
 Part~II). Odin~III is the trunk: every path from HDL to the tools passes through its one
 provenance IR, which is why I see it as the final frontier of the Odin line. The branches are
 Wyrd~III, Loki~III, Bifrost~III and Midgard~III (the Verilog Town game), and most of them are planned.
@@ -2459,14 +2459,14 @@ writers (ADR D10) are not part of v1.0.
 \label{sec:v1plan}
 
 After v1.0 the new tools live in their own repositories and use Odin III as a pip package, with
-no change to the core. I named the whole suite Yggdrasil, the world tree
+no change to the core. I named the whole suite Yggdrasil~III, the world tree
 (Fig.~\ref{fig:yggdrasil}). Odin~III is the trunk, and each project below is a branch. The
 decisions are mine of 2026-10-21. Only Odin~III v1.0 and the Wyrd~III runner are built.
 
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil}}
-\caption{Yggdrasil. Odin III is the trunk: every path from HDL and netlists, through the tools it
+\caption{Yggdrasil~III. Odin III is the trunk: every path from HDL and netlists, through the tools it
 links to, goes through its one provenance IR, and the oracles check it. The patch releases grow up
 the trunk. Wyrd~III and Loki~III branch to the left, and Leman~Russ~III is a placeholder branch from Loki~III.
 Bifrost~III is the bridge from the trunk's simulation API (S1) to Midgard~III and the Wyrd~III simulation
@@ -2517,9 +2517,12 @@ Seeker's Dilemma poses it~\cite{sarihi2024seekers}: the detector does not know w
 holds a Trojan, so it must decide whether one exists and, if so, where. Loki~III's clusters and L2
 graph analysis would supply the evidence. Leman~Russ~III is planned and not yet specified.
 
-\emph{The placement experiment} uses the provenance, or the clusters that Loki~III recovers, as VPR
-placement constraints (\code{--read\_vpr\_constraints}). It revisits the study of system-level
-information and FPGA placement~\cite{gharibian2010finding,gharibian2013analyzing}. It is a
-backlog item until the projects above finish.
+\emph{The Norns~III} is the placement experiment. It uses the provenance, or the clusters that
+Loki~III recovers, as VPR placement constraints (\code{--read\_vpr\_constraints}). Urd uses what the
+design was (the provenance hierarchy), Verdandi what is recovered now (Loki~III clusters), and Skuld
+what shall be (the placement they constrain); they run as Wyrd~III steps. It revisits the study of
+system-level information and FPGA
+placement~\cite{gharibian2010finding,gharibian2013analyzing}. It is a backlog item until the projects
+above finish.
 
 \end{document}

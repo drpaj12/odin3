@@ -1,4 +1,4 @@
-% Yggdrasil, the world tree: Odin III is the trunk and every tool grows from it (Part II, After v1.0).
+% Yggdrasil III, the world tree: Odin III is the trunk and every tool grows from it (Part II, After v1.0).
 % Status as of 2026-10-21 (POST-V1-ROADMAP). Wide figure: \textwidth (figure*).
 % Roots at the bottom (inputs, tools, oracles), the trunk in the middle (one provenance IR and its
 % patch releases, oldest at the bottom), branches left (Wyrd~III, Loki~III, Leman~Russ~III) and a bridge
@@ -63,5 +63,7 @@
   \draw[flowplanned] (r3.east) -| ([xshift=-3mm]bif.south east);
   \draw[flowplanned] (bif.east) -- (mid.west);
   \draw[flowplanned] (bif.west) -| node[edgelabel, above, pos=0.2] {sim panel} (wr.north);
+  \node[box, planned, text width=40mm] (nor) at (6.3,5.4) {\textbf{The Norns~III}\\\odinsub{placement experiment, backlog}};
+  \draw[flowplanned] (trunk.east |- nor.west) -- (nor.west);
   \odinlegend{anchor=north east, at={(9.0,3.4)}}
 \end{tikzpicture}

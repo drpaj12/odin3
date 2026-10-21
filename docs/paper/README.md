@@ -66,7 +66,8 @@ features table and the phases table together.
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
 | `fig_re` | the reverse-engineering and analysis flow | TikZ | `\columnwidth` |
-| `fig_yggdrasil` | Yggdrasil: Odin III as the trunk, with Wyrd III, Loki III, Leman Russ III, Bifrost III and Midgard III | TikZ | `\textwidth` |
+| `fig_yggdrasil` | Yggdrasil III: Odin III as the trunk, with Wyrd III, Loki III, Leman Russ III, Bifrost III and Midgard III | TikZ | `\textwidth` |
+| `fig_yggdrasil_tree`, `fig_yggdrasil_hybrid` | Variants of the Yggdrasil III figure for comparison (organic tree; tree silhouette with boxes), not used by the paper | TikZ | `\textwidth` |
 | `fig_flow` | the flow of a design, with what each stage does (drawn by `fig_flow_base`) | TikZ | `\textwidth` |
 | `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
 | `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
