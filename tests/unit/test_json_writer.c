@@ -7,6 +7,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "techlib/reader.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -1029,6 +1030,131 @@ static void test_write_failure_reason(void) {
     TEST_ASSERT_NOT_EQUAL_INT(0, access("t17.json", F_OK));
 }
 
+/* --- black-box modules: widths, implicit types, what is never written ------------------------ */
+
+static const odin3_port_def WBB_PORTS[] = {
+    {"d", ODIN3_DIR_IN, false, 0, "W", NULL, NULL, false},
+    {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
+};
+
+static const odin3_param_def WBB_PARAMS[] = {
+    {"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 3, NULL, 0, 0, 0}}};
+
+/* Declares black box "wbb" whose port d is W bits wide. */
+static odin3_celltype_id declare_wbb(void) {
+    odin3_celltype_def def = {
+        "wbb", ODIN3_GRAN_BLACKBOX, 0, WBB_PORTS, 2, WBB_PARAMS, 1, NULL, NULL, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
+    return id;
+}
+
+/* An instance `name` of wbb in mod with W = width. */
+static void add_wbb(odin3_module *mod, odin3_celltype_id type, const char *name, uint32_t width) {
+    odin3_net_id ins[MAX_COVER];
+    for (uint32_t i = 0; i < width; i++) {
+        ins[i] = new_net(mod, NULL);
+    }
+    odin3_net_id out = new_net(mod, NULL);
+    odin3_value params[1] = {odin3_value_int(width)};
+    odin3_node_spec spec = {type, intern(name), prov_at(7), params, 1};
+    odin3_netvec ports[2] = {{ins, width}, {&out, 1}};
+    add_node(mod, &spec, ports);
+}
+
+/* Instances of one type with different resolved port widths cannot be one module: the write fails
+ * and names the type and two instances, and no file is left (read_json would reject it). */
+static void test_mixed_width_instances_refused(void) {
+    odin3_celltype_id type = declare_wbb();
+    odin3_module *mod = new_module("top");
+    add_wbb(mod, type, "u1", 2);
+    add_wbb(mod, type, "u2", 4);
+    json_error[0] = '\0';
+    odin3_log_set_sink(json_sink, NULL);
+    odin3_status status = odin3_json_write(design, "t18.json");
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, status);
+    assert_has(json_error, "'wbb'");
+    assert_has(json_error, "'u1'");
+    assert_has(json_error, "'u2'");
+    assert_has(json_error, "'top'");
+    TEST_ASSERT_NOT_EQUAL_INT(0, access("t18.json", F_OK));
+}
+
+/* Equal widths in every instance: one module for the type, sized by them. */
+static void test_same_width_instances_one_module(void) {
+    odin3_celltype_id type = declare_wbb();
+    odin3_module *mod = new_module("top");
+    add_wbb(mod, type, "u1", 2);
+    add_wbb(mod, type, "u2", 2);
+    char *text = write_json("t19.json");
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, "\"wbb\": {"));
+    assert_has(text, "\"bits\": [ 2, 3 ]");
+    odin3_util_free(text);
+    (void)remove("t19.json");
+}
+
+static const odin3_port_def IMP_PORTS[] = {
+    {"a", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL, false},
+    {"y", ODIN3_DIR_INOUT, true, 1, NULL, NULL, NULL, false},
+};
+
+static void add_imp(odin3_module *mod, odin3_celltype_id type, const char *name) {
+    odin3_net_id nets[2] = {new_net(mod, NULL), new_net(mod, NULL)};
+    odin3_node_spec spec = {type, intern(name), prov_at(7), NULL, 0};
+    odin3_netvec ports[2] = {{&nets[0], 1}, {&nets[1], 1}};
+    add_node(mod, &spec, ports);
+}
+
+/* Two instances of one implicit black box (no declaration) write one module. */
+static void test_implicit_blackbox_one_module(void) {
+    odin3_celltype_def def = {
+        "imp", ODIN3_GRAN_BLACKBOX, 0, IMP_PORTS, 2, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
+    odin3_module *mod = new_module("top");
+    add_imp(mod, type, "u1");
+    add_imp(mod, type, "u2");
+    char *text = write_json("t20.json");
+    TEST_ASSERT_EQUAL_UINT64(1, count_of(text, "\"imp\": {"));
+    assert_has(text, "\"blackbox\"");
+    odin3_util_free(text);
+    (void)remove("t20.json");
+}
+
+/* A tech-library black box or hard cell without a `.blackbox` declaration is not an implicit black
+ * box: it is not written as a module (the library supplies it on read). */
+static void test_techlib_cells_not_written(void) {
+    const odin3_techlib_text lib = {
+        "t.o3lib", odin3_bytes_cstr("library L\n"
+                                    "cell tb blackbox ; in a 1 ; out y 1 ; end\n"
+                                    "cell th hard ; in a 1 ; out y 1 ; fn y = a ; end\n")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read_text(design, &lib));
+    odin3_module *mod = new_module("top");
+    add_imp(mod, type_id("tb"), "u1");
+    add_imp(mod, type_id("th"), "u2");
+    char *text = write_json("t21.json");
+    assert_has(text, "\"type\": \"tb\"");
+    assert_has(text, "\"type\": \"th\"");
+    assert_lacks(text, "\"tb\": {");
+    assert_lacks(text, "\"th\": {");
+    odin3_util_free(text);
+    (void)remove("t21.json");
+}
+
+/* A registered `$` cell is never written as a black-box module. */
+static void test_registered_dollar_cell_not_a_module(void) {
+    odin3_module *mod = new_module("top");
+    odin3_net_id nets[3] = {new_net(mod, NULL), new_net(mod, NULL), new_net(mod, NULL)};
+    add_gate(mod, "$_AND_", nets);
+    char *text = write_json("t22.json");
+    assert_has(text, "\"type\": \"$_AND_\"");
+    assert_lacks(text, "\"$_AND_\": {");
+    assert_lacks(text, "\"blackbox\"");
+    odin3_util_free(text);
+    (void)remove("t22.json");
+}
+
 static void test_io_failure(void) {
     (void)new_module("top");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_json_write(design, "/nonexistent-dir/x/out.json"));
@@ -1277,6 +1403,11 @@ int main(void) {
     RUN_TEST(test_empty_cover_is_const0);
     RUN_TEST(test_invalid_utf8_name);
     RUN_TEST(test_deterministic);
+    RUN_TEST(test_mixed_width_instances_refused);
+    RUN_TEST(test_same_width_instances_one_module);
+    RUN_TEST(test_implicit_blackbox_one_module);
+    RUN_TEST(test_techlib_cells_not_written);
+    RUN_TEST(test_registered_dollar_cell_not_a_module);
     RUN_TEST(test_io_failure);
     RUN_TEST(test_write_failure_reason);
     RUN_TEST(test_oom_sweep);

@@ -426,6 +426,68 @@ static void test_declared_blackbox_module(void) {
     TEST_ASSERT_EQUAL_UINT32(1, odin3_design_declared_model_count(rj_design));
 }
 
+/* Two modules that nothing instantiates (hand_ports.blif): the file must say which is the top, or
+ * the reader cannot choose (M-1). The top here is the second module, so the choice is not file
+ * order. */
+static void test_two_roots_keep_top(void) {
+    odin3_module *first = new_module("alpha");
+    (void)add_port(first, (port_args){"i", ODIN3_DIR_IN, 1});
+    odin3_module *second = new_module("beta");
+    (void)add_port(second, (port_args){"o", ODIN3_DIR_OUT, 1});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(rj_design, odin3_module_id_of(second)));
+    char *text = round_trip(NULL);
+    assert_has(text, "\"top\": \"00000000000000000000000000000001\"");
+    odin3_util_free(text);
+    odin3_module *top = odin3_module_get(rj_design, odin3_design_top(rj_design));
+    TEST_ASSERT_NOT_NULL(top);
+    TEST_ASSERT_EQUAL_UINT32(intern("beta"), odin3_module_name(top));
+}
+
+/* An implicit black box (BLIF .subckt of a type nothing defines, such as $_DFFSR_PPP_ from Yosys)
+ * is written as a blackbox module, so the file reads back without --auto-blackbox. */
+static void test_implicit_dollar_blackbox_reads_back(void) {
+    odin3_celltype_def def = {
+        "$ff_unknown", ODIN3_GRAN_BLACKBOX, 0, BB_PORTS, 2, NULL, 0, NULL, NULL, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(rj_design, &def, &id));
+    odin3_module *mod = new_module("top");
+    odin3_wire_id data = add_port(mod, (port_args){"data", ODIN3_DIR_IN, 3});
+    odin3_wire_id out = add_port(mod, (port_args){"out", ODIN3_DIR_OUT, 1});
+    odin3_net_id nd[3];
+    odin3_net_id no[1];
+    odin3_netvec ports[2] = {wire_nets(mod, data, nd), wire_nets(mod, out, no)};
+    (void)add_node(mod, (node_args){"$ff_unknown", "u", NULL, 0}, ports);
+    char *text = round_trip(NULL);
+    assert_has(text, "\"$ff_unknown\": {");
+    odin3_util_free(text);
+}
+
+static const odin3_port_def WIDE_PORTS[] = {
+    {"a", ODIN3_DIR_IN, false, 1, "WIDTH", NULL, NULL, false},
+    {"out", ODIN3_DIR_OUT, false, 1, "WIDTH", NULL, NULL, false},
+};
+
+/* A black box whose ports are as wide as its WIDTH parameter (ansiportlist_2's `multiply`): the
+ * module in the file has the instance's port widths, or the instance's connections do not fit. */
+static void test_parametric_blackbox_widths(void) {
+    odin3_param_def pdef = {"WIDTH", ODIN3_VAL_INT, odin3_value_int(1)};
+    odin3_celltype_def def = {
+        "wide", ODIN3_GRAN_BLACKBOX, 0, WIDE_PORTS, 2, &pdef, 1, NULL, NULL, NULL, NULL};
+    odin3_celltype_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(rj_design, &def, &id));
+    odin3_module *mod = new_module("top");
+    odin3_wire_id data = add_port(mod, (port_args){"data", ODIN3_DIR_IN, 4});
+    odin3_wire_id out = add_port(mod, (port_args){"out", ODIN3_DIR_OUT, 4});
+    odin3_net_id nd[4];
+    odin3_net_id no[4];
+    odin3_netvec ports[2] = {wire_nets(mod, data, nd), wire_nets(mod, out, no)};
+    odin3_value width = odin3_value_int(4);
+    (void)add_node(mod, (node_args){"wide", "u", &width, 1}, ports);
+    char *text = round_trip(NULL);
+    assert_has(text, "\"wide\": {");
+    odin3_util_free(text);
+}
+
 /* R-5: the parameters of an instance of a module are attributes parameter:<NAME> after a read;
  * the writer writes them back as the cell's parameters, so files 2 and 3 are the same. */
 static void test_instance_and_parameters(void) {
@@ -670,6 +732,9 @@ int main(void) {
     RUN_TEST(test_latch_init_unnamed_q);
     RUN_TEST(test_user_attributes);
     RUN_TEST(test_declared_blackbox_module);
+    RUN_TEST(test_two_roots_keep_top);
+    RUN_TEST(test_implicit_dollar_blackbox_reads_back);
+    RUN_TEST(test_parametric_blackbox_widths);
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_instance_parameters_from_file);
     RUN_TEST(test_parameters_binary);

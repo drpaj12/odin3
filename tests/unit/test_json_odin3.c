@@ -45,6 +45,7 @@ static void build_design(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_module_create(rj_design, intern("top"), prov_at(1), &mid));
     odin3_module *mod = odin3_module_get(rj_design, mid);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(rj_design, mid)); /* a read sets it too */
     odin3_net_id nets[4];
     const struct {
         const char *name;
