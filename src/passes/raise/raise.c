@@ -216,8 +216,7 @@ static odin3_status create_cell(rs_job *job, odin3_node_id *cell) {
     odin3_status st = make_prov(job, &prov);
     odin3_node_spec spec = {job->tmpl.type, 0, prov, job->tmpl.params.data,
                             job->tmpl.def->n_params};
-    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, job->ports.data,
-                                                        cell)
+    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, job->ports.data, cell)
                           : st;
 }
 
@@ -288,6 +287,27 @@ odin3_status raise_check_module(odin3_pass_ctx *ctx, odin3_module *module, const
     return st;
 }
 
+/* Creates the cell, then deletes the group; the cell is taken back when no node is gone yet. */
+static odin3_status replace_group(rs_job *job) {
+    odin3_node_id cell = {0};
+    odin3_status st = create_cell(job, &cell);
+    size_t deleted = 0;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = delete_group(job, &deleted);
+    if (st != ODIN3_OK && deleted == 0) {
+        /* nothing of the group is gone yet: take the new cell back so it never double-drives */
+        (void)odin3_node_delete(job->module, cell);
+    }
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "raise: module '%s': replacing the group failed (%d)%s",
+                  module_name(job->module), (int)st,
+                  deleted == 0 ? "" : ": the module is partly changed");
+    }
+    return st;
+}
+
 odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
                               bool *found) {
     rs_job job;
@@ -295,22 +315,8 @@ odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const c
     odin3_status st = cc_group_collect(&job.group, opts);
     *found = st == ODIN3_OK && job.group.nodes.len > 0;
     st = *found && st == ODIN3_OK ? prepare(&job) : st;
-    odin3_node_id cell = {0};
-    st = *found && st == ODIN3_OK ? create_cell(&job, &cell) : st;
     size_t count = job.group.nodes.len;
-    size_t deleted = 0;
-    if (*found && st == ODIN3_OK) {
-        st = delete_group(&job, &deleted);
-        if (st != ODIN3_OK && deleted == 0) {
-            /* nothing of the group is gone yet: take the new cell back so it never double-drives */
-            (void)odin3_node_delete(module, cell);
-        }
-        if (st != ODIN3_OK) {
-            odin3_log(ODIN3_LOG_ERROR, "raise: module '%s': replacing the group failed (%d)%s",
-                      module_name(module), (int)st,
-                      deleted == 0 ? "" : ": the module is partly changed");
-        }
-    }
+    st = *found && st == ODIN3_OK ? replace_group(&job) : st;
     if (*found && st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "raise: module '%s': group '%s=%s': %zu nodes replaced by one %s",
                   module_name(module), opts->key, opts->value, count, opts->cell);

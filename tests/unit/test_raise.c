@@ -330,13 +330,8 @@ static void test_raise_drops_internal_wires(void) {
     check_clean();
 }
 
-/* A later module refused: an earlier module that holds a valid proof is left unchanged too. */
-static void test_raise_all_or_nothing_across_modules(void) {
-    use_real_abc();
-    read_blif(RIPPLE ".model m2\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
-    mark_all();
-    bind_adder(false);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4), log_text);
+/* Puts one logic node of module 2 in group grp=add4, which has no proof there. */
+static void mark_second_module(void) {
     odin3_module *second = odin3_module_get(design, (odin3_module_id){2});
     TEST_ASSERT_NOT_NULL(second);
     odin3_node_id found = {0};
@@ -349,9 +344,18 @@ static void test_raise_all_or_nothing_across_modules(void) {
     }
     TEST_ASSERT_TRUE(found.v != 0);
     odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern("add4"), 0};
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        odin3_attr_set(second, (odin3_objref){ODIN3_OBJ_NODE, found.v}, intern("grp"), &value));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(second, (odin3_objref){ODIN3_OBJ_NODE, found.v},
+                                                   intern("grp"), &value));
+}
+
+/* A later module refused: an earlier module that holds a valid proof is left unchanged too. */
+static void test_raise_all_or_nothing_across_modules(void) {
+    use_real_abc();
+    read_blif(RIPPLE ".model m2\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
+    mark_all();
+    bind_adder(false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4), log_text);
+    mark_second_module();
     uint32_t live = live_count();
     TEST_ASSERT_TRUE(live > 1);
     REFUSED(ADD4, "no cone_check result");

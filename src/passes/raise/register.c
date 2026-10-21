@@ -15,7 +15,9 @@
 #include <stdint.h>
 #include <string.h>
 
-static const char k_usage[] = "raise -attr KEY=V -cell TYPE [-param P=V ...]";
+static const char k_usage[] =
+    "raise -attr KEY=V -cell TYPE [-param P=V ...] (trusts the cone_check result in "
+    "the module attributes: run cone_check in this session first)";
 
 static odin3_status raise_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                    void *user) {
