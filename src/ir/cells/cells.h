@@ -8,6 +8,7 @@
 #ifndef ODIN3_IR_CELLS_H
 #define ODIN3_IR_CELLS_H
 
+#include "dffx.h"
 #include "ir/ir_internal.h"
 #include "ir/lut.h"
 #include "sim/cell.h"
@@ -218,6 +219,16 @@ extern const odin3_celltype_def odin3_cell_dlatchsr;
 extern const odin3_celltype_def odin3_cell_sr;
 /* 3D (3D spec §2, AB-2): the K-input LUT, appended after $sr; ir/lut.h names its ID. */
 extern const odin3_celltype_def odin3_cell_lut;
+/* 5.3 follow-up (append-only after $lut): the 68 gate-level flip-flops of dffx.h (dffx.c). */
+#define ODIN3_DX_EXT_E(c, e) extern const odin3_celltype_def odin3_cell_dffx_e_##c##e;
+#define ODIN3_DX_EXT_A(c, r, v) extern const odin3_celltype_def odin3_cell_dffx_a_##c##r##v;
+#define ODIN3_DX_EXT_AE(c, r, v, e) extern const odin3_celltype_def odin3_cell_dffx_ae_##c##r##v##e;
+#define ODIN3_DX_EXT_S(c, r, v) extern const odin3_celltype_def odin3_cell_dffx_s_##c##r##v;
+#define ODIN3_DX_EXT_SE(c, r, v, e) extern const odin3_celltype_def odin3_cell_dffx_se_##c##r##v##e;
+#define ODIN3_DX_EXT_SCE(c, r, v, e)                                                               \
+    extern const odin3_celltype_def odin3_cell_dffx_sce_##c##r##v##e;
+ODIN3_DFFX_LIST(ODIN3_DX_EXT_A, ODIN3_DX_EXT_E, ODIN3_DX_EXT_AE, ODIN3_DX_EXT_S, ODIN3_DX_EXT_SE,
+                ODIN3_DX_EXT_SCE)
 
 /* Word-level cells sharing the binary / unary tables above; the _SIM forms have hooks. */
 #define ODIN3_BINARY(var, label)                                                                   \

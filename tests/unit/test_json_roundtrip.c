@@ -7,6 +7,7 @@
 #include "ir/celltype.h"
 #include "ir/prov.h"
 #include "passes/manager.h"
+#include "techlib/reader.h"
 
 static odin3_pass_ctx rt_run;
 
@@ -522,6 +523,32 @@ static void test_instance_parameters_from_file(void) {
     odin3_util_free(text);
 }
 
+/* Yosys's positional parameter `$1` of an unresolved hard block is written back as the parameter
+ * (R-5), not as `parameter:$1`, and files 2 and 3 are the same (R-1). */
+static void test_positional_parameter_round_trip(void) {
+    static const char *const k_json =
+        "{\"modules\": {\"top\": {\"ports\": {\"x\": {\"direction\": \"input\", \"bits\": [2]}, "
+        "\"s\": {\"direction\": \"output\", \"bits\": [3]}}, \"cells\": {\"g\": {\"type\": "
+        "\"adder\", \"parameters\": {\"$1\": \"00000000000000000000000000000010\"}, "
+        "\"connections\": {\"a\": [2], \"b\": [2], \"cin\": [2], \"sumout\": [3]}}}}}}";
+    rj_fresh();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(rj_design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_read(rj_design, rj_put("pos.json", k_json), NULL));
+    const char *paths[2] = {rj_path("p2.json"), rj_path("p3.json")};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write(rj_design, paths[0]));
+    rj_fresh();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(rj_design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_read(rj_design, paths[0], NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write(rj_design, paths[1]));
+    char *two = rj_slurp(paths[0]);
+    char *three = rj_slurp(paths[1]);
+    TEST_ASSERT_EQUAL_STRING(two, three);
+    assert_has(two, "\"$1\": \"00000000000000000000000000000010\"");
+    assert_lacks_text(two, "parameter:");
+    odin3_util_free(two);
+    odin3_util_free(three);
+}
+
 static void test_parameters_binary(void) {
     odin3_module *mod = new_module("top");
     odin3_net_id net_x = port_net(mod, (port_args){"x", ODIN3_DIR_IN, 1});
@@ -711,6 +738,7 @@ int main(void) {
     RUN_TEST(test_instance_and_parameters);
     RUN_TEST(test_instance_parameters_from_file);
     RUN_TEST(test_parameters_binary);
+    RUN_TEST(test_positional_parameter_round_trip);
     RUN_TEST(test_2d_word_cells);
     RUN_TEST(test_wire_range_attributes);
     RUN_TEST(test_ranged_ports);

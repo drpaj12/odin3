@@ -1060,6 +1060,32 @@ static void test_2d_signed_word_cell_is_refused(void) {
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "cannot write a cell of '$neg'"), last_error);
 }
 
+/* The 68 gate-level flip-flops with a reset or an enable (5.3 follow-up) have no BLIF form either:
+ * a sample of every family is refused with a located message, and the plain $_DFF_P_ still writes.
+ */
+static void test_gate_ff_types_are_refused(void) {
+    static const char *const types[] = {"$_DFF_PN1_",  "$_DFFE_NP_",    "$_DFFE_PN0P_",
+                                        "$_SDFF_NP0_", "$_SDFFE_PP1N_", "$_SDFFCE_NN0P_"};
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++) {
+        odin3_design *des = odin3_design_create();
+        TEST_ASSERT_NOT_NULL(des);
+        odin3_module *module = new_module(des, "top");
+        odin3_node_spec spec = {.type = type_named(des, types[i])};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, NULL));
+        (void)remove(OUT_PATH);
+        last_error[0] = '\0';
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, odin3_blif_write(des, OUT_PATH),
+                                      types[i]);
+        char want[MSG_MAX];
+        (void)snprintf(want, sizeof want,
+                       "%s: model 'top': gate-level flip-flops with a reset or an enable have no "
+                       "BLIF form; cannot write a cell of '%s'",
+                       OUT_PATH, types[i]);
+        TEST_ASSERT_EQUAL_STRING(want, last_error);
+        odin3_design_destroy(des);
+    }
+}
+
 /* The eleven word flip-flops and latches of 2E's IR change D (2E spec §13) have no BLIF form:
  * each, at its defaults (so a .subckt would be implied), is refused with the exact message and
  * the destination is not written. */
@@ -1533,6 +1559,7 @@ int main(void) {
     RUN_TEST(test_2d_word_cells_as_subckt);
     RUN_TEST(test_2d_signed_word_cell_is_refused);
     RUN_TEST(test_ir_change_d_cells_are_refused);
+    RUN_TEST(test_gate_ff_types_are_refused);
     RUN_TEST(test_top_first_model_spacing);
     RUN_TEST(test_out_of_memory_sweep);
     RUN_TEST(test_out_of_memory_sweep_generated_names);

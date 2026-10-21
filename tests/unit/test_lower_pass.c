@@ -322,6 +322,11 @@ static void check_one_home(const odin3_celltype_def *def) {
 
 /* Checks one registry entry; returns whether it is a word type. */
 static bool check_registry_entry(const odin3_celltype_def *def) {
+    if (def->gran == ODIN3_GRAN_BIT && lw_ff_gate_name(def->name)) {
+        /* The gate-level flip-flops of dffx.h share one rule (found by name, not in the table). */
+        TEST_ASSERT_NOT_NULL_MESSAGE(lw_rule_find(def->name), def->name);
+        return false;
+    }
     if (def->gran != ODIN3_GRAN_WORD) {
         TEST_ASSERT_NULL_MESSAGE(lw_rule_find(def->name), def->name);
         return false;

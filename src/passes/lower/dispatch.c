@@ -86,9 +86,15 @@ void odin3_lower_test_override_rule(const lw_rule *rule) {
     g_override = rule;
 }
 
+/* The one rule of the gate-level flip-flops of dffx.h (matched by name, not in the table). */
+static const lw_rule k_gate_ff_rule = {"$_DFF*", lw_build_gate_ff, lw_est_gate_ff};
+
 const lw_rule *lw_rule_find(const char *type_name) {
     if (g_override != NULL && strcmp(g_override->type_name, type_name) == 0) {
         return g_override;
+    }
+    if (lw_ff_gate_name(type_name)) {
+        return &k_gate_ff_rule;
     }
     for (uint32_t i = 0; k_rules[i].type_name != NULL; i++) {
         if (strcmp(k_rules[i].type_name, type_name) == 0) {

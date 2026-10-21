@@ -23,6 +23,12 @@
  * Made synchronous, the async families take the control into the next-state function, over the
  * enable (agent default of spec §6.3: `Q <= ARST ? VALUE : (EN ? D : Q)`, which is what the RTL
  * does). The hidden option --async-enable-first gives Parmys's shape, the enable over the reset.
+ *
+ * The 68 gate-level flip-flops of ir/cells/dffx.h ($_DFFE_*, $_DFF_<c><r><v>_, $_SDFF*; Yosys
+ * 0.55 spelling, from read_json) are bit cells with the same meaning at width 1: they take the
+ * shape of the matching word type ($_SDFFE_ as $sdffe, $_DFF_PN0_ as $adff, ...) and are lowered
+ * the same way, so a gate-level netlist read from a file reaches write_blif --vtr (spec 5.3
+ * follow-up). Their polarity is in the name, not in parameters.
  */
 #include "passes/ffinit.h"
 #include "passes/lower/lower_int.h"
@@ -101,6 +107,7 @@ typedef struct ff_view {
     lw_span clr;
     lw_span out; /* the cell's Q nets as they were */
     const odin3_value *value;
+    int gate_init; /* INIT of a gate-level cell (0 or 1); -1: from the net's init attribute */
 } ff_view;
 
 /* The names of a control: its port and its polarity parameter. */
@@ -124,13 +131,9 @@ static const ff_shape *shape_named(const char *type) {
     return NULL;
 }
 
-bool lw_ff_is_async(const char *type_name) {
-    const ff_shape *shape = shape_named(type_name);
-    return shape != NULL && shape->async;
-}
-
 static void view_load(const lw_ctx *lw, const lw_cell *cell, const ff_shape *shape, ff_view *view) {
     memset(view, 0, sizeof *view);
+    view->gate_init = -1;
     view->shape = shape;
     view->width = cell->port[cell->out_port].n;
     view->clk_high = cell->params[FF_P_CLK_POLARITY].i != 0;
@@ -148,6 +151,119 @@ static void view_load(const lw_ctx *lw, const lw_cell *cell, const ff_shape *sha
     view->en_outer = shape->has_en &&
                      (shape->en_outer ||
                       (lw->opts->async_enable_first && shape->async && shape->ctl != FF_CTL_NONE));
+}
+
+/* --- the gate-level types (dffx.h) --------------------------------------------------------- */
+
+/* A gate-level type taken apart: the word shape it behaves as, and the letters of its name. */
+typedef struct gate_ff {
+    int shape;
+    bool clk_high;
+    bool ctl_high; /* the reset's level (R) */
+    bool value;    /* the reset value */
+    bool en_high;
+} gate_ff;
+
+typedef struct gate_family {
+    const char *prefix;
+    size_t letters; /* the letters after the prefix, without the closing `_` */
+    int shape;
+} gate_family;
+
+static const gate_family k_gate_families[] = {
+    {"$_DFFE_", 2, FF_DFFE}, {"$_DFFE_", 4, FF_ADFFE},  {"$_DFF_", 3, FF_ADFF},
+    {"$_SDFF_", 3, FF_SDFF}, {"$_SDFFE_", 4, FF_SDFFE}, {"$_SDFFCE_", 4, FF_SDFFCE},
+};
+
+static bool letters_valid(const char *letters, size_t count, const gate_ff *gate) {
+    if (strlen(letters) != count + 1 || letters[count] != '_') {
+        return false;
+    }
+    bool has_reset = gate->shape != FF_DFFE;
+    for (size_t i = 0; i < count; i++) {
+        bool value_slot = has_reset && i == 2;
+        const char *allowed = value_slot ? "01" : "PN";
+        if (strchr(allowed, letters[i]) == NULL || letters[i] == '\0') {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* True when name is one of the 68 types of dffx.h; *gate says which. */
+static bool gate_parse(const char *name, gate_ff *gate) {
+    for (size_t i = 0; i < sizeof k_gate_families / sizeof k_gate_families[0]; i++) {
+        const gate_family *fam = &k_gate_families[i];
+        size_t len = strlen(fam->prefix);
+        *gate = (gate_ff){.shape = fam->shape};
+        if (strncmp(name, fam->prefix, len) != 0 ||
+            !letters_valid(name + len, fam->letters, gate)) {
+            continue;
+        }
+        const char *at = name + len;
+        gate->clk_high = at[0] == 'P';
+        if (fam->shape == FF_DFFE) {
+            gate->en_high = at[1] == 'P';
+            return true;
+        }
+        gate->ctl_high = at[1] == 'P';
+        gate->value = at[2] == '1';
+        gate->en_high = fam->letters == 4 && at[3] == 'P';
+        return true;
+    }
+    return false;
+}
+
+bool lw_ff_is_async(const char *type_name) {
+    const ff_shape *shape = shape_named(type_name);
+    gate_ff gate;
+    if (gate_parse(type_name, &gate)) {
+        return k_shapes[gate.shape].async;
+    }
+    return shape != NULL && shape->async;
+}
+
+bool lw_ff_gate_name(const char *type_name) {
+    gate_ff gate;
+    return gate_parse(type_name, &gate);
+}
+
+static const uint8_t k_gate_bit[2] = {ODIN3_BIT_0, ODIN3_BIT_1};
+static const odin3_value k_gate_value[2] = {{ODIN3_VAL_BITS, 0, &k_gate_bit[0], 1, 0, 0},
+                                            {ODIN3_VAL_BITS, 0, &k_gate_bit[1], 1, 0, 0}};
+
+static lw_sel gate_sel(const lw_cell *cell, const char *port, bool high) {
+    lw_span span = lw_cell_span(cell, port);
+    return (lw_sel){span.n > 0 ? span.nets[0] : (odin3_net_id){0}, high};
+}
+
+static odin3_status view_load_gate(const lw_ctx *lw, const lw_cell *cell, const gate_ff *gate,
+                                   ff_view *view) {
+    memset(view, 0, sizeof *view);
+    lw_span clk = lw_cell_span(cell, "C");
+    lw_span data = lw_cell_span(cell, "D");
+    if (clk.n == 0 || data.n == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "lower: gate-level FF '%s' has no %s pin", cell->def->name,
+                  clk.n == 0 ? "C" : "D");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    view->shape = &k_shapes[gate->shape];
+    view->width = 1;
+    view->clk_high = gate->clk_high;
+    view->clk = clk.nets[0];
+    view->en = gate_sel(cell, view->shape->has_en ? "E" : NULL, gate->en_high);
+    view->ctl = gate_sel(cell, view->shape->ctl == FF_CTL_RESET ? "R" : NULL, gate->ctl_high);
+    view->data = data;
+    view->out = cell->port[cell->out_port];
+    view->value = &k_gate_value[gate->value ? 1 : 0];
+    view->en_outer =
+        view->shape->en_outer || (view->shape->has_en && lw->opts->async_enable_first &&
+                                  view->shape->async && view->shape->ctl != FF_CTL_NONE);
+    view->gate_init =
+        cell->params[0].kind == ODIN3_VAL_INT && cell->params[0].i >= 0 && cell->params[0].i <= 1
+            ? (int)cell->params[0].i
+            : -1;
+    return ODIN3_OK;
 }
 
 /* --- the next-state function (spec §6.1's table) ------------------------------------------------
@@ -268,6 +384,9 @@ static odin3_status build_bit(lw_ctx *lw, const ff_view *view, uint32_t bit,
     st = st == ODIN3_OK ? lw_next_state(lw, view, bit, *qnet, &args.next) : st;
     odin3_net_id old = bit < view->out.n ? view->out.nets[bit] : (odin3_net_id){0};
     args.init = odin3_net_valid(old) ? odin3_ffinit_get(lw->module, old) : ODIN3_BIT_X;
+    if (view->gate_init >= 0) {
+        args.init = view->gate_init == 1 ? ODIN3_BIT_1 : ODIN3_BIT_0;
+    }
     return st == ODIN3_OK ? lw_storage(lw, &args, *qnet) : st;
 }
 
@@ -292,9 +411,7 @@ static odin3_status book(lw_ctx *lw, const lw_cell *cell, const ff_view *view) {
     return st;
 }
 
-static odin3_status build_ff(lw_ctx *lw, const lw_cell *cell, const ff_shape *shape, lw_bits *out) {
-    ff_view view;
-    view_load(lw, cell, shape, &view);
+static odin3_status build_view(lw_ctx *lw, const lw_cell *cell, ff_view view, lw_bits *out) {
     lw_storage_args base = {false, view.clk, view.clk, ODIN3_BIT_X};
     odin3_status st = clock_for(lw, &view, &base.clk, &base.negative);
     lw_bits_clear(out);
@@ -304,6 +421,12 @@ static odin3_status build_ff(lw_ctx *lw, const lw_cell *cell, const ff_shape *sh
         st = st == ODIN3_OK ? lw_bits_push(out, qnet) : st;
     }
     return st == ODIN3_OK ? book(lw, cell, &view) : st;
+}
+
+static odin3_status build_ff(lw_ctx *lw, const lw_cell *cell, const ff_shape *shape, lw_bits *out) {
+    ff_view view;
+    view_load(lw, cell, shape, &view);
+    return build_view(lw, cell, view, out);
 }
 
 /* The exact gate count: per bit the muxes and the storage node, one $_NOT_ for a falling edge
@@ -334,6 +457,29 @@ FF_RULE(aldff, FF_ALDFF)
 FF_RULE(aldffe, FF_ALDFFE)
 FF_RULE(dffsr, FF_DFFSR)
 FF_RULE(dffsre, FF_DFFSRE)
+
+/* The entry points of the gate-level types: every one of dffx.h (rule found by lw_rule_find). */
+odin3_status lw_build_gate_ff(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
+    gate_ff gate;
+    ff_view view;
+    if (!gate_parse(cell->def->name, &gate)) {
+        odin3_log(ODIN3_LOG_ERROR, "lower: no lowering rule for cell type '%s'", cell->def->name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status st = view_load_gate(lw, cell, &gate, &view);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return build_view(lw, cell, view, out);
+}
+
+uint64_t lw_est_gate_ff(const lw_cell *cell) {
+    gate_ff gate;
+    if (!gate_parse(cell->def->name, &gate)) {
+        return 0;
+    }
+    return (uint64_t)k_shapes[gate.shape].muxes + 1U + (gate.clk_high ? 0U : 1U);
+}
 
 /* --- --async error -----------------------------------------------------------------------------
  */

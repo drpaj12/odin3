@@ -1481,15 +1481,17 @@ static void test_e1b_async(void) {
 /* Plan 3E point (e)'s names: E1b wins over E6 for each; `$_DFF_PN2_` and `$_DFFE_PP0_` are no
  * async flip-flops (E6). */
 static void test_e1b_names(void) {
-    read_ok(".model top\n.inputs c d r\n.outputs q\n"
+    /* One output net per cell: $_DFF_PN0_ and $_DFFE_PP1N_ are registered (5.3 follow-up), so
+     * their Q is an OUT pin (one driver per net); the others are implicit black boxes. */
+    read_ok(".model top\n.inputs c d r\n.outputs q q2 q3 q4 q5 q6 q7 q8\n"
             ".subckt $_DFF_PN0_ C=c D=d Q=q R=r\n"
-            ".subckt $_DFFE_PP1N_ C=c D=d Q=q R=r\n"
-            ".subckt $_SR_PN_ S=c R=r Q=q\n"
-            ".subckt $_ALDFF_PP_ C=c D=d Q=q\n"
-            ".subckt $_ALDFFE_PPP_ C=c D=d Q=q\n"
-            ".subckt $_DFFSRE_PPPP_ C=c D=d Q=q\n"
-            ".subckt $_DFF_PN2_ C=c D=d Q=q\n"
-            ".subckt $_DFFE_PP0_ C=c D=d Q=q\n"
+            ".subckt $_DFFE_PP1N_ C=c D=d Q=q2 R=r E=r\n"
+            ".subckt $_SR_PN_ S=c R=r Q=q3\n"
+            ".subckt $_ALDFF_PP_ C=c D=d Q=q4\n"
+            ".subckt $_ALDFFE_PPP_ C=c D=d Q=q5\n"
+            ".subckt $_DFFSRE_PPPP_ C=c D=d Q=q6\n"
+            ".subckt $_DFF_PN2_ C=c D=d Q=q7\n"
+            ".subckt $_DFFE_PP0_ C=c D=d Q=q8\n"
             ".end\n",
             false);
     odin3_blif_write_opts opts = {ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL};

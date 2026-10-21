@@ -86,6 +86,74 @@ $adlatch seq EN:i ARST:i D:i Q:o
 $dlatchsr seq EN:i SET:i CLR:i D:i Q:o
 $sr seq SET:i CLR:i Q:o
 $lut comb A:i Y:o
+$_DFF_PP0_ seq C:i R:i D:i Q:o
+$_DFF_PP1_ seq C:i R:i D:i Q:o
+$_DFF_PN0_ seq C:i R:i D:i Q:o
+$_DFF_PN1_ seq C:i R:i D:i Q:o
+$_DFF_NP0_ seq C:i R:i D:i Q:o
+$_DFF_NP1_ seq C:i R:i D:i Q:o
+$_DFF_NN0_ seq C:i R:i D:i Q:o
+$_DFF_NN1_ seq C:i R:i D:i Q:o
+$_DFFE_PP_ seq C:i E:i D:i Q:o
+$_DFFE_PN_ seq C:i E:i D:i Q:o
+$_DFFE_NP_ seq C:i E:i D:i Q:o
+$_DFFE_NN_ seq C:i E:i D:i Q:o
+$_DFFE_PP0P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PP0N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PP1P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PP1N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PN0P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PN0N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PN1P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_PN1N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NP0P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NP0N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NP1P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NP1N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NN0P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NN0N_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NN1P_ seq C:i R:i E:i D:i Q:o
+$_DFFE_NN1N_ seq C:i R:i E:i D:i Q:o
+$_SDFF_PP0_ seq C:i R:i D:i Q:o
+$_SDFF_PP1_ seq C:i R:i D:i Q:o
+$_SDFF_PN0_ seq C:i R:i D:i Q:o
+$_SDFF_PN1_ seq C:i R:i D:i Q:o
+$_SDFF_NP0_ seq C:i R:i D:i Q:o
+$_SDFF_NP1_ seq C:i R:i D:i Q:o
+$_SDFF_NN0_ seq C:i R:i D:i Q:o
+$_SDFF_NN1_ seq C:i R:i D:i Q:o
+$_SDFFE_PP0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PP0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PP1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PP1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PN0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PN0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PN1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_PN1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NP0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NP0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NP1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NP1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NN0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NN0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NN1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFE_NN1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PP0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PP0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PP1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PP1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PN0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PN0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PN1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_PN1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NP0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NP0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NP1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NP1N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NN0P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NN0N_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NN1P_ seq C:i R:i E:i D:i Q:o
+$_SDFFCE_NN1N_ seq C:i R:i E:i D:i Q:o
 yosys $mem_v2 seq RD_CLK:i RD_EN:i RD_ARST:i RD_SRST:i RD_ADDR:i RD_DATA:o WR_CLK:i WR_EN:i WR_ADDR:i WR_DATA:i
 yosys $alu comb A:i B:i CI:i BI:i X:o Y:o CO:o
 yosys $fa comb A:i B:i C:i X:o Y:o

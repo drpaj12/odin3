@@ -541,6 +541,12 @@ LW_DECLARE_BUILDER(sr);
 /* True for the FF types whose asynchronous set, reset or load `lower` makes synchronous. */
 bool lw_ff_is_async(const char *type_name);
 
+/* True for the 68 gate-level flip-flops of ir/cells/dffx.h; lower treats them like the word
+ * flip-flops (ff.c), through the one rule lw_rule_find returns for all of them. */
+bool lw_ff_gate_name(const char *type_name);
+odin3_status lw_build_gate_ff(lw_ctx *lw, const lw_cell *cell, lw_bits *out);
+uint64_t lw_est_gate_ff(const lw_cell *cell);
+
 /* With `--async error` and an async FF type: logs `lower: module 'm': asynchronous control on
  * '<type>' '<cell>'` and returns true (the pre-scan of the run; nothing has been changed yet). */
 bool lw_ff_async_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);

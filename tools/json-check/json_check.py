@@ -273,13 +273,25 @@ def read_back_script(libs: str, source: Path, outs: tuple[Path, str]) -> str:
     return f"{head}read_json {source}; write_json {outs[0]}{tail}"
 
 
+def read_back_writer(level: str, path: Path, source_text: str = "") -> str:
+    """The command that writes the read-back netlist: RTLIL at the word level; otherwise BLIF,
+    after ``lower`` only when the source holds a gate-level flip-flop with a reset or an enable
+    (Yosys ``$_SDFF_*``, ``$_DFFE_*``, ...), which ``lower`` makes the plain ``$_DFF_P_`` plus
+    logic that VPR takes. Every other read-back is written as before, so ``lower`` cannot
+    normalise away a reader difference there."""
+    if level in RTLIL_LEVELS:
+        return f"write_rtlil {path}"
+    lowered = "lower; " if GATE_FF_FAMILY.search(source_text) is not None else ""
+    return f"{lowered}write_blif --vtr {path}"
+
+
 def read_both(cfg: Config, level: str, flags: Sequence[str], paths: dict[str, Path]) -> Row | None:
     """Generations 2 and 3 (two odin3 runs); a Row when a read-back fails, else None. The first
     run also writes the read-back netlist (RTLIL at the word level, BLIF otherwise)."""
-    fmt = "write_rtlil" if level in RTLIL_LEVELS else "write_blif --vtr"
     libs = libs_text(cfg, paths["design"])
+    source_text = paths["F1"].read_text(encoding="utf-8")
     steps = (
-        (paths["F1"], (paths["F2"], f"{fmt} {paths['R']}")),
+        (paths["F1"], (paths["F2"], read_back_writer(level, paths["R"], source_text))),
         (paths["F2"], (paths["F3"], "")),
     )
     for source, outs in steps:
@@ -368,16 +380,44 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> Row:
 # --- the Yosys fixtures ---------------------------------------------------------------------
 
 
+GATE_FF_FAMILY = re.compile(r'"type":\s*"\$_(?:DFFE?|SDFF(?:CE|E)?)_[PN]{2}[01]?[PN]?_"')
+ASYNC_LEGALIZE = "dffs with async set or reset are not supported"
+LEGALIZE = (
+    "dfflegalize -cell $_DFF_P_ 01 -cell $_DFF_N_ 01 -cell $_DLATCH_P_ 01 -cell $_DLATCH_N_ 01"
+)
+
+
+def gold_commands(level: str, fixture: Path, gold: Path) -> str:
+    """Yosys's own reading of the fixture, written as RTLIL or BLIF. A BLIF fixture with a
+    gate-level flip-flop that has a reset or an enable is first legalised to the plain
+    ``$_DFF_P_``/``$_DFF_N_`` (Yosys's own conversion, the gold of what ``lower`` does): Yosys's
+    BLIF would hold the cell as a ``.subckt`` that equiv-check cannot read."""
+    if level in RTLIL_LEVELS:
+        return f"read_json {fixture}; write_rtlil {gold}"
+    legalise = GATE_FF_FAMILY.search(fixture.read_text(encoding="utf-8")) is not None
+    return f"read_json {fixture}; {LEGALIZE + '; ' if legalise else ''}write_blif {gold}"
+
+
 def yosys_gold(cfg: Config, level: str, fixture: Path, gold: Path, work: Path) -> Row | None:
-    """Yosys 0.55's own reading of the fixture, written as RTLIL or BLIF; a Row when it fails."""
-    fmt = "write_rtlil" if level in RTLIL_LEVELS else "write_blif"
-    argv = [cfg.yosys, "-q", "-p", f"read_json {fixture}; {fmt} {gold}"]
+    """Yosys 0.55's own reading of the fixture, written as RTLIL or BLIF; a Row when it fails
+    (``unproven`` when Yosys has no plain-flip-flop form of an asynchronous reset to compare)."""
+    argv = [cfg.yosys, "-q", "-p", gold_commands(level, fixture, gold)]
     try:
         done = subprocess.run(
             argv, capture_output=True, text=True, timeout=ic.TIMEOUT, cwd=work, check=False
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise opt_equiv.CrashError("yosys", str(exc), True) from exc
+    if done.returncode != 0 and ASYNC_LEGALIZE in done.stderr:
+        return Row(
+            "unproven",
+            "Yosys has no plain flip-flop form of an asynchronous reset to compare with: "
+            "`lower` makes it synchronous (PHASE3 decision 19), a different netlist",
+            "",
+            (0, 0, 0),
+            "",
+            False,
+        )
     if done.returncode != 0:
         return Row("error:check", "Yosys cannot read the fixture: " + done.stderr[-160:])
     return None
@@ -472,7 +512,12 @@ class Tally:
 def report(level: str, item: Path, row: Row, listed: tuple[str, str] | None) -> tuple[bool, str]:
     """Prints one row; returns (passes the run, the report word)."""
     cells, wires, nets = row.counts
-    passed, word = judge_listed(ic.Verdict(row.outcome, row.reason), listed)
+    skipped = row.outcome == "ok" and not row.equivalence
+    if listed is not None and listed[0] == "unproven" and skipped:
+        # without Yosys the equivalence leg did not run, so an unproven entry is not stale
+        passed, word = True, "ok (listed unproven; equivalence not run)"
+    else:
+        passed, word = judge_listed(ic.Verdict(row.outcome, row.reason), listed)
     detail = f" ({row.reason})" if row.reason and row.outcome != "ok" else ""
     kind = f" {row.kind}" if row.kind else ""
     note = row.reason if row.outcome == "ok" and row.reason else ""
