@@ -330,6 +330,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_write.c
     src/frontends/verilog/elab1_inst.c
     src/frontends/verilog/elab1_bbox.c
+    src/frontends/verilog/elab1_bbdir.c
     src/frontends/verilog/elab1_gen.c
     src/frontends/verilog/elab1_decl.c
     src/frontends/verilog/elab1_diag.c

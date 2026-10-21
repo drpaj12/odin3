@@ -886,10 +886,10 @@ static void test_implicit_dirs_first_drives(void) {
             "  assign y = w;\nendmodule\n",
             &k_auto, NULL);
     expect_clean();
-    const char *const p[] = {"P output"};
-    const char *const z[] = {"Z input"};
-    expect_dirs("foo", p, 1);
-    expect_dirs("bar", z, 1);
+    const char *const first[] = {"P output"};
+    const char *const second[] = {"Z input"};
+    expect_dirs("foo", first, 1);
+    expect_dirs("bar", second, 1);
 }
 
 /* A port that is an input at one instance and needs to be an output at another is an output, and
