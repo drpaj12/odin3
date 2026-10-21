@@ -636,6 +636,16 @@ odin3_status odin3_elab1_write_carriers(odin3_elab1 *e1);
 odin3_status odin3_elab1_write_implicit(odin3_elab1 *e1);
 
 /*
+ * EL-11 (amended 2026-10-21; elab1_bbdir.c): gives every implicit black box port its direction
+ * from the nets it is connected to in the modules already on the store's pending stack, and logs
+ * one WARNING per cell type listing them. An output when the port connects to a net bit nothing
+ * else drives, an inout when a net bit has no known direction, an input otherwise; one direction
+ * per cell type (output if any instance needs it). Called by odin3_elab1_write_implicit before it
+ * writes the MODULEs. ODIN3_OK; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_elab1_infer_directions(odin3_elab1 *e1);
+
+/*
  * EL-11 --auto-blackbox: inst of an implicit black box (elab1_bbox.c). The black box's ports, made
  * when its name is first met, are the union of the names every instantiation of the name in the
  * sources connects (all inout, in source order; a black box's own body excluded); the first

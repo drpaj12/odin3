@@ -11,7 +11,7 @@ Spec: `docs/specs/2026-10-21-6-analysis-flow-design.md` section 1 (G-1 to G-7).
 - `<micro>/mapped.v`: the Yosys-mapped netlist, no attributes (the reverse-engineering case, no
   `src`). `<micro>/mapped_src.v`: the same with Yosys `src` attributes. `<micro>/mapped.blif`: the
   same netlist as BLIF (`.subckt $_NAND_` and so on).
-- `unknown/unknown.v`: a netlist with a cell no library defines (G-7).
+- `unknown/unknown.v`, `unknown/unknown_drv.v`: netlists with cells no library defines (G-7); the second wires them to driven nets (EL-11 inferred directions).
 - `gen.sh`: regenerates all of it with Yosys 0.55 (`$VTR_ROOT/build/bin/yosys`): `synth -flatten`,
   `dfflegalize` to `$_DFF_P_` and `$_DFFSR_PPP_`, `abc -g NAND,NOR`, `opt_clean`,
   `insbuf -buf $_BUF_ A Y`, `techmap -map cells/cmos_map.v`, `check -assert`.

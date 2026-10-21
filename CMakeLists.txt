@@ -87,6 +87,7 @@ add_library(odin3_core OBJECT
     src/frontends/json/reader_cell.c
     src/frontends/json/reader_ext.c
     src/frontends/json/reader_implicit.c
+    src/frontends/json/reader_implicit_dirs.c
     src/frontends/json/reader_locs.c
     src/frontends/json/reader_names.c
     src/frontends/json/reader_module.c
@@ -331,6 +332,7 @@ add_library(odin3_core OBJECT
     src/frontends/verilog/elab1_write.c
     src/frontends/verilog/elab1_inst.c
     src/frontends/verilog/elab1_bbox.c
+    src/frontends/verilog/elab1_bbdir.c
     src/frontends/verilog/elab1_gen.c
     src/frontends/verilog/elab1_decl.c
     src/frontends/verilog/elab1_diag.c

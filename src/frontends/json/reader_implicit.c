@@ -142,19 +142,95 @@ odin3_status jr_note_implicit(jr *rd, const odin3_json_node *cell, const char *t
     return st;
 }
 
-/* The WARNING of one implicit type: the netlist with it is not equivalent to its source. */
-static void warn_implicit(const jr *rd, const char *name) {
+odin3_dir jr_role_dir(uint8_t role) {
+    bool both = (role & JR_ROLE_OUT) != 0 && (role & JR_ROLE_IN) != 0;
+    if ((role & JR_ROLE_BIDI) != 0 || both) {
+        return ODIN3_DIR_INOUT;
+    }
+    return (role & JR_ROLE_OUT) != 0 ? ODIN3_DIR_OUT : ODIN3_DIR_IN;
+}
+
+static const char *dir_text(odin3_dir dir) {
+    if (dir == ODIN3_DIR_IN) {
+        return "input";
+    }
+    return dir == ODIN3_DIR_OUT ? "output" : "inout";
+}
+
+/* The notes of an inferred port, "; <port>: <what>": its votes disagree or its net has no known
+ * direction, another output shares its net, its net has no driver. The wording is the Verilog
+ * front end's. */
+static odin3_status port_notes(const jr *rd, const jr_iport *port, odin3_strbuf *text) {
+    const char *name = jr_str(rd, port->name_str);
+    odin3_status st = ODIN3_OK;
+    if (port->def.dir == ODIN3_DIR_INOUT) {
+        st = odin3_strbuf_appendf(text, "; %s: %s", name,
+                                  (port->role & JR_ROLE_BIDI) != 0
+                                      ? "its net has no known direction"
+                                      : "an input at some instances, an output at others");
+    }
+    if (st == ODIN3_OK && port->peer_type != 0) {
+        const jr_implicit *peer = odin3_vec_cat(&rd->implicit, port->peer_type - 1);
+        const jr_iport *other = odin3_vec_cat(&peer->ports, port->peer_port - 1);
+        st = odin3_strbuf_appendf(text, "; %s: its net is also driven by '%s.%s'", name,
+                                  jr_str(rd, peer->name_str), jr_str(rd, other->name_str));
+    }
+    if (st == ODIN3_OK && (port->role & JR_ROLE_TIED) != 0) {
+        st = odin3_strbuf_appendf(text, "; %s: chosen as output: the type had none", name);
+    }
+    if (st == ODIN3_OK && (port->role & JR_ROLE_UNDRIVEN) != 0) {
+        st = odin3_strbuf_appendf(text, "; %s: its net bit %llu has no driver", name,
+                                  (unsigned long long)port->net);
+    }
+    return st;
+}
+
+/* The k-th port of the type by name (rank 0 is the smallest), so the text does not follow the order
+ * the cells named the ports in. */
+static const jr_iport *nth_by_name(const jr *rd, const jr_implicit *entry, size_t rank) {
+    for (size_t pos = 0; pos < entry->ports.len; pos++) {
+        const jr_iport *port = odin3_vec_cat(&entry->ports, pos);
+        size_t below = 0;
+        for (size_t other = 0; other < entry->ports.len; other++) {
+            const jr_iport *cmp = odin3_vec_cat(&entry->ports, other);
+            below += strcmp(jr_str(rd, cmp->name_str), jr_str(rd, port->name_str)) < 0 ? 1U : 0U;
+        }
+        if (below == rank) {
+            return port;
+        }
+    }
+    return odin3_vec_cat(&entry->ports, rank);
+}
+
+/* The directions of the type's ports ("a=input, y=output", by name), then the notes on the
+ * inferred ones. */
+static odin3_status list_dirs(const jr *rd, const jr_implicit *entry, odin3_strbuf *text) {
+    odin3_status st = ODIN3_OK;
+    for (size_t rank = 0; st == ODIN3_OK && rank < entry->ports.len; rank++) {
+        const jr_iport *port = nth_by_name(rd, entry, rank);
+        st = odin3_strbuf_appendf(text, "%s%s=%s", rank > 0 ? ", " : "", jr_str(rd, port->name_str),
+                                  dir_text(port->def.dir));
+    }
+    for (size_t rank = 0; st == ODIN3_OK && rank < entry->ports.len; rank++) {
+        const jr_iport *port = nth_by_name(rd, entry, rank);
+        st = port->dir_known ? ODIN3_OK : port_notes(rd, port, text);
+    }
+    return st;
+}
+
+/* The WARNING of one implicit type: the port directions that were inferred from its connections
+ * (EL-11; the text the Verilog front end prints too), and for a Yosys internal cell that the
+ * netlist with it is not equivalent to its source. */
+static void warn_implicit(const jr *rd, const char *name, const char *dirs) {
     if (name[0] == '$') {
         odin3_log(ODIN3_LOG_WARN,
-                  "%s: '%s' is a Yosys internal cell type this tool has no cell for; it becomes "
-                  "an implicit black box and the netlist is not equivalent to its source",
-                  rd->path, name);
+                  "%s: implicit black box '%s': inferred port directions: %s; '%s' is a Yosys "
+                  "internal cell type this tool has no cell for, so the netlist is not "
+                  "equivalent to its source",
+                  rd->path, name, dirs, name);
     } else {
-        odin3_log(ODIN3_LOG_WARN,
-                  "%s: cell type '%s' is neither a module of the file nor a registered cell "
-                  "type; it becomes an implicit black box (every port inout unless "
-                  "port_directions says)",
-                  rd->path, name);
+        odin3_log(ODIN3_LOG_WARN, "%s: implicit black box '%s': inferred port directions: %s",
+                  rd->path, name, dirs);
     }
 }
 
@@ -184,9 +260,13 @@ static odin3_status make_implicit_one(jr *rd, jr_implicit *entry) {
         }
         st = st == ODIN3_ERR_PARSE ? st : jr_fail(rd, st);
     }
+    odin3_strbuf dirs;
+    odin3_strbuf_init(&dirs);
+    st = st == ODIN3_OK ? jr_fail(rd, list_dirs(rd, entry, &dirs)) : st;
     if (st == ODIN3_OK) {
-        warn_implicit(rd, name);
+        warn_implicit(rd, name, dirs.data != NULL ? dirs.data : "");
     }
+    odin3_strbuf_free(&dirs);
     odin3_vec_free(&defs);
     return st;
 }
