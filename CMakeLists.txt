@@ -1710,6 +1710,18 @@ if(BUILD_TESTING)
         set_tests_properties(test_cone_check PROPERTIES
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
+    # Phase 7 (7.4d): the raise pass; it needs the cone_check proof, so the unit test links the ABC too.
+    odin3_add_unit_test(test_raise)
+    target_compile_definitions(test_raise PRIVATE ODIN3_RS_ROOT="${PROJECT_BINARY_DIR}")
+    if(ODIN3_WITH_ABC)
+        target_include_directories(test_raise PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_raise PRIVATE ODIN3_HAVE_REAL_ABC)
+        target_link_libraries(test_raise PRIVATE odin3_abc_testlib $<LINK_ONLY:libabc-pic>)
+        target_link_options(test_raise PRIVATE ${ODIN3_ABC_WRAPS} -Wl,--wrap=pthread_create)
+        set_target_properties(test_raise PROPERTIES LINKER_LANGUAGE CXX)
+        set_tests_properties(test_raise PROPERTIES
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+    endif()
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
