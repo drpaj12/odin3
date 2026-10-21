@@ -25,7 +25,8 @@ reader exists: the Verilog netlist is read by ``read_verilog`` with the library 
 - ``src MICRO``          G-6: ``mapped_src.v`` read with ``read_verilog -netlist`` (5.4c) restores
                          the RTL location (``rtl.v``, as the ``src`` attribute spells it).
 - ``unknown``            G-7: a cell no library defines is a located ``unresolved_module`` error;
-                         with ``--auto-blackbox`` it is an implicit black box.
+                         with ``--auto-blackbox`` it is an implicit black box whose port
+                         directions come from its nets (EL-11).
 
 Every child runs under the memory cap of ``memcap`` (``tools/elab-check``). Exit codes: 0 the check
 passed, 1 it failed, 2 usage or tool error, 77 skipped (no cap available).
@@ -320,6 +321,22 @@ def check_src(args: argparse.Namespace) -> int:
     return EXIT_PASS
 
 
+def check_unknown_directions(args: argparse.Namespace) -> list[str]:
+    """EL-11: unknown cells on driven nets read; their ports get directions from the nets."""
+    fixture = NETLIST / "unknown" / "unknown_drv.v"
+    code, text = odin3(args.odin3, f"read_verilog --auto-blackbox {fixture}")
+    failures = []
+    if code != 0:
+        failures.append(f"unknown_drv with --auto-blackbox: {first_error(text)}")
+    for want in (
+        "implicit black box 'MYSTERY': inferred port directions: A input, B input, Q output",
+        "implicit black box 'OTHER': inferred port directions: D input, Q output",
+    ):
+        if want not in text:
+            failures.append(f"unknown_drv: missing warning: {want}")
+    return failures
+
+
 def check_unknown(args: argparse.Namespace) -> int:
     """G-7: an unknown cell is unresolved_module; --auto-blackbox makes it a black box."""
     fixture = NETLIST / "unknown" / "unknown.v"
@@ -330,6 +347,7 @@ def check_unknown(args: argparse.Namespace) -> int:
     code, text = odin3(args.odin3, f"read_verilog --auto-blackbox {fixture}")
     if code != 0 or "implicit black box" not in text:
         failures.append(f"with --auto-blackbox: {first_error(text)}")
+    failures.extend(check_unknown_directions(args))
     for failure in failures:
         print(f"FAIL {failure}")
     print(f"netlist_unknown: {len(failures)} failed")
