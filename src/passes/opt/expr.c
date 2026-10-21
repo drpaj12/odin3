@@ -485,6 +485,37 @@ static odin3_status run_rounds(odin3_expr_ctx *ec) {
     return st;
 }
 
+#ifndef NDEBUG
+/* The Debug sweep in settle changes nothing, but a rule may still make a canonical constant it ends
+ * up not reading (the group rule loads 0 and 1 before it knows it will rewrite). The incremental
+ * rounds of a Release build never visit those cells again, so the leftover constants would be a
+ * difference between the builds (the 5.4 loc sweep counts them as X-9 objects): the unread
+ * constants the sweep made (nodes from `first` on) go again. */
+static void drop_check_consts(odin3_opt_ctx *oc, uint32_t first) {
+    enum { CONST_PREFIX_LEN = 7 }; /* strlen("$_CONST") */
+    odin3_module *module = oc->module;
+    const uint32_t end = odin3_module_node_end(module);
+    for (uint32_t id = first; id < end; id++) {
+        odin3_node_id node = {id};
+        if (!odin3_node_live(module, node)) {
+            continue;
+        }
+        const odin3_celltype_def *def =
+            odin3_celltype_get(oc->design, odin3_node_type(module, node));
+        odin3_pinslice pins = odin3_node_port(module, node, 0);
+        if (def == NULL || strncmp(def->name, "$_CONST", CONST_PREFIX_LEN) != 0 ||
+            pins.count == 0) {
+            continue;
+        }
+        odin3_net_id net = odin3_pin_net(module, pins.first);
+        if (odin3_net_sinks(module, net).count == 0 &&
+            odin3_node_delete(module, node) == ODIN3_OK) {
+            (void)odin3_net_delete(module, net); /* unnamed and pinless now: best effort */
+        }
+    }
+}
+#endif
+
 /*
  * The call reached its fixed point: no node is dirty any more. In a Debug build an incremental
  * module is first swept in full once, in both kinds of round, and must not change (the dirty set
@@ -496,12 +527,14 @@ static odin3_status settle(odin3_expr_ctx *ec) {
 #ifndef NDEBUG
     if (odin3_opt_dirty_incremental(ec->oc)) {
         bool logged = true;
+        const uint32_t first_new = odin3_module_node_end(ec->module);
         odin3_opt_dirty_sweep_all(ec->oc);
         for (uint32_t phase = 0; st == ODIN3_OK && phase < (ec->keepdc ? 1U : 2U); phase++) {
             ec->oc->changed = false;
             st = round_once(ec, phase == 1U, &logged);
             assert(!ec->oc->changed && "opt_expr: the dirty set missed a rewrite");
         }
+        drop_check_consts(ec->oc, first_new);
     }
 #endif
     odin3_opt_dirty_settle(ec->oc);
