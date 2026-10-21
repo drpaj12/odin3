@@ -1,9 +1,32 @@
+[build-system]
+requires = ["scikit-build-core==0.11.6"]
+build-backend = "scikit_build_core.build"
+
 [project]
-name = "odin3-tools"
-version = "0.0.1"
-description = "Python tooling for Odin III: netlist-compare, equiv-check and the cffi plugin binding"
+name = "odin3"
+version = "1.0.0"
+description = "Odin III: HDL elaboration and front-end synthesis for FPGA CAD research (cffi binding, CLI and library)"
 license = "MIT"
 requires-python = ">=3.10"
+dependencies = ["cffi>=1.15"]
+
+[project.scripts]
+odin3 = "odin3._entry:odin3_main"
+odin3-flow = "odin3._entry:flow_main"
+
+[tool.scikit-build]
+# The wheel is built by CMake (CMakeLists.txt, SKBUILD branch): libodin3.so, the odin3 CLI and the
+# binding (plugins/python/odin3.py, installed as odin3/__init__.py) go into the odin3 package.
+minimum-version = "build-system.requires"
+cmake.version = ">=3.25"
+cmake.build-type = "Release"
+build.targets = ["libodin3", "odin3", "odin3_abc_exe"]
+wheel.packages = []
+wheel.py-api = "py3"
+sdist.include = ["third_party/abc", "third_party/unity"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTING = "OFF"
 
 [tool.ruff]
 line-length = 100
@@ -13,7 +36,7 @@ src = ["tools/blif", "tools/netlist-compare", "tools/equiv-check", "tools/golden
        "tools/golden-blackboxes", "tools/token-cost",
        "tools/project-fixtures", "tools/pp-fuzz", "tools/pp-diff", "plugins/python", "tools/parse-check", "tools/elab-check", "tools/opt-check", "tools/flatten-check", "tools/lower-check", "tools/hardmap-check", "tools/partial-map-check", "tools/exit-check", "tools/proc-check", "tools/blif-vtr-check",
        "tools/vtr-models",
-       "tools/vtr-qor", "tools/fsm-check", "tools/vtr-read-check", "tools/abc-check", "tools/prov-cover", "tools/flow",
+       "tools/vtr-qor", "tools/fsm-check", "tools/vtr-read-check", "tools/abc-check", "tools/prov-cover", "tools/flow", "docs/user/_ext",
        "tools/verilog-gen"]
 extend-exclude = ["third_party", "build"]
 
@@ -28,7 +51,7 @@ max-complexity = 15
 strict = true
 python_version = "3.10"
 # The tools are stand-alone scripts that add these directories to sys.path at run time.
-mypy_path = "tools/blif:tools/netlist-compare:tools/equiv-check:tools/golden-sample:tools/golden-blackboxes:tools/token-cost:tools/project-fixtures:tools/pp-fuzz:tools/pp-diff:tools/parse-check:tools/elab-check:tools/opt-check:tools/flatten-check:tools/lower-check:tools/hardmap-check:tools/partial-map-check:tools/exit-check:tools/proc-check:tools/blif-vtr-check:tools/vtr-models:tools/vtr-qor:tools/fsm-check:tools/vtr-read-check:tools/verilog-gen:tools/abc-check:tools/prov-cover:tools/flow"
+mypy_path = "tools/blif:tools/netlist-compare:tools/equiv-check:tools/golden-sample:tools/golden-blackboxes:tools/token-cost:tools/project-fixtures:tools/pp-fuzz:tools/pp-diff:tools/parse-check:tools/elab-check:tools/opt-check:tools/flatten-check:tools/lower-check:tools/hardmap-check:tools/partial-map-check:tools/exit-check:tools/proc-check:tools/blif-vtr-check:tools/vtr-models:tools/vtr-qor:tools/fsm-check:tools/vtr-read-check:tools/verilog-gen:tools/abc-check:tools/prov-cover:tools/flow:docs/user/_ext"
 exclude = ["^third_party/", "^build/"]
 
 [[tool.mypy.overrides]]

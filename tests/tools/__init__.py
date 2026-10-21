@@ -41,6 +41,7 @@ for _sub in (
     "tools/loc-check",
     "tools/prov-cover",
     "tools/flow",
+    "docs/user/_ext",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",
