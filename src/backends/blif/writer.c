@@ -490,8 +490,8 @@ static bool prov_style(const blif_writer *wr) {
  * VTR with --name-style provenance (spec 3E §10 item 7): wr->cand, the net's short name, becomes
  * `hier/<short name>@file:line` from the net's provenance record. Unchanged for a net on a port
  * bit (pads, .inputs/.outputs and Verilator's port matcher depend on the short names; a hard cell's
- * output net on a port bit is not: it is written apart from the port bit, hard), a generator, and a net whose record has neither a hierarchy nor a location. VB-10 rules 1 to 4
- * follow in the caller.
+ * output net on a port bit is not: it is written apart from the port bit, hard), a generator, and a
+ * net whose record has neither a hierarchy nor a location. VB-10 rules 1 to 4 follow in the caller.
  */
 static odin3_status provenance_name(blif_writer *wr, odin3_net_id net, bool hard, bool *applied) {
     uint64_t owner = 0;
@@ -571,8 +571,7 @@ static odin3_status take_suffixed(blif_writer *wr, uint64_t key, odin3_net_id se
 
 /* An unnamed net under --name-style provenance: its short name (the wire bit name, else `$n<ID>`)
  * wrapped by provenance_name; *found is set when the wrapped name replaces the candidate. */
-static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool hard,
-                                        bool *found) {
+static odin3_status generate_provenance(blif_writer *wr, odin3_net_id net, bool hard, bool *found) {
     if (!prov_style(wr)) {
         return ODIN3_OK;
     }

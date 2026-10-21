@@ -2781,7 +2781,7 @@ static void test_hard_port_net_keeps_name(void) {
 
 /* A RAM whose output net (unnamed or named, with a SOURCE record) sits on the port bit `o`, written
  * with args. */
-static void write_ram_prov(const char *name, const char *args) {
+static void write_ram_prov(bool named, bool provenance) {
     odin3_module *top = hand_top();
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(tc.design, ODIN3_LIB_DIR "/vtr.o3lib"));
     odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
@@ -2795,8 +2795,8 @@ static void write_ram_prov(const char *name, const char *args) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_add_port(top, &spec, NULL));
     odin3_wire_id o_wire = odin3_module_port_wire(top, odin3_module_port_count(top) - 1);
     odin3_net_id y_net = odin3_wire_net(top, o_wire, 0);
-    if (name != NULL) {
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, y_net, intern(name)));
+    if (named) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, y_net, intern("y")));
     }
     odin3_value params[2] = {odin3_value_int(1), odin3_value_int(1)};
     odin3_node_id ram = hand_cell(top, "single_port_ram", params, 2);
@@ -2805,24 +2805,30 @@ static void write_ram_prov(const char *name, const char *args) {
     pin_onto(ram, 2, a_net);
     pin_onto(ram, 3, w_net);
     pin_onto(ram, 4, y_net);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, args, &out), tc.log.data);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        bvt_write(&tc, provenance ? "--vtr --name-style provenance out.blif" : "--vtr out.blif",
+                  &out),
+        tc.log.data);
 }
 
 /* D2: with --name-style provenance a hard block's port-bit output net is named by provenance
  * (the read-back keeps the block's location); the port bit keeps its buffer; short is unchanged. */
 static void test_hard_port_net_provenance_unnamed(void) {
-    write_ram_prov(NULL, "--vtr --name-style provenance out.blif");
+    write_ram_prov(false, true);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "out=top/$n"), out.data);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "@t.blif:9"), out.data);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, " o\n1 1\n"), out.data);
-    bvt_free(&tc);
-    write_ram_prov(NULL, "--vtr out.blif");
+}
+
+static void test_hard_port_net_short_unchanged(void) {
+    write_ram_prov(false, false);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "out=$n"), out.data);
     TEST_ASSERT_NULL_MESSAGE(strstr(out.data, "@"), out.data);
 }
 
 static void test_hard_port_net_provenance_named(void) {
-    write_ram_prov("y", "--vtr --name-style provenance out.blif");
+    write_ram_prov(true, true);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, "out=top/y@t.blif:9"), out.data);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names top/y@t.blif:9 o\n1 1\n"), out.data);
 }
@@ -3253,6 +3259,7 @@ static void run_task_5(void) {
     RUN_TEST(test_hard_port_net_keeps_name);
     RUN_TEST(test_hard_port_net_same_name_counted);
     RUN_TEST(test_hard_port_net_provenance_unnamed);
+    RUN_TEST(test_hard_port_net_short_unchanged);
     RUN_TEST(test_hard_port_net_provenance_named);
     RUN_TEST(test_stub_width_max);
     RUN_TEST(test_stub_declared_order_kept);
