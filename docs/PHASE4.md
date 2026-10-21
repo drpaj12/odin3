@@ -68,7 +68,11 @@ Each item has a one-line acceptance test.
   the RTL after `fsm`; detection and encoding match Yosys 0.55 `fsm` on the micros (same FSMs,
   state counts and encodings); the 19 VTR designs with `fsm` in the script still route and
   pass fcheck.
-- [ ] 4.13 Arch-sweep exit test (above). Test: the exit test item 1.
+- [x] 4.13 Arch-sweep exit test (above). Test: the exit test item 1.
+  Evidence: decision 18. EArch 15/15 routed, fcheck 8 pass, 7 untested, 0 fail
+  (`work/vtr-qor/tables/20261021-1528-P4-earch/qor.md`); k4_N4_90nm 14/15 routed, fcheck 8 pass,
+  6 untested, 0 fail; micros (26 `hardmap` micros against that arch's Parmys golden, 0 not
+  equivalent): EArch 16 equivalent, 10 listed; k4 14 equivalent, 12 listed.
 
 ## Dropped from Phase 4 (D10)
 
@@ -273,6 +277,35 @@ DESIGN §12.1.
    carry-pack warning needs an `$add` or `$sub` in the design; `hardmap-diff` lists a D18 design
    only for an unresolved `single_port_ram`, `dual_port_ram`, `multiply` or `adder`; an `--arch`
    path with `;`, `#` or blanks is refused. 4.13 (the arch sweep) is the controller's run.
+
+18. **Phase 4 closed** (controller, 2026-10-21). Exit test evidence (4.13, per arch, Oprime leg):
+    - EArch (DSP arch): 15/15 routed (`vpr_status=success`); fcheck 8 pass, 7 untested, 0 fail
+      (table `work/vtr-qor/tables/20261021-1528-P4-earch/qor.md`).
+    - k4_N4_90nm (plain-LUT arch, no hard adders or multipliers): 14/15 routed; fcheck 8 pass,
+      6 untested, 0 fail. The 15th, mkDelayWorker32B, hit the ABC 3600 s timeout. Routed designs,
+      fcheck verdict, LUTs, min W: ch_intrinsics untested 105 10; stereovision3 untested 93 10;
+      diffeq2 pass 163 10; diffeq1 pass 4912 24; mkPktMerge pass 21 6; raygentop untested 14384
+      32; sha pass 2781 26; boundtop untested 36196 30; mkSMAdapter4B untested 1604 24; or1200
+      pass 9561 30; stereovision0 untested 10868 22; stereovision1 pass 35295 30; stereovision2
+      pass 57499 24; blob_merge pass 8671 30.
+    - Untested means the RTL latch / `--nolatches` precheck, plus stereovision0 on EArch with
+      initial-state-dependent mismatches only. No fcheck FAIL on either arch.
+    - Micros, `tools/partial-map-check/pm-diff-micro <arch>` (the 26 micros of
+      `tests/hardmap/micros.txt` against that arch's Parmys golden, `hardmap-diff`): EArch 16
+      equivalent, 10 listed, 0 differ, 0 skipped; k4_N4_90nm 14 equivalent, 12 listed, 0 differ,
+      0 skipped. The listed entries are known divergences already in the expect files, none new.
+      EArch: D15 (4), D6 (2), D9 (1), D2b (1, equivalent after the declared undo), `lower-gap`
+      `$pow` (2). k4: D17 (7), D15 (2), `lower-gap` `$pow` (2), and `common/mult_const.v`
+      `no-golden` (Parmys fails with BUF_NODE on soft multipliers). `k6_frac_N10` micros were
+      checked in Phase 3 and 4.3.
+    Agent defaults (Peter may override): (a) the k4 mkDelayWorker32B ABC timeout is a known gap,
+    not an exit blocker: an adder-heavy design (833 adders on EArch) that is all soft logic on a
+    LUT-only arch. (b) `run --fcheck` records "skipped", so fcheck ran through the `fcheck`
+    subcommand. (c) `table --arch k4` refuses an incomplete key, so the k4 numbers are listed
+    here and there is no k4 table. (d) `read_arch` is applied to the O and Oprov legs as well as
+    O' for archs other than k6 and EArch (a398719b). (e) `pm-diff-micro` gained an `EArch` case
+    using the k6 and COFFE expect files (no EArch-specific expect file was needed); it is not a
+    CTest because the EArch golden tree is local only.
 
 ## Open items
 
