@@ -39,7 +39,9 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(rows[2].src, "")
 
     def test_dump_cell_types(self) -> None:
-        rows = lc.parse_dump("m|node:$_AND_|$c1|a.v:3\nm|node:|$c2|\nm|node:a\\|b|$c3|\nm|net|$n1|\n")
+        rows = lc.parse_dump(
+            "m|node:$_AND_|$c1|a.v:3\nm|node:|$c2|\nm|node:a\\|b|$c3|\nm|net|$n1|\n"
+        )
         self.assertEqual((rows[0].kind, rows[0].ctype), ("node", "$_AND_"))
         self.assertEqual((rows[1].kind, rows[1].ctype), ("node", ""))
         self.assertEqual(rows[2].ctype, "a|b")
@@ -108,9 +110,7 @@ class CompareTests(unittest.TestCase):
     def test_cell_class_is_by_type(self) -> None:
         # a constant driver: X-9; a port cell: X-8 in the BLIF dialects only; any other cell lost
         # in a lossless format has no class, whatever the written files hold
-        before = cells(
-            ("$_CONST1_", "$c1", A), ("$port_in", "$c2", B), ("$and", "$c3", C)
-        )
+        before = cells(("$_CONST1_", "$c1", A), ("$port_in", "$c2", B), ("$and", "$c3", C))
         after = cells(("$_CONST1_", "$c1", ""), ("$port_in", "$c2", ""), ("$and", "$c3", ""))
         t = lc.compare("json", before, after)["node"]
         self.assertEqual((t.lost, t.unclassified), ({"X-9": 1}, 2))
@@ -179,8 +179,14 @@ class CompareTests(unittest.TestCase):
         t = lc.compare("json", before, after)["net"]
         # $n1 takes the location of a wire (one net had none before); $n2 has no wire's location
         self.assertEqual((t.inherited, t.gained), (1, 1))
-        more = lc.compare("json", dump(("wire", "x", A), ("net", "$n1", A)), dump(("net", "$n1", A), ("net", "$n2", A)))
-        self.assertEqual((more["net"].inherited, more["net"].gained), (0, 1))  # no net to give it to
+        more = lc.compare(
+            "json",
+            dump(("wire", "x", A), ("net", "$n1", A)),
+            dump(("net", "$n1", A), ("net", "$n2", A)),
+        )
+        self.assertEqual(
+            (more["net"].inherited, more["net"].gained), (0, 1)
+        )  # no net to give it to
         named = lc.compare("json", dump(("wire", "n", A), ("net", "n", "")), dump(("net", "n", A)))
         self.assertEqual((named["net"].inherited, named["net"].gained), (1, 0))
         # a net named for another wire, or a generated name no wire can be told from: gained
@@ -370,7 +376,9 @@ class AbsentModuleTests(unittest.TestCase):
         before = self.BEFORE + [lc.Obj("top", "node", "$c1", A, "sub")]
         after = self.AFTER + [lc.Obj("top", "node", "$c1", A, "")]
         allow = lc.Allow(absent=frozenset({"sub"}))
-        problems = lc.check_tallies("verilog", lc.compare("verilog", before, after, None, allow), allow)
+        problems = lc.check_tallies(
+            "verilog", lc.compare("verilog", before, after, None, allow), allow
+        )
         self.assertTrue(any("instantiates it" in p for p in problems), problems)
 
     def test_stale_entry_fails(self) -> None:
@@ -433,7 +441,9 @@ class PinTests(unittest.TestCase):
     def test_pin_lines_round_trip(self) -> None:
         run = {"node": lc.Tally(lost={"X-9": 5})}
         lines = lc.pin_lines("micros", "lut", "json", run)
-        self.assertEqual(lc.parse_pins("\n".join(lines)), {("micros", "lut", "json", "node", "X-9"): 5})
+        self.assertEqual(
+            lc.parse_pins("\n".join(lines)), {("micros", "lut", "json", "node", "X-9"): 5}
+        )
 
     def test_modgained_is_pinned(self) -> None:
         pins = lc.parse_pins("micros lut verilog node modgained 3\n")
@@ -453,7 +463,7 @@ class PinTests(unittest.TestCase):
 class WrittenTests(unittest.TestCase):
     def test_verilog_aliases(self) -> None:
         text = (
-            "(* src = \"a.v:1.1-9.9\" *)\nmodule top (  // a.v:1\n  input a\n);\n"
+            '(* src = "a.v:1.1-9.9" *)\nmodule top (  // a.v:1\n  input a\n);\n'
             "  assign y = a;  // /w/a.v:5\n"
             "  assign z[2] = a[1];  // /w/a.v:6\n"
             "  assign q = a == b;  // /w/a.v:7\n"
@@ -475,7 +485,9 @@ class WrittenTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             j, v = Path(tmp) / "W.json", Path(tmp) / "W.v"
             j.write_text(__import__("json").dumps(doc), encoding="utf-8")
-            v.write_text("module top (\n);\n  assign y = a;  // a.v:4\nendmodule\n", encoding="utf-8")
+            v.write_text(
+                "module top (\n);\n  assign y = a;  // a.v:4\nendmodule\n", encoding="utf-8"
+            )
             got = lc.written_facts(j, v)
         self.assertEqual(got["top"], lc.Carrier(frozenset({"b"}), frozenset({("a.v", 4)})))
 

@@ -49,7 +49,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -305,9 +305,9 @@ def node_class(scope: Scope, before: Obj, by_rule: str | None) -> str | None:
         return "X-9"
     mine = parse_locs(before.src)
     carrier = scope.carrier
-    if scope.fmt == "verilog" and carrier is not None and mine:
-        if before.name in carrier.buffers and (mine[0].file, mine[0].line) in carrier.aliases:
-            return "X-9"
+    folded = carrier is not None and mine and (mine[0].file, mine[0].line) in carrier.aliases
+    if scope.fmt == "verilog" and folded and carrier and before.name in carrier.buffers:
+        return "X-9"
     return by_rule
 
 
@@ -333,7 +333,8 @@ def gain_kind(scope: Scope, after: Obj) -> str:
     takes the location of its own declared wire (the readers give a net its netname's or
     declaration's location, D-2 and D-3: `inherited`); "wirelike" for a net with a generated name
     and the location of some wire (the reader renumbers nets, so its own wire cannot be told:
-    `inherited` while a bit of a declared wire with that location has no net, else `gained`); "split" for a
+    `inherited` while a bit of a declared wire with that location has no net, else `gained`);
+    "split" for a
     Verilog object with the file and line of a located object before (the reader splits an
     `assign` expression into several cells and nets, all with its line); else "" (`gained`)."""
     if scope.module_src and after.src == scope.module_src:
@@ -345,7 +346,11 @@ def gain_kind(scope: Scope, after: Obj) -> str:
         elif scope.wires.get(OWN_BIT.sub("", after.name)) == after.src:
             return "wire"
     first = parse_locs(after.src)
-    if scope.fmt in SPLIT_FORMATS and first and (first[0].file, first[0].line) in scope.before_lines:
+    if (
+        scope.fmt in SPLIT_FORMATS
+        and first
+        and (first[0].file, first[0].line) in scope.before_lines
+    ):
         return "split"
     return ""
 
@@ -376,7 +381,8 @@ def count_gain(scope: Scope, after: Obj, tally: Tally, credit: Credit | None = N
 
 def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> None:
     """Counts one paired object: before has a location or not, after is its read-back (or None).
-    No location after is a loss (classed or not); a location that differs is wrong, never classed."""
+    No location after is a loss (classed or not); a location that differs is wrong, never
+    classed."""
     fmt, kind = scope.fmt, scope.kind
     mine = parse_locs(before.src)
     inherits = fmt == "blif" and kind == "node"  # counted as `inherited`, not as same or line
@@ -565,12 +571,18 @@ def allow_problems(tallies: dict[str, Tally], allow: Allow) -> list[str]:
     """Modules absent from the read-back and objects that took their module's location, against
     what the expect file lists (an entry that no longer applies is stale)."""
     absent = {m for t in tallies.values() for m in t.absent}
-    out = [f"module {m} is absent from the read-back (not in the expect file)"
-           for m in sorted(absent - allow.absent)]
-    out += [f"STALE absent entry for module {m}: the read-back has it"
-            for m in sorted(allow.absent - absent)]
-    out += [f"module {m} is absent from the read-back, yet a module that is there instantiates it"
-            for m in sorted({m for t in tallies.values() for m in t.referenced})]
+    out = [
+        f"module {m} is absent from the read-back (not in the expect file)"
+        for m in sorted(absent - allow.absent)
+    ]
+    out += [
+        f"STALE absent entry for module {m}: the read-back has it"
+        for m in sorted(allow.absent - absent)
+    ]
+    out += [
+        f"module {m} is absent from the read-back, yet a module that is there instantiates it"
+        for m in sorted({m for t in tallies.values() for m in t.referenced})
+    ]
     modgained = sum(t.modgained for t in tallies.values())
     if modgained and not allow.modgained:
         out.append(f"{modgained} objects took their module's location (not in the expect file)")
@@ -601,9 +613,7 @@ class Expect:
     modgained: dict[str, str] = field(default_factory=dict)
 
     def allow(self, level: str, design: str, fmt: str) -> Allow:
-        return Allow(
-            frozenset(self.absent.get((level, design, fmt), ())), fmt in self.modgained
-        )
+        return Allow(frozenset(self.absent.get((level, design, fmt), ())), fmt in self.modgained)
 
 
 def expect_line(table: Expect, words: list[str]) -> None:
@@ -617,8 +627,10 @@ def expect_line(table: Expect, words: list[str]) -> None:
     elif len(words) >= 4 and words[0] in LEVELS and words[2] in OUTCOMES:
         table.designs[(words[0], words[1])] = (words[2], " ".join(words[3:]))
     else:
-        raise ToolError("want '<level> <design> <outcome> <reason>', 'absent <level> <design> "
-                        "<format> <module> <reason>' or 'modgained <format> <reason>'")
+        raise ToolError(
+            "want '<level> <design> <outcome> <reason>', 'absent <level> <design> "
+            "<format> <module> <reason>' or 'modgained <format> <reason>'"
+        )
 
 
 def parse_expect(text: str) -> Expect:
@@ -654,7 +666,9 @@ def parse_pins(text: str) -> Pins:
             or not (words[4].startswith("X-") or words[4] == MODGAINED)
             or not words[5].isdigit()
         ):
-            raise ToolError(f"pins line {number}: want '<set> <level> <format> <kind> X-n|modgained <count>'")
+            raise ToolError(
+                f"pins line {number}: want '<set> <level> <format> <kind> X-n|modgained <count>'"
+            )
         pins[(words[0], words[1], words[2], words[3], words[4])] = int(words[5])
     return pins
 
@@ -787,7 +801,10 @@ def written_facts(json_path: Path, verilog_path: Path) -> Written:
         name: Carrier(
             frozenset(k for k, v in modules.get(name, {}).get("cells", {}).items() if is_buffer(v)),
             aliases.get(name, frozenset()),
-            {k: len(v.get("bits", ())) for k, v in modules.get(name, {}).get("netnames", {}).items()},
+            {
+                k: len(v.get("bits", ()))
+                for k, v in modules.get(name, {}).get("netnames", {}).items()
+            },
         )
         for name in names
     }
