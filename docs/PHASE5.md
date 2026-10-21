@@ -19,7 +19,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
 
 ## Checklist
 
-- [ ] 5.1 Altera via LPM, light (code on `feat/5.1-lpm-spec`; tick when the PR merges; PHASE5 decisions 7 and 8) (was PHASE4 4.14; decision 1):
+- [x] 5.1 Altera via LPM, light (merged: #154; PHASE5 decisions 7 and 8) (was PHASE4 4.14; decision 1):
   - an LPM tech library (`.o3lib`) with exactly `lpm_add_sub`, `lpm_mult`, `lpm_compare` and
     `altsyncram` (single-port and simple-dual-port). Flip-flops are plain DFFs in soft logic,
     not `lpm_ff`. Everything else is soft logic as structural Verilog gates or assigns;
@@ -33,12 +33,12 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   Test: one micro per LPM cell writes, reads back to the same netlist, and passes a Verilog
   lint (Icarus or Verilator with stub modules). Equivalence under LPM simulation models and a
   Quartus compile wait until Peter needs that step.
-- [ ] 5.2 Verilog read-back at every level: a `read_verilog -icells` mode (as Yosys's) that
+- [x] 5.2 (merged: #155) Verilog read-back at every level: a `read_verilog -icells` mode (as Yosys's) that
   reads instances of Odin III's own cell types (`$mem*`, `$shiftx`, `$pow`, `$dffsr`,
   `$dlatch`, ...) as those cells, not as unknown modules. Test: for the micros, write Verilog
   after `opt` (word), after `lower` (gate), after `abc` (LUT) and after 5.1 (LPM); read each
   back; each is equivalent to the netlist written.
-- [ ] 5.3 Yosys JSON reader (`read_json`, was 7.2): reads the Yosys JSON netlist schema that
+- [x] 5.3 (merged: #173, #175, #182, #183; follow-ups #203 gate-level FF types and `$N` params, #206 write_json output reads back) Yosys JSON reader (`read_json`, was 7.2): reads the Yosys JSON netlist schema that
   `write_json` writes, and Yosys's own JSON. Test: `write_json` then `read_json` round trip is
   identical under `netlist-compare` on the micros and the BLIF goldens; a Yosys-written JSON of
   a micro reads and is equivalent to its RTL.
@@ -46,7 +46,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   (PRs 5.3a parser, 5.3b reader and pass, 5.3c round-trip tool and Yosys fixtures; decision 10). The
   fixpoint is generation 2 to 3 (spec R-1); `netlist-compare` is identical where covers survive the
   `$sop` to `$lut` write (spec R-3, question 3).
-- [x] 5.4 HDL locations survive write and read (5.4a to 5.4e merged; 5.4f hashed names has its own PRs):
+- [x] 5.4 HDL locations survive write and read (5.4a to 5.4e merged; 5.4f hashed names merged: #180, #192, #200; D2 hard-block port-bit net #207):
   - BLIF: `read_blif` decodes `--name-style provenance` names (`hier/<name>@file:line`) back
     into provenance records pointing at the HDL, beside the IMPORTED record of the BLIF line;
   - Verilog: the writer adds `(* src = "file:line" *)` where Verilog allows an attribute
@@ -219,3 +219,12 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
     spec's section 14 tables, which are Phase 6.5's baseline. The measurement found that constant drivers have
     a location before writing (the spec assumed none) and that the Verilog reader gives a constant the module's
     location (`modgained`: 81 cells and 748 nets over the micros, allowed in `expect.txt` and pinned in `pins.txt`): both are listed in section 14.
+12. **Phase 5 closed** (controller, 2026-10-21; Peter: "let's tick off p5 and p6"). Exit test evidence:
+    the JSON sweeps (`json_micros_word/gate/lut`, `json_vtr14_lut`) and the Yosys fixture tests pass
+    (#201, #203, #206); the HDL-location sweeps (`loc_micros_*`, `loc_vtr14_*`) pass with their pins
+    (5.4e, #210 for the Debug-only constants); the Verilog read-back sweeps at word, gate, LUT and LPM
+    pass (#155); the LPM micros write, read back and lint (#154). Known gaps, not fixed for v1.0:
+    `$_DFFSR_*`, `$_ALDFF_*`, `$_SR_*` and latches with reset are not registered cell types (they read
+    as implicit black boxes); three `$1` hard-block JSON fixtures differ on port width
+    (`tests/json/expect.txt`); a black box used at different widths cannot be written to JSON (located
+    error, #206); diffeq1 equivalence stays untested (unnameable `multiply` boxes; decision 2026-10-21).
