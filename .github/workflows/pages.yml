@@ -1,0 +1,72 @@
+name: Docs (GitHub Pages)
+
+# Publishes the user manual (docs/user, Sphinx) to https://drpaj12.github.io/odin3/ on every push
+# to main. The build is the CI docs job's (warnings are errors); this workflow only adds the deploy.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 1G
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build ccache libreadline-dev bison flex
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
+      - name: Install Sphinx and extensions
+        run: pip install -r requirements-docs.txt
+      - name: Restore ccache
+        uses: actions/cache@v6
+        with:
+          path: .ccache
+          key: ccache-docs-${{ github.sha }}
+          restore-keys: ccache-docs-
+      # The pass reference is generated from `odin3 --help` (docs/user/_ext/passes_ref.py).
+      - name: Build odin3
+        run: |
+          cmake --preset release
+          cmake --build --preset release --target odin3
+      - name: Build the documentation (warnings are errors)
+        run: sphinx-build -W -b html docs/user build/docs
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: build/docs
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.1
