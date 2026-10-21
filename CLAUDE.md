@@ -1,8 +1,8 @@
 # Odin III — working agreement for Claude Code
 
 Odin III is an MIT-licensed HDL elaboration and front-end synthesis framework for FPGA CAD
-research, the successor to Odin and Odin II. It reads Verilog/SystemVerilog/VHDL and structural
-netlists into one hierarchical, provenance-tracked IR, does architecture-driven partial mapping,
+research, the successor to Odin and Odin II. It reads Verilog-2005 and structural netlists (BLIF,
+Yosys JSON, gate-level Verilog) into one hierarchical, provenance-tracked IR, does architecture-driven partial mapping,
 links ABC for soft logic, and writes netlists for VTR, Intel/Altera and visualisation.
 Peter is the architect; you are the primary developer. You proceed on your own recommendations
 and ask him only when he is needed (rule 11).
@@ -112,6 +112,10 @@ ADRs, IR, passes, oracles, phase checklists.
 
 ## Where things are going
 
-Phase 0 (now): environment, oracles, goldens, gate. Phase 1: `util/`, core IR, op registry, pass
-manager, `check`, provenance, C ABI v0, BLIF read/write, writers, simulator. See spec §12 for
-Phases 2–7 and their exit tests.
+Version 1.0.0 is released (tag `v1.0.0`, 2026-10-21; Phases 0 to 7 closed, see the `docs/PHASE*.md`
+logs and `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to
+<https://drpaj12.github.io/odin3/>. After v1.0, new tools live in their own repos and use Odin III
+as a pip package without changing the core: Wyrd-I (GUI and experiment runner,
+github.com/drpaj12/wyrd) and Loki (reverse engineering, github.com/drpaj12/loki). Core changes
+after v1.0 (SystemVerilog and VHDL front ends, ADR D11; a per-cycle simulation call) each get
+their own spec and PR.
