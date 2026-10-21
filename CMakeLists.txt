@@ -2953,6 +2953,18 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Phase 7 Task 9 (spec 3.5): plugins/python/re_round.py, one round of the RE loop, through
+    # the CLI and equiv-check (needs the linked ABC for cone_check and equiv-check).
+    if(ODIN3_WITH_ABC)
+        add_test(NAME python_re_round
+            COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                    ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe> ODIN3_REQUIRE_ABC=1
+                    "ODIN3_ABC_LIB=$<TARGET_FILE:odin3_abc>"
+                    ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_re_round
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(python_re_round PROPERTIES
+            LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
+    endif()
     # Phase 6 (6.3, spec E-3 to E-7): write_json --odin3, the reader's handlers and the loader
     # plugins/python/odin3_graph.py. Skips are named and reported as Skipped.
     foreach(_ge IN ITEMS loader_isolated:IsolatedLoaderTest export_counts:CountsTest

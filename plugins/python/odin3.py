@@ -94,6 +94,8 @@ class Odin3:
         self._object_cb = self.ffi.callback("odin3_prov_object_visit", _on_object(self))
         self._log_cb = self.ffi.callback("odin3_log_sink", _on_log(self))
         self._captures: list[Any] = []  # handles of the open capture_log blocks, innermost last
+        self._library = Path(library or find_library())
+        self._abc_loaded = False
 
     def version(self) -> str:
         return str(self.ffi.string(self.lib.odin3_version_string()).decode())
@@ -138,6 +140,18 @@ class Odin3:
     def load_plugin(self, path: str | Path) -> None:
         """Load a shared-object plugin (odin3_plugin_load)."""
         self.call("odin3_plugin_load", os.fsencode(path))
+
+    def load_abc(self, library: str | Path | None = None) -> None:
+        """Register the linked ABC engine, which `abc` and `cone_check` need (the odin3 CLI does
+        this at start-up; a plain library does not). library: libodin3_abc.so, default
+        $ODIN3_ABC_LIB, else the file next to libodin3. Once per process: a second call does
+        nothing. Odin3Error with the plugin's status when it cannot be loaded."""
+        if self._abc_loaded:
+            return
+        env = os.environ.get("ODIN3_ABC_LIB")
+        path = library or env or self._library.with_name("libodin3_abc.so")
+        self.load_plugin(path)
+        self._abc_loaded = True
 
     @contextmanager
     def capture_log(self) -> Iterator[list[LogRecord]]:
