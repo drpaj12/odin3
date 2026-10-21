@@ -1258,6 +1258,16 @@ static void test_hard_cell_clock(void) {
     TEST_ASSERT_NULL_MESSAGE(strstr(body, "x|y"), body);
 }
 
+/* A primary output driven straight by a hard cell's output pin gets a `.names` buffer (the box
+ * writes a net of its own), so VTR's ABC keeps the output (spec 3E §9.2). */
+static void test_hard_cell_po_buffer(void) {
+    read_ok(RAM_CLOCK, true);
+    const char *body = write_vtr();
+    TEST_ASSERT_NULL_MESSAGE(strstr(body, "out=o\n"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "out=$n"), body);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, " o\n1 1\n"), body);
+}
+
 /* Without the library the same cell is an implicit black box with no known clock, which the VTR
  * dialect refuses (E6, 3E Task 3) before any name is written. */
 static void test_blackbox_clock_unknown(void) {
@@ -1937,7 +1947,7 @@ static void test_classes_by_pin_kind(void) {
     TEST_ASSERT_EQUAL_UINT32(1, report.x_to_gnd);
     TEST_ASSERT_EQUAL_UINT32(1, report.x_to_unconn);
     TEST_ASSERT_EQUAL_UINT32(0, report.unconn_logic);
-    TEST_ASSERT_EQUAL_UINT32(1, report.names);
+    TEST_ASSERT_EQUAL_UINT32(2, report.names); /* the .names and the RAM output's buffer */
     TEST_ASSERT_EQUAL_UINT32(1, report.subckts);
 }
 
@@ -1976,7 +1986,7 @@ static void test_clean_report(void) {
     TEST_ASSERT_EQUAL_UINT32(0, report.errors);
     TEST_ASSERT_EQUAL_UINT32(0, count_of(text_of(&tc.log), "error"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, bvt_write(&tc, "--vtr out.blif", &out), tc.log.data);
-    TEST_ASSERT_EQUAL_UINT32(3, report.names);
+    TEST_ASSERT_EQUAL_UINT32(6, report.names);
     TEST_ASSERT_EQUAL_UINT32(0, report.latches);
     TEST_ASSERT_EQUAL_UINT32(8, report.subckts);
     TEST_ASSERT_EQUAL_UINT32(lines_starting(&out, ".names "), report.names);
@@ -2472,8 +2482,9 @@ static void test_generators_in_order(void) {
     pin_to_const((odin3_node_id){node_of("$sop")}, (pin_at){0, 2}, "$_CONST1_");
     TEST_ASSERT_EQUAL_STRING(".inputs x y z\n.outputs s c t\n.names gnd\n.names vcc\n1\n"
                              ".names unconn\n"
-                             ".subckt adder a=gnd b=vcc cin=unconn cout=c sumout=s\n"
-                             ".names x y vcc t\n111 1\n.end\n\n.model adder\n.inputs a b cin\n"
+                             ".subckt adder a=gnd b=vcc cin=unconn cout=$n5 sumout=$n4\n"
+                             ".names x y vcc t\n111 1\n.names $n4 s\n1 1\n.names $n5 c\n1 "
+                             "1\n.end\n\n.model adder\n.inputs a b cin\n"
                              ".outputs cout sumout\n.blackbox\n.end\n",
                              write_vtr());
     odin3_blif_vtr_report report = vtr_report();
@@ -2550,7 +2561,7 @@ static void test_summary_line(void) {
     write_vtr();
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(
         1,
-        count_of(tc.log.data, "info: write_blif: --vtr: 'top': 2 .names, 1 .latch, 4 .subckt "
+        count_of(tc.log.data, "info: write_blif: --vtr: 'top': 6 .names, 1 .latch, 4 .subckt "
                               "(adder 3, single_port_ram 1), K=6; x bits: 0 to gnd, 1 open "
                               "(unconn)\n"),
         tc.log.data);
@@ -2698,8 +2709,8 @@ static void test_formals_sorted(void) {
     put(&want, ".inputs c d a w\n.outputs o0 o1\n"
                ".subckt single_port_ram");
     formals_on(&want, "addr", 15, "a");
-    put(&want, " clk=c data[0]=d data[1]=d out[0]=o0 "
-               "out[1]=o1 we=w\n.end\n\n"
+    put(&want, " clk=c data[0]=d data[1]=d out[0]=$n5 "
+               "out[1]=$n6 we=w\n.names $n5 o0\n1 1\n.names $n6 o1\n1 1\n.end\n\n"
                ".model single_port_ram\n.inputs clk "
                "data[0] data[1]");
     bits_of(&want, "addr", 15);
@@ -2715,11 +2726,12 @@ static void test_ram_one_bit_slice_scalar(void) {
     read_ok(".model top\n.inputs c d a0 a1 w\n.outputs o\n"
             ".subckt single_port_ram clk=c data[0]=d addr[0]=a0 addr[1]=a1 we=w out[0]=o\n.end\n",
             true);
-    TEST_ASSERT_EQUAL_STRING(".inputs c d a0 a1 w\n.outputs o\n"
-                             ".subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=c data=d out=o "
-                             "we=w\n.end\n\n.model single_port_ram\n.inputs clk data addr[0] "
-                             "addr[1] we\n.outputs out\n.blackbox\n.end\n",
-                             unwrapped(write_vtr()));
+    TEST_ASSERT_EQUAL_STRING(
+        ".inputs c d a0 a1 w\n.outputs o\n"
+        ".subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=c data=d out=$n6 "
+        "we=w\n.names $n6 o\n1 1\n.end\n\n.model single_port_ram\n.inputs clk data addr[0] "
+        "addr[1] we\n.outputs out\n.blackbox\n.end\n",
+        unwrapped(write_vtr()));
 }
 
 /* An adder with cout unconnected: `cout=$p<pin ID>`, so every output bit is written and the
@@ -2733,8 +2745,9 @@ static void test_subckt_unconnected_outputs_named(void) {
     uint32_t cout2 = odin3_node_port(top, (odin3_node_id){nth_node("adder", 1)}, 3).first.v;
     TEST_ASSERT_NOT_EQUAL(cout1, cout2);
     TEST_ASSERT_EQUAL_STRING(line_of(".inputs x y z\n.outputs s1 s2\n"
-                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=s1\n"
-                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=s2\n.end\n\n"
+                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=$n4\n"
+                                     ".subckt adder a=x b=y cin=z cout=$p%u sumout=$n5\n"
+                                     ".names $n4 s1\n1 1\n.names $n5 s2\n1 1\n.end\n\n"
                                      ".model adder\n.inputs a b cin\n.outputs cout sumout\n"
                                      ".blackbox\n.end\n",
                                      cout1, cout2),
@@ -2758,7 +2771,8 @@ static void test_ram_clock_constant(void) {
     pin_onto(ram, 3, w_net);
     pin_onto(ram, 4, o_net);
     TEST_ASSERT_EQUAL_STRING(".inputs d a w\n.outputs o\n.names gnd\n"
-                             ".subckt single_port_ram addr=a clk=gnd data=d out=o we=w\n.end\n\n"
+                             ".subckt single_port_ram addr=a clk=gnd data=d out=$n4 we=w\n"
+                             ".names $n4 o\n1 1\n.end\n\n"
                              ".model single_port_ram\n.inputs clk data addr we\n.outputs out\n"
                              ".blackbox\n.end\n",
                              write_vtr());
@@ -2816,8 +2830,9 @@ static void test_stub_declared_order_kept(void) {
             ".outputs out[0] out[1] out[2] out[3]\n.blackbox\n.end\n",
             true);
     TEST_ASSERT_EQUAL_STRING(".inputs i\n.outputs o p q r\n"
-                             ".subckt multiply a[0]=i a[1]=i b[0]=i b[1]=i out[0]=o out[1]=p "
-                             "out[2]=q out[3]=r\n.end\n\n.model multiply\n"
+                             ".subckt multiply a[0]=i a[1]=i b[0]=i b[1]=i out[0]=$n2 out[1]=$n3 "
+                             "out[2]=$n4 out[3]=$n5\n.names $n2 o\n1 1\n.names $n3 p\n1 1\n"
+                             ".names $n4 q\n1 1\n.names $n5 r\n1 1\n.end\n\n.model multiply\n"
                              ".inputs b[0] b[1] a[0] a[1]\n.outputs out[0] out[1] out[2] out[3]\n"
                              ".blackbox\n.end\n",
                              unwrapped(write_vtr()));
@@ -2940,9 +2955,10 @@ static void test_mixed_width_formals_reread(void) {
             true);
     const char *body = unwrapped(write_vtr());
     TEST_ASSERT_NOT_NULL_MESSAGE(
-        strstr(body, ".subckt single_port_ram addr[0]=a0 clk=c data[0]=d out[0]=o1 we=w\n"
+        strstr(body, ".subckt single_port_ram addr[0]=a0 clk=c data[0]=d out[0]=$n6 we=w\n"
                      ".subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=c data[0]=d data[1]=d "
-                     "out[0]=o2 out[1]=o3 we=w\n.end\n\n.model single_port_ram\n"
+                     "out[0]=$n7 out[1]=$n8 we=w\n.names $n6 o1\n1 1\n.names $n7 o2\n1 1\n"
+                     ".names $n8 o3\n1 1\n.end\n\n.model single_port_ram\n"
                      ".inputs clk data[0] data[1] addr[0] addr[1] we\n.outputs out[0] out[1]\n"),
         body);
     odin3_strbuf written;
@@ -2959,7 +2975,8 @@ static void test_mixed_width_formals_reread(void) {
 static void test_declared_one_bit_vector_kept(void) {
     static const char *const body =
         ".inputs c d a w\n.outputs o\n"
-        ".subckt single_port_ram addr[0]=a clk=c data[0]=d out[0]=o we=w\n.end\n\n"
+        ".subckt single_port_ram addr[0]=a clk=c data[0]=d out[0]=$n5 we=w\n.names $n5 o\n1 "
+        "1\n.end\n\n"
         ".model single_port_ram\n.inputs clk we addr[0] data[0]\n.outputs out[0]\n.blackbox\n"
         ".end\n";
     char text[LINE_BUF * 2];
@@ -2982,7 +2999,7 @@ static void test_stub_dead_nodes(void) {
     const char *body = write_vtr();
     TEST_ASSERT_NULL_MESSAGE(strstr(body, ".model adder"), body);
     TEST_ASSERT_NOT_NULL_MESSAGE(
-        strstr(body, ".subckt single_port_ram addr=a0 clk=c data=d out=o1 we=w\n"), body);
+        strstr(body, ".subckt single_port_ram addr=a0 clk=c data=d out=$n7 we=w\n"), body);
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "\n.model single_port_ram\n.inputs clk data addr "
                                               "we\n.outputs out\n.blackbox\n.end\n"),
                                  body);
@@ -3553,6 +3570,7 @@ static void run_tasks_1_2(void) {
     RUN_TEST(test_model_name_legalised);
     RUN_TEST(test_port_collision_refused);
     RUN_TEST(test_hard_cell_clock);
+    RUN_TEST(test_hard_cell_po_buffer);
     RUN_TEST(test_blackbox_clock_unknown);
     RUN_TEST(test_clock_port_bit);
     RUN_TEST(test_port_renamed_net_named);

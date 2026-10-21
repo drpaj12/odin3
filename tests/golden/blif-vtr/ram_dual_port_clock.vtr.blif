@@ -7,8 +7,14 @@
 .names vcc
 1
 .subckt dual_port_ram addr1[0]=a0 addr1[1]=a1 addr2[0]=b0 addr2[1]=b1 clk=clk data1=d1 data2=d2 \
-  out1=q1 out2=q2 we1=w we2=vcc
-.subckt single_port_ram addr=a0 clk=gnd data=d1 out=r we=w
+  out1=$n9 out2=$n10 we1=w we2=vcc
+.subckt single_port_ram addr=a0 clk=gnd data=d1 out=$n11 we=w
+.names $n9 q1
+1 1
+.names $n10 q2
+1 1
+.names $n11 r
+1 1
 .end
 
 .model dual_port_ram

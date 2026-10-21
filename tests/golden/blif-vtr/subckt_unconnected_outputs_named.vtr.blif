@@ -3,8 +3,12 @@
 .model adders
 .inputs a b c
 .outputs s1 s2
-.subckt adder a=a b=b cin=c cout=$p9 sumout=s1
-.subckt adder a=b b=a cin=c cout=$p14 sumout=s2
+.subckt adder a=a b=b cin=c cout=$p9 sumout=$n4
+.subckt adder a=b b=a cin=c cout=$p14 sumout=$n5
+.names $n4 s1
+1 1
+.names $n5 s2
+1 1
 .end
 
 .model adder

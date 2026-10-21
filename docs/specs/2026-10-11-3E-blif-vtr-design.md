@@ -468,6 +468,13 @@ An output-port bit whose net is itself driven by a constant `$sop` or a normalis
 `gnd`/`vcc` are used only when the constant comes from a `$_CONST*_` node shared with other
 nets.
 
+An output-port bit that a hard cell's (`.subckt`) output pin drives is written through a buffer:
+the box output gets a net of its own (`$n<ID>`) and `.names <net> <port bit>` / `1 1` joins it to
+the port (the existing port buffer, no second mechanism). VTR's ABC step (`strash; ifraig; scorr;
+...; write_hie`) drops a primary output that a box drives directly, and the boxes behind it with it
+(mkPktMerge: 153 of 156 outputs, all 459 RAMs). Parmys has logic between box and port, so it never
+hits this. The info line's `.names` count includes these buffers.
+
 The 0/1 rows keep Parmys's buffer form (§3 item 2). The x rows are the VPR-safe form of 2D
 §14.6's convention: x is 0 wherever logic sees it (what VTR's ABC makes of Parmys's `unconn`), and
 an open pin on hard blocks, the only place Parmys's `unconn` reaches VPR.

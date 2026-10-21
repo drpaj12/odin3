@@ -837,6 +837,17 @@ static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t
     return ODIN3_OK;
 }
 
+/* VTR: true for a net on a port bit that a hard cell's output pin drives. It is written under a
+ * name of its own, so the port bit gets a `.names` buffer (port_buffer): VTR's ABC step drops a
+ * primary output that a .subckt drives directly, and the hard cells behind it with it (spec 3E
+ * §9.2). */
+static bool hard_port_net(const blif_writer *wr, odin3_net_id net) {
+    uint64_t owner = 0;
+    odin3_pin_id driver = odin3_net_driver(wr->module, net);
+    return wr->vtr && odin3_pin_valid(driver) && odin3_u64map_get(wr->net_port, net.v, &owner) &&
+           hard_type(wr->design, odin3_node_type(wr->module, odin3_pin_node(wr->module, driver)));
+}
+
 /* Chooses the name net is written under: its own name unless a port bit of another net or (plain)
  * a generator has it (then `$n<ID>`…, name_named_plain); for an unnamed net the first port bit name
  * on it, else a generated name. In the VTR dialect, each in its VB-10 form (name_named_vtr,
@@ -844,6 +855,9 @@ static odin3_status name_named_plain(blif_writer *wr, odin3_net_id net, uint32_t
 static odin3_status name_net(blif_writer *wr, odin3_net_id net) {
     uint32_t real = odin3_net_name(wr->module, net);
     uint64_t owner = 0;
+    if (hard_port_net(wr, net)) {
+        return take_numbered(wr, net.v);
+    }
     if (real != 0) {
         return wr->vtr ? name_named_vtr(wr, net, real) : name_named_plain(wr, net, real);
     }
