@@ -31,14 +31,21 @@
 #error "ODIN3_CC_ROOT must name the build tree"
 #endif
 
-enum { PATH_BUF = 512, DIR_BUF = 256, LOG_MAX = 16384, HASH_HEX = 65, CEX_BITS = 8 };
+enum {
+    PATH_BUF = 512,
+    DIR_BUF = 256,
+    LOG_MAX = 16384,
+    HASH_HEX = 65,
+    CEX_BITS = 8,
+    PAIR_BYTES = 16
+};
 
 /* 4-bit ripple adder: a half adder at bit 0, full adders above; the last carry is unused. */
 #define RIPPLE                                                                                     \
-    ".model m\n.inputs a0 a1 a2 a3 b0 b1 b2 b3\n.outputs s0 s1 s2 s3\n"                           \
+    ".model m\n.inputs a0 a1 a2 a3 b0 b1 b2 b3\n.outputs s0 s1 s2 s3\n"                            \
     ".names a0 b0 s0\n10 1\n01 1\n.names a0 b0 c1\n11 1\n"                                         \
-    ".names a1 b1 c1 s1\n001 1\n010 1\n100 1\n111 1\n.names a1 b1 c1 c2\n11- 1\n1-1 1\n-11 1\n"   \
-    ".names a2 b2 c2 s2\n001 1\n010 1\n100 1\n111 1\n.names a2 b2 c2 c3\n11- 1\n1-1 1\n-11 1\n"   \
+    ".names a1 b1 c1 s1\n001 1\n010 1\n100 1\n111 1\n.names a1 b1 c1 c2\n11- 1\n1-1 1\n-11 1\n"    \
+    ".names a2 b2 c2 s2\n001 1\n010 1\n100 1\n111 1\n.names a2 b2 c2 c3\n11- 1\n1-1 1\n-11 1\n"    \
     ".names a3 b3 c3 s3\n001 1\n010 1\n100 1\n111 1\n.end\n"
 
 #define ADD4 "-attr grp=add4 -cell $add -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4"
@@ -118,19 +125,24 @@ static const char *text_attr(const char *key) {
                : NULL;
 }
 
-static void bind(const char *net, const char *binding) {
+/* Binds the net named in pair "net=PORT[BIT]". */
+static void bind(const char *pair) {
+    char net[PATH_BUF];
+    const char *eq = strchr(pair, '=');
+    TEST_ASSERT_NOT_NULL(eq);
+    (void)snprintf(net, sizeof net, "%.*s", (int)(eq - pair), pair);
     odin3_net_id id = odin3_module_find_net(top(), intern(net));
     TEST_ASSERT_TRUE_MESSAGE(odin3_net_valid(id), net);
-    set_str((odin3_objref){ODIN3_OBJ_NET, id.v}, "odin3:bind", binding);
+    set_str((odin3_objref){ODIN3_OBJ_NET, id.v}, "odin3:bind", eq + 1);
 }
 
 /* Every live node that is not a port node joins group grp=add4; ports are never in a group. */
 static void mark_all(void) {
-    odin3_module *m = top();
-    for (uint32_t nid = 1; nid < odin3_module_node_end(m); nid++) {
+    odin3_module *mod = top();
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
         odin3_node_id node = {nid};
-        if (odin3_node_live(m, node) &&
-            odin3_celltype_get(design, odin3_node_type(m, node))->gran != ODIN3_GRAN_PORT) {
+        if (odin3_node_live(mod, node) &&
+            odin3_celltype_get(design, odin3_node_type(mod, node))->gran != ODIN3_GRAN_PORT) {
             set_str((odin3_objref){ODIN3_OBJ_NODE, nid}, "grp", "add4");
         }
     }
@@ -139,17 +151,13 @@ static void mark_all(void) {
 /* a_i to A[i], b_i to B[i], s_i to Y[i]; swap_a01 exchanges the bindings of a0 and a1. */
 static void bind_adder(bool swap_a01) {
     for (int i = 0; i < 4; i++) {
-        char net[8];
-        char port[8];
-        (void)snprintf(net, sizeof net, "a%d", i);
-        (void)snprintf(port, sizeof port, "A[%d]", swap_a01 && i < 2 ? 1 - i : i);
-        bind(net, port);
-        (void)snprintf(net, sizeof net, "b%d", i);
-        (void)snprintf(port, sizeof port, "B[%d]", i);
-        bind(net, port);
-        (void)snprintf(net, sizeof net, "s%d", i);
-        (void)snprintf(port, sizeof port, "Y[%d]", i);
-        bind(net, port);
+        char pair[PAIR_BYTES];
+        (void)snprintf(pair, sizeof pair, "a%d=A[%d]", i, swap_a01 && i < 2 ? 1 - i : i);
+        bind(pair);
+        (void)snprintf(pair, sizeof pair, "b%d=B[%d]", i, i);
+        bind(pair);
+        (void)snprintf(pair, sizeof pair, "s%d=Y[%d]", i, i);
+        bind(pair);
     }
 }
 
@@ -174,10 +182,11 @@ typedef struct shape {
 } shape;
 
 static shape shape_of(void) {
-    odin3_module *m = top();
-    shape out = {odin3_module_node_end(m), odin3_module_pin_end(m), odin3_module_net_end(m), 0};
+    odin3_module *mod = top();
+    shape out = {odin3_module_node_end(mod), odin3_module_pin_end(mod), odin3_module_net_end(mod),
+                 0};
     for (uint32_t nid = 1; nid < out.nodes; nid++) {
-        out.live += odin3_node_live(m, (odin3_node_id){nid}) ? 1U : 0U;
+        out.live += odin3_node_live(mod, (odin3_node_id){nid}) ? 1U : 0U;
     }
     TEST_ASSERT_EQUAL_UINT32(1, odin3_design_module_end(design) - 1);
     return out;
@@ -203,9 +212,16 @@ static void use_real_abc(void) {
 #endif
 }
 
-static void expect_error(const char *args, const char *needle) {
+/* The text a refusal must log. */
+typedef struct needle {
+    const char *text;
+} needle;
+
+#define FAILS_WITH(args, text) expect_error(args, (needle){text})
+
+static void expect_error(const char *args, needle must_log) {
     TEST_ASSERT_NOT_EQUAL_INT_MESSAGE(ODIN3_OK, run(args), log_text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, needle), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, must_log.text), log_text);
 }
 
 /* --- the cases of plan Task 7 step 1 ---------------------------------------------------------- */
@@ -255,20 +271,20 @@ static void test_cone_check_register_refused(void) {
     read_blif(".model m\n.inputs a b clk\n.outputs q\n.names a b d\n11 1\n"
               ".latch d q re clk 0\n.end\n");
     mark_all();
-    bind("a", "A[0]");
-    bind("b", "A[1]");
-    bind("q", "Y[0]");
+    bind("a=A[0]");
+    bind("b=A[1]");
+    bind("q=Y[0]");
     shape before = shape_of();
-    expect_error("-attr grp=add4 -cell $and -param A_WIDTH=2", "register");
+    FAILS_WITH("-attr grp=add4 -cell $and -param A_WIDTH=2", "register");
     TEST_ASSERT_NULL(text_attr("odin3:cone_check"));
     expect_same(before);
 }
 
 static void test_cone_check_binding_incomplete(void) {
     load_adder(false);
-    bind("s3", "Y[2]"); /* Y[2] twice, Y[3] never */
+    bind("s3=Y[2]"); /* Y[2] twice, Y[3] never */
     shape before = shape_of();
-    expect_error(ADD4, "Y[2] is bound twice");
+    FAILS_WITH(ADD4, "Y[2] is bound twice");
     TEST_ASSERT_NOT_NULL(strstr(log_text, "Y[3] is not bound"));
     TEST_ASSERT_NULL(text_attr("odin3:cone_check"));
     expect_same(before);
@@ -277,18 +293,18 @@ static void test_cone_check_binding_incomplete(void) {
 static void test_cone_check_binding_missing_and_unknown(void) {
     load_adder(false);
     odin3_net_id net = odin3_module_find_net(top(), intern("b2"));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NET, net.v}, intern("odin3:bind")));
-    expect_error(ADD4, "has no odin3:bind");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NET, net.v},
+                                                      intern("odin3:bind")));
+    FAILS_WITH(ADD4, "has no odin3:bind");
     log_text[0] = '\0';
-    bind("b2", "B[9]");
-    expect_error(ADD4, "B[9]");
+    bind("b2=B[9]");
+    FAILS_WITH(ADD4, "B[9]");
     log_text[0] = '\0';
-    bind("b2", "Z[0]");
-    expect_error(ADD4, "no port 'Z'");
+    bind("b2=Z[0]");
+    FAILS_WITH(ADD4, "no port 'Z'");
     log_text[0] = '\0';
-    bind("b2", "Y[2]"); /* an input net bound to an output bit */
-    expect_error(ADD4, "direction");
+    bind("b2=Y[2]"); /* an input net bound to an output bit */
+    FAILS_WITH(ADD4, "direction");
 }
 
 static void test_cone_check_hash_stable(void) {
@@ -309,12 +325,12 @@ static void test_cone_check_hash_stable(void) {
 
 static void test_cone_check_usage_errors(void) {
     load_adder(false);
-    expect_error("-cell $add", "-attr");
-    expect_error("-attr grp=add4", "-cell");
-    expect_error("-attr grp=nothing -cell $add", "empty");
-    expect_error("-attr grp=add4 -cell $nosuch", "$nosuch");
-    expect_error(ADD4 " -timeout x", "-timeout");
-    expect_error(ADD4 " -bogus", "-bogus");
+    FAILS_WITH("-cell $add", "-attr");
+    FAILS_WITH("-attr grp=add4", "-cell");
+    FAILS_WITH("-attr grp=nothing -cell $add", "empty");
+    FAILS_WITH("-attr grp=add4 -cell $nosuch", "$nosuch");
+    FAILS_WITH(ADD4 " -timeout x", "-timeout");
+    FAILS_WITH(ADD4 " -bogus", "-bogus");
 }
 
 int main(void) {

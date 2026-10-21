@@ -111,6 +111,11 @@ add_library(odin3_core OBJECT
     src/passes/submod/submod.c
     src/passes/submod/register.c
     src/passes/cone_check/cone_check.c
+    src/passes/cone_check/bind.c
+    src/passes/cone_check/tmpl.c
+    src/passes/cone_check/miter.c
+    src/passes/cone_check/prove.c
+    src/passes/cone_check/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -2176,6 +2181,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_sm_dir}/adder_hard_block.parmys.blif ${_sm_dir}/ansiportlist_2.parmys.blif
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(submod_equiv_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # Phase 7 (7.4c, spec 3.3 C-5): cone_check on generated BLIF micros through the odin3 binary
+        # (real ABC): ripple adder vs $add, AND vs $and, a swapped binding, 0 s timeout, a register.
+        add_test(NAME cone_check_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/cone_check_micros.py
+                    $<TARGET_FILE:odin3> ${PROJECT_BINARY_DIR}/cone_check_micros
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(cone_check_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
