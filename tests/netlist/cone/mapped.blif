@@ -1,0 +1,18 @@
+
+.model cone
+.inputs a b c d
+.outputs y0 y1
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NAND_ A=b B=a Y=$abc$96$new_n10
+.subckt $_NAND_ A=d B=$abc$96$new_n8 Y=$abc$96$new_n11
+.subckt $_NAND_ A=$abc$96$new_n10 B=$abc$96$new_n11 Y=$abc$96$new_n12
+.subckt $_NOR_ A=$abc$96$new_n9 B=$abc$96$new_n12 Y=$abc$96$new_n13
+.subckt $_NOR_ A=$abc$96$new_n7 B=$abc$96$new_n13 Y=y0
+.subckt $_NAND_ A=$abc$96$new_n8 B=$abc$96$new_n12 Y=y1
+.subckt $_NOT_ A=a Y=$abc$96$new_n7
+.subckt $_NOT_ A=c Y=$abc$96$new_n8
+.subckt $_NOR_ A=d B=$abc$96$new_n8 Y=$abc$96$new_n9
+.end

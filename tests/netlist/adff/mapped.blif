@@ -1,0 +1,21 @@
+
+.model adff
+.inputs CLK ARST D[0] D[1]
+.outputs Q[0] Q[1]
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_DFFSR_PPP_ C=CLK D=D[0] Q=Q[0] R=ARST S=$false
+.subckt $_DFFSR_PPP_ C=CLK D=D[1] Q=Q[1] R=ARST S=$false
+.subckt $_BUF_ A=ARST Y=pos_arst
+.subckt $_BUF_ A=CLK Y=pos_clk
+.end
+.model $_DFFSR_PPP_
+.inputs C S R D
+.outputs Q
+.names R S D N
+01- 1
+001 1
+.latch N Q re C 3
+.end

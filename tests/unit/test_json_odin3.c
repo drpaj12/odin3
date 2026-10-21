@@ -75,14 +75,14 @@ static void build_design(void) {
     set_int_attr(mod, (odin3_objref){ODIN3_OBJ_NET, nets[3].v}, "odin3_level", 1);
 }
 
-static char *write_text(const char *name, const odin3_json_wopts *opts) {
+static char *write_text(const char *name, const odin3_json_write_opts *opts) {
     const char *path = rj_path(name);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write_opts(rj_design, path, opts));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_write_with(rj_design, path, opts));
     return rj_slurp(path);
 }
 
-static const odin3_json_wopts k_odin3 = {true};
-static const odin3_json_wopts k_plain = {false};
+static const odin3_json_write_opts k_odin3 = {.odin3_keys = true};
+static const odin3_json_write_opts k_plain = {.odin3_keys = false};
 
 static void assert_has(const char *text, const char *needle) {
     if (strstr(text, needle) == NULL) {

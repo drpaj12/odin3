@@ -314,6 +314,50 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
    `dual_port_ram` (BLIF `.subckt`, VTR primitives) or whose model is the `.subckt` of a
    `class="memory"` leaf of the loaded arch record is a source like a library `memory` cell.
 
+6.1 (Tasks 3 and 4, lane feat/6.1-ingest):
+
+1. Script order is `proc; flatten; lower`, not `flatten; proc; lower` (spec G-3): `flatten` refuses
+   a design with processes (`module 'DFF' has processes; run proc first`), and the cell models of
+   `cmos.v` contain `always` blocks. Same order as `tools/flatten-check`.
+2. The equivalence legs (G-5) add `abc --lut 6` after `lower`: `write_blif` writes `$_MUX_`,
+   `$_BUF_` and the other gates as `.subckt`, which `tools/equiv-check` cannot read. Both sides go
+   through the same flow, so the comparison is still netlist against RTL.
+3. `common/adder.v` is not readable as it stands (it instantiates `add_add_module`, defines
+   `add_module`). `gen.sh` copies it to `tests/netlist/adder/rtl.v` with that name fixed; the micro
+   itself is unchanged.
+4. `mapped.blif` is Yosys's `write_blif -icells` of the netlist before the techmap
+   (`.subckt $_NAND_ ...`, `$_BUF_`, `$_DFF_P_`, `$_DFFSR_PPP_`), because there is no BLIF form of the
+   `cmos.v` cell names. The IR has no `$_DFFSR_PPP_` cell type, so `gen.sh` appends
+   `cells/dffsr_sync.blif` (a `.model $_DFFSR_PPP_` whose latch is synchronous, reset first, the
+   same as `lower` makes it) to a `mapped.blif` that uses it; without it the reader makes an
+   implicit black box with inout pins.
+5. `gen.sh` adds `insbuf -buf $_BUF_ A Y` so that `BUF` occurs (G-7: every cell of G-2 occurs) and
+   `delete t:$scopeinfo`; `opt_clean` runs before the techmap only (it would delete the buffers
+   after).
+6. The `src` restoration test (`netlist_src_<micro>`) had a named skip (exit 77) until 5.4c
+   (`read_verilog -netlist`, #187) was merged; the probe is removed and the test runs. The reader keeps
+   the file name as the `src` attribute spells it (`rtl.v`, relative), so the test matches `rtl.v:`
+   and not the absolute fixture path.
+7. `dump_locs` has no provenance-kind column, so the BLIF `IMPORTED` kind is checked as "the BLIF
+   object prints no HDL location" and the Verilog `SOURCE` kind as "prints a location in
+   mapped.v".
+8. Extra: `unknown/unknown.v` (a hand fixture) for G-7, because `--auto-blackbox` with the real
+   fixtures fails (see Open issues in the lane result).
+9. 6.1 fix round: the equivalence leg proves the synchronous reading of `dffsr` and `adff` only. The
+   `$_DFFSR_PPP_` model appended to `mapped.blif` (item 4) is synchronous, the same as `lower`
+   makes it, so a netlist whose asynchronous set/reset differs from the synchronous one is not
+   told apart by `netlist_ingest_*`.
+10. `abc --lut 6` means functional equivalence of the LUT form: both sides go through the same ABC
+    and `equiv-check` compares the LUT netlists. It is not structural equality of the gate netlist.
+11. 6.1 fix round: `netlist_src_<micro>` compares the restored `rtl.v` locations of the top module,
+    its wires and its instances (not the derived `$n` and `$c` objects) with the `src` attributes
+    of `mapped_src.v` that start with `rtl.v:`; a value that names only `cmos_map.v` (the techmap)
+    has no RTL location. `dump_locs` rows whose location joins several (`a|b`) were dropped by the
+    row parser; it now splits at the first three `|`.
+12. `gen.sh` runs `check -mapped -assert`; the regenerated fixtures are byte-identical (the
+    `rtl.v` copies differ only by trailing whitespace that pre-commit strips, so they stay as
+    committed).
+
 6.3 graph export (lane p6-graph-export):
 
 1. E-3 (i) as written (A equals B once `odin3_prov` is dropped) cannot hold for a file whose bit numbers

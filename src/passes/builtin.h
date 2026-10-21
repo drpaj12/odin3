@@ -28,6 +28,8 @@ extern const odin3_pass_def odin3_pass_read_arch;
 extern const odin3_pass_def odin3_pass_write_techlib;
 extern const odin3_pass_def odin3_pass_read_project;
 extern const odin3_pass_def odin3_pass_dump_project;
+/* names.c (5.4f): names. */
+extern const odin3_pass_def odin3_pass_names;
 /* dump_locs.c (5.4): dump_locs. */
 extern const odin3_pass_def odin3_pass_dump_locs;
 /* src/passes/levelize/levelize.c (Phase 6, 6.4): levelize. */

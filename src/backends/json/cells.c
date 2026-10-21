@@ -37,8 +37,13 @@ static void open_member(jw *out, const jw_cell *cell, const char *key, jw_list *
 static const char *cell_key(jw *out, const jw_cell_ref *ref) {
     char buf[NAME_BUF];
     uint32_t name = odin3_node_name(out->module, ref->node);
-    jw_keyspec spec = {JW_KEY_CELL, ref->suffix[0] != '\0', odin3_strtab_get(out->strtab, name),
-                       ref->suffix};
+    jw_keyspec spec = {JW_KEY_CELL,
+                       ref->suffix[0] != '\0',
+                       odin3_strtab_get(out->strtab, name),
+                       ref->suffix,
+                       odin3_node_prov(out->module, ref->node),
+                       ODIN3_NAME_NODE,
+                       ref->node.v};
     if (name == 0) {
         (void)snprintf(buf, sizeof buf, "%u%s", (unsigned)ref->node.v, ref->suffix);
         spec.generated = true;
@@ -56,7 +61,7 @@ void jw_cell_begin(jw *out, jw_list *cells, const jw_cell_ref *ref, jw_cell *cel
     jw_string(out, odin3_bytes_cstr(key));
     jw_raw(out, ": {\n");
     jw_indent(out, cells->depth + CELL_DEPTH_OFFSET);
-    jw_fmt(out, "\"hide_name\": %d,\n", key[0] == '$' ? 1 : 0);
+    jw_fmt(out, "\"hide_name\": %d,\n", out->hide ? 1 : 0);
     jw_indent(out, cells->depth + CELL_DEPTH_OFFSET);
     jw_raw(out, "\"type\": ");
     jw_string(out, odin3_bytes_cstr(ref->type));

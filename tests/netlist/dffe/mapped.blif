@@ -1,0 +1,19 @@
+
+.model dffe
+.inputs CLK EN D[0] D[1]
+.outputs Q[0] Q[1]
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NOT_ A=EN Y=$abc$92$new_n8
+.subckt $_NAND_ A=D[0] B=EN Y=$abc$92$new_n9
+.subckt $_NAND_ A=Q[0] B=$abc$92$new_n8 Y=$abc$92$new_n10
+.subckt $_NAND_ A=$abc$92$new_n9 B=$abc$92$new_n10 Y=$abc$92$auto$rtlil.cc:3203:MuxGate$89
+.subckt $_NAND_ A=EN B=D[1] Y=$abc$92$new_n12
+.subckt $_NAND_ A=$abc$92$new_n8 B=Q[1] Y=$abc$92$new_n13
+.subckt $_NAND_ A=$abc$92$new_n12 B=$abc$92$new_n13 Y=$abc$92$auto$rtlil.cc:3203:MuxGate$91
+.subckt $_DFF_P_ C=CLK D=$abc$92$auto$rtlil.cc:3203:MuxGate$89 Q=Q[0]
+.subckt $_DFF_P_ C=CLK D=$abc$92$auto$rtlil.cc:3203:MuxGate$91 Q=Q[1]
+.subckt $_BUF_ A=CLK Y=pos_clk
+.end
