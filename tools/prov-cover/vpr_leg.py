@@ -28,7 +28,7 @@ Block name to netlist name, with the evidence (ch_intrinsics, VTR 12 ``vpr``, k6
 
 Resolution of an atom: pad (``--allow pad``) or generator name, else the name decodes to
 ``SHORT`` (with a location in the name, a node driving a net ``SHORT`` must carry exactly that
-file and line: the same short name in two scopes does not pair, the read-back has no hierarchy
+file and line (its own or its net's): the same short name in two scopes does not pair, the read-back has no hierarchy
 to key on) or the name is the net, whose driver cell must carry a location (inherited
 through D-5 in a BLIF VTR read-back). Anything else is a defect: ``unmapped`` (no such net: the
 rule above is wrong for this block) or ``unresolved`` (the driver has no location). A cluster
@@ -103,7 +103,7 @@ class Index:
     driven: frozenset[str]
     inputs: frozenset[str]
     outputs: frozenset[str]
-    # net name -> the (file, line) of every located node that drives a net of that name
+    # net name -> the (file, line) of the net and of every located node that drives it
     where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
 
 
@@ -111,6 +111,9 @@ def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
     """The net names of a typed dump joined with its connections (``write_json``)."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
     where: dict[str, set[tuple[str, int]]] = {}
+    for r in rows:  # the net's own location is what the written name carries (a hard block's)
+        if r.kind == "net":
+            where.setdefault(r.name, set()).update((x.file, x.line) for x in parse_locs(r.src))
     located: set[str] = set()
     driven: set[str] = set()
     inputs: set[str] = set()

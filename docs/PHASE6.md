@@ -53,9 +53,9 @@ the Phase 3 design set and the Phase 5 LPM micros.
   objects by class X-1 to X-9, and the specificity before and after.
   - [x] 6.5a `dump_locs --types`; 6.5b `tools/prov-cover` legs a, b and c (PRs merged).
   - [x] 6.5c leg d (VPR placed blocks, `tools/prov-cover/vpr_leg.py`, CTest `prov_cover_sweep_place`):
-    built, every placed name maps to a netlist name (0 unmapped, 0 unplaced on the 14 designs).
+    built, every placed name maps to a netlist name (0 unmapped, 0 unplaced, 0 unnetted on the 14 designs); a decoded name pairs only with a net of the same file and line.
   - [ ] Gate green: leg b and d lose the location of the driver of an output port bit (D1/D3) in 13
-    of 14 designs and, until PR 207 merges, the 8 `single_port_ram` of ch_intrinsics (D2). Decision
+    of 14 designs (D2, the `single_port_ram` outputs of ch_intrinsics, is fixed by PR 207). Decision
     for Peter pending: a counted `port-driver` class, or locations on port bits.
 
 ## Dependencies
@@ -81,17 +81,22 @@ objects are placed blocks plus the atoms inside them, pads and the `gnd`/`vcc` g
 | multiclock_reader_writer | 32/32 100.0% | 31/34 96.9% (def 1) | 31/32 96.9% (def 1, pad 4) | 2 / 8 |
 | diffeq1 | 628/628 100.0% | 532/631 84.7% (def 96) | 563/659 85.4% (def 96, pad 258) | 4 / 4 |
 | diffeq2 | 435/435 100.0% | 339/438 77.9% (def 96) | 360/456 78.9% (def 96, pad 162) | 3 / 3 |
-| ch_intrinsics | 225/225 100.0% | 144/285 77.8% (def 73) | 154/196 78.6% (def 41, pad 229) | 8 / 8 |
+| ch_intrinsics | 225/225 100.0% | 152/285 82.2% (def 65) | 163/196 83.2% (def 33, pad 229) | 8 / 8 |
 | ch_intrinsics_nolatches | 312/312 100.0% | 157/289 70.4% (def 106) | 163/232 70.3% (def 66, pad 229) | 8 / 8 |
 | stereovision3 | 320/320 100.0% | 292/324 91.2% (def 28) | 304/332 91.6% (def 28, pad 41) | 2 / 8 |
 | sha | 2503/2503 100.0% | 2467/2506 98.6% (def 36) | 2598/2634 98.6% (def 36, pad 74) | 3 / 3 |
 | mkPktMerge | 1394/1394 100.0% | 701/860 99.6% (def 3) | 706/709 99.6% (def 3, pad 467) | 2 / 4 |
 | blob_merge | 10542/10542 100.0% | 10305/10408 99.4% (def 61) | 10496/10557 99.4% (def 61, pad 136) | 1 / 8 |
 
+Reading the columns: in leg b the count is the cells that carry their own location and the
+percentage also counts the inherited ones (X-6), so 701/860 is 99.6% for mkPktMerge; leg d counts
+blocks plus atoms and the percentage is the plain ratio. Pad counts are unique names (a pad
+cluster and its atom have one name), not blocks.
+
 Leg c (LPM micros, `tests/lpm`, 8 files): 100% resolved in memory and after read-back for all of
 them; `altsyncram_soft` has 3 objects in memory and 0 after the `-netlist` read-back (it is lowered
 to logic; nothing to count). Leg a is 100% everywhere; every leg-b and leg-d defect is the loss of
-the location of a driver of an output port bit (D1/D3; ch_intrinsics also D2). Leg d records no
+the location of a driver of an output port bit (D1/D3). Leg d records no
 specificity (the placed names carry no location list; the leg-b figure applies).
 Source: `prov-cover --legs a,b|c|d --smallest-first` reports (`tests/prov/expect_vtr14.txt` and
 `expect_vtr14_d.txt` list the known defects).

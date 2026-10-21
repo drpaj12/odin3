@@ -490,7 +490,7 @@ gnd\t3\t1\t0\t0\t#5
 
     def test_index_from_a_dump_and_its_connections(self) -> None:
         rows = pc.parse_dump(
-            f"m|node:$lut|$c1|{A}\nm|node:$lut|$c2|\nm|node:$port_in|$c3|\n"
+            f"m|node:$lut|$c1|{A}\nm|node:$lut|$c2|\nm|node:$port_in|$c3|\nm|net|y|b.v:5\n"
         )
         mod = pc.Mod(
             {
@@ -504,7 +504,7 @@ gnd\t3\t1\t0\t0\t#5
         )
         index = vpr.build_index(rows, {"m": mod})
         self.assertEqual(index.located, {"x"})
-        self.assertEqual(index.where, {"x": {("a.v", 3)}})
+        self.assertEqual(index.where, {"x": {("a.v", 3)}, "y": {("b.v", 5)}})
         self.assertEqual(index.driven, {"x", "y", "a"})
         self.assertEqual((index.inputs, index.outputs), ({"a"}, {"y"}))
 
