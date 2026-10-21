@@ -90,7 +90,7 @@ static void report(const char *step, const char *result, double start) {
 /* A dot refusal with no focus is the node budget at work: reported as "over-budget", not a
  * failure. */
 static int write_dot(const odin3_design *design, const wr_args *args) {
-    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, args->max_nodes};
+    odin3_dot_opts opts = {ODIN3_DOT_FOCUS_NONE, NULL, args->max_nodes, NULL, false};
     double start = now_seconds();
     odin3_status st = odin3_dot_write(design, args->dot, &opts);
     if (st == ODIN3_ERR_INVALID_ARG) {
