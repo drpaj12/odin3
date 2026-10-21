@@ -25,6 +25,11 @@ def dump(*rows: tuple[str, str, str]) -> list[lc.Obj]:
     return [lc.Obj("m", kind, name, src) for kind, name, src in rows]
 
 
+def cells(*rows: tuple[str, str, str]) -> list[lc.Obj]:
+    """Nodes with a cell type: (type, name, src)."""
+    return [lc.Obj("m", "node", name, src, ctype) for ctype, name, src in rows]
+
+
 class ParseTests(unittest.TestCase):
     def test_dump_fields_and_escapes(self) -> None:
         text = "m|node|$c1|a.v:3.1-4.10|b.v:2\nm\\|x|wire|a\\\\b\\nc|\nm|net|$n1|\n"
@@ -32,6 +37,13 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(rows[0], lc.Obj("m", "node", "$c1", "a.v:3.1-4.10|b.v:2"))
         self.assertEqual(rows[1], lc.Obj("m|x", "wire", "a\\b\nc", ""))
         self.assertEqual(rows[2].src, "")
+
+    def test_dump_cell_types(self) -> None:
+        rows = lc.parse_dump("m|node:$_AND_|$c1|a.v:3\nm|node:|$c2|\nm|node:a\\|b|$c3|\nm|net|$n1|\n")
+        self.assertEqual((rows[0].kind, rows[0].ctype), ("node", "$_AND_"))
+        self.assertEqual((rows[1].kind, rows[1].ctype), ("node", ""))
+        self.assertEqual(rows[2].ctype, "a|b")
+        self.assertEqual((rows[3].kind, rows[3].ctype), ("net", ""))
 
     def test_bad_dump_line(self) -> None:
         with self.assertRaises(lc.ToolError):
@@ -93,18 +105,24 @@ class CompareTests(unittest.TestCase):
         self.assertEqual(lc.compare("blif", before, after)["node"].lost, {"X-6": 1})
         self.assertEqual(lc.compare("plain", before, after)["net"].lost, {"X-1": 2})
 
-    def test_cell_without_a_json_entry(self) -> None:
-        # a constant driver the JSON file has no cell for: X-9; a port cell (the location of a
-        # declared wire): X-8; a cell the file has but the read-back lost: no class
-        before = dump(("wire", "x", A), ("node", "$c1", A), ("node", "$c2", B), ("node", "$c3", C))
-        after = dump(
-            ("wire", "x", A), ("node", "$c1", ""), ("node", "$c2", ""), ("node", "$c3", "")
+    def test_cell_class_is_by_type(self) -> None:
+        # a constant driver: X-9; a port cell: X-8 in the BLIF dialects only; any other cell lost
+        # in a lossless format has no class, whatever the written files hold
+        before = cells(
+            ("$_CONST1_", "$c1", A), ("$port_in", "$c2", B), ("$and", "$c3", C)
         )
-        written = {"m": lc.CellSet(frozenset({"$c3"}), frozenset())}
-        t = lc.compare("json", before, after, written)["node"]
+        after = cells(("$_CONST1_", "$c1", ""), ("$port_in", "$c2", ""), ("$and", "$c3", ""))
+        t = lc.compare("json", before, after)["node"]
+        self.assertEqual((t.lost, t.unclassified), ({"X-9": 1}, 2))
+        t = lc.compare("plain", before, after)["node"]
         self.assertEqual((t.lost, t.unclassified), ({"X-8": 1, "X-9": 1}, 1))
-        t = lc.compare("json", before, after)["node"]  # no JSON file known: all are written
-        self.assertEqual((t.lost, t.unclassified), ({}, 3))
+
+    def test_dropped_cell_with_a_wire_location_is_not_a_port(self) -> None:
+        # the old rule took a lost cell with the location of a wire for a port cell
+        before = dump(("wire", "x", A)) + cells(("$and", "$c1", A))
+        after = dump(("wire", "x", A)) + cells(("$and", "$c1", ""))
+        t = lc.compare("json", before, after)["node"]
+        self.assertEqual((t.lost, t.unclassified), ({}, 1))
 
     def test_named_net_class(self) -> None:
         before = dump(("net", "n", A))
@@ -131,13 +149,20 @@ class CompareTests(unittest.TestCase):
         t = lc.compare("json", before, after)["node"]
         self.assertEqual((t.same, t.gained), (1, 1))
 
-    def test_buffer_lost_in_verilog_is_x9(self) -> None:
-        before = dump(("node", "$c1", A), ("node", "$c2", B))
-        after = dump(("node", "$c1", A), ("node", "$c2", ""))
-        written = {"m": lc.CellSet(frozenset({"$c1", "$c2"}), frozenset({"$c2"}))}
-        t = lc.compare("verilog", before, after, written)["node"]
+    def test_buffer_lost_in_verilog_is_x9_only_as_an_alias(self) -> None:
+        before = cells(("$lut", "$c1", A), ("$lut", "$c2", "a.v:5.2-5.9"))
+        after = cells(("$lut", "$c1", A), ("$lut", "$c2", ""))
+        folded = {"m": lc.Carrier(frozenset({"$c2"}), frozenset({("a.v", 5)}))}
+        t = lc.compare("verilog", before, after, folded)["node"]
         self.assertEqual((t.lost, t.unclassified), ({"X-9": 1}, 0))
-        t = lc.compare("json", before, after, written)["node"]  # JSON keeps the buffer
+        # the buffer is in the JSON file, but the Verilog file has no alias for it: a real loss
+        kept = {"m": lc.Carrier(frozenset({"$c2"}), frozenset())}
+        t = lc.compare("verilog", before, after, kept)["node"]
+        self.assertEqual((t.lost, t.unclassified), ({}, 1))
+        # an alias at that line is no excuse for a cell that is not a buffer
+        other = {"m": lc.Carrier(frozenset(), frozenset({("a.v", 5)}))}
+        self.assertEqual(lc.compare("verilog", before, after, other)["node"].unclassified, 1)
+        t = lc.compare("json", before, after, folded)["node"]  # JSON keeps the buffer
         self.assertEqual((t.lost, t.unclassified), ({}, 1))
 
     def test_buffer_cells(self) -> None:
@@ -146,16 +171,18 @@ class CompareTests(unittest.TestCase):
         self.assertTrue(lc.is_buffer(lut))
         self.assertFalse(lc.is_buffer(inverter))
         self.assertTrue(lc.is_buffer({"type": "$_BUF_"}))
-        self.assertEqual(lc.cell_set({"a": lut, "b": inverter}).buffers, frozenset({"a"}))
 
     def test_net_with_a_wire_location_is_inherited(self) -> None:
         # D-2, D-3: a net takes the location of its netname or declaration
         before = dump(("wire", "x", A), ("net", "$n1", ""), ("net", "$n2", ""))
         after = dump(("wire", "x", A), ("net", "$n1", A), ("net", "$n2", B))
         t = lc.compare("json", before, after)["net"]
-        self.assertEqual((t.inherited, t.gained), (1, 1))
-        named = lc.compare("json", dump(("wire", "x", A), ("net", "n", "")), dump(("net", "n", A)))
+        self.assertEqual((t.inherited, t.gained), (0, 2))
+        named = lc.compare("json", dump(("wire", "n", A), ("net", "n", "")), dump(("net", "n", A)))
         self.assertEqual((named["net"].inherited, named["net"].gained), (1, 0))
+        # a net named for another wire, or a generated name no wire can be told from: gained
+        other = lc.compare("json", dump(("wire", "x", A), ("net", "n", "")), dump(("net", "n", B)))
+        self.assertEqual((other["net"].inherited, other["net"].gained), (0, 1))
 
     def test_module_location_is_modgained(self) -> None:
         # a constant driver the reader makes takes the module's location (X-9, reported)
@@ -163,13 +190,33 @@ class CompareTests(unittest.TestCase):
         after = dump(("module", "m", A), ("node", "$c1", A), ("node", "$c2", B))
         t = lc.compare("verilog", before, after)["node"]
         self.assertEqual((t.modgained, t.gained), (1, 1))
-        problems = lc.check_tallies("verilog", {"node": lc.Tally(had=1, modgained=1)})
-        self.assertEqual(problems, [])
+        tally = {"node": lc.Tally(had=1, modgained=1)}
+        self.assertEqual(lc.check_tallies("verilog", tally, lc.Allow(modgained=1)), [])
+        problems = lc.check_tallies("verilog", tally)  # not listed: a failure
+        self.assertTrue(any("module's location" in p for p in problems), problems)
+        stale = lc.check_tallies("verilog", {"node": lc.Tally(had=1)}, lc.Allow(modgained=2))
+        self.assertTrue(any("module's location" in p for p in stale), stale)
 
-    def test_new_objects_are_not_gained(self) -> None:
+    def test_new_objects_are_gained(self) -> None:
         before = dump(("wire", "x", A))
         after = dump(("wire", "x", A), ("wire", "$n7", B))
-        self.assertEqual(lc.compare("verilog", before, after)["wire"].gained, 0)
+        self.assertEqual(lc.compare("verilog", before, after)["wire"].gained, 1)
+
+    def test_every_surplus_is_gained(self) -> None:
+        # one object with no location before, three located after: none is capped by the first
+        before = dump(("node", "$c1", A), ("node", "$c2", ""))
+        after = dump(("node", "$c1", A), ("node", "$c2", B), ("node", "$c3", B), ("node", "$c4", C))
+        t = lc.compare("json", before, after)["node"]
+        self.assertEqual((t.same, t.gained), (1, 3))
+
+    def test_verilog_split_keeps_a_line_from_before(self) -> None:
+        # the reader splits an assign into cells with its line: not gained; a line nothing had is
+        before = dump(("node", "$c1", A))
+        after = dump(("node", "$c1", "a.v:3"), ("node", "$c2", "a.v:3"), ("node", "$c3", "a.v:99"))
+        t = lc.compare("verilog", before, after)["node"]
+        self.assertEqual((t.line, t.split, t.gained), (1, 1, 1))
+        t = lc.compare("json", before, after)["node"]  # no splitting in JSON
+        self.assertEqual((t.split, t.gained), (0, 3))
 
     def test_line_only_cells_in_verilog(self) -> None:
         before = dump(("node", "$c1", A), ("node", "$c2", C))
@@ -184,7 +231,21 @@ class CompareTests(unittest.TestCase):
         bad = dump(("module", "m", A), ("wire", "x", A), ("wire", "y", "a.v:99.1-99.2"))
         self.assertEqual(lc.check_tallies("json", lc.compare("json", before, good)), [])
         problems = lc.check_tallies("json", lc.compare("json", before, bad))
-        self.assertTrue(any("wire" in p and "no class" in p for p in problems), problems)
+        self.assertTrue(any("wire" in p and "different location" in p for p in problems), problems)
+
+    def test_wrong_location_is_never_classified(self) -> None:
+        # present but different: a failure in every format, whatever class the loss would have
+        before = dump(("net", "n", A), ("node", "$c1", B)) + cells(("$_CONST0_", "n0", C))
+        after = dump(("net", "n", "a.v:99.1-99.2")) + cells(("$_CONST0_", "n0", "a.v:98"))
+        for fmt in ("json", "verilog", "blif", "plain"):
+            t = lc.compare(fmt, before, after)
+            self.assertEqual(t["net"].wrong, 1, fmt)
+            self.assertEqual(t["net"].lost, {}, fmt)
+            if fmt != "blif":  # the VTR dialect names no cell: it pools them
+                self.assertEqual(t["node"].wrong, 1, fmt)
+                self.assertEqual(t["node"].lost.get("X-9", 0), 0, fmt)
+            problems = lc.check_tallies(fmt, t)
+            self.assertTrue(any("different location" in p for p in problems), (fmt, problems))
 
 
 class CheckTests(unittest.TestCase):
@@ -252,18 +313,151 @@ class NumbersTests(unittest.TestCase):
 
 class ExpectTests(unittest.TestCase):
     def test_parse(self) -> None:
-        table = lc.parse_expect("# c\nlut x.v error:script no lower for it\n\n")
-        self.assertEqual(table, {("lut", "x.v"): ("error:script", "no lower for it")})
-        with self.assertRaises(lc.ToolError):
-            lc.parse_expect("lut x.v\n")
-        with self.assertRaises(lc.ToolError):
-            lc.parse_expect("lut x.v bogus why\n")
+        table = lc.parse_expect(
+            "# c\nlut x.v error:script no lower for it\n\n"
+            "absent lut x.v verilog sub not instantiated\n"
+            "modgained lut x.v verilog 3 a literal 1'b1 driver\n"
+        )
+        self.assertEqual(table.designs, {("lut", "x.v"): ("error:script", "no lower for it")})
+        self.assertEqual(table.allow("lut", "x.v", "verilog"), lc.Allow(frozenset({"sub"}), 3))
+        self.assertEqual(table.allow("lut", "x.v", "json"), lc.Allow())
+        for bad in (
+            "lut x.v\n",
+            "lut x.v bogus why\n",
+            "absent lut x.v json sub no module-less json\n",  # JSON always has every module
+            "absent lut x.v plain sub nor plain BLIF\n",
+            "modgained lut x.v verilog many why\n",
+            "absent lut x.v verilog sub\n",  # no reason
+        ):
+            with self.assertRaises(lc.ToolError, msg=bad):
+                lc.parse_expect(bad)
 
     def test_level_script(self) -> None:
         text = lc.level_script(
             "# c\n@TECHLIB@\nread_verilog @DESIGN@\nproc\n", {"@DESIGN@": "d.v", "@TECHLIB@": ""}
         )
         self.assertEqual(text, "read_verilog d.v; proc")
+
+
+class AbsentModuleTests(unittest.TestCase):
+    """The objects of a module the read-back lacks are X-1 only where the expect file says so."""
+
+    BEFORE = [
+        lc.Obj("top", "module", "top", A),
+        lc.Obj("top", "wire", "x", A),
+        lc.Obj("sub", "module", "sub", B),
+        lc.Obj("sub", "wire", "y", B),
+    ]
+    AFTER = [lc.Obj("top", "module", "top", A), lc.Obj("top", "wire", "x", A)]
+
+    def test_missing_module_fails_in_every_format(self) -> None:
+        for fmt in ("json", "verilog", "blif", "plain"):
+            t = lc.compare(fmt, self.BEFORE, self.AFTER)
+            problems = lc.check_tallies(fmt, t)
+            self.assertTrue(any("module sub is absent" in p for p in problems), (fmt, problems))
+
+    def test_listed_module_is_x1(self) -> None:
+        allow = lc.Allow(absent=frozenset({"sub"}))
+        t = lc.compare("verilog", self.BEFORE, self.AFTER, None, allow)
+        self.assertEqual(lc.check_tallies("verilog", t, allow), [])
+        self.assertEqual(t["wire"].lost, {"X-1": 1})
+
+    def test_stale_entry_fails(self) -> None:
+        allow = lc.Allow(absent=frozenset({"top"}))
+        t = lc.compare("verilog", self.BEFORE, self.BEFORE, None, allow)
+        problems = lc.check_tallies("verilog", t, allow)
+        self.assertTrue(any("STALE absent entry for module top" in p for p in problems), problems)
+
+    def test_unlisted_module_objects_get_no_x1(self) -> None:
+        t = lc.compare("json", self.BEFORE, self.AFTER)
+        self.assertEqual(t["wire"].unclassified, 1)  # JSON wires are lossless
+        self.assertNotIn("X-1", t["wire"].lost)
+
+
+class BlifDialectTests(unittest.TestCase):
+    def test_blif_wire_with_a_location_fails(self) -> None:
+        rows = dump(("module", "m", A), ("wire", "x", A))
+        for fmt in ("blif", "plain"):
+            problems = lc.check_tallies(fmt, lc.compare(fmt, rows, rows))
+            self.assertTrue(any("out of date" in p for p in problems), (fmt, problems))
+
+    def test_blif_wire_without_one_is_fine(self) -> None:
+        before = dump(("wire", "x", A), ("net", "$n1", A), ("node", "$c1", A))
+        after = dump(("wire", "x", ""), ("net", "$n1", ""), ("node", "$c1", A))
+        for fmt in ("blif", "plain"):
+            problems = lc.check_tallies(fmt, lc.compare(fmt, before, after))
+            self.assertFalse(any("out of date" in p for p in problems), (fmt, problems))
+
+
+class PinTests(unittest.TestCase):
+    PINS = lc.parse_pins("# c\nmicros lut json node X-9 5\nmicros lut json net X-1 7\n")
+
+    def sums(self, nodes: int, nets: int) -> dict[tuple[str, str], list[dict[str, lc.Tally]]]:
+        run = {
+            "node": lc.Tally(lost={"X-9": nodes} if nodes else {}),
+            "net": lc.Tally(lost={"X-1": nets}),
+        }
+        return {("lut", "json"): [run]}
+
+    def test_at_the_pin(self) -> None:
+        self.assertEqual(lc.pin_problems(self.PINS, "micros", self.sums(5, 7)), ([], []))
+
+    def test_above_fails_below_notes(self) -> None:
+        fails, notes = lc.pin_problems(self.PINS, "micros", self.sums(6, 6))
+        self.assertEqual(len(fails), 1)
+        self.assertIn("lut json node X-9: 6 lost, pinned 5", fails[0])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("improved, update the pin", notes[0])
+
+    def test_a_class_with_no_pin_is_pinned_at_zero(self) -> None:
+        sums = self.sums(5, 7)
+        sums[("lut", "json")][0]["wire"] = lc.Tally(lost={"X-8": 1})
+        fails, _ = lc.pin_problems(self.PINS, "micros", sums)
+        self.assertEqual(len(fails), 1)
+        self.assertIn("wire X-8", fails[0])
+
+    def test_other_sets_are_not_looked_at(self) -> None:
+        self.assertEqual(lc.pin_problems(self.PINS, "vtr14", self.sums(0, 0)), ([], []))
+
+    def test_pin_lines_round_trip(self) -> None:
+        run = {"node": lc.Tally(lost={"X-9": 5})}
+        lines = lc.pin_lines("micros", "lut", "json", run)
+        self.assertEqual(lc.parse_pins("\n".join(lines)), {("micros", "lut", "json", "node", "X-9"): 5})
+
+    def test_bad_pins(self) -> None:
+        for bad in ("micros lut json node X-9\n", "micros lut json node lost 5\n"):
+            with self.assertRaises(lc.ToolError):
+                lc.parse_pins(bad)
+
+
+class WrittenTests(unittest.TestCase):
+    def test_verilog_aliases(self) -> None:
+        text = (
+            "(* src = \"a.v:1.1-9.9\" *)\nmodule top (  // a.v:1\n  input a\n);\n"
+            "  assign y = a;  // /w/a.v:5\n"
+            "  assign z[2] = a[1];  // /w/a.v:6\n"
+            "  assign q = a == b;  // /w/a.v:7\n"
+            "  assign r = ~a;  // /w/a.v:8\n"
+            "  assign s = a;\n"
+            "endmodule\nmodule \\odd.name  (\n);\n  assign u = v;  // /w/b.v:2\nendmodule\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "W.v"
+            path.write_text(text, encoding="utf-8")
+            got = lc.verilog_aliases(path)
+        self.assertEqual(got["top"], frozenset({("/w/a.v", 5), ("/w/a.v", 6)}))
+        self.assertEqual(got["odd.name"], frozenset({("/w/b.v", 2)}))
+
+    def test_written_facts(self) -> None:
+        lut = {"type": "$lut", "parameters": {"WIDTH": "0" * 31 + "1", "LUT": "10"}}
+        inv = {"type": "$lut", "parameters": {"WIDTH": "0" * 31 + "1", "LUT": "01"}}
+        doc = {"modules": {"top": {"cells": {"b": lut, "i": inv}}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            j, v = Path(tmp) / "W.json", Path(tmp) / "W.v"
+            j.write_text(__import__("json").dumps(doc), encoding="utf-8")
+            v.write_text("module top (\n);\n  assign y = a;  // a.v:4\nendmodule\n", encoding="utf-8")
+            got = lc.written_facts(j, v)
+        self.assertEqual(got["top"], lc.Carrier(frozenset({"b"}), frozenset({("a.v", 4)})))
 
 
 class MainTests(unittest.TestCase):

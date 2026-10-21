@@ -49,7 +49,7 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -127,6 +127,7 @@ class Obj:
     kind: str
     name: str
     src: str
+    ctype: str = ""  # a node's cell type name (`dump_locs --types`), else ""
 
 
 @dataclass(frozen=True)
@@ -170,7 +171,8 @@ def parse_dump(text: str) -> list[Obj]:
                 i += 1
         if len(fields) < 3:
             raise ToolError(f"dump_locs line {number} has fewer than four fields: {line[:80]!r}")
-        rows.append(Obj(unescape(fields[0]), fields[1], unescape(fields[2]), line[i:]))
+        kind, _, ctype = fields[1].partition(":")
+        rows.append(Obj(unescape(fields[0]), kind, unescape(fields[2]), line[i:], unescape(ctype)))
     return rows
 
 
@@ -191,16 +193,38 @@ def is_generated(name: str) -> bool:
 # --- the comparison --------------------------------------------------------------------------
 
 
+CONST_TYPES = frozenset({"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"})
+PORT_TYPES = frozenset({"$port_in", "$port_out", "$port_inout"})
+BLIF_FORMATS = ("blif", "plain")
+ABSENT_FORMATS = ("verilog", "blif")  # the formats that may leave a module out of the file
+SPLIT_FORMATS = ("verilog",)  # the reader splits an `assign` expression into several objects
+OWN_BIT = re.compile(r"\[\d+\]$")
+
+
 @dataclass(frozen=True)
-class CellSet:
-    """The cells of one module in its JSON file: all names, and those that only copy a net (a
-    one-input identity LUT or buffer), which the Verilog writer folds into an alias."""
+class Carrier:
+    """What the written files say about one module: the cells of its JSON file that only copy a
+    net (a one-input identity LUT or buffer), and the (file, line) of every pure alias `assign`
+    in its Verilog file (a statement the reader reads as an alias, not as a cell)."""
 
-    names: frozenset[str]
-    buffers: frozenset[str]
+    buffers: frozenset[str] = frozenset()
+    aliases: frozenset[tuple[str, int]] = frozenset()
 
 
-Written = dict[str, CellSet]
+Written = dict[str, Carrier]
+
+
+@dataclass(frozen=True)
+class Allow:
+    """What the expect file lists for one design, level and format: the modules the file may
+    leave out (``absent``) and the exact number of objects that take their module's location
+    (``modgained``)."""
+
+    absent: frozenset[str] = frozenset()
+    modgained: int = 0
+
+
+NO_ALLOW = Allow()
 
 
 @dataclass
@@ -214,9 +238,12 @@ class Tally:
     inherited: int = 0
     lost: dict[str, int] = field(default_factory=dict)
     unclassified: int = 0
+    wrong: int = 0
     gained: int = 0
     modgained: int = 0
+    split: int = 0
     capped: int = 0
+    absent: list[str] = field(default_factory=list)
     lines_before: list[int] = field(default_factory=list)
     lines_after: list[int] = field(default_factory=list)
 
@@ -228,13 +255,16 @@ class Tally:
             "line",
             "inherited",
             "unclassified",
+            "wrong",
             "gained",
             "modgained",
+            "split",
         ):
             setattr(self, name, getattr(self, name) + getattr(other, name))
         self.capped += other.capped
         for cls, count in other.lost.items():
             self.lost[cls] = self.lost.get(cls, 0) + count
+        self.absent += other.absent
         self.lines_before += other.lines_before
         self.lines_after += other.lines_after
 
@@ -243,65 +273,91 @@ def distinct_lines(locs: Sequence[Loc]) -> int:
     return len({(x.file, x.line) for x in locs})
 
 
+@dataclass(frozen=True)
+class Scope:
+    """What a pairing needs: the format, the kind, the located wires of the module (name -> SRC),
+    what its written files say (None: not known), whether the read-back has the module, whether
+    the expect file lets it be absent, and the module's own SRC."""
+
+    fmt: str
+    kind: str
+    wires: Mapping[str, str]
+    carrier: Carrier | None
+    present: bool = True
+    absent_ok: bool = False
+    module_src: str = ""
+    before_lines: frozenset[tuple[str, int]] = frozenset()
+
+
+def node_class(scope: Scope, before: Obj, by_rule: str | None) -> str | None:
+    """The class of a lost cell, decided by its type in the design before writing (never by
+    whether a file has it): a port cell has no carrier in the BLIF dialects (X-8; JSON and
+    Verilog restore a port through its netname or declaration: a loss there is a bug); a constant
+    driver is folded into a literal by every writer (X-9); an identity buffer is X-9 in Verilog
+    only when the written file has it as a pure alias `assign` at its location."""
+    if before.ctype in PORT_TYPES:
+        return "X-8" if scope.fmt in BLIF_FORMATS else by_rule
+    if before.ctype in CONST_TYPES:
+        return "X-9"
+    mine = parse_locs(before.src)
+    carrier = scope.carrier
+    if scope.fmt == "verilog" and carrier is not None and mine:
+        if before.name in carrier.buffers and (mine[0].file, mine[0].line) in carrier.aliases:
+            return "X-9"
+    return by_rule
+
+
 def lose(scope: Scope, before: Obj, tally: Tally) -> None:
-    """Counts a lost object under its class. A cell the JSON file of the same netlist has no entry
-    for (``scope.written``) has no carrier in any format: X-8 when it has the location of a
-    declared wire (a port cell: every format writes ports, not cells), else X-9 (a constant driver
-    or other cell the writers fold into a literal); a buffer lost in Verilog is X-9 too (the
-    writer folds it into an alias). A module the read-back has no trace of (the
-    Verilog writer writes the top and what it instantiates) is X-1, no carrier. Everything else
-    by RULES."""
+    """Counts a lost object (it has no location after) under its class by RULES (spec section 5:
+    the object has no carrier in that format), else ``unclassified``. A cell is classed by its
+    type (node_class). An object of a module the read-back has no trace of is X-1 only where the
+    expect file lists that module as absent."""
     cls = RULES.get((scope.fmt, scope.kind, not is_generated(before.name)))
-    if not scope.present:
+    if not scope.present and scope.absent_ok:
         cls = "X-1"
-    elif (
-        scope.kind == "node"
-        and scope.written is not None
-        and before.name not in scope.written.names
-    ):
-        cls = "X-8" if before.src in scope.wire_srcs else "X-9"
-    elif scope.kind == "node" and scope.fmt == "verilog" and scope.written is not None:
-        cls = "X-9" if before.name in scope.written.buffers else cls
+    elif scope.kind == "node":
+        cls = node_class(scope, before, cls)
     if cls is None:
         tally.unclassified += 1
     else:
         tally.lost[cls] = tally.lost.get(cls, 0) + 1
 
 
-@dataclass(frozen=True)
-class Scope:
-    """What a pairing needs: the format, the kind, the location texts of the module's wires and the
-    names of the cells its JSON file has (None: not known, every cell counts as written)."""
-
-    fmt: str
-    kind: str
-    wire_srcs: frozenset[str]
-    written: CellSet | None
-    present: bool = True
-    module_src: str = ""
-
-
 def gain_kind(scope: Scope, after: Obj) -> str:
-    """How an object with no location before has one after: "wire" for a net with the location
-    of a declared wire of its module (the readers give a net its netname's or declaration's
-    location, D-2 and D-3: `inherited`); "module" for an object with its module's own location
-    (a constant driver the reader makes: X-9, counted as `modgained`); else "" (`gained`)."""
+    """How an object with no location before has one after: "module" for the module's own
+    location (a constant driver the reader makes: X-9, `modgained`); "wire" for a named net that
+    takes the location of its own declared wire (the readers give a net its netname's or
+    declaration's location, D-2 and D-3: `inherited`); "split" for a Verilog object with the file
+    and line of a located object before (the reader splits an `assign` expression into several
+    cells and nets, all with its line); else "" (`gained`)."""
     if scope.module_src and after.src == scope.module_src:
         return "module"
-    return "wire" if scope.kind == "net" and after.src in scope.wire_srcs else ""
+    if scope.kind == "net" and not is_generated(after.name):
+        if scope.wires.get(OWN_BIT.sub("", after.name)) == after.src:
+            return "wire"
+    first = parse_locs(after.src)
+    if scope.fmt in SPLIT_FORMATS and first and (first[0].file, first[0].line) in scope.before_lines:
+        return "split"
+    return ""
+
+
+def count_gain(scope: Scope, after: Obj, tally: Tally) -> None:
+    kind_of = gain_kind(scope, after)
+    tally.inherited += kind_of == "wire"
+    tally.modgained += kind_of == "module"
+    tally.split += kind_of == "split"
+    tally.gained += kind_of == ""
 
 
 def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> None:
-    """Counts one paired object: before has a location or not, after is its read-back (or None)."""
+    """Counts one paired object: before has a location or not, after is its read-back (or None).
+    No location after is a loss (classed or not); a location that differs is wrong, never classed."""
     fmt, kind = scope.fmt, scope.kind
     mine = parse_locs(before.src)
     inherits = fmt == "blif" and kind == "node"  # counted as `inherited`, not as same or line
     if not mine:
         if after is not None and after.src and not inherits:
-            kind_of = gain_kind(scope, after)
-            tally.inherited += kind_of == "wire"
-            tally.modgained += kind_of == "module"
-            tally.gained += kind_of == ""
+            count_gain(scope, after, tally)
         return
     theirs = parse_locs(after.src) if after is not None else []
     if not theirs:
@@ -313,7 +369,7 @@ def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> No
         tally.line += not inherits
         tally.lines_after.append(distinct_lines(theirs))
     else:
-        lose(scope, before, tally)  # a changed location is a lost one
+        tally.wrong += 1
 
 
 def pool_pairs(
@@ -363,30 +419,38 @@ def compare_group(scope: Scope, before: list[Obj], after: list[Obj], tally: Tall
         else:
             left_b.append(obj)
     left_a = [o for o in after if o.name not in taken or is_generated(o.name) or pool_all]
-    if scope.written is not None:  # a cell with no carrier takes what is left (stable sort)
-        left_b.sort(key=lambda o: o.name not in (scope.written.names if scope.written else ()))
+    # a cell with no carrier (a port or constant driver) takes what is left (stable sort)
+    left_b.sort(key=lambda o: o.ctype in PORT_TYPES or o.ctype in CONST_TYPES)
     pairs, surplus = pool_pairs(left_b, left_a, (fmt, kind) in LINE_POOL)
     for obj, partner in pairs:
         judge_pair(scope, obj, partner, tally)
-    nolocs = sum(1 for o in left_b if not o.src)
-    if not pool_all:
-        kinds = Counter(gain_kind(scope, o) for o in surplus)
-        room = nolocs
-        for kind_of in ("module", "wire", ""):
-            take = min(kinds[kind_of], room)
-            room -= take
-            tally.modgained += take if kind_of == "module" else 0
-            tally.inherited += take if kind_of == "wire" else 0
-            tally.gained += take if kind_of == "" else 0
-    else:
+    if pool_all:
         tally.inherited += sum(1 for o in after if o.src)
+    else:
+        for obj in surplus:  # every located object nobody took counts: none is capped
+            count_gain(scope, obj, tally)
+
+
+def first_lines(objs: Sequence[Obj]) -> frozenset[tuple[str, int]]:
+    """The file and line of the first location of every located object."""
+    out: set[tuple[str, int]] = set()
+    for obj in objs:
+        locs = parse_locs(obj.src)
+        if locs:
+            out.add((locs[0].file, locs[0].line))
+    return frozenset(out)
 
 
 def compare(
-    fmt: str, before: list[Obj], after: list[Obj], written: Written | None = None
+    fmt: str,
+    before: list[Obj],
+    after: list[Obj],
+    written: Written | None = None,
+    allow: Allow = NO_ALLOW,
 ) -> dict[str, Tally]:
     """The tally of every kind present, for one design at one level in one format. ``written``:
-    module -> the names of the cells in its JSON file (for the classes X-8 and X-9)."""
+    module -> what its written files say (the classes X-9); ``allow``: the modules the read-back
+    may lack."""
     out: dict[str, Tally] = {}
     groups_b: dict[tuple[str, str], list[Obj]] = {}
     groups_a: dict[tuple[str, str], list[Obj]] = {}
@@ -395,8 +459,10 @@ def compare(
     modules_after = {o.module for o in after}
     for obj in after:
         groups_a.setdefault((obj.module, obj.kind), []).append(obj)
+    for module in sorted({o.module for o in before} - modules_after):
+        out.setdefault("module", Tally()).absent.append(module)
     for key in sorted(set(groups_b) | set(groups_a)):
-        kind = key[1]
+        module, kind = key
         tally = out.setdefault(kind, Tally())
         group_b = groups_b.get(key, [])
         tally.objects += len(group_b)
@@ -406,10 +472,19 @@ def compare(
                 tally.had += 1
                 tally.lines_before.append(distinct_lines(locs))
                 tally.capped += len(locs) >= CAP
-        wires = frozenset(o.src for o in groups_b.get((key[0], "wire"), []) if o.src)
-        cells = written.get(key[0]) if written else None
-        mods = [o.src for o in groups_b.get((key[0], "module"), [])]
-        scope = Scope(fmt, kind, wires, cells, key[0] in modules_after, mods[0] if mods else "")
+        wires = {o.name: o.src for o in groups_b.get((module, "wire"), []) if o.src}
+        mods = [o.src for o in groups_b.get((module, "module"), [])]
+        seen = first_lines(groups_b.get((module, "node"), []) + groups_b.get((module, "net"), []))
+        scope = Scope(
+            fmt,
+            kind,
+            wires,
+            written.get(module) if written else None,
+            module in modules_after,
+            module in allow.absent,
+            mods[0] if mods else "",
+            seen,
+        )
         compare_group(scope, group_b, groups_a.get(key, []), tally)
     return out
 
@@ -432,39 +507,157 @@ def specificity(values: Sequence[int]) -> tuple[float, float]:
     return median, float(ordered[math.ceil(0.9 * n) - 1])
 
 
-def check_tallies(fmt: str, tallies: dict[str, Tally]) -> list[str]:
+def kind_problems(fmt: str, kind: str, t: Tally) -> list[str]:
+    """The rule failures of one kind (spec T-3)."""
+    out: list[str] = []
+    if t.unclassified:
+        out.append(f"{kind}: {t.unclassified} lost with no class (the format keeps them)")
+    if t.wrong:
+        out.append(f"{kind}: {t.wrong} with a different location (present, but not the original)")
+    if t.gained:
+        out.append(f"{kind}: {t.gained} gained a location")
+    if t.line and (fmt, kind) not in LINE_OK:
+        out.append(f"{kind}: {t.line} line-only where the format is lossless")
+    located = t.same + t.line + t.gained + t.inherited + t.modgained + t.split
+    if fmt in BLIF_FORMATS and kind in ("wire", "module") and located:
+        out.append(
+            f"{kind}: {located} carry a location in a BLIF dialect; the rule that BLIF has "
+            "none (RULES X-1, X-8) is out of date"
+        )
+    return out
+
+
+def allow_problems(tallies: dict[str, Tally], allow: Allow) -> list[str]:
+    """Modules absent from the read-back and objects that took their module's location, against
+    what the expect file lists (an entry that no longer applies is stale)."""
+    absent = {m for t in tallies.values() for m in t.absent}
+    out = [f"module {m} is absent from the read-back (not in the expect file)"
+           for m in sorted(absent - allow.absent)]
+    out += [f"STALE absent entry for module {m}: the read-back has it"
+            for m in sorted(allow.absent - absent)]
+    modgained = sum(t.modgained for t in tallies.values())
+    if modgained != allow.modgained:
+        out.append(
+            f"{modgained} objects took their module's location, the expect file lists "
+            f"{allow.modgained}"
+        )
+    return out
+
+
+def check_tallies(fmt: str, tallies: dict[str, Tally], allow: Allow = NO_ALLOW) -> list[str]:
     """The rule failures of one design in one format (spec T-3)."""
     problems: list[str] = []
     if sum(t.had for t in tallies.values()) == 0:
         problems.append("the comparison matched no objects with a location")
     for kind in KINDS:
-        t = tallies.get(kind)
-        if t is None:
-            continue
-        if t.unclassified:
-            problems.append(f"{kind}: {t.unclassified} lost with no class (the format keeps them)")
-        if t.gained:
-            problems.append(f"{kind}: {t.gained} gained a location")
-        if t.line and (fmt, kind) not in LINE_OK:
-            problems.append(f"{kind}: {t.line} line-only where the format is lossless")
-    return problems
+        if kind in tallies:
+            problems += kind_problems(fmt, kind, tallies[kind])
+    return problems + allow_problems(tallies, allow)
 
 
-# --- the expect file and the scripts -------------------------------------------------------------
+# --- the expect file, the pins and the scripts ---------------------------------------------------
 
 
-def parse_expect(text: str) -> dict[tuple[str, str], tuple[str, str]]:
-    """``(level, design) -> (outcome, reason)``."""
-    table: dict[tuple[str, str], tuple[str, str]] = {}
+@dataclass
+class Expect:
+    """The expect file: designs a level cannot take, modules a read-back may lack, and the
+    objects that take their module's location, the last two per (level, design, format)."""
+
+    designs: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    absent: dict[tuple[str, str, str], set[str]] = field(default_factory=dict)
+    modgained: dict[tuple[str, str, str], int] = field(default_factory=dict)
+
+    def allow(self, level: str, design: str, fmt: str) -> Allow:
+        key = (level, design, fmt)
+        return Allow(frozenset(self.absent.get(key, ())), self.modgained.get(key, 0))
+
+
+def expect_line(table: Expect, words: list[str]) -> None:
+    """One line of the expect file, split into words; ToolError when it is not one of the forms."""
+    if words[0] == "absent" and len(words) >= 6 and words[1] in LEVELS:
+        if words[3] not in ABSENT_FORMATS:
+            raise ToolError(f"absent: only {', '.join(ABSENT_FORMATS)} may lack a module")
+        table.absent.setdefault((words[1], words[2], words[3]), set()).add(words[4])
+    elif words[0] == "modgained" and len(words) >= 6 and words[1] in LEVELS:
+        if words[3] not in FORMATS or not words[4].isdigit():
+            raise ToolError("modgained: want '<level> <design> <format> <count> <reason>'")
+        table.modgained[(words[1], words[2], words[3])] = int(words[4])
+    elif len(words) >= 4 and words[0] in LEVELS and words[2] in OUTCOMES:
+        table.designs[(words[0], words[1])] = (words[2], " ".join(words[3:]))
+    else:
+        raise ToolError("want '<level> <design> <outcome> <reason>', 'absent <level> <design> "
+                        "<format> <module> <reason>' or 'modgained <level> <design> <format> "
+                        "<count> <reason>'")
+
+
+def parse_expect(text: str) -> Expect:
+    """The expect file; a reason is required on every line."""
+    table = Expect()
     for number, raw in enumerate(text.splitlines(), 1):
-        line = raw.split("#", 1)[0].strip()
-        if not line:
+        words = raw.split("#", 1)[0].split()
+        if not words:
             continue
-        words = line.split(None, 3)
-        if len(words) < 4 or words[0] not in LEVELS or words[2] not in OUTCOMES:
-            raise ToolError(f"expect line {number}: want '<level> <design> <outcome> <reason>'")
-        table[(words[0], words[1])] = (words[2], words[3])
+        try:
+            expect_line(table, words)
+        except ToolError as exc:
+            raise ToolError(f"expect line {number}: {exc}") from exc
     return table
+
+
+Pins = dict[tuple[str, str, str, str, str], int]
+
+
+def parse_pins(text: str) -> Pins:
+    """``(set, level, format, kind, class) -> count`` from lines
+    ``<set> <level> <format> <kind> <class> <count>``."""
+    pins: Pins = {}
+    for number, raw in enumerate(text.splitlines(), 1):
+        words = raw.split("#", 1)[0].split()
+        if not words:
+            continue
+        if (
+            len(words) != 6
+            or words[1] not in LEVELS
+            or words[2] not in FORMATS
+            or words[3] not in KINDS
+            or not words[4].startswith("X-")
+            or not words[5].isdigit()
+        ):
+            raise ToolError(f"pins line {number}: want '<set> <level> <format> <kind> X-n <count>'")
+        pins[(words[0], words[1], words[2], words[3], words[4])] = int(words[5])
+    return pins
+
+
+def pin_lines(name: str, level: str, fmt: str, tallies: dict[str, Tally]) -> list[str]:
+    """The pin lines of one (level, format) total."""
+    return [
+        f"{name} {level} {fmt} {kind} {cls} {n}"
+        for kind in KINDS
+        if kind in tallies
+        for cls, n in sorted(tallies[kind].lost.items())
+    ]
+
+
+def pin_problems(
+    pins: Pins, name: str, sums: dict[tuple[str, str], list[dict[str, Tally]]]
+) -> tuple[list[str], list[str]]:
+    """(failures, notes): a class count above its pin fails, below it is a note to lower the pin.
+    A class with no pin is pinned at 0."""
+    seen: dict[tuple[str, str, str, str, str], int] = {}
+    for (level, fmt), runs in sums.items():
+        for kind, t in merge_tallies(runs).items():
+            for cls, n in t.lost.items():
+                seen[(name, level, fmt, kind, cls)] = n
+    fails: list[str] = []
+    notes: list[str] = []
+    for key in sorted(set(seen) | {k for k in pins if k[0] == name and (k[1], k[2]) in sums}):
+        have, pinned = seen.get(key, 0), pins.get(key, 0)
+        label = " ".join(key[1:])
+        if have > pinned:
+            fails.append(f"pin exceeded: {label}: {have} lost, pinned {pinned}")
+        elif have < pinned:
+            notes.append(f"improved, update the pin: {label}: {have} lost, pinned {pinned}")
+    return fails, notes
 
 
 def parse_techlibs(path: Path) -> dict[str, list[str]]:
@@ -513,7 +706,7 @@ class ReadFail:
 
 @dataclass
 class Pair:
-    """The listings of one format: before, after, and the cells of the JSON file by module."""
+    """The listings of one format: before, after, and what the written files say by module."""
 
     before: list[Obj]
     after: list[Obj]
@@ -522,11 +715,41 @@ class Pair:
 
 Result = Pair | ReadFail
 
+OPERAND = r"(?:\\\S+\s|[A-Za-z_][\w$.]*)(?:\[\d+(?::\d+)?\])?"
+ALIAS_RE = re.compile(rf"^\s*assign\s+{OPERAND}\s*=\s*{OPERAND}\s*;\s*//\s*(\S.*?)\s*$")
+MODULE_RE = re.compile(r"^module\s+(\\\S+|[\w$]+)")
 
-def json_cells(path: Path) -> Written:
-    """module -> the cell names of a ``write_json`` file."""
-    modules = json.loads(path.read_text(encoding="utf-8")).get("modules", {})
-    return {name: cell_set(mod.get("cells", {})) for name, mod in modules.items()}
+
+def verilog_aliases(path: Path) -> dict[str, frozenset[tuple[str, int]]]:
+    """module -> the (file, line) of every pure alias ``assign x = y;  // file:line`` in a
+    ``write_verilog`` file: a statement the reader reads as an alias and makes no cell of."""
+    out: dict[str, set[tuple[str, int]]] = {}
+    module = ""
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        head = MODULE_RE.match(raw)
+        if head:
+            module = head.group(1).lstrip("\\")
+            out.setdefault(module, set())
+            continue
+        match = ALIAS_RE.match(raw)
+        locs = parse_locs(match.group(1)) if match else []
+        if locs:
+            out.setdefault(module, set()).add((locs[0].file, locs[0].line))
+    return {m: frozenset(v) for m, v in out.items()}
+
+
+def written_facts(json_path: Path, verilog_path: Path) -> Written:
+    """module -> what the JSON and Verilog files of the netlist say (for the class X-9)."""
+    modules = json.loads(json_path.read_text(encoding="utf-8")).get("modules", {})
+    aliases = verilog_aliases(verilog_path)
+    names = set(modules) | set(aliases)
+    return {
+        name: Carrier(
+            frozenset(k for k, v in modules.get(name, {}).get("cells", {}).items() if is_buffer(v)),
+            aliases.get(name, frozenset()),
+        )
+        for name in names
+    }
 
 
 def is_buffer(cell: dict[str, Any]) -> bool:
@@ -539,10 +762,6 @@ def is_buffer(cell: dict[str, Any]) -> bool:
         and params.get("WIDTH") == "1".zfill(32)
         and params.get("LUT") == "10"
     )
-
-
-def cell_set(cells: dict[str, Any]) -> CellSet:
-    return CellSet(frozenset(cells), frozenset(k for k, v in cells.items() if is_buffer(v)))
 
 
 WRITES = {
@@ -587,7 +806,7 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     formats = LEVEL_FORMATS[level]
     paths = {fmt: work / f"W.{SUFFIX[fmt]}" for fmt in formats}
     before = work / "before.txt"
-    commands = [level_script(template, subs), f"dump_locs {before}"]
+    commands = [level_script(template, subs), f"dump_locs --types {before}"]
     commands += [WRITES[fmt][0].format(p=paths[fmt]) for fmt in formats]
     log = odin3_run(cfg, "; ".join(commands), work)
     top = TOP_RE.search(log)
@@ -596,7 +815,7 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     if level == "lpm":
         prefix = f"read_techlib {cfg.lib}; {prefix}"
     results: dict[str, Result] = {}
-    written = json_cells(paths["json"])
+    written = written_facts(paths["json"], paths["verilog"])
     rows = parse_dump(before.read_text(encoding="utf-8"))
     for fmt in formats:
         after = work / f"after-{fmt}.txt"
@@ -620,8 +839,9 @@ def row_text(kind: str, t: Tally) -> str:
     sb, sa = specificity(t.lines_before), specificity(t.lines_after)
     return (
         f"{kind:6s} objects {t.objects:6d} had {t.had:6d} same {t.same:6d} line {t.line:5d} "
-        f"inherited {t.inherited:5d} lost {lost} gained {t.gained} modgained {t.modgained} "
-        f"capped {t.capped} spec {sb[0]:g}/{sb[1]:g} -> {sa[0]:g}/{sa[1]:g}"
+        f"inherited {t.inherited:5d} lost {lost} wrong {t.wrong} gained {t.gained} "
+        f"modgained {t.modgained} split {t.split} capped {t.capped} "
+        f"spec {sb[0]:g}/{sb[1]:g} -> {sa[0]:g}/{sa[1]:g}"
     )
 
 
@@ -633,10 +853,11 @@ def print_table(title: str, tallies: dict[str, Tally]) -> None:
 
 @dataclass
 class RunState:
-    """The run: designs compared, excepted and failed, the expect table, and the tallies per
-    (level, format)."""
+    """The run: designs compared, excepted and failed, the expect table, the pins and the tallies
+    per (level, format)."""
 
-    expect: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    expect: Expect = field(default_factory=Expect)
+    pins: Pins = field(default_factory=dict)
     total: int = 0
     compared: int = 0
     excepted: int = 0
@@ -644,16 +865,28 @@ class RunState:
     sums: dict[tuple[str, str], list[dict[str, Tally]]] = field(default_factory=dict)
 
 
-def outcome_of(results: dict[str, Result]) -> tuple[str, str]:
+Analysis = dict[str, tuple[dict[str, Tally], list[str]]]
+
+
+def analyse(level: str, design: str, results: dict[str, Result], expect: Expect) -> Analysis:
+    """Per format: the tallies of the comparison and the rule failures."""
+    out: Analysis = {}
+    for fmt, res in results.items():
+        if not isinstance(res, ReadFail):
+            allow = expect.allow(level, design, fmt)
+            tallies = compare(fmt, res.before, res.after, res.written, allow)
+            out[fmt] = (tallies, check_tallies(fmt, tallies, allow))
+    return out
+
+
+def outcome_of(results: dict[str, Result], analysis: Analysis) -> tuple[str, str]:
     """(``ok``, ``error:read`` or ``fail``) of a design and the first reason."""
     for fmt, res in results.items():
         if isinstance(res, ReadFail):
             return "error:read", f"{fmt}: {res.reason}"
-    for fmt, res in results.items():
-        if not isinstance(res, ReadFail):
-            problems = check_tallies(fmt, compare(fmt, res.before, res.after, res.written))
-            if problems:
-                return "fail", f"{fmt}: {problems[0]}"
+    for fmt, (_, problems) in analysis.items():
+        if problems:
+            return "fail", f"{fmt}: {problems[0]}"
     return "ok", ""
 
 
@@ -671,23 +904,22 @@ def one_design(
     cfg: Config, level: str, design: Path, work: Path, state: RunState, verbose: bool
 ) -> bool:
     """Runs and reports one design at one level; True when it passes the run."""
-    listed = state.expect.get((level, design.name))
+    listed = state.expect.designs.get((level, design.name))
+    analysis: Analysis = {}
     try:
         results = run_design(cfg, level, design, work)
-        outcome, reason = outcome_of(results)
+        analysis = analyse(level, design.name, results, state.expect)
+        outcome, reason = outcome_of(results, analysis)
     except ScriptError as exc:
-        results, outcome, reason = {}, "error:script", str(exc)
+        outcome, reason = "error:script", str(exc)
     passed, word = judge(outcome, listed)
     print(f"{level} {design.name}: {word}{'' if outcome == 'ok' else ' ' + reason}", flush=True)
-    for fmt, res in results.items():
-        if isinstance(res, ReadFail):
-            continue
-        tallies = compare(fmt, res.before, res.after, res.written)
+    for fmt, (tallies, problems) in analysis.items():
         if outcome == "ok":
             state.sums.setdefault((level, fmt), []).append(tallies)
         if verbose or not passed:
             print_table(f"{level} {fmt} {design.name}", tallies)
-        for problem in check_tallies(fmt, tallies) if not passed else []:
+        for problem in problems if not passed else []:
             print(f"  {fmt}: {problem}")
     return passed
 
@@ -701,6 +933,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--odin3", default=str(ROOT / "build" / "debug" / "odin3"))
     ap.add_argument("--scripts", type=Path, default=ROOT / "tests" / "loc")
     ap.add_argument("--expect", type=Path)
+    ap.add_argument("--pins", type=Path, help="the pinned class counts (with --set)")
+    ap.add_argument("--set", dest="set_name", help="the name of the design set, the pins' key")
+    ap.add_argument("--print-pins", action="store_true", help="print the pin lines of the run")
     ap.add_argument("--techlib-list", type=Path, default=ROOT / "tests" / "loc" / "techlib.txt")
     ap.add_argument("--lib", type=Path, default=ROOT / "lib" / "lpm.o3lib")
     ap.add_argument("--work", type=Path, help="keep every file here")
@@ -710,9 +945,20 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     return ap.parse_args(argv)
 
 
-def totals_report(state: RunState) -> None:
+def totals_report(state: RunState, args: argparse.Namespace) -> int:
+    """The totals, the pin lines when asked, and the pin check; the exit code it contributes."""
     for (level, fmt), runs in sorted(state.sums.items()):
-        print_table(f"TOTAL {level} {fmt}", merge_tallies(runs))
+        total = merge_tallies(runs)
+        print_table(f"TOTAL {level} {fmt}", total)
+        if args.print_pins:
+            for line in pin_lines(args.set_name or "SET", level, fmt, total):
+                print(f"PIN {line}")
+    if not state.pins:
+        return EXIT_OK
+    fails, notes = pin_problems(state.pins, args.set_name, state.sums)
+    for line in notes + fails:
+        print(f"{TOOL}: {line}")
+    return EXIT_FAIL if fails else EXIT_OK
 
 
 def execute(args: argparse.Namespace, work: Path) -> int:
@@ -722,11 +968,15 @@ def execute(args: argparse.Namespace, work: Path) -> int:
         raise ToolError(f"unknown level {bad[0]} (want one of {', '.join(LEVELS)})")
     if not args.files:
         raise ToolError("no designs given")
+    if args.pins and not args.set_name:
+        raise ToolError("--pins needs --set")
     cfg = Config(str(Path(args.odin3).resolve()), args.scripts, args.lib)
     cfg.techlibs = parse_techlibs(args.techlib_list)
     state = RunState()
     if args.expect:
         state.expect = parse_expect(args.expect.read_text(encoding="utf-8"))
+    if args.pins:
+        state.pins = parse_pins(args.pins.read_text(encoding="utf-8"))
     files = [f.resolve() for f in args.files]
     if args.smallest_first:
         files.sort(key=lambda f: (f.stat().st_size, f.name))
@@ -736,11 +986,11 @@ def execute(args: argparse.Namespace, work: Path) -> int:
             run_dir.mkdir(exist_ok=True)
             state.total += 1
             passed = one_design(cfg, level, item, run_dir, state, args.verbose)
-            listed = (level, item.name) in state.expect
+            listed = (level, item.name) in state.expect.designs
             state.excepted += passed and listed
             state.compared += passed and not listed
             state.worst = state.worst if passed else EXIT_FAIL
-    totals_report(state)
+    state.worst = max(state.worst, totals_report(state, args))
     print(
         f"{TOOL}: compared {state.compared} of {state.total} ({state.excepted} excepted)",
         flush=True,
