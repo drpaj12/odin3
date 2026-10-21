@@ -457,7 +457,8 @@ static void put_params(rtl_writer *rw, odin3_node_id node, const odin3_celltype_
 
 /*
  * Built-in types Yosys 0.55's read_rtlil rejects or asserts on as Odin III defines them (review
- * I2): the bit-level storage cells carry an INIT Yosys's have not, $sop has WIDTH/COVER where
+ * I2): the bit-level storage cells (and the families of dffx.h, by prefix below) carry an INIT
+ * Yosys's have not, $sop has WIDTH/COVER where
  * Yosys's has DEPTH/TABLE, and $memrd/$memwr need a `memory` record this writer does not make.
  */
 static const char *const k_no_rtlil[] = {"$_DFF_P_", "$_DFF_N_", "$_DLATCH_P_", "$_DLATCH_N_",
@@ -473,6 +474,11 @@ static const char *no_rtlil_form(const rtl_writer *rw, odin3_node_id node,
         if (strcmp(def->name, k_no_rtlil[i]) == 0) {
             return "has no RTLIL form";
         }
+    }
+    /* The $_DFFE_*, $_DFF_<c><r><v>_ and $_SDFF* families (dffx.h) carry an INIT as well. */
+    if (def->gran == ODIN3_GRAN_BIT &&
+        (strncmp(def->name, "$_DFF", 5) == 0 || strncmp(def->name, "$_SDFF", 6) == 0)) {
+        return "has no RTLIL form";
     }
     for (uint32_t param = 0; strcmp(def->name, "$mem") == 0 && param < def->n_params; param++) {
         const odin3_value *val = odin3_node_param(rw->module, node, param);

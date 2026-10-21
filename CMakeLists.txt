@@ -383,6 +383,7 @@ add_library(odin3_core OBJECT
     src/ir/cells/tribuf.c
     src/ir/cells/gates.c
     src/ir/cells/dff.c
+    src/ir/cells/dffx.c
     src/ir/cells/sop.c
     src/ir/cells/proc.c
     src/ir/cells/lut.c
@@ -1583,6 +1584,7 @@ if(BUILD_TESTING)
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_cells)
+    odin3_add_unit_test(test_dffx_cells)
     odin3_add_unit_test(test_sim_build)
     odin3_add_unit_test(test_sim_cycle)
     target_compile_definitions(test_sim_cycle PRIVATE

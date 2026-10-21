@@ -41,7 +41,15 @@ static const char *const k_sources[] = {
     "$aldff", "$aldffe", "$dffsr",   "$dffsre",  "$dlatch",     "$adlatch",    "$dlatchsr",
     "$sr",    "$mem",    "$_DFF_P_", "$_DFF_N_", "$_DLATCH_P_", "$_DLATCH_N_", "$_FF_"};
 
+/* The gate-level flip-flops with a reset or an enable ($_DFFE_*, $_SDFF*; dffx.h), by prefix. */
+static bool is_dffx(const char *type) {
+    return strncmp(type, "$_DFF", 5) == 0 || strncmp(type, "$_SDFF", 6) == 0;
+}
+
 bool wr_order_is_source(const char *type) {
+    if (is_dffx(type)) {
+        return true;
+    }
     for (size_t i = 0; i < sizeof k_sources / sizeof k_sources[0]; i++) {
         if (strcmp(type, k_sources[i]) == 0) {
             return true;

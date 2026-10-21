@@ -263,7 +263,15 @@ bit cells, `$sop`); 53–61 are 2D's IR change A (`$neg` … `$pow`), 62 is IR c
 IR-19), 63–73 are 2E's IR change D (2E spec §13): the word flip-flops and latches `$adffe
 $sdffe $sdffce $aldff $aldffe $dffsr $dffsre $dlatch $adlatch $dlatchsr $sr` (`ff.c`), and index 74
 is 3D's `$lut` (`lut.c`; found by `odin3_celltype_find` on `$lut`, never by number: a design's slot 0 is
-reserved, so a built-in's cell-type ID is its index + 1), 75 types in all.
+reserved, so a built-in's cell-type ID is its index + 1), then 75..142 are the 5.3 follow-up's 68
+gate-level flip-flops with an enable or a reset (`src/ir/cells/dffx.c`, list in `dffx.h`; Yosys 0.55
+simcells spelling): `$_DFFE_<c><e>_`, `$_DFF_<c><r><v>_` (asynchronous reset), `$_DFFE_<c><r><v><e>_`,
+`$_SDFF_<c><r><v>_`, `$_SDFFE_<c><r><v><e>_` and `$_SDFFCE_<c><r><v><e>_` (each polarity letter P or N,
+the value 0 or 1), 143 types in all. Ports in the order `C` `[R]` `[E]` `D` `Q` (bit granularity, flags
+`SEQ_EDGE | CLOCK_PIN0` as `$_DFF_P_`, one `INIT` parameter, a simulate hook). They change no invariant: the
+append-only table, the flags and the clock-pin rule are IR-8's. The simulator applies an asynchronous
+reset at every settle and at both clock edges, and it beats the clock edge; `$_SDFFE_` has the reset over
+the enable, `$_SDFFCE_` the enable over the reset.
 IR change D follows Yosys 0.55 simlib: its ports in simlib's order, `WIDTH` first (INT, ≥ 1),
 polarities INT 0/1, every `*_VALUE` BITS of `WIDTH` bits; `CLK`, `EN`, `ARST`, `SRST` and
 `ALOAD` are 1 bit, `D`, `Q`, `AD`, `SET` and `CLR` are `WIDTH` bits, and `Q` is the only output.
