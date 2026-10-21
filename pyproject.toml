@@ -32,5 +32,7 @@ mypy_path = "tools/blif:tools/netlist-compare:tools/equiv-check:tools/golden-sam
 exclude = ["^third_party/", "^build/"]
 
 [[tool.mypy.overrides]]
-module = ["cffi", "cffi.*"]
+# networkx, torch and torch_geometric are optional (plugins/python/odin3_graph.py imports them lazily).
+module = ["cffi", "cffi.*", "networkx", "networkx.*", "torch", "torch.*", "torch_geometric",
+          "torch_geometric.*"]
 ignore_missing_imports = true

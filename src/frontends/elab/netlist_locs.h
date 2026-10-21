@@ -61,10 +61,13 @@ typedef struct odin3_netlist_name {
 } odin3_netlist_name;
 
 /*
- * Decodes the identifier raw_str (strtab ID) as L-5. *out->matched is false for a name that does
- * not match (kept as it is). ODIN3_ERR_NO_MEMORY.
+ * Decodes the identifier raw_str (strtab ID), declared at `at`, as L-5. With -name-map (H-6) a hash
+ * name of the current module that the map holds is first replaced by its full name; one that it
+ * lacks is counted for the end-of-run warning. *out->matched is false for a name that does not
+ * match (kept as it is). ODIN3_ERR_NO_MEMORY.
  */
-odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_netlist_name *out);
+odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_loc at,
+                                       odin3_netlist_name *out);
 
 /* Notes that a declarator of the current module is spelled str: a decoded name never takes it. */
 odin3_status odin3_netlist_note_raw(odin3_elab2 *e2, uint32_t str);

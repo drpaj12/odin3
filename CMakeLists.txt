@@ -88,6 +88,7 @@ add_library(odin3_core OBJECT
     src/frontends/json/reader_ext.c
     src/frontends/json/reader_implicit.c
     src/frontends/json/reader_locs.c
+    src/frontends/json/reader_names.c
     src/frontends/json/reader_module.c
     src/frontends/json/reader_net.c
     src/frontends/json/reader_sop.c
@@ -415,6 +416,8 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/frontends/hdl_restore.c
+    src/frontends/name_resolve.c
+    src/frontends/blif/reader_names.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
     src/backends/rtlil/writer.c)
@@ -802,6 +805,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_json_roundtrip)
     target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    # Phase 6 (6.3): write_json --odin3 and the reader's handlers for its keys.
+    odin3_add_unit_test(test_json_odin3)
+    target_compile_definitions(test_json_odin3 PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_util_log)
     odin3_add_unit_test(test_util_file)
     odin3_add_unit_test(test_sha256)
@@ -1601,6 +1607,9 @@ if(BUILD_TESTING)
     # 5.4f-b: --name-style hash in the three writers and the names pass, each case in a mkdtemp dir.
     odin3_add_unit_test(test_hash_writers)
     target_compile_definitions(test_hash_writers PRIVATE ODIN3_HASHW_ROOT="${PROJECT_BINARY_DIR}")
+    # 5.4f-c: --name-map in the three readers (H-6), each case in a mkdtemp dir.
+    odin3_add_unit_test(test_hash_readers)
+    target_compile_definitions(test_hash_readers PRIVATE ODIN3_HASHR_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
@@ -2859,6 +2868,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Phase 6 (6.3, spec E-3 to E-7): write_json --odin3, the reader's handlers and the loader
+    # plugins/python/odin3_graph.py. Skips are named and reported as Skipped.
+    foreach(_ge IN ITEMS loader_isolated:IsolatedLoaderTest export_counts:CountsTest
+                         export_roundtrip:RoundTripTest loader_packages:PackagesTest)
+        string(REPLACE ":" ";" _ge_parts "${_ge}")
+        list(GET _ge_parts 0 _ge_name)
+        list(GET _ge_parts 1 _ge_class)
+        add_test(NAME graph_${_ge_name}
+            COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                    ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_graph_export.${_ge_class}
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(graph_${_ge_name} PROPERTIES
+            LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    endforeach()
 
     # 2E Task 11 (spec 18.2): the 48 construct rows. Odin III's `read_verilog; proc --noopt;
     # write_rtlil` equals each golden (and the --nolatches one of a combinational row), the five

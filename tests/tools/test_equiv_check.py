@@ -360,6 +360,33 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("no .cname and no named output net", err)
 
+    def test_generated_output_net_is_named_through_its_port_buffer(self) -> None:
+        """write_blif --vtr: the box output is a generated ``$n`` net read by one buffer that
+        drives a named net; the box takes the name of the buffer's output."""
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$n7")
+                + ".names $n7 q\n1 1\n" + BB_TAIL)
+        flat = equiv_check.flatten(blif.parse_text(text, gates=True))
+        self.assertEqual([b.key for b in flat.blackboxes], ["out=q"])
+        plain = equiv_check.flatten(blif.parse_text(BB_HEAD + RAM_Q + BB_TAIL, gates=True))
+        self.assertEqual([b.key for b in plain.blackboxes], ["out=q"])
+
+    def test_generated_output_net_with_two_readers_exit_2(self) -> None:
+        """No unique buffer (the net feeds a buffer and more logic): still unnameable."""
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$n7")
+                + ".names $n7 q\n1 1\n.names $n7 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check(a, a)
+        self.assertEqual(code, 2)
+        self.assertIn("no .cname and no named output net", err)
+
+    def test_generated_output_net_behind_a_generated_buffer_exit_2(self) -> None:
+        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$n7")
+                + ".names $n7 $n8\n1 1\n.names $n8 a y\n11 1\n.end\n")
+        a = self.write("a.blif", text)
+        code, _, err = check(a, a)
+        self.assertEqual(code, 2)
+        self.assertIn("no .cname and no named output net", err)
+
     def test_match_unnamed_compares_params_of_every_pair(self) -> None:
         """A box with a different ``.param`` list never pairs, named or by signature: exit 2."""
         for cname in ("", ".cname ram\n"):

@@ -95,12 +95,13 @@ static odin3_status check_port_netname(const jr *rd, odin3_wire_id wire,
 }
 
 /* D-2: the record of a netname: its IMPORTED one, or the DERIVED of its `src`. */
-static odin3_status netname_prov(jr *rd, const odin3_json_node *name, odin3_prov_id *out) {
+static odin3_status netname_prov(jr *rd, const odin3_json_node *name, const jr_named *named,
+                                 odin3_prov_id *out) {
     odin3_prov_id imported = {0};
     odin3_status st = jr_prov(rd, name, &imported);
     if (st == ODIN3_OK) {
-        st = jr_restore_src(rd, &(jr_restore_in){jr_member(name, "attributes"), imported, true},
-                            out);
+        st = jr_restore_src(
+            rd, &(jr_restore_in){jr_member(name, "attributes"), imported, true, named}, out);
     }
     return st;
 }
@@ -108,15 +109,14 @@ static odin3_status netname_prov(jr *rd, const odin3_json_node *name, odin3_prov
 typedef struct wire_shape_in {
     uint32_t width;
     odin3_prov_id prov;
+    uint32_t name; /* the interned netname key (after --name-map) */
 } wire_shape_in;
 
 static odin3_status make_wire(jr *rd, const odin3_json_node *name, wire_shape_in in,
                               odin3_wire_id *wire) {
     odin3_wire_spec spec = {.prov = in.prov};
     odin3_status st = jr_shape(rd, name, "netnames", (jr_shape_out){in.width, &spec});
-    if (st == ODIN3_OK) {
-        st = jr_intern(rd, odin3_json_key(name), &spec.name);
-    }
+    spec.name = in.name;
     if (st == ODIN3_OK) {
         st = jr_fail(rd, odin3_wire_create(rd->cur.module, &spec, rd->cur.conn_nets.data, wire));
     }
@@ -128,30 +128,34 @@ static odin3_status read_netname(jr *rd, const odin3_json_node *name) {
     if (jr_kind(name) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, name, &where, "the netname is not an object");
     }
-    jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
+    odin3_status st =
+        jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
     const odin3_json_node *bits = jr_member(name, "bits");
     uint32_t width = 0;
-    odin3_status st =
-        jr_bits_count(rd, bits, &(jr_where){"netnames", where.key, "bits"}, false, &width);
+    if (st == ODIN3_OK) {
+        st = jr_bits_count(rd, bits, &(jr_where){"netnames", where.key, "bits"}, false, &width);
+    }
     if (st == ODIN3_OK) {
         st = collect_nets(rd, bits, &(jr_where){"netnames", where.key, "bits"});
     }
-    uint32_t str = 0;
+    jr_named named = {0};
     if (st == ODIN3_OK) {
-        st = jr_intern(rd, where.key, &str);
+        st = jr_name_key(rd, name, JR_NAME_WIRE, &named);
     }
+    uint32_t str = named.name;
     odin3_prov_id prov = {0};
     if (st == ODIN3_OK) {
-        st = netname_prov(rd, name, &prov);
+        st = netname_prov(rd, name, &named, &prov);
     }
     odin3_wire_id wire = odin3_module_find_wire(rd->cur.module, str);
     if (st == ODIN3_OK && odin3_wire_valid(wire)) {
         st = check_port_netname(rd, wire, name, &where);
     } else if (st == ODIN3_OK) {
-        st = make_wire(rd, name, (wire_shape_in){width, prov}, &wire);
+        st = make_wire(rd, name, (wire_shape_in){width, prov, str}, &wire);
     }
-    return st == ODIN3_OK ? name_attrs(rd, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, name, &where)
-                          : st;
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
+    st = st == ODIN3_OK ? name_attrs(rd, obj, name, &where) : st;
+    return st == ODIN3_OK ? jr_apply_ext(rd, rd->cur.module, obj) : st;
 }
 
 odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj) {
@@ -238,9 +242,8 @@ static odin3_status read_memory(jr *rd, const odin3_json_node *mem) {
     if (jr_kind(mem) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, mem, &where, "the memory is not an object");
     }
-    jr_audit(rd, mem, MEMORY_KEYS, sizeof MEMORY_KEYS / sizeof MEMORY_KEYS[0]);
+    odin3_status st = jr_audit(rd, mem, MEMORY_KEYS, sizeof MEMORY_KEYS / sizeof MEMORY_KEYS[0]);
     static const char *const numbers[] = {"width", "size", "start_offset"};
-    odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < sizeof numbers / sizeof numbers[0]; i++) {
         st = memory_number(rd, mem, numbers[i]);
     }

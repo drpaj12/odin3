@@ -7,6 +7,8 @@
 #include "ir/design.h"
 #include "odin3/odin3.h"
 
+#include <stdbool.h>
+
 /*
  * Writes every module of the design to path in the Yosys JSON netlist schema (read by netlistsvg,
  * nextpnr and `yosys read_json`). Modules, ports, cells and netnames come out in ID order, so the
@@ -51,6 +53,15 @@ typedef enum odin3_json_name_style {
 typedef struct odin3_json_write_opts {
     odin3_json_name_style name_style;
     const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (H-4) */
+    /*
+     * `write_json --odin3` (spec 6.3 E-1 to E-3, E-8): root `odin3_version` 1; on every module,
+     * cell and netname entry `odin3_prov` {kind, hier, hdl} (hdl: the HDL locations of the `src`
+     * text, up to 8, as separate strings), and `odin3_level` (a JSON integer) where the object has
+     * the INT attribute of that name; that attribute is then not repeated under `attributes`. The
+     * keys are the last members of each object, `odin3_level` first. Every other attribute stays
+     * under `attributes`. false: the output is byte for byte that of odin3_json_write.
+     */
+    bool odin3_keys;
 } odin3_json_write_opts;
 
 /*

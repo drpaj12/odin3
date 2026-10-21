@@ -71,10 +71,10 @@ static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node
     if (jr_kind(port) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, port, &where, "the port is not an object");
     }
-    jr_audit(rd, port, PORT_KEYS, sizeof PORT_KEYS / sizeof PORT_KEYS[0]);
     odin3_port_spec spec = {.width = 0};
     odin3_wire_spec shape = {0};
-    odin3_status st = port_dir(rd, port, &where, &spec.dir);
+    odin3_status st = jr_audit(rd, port, PORT_KEYS, sizeof PORT_KEYS / sizeof PORT_KEYS[0]);
+    st = st == ODIN3_OK ? port_dir(rd, port, &where, &spec.dir) : st;
     uint32_t width = 0;
     if (st == ODIN3_OK) {
         st = jr_bits_count(rd, jr_member(port, "bits"), &(jr_where){"ports", where.key, "bits"},
@@ -200,7 +200,7 @@ static odin3_status make_module(jr *rd, jr_mod *mod) {
     odin3_status st = jr_prov(rd, mod->node, &mod->base);
     if (st == ODIN3_OK) {
         st = jr_restore_src(
-            rd, &(jr_restore_in){jr_member(mod->node, "attributes"), mod->base, true}, &prov);
+            rd, &(jr_restore_in){jr_member(mod->node, "attributes"), mod->base, true, NULL}, &prov);
     }
     if (st == ODIN3_OK) {
         st = jr_fail(rd, odin3_module_create(rd->design, mod->name_str, prov, &mod->module));
@@ -225,7 +225,10 @@ static odin3_status describe(jr *rd, const odin3_json_node *obj, jr_mod *mod) {
     if (jr_kind(obj) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, obj, NULL, "the module is not an object");
     }
-    jr_audit(rd, obj, MODULE_KEYS, sizeof MODULE_KEYS / sizeof MODULE_KEYS[0]);
+    odin3_status st = jr_audit(rd, obj, MODULE_KEYS, sizeof MODULE_KEYS / sizeof MODULE_KEYS[0]);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     const odin3_json_node *attrs = jr_member(obj, "attributes");
     const odin3_json_node *cells = jr_member(obj, "cells");
     const odin3_json_node *black = attrs != NULL ? jr_member(attrs, "blackbox") : NULL;
@@ -569,6 +572,9 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     rd->cur_name = mod->name;
     odin3_status st = jr_cur_begin(rd, mod);
     if (st == ODIN3_OK) {
+        st = jr_names_begin(rd, mod->node);
+    }
+    if (st == ODIN3_OK) {
         st = jr_scan_bits(rd);
     }
     if (st == ODIN3_OK) {
@@ -583,6 +589,7 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     if (st == ODIN3_OK) {
         st = jr_read_memories(rd, jr_member(mod->node, "memories"));
     }
+    jr_names_end(rd);
     jr_cur_end(rd);
     return st;
 }

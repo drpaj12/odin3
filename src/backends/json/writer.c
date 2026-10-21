@@ -241,6 +241,8 @@ static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     write_wire_bits(out, wire);
     write_wire_shape(out, &fields, wire);
     write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_WIRE, wire.v});
+    jw_odin3_keys(out, &fields, (odin3_objref){ODIN3_OBJ_WIRE, wire.v},
+                  odin3_wire_prov(out->module, wire));
     jw_close(out, &fields);
 }
 
@@ -280,6 +282,8 @@ static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     jw_bit(out, jw_net_code(out, entry->net));
     jw_raw(out, " ]");
     write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_NET, entry->net.v});
+    jw_odin3_keys(out, &fields, (odin3_objref){ODIN3_OBJ_NET, entry->net.v},
+                  odin3_net_prov(out->module, entry->net));
     jw_close(out, &fields);
 }
 
@@ -363,6 +367,8 @@ static void write_module_body(jw *out, jw_list *entry) {
     jw_cells(out, &cells);
     jw_close(out, &cells);
     write_netnames(out, entry);
+    jw_odin3_keys(out, entry, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(out->module).v},
+                  odin3_module_prov(out->module));
 }
 
 static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
@@ -497,6 +503,10 @@ static odin3_status write_design(jw *out) {
     jw_open(out, &top);
     jw_key(out, &top, "creator");
     jw_raw(out, "\"Odin III\"");
+    if (out->odin3_keys) {
+        jw_key(out, &top, "odin3_version");
+        jw_raw(out, "1");
+    }
     jw_key(out, &top, "modules");
     jw_open(out, &modules);
     const uint32_t end = odin3_design_module_end(out->design);
@@ -595,7 +605,9 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
     jw state = {.design = (odin3_design *)design,
                 .strtab = odin3_design_strtab(design),
                 .status = ODIN3_OK,
-                .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE};
+                .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE,
+                .odin3_keys = opts != NULL && opts->odin3_keys};
+    (void)odin3_strtab_find(state.strtab, odin3_bytes_cstr("odin3_level"), &state.level_key);
     odin3_strbuf_init(&state.key);
     odin3_strbuf_init(&state.src);
     odin3_strbuf_init(&state.pname);

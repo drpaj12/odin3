@@ -164,6 +164,10 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
                                  write_args *out) {
     bool names = strcmp(pass, "write_verilog") == 0 || strcmp(pass, "write_json") == 0;
     bool dot = strcmp(pass, "write_dot") == 0;
+    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--odin3")) {
+        out->json.odin3_keys = true;
+        return ODIN3_OK;
+    }
     if (names &&
         (odin3_pass_arg_is(word, "--name-style") || odin3_pass_arg_is(word, "--name-map"))) {
         return parse_names_option(pass, rest, word, out);
@@ -218,7 +222,7 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
     write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL},
-                         .json = {ODIN3_JSON_NAMES_SHORT, NULL},
+                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false},
                          .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
@@ -278,9 +282,11 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",
-    "write_json <file> [--name-style short|provenance|hash [--name-map <file>]]: write the design "
-    "as Yosys-schema JSON (file - is stdout); hash names write the name map to <file>.names or "
-    "--name-map",
+    "write_json <file> [--odin3] [--name-style short|provenance|hash [--name-map <file>]]: write "
+    "the "
+    "design as Yosys-schema JSON (file - is stdout); hash names write the name map to <file>.names "
+    "or --name-map; --odin3 adds odin3_version, and per module, cell and netname odin3_prov and "
+    "odin3_level",
     write_json_run,
     NULL,
     false,
