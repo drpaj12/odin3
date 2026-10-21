@@ -781,9 +781,9 @@ static void test_implicit_union(void) {
     TEST_ASSERT_EQUAL_STRING("top,foo", module_names());
     odin3_ast_id module = expect_blackbox("foo", 3);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, module, 0).v);
-    expect_port(module, 0, "a inout");
-    expect_port(module, 1, "b inout");
-    expect_port(module, 2, "c inout");
+    expect_port(module, 0, "a output"); /* each drives a net nothing else drives */
+    expect_port(module, 1, "b output");
+    expect_port(module, 2, "c output");
     odin3_ast_id one = instance("u1");
     expect_conn(one, 0, "a", "x"); /* one per port of the union, in its order */
     expect_conn(one, 1, "b", "y");
@@ -801,9 +801,9 @@ static void test_implicit_widths(void) {
     expect_clean();
     TEST_ASSERT_EQUAL_STRING("top,sub,foo", module_names());
     odin3_ast_id module = expect_blackbox("foo", 3);
-    expect_port(module, 0, "d inout [5:0]"); /* the union in source order */
-    expect_port(module, 1, "a inout [3:0]");
-    expect_port(module, 2, "e inout");
+    expect_port(module, 0, "d output [5:0]"); /* the union in source order */
+    expect_port(module, 1, "a output [3:0]");
+    expect_port(module, 2, "e input"); /* connected to no net */
     expect_conn(instance("u"), 0, "d", "");
 }
 
@@ -816,8 +816,8 @@ static void test_implicit_width_from_array(void) {
             &k_auto, NULL);
     expect_clean();
     odin3_ast_id module = expect_blackbox("foo", 2);
-    expect_port(module, 0, "a inout [1:0]");
-    expect_port(module, 1, "c inout");
+    expect_port(module, 0, "a output [1:0]");
+    expect_port(module, 1, "c output");
 }
 
 /* A black box's body adds no port to an implicit black box's union (Task 12 review n3, Q10). */
@@ -827,7 +827,94 @@ static void test_blackbox_body_not_in_union(void) {
             &k_auto, NULL);
     expect_clean();
     TEST_ASSERT_EQUAL_STRING("top,bb,foo", module_names());
-    expect_port(expect_blackbox("foo", 1), 0, "p inout");
+    expect_port(expect_blackbox("foo", 1), 0, "p output");
+}
+
+/* --- implicit black boxes: inferred port directions (EL-11, 2026-10-21) ---------------------- */
+
+static void expect_dirs(const char *box, const char *const *want, uint32_t n) {
+    odin3_ast_id module = expect_blackbox(box, n);
+    for (uint32_t k = 0; k < n; k++) {
+        expect_port(module, k, want[k]);
+    }
+}
+
+/* A port that drives a net nothing else drives is an output; one on a module input, or on a net
+ * a known cell drives, is an input; one WARNING per cell type lists the directions. */
+static void test_implicit_dirs_basic(void) {
+    run_req("module top (input a, output y);\n  wire w;\n  foo u (.A(a), .Q(w));\n"
+            "  assign y = w;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"A input", "Q output"};
+    expect_dirs("foo", want, 2);
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: A input, "
+              "Q output");
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "implicit black box"));
+}
+
+/* A net a known module, a gate, a continuous assign, an always block or a cell type drives makes
+ * the unknown cell's port an input. */
+static void test_implicit_dirs_known_drivers(void) {
+    run_req("module bar (input i, output o);\nendmodule\n"
+            "module top (input a, output y);\n  wire w, g, c, v; wire [7:0] d;\n  reg r;\n"
+            "  bar b (.i(a), .o(w));\n  and gt (g, a, a);\n  assign c = a;\n"
+            "  always @(*) r = a;\n  multiply #(.WIDTH(4)) m (.a(4'd1), .b(4'd2), .out(d));\n"
+            "  foo u (.W(w), .G(g), .C(c), .R(r), .D(d), .K(1'b0), .Q(v));\n"
+            "  assign y = v;\nendmodule\n",
+            &k_auto, TECHLIB);
+    expect_clean();
+    const char *const want[] = {"W input",       "G input", "C input", "R input",
+                                "D input [7:0]", "K input", "Q output"};
+    expect_dirs("foo", want, 7);
+}
+
+/* Directions are per bit: a bus driven in part by a known cell is partly an input. */
+static void test_implicit_dirs_bits(void) {
+    run_req("module top (input a, output [1:0] y);\n  wire [1:0] b;\n  assign b[0] = a;\n"
+            "  foo u (.X(b[1]), .Y(b[0]));\n  assign y = b;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"X output", "Y input"};
+    expect_dirs("foo", want, 2);
+}
+
+/* Two unknown ports on a net nothing known drives: the first in source order drives it. */
+static void test_implicit_dirs_first_drives(void) {
+    run_req("module top (output y);\n  wire w;\n  foo u1 (.P(w));\n  bar u2 (.Z(w));\n"
+            "  assign y = w;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const p[] = {"P output"};
+    const char *const z[] = {"Z input"};
+    expect_dirs("foo", p, 1);
+    expect_dirs("bar", z, 1);
+}
+
+/* A port that is an input at one instance and needs to be an output at another is an output, and
+ * the WARNING says so. */
+static void test_implicit_dirs_ambiguous(void) {
+    run_req("module top (input a, output y);\n  wire w;\n  foo u1 (.R(a));\n  foo u2 (.R(w));\n"
+            "  assign y = w;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"R output"};
+    expect_dirs("foo", want, 1);
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: R output "
+              "(an input at some instances, made an output)");
+}
+
+/* A net with no known direction (a module inout) keeps the port inout, and the WARNING says so. */
+static void test_implicit_dirs_inout(void) {
+    run_req("module top (inout p);\n  foo u (.A(p));\nendmodule\n", &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"A inout"};
+    expect_dirs("foo", want, 1);
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:2:3: warning: implicit black box 'foo': inferred port directions: A inout "
+              "(its net has no known direction)");
 }
 
 static bool port_signed(odin3_ast_id module, uint32_t pos) {
@@ -1008,6 +1095,12 @@ int main(void) {
     RUN_TEST(test_celltype_adder_named_width_parameter);
     RUN_TEST(test_celltype_array);
     RUN_TEST(test_implicit_union);
+    RUN_TEST(test_implicit_dirs_basic);
+    RUN_TEST(test_implicit_dirs_known_drivers);
+    RUN_TEST(test_implicit_dirs_bits);
+    RUN_TEST(test_implicit_dirs_first_drives);
+    RUN_TEST(test_implicit_dirs_ambiguous);
+    RUN_TEST(test_implicit_dirs_inout);
     RUN_TEST(test_implicit_widths);
     RUN_TEST(test_implicit_width_from_array);
     RUN_TEST(test_blackbox_body_not_in_union);
