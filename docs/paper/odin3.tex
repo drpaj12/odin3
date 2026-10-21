@@ -2079,59 +2079,100 @@ Anthropic-compatible API, and because the transcripts record Claude model names 
 DeepSeek windows are listed by hand in \code{docs/token\_backends.txt}.
 
 % ------------------------------------------------------------------------------------------
-\section{Status and Roadmap}
+\section{Status and After v1.0}
 \label{sec:status}
 \begin{table*}[t]
-\caption{Development phases (ADR D11, 2026-10-19) and status on 2026-10-20}
+\caption{Development phases (ADR D11, 2026-10-19) and status at the v1.0.0 release, 2026-10-21}
 \label{tab:phases}
 \centering
 \footnotesize
 \begin{tabular}{@{}p{0.03\textwidth}>{\raggedright\arraybackslash}p{0.28\textwidth}%
-  >{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.19\textwidth}%
-  >{\raggedright\arraybackslash}p{0.13\textwidth}@{}}
+  >{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.32\textwidth}@{}}
 \toprule
-Ph. & Deliverable & Exit test & Status & Target \\
+Ph. & Deliverable & Exit test & Status at v1.0 \\
 \midrule
 0 & environment, oracle builds, golden BLIFs, \code{netlist-compare}, \code{equiv-check}, lint
-  gate, CI & oracles green on all goldens & done & --- \\
+  gate, CI & oracles green on all goldens & closed \\
 1 & \code{util}, IR, op registry, pass manager, \code{check}, provenance, C ABI, BLIF I/O,
   writers, simulator, tech library & BLIF$\to$IR$\to$BLIF identical; simulation matches ABC; a
-  Python plugin walks the IR & done & --- \\
+  Python plugin walks the IR & closed \\
 2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
-  micros equivalent to Parmys; project fixtures elaborate from each format & done, closed
-  2026-10-18 (PHASE2 \#30) & --- \\
+  micros equivalent to Parmys; project fixtures elaborate from each format & closed 2026-10-18
+  (PHASE2 \#30) \\
 3 & VTR flow: \code{wreduce}, \code{flatten}, \code{lower}, \code{hardmap}, linked ABC,
   \code{write\_blif --vtr}, QoR harness & the VTR~7.0 benchmarks through place and route with
   Odin III alone; QoR table against Parmys; the local gate is the 15 smaller designs (PHASE3
-  decision 54) & done, closed 2026-10-20 on the M2/M3 runs (PHASE3 decision 58); \code{mcml},
+  decision 54) & closed 2026-10-20 on the M2 and M3 runs (PHASE3 decision 58); \code{mcml},
   \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng} shipped out as too big for
-  this machine & --- \\
-4 & VTR architectures and FSM: 4.1 to 4.8, 4.13 & VTR designs route on several architectures and
-  pass \code{fcheck}; FSM micros equivalent; QoR parity is not a gate & 4.1, 4.2 (PRs A to C),
-  4.4 (PR~D), 4.5 (PR~E), 4.7 and 4.8 merged; 4.3 (PR~F) in progress; 4.13 planned & v1.0 about
-  12--17 Nov \\
+  this machine \\
+4 & VTR architectures and FSM: partial mapping (4.1 to 4.8), architecture sweep (4.13) & VTR
+  designs route on several architectures and pass \code{fcheck}; FSM micros equivalent; QoR
+  parity is not a gate & closed 2026-10-21 (PHASE4 decision 18; Table~\ref{tab:sweep}); FF
+  feature matching (4.6) dropped from v1.0 \\
 5 & outputs and read-back: LPM (5.1), Verilog read-back (5.2), JSON reader (5.3), HDL locations
   through write and read (5.4) & every write and read round trip is equivalent and keeps the HDL
-  locations & 5.1, 5.2 and 5.3 merged; 5.4 in progress & with v1.0 \\
+  locations & closed 2026-10-21 (PHASE5 decision 12) \\
 6 & analysis flow and provenance: gate-level ingest, \code{write\_dot --color-by}, graph export,
   \code{levelize}, coverage gate (6.1 to 6.5) & the 6.5 gate passes on the Phase~3 designs and
-  the LPM micros & specified; first items in progress & with v1.0 \\
-7 & CIRCT writer, visual tooling polish, documentation with the extension-API review, packaging
-  and the v1.0 tag & release & planned & with v1.0 \\
+  the LPM micros & closed 2026-10-21 (PHASE6 decision 10) \\
+7 & the \code{odin3-flow} command, the user manual, reverse-engineering support (7.4), packaging
+  and the v1.0 tag & release & released: tag \code{v1.0.0}, 2026-10-21 \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 Table~\ref{tab:phases} lists the phases. The status comes from the repository's phase
-documents and from the measured runs of 2026-10-19 that Sec.~\ref{sec:measured} reports. The
-v1.0 scope is ADR D10, accepted on 2026-10-19: ``since our goal is to make Odin III \ldots\ I
-just want the tool to work.'' ADR D11 of the same day splits the plan into the phases above, so
-that Phases~3 and~4 serve the first goal (Verilog through the modern VTR flow, comparable to
-Parmys) and Phases~5 and~6 serve the second and third (a platform for netlist analysis, and
-provenance back to the HDL). QoR parity with Parmys is not an exit criterion, and it is still
-measured and reported. The target date is the controller's estimate. Phase~3 closed on
-2026-10-20 on the existing M2 and M3 data (PHASE3 decision 58), because the front end to
-elaboration is the priority and the VTR link matters less.
+documents and from the measured runs that Sec.~\ref{sec:measured} reports. Version 1.0.0 was
+tagged on 2026-10-21, 14 calendar days after the first commit, with 225 pull requests merged. The
+GitHub release carries a source tarball with the ABC and Unity submodules
+(\code{odin3-1.0.0.tar.gz}), a Python wheel (\code{odin3-1.0.0-py3-none-linux\_x86\_64.whl}) and
+a \code{SHA256SUMS} file; the manual is published at \url{https://drpaj12.github.io/odin3/}. The
+wheel is tagged \code{linux\_x86\_64} and not \code{manylinux}, because the build host's glibc
+is too new for the manylinux tags; a manylinux wheel needs a build in an older container. There
+is no API or ABI stability promise for v1.0 (PHASE7 decision 4). The v1.0 scope is ADR D10,
+accepted on 2026-10-19: ``since our goal is to make Odin III \ldots\ I just want the tool to
+work.'' ADR D11 of the same day splits the plan into the phases above, so that Phases~3 and~4
+serve the first goal (Verilog through the modern VTR flow, comparable to Parmys) and Phases~5
+and~6 serve the second and third (a platform for netlist analysis, and provenance back to the
+HDL). QoR parity with Parmys was not an exit criterion, and it is still measured and reported.
+Phase~3 closed on 2026-10-20 on the existing M2 and M3 data (PHASE3 decision 58), because the
+front end to elaboration is the priority and the VTR link matters less.
+
+Phases~4 to~7 each closed on 2026-10-21. Phase~4 delivered the partial mapping from VPR
+architectures: \code{read\_arch}, generic hard blocks by port signature, multiplier and memory
+splitting, carry chains from the architecture, and FSM detection with one-hot recoding.
+Phase~5 delivered the Altera LPM target, Verilog read-back at every level, the Yosys JSON reader
+and HDL locations that survive write and read. Phase~6 delivered gate-level netlist ingest,
+\code{write\_dot --color-by}, the graph export with a Python loader, \code{levelize} and the
+provenance coverage gate. Phase~7 delivered \code{odin3-flow}, which takes a design from Verilog
+to a routed VPR result or to LPM Verilog with one command; the user manual; the
+reverse-engineering support of Sec.~\ref{sec:re} (\code{submod}, \code{Design.copy},
+\code{cone\_check}, \code{raise}); and the release. The architecture sweep (4.13) is the exit
+test of Phase~4. It runs the 15 designs of the local gate on a DSP architecture (EArch) and on a
+plain-LUT architecture (\code{k4\_N4\_90nm}), routes them with VPR and checks them with
+\code{fcheck}; Table~\ref{tab:sweep} gives the result. The \code{k6\_frac\_N10} result is the
+Phase~3 one (Table~\ref{tab:m2}). On \code{k4\_N4\_90nm}, \code{mkDelayWorker32B} reached the
+3600\,s limit in ABC, because its 833 adders are all soft logic on that architecture; it is a
+known gap and not an exit blocker (PHASE4 decision 18). The untested \code{fcheck} verdicts
+are designs with latches or the \code{--nolatches} precheck, which \code{fcheck} does not
+simulate; no \code{fcheck} run failed.
+
+\begin{table}[t]
+\caption{The 4.13 architecture sweep (PHASE4 decision 18): designs routed by VPR, \code{fcheck}
+verdicts (pass / untested / fail) and the 26 \code{hardmap} micros against Parmys (equivalent /
+listed known divergence / differ)}
+\label{tab:sweep}
+\centering
+\footnotesize
+\begin{tabular}{@{}lccc@{}}
+\toprule
+Architecture & Routed & \code{fcheck} & Micros \\
+\midrule
+EArch (DSP) & 15 of 15 & 8 / 7 / 0 & 16 / 10 / 0 \\
+\code{k4\_N4\_90nm} (plain LUT) & 14 of 15 & 8 / 6 / 0 & 14 / 12 / 0 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 Phase~1's exit tests passed on the goldens: every one of
 the 1,846 successful golden BLIFs read and wrote back identically under the text gate, and 1,824
@@ -2276,33 +2317,58 @@ from Yosys's \code{techmap} (Sec.~\ref{sec:verify}). The \code{hardmap} result s
 passes that run before it. The \code{fcheck} result is the reverse of the usual direction: Odin
 III's netlists are right and Parmys's are wrong, because of the divergence D2b (Sec.~\ref{sec:verify}).
 
-\subsection{In progress and next}
+\subsection{Known gaps at v1.0}
 
-Five items are open. (1) \emph{After Phase~3.} The five largest designs, \code{mcml},
-\code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}, are shipped out to a larger
-machine as ``untested here: too big for this machine'', and their tables are report-only (PHASE3
-decisions 54 and 55). No new Parmys-parity work starts: comparable results are the target, not
-parity (PHASE3 decision 53). The O-leg QoR table was not run for v1.0 (PHASE3 decision 58). (2) \emph{The in-memory ABC exchange.} It is built (3D-7, 3D-8); its default
-flip awaits its gate. (3) \emph{Partial mapping.} Multiplier splitting from the architecture (4.3,
-PR~F) is in progress, and the architecture sweep (4.13) follows. (4) \emph{Name style.} The cost
-of provenance names in VPR (the Oprov leg) is not measured, so short names stay the default
-(DESIGN \S13 \#6). (5) \emph{Outputs and analysis.} The rest of 5.4 and the Phase~6 analysis flow
-are being built in parallel lanes.
+Seven gaps are open at the release (\code{docs/RELEASE-NOTES-1.0.md}). (1) \emph{The five largest
+designs.} \code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng} are
+shipped out to a larger machine as ``untested here: too big for this machine'', and their tables
+are report-only (PHASE3 decisions 54 and 55). No new Parmys-parity work was started: comparable
+results are the target, not parity (PHASE3 decision 53). The O-leg QoR table was not run for
+v1.0 (PHASE3 decision 58). (2) \emph{The plain-LUT architecture.} On \code{k4\_N4\_90nm},
+\code{mkDelayWorker32B} reaches the 3600\,s ABC limit. (3) \emph{Dead adders.} On some EArch
+designs the QoR harness prints its \code{hardblocks\_lost} warning, because the adders are unused
+after VTR's ABC step. I did not investigate it. (4) \emph{Functional check.} \code{fcheck}
+classes designs with latches or the \code{--nolatches} precheck as untested, and \code{diffeq1}
+is not equivalence-tested because \code{equiv-check} cannot name three of its five multiply
+black boxes. (5) \emph{Cell types.} The types \code{\$\_DFFSR\_*}, \code{\$\_ALDFF\_*} and
+\code{\$\_SR\_*}, and latches with reset, are not registered; a netlist that uses them reads
+them as implicit black boxes (PHASE5 decision 12). (6) \emph{Name style.} The cost of provenance
+names in VPR (the Oprov leg) is not measured, so short names stay the default (DESIGN \S13
+\#6). (7) \emph{ABI gaps for tools.} Attributes are strings only, with no remove;
+\code{cone\_check} is combinational and keeps one result per module; node IDs are
+module-local; and there are no bulk readers (\code{docs/RE-ARCHITECTURE.md} section 5). FF
+feature matching (4.6) was dropped from v1.0. The CIRCT writer (ADR D12) and the EDIF and VQM
+writers (ADR D10) are not part of v1.0.
 
-\subsection{The roadmap to v1.0}
+\subsection{After v1.0}
 \label{sec:v1plan}
 
-Phase~4 finishes the generic hard-block mapping (4.3 to 4.5), and then the architecture sweep
-(4.13). The sweep runs the VTR designs on \code{k6\_frac\_N10}, a DSP architecture and a plain-LUT
-architecture, and passes when VPR routes them and \code{fcheck} passes. Phase~5 builds the outputs
-and their read-back. BLIF, Verilog and JSON must read back into Odin III with their HDL locations;
-\code{dot} is for viewing and RTLIL is for Yosys, and neither needs a reader. The Altera path is
-light: it is tested by write, read back and lint, and equivalence under the LPM models waits until
-the architect needs it. Phase~6 builds the analysis flow of Sec.~\ref{sec:re-graph} and the
-provenance coverage gate. Phase~7 is the release. After v1.0, the plan adds SystemVerilog through
-slang, VHDL through GHDL, and the research plugins (DESIGN \S12.1). The decision is to be revisited
-if a phase turns out to depend on another in a way that blocks the order of three parallel lanes,
-or if the architect needs the LPM equivalence step before Phase~5 closes (D11).
+After v1.0 the new tools live in their own repositories and use Odin III as a pip package, with
+no change to the core. The three items below are my decisions of 2026-10-21. They are planned,
+and none is built.
+
+\emph{Wyrd-I} (\url{https://github.com/drpaj12/wyrd}) is a GUI wrapper around Odin III and an
+experiment runner. Its first piece, W1, is a command-line experiment runner: projects in TOML, a
+run store in SQLite and a scheduler that respects a memory budget. A Qt GUI follows, with a
+Quartus-like report, simulation and waveforms, and Verilog Town, Jamieson's Verilog teaching
+game, ported to pygame-ce on Odin III.
+
+\emph{Loki} (\url{https://github.com/drpaj12/loki}) is the reverse-engineering tool for
+structural netlists (Sec.~\ref{sec:re}). L0 is a provenance ground-truth dataset made from the
+benchmarks. L1 is a Bayesian hypothesis flow: pattern detectors give likelihoods, \code{cone\_check}
+proofs confirm them, and \code{raise} and \code{submod} move the design up the hierarchy. L2 adds
+graph export, clustering (k-means and affinity propagation) and graphlet signatures (GraphCrunch
+and ORCA). There is no LLM step for now. Loki targets the future work of Gate-Breaker itself:
+clustering for bus naming, separating datapath from control, and partitioning. Trojan detection
+comes later.
+
+\emph{The placement experiment} uses the provenance, or the clusters that Loki recovers, as VPR
+placement constraints (\code{--read\_vpr\_constraints}). It revisits the study of system-level
+information and FPGA placement~\cite{gharibian2010finding,gharibian2013analyzing}.
+
+The core changes that remain each get their own specification and pull request: the
+SystemVerilog and VHDL front ends (ADR D11) and a per-cycle simulation call. FF feature matching
+(4.6) is a later plugin or v1.1.
 
 
 \end{document}
