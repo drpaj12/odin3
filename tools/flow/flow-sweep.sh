@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # flow-sweep: run odin3-flow with VPR over each given design in turn (the flow_vpr_sweep CTest).
 # usage: flow-sweep.sh <odin3-flow command...> --out-base DIR design.v...
-# Each design runs as `<command> --top <stem> --out DIR/<stem> design.v`; the first failure stops.
+# Each design runs as `<command> --out DIR/<stem> design.v` (the top is found by the script);
+# the first failure stops.
 set -euo pipefail
 cmd=()
 while [[ $# -gt 0 && $1 != --out-base ]]; do cmd+=("$1"); shift; done
@@ -9,5 +10,5 @@ while [[ $# -gt 0 && $1 != --out-base ]]; do cmd+=("$1"); shift; done
 base=$2; shift 2
 for design in "$@"; do
     stem=$(basename "$design" .v)
-    "${cmd[@]}" --top "$stem" --out "$base/$stem" "$design"
+    "${cmd[@]}" --out "$base/$stem" "$design"
 done
