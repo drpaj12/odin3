@@ -334,13 +334,14 @@ static odin3_status create_node(jr *rd, const jr_cell *cell, odin3_node_id *node
                             .params = cell->def->n_params > 0 ? rd->cur.params.data : NULL,
                             .n_params = cell->def->n_params};
     odin3_prov_id imported = {0};
-    odin3_status st = jr_prov(rd, cell->node, &imported);
+    jr_named named = {0};
+    odin3_status st = jr_name_key(rd, cell->node, JR_NAME_NODE, &named);
+    spec.name = named.name;
+    st = st == ODIN3_OK ? jr_prov(rd, cell->node, &imported) : st;
     if (st == ODIN3_OK) {
         st = jr_restore_src(
-            rd, &(jr_restore_in){jr_member(cell->node, "attributes"), imported, true}, &spec.prov);
-    }
-    if (st == ODIN3_OK) {
-        st = jr_intern(rd, cell->key, &spec.name);
+            rd, &(jr_restore_in){jr_member(cell->node, "attributes"), imported, true, &named},
+            &spec.prov);
     }
     if (st == ODIN3_OK) {
         st = odin3_node_create_connected(rd->cur.module, &spec, rd->cur.conn_ports.data, node);

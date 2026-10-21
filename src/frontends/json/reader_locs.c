@@ -61,28 +61,16 @@ static void note_bad(jr *rd, const odin3_json_node *src, const char *text, size_
     rd->n_bad_src++;
 }
 
-odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out) {
-    *out = in->base;
-    const odin3_json_node *src = rd->opts.keep_src_attr ? NULL : src_member(in->attrs);
-    if (src == NULL) {
-        return ODIN3_OK;
-    }
-    size_t len = 0;
-    const char *text = jr_text(src, &len);
-    odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
-    uint32_t count = odin3_hdl_loc_parse((odin3_bytes){text, len}, locs, ODIN3_HDL_LOC_MAX);
-    if (count == 0) {
-        if (in->warn) {
-            note_bad(rd, src, text, len);
-        }
-        return ODIN3_OK;
-    }
+/* The restored record of one object: its own `src` locations, else the line of its decoded key. */
+static odin3_status make_restored(jr *rd, const jr_restore_in *in, const odin3_hdl_loc *locs,
+                                  uint32_t count, odin3_prov_id *out) {
     if (!rd->op_begun) {
         odin3_prov_begin_op(&rd->ctx); /* the one operation of every restored record (D-1) */
         rd->op_begun = true;
     }
     odin3_hdl_restore_req req = {in->base, locs,
-                                 count < ODIN3_HDL_LOC_MAX ? count : ODIN3_HDL_LOC_MAX, 0};
+                                 count < ODIN3_HDL_LOC_MAX ? count : ODIN3_HDL_LOC_MAX,
+                                 in->named != NULL ? in->named->hier : 0};
     odin3_hdl_restored made = {0};
     odin3_status st = jr_fail(rd, odin3_hdl_restore(&rd->ctx, &req, &made));
     if (st == ODIN3_OK) {
@@ -90,6 +78,26 @@ odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out)
         rd->n_capped_src += in->warn && count > ODIN3_HDL_LOC_MAX ? 1U : 0U;
     }
     return st;
+}
+
+odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out) {
+    *out = in->base;
+    const odin3_json_node *src = rd->opts.keep_src_attr ? NULL : src_member(in->attrs);
+    odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
+    uint32_t count = 0;
+    if (src != NULL) {
+        size_t len = 0;
+        const char *text = jr_text(src, &len);
+        count = odin3_hdl_loc_parse((odin3_bytes){text, len}, locs, ODIN3_HDL_LOC_MAX);
+        if (count == 0 && in->warn) {
+            note_bad(rd, src, text, len);
+        }
+    }
+    if (count == 0 && in->named != NULL && in->named->decoded) {
+        locs[0] = in->named->loc; /* a hash name's full name carries file and line (H-6) */
+        count = 1;
+    }
+    return count == 0 ? ODIN3_OK : make_restored(rd, in, locs, count, out);
 }
 
 /* --- ports (D-2) ---------------------------------------------------------------------------- */
@@ -155,8 +163,8 @@ odin3_status jr_port_prov(jr *rd, const jr_port_srcs *srcs, const odin3_json_nod
     odin3_prov_id value = {0}; /* the IMPORTED record of the netname value, where the text is */
     st = jr_prov(rd, name, &value);
     return st == ODIN3_OK
-               ? jr_restore_src(rd, &(jr_restore_in){jr_member(name, "attributes"), value, false},
-                                out)
+               ? jr_restore_src(
+                     rd, &(jr_restore_in){jr_member(name, "attributes"), value, false, NULL}, out)
                : st;
 }
 
@@ -193,7 +201,7 @@ static odin3_status collect_one(jr *rd, const odin3_json_node *name) {
     odin3_prov_id prov = {0};
     odin3_status st = jr_prov(rd, name, &base);
     if (st == ODIN3_OK) {
-        st = jr_restore_src(rd, &(jr_restore_in){attrs, base, false}, &prov);
+        st = jr_restore_src(rd, &(jr_restore_in){attrs, base, false, NULL}, &prov);
     }
     if (st == ODIN3_OK) {
         st = jr_fail(rd, odin3_u64map_put(rd->cur.netloc, (odin3_kv){label, prov.v}));

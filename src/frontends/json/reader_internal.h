@@ -5,8 +5,10 @@
 #ifndef ODIN3_FRONTENDS_JSON_READER_INTERNAL_H
 #define ODIN3_FRONTENDS_JSON_READER_INTERNAL_H
 
+#include "backends/common/hdl_loc.h"
 #include "frontends/json/json_parse.h"
 #include "frontends/json/reader.h"
+#include "frontends/name_resolve.h"
 #include "ir/celltype.h"
 #include "ir/module.h"
 #include "util/arena.h"
@@ -114,6 +116,10 @@ typedef struct jr {
     jr_cur cur;
     odin3_arena *vals; /* payloads of typed values, until the read ends */
     odin3_strbuf scratch;
+    odin3_name_resolver names; /* the --name-map state (H-6), when have_names */
+    odin3_name_miss name_miss; /* hash-shaped keys the map lacks */
+    bool have_names;
+    odin3_strbuf name_buf; /* scratch for unique decoded names (reader_names.c) */
 } jr;
 
 /* NULL-safe views of the parser's accessors (an absent member is a NULL node). */
@@ -180,11 +186,26 @@ bool jr_src_restorable(const jr *rd, const odin3_json_node *attrs);
 bool jr_src_member_restorable(const jr *rd, const odin3_json_node *member);
 /* What to restore for one object: its attributes object (may be NULL), the record the reader
  * would make without 5.4 (IMPORTED), and whether a `src` that does not parse is reported (L-6). */
+typedef struct jr_named jr_named;
 typedef struct jr_restore_in {
     const odin3_json_node *attrs;
     odin3_prov_id base;
     bool warn;
+    const jr_named *named; /* the decoded key of the object (H-6), or NULL */
 } jr_restore_in;
+/* A key after --name-map (H-6): the interned name and, when the key was a hash name whose full
+ * name decodes (L-5), its hier (strtab ID, 0 for none) and location, which the object's record
+ * takes when its `src` does not restore. */
+struct jr_named {
+    uint32_t name, hier;
+    odin3_hdl_loc loc;
+    bool decoded;
+};
+typedef enum jr_name_kind { JR_NAME_WIRE, JR_NAME_NODE } jr_name_kind;
+/* Interns the key of a netname or cell; node is its JSON member (for the line of a miss). */
+odin3_status jr_name_key(jr *rd, const odin3_json_node *node, jr_name_kind kind, jr_named *out);
+/* The one WARNING of H-6. */
+void jr_report_names(const jr *rd);
 /* *out is the record the object takes: the DERIVED of D-1 when its `src` restores, else base. */
 odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out);
 /* The netnames of a module that hold a restorable `src`, by name, for its ports (D-2). */

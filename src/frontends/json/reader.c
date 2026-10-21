@@ -117,7 +117,13 @@ static odin3_status jr_init(jr *rd, odin3_design *design, const char *path,
         rd->vals == NULL) {
         return jr_fail(rd, ODIN3_ERR_NO_MEMORY);
     }
-    return jr_intern(rd, path, &rd->file);
+    odin3_strbuf_init(&rd->name_buf);
+    odin3_status st = jr_intern(rd, path, &rd->file);
+    if (st == ODIN3_OK && rd->opts.name_map != NULL) {
+        st = odin3_name_resolver_open(&rd->names, "read_json", rd->opts.name_map);
+        rd->have_names = st == ODIN3_OK;
+    }
+    return st;
 }
 
 static void jr_free(jr *rd) {
@@ -126,6 +132,10 @@ static void jr_free(jr *rd) {
     odin3_vec_free(&rd->edges);
     odin3_vec_free(&rd->implicit);
     odin3_strbuf_free(&rd->scratch);
+    odin3_strbuf_free(&rd->name_buf);
+    if (rd->have_names) {
+        odin3_name_resolver_close(&rd->names);
+    }
     odin3_u64map_destroy(rd->mod_index);
     odin3_u64map_destroy(rd->implicit_index);
     odin3_u64map_destroy(rd->implicit_port);
@@ -259,6 +269,7 @@ static odin3_status read_all(jr *rd) {
     if (st == ODIN3_OK) {
         jr_report_skipped(rd);
         jr_report_src(rd);
+        jr_report_names(rd);
     }
     return st;
 }

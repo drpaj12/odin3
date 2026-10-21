@@ -20,6 +20,7 @@
 #include "frontends/elab/ceval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_test.h"
+#include "frontends/name_resolve.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -214,11 +215,13 @@ struct odin3_elab2 {
     uint64_t next_check; /* the object count of the next budget check */
     uint32_t ports_made; /* ports created (the refuse_port test hook counts them) */
     /* read_verilog -netlist (5.4c; netlist_locs.c) */
-    const char *asg_loc;  /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
-    odin3_u64map *nl_raw; /* (module, strtab ID) of every raw declarator name, made on use */
-    uint32_t nl_capped;   /* `src` attributes holding more than 8 locations (INFO; X-3) */
-    uint32_t nl_bad;      /* `src` attributes that are not locations (kept; L-6) */
-    odin3_loc nl_bad_loc; /* the first of them */
+    const char *asg_loc;     /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
+    odin3_u64map *nl_raw;    /* (module, strtab ID) of every raw declarator name, made on use */
+    uint32_t nl_capped;      /* `src` attributes holding more than 8 locations (INFO; X-3) */
+    uint32_t nl_bad;         /* `src` attributes that are not locations (kept; L-6) */
+    odin3_loc nl_bad_loc;    /* the first of them */
+    odin3_name_miss nl_miss; /* hash-shaped declarators the --name-map lacks (H-6) */
+    odin3_loc nl_miss_loc;   /* the first of them */
     char nl_bad_text[ODIN3_NL_BAD_TEXT]; /* its text, cut */
     bool pend_seen[ODIN3_PEND_END];
 };

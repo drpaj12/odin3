@@ -119,7 +119,28 @@ void odin3_netlist_begin(odin3_elab2 *e2) {
     }
 }
 
-odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_netlist_name *out) {
+/* H-6: the full name of the hash name raw in the current module when the map holds it, else raw
+ * (a hash-shaped name the map lacks is counted). */
+static odin3_bytes resolve_hash(odin3_elab2 *e2, odin3_bytes raw, odin3_loc at) {
+    if (e2->opts.names == NULL || !odin3_name_hash_shaped(raw)) {
+        return raw;
+    }
+    const odin3_strtab *tab = odin3_design_strtab(e2->design);
+    odin3_bytes module = {odin3_strtab_get(tab, odin3_module_name(e2->mod)),
+                          odin3_strtab_len(tab, odin3_module_name(e2->mod))};
+    odin3_bytes full = {NULL, 0};
+    if (odin3_name_resolver_find(e2->opts.names, module, raw, &full)) {
+        return full;
+    }
+    if (e2->nl_miss.count == 0) {
+        e2->nl_miss_loc = at;
+    }
+    odin3_name_miss_note(&e2->nl_miss, raw, 0);
+    return raw;
+}
+
+odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_loc at,
+                                       odin3_netlist_name *out) {
     *out = (odin3_netlist_name){0};
     const odin3_strtab *tab = odin3_design_strtab(e2->design);
     size_t len = odin3_strtab_len(tab, raw_str);
@@ -128,6 +149,7 @@ odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_
     }
     /* the table never moves a string: the decoded views stay valid while the name is interned */
     odin3_bytes raw = {(const unsigned char *)odin3_strtab_get(tab, raw_str), len};
+    raw = resolve_hash(e2, raw, at);
     odin3_hdl_name name;
     if (!odin3_hdl_name_decode(raw, &name)) {
         return ODIN3_OK;
@@ -332,6 +354,13 @@ void odin3_netlist_finish(odin3_elab2 *e2) {
                   "read_verilog -netlist: %u `src` attribute(s) hold more than %u locations; the "
                   "first %u of each were kept",
                   e2->nl_capped, (unsigned)ODIN3_HDL_LOC_MAX, (unsigned)ODIN3_HDL_LOC_MAX);
+    }
+    if (e2->nl_miss.count > 0) {
+        odin3_elab2_warn(
+            e2, e2->nl_miss_loc,
+            "read_verilog -netlist: %u hash-shaped name(s) are not in the name map and "
+            "stay as written (first: '%s')",
+            e2->nl_miss.count, e2->nl_miss.first);
     }
     if (e2->nl_bad == 0) {
         return;
