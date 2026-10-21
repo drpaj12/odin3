@@ -1,0 +1,11 @@
+# The 5.4 gate level: flatten and lower to bit gates. --nolatches: write_blif --vtr refuses a
+# level-sensitive latch.
+@TECHLIB@
+read_verilog --nolatches @DESIGN@
+proc
+opt
+opt_clean
+flatten
+opt -full
+lower
+opt -fast
