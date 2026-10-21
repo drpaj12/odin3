@@ -415,6 +415,7 @@ gnd\t3\t1\t0\t0\t#5
         rep = vpr.place_check(self.PLACE, self.index(("n1", "$n9"), ("q",)), self.NET)
         self.assertEqual({d.name for d in rep.defects}, {"q"})
         self.assertEqual(rep.objects["atom"], 3)
+        self.assertEqual(len(rep.defects), 1)  # the cluster q and its atom q: one defect
 
     def test_name_with_no_net_is_unmapped(self) -> None:
         rep = vpr.place_check(self.PLACE, self.index(("q", "$n9")))
@@ -422,8 +423,8 @@ gnd\t3\t1\t0\t0\t#5
 
     def test_plain_output_port_name_is_logic_not_a_pad(self) -> None:
         text = self.PLACE + "o\t1\t3\t0\t0\t#6\n"
-        rep = vpr.place_check(text, self.index(("n1", "q", "$n9")))
-        self.assertEqual([d.name for d in rep.defects], ["o"])
+        rep = vpr.place_check(text, self.index(("n1", "q", "$n9"), ("o",)))
+        self.assertEqual([(d.name, d.note) for d in rep.defects], [("o", "drives-output-port")])
         rep = vpr.place_check(text, self.index(("n1", "q", "$n9", "o")))
         self.assertTrue(rep.ok)
 

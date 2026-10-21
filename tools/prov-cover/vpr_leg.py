@@ -166,7 +166,8 @@ def _resolve(
     if key in index.located:
         return "resolved", "decode" if decoded else "net"
     if key in index.driven:
-        return "unresolved", "driver-has-no-location"
+        note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
+        return "unresolved", note
     return "unmapped", "no-such-net"
 
 
@@ -185,8 +186,9 @@ def place_check(
     atoms = parse_net_atoms(net_text) if net_text is not None else {}
     seen: set[str] = set()
     excepted: set[str] = set()
+    failed: set[str] = set()
 
-    def count(cls: str, name: str, ctype: str) -> None:
+    def count(cls: str, name: str) -> None:
         verdict, note = _resolve(name, index, allow)
         if verdict in ("pad", "const"):
             if name not in excepted:  # a pad cluster and its atom have one name: count it once
@@ -197,17 +199,18 @@ def place_check(
             if verdict == "resolved":
                 rep.resolved[cls] += 1
                 rep.direct += 1
-            else:
-                rep.defects.append(Defect(verdict, "", name, ctype, note))
+            elif name not in failed:  # a cluster and its same-named atom are one defect
+                failed.add(name)
+                rep.defects.append(Defect(verdict, "", name, "block", note))
 
     names = parse_place(place_text)
     for name in names:
         rep.blocks += 1
-        count("block", name, "block")
+        count("block", name)
         for atom in atoms.get(name, []):
             if atom not in seen:
                 seen.add(atom)
-                count("atom", atom, "atom")
+                count("atom", atom)
     for name in sorted(atoms.keys() - set(names)):
         rep.defects.append(Defect("unplaced", "", name, "block", "in-net-not-in-place"))
     return rep
