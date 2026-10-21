@@ -497,6 +497,31 @@ class ErrorTests(ToolCase):
         self.assertEqual(code, 2)
         self.assertNotIn("listed:D18", out)
 
+    def test_two_unresolved_modules_one_outside_d18_is_not_listed(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = (
+            "odin3: error: foo.v:23:2: error: unresolved_module: module 'single_port_ram' "
+            "is not defined\n"
+            "odin3: error: foo.v:30:2: error: unresolved_module: module 'my_sub' "
+            "is not defined\n")
+        self.expect("common/foo.v D18 explicit instance, no such model in the arch\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 2)
+        self.assertNotIn("listed:D18", out)
+        self.assertIn("my_sub", out)
+
+    def test_two_unresolved_modules_both_d18_is_listed(self) -> None:
+        self.spec["odin_rc"] = 1
+        self.spec["odin_stderr"] = (
+            "odin3: error: foo.v:23:2: error: unresolved_module: module 'single_port_ram' "
+            "is not defined\n"
+            "odin3: error: foo.v:30:2: error: unresolved_module: module 'adder' "
+            "is not defined\n")
+        self.expect("common/foo.v D18 explicit instance, no such model in the arch\n")
+        code, out, _ = self.run_tool()
+        self.assertEqual(code, 0, out)
+        self.assertIn("listed:D18", out)
+
     def test_d18_entry_is_stale_when_the_design_runs(self) -> None:
         self.expect("common/foo.v D18 explicit instance, no such model\n")
         self.spec["compare_rc"] = 0

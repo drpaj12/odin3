@@ -306,9 +306,9 @@ static void info_absent(const odin3_arch *arch, const char *model, uint64_t coun
 }
 
 /* C-2 and C-3: a record with an `adder` model but no carry pack pattern gets one warning (only when
- * the design has an `$add` or `$sub`); with
- * one, the number of pack patterns reaching the adder's `cin` is reported as a fact, at DEBUG level
- * so that the pass log of the k6 record stays equal to the log without a record (identity gate). */
+ * the design has an `$add` or `$sub`); with one, the number of pack patterns reaching the adder's
+ * `cin` is reported as a fact, at DEBUG level so that the pass log of the k6 record stays equal to
+ * the log without a record (identity gate). */
 static void carry_report(hm_ctx *hc, const odin3_arch *arch) {
     if (!hc->rules.have_adder) {
         return;

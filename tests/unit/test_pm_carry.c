@@ -429,6 +429,19 @@ static void test_adder_free_design_gets_no_carry_warning(void) {
 }
 #endif
 
+/* Paired with the case above: with an `$add` present, the no-chain arch still gets the warning. */
+#ifndef PM_CARRY_VTR
+static void test_add_design_still_gets_carry_warning(void) {
+    static const uint32_t widths[] = {4};
+    pb_result res;
+    build_adds("$add", widths, 1, &res, false);
+    read_arch_fixture(&res, "adder_nochain.xml");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_partial_map_run(&res.ctx, res.design, NULL));
+    assert_logged("carry pack pattern");
+    pb_free(&res);
+}
+#endif
+
 /* --- the --min-add argument parser ---------------------------------------------------------- */
 
 #ifndef PM_CARRY_VTR
@@ -463,7 +476,7 @@ static void test_min_add_parser_refuses_bad_values(void) {
     assert_min_add_refused("--min-add --allow-unknown-blocks"); /* next flag taken as value */
 }
 
-static void test_min_add_parser_blanks(void) {
+static void test_min_add_parser_refuses_malformed_after_blank(void) {
     assert_min_add_refused("--min-add  8x");
     assert_min_add_refused("--min-add 8 --min-add"); /* trailing flag without value */
 }
@@ -506,8 +519,9 @@ int main(void) {
     RUN_TEST(test_no_record_gives_no_chain_message);
     RUN_TEST(test_accessors_root_level_adder_leaf);
     RUN_TEST(test_adder_free_design_gets_no_carry_warning);
+    RUN_TEST(test_add_design_still_gets_carry_warning);
     RUN_TEST(test_min_add_parser_refuses_bad_values);
-    RUN_TEST(test_min_add_parser_blanks);
+    RUN_TEST(test_min_add_parser_refuses_malformed_after_blank);
     RUN_TEST(test_min_add_parser_accepts);
 #endif
     return UNITY_END();

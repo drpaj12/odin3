@@ -49,9 +49,9 @@ Each item has a one-line acceptance test.
   arch with a carry model; 3C maps to k6's `adder` only and stays unchanged.
   Evidence: merged PR #174 (E, `test_pm_carry`, `test_pm_carry_vtr`, `cli_pm_carry_arch`); the
   close-out follow-ups are in PR H.
-- [-] 4.6 (DROPPED from v1.0, decision 17; later plugin or v1.1) FF feature matching: enable and sync/async reset mapped onto what the arch's FF
-  supports, soft glue for the rest. Test: FF micros (enable, sync reset, async reset) are
-  equivalent on an arch with a featureful FF and on a plain one.
+- [ ] 4.6 DROPPED from v1.0 (Peter 2026-10-20; later plugin / v1.1). FF feature matching: enable
+  and sync/async reset mapped onto what the arch's FF supports, soft glue for the rest. Test: FF
+  micros (enable, sync reset, async reset) are equivalent on an arch with a featureful FF and on a plain one.
 - [x] 4.7 Memory port merge: registered reads and writes merged into `$mem` ports; no
   `ram_style` attribute overrides. Test: a registered-read RAM micro yields one `$mem` with the
   read register merged, and is equivalent.

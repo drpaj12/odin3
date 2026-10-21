@@ -322,8 +322,8 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path, compat: bool = Fal
         gap = gap_lines[0]
         raise LowerGap(gap.replace("odin3: error: ", "").strip(), log)
     if proc.returncode != 0 and UNRESOLVED_NEEDLE in proc.stderr:
-        hit = next(ln for ln in proc.stderr.splitlines() if UNRESOLVED_NEEDLE in ln)
-        raise UnresolvedModule(f"odin3 exited {proc.returncode}: {hit.strip()}")
+        hits = [ln.strip() for ln in proc.stderr.splitlines() if UNRESOLVED_NEEDLE in ln]
+        raise UnresolvedModule(f"odin3 exited {proc.returncode}: " + " | ".join(hits))
     if proc.returncode != 0:
         raise ToolError(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
     return out, log
@@ -581,10 +581,9 @@ def find_golden(cfg: Config, design: Path) -> Path:
         raise ToolError(f"{design}: {exc}") from None
 
 
-def unresolved_name(message: str) -> str | None:
-    """The module named by the ``unresolved_module`` line of ``message`` (None when absent)."""
-    found = UNRESOLVED_NAME.search(message)
-    return found.group(1) if found else None
+def unresolved_names(message: str) -> list[str]:
+    """The modules named by every ``unresolved_module`` line of ``message``."""
+    return UNRESOLVED_NAME.findall(message)
 
 
 def check_design(cfg: Config, design: Path, work: Path) -> Result:
@@ -600,7 +599,8 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
         out, log = run_odin(cfg, design, first_model(golden), work)
     except UnresolvedModule as exc:
         listed = [e for e in entries if e.ident == D18]
-        if not listed or unresolved_name(str(exc)) not in D18_MODULES:
+        names = unresolved_names(str(exc))
+        if not listed or not names or any(n not in D18_MODULES for n in names):
             raise
         return Result(key, f"listed:{D18}", True, listed[0].reason)
     except LowerGap as gap:
