@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import vpr_leg
 from loc_check import level_script, parse_techlibs
 
 from prov_cover import (
@@ -194,6 +196,7 @@ def lut_legs(
     """Leg a is run for leg b's file; its result is kept only when asked for, and a failure of
     leg b keeps leg a's result."""
     wanted = args.legs.split(",")
+    first = next(x for x in ("a", "b", "d") if x in wanted)
     libs = parse_techlibs(TECHLIBS).get(design.name, [])
     blif = work / "W.blif"
     script = (
@@ -204,17 +207,17 @@ def lut_legs(
         run_odin3(odin3, script, work)
         a = dump_state(work, "a", "")
     except ToolError as exc:
-        return [("a" if "a" in wanted else "b", flow_error(design.name, exc))]
+        return [(first, flow_error(design.name, exc))]
     rep_a = classify(a.rows, a.facts, allow=args.allow_set)
     out = [("a", rep_a)] if "a" in wanted else []
-    if "b" not in wanted:
+    if "b" not in wanted and "d" not in wanted:
         return out
     pre = "; ".join(libs) if libs else f"read_techlib {LIB_VTR}"
     try:
         log = run_odin3(odin3, f"{pre}; read_blif --hdl-locs {blif}; {tail_commands('b')}", work)
         b = dump_state(work, "b", log)
     except ToolError as exc:
-        return [*out, ("b", flow_error(design.name, exc))]
+        return [*out, ("b" if "b" in wanted else "d", flow_error(design.name, exc))]
     rep = classify(
         b.rows,
         b.facts,
@@ -231,8 +234,32 @@ def lut_legs(
             f"inherited: {rep.exceptions['inherited']} in the dump, "
             f"{info.group(1)} in the read_blif INFO line"
         )
-    out.append(("b", rep))
+    if "b" in wanted:
+        out.append(("b", rep))
+    if "d" in wanted:
+        out.append(("d", leg_d(args, design, work, b)))
     return out
+
+
+def vtr_root() -> Path:
+    default = Path.home() / "odin3-ws" / "external" / "vtr-verilog-to-routing"
+    return Path(os.environ.get("VTR_ROOT") or default)
+
+
+def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegReport:
+    """VPR (pack and place) on leg b's BLIF, then ``place_check`` against leg b's read-back."""
+    vpr = args.vpr or vtr_root() / "vpr" / "vpr"
+    arch = args.arch or vtr_root() / vpr_leg.DEFAULT_ARCH
+    try:
+        net, place = vpr_leg.run_vpr(Path(vpr), Path(arch), work / "W.blif", work)
+        return vpr_leg.place_check(
+            place.read_text(encoding="utf-8", errors="replace"),
+            vpr_leg.build_index(b.rows, b.facts),
+            net.read_text(encoding="utf-8", errors="replace"),
+            allow=args.allow_set,
+        )
+    except ToolError as exc:
+        return flow_error(design.name, exc)
 
 
 def lpm_legs(
@@ -271,7 +298,7 @@ def run_designs(args: argparse.Namespace, work: Path) -> list[tuple[str, str, Le
     """The reports of every design and leg; a flow that fails is a ``flow-error`` defect."""
     odin3 = str(Path(args.odin3 or ROOT_DIR / "build" / "debug" / "odin3").resolve())
     wanted = args.legs.split(",")
-    bad = [w for w in wanted if w not in ("a", "b", "c")]
+    bad = [w for w in wanted if w not in ("a", "b", "c", "d")]
     if bad or not args.files:
         raise ToolError(f"bad --legs {bad[0]!r}" if bad else "no designs given")
     files = [f.resolve() for f in args.files]
@@ -282,7 +309,7 @@ def run_designs(args: argparse.Namespace, work: Path) -> list[tuple[str, str, Le
         run_dir = work / f"{number:04d}-{design.stem}"
         run_dir.mkdir(exist_ok=True)
         flows = []
-        if "a" in wanted or "b" in wanted:
+        if "a" in wanted or "b" in wanted or "d" in wanted:
             flows.append(("a", lut_legs))
         if "c" in wanted:
             flows.append(("c", lpm_legs))

@@ -13,6 +13,7 @@ from unittest import mock
 
 import legs
 import prov_cover as pc
+import vpr_leg as vpr
 
 from .helpers import run_main
 
@@ -345,35 +346,133 @@ class SpecificityTests(unittest.TestCase):
 
 
 class PlaceTests(unittest.TestCase):
-    PLACE = """Netlist_File: x.net Netlist_ID: 1
+    """Leg (d): the `.place` and `.net` of a VPR run against the leg-(b) read-back."""
+
+    LOC = "/d/a.v:7"
+    PLACE = f"""Netlist_File: x.net Netlist_ID: 1
 Array size: 4 x 4 logic blocks
 
-#block name\tx\ty\tsubblk\tblock number
-#----------\t--\t--\t------\t------------
-in[0]\t0\t1\t0\t#0
-out:o\t0\t2\t0\t#1
-n1@a.v:3\t1\t1\t0\t#2
-$abc$7\t1\t2\t0\t#3
+#block name\tx\ty\tsubblk\tlayer\tblock number
+#----------\t--\t--\t------\t-----\t------------
+in[0]\t0\t1\t0\t0\t#0
+out:o\t0\t2\t0\t0\t#1
+top/n1@{LOC}\t1\t1\t0\t0\t#2
+q\t1\t2\t0\t0\t#3
+$n9\t2\t2\t0\t0\t#4
+gnd\t3\t1\t0\t0\t#5
+"""
+    NET = """<block name="x.net" instance="FPGA_packed_netlist[0]">
+<block name="in[0]" instance="io[0]" mode="inpad"><block name="in[0]" instance="inpad[0]"/></block>
+<block name="out:o" instance="io[1]" mode="outpad"><block name="out:o" instance="outpad[0]"/></block>
+<block name="q" instance="clb[0]"><block name="fle" instance="fle[0]"><block name="q" instance="ff[0]"/>
+<block name="open" instance="lut[0]"/><block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block></block>
+<block name="top/n1@/d/a.v:7" instance="clb[1]"><block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block>
+<block name="$n9" instance="memory[0]"><block name="$n9" instance="mem[0]"/></block>
+<block name="gnd" instance="io[2]"><block name="gnd" instance="inpad[0]"/></block>
+</block>
 """
 
-    def test_pad_resolved_block_and_unresolved_block(self) -> None:
-        ports = frozenset({"in[0]", "o"})
-        rep = pc.place_check(self.PLACE, set(), ports, allow=pc.DEFAULT_ALLOW)
+    def index(self, located: tuple[str, ...], driven: tuple[str, ...] = ()) -> vpr.Index:
+        return vpr.Index(
+            frozenset(located),
+            frozenset((*located, *driven)),
+            frozenset({"in[0]"}),
+            frozenset({"o"}),
+        )
+
+    def test_decode_name_is_l5(self) -> None:
+        got = vpr.decode_name("top/sub/n1@/d/a.v:7$2")
+        self.assertEqual(got, vpr.Decoded("top/sub", "n1", "/d/a.v:7"))
+        self.assertEqual(vpr.decode_name("n1@a.v:3"), vpr.Decoded("", "n1", "a.v:3"))
+        self.assertEqual(vpr.decode_name("%24n1@a.v:3"), vpr.Decoded("", "$n1", "a.v:3"))
+        self.assertIsNone(vpr.decode_name("plain"))
+        self.assertIsNone(vpr.decode_name("a@b"))
+
+    def test_net_atoms_are_the_leaves_without_open(self) -> None:
+        atoms = vpr.parse_net_atoms(self.NET)
+        self.assertEqual(atoms["q"], ["q", "top/n1@/d/a.v:7"])
+        self.assertEqual(atoms["$n9"], ["$n9"])
+        self.assertEqual(vpr.parse_place(self.PLACE)[:3], ["in[0]", "out:o", "top/n1@/d/a.v:7"])
+
+    def test_lut_latch_hard_pad_and_unresolved(self) -> None:
+        # a LUT (name decodes), a latch (the plain net), a hard block that is not located
+        rep = vpr.place_check(self.PLACE, self.index(("n1", "q"), ("$n9",)))
         self.assertEqual(rep.exceptions["pad"], 2)
-        self.assertEqual([d.name for d in rep.defects], ["$abc$7"])
-        self.assertEqual(rep.objects, {"block": 2})
-        self.assertEqual(rep.blocks, 4)
+        self.assertEqual(rep.exceptions["const-table"], 1)
+        self.assertEqual(rep.objects, {"block": 3, "atom": 0})
+        self.assertEqual(rep.resolved, {"block": 2, "atom": 0})
+        self.assertEqual([(d.kind, d.name) for d in rep.defects], [("unresolved", "$n9")])
+        self.assertEqual(rep.blocks, 6)
+
+    def test_atoms_of_every_block_are_checked_once(self) -> None:
+        rep = vpr.place_check(self.PLACE, self.index(("n1", "q", "$n9")), self.NET)
+        self.assertTrue(rep.ok)
+        self.assertEqual(rep.objects, {"block": 3, "atom": 3})
+        self.assertEqual(rep.resolved, {"block": 3, "atom": 3})
+        self.assertEqual(rep.exceptions["pad"], 2)
+
+    def test_an_atom_in_a_cluster_can_fail_alone(self) -> None:
+        rep = vpr.place_check(self.PLACE, self.index(("n1", "$n9"), ("q",)), self.NET)
+        self.assertEqual({d.name for d in rep.defects}, {"q"})
+        self.assertEqual(rep.objects["atom"], 3)
+
+    def test_name_with_no_net_is_unmapped(self) -> None:
+        rep = vpr.place_check(self.PLACE, self.index(("q", "$n9")))
+        self.assertEqual([(d.kind, d.note) for d in rep.defects], [("unmapped", "no-such-net")] * 1)
+
+    def test_plain_output_port_name_is_logic_not_a_pad(self) -> None:
+        text = self.PLACE + "o\t1\t3\t0\t0\t#6\n"
+        rep = vpr.place_check(text, self.index(("n1", "q", "$n9")))
+        self.assertEqual([d.name for d in rep.defects], ["o"])
+        rep = vpr.place_check(text, self.index(("n1", "q", "$n9", "o")))
+        self.assertTrue(rep.ok)
 
     def test_pad_not_allowed_is_a_defect(self) -> None:
-        ports = frozenset({"in[0]", "o"})
-        rep = pc.place_check(self.PLACE, set(), ports, allow=frozenset())
-        self.assertEqual(len(rep.defects), 3)
-
-    def test_block_resolved_by_mapping(self) -> None:
-        rep = pc.place_check(
-            self.PLACE, {"$abc$7"}, frozenset({"in[0]", "o"}), allow=pc.DEFAULT_ALLOW
+        rep = vpr.place_check(
+            self.PLACE, self.index(("n1", "q", "$n9"), ("in[0]",)), allow=frozenset()
         )
-        self.assertTrue(rep.ok)
+        self.assertEqual(rep.exceptions["pad"], 0)
+        self.assertEqual({d.name for d in rep.defects}, {"in[0]", "out:o"})
+
+    def test_cluster_in_net_but_not_placed(self) -> None:
+        rep = vpr.place_check(self.PLACE.replace("q\t1\t2", "zz\t1\t2"), self.index(("n1", "q",
+                              "$n9", "zz")), self.NET)
+        self.assertEqual([d.kind for d in rep.defects], ["unplaced"])
+
+    def test_index_from_a_dump_and_its_connections(self) -> None:
+        rows = pc.parse_dump(
+            f"m|node:$lut|$c1|{A}\nm|node:$lut|$c2|\nm|node:$port_in|$c3|\n"
+        )
+        mod = pc.Mod(
+            {
+                "$c1": cell("$lut", ("1",), ("2",)),
+                "$c2": cell("$lut", ("1",), ("3",)),
+                "$c3": cell("$port_in", (), ("1",)),
+            },
+            frozenset({"1"}),
+            frozenset({"3"}),
+            {"1": "a", "2": "x", "3": "y"},
+        )
+        index = vpr.build_index(rows, {"m": mod})
+        self.assertEqual(index.located, {"x"})
+        self.assertEqual(index.driven, {"x", "y", "a"})
+        self.assertEqual((index.inputs, index.outputs), ({"a"}, {"y"}))
+
+    def test_vpr_command_packs_and_places_only(self) -> None:
+        argv = vpr.vpr_command(Path("v"), Path("a.xml"), Path("b.blif"), Path("n"), Path("p"))
+        self.assertIn("--pack", argv)
+        self.assertIn("--place", argv)
+        self.assertNotIn("--route", argv)
+        self.assertEqual(argv[argv.index("--place_file") + 1], "p")
+
+    def test_a_vpr_failure_is_a_tool_error(self) -> None:
+        done = mock.Mock(returncode=1, stdout="", stderr="Error 3: no device")
+        with (
+            mock.patch("subprocess.run", return_value=done),
+            self.assertRaises(pc.ToolError) as ctx,
+        ):
+            vpr.run_vpr(Path("v"), Path("a"), Path("b.blif"), Path("/nonexistent-dir"))
+        self.assertIn("no device", str(ctx.exception))
 
 
 def fake_leg(*items: tuple[str, str, pc.LegReport]) -> mock._patch[mock.MagicMock]:
@@ -635,6 +734,27 @@ class LegsTests(unittest.TestCase):
         self.assertEqual([n for n, _ in got], ["a", "b"])
         self.assertTrue(got[0][1].ok)
         self.assertEqual(got[1][1].defects[0].kind, "flow-error")
+
+    def test_leg_d_runs_vpr_on_the_leg_b_file_and_reports_only_d(self) -> None:
+        args = self._args("d")
+        args.vpr = args.arch = None
+        place = "#x\nin\t0\t0\t0\t0\t#0\n"
+        net = Path("n")
+        with (
+            mock.patch("legs.vpr_leg.run_vpr", return_value=(net, Path("p"))) as run_vpr,
+            mock.patch.object(Path, "read_text", side_effect=[place, "<block/>"]),
+        ):
+            rep = legs.leg_d(args, Path("d.v"), Path("w"), legs.Dumped(dump(), {}, ""))
+        self.assertEqual(run_vpr.call_args.args[2], Path("w") / "W.blif")
+        self.assertEqual(rep.blocks, 1)
+        self.assertEqual([d.kind for d in rep.defects], ["unmapped"])
+
+    def test_leg_d_vpr_failure_is_a_flow_error(self) -> None:
+        args = self._args("d")
+        args.vpr = args.arch = None
+        with mock.patch("legs.vpr_leg.run_vpr", side_effect=pc.ToolError("vpr: no device")):
+            rep = legs.leg_d(args, Path("d.v"), Path("w"), legs.Dumped([], {}, ""))
+        self.assertEqual(rep.defects[0].kind, "flow-error")
 
     def test_nothing_compared_fails(self) -> None:
         with fake_leg():

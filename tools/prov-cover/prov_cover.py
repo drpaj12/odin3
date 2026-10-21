@@ -2,8 +2,8 @@
 
 Usage::
 
-    prov-cover [--legs a,b,c] [--allow inherited,pad] [--odin3 O] [--report report.json]
-               [--work DIR] [--smallest-first] DESIGN.v...
+    prov-cover [--legs a,b,c,d] [--allow inherited,pad] [--odin3 O] [--report report.json]
+               [--work DIR] [--smallest-first] [--vpr VPR] [--arch XML] DESIGN.v...
 
 P-1 to P-8 of the spec.
 
@@ -14,7 +14,7 @@ LPM) and LPM instances (``lpm_*``, ``altsyncram``). An object is resolved when i
 
 Legs: (a) BLIF after ``abc``, in memory; (b) the same BLIF written and read back with
 ``--hdl-locs``; (c) the LPM flow, in memory and (``c2``) written and read back; (d) the VPR
-``.place`` file (``place_check``; the tool never starts VPR).
+``.place`` file (``vpr_leg.py``: the tool starts VPR, pack and place only, itself).
 
 P-3 exception classes apply to a read-back dump only (legs b and c-rb): in memory (legs a and c)
 every object without a location is a loss. Each class is counted, none silent (the report lists
@@ -526,43 +526,6 @@ def written_counts(text: str) -> dict[str, int]:
     return counts
 
 
-# --- leg (d): the .place file -----------------------------------------------------------------
-
-
-def place_check(
-    text: str,
-    resolved: Collection[str],
-    ports: Collection[str],
-    allow: frozenset[str] = DEFAULT_ALLOW,
-) -> LegReport:
-    """P-4 leg (d): every block of a VPR ``.place`` resolves, through its netlist name (a name
-    that carries ``@file:line`` is the L-5 decode; else it must be in ``resolved``, the names of
-    the located leg-(b) objects), unless it is a pad (a block named for a port bit, or
-    ``out:`` + a port bit) and ``pad`` is allowed."""
-    rep = LegReport(objects={"block": 0}, resolved={"block": 0})
-    for line in text.splitlines():
-        words = line.split()
-        if len(words) < 5 or line.startswith(("#", "Netlist_File", "Array size")):
-            continue
-        name = words[0]
-        rep.blocks += 1
-        base = name[4:] if name.startswith("out:") else name
-        if base in ports and "pad" in allow:
-            rep.exceptions["pad"] += 1
-            rep.removed += 1
-            rep.objects["block"] += 1
-            continue
-        rep.objects["block"] += 1
-        if LOC_SUFFIX.search(name) or name in resolved:
-            rep.resolved["block"] += 1
-            rep.direct += 1
-        else:
-            rep.defects.append(Defect("unresolved", "", name, "block"))
-    rep.objects["block"] -= rep.exceptions["pad"]
-    rep.removed -= rep.exceptions["pad"]
-    return rep
-
-
 # --- the report -------------------------------------------------------------------------------
 
 
@@ -706,7 +669,9 @@ def run_designs(args: argparse.Namespace, work: Path) -> list[tuple[str, str, Le
 
 def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__.split("\n")[0])
-    ap.add_argument("--legs", default="a,b", help="a, b, c (comma separated)")
+    ap.add_argument("--legs", default="a,b", help="a, b, c, d (comma separated)")
+    ap.add_argument("--vpr", type=Path, help="leg d: the vpr binary (default $VTR_ROOT/vpr/vpr)")
+    ap.add_argument("--arch", type=Path, help="leg d: the architecture XML (default k6_frac)")
     ap.add_argument("--allow", help="exception classes to enable (default inherited,pad)")
     ap.add_argument("--odin3", default=None)
     ap.add_argument("--report", type=Path, help="write report.json here")
