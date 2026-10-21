@@ -28,15 +28,16 @@ Block name to netlist name, with the evidence (ch_intrinsics, VTR 12 ``vpr``, k6
 
 Resolution of an atom: pad (``--allow pad``) or generator name, else the name decodes to
 ``SHORT`` (with a location in the name, a node driving a net ``SHORT`` must carry exactly that
-file and line (its own or its net's): the same short name in two scopes does not pair, the read-back has no hierarchy
-to key on) or the name is the net, whose driver cell must carry a location (inherited
-through D-5 in a BLIF VTR read-back). Anything else is a defect: ``unmapped`` (no such net: the
-rule above is wrong for this block) or ``unresolved`` (the driver has no location). A cluster
-resolves when its own name resolves and, with the ``.net`` file, every atom in it does; a
-``.place`` name that is no block of the ``.net`` file is a defect too (``unnetted``). With the
-``.net`` file a pad is a block whose ``mode`` is ``inpad``/``outpad`` (the name must then be a
-port bit), not any block named like a port; pad counts are unique names. VPR runs only with
-``ODIN3_HEAVY_OK=1`` (``tools/heavy-run``), per design ``--vpr-timeout`` seconds (default 1800).
+file and line (its own or its net's): the same short name in two scopes does not pair, the
+read-back has no hierarchy to key on) or the name is the net, whose driver cell must carry a
+location (inherited through D-5 in a BLIF VTR read-back). Anything else is a defect:
+``unmapped`` (no such net: the rule above is wrong for this block) or ``unresolved`` (the
+driver has no location). A cluster resolves when its own name resolves and, with the ``.net``
+file, every atom in it does; a ``.place`` name that is no block of the ``.net`` file is a defect
+too (``unnetted``). With the ``.net`` file a pad is a block whose ``mode`` is
+``inpad``/``outpad`` (the name must then be a port bit), not any block named like a port; pad
+counts are unique names. VPR runs only with ``ODIN3_HEAVY_OK=1`` (``tools/heavy-run``), per
+design ``--vpr-timeout`` seconds (default 1800).
 """
 
 from __future__ import annotations
