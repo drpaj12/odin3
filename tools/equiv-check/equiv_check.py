@@ -1336,9 +1336,9 @@ def _input_signature(box: BlackBox, flat: Flat, drivers: dict[str, tuple[BlackBo
 
 def pair_by_input_signature(flats: Sequence[Flat], normalize: bool = True) -> int:
     """Pair the boxes that have no name at all (``BlackBox.pending``) across the two flats by
-    input signature: the model, its .param list, plus, per input pin, the named net or the named/paired box pin
-    that drives it.  A box fed by an unnamed box is signed once that box is paired (rounds, to a
-    fixpoint).  A signature shared by two boxes of one file, or found in one file only, is
+    input signature: the model, its .param list, plus, per input pin, the named net or the
+    named/paired box pin that drives it.  A box fed by an unnamed box is signed once that box is
+    paired (rounds, to a fixpoint).  A signature shared by two boxes of one file, or found in one file only, is
     EquivError (exit 2).  Each pair gets one key in both files and is cut like a named box.
     Returns the number of pairs."""
     pending = [[b for b in f.blackboxes if b.pending] for f in flats]
