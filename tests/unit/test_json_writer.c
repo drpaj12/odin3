@@ -13,6 +13,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <dirent.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdbool.h>
@@ -1362,7 +1363,47 @@ static void test_yosys_sop_equivalence(void) {
     TEST_ASSERT_EQUAL_INT(0, rc);
 }
 
+/* Every test writes its files by relative name: run them in a fresh temp dir so a leftover from an
+ * earlier run (or another process) cannot change a result. */
+/* The scratch dir is flat: unlink each entry, then the dir. */
+static void remove_scratch_dir(const char *dir) {
+    DIR *dirp = opendir(dir);
+    if (dirp != NULL) {
+        const struct dirent *ent;
+        while ((ent = readdir(dirp)) != NULL) {
+            char path[4096 + 300];
+            if (strcmp(ent->d_name, ".") != 0 && strcmp(ent->d_name, "..") != 0 &&
+                snprintf(path, sizeof path, "%s/%s", dir, ent->d_name) < (int)sizeof path) {
+                (void)remove(path);
+            }
+        }
+        (void)closedir(dirp);
+    }
+    (void)rmdir(dir);
+}
+
+static bool enter_scratch_dir(char *dir, size_t cap) {
+    const char *base = getenv("TMPDIR");
+    if (base == NULL || base[0] == '\0') {
+        base = "/tmp";
+    }
+    if (snprintf(dir, cap, "%s/odin3_jsonw_XXXXXX", base) >= (int)cap || mkdtemp(dir) == NULL) {
+        return false;
+    }
+    return chdir(dir) == 0;
+}
+
+static void leave_scratch_dir(const char *scratch) {
+    if (chdir("/") == 0) {
+        remove_scratch_dir(scratch);
+    }
+}
+
 int main(void) {
+    char scratch[4096];
+    if (!enter_scratch_dir(scratch, sizeof scratch)) {
+        return 1;
+    }
     UNITY_BEGIN();
     RUN_TEST(test_bits_ports_cells_netnames);
     RUN_TEST(test_constants);
@@ -1413,5 +1454,7 @@ int main(void) {
     RUN_TEST(test_oom_sweep);
     RUN_TEST(test_yosys_reads_output);
     RUN_TEST(test_yosys_sop_equivalence);
-    return UNITY_END();
+    int rc = UNITY_END();
+    leave_scratch_dir(scratch);
+    return rc;
 }
