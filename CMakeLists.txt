@@ -1863,6 +1863,10 @@ if(BUILD_TESTING)
     add_test(NAME test_abi_ir COMMAND test_abi_ir)
     set_tests_properties(test_abi_ir PROPERTIES LABELS unit)
     odin3_add_unit_test(test_abi_values)
+    # Phase 7 Task 6 (spec 3.2): odin3_design_copy, deep copy with the IDs kept.
+    odin3_add_unit_test(test_design_copy)
+    target_compile_definitions(test_design_copy PRIVATE
+        ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
     target_sources(test_abi_values PRIVATE tests/unit/proc_fixture.c
                                            tests/unit/proc_fixture_core.c)
     # Test-only, never installed: libodin3's objects plus odin3_test_proc_design (Task 3's P1), so
@@ -2869,6 +2873,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_ast
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
+    add_test(NAME python_copy
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_copy
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 6 (6.3, spec E-3 to E-7): write_json --odin3, the reader's handlers and the loader
     # plugins/python/odin3_graph.py. Skips are named and reported as Skipped.
