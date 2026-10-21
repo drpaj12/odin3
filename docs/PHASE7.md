@@ -37,3 +37,10 @@ clean-machine test passes.
 6. (Peter) Release as source plus a pip package bundling `libodin3`.
 7. (Peter) Benchmark runner, Python GUI, RTL viewer, Verilog Town (Pygame CE) after v1.0, each
    with its own spec on Peter's material.
+8. (Agent default) The wheel keeps the plain `linux_x86_64` tag. `auditwheel repair` reaches only
+   `manylinux_2_39_x86_64` from this host (glibc 2.39), too new for most users and PyPI. Release notes
+   say so; a manylinux wheel needs a build in an older-glibc container (later work).
+9. (Agent default) The wheel ships the flow tools under `odin3/data/` (`lib/*.o3lib`,
+   `lib/abc/vtr.abc`, `tools/flow`, `tools/vtr-qor`) and the console commands `odin3` (bundled CLI)
+   and `odin3-flow`. `import odin3` registers the in-process ABC engine by loading
+   `libodin3_abc.so` beside `libodin3.so` as a plugin, so `abc` works from Python.

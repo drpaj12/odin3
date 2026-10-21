@@ -42,7 +42,7 @@
 extern "C" {
 #endif
 
-#define ODIN3_VERSION_MAJOR 0
+#define ODIN3_VERSION_MAJOR 1
 #define ODIN3_VERSION_MINOR 0
 #define ODIN3_VERSION_PATCH 0
 

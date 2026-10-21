@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(odin3 VERSION 0.0.0 LANGUAGES C)
+project(odin3 VERSION 1.0.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
@@ -506,6 +506,42 @@ target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
 add_executable(odin3 src/cli/main.c)
 target_link_libraries(odin3 PRIVATE libodin3 odin3_flags)
 
+# --- Install (Phase 7 Task 10/11; spec 4 P-3, P-4) ---------------------------------
+# `cmake --install`: bin/odin3 (+ odin3-abc), lib/libodin3.so, include/odin3/odin3.h and
+# share/odin3/{lib,tools/flow,tools/vtr-qor} (odin3_flow.resource_root() finds the share tree).
+# Under scikit-build-core (the pip wheel) everything goes inside the Python package instead:
+# <platlib>/odin3/{__init__.py (plugins/python/odin3.py), libodin3.so, odin3.h, bin/}.
+if(SKBUILD)
+    set(_odin3_pkg ${SKBUILD_PLATLIB_DIR}/odin3)
+    set(_odin3_bin_dir ${_odin3_pkg}/bin)
+    set(_odin3_lib_dir ${_odin3_pkg})
+    set(_odin3_inc_dir ${_odin3_pkg})
+    set_target_properties(libodin3 PROPERTIES VERSION "" SOVERSION "")
+    set_target_properties(odin3 PROPERTIES INSTALL_RPATH "$ORIGIN/..")
+    # The one binding source, installed as the package module (no copy in the tree).
+    install(FILES plugins/python/odin3.py DESTINATION ${_odin3_pkg} RENAME __init__.py)
+    # The console entry points (pyproject [project.scripts]) and the flow data they need.
+    install(FILES plugins/python/entry.py DESTINATION ${_odin3_pkg} RENAME _entry.py)
+    set(_odin3_share_dir ${_odin3_pkg}/data)
+else()
+    set(_odin3_share_dir share/odin3)
+    set(_odin3_bin_dir bin)
+    set(_odin3_lib_dir lib)
+    set(_odin3_inc_dir include/odin3)
+    set_target_properties(odin3 PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
+endif()
+install(TARGETS odin3 RUNTIME DESTINATION ${_odin3_bin_dir})
+install(TARGETS libodin3 LIBRARY DESTINATION ${_odin3_lib_dir})
+install(FILES include/odin3/odin3.h DESTINATION ${_odin3_inc_dir})
+file(GLOB _odin3_share_libs CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/lib/*.o3lib)
+file(GLOB _odin3_share_qor CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tools/vtr-qor/*.py)
+install(FILES ${_odin3_share_libs} DESTINATION ${_odin3_share_dir}/lib)
+install(FILES lib/abc/vtr.abc DESTINATION ${_odin3_share_dir}/lib/abc)
+install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script
+        DESTINATION ${_odin3_share_dir}/tools/flow)
+install(PROGRAMS tools/flow/odin3-flow DESTINATION ${_odin3_share_dir}/tools/flow)
+install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
+
 # --- Plugins --------------------------------------------------------------------
 add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
 set_target_properties(example_plugin PROPERTIES
@@ -590,7 +626,7 @@ if(ODIN3_WITH_ABC)
         COMMAND ${CMAKE_COMMAND} -E copy_if_different $<TARGET_FILE:odin3_abc_exe>
                 ${PROJECT_BINARY_DIR}/odin3-abc
         COMMENT "odin3-abc beside odin3")
-    install(PROGRAMS $<TARGET_FILE:odin3_abc_exe> DESTINATION bin RENAME odin3-abc)
+    install(PROGRAMS $<TARGET_FILE:odin3_abc_exe> DESTINATION ${_odin3_bin_dir} RENAME odin3-abc)
     # §4.2's wraps: exit, _exit, abort and __assert_fail escape through the guard; the process
     # control and code loading calls are refused (adapters/abc/guard.c): execl (base/sn's child)
     # and dlopen (Libs_Init loads every libabc_*.so of the cwd or $ABC_LIB_PATH at frame creation;
@@ -627,6 +663,9 @@ if(ODIN3_WITH_ABC)
     # The CLI links the adapter (P3-8) and registers its engine at start-up, before any --plugin
     # (3D spec §4.3); --version names the commit (plan point (u)). libodin3 never links ABC.
     target_link_libraries(odin3 PRIVATE odin3_abc)
+    # The installed CLI loads the adapter from its own lib directory (beside libodin3.so).
+    set_target_properties(odin3_abc PROPERTIES INSTALL_RPATH "$ORIGIN")
+    install(TARGETS odin3_abc LIBRARY DESTINATION ${_odin3_lib_dir})
     target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
     target_compile_definitions(odin3 PRIVATE ${_abc_adapter_defs})
 endif()
@@ -2379,6 +2418,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # Phase 7 Task 11: build the pip wheel (compiles ABC) in a temp venv, install it in a fresh
+    # one and read a BLIF through it. Needs network for the pinned build tools.
+    odin3_add_sweep_test(wheel_build LABEL sweep
+        COMMAND ${CMAKE_COMMAND} -E chdir ${PROJECT_SOURCE_DIR}
+                ${CMAKE_COMMAND} -E env ODIN3_WHEEL_TEST=1
+                ${Python3_EXECUTABLE} -m unittest tests.tools.test_wheel.WheelTest)
     # test_vtr_abc_hardblocks runs VTR's ABC (build/abc/abc under VTR_ROOT): in python_tools it
     # skips (loudly) without it; here it must run, so a missing ABC or odin3 fails
     # (ODIN3_REQUIRE_VTR_ABC=1). Registered when VTR_ROOT has the binary; a heavy run.
