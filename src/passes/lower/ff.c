@@ -256,9 +256,9 @@ static odin3_status view_load_gate(const lw_ctx *lw, const lw_cell *cell, const 
     view->data = data;
     view->out = cell->port[cell->out_port];
     view->value = &k_gate_value[gate->value ? 1 : 0];
-    view->en_outer = view->shape->en_outer ||
-                     (view->shape->has_en && lw->opts->async_enable_first && view->shape->async &&
-                      view->shape->ctl != FF_CTL_NONE);
+    view->en_outer =
+        view->shape->en_outer || (view->shape->has_en && lw->opts->async_enable_first &&
+                                  view->shape->async && view->shape->ctl != FF_CTL_NONE);
     view->gate_init =
         cell->params[0].kind == ODIN3_VAL_INT && cell->params[0].i >= 0 && cell->params[0].i <= 1
             ? (int)cell->params[0].i

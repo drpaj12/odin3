@@ -2097,10 +2097,14 @@ static bool lacks_blif_form(const blif_writer *wr, odin3_celltype_id type) {
 
 /* True for one of the 68 gate-level flip-flops with a reset or an enable (dffx.h): `$_SDFF*`,
  * `$_DFFE_*`, and `$_DFF_<c><r><v>_` (longer than the plain `$_DFF_P_`/`$_DFF_N_`). */
+static bool has_prefix(const char *name, const char *prefix) {
+    return strncmp(name, prefix, strlen(prefix)) == 0;
+}
+
 static bool is_gate_ff_x(const odin3_celltype_def *def) {
     const char *name = def->name;
-    return strncmp(name, "$_SDFF", 6) == 0 || strncmp(name, "$_DFFE_", 7) == 0 ||
-           (strncmp(name, "$_DFF_", 6) == 0 && strlen(name) > 8);
+    return has_prefix(name, "$_SDFF") || has_prefix(name, "$_DFFE_") ||
+           (has_prefix(name, "$_DFF_") && strlen(name) > strlen("$_DFF_P_"));
 }
 
 /* VTR: one cell (spec 3E §6): a $sop, gate or $lut as .names, a $_CONST*_ as no line (its

@@ -263,7 +263,7 @@ class GoldTests(unittest.TestCase):
             )
             for kind in ("$_SDFF_PP0_", "$_DFFE_PN1P_", "$_DFFE_NP_", "$_DFF_NN0_"):
                 self.assertEqual(
-                    jc.read_back_writer(level, Path("R.blif"), '{"type": "%s"}' % kind),
+                    jc.read_back_writer(level, Path("R.blif"), f'{{"type": "{kind}"}}'),
                     "lower; write_blif --vtr R.blif",
                     kind,
                 )

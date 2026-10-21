@@ -1061,9 +1061,10 @@ static void test_2d_signed_word_cell_is_refused(void) {
 }
 
 /* The 68 gate-level flip-flops with a reset or an enable (5.3 follow-up) have no BLIF form either:
- * a sample of every family is refused with a located message, and the plain $_DFF_P_ still writes. */
+ * a sample of every family is refused with a located message, and the plain $_DFF_P_ still writes.
+ */
 static void test_gate_ff_types_are_refused(void) {
-    static const char *const types[] = {"$_DFF_PN1_",  "$_DFFE_NP_",   "$_DFFE_PN0P_",
+    static const char *const types[] = {"$_DFF_PN1_",  "$_DFFE_NP_",    "$_DFFE_PN0P_",
                                         "$_SDFF_NP0_", "$_SDFFE_PP1N_", "$_SDFFCE_NN0P_"};
     for (size_t i = 0; i < sizeof types / sizeof types[0]; i++) {
         odin3_design *des = odin3_design_create();
