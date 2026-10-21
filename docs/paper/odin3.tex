@@ -1780,7 +1780,7 @@ Reverse engineering was one of the three threads that started the project (DESIG
 flat netlist and recover the higher-level structure a designer would recognise. The architect
 scoped it in ADR D10 and D11 as an analysis flow that serves graph methods and keeps provenance
 back to the HDL. This section says what the goal is, what the built system already provides for
-it, what Phases~5 and~6 add, and what open problems are left.
+it, how it compares with Gate-Breaker, and what open problems are left.
 
 \subsection{The goal: from Altera all the way up}
 
@@ -1793,29 +1793,31 @@ Quartus-style flows produce or accept: a netlist of LPM megafunctions (\code{lpm
 assigns. The end point is a higher-level description: word-level operators, memories and
 registers, with every recovered object tied to the lines of netlist text it came from.
 
-Phase~5.1, the Altera target, is the first step. Its LPM tech library (\code{.o3lib}) and the
+Phase~5.1, the Altera target, was the first step. Its LPM tech library (\code{.o3lib}) and the
 pass \code{lpmmap} write structural Verilog that instantiates LPM modules with their parameters,
 and the same library lets the front end read them back, with each LPM instance becoming a hard
 cell. An \code{lpm\_add\_sub} in the input is then already a word-level adder in the IR, and a
 memory is an \code{altsyncram} hard cell, instead of an anonymous cone of gates. The test is a
 write, read and write fixpoint plus a Verilog lint. Equivalence under the LPM simulation models
-and a Quartus compile wait until the architect needs that step (PHASE5 decisions 1 and 6).
+and a Quartus compile were not done for v1.0; they wait until the architect needs that step
+(PHASE5 decisions 1 and 6).
 Recovering structure \emph{between} the LPM cells (counters, shift registers, FSM state registers
 built from plain gates) is the part that needs graph methods (Sec.~\ref{sec:re-graph}).
 
 \begin{figure}[t]
 \centering
 \odinfit{\columnwidth}{\input{IMAGE/fig_re}}
-\caption{The reverse-engineering and analysis flow. Solid-blue boxes are built on main; dashed
-boxes are Phase~6 items (approved, not built); the dotted box is the research plugins that follow
-v1.0. Dashed arrows are provenance links back to the AST and source lines.}
+\caption{The reverse-engineering and analysis flow. Solid-blue boxes are built in v1.0; the dotted
+box is the research plugins that follow v1.0. Dashed arrows are provenance links back to the AST and source lines.}
 \label{fig:re}
 \end{figure}
 
 \subsection{What already supports reverse engineering}
 
 Provenance, identity and hierarchy were built for the forward flow, and they are the parts of
-reverse engineering that cannot be retrofitted. Table~\ref{tab:re-support} lists them.
+reverse engineering that cannot be retrofitted. Phases~6 and~7 then added the analysis flow and
+the operations that move a design up a level. Table~\ref{tab:re-support} lists them; all are
+built in v1.0.
 
 \begin{table}[t]
 \caption{Built features that a reverse-engineering flow uses}
@@ -1835,7 +1837,15 @@ Hierarchy and paths & dotted instance paths and \code{hier} kept in provenance &
 Bit-node names & each gate named after the word cell it came from & 3B \\
 Provenance names & \code{hier/path/name@file:line} in BLIF and Verilog & 3E-6, 1F \\
 C ABI, Python walk & a plugin walks the IR and its provenance & 1D \\
-Dot writer & Graphviz, focus on a cone, instance path or \code{file:line} & 1F \\
+Dot writer & Graphviz, focus on a cone, instance path or \code{file:line}; \code{--color-by} & 1F, 6.2 \\
+Gate-level ingest & BLIF, Yosys JSON and structural Verilog netlists read as IR & 5, 6.1 \\
+Graph export, \code{levelize} & JSON with versioned keys and a Python loader; the combinational level of each cell & 6.3, 6.4 \\
+Coverage gate & every LUT, latch, hard block and LPM instance resolves to an HDL location & 6.5 \\
+\code{submod} & the nodes marked with one attribute value move into a new module & 7.4a \\
+\code{Design.copy} & a copy of a design, so a level can be committed without editing the one below & 7.4b \\
+\code{cone\_check} & a marked cone is proved equal to a template cell, differs with a counterexample, or is unproven & 7.4c \\
+\code{raise} & a proved cone is replaced by one word-level cell & 7.4d \\
+\code{re\_round.py} & one round of the hypothesis loop on a small example & 7.4e \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1864,6 +1874,22 @@ cell (3B, PHASE3 \#38), and \code{write\_blif --vtr --name-style provenance} and
 \code{write\_verilog --name-style provenance} print \code{hier/name@file:line}, so a name read in
 a netlist leads to a source line.
 
+\emph{Moving up a level (Phase~7.4).} Four operations commit a guess and check it. \code{submod}
+moves the nodes that carry one attribute value into a new module, with the boundary nets as
+ports, so a recovered block becomes a hierarchy level. \code{Design.copy} (the ABI call
+\code{odin3\_design\_copy}) copies a design, so that level~1 is built on a copy and level~0 is
+never edited. \code{cone\_check} cuts the marked cone and proves it equivalent to a template cell
+of a given type and parameters; the answer is equivalent, differs with a counterexample, or
+unproven within a time limit. \code{raise} replaces a cone that \code{cone\_check} proved by that
+one word-level cell. Each new object carries provenance to the fine nodes it replaces, so a
+recovered adder still leads to its gates and, through them, to the netlist text.
+\code{plugins/python/re\_round.py} runs one round of the loop on a small example: mark, bind the
+boundary nets, check, raise, and write the new level. Writing the example showed the limits of
+the ABI for such tools, and I recorded them (\code{docs/RE-ARCHITECTURE.md}, section 5):
+attributes are strings with no remove, \code{cone\_check} is combinational and keeps one result
+per module, node IDs are module-local and change after \code{submod}, and there are no bulk
+readers.
+
 \emph{Walk and view.} A plugin, in C or in Python through cffi, walks nodes, nets and
 provenance through the ABI (1D exit test: ``a Python plugin walks the IR''). \code{write\_dot}
 draws a cone, an instance or all objects from a source line, and refuses to draw more than a node
@@ -1879,7 +1905,7 @@ and the result can inform downstream decisions. The structures in view are datap
 register files, counters and bus groupings. Which graph methods to use is not decided
 (Sec.~\ref{sec:re-open}). This paper reports the \emph{hooks} that the core keeps for them, and
 the Phase~6 items that build the flow around them, not results. Phase~6 has five items, all
-specified and none merged on 2026-10-20: gate-level netlist ingest (6.1); \code{write\_dot --color-by} and
+built and closed for v1.0 (PHASE6 decision 10): gate-level netlist ingest (6.1); \code{write\_dot --color-by} and
 HDL locations on node labels (6.2); graph export as Yosys JSON plus versioned Odin III keys, which
 networkx and PyTorch Geometric can load without Odin III (6.3); a \code{levelize} pass that stores
 the combinational level of each cell (6.4); and a provenance coverage gate (6.5). The gate asks
@@ -1898,7 +1924,31 @@ lines per object. The hooks are:
 \end{itemize}
 The route after v1.0 is the one the architect named: add the research techniques through libraries
 and plugins, without changing the core. D10's last rule protects that route: IR provenance, IDs,
-hierarchy and the C ABI stay intact.
+hierarchy and the C ABI stay intact. The tool that follows this route is Loki
+(Sec.~\ref{sec:v1plan}).
+
+\subsection{Gate-Breaker as the method baseline}
+\label{sec:re-gb}
+
+The baseline for this work is Gate-Breaker~\cite{faruque2025gatebreaker}, a netlist-to-RTL tool
+that I co-authored. It takes a gate-level netlist that Yosys produced, with obfuscated wire names
+and a five-cell CMOS library, formats it into a prompt, asks a language model to write the RTL,
+and checks the result by simulation with Icarus Verilog against the original. It was evaluated
+on 156 problems from VerilogEval~\cite{liu2023verilogeval} with four models. The best model,
+OpenAI's O3-Mini, recovered functional RTL for 75.1\% of the runs, and for 53.4\% on the
+fourth quartile of code complexity. The metrics were functional correctness and the similarity of
+the abstract syntax tree and of the control flow graph. The paper's own conclusion is that
+external graph tools should help the model: clustering to name buses, a classification of signals
+as datapath or control, and partitioning of the netlist into smaller parts.
+
+Loki's flow differs in three ways (Sec.~\ref{sec:v1plan}). First, it has no language model for
+now: pattern detectors give likelihoods, and the hypotheses are updated by Bayes' rule. Second,
+a guess is checked by proof, not by simulation: \code{cone\_check} says equivalent, differs or
+unproven, and that is a strong term in the update. Third, a confirmed guess is committed as a
+new level of an ordinary Odin III design (\code{submod}, \code{raise}), so the result can be
+written, drawn and traced back to the gates, and the next round runs on that level. Loki
+targets exactly the three items that Gate-Breaker leaves as future work. None of this is built
+or measured yet, so I make no claim about how it compares in accuracy.
 
 \subsection{Open problems}
 \label{sec:re-open}
@@ -1920,7 +1970,11 @@ hierarchy and the C ABI stay intact.
 \item \emph{Which graph methods.} Which graph methods work best on structural netlists, and
   for which structures, is a research question this paper does not answer.
 \item \emph{The plugin interface.} An analysis plugin needs to add cells and provenance records
-  safely. Phase~7's extension-API review is where that interface is checked.
+  safely. The Phase~7 review of the ABI found nine gaps for such tools, and v1.0 fixes none of
+  them except the registration of the linked ABC in the Python binding
+  (\code{docs/RE-ARCHITECTURE.md}, section 5): string-only attributes, one \code{cone\_check}
+  result per module, no sequential check, no bulk readers, module-local IDs, no cell creation
+  through the ABI and others.
 \end{enumerate}
 
 % ------------------------------------------------------------------------------------------
