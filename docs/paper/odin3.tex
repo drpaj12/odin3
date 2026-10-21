@@ -560,7 +560,7 @@ override.
 Cost is logged from the agents' transcripts (Table~\ref{tab:cost}). From the first session to the
 v1.0 close, 315.5\,h of wall-clock time, 209.9\,h of it active, 63,323 requests used 15.1 billion
 tokens, 95\% of them prompt-cache reads and 65.7 million of them output, across 16 main sessions
-and 877 subagent runs; 225 pull requests merged. The work ran on a Claude Max subscription.
+and 877 subagent runs; 226 pull requests merged. The work ran on a Claude Max subscription.
 Controller sessions may also run on DeepSeek's Anthropic-compatible API; no DeepSeek window fell
 before v1.0.
 
@@ -744,7 +744,7 @@ Every step inside the core is a pass registered with the pass manager, which run
 \code{check} before and after each pass in Debug builds. The elaborated AST is the seam between
 the language-specific half of elaboration and the shared half. \code{partial\_map} (script name
 \code{hardmap}) is Phase~3's fixed binding generalised in Phase~4. The in-memory ABC exchange is
-built; its default flip awaits its gate (PHASE3 \#48).}
+built; BLIF text remains the default exchange at v1.0 (PHASE3 \#48).}
 \label{fig:pipeline}
 \end{figure*}
 
@@ -1188,7 +1188,7 @@ Altera LPM path & LPM library (\code{lpm\_add\_sub}, \code{lpm\_mult}, \code{lpm
 Verilog read-back & instances of Odin III's own cell types read as those cells &
   \code{read\_verilog -icells} & 5.2 & done \\
 Linked ABC & \code{\$lut}; run records; script checker; adapter with escape guard; BLIF and in-memory
-  exchanges & \code{abc} & 3D-0 to 3D-8 & done; default flip awaits its gate \\
+  exchanges & \code{abc} & 3D-0 to 3D-8 & done; BLIF text still the default \\
 VPR BLIF & preflight; \code{blif-vtr-check}; provenance names & \code{write\_blif --vtr} & 3E &
   done \\
 QoR harness & legs P, P$'$, O, O$'$, R, Oprov; heavy-run scheduling; table and gate; \code{fcheck}
@@ -1934,7 +1934,7 @@ hierarchy and the C ABI stay intact. The tool that follows this route is Loki
 
 The baseline for this work is Gate-Breaker~\cite{faruque2025gatebreaker}, a netlist-to-RTL tool
 that I co-authored. It takes a gate-level netlist that Yosys produced, with obfuscated wire names
-and a five-cell CMOS library, formats it into a prompt, asks a language model to write the RTL,
+and a six-cell CMOS library, formats it into a prompt, asks a language model to write the RTL,
 and checks the result by simulation with Icarus Verilog against the original. It was evaluated
 on 156 problems from VerilogEval~\cite{liu2023verilogeval} with four models. The best model,
 OpenAI's O3-Mini, recovered functional RTL for 75.1\% of the runs, and for 53.4\% on the
@@ -1972,8 +1972,8 @@ or measured yet, so I make no claim about how it compares in accuracy.
 \item \emph{Which graph methods.} Which graph methods work best on structural netlists, and
   for which structures, is a research question this paper does not answer.
 \item \emph{The plugin interface.} An analysis plugin needs to add cells and provenance records
-  safely. The Phase~7 review of the ABI found nine gaps for such tools, and v1.0 fixes none of
-  them except the registration of the linked ABC in the Python binding
+  safely. The Phase~7 review of the ABI found ten gaps for such tools; v1.0 fixed one, the
+  registration of the linked ABC in the Python binding, and nine stay open
   (\code{docs/RE-ARCHITECTURE.md}, section 5): string-only attributes, one \code{cone\_check}
   result per module, no sequential check, no bulk readers, module-local IDs, no cell creation
   through the ABI and others.
@@ -2179,7 +2179,7 @@ Ph. & Deliverable & Exit test & Status at v1.0 \\
 
 Table~\ref{tab:phases} lists the phases. The status comes from the repository's phase
 documents and from the measured runs that Sec.~\ref{sec:measured} reports. Version 1.0.0 was
-tagged on 2026-10-21, 14 calendar days after the first commit, with 225 pull requests merged. The
+tagged on 2026-10-21, 14 calendar days after the first commit, with 226 pull requests merged. The
 GitHub release carries a source tarball with the ABC and Unity submodules
 (\code{odin3-1.0.0.tar.gz}), a Python wheel (\code{odin3-1.0.0-py3-none-linux\_x86\_64.whl}) and
 a \code{SHA256SUMS} file; the manual is published at \url{https://drpaj12.github.io/odin3/}. The
@@ -2208,10 +2208,11 @@ test of Phase~4. It runs the 15 designs of the local gate on a DSP architecture 
 plain-LUT architecture (\code{k4\_N4\_90nm}), routes them with VPR and checks them with
 \code{fcheck}; Table~\ref{tab:sweep} gives the result. The \code{k6\_frac\_N10} result is the
 Phase~3 one (Table~\ref{tab:m2}). On \code{k4\_N4\_90nm}, \code{mkDelayWorker32B} reached the
-3600\,s limit in ABC, because its 833 adders are all soft logic on that architecture; it is a
+3600\,s limit in ABC, because all its adders are soft logic on that architecture; it is a
 known gap and not an exit blocker (PHASE4 decision 18). The untested \code{fcheck} verdicts
 are designs with latches or the \code{--nolatches} precheck, which \code{fcheck} does not
-simulate; no \code{fcheck} run failed.
+simulate, and on EArch \code{stereovision0}, whose only mismatches depend on the initial state;
+no \code{fcheck} run failed.
 
 \begin{table}[t]
 \caption{The 4.13 architecture sweep (PHASE4 decision 18): designs routed by VPR, \code{fcheck}
@@ -2375,7 +2376,8 @@ III's netlists are right and Parmys's are wrong, because of the divergence D2b (
 
 \subsection{Known gaps at v1.0}
 
-Seven gaps are open at the release (\code{docs/RELEASE-NOTES-1.0.md}). (1) \emph{The five largest
+Seven gaps are open at the release (from \code{docs/RELEASE-NOTES-1.0.md} and the phase
+logs). (1) \emph{The five largest
 designs.} \code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng} are
 shipped out to a larger machine as ``untested here: too big for this machine'', and their tables
 are report-only (PHASE3 decisions 54 and 55). No new Parmys-parity work was started: comparable
