@@ -110,6 +110,12 @@ add_library(odin3_core OBJECT
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
     src/passes/submod/register.c
+    src/passes/cone_check/cone_check.c
+    src/passes/cone_check/bind.c
+    src/passes/cone_check/tmpl.c
+    src/passes/cone_check/miter.c
+    src/passes/cone_check/prove.c
+    src/passes/cone_check/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1692,6 +1698,18 @@ if(BUILD_TESTING)
     # Phase 7 (7.4a): the submod pass.
     odin3_add_unit_test(test_submod)
     target_compile_definitions(test_submod PRIVATE ODIN3_SM_ROOT="${PROJECT_BINARY_DIR}")
+    # Phase 7 (7.4c): the cone_check pass; with ABC the proofs run on the linked engine in process.
+    odin3_add_unit_test(test_cone_check)
+    target_compile_definitions(test_cone_check PRIVATE ODIN3_CC_ROOT="${PROJECT_BINARY_DIR}")
+    if(ODIN3_WITH_ABC)
+        target_include_directories(test_cone_check PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_cone_check PRIVATE ODIN3_HAVE_REAL_ABC)
+        target_link_libraries(test_cone_check PRIVATE odin3_abc_testlib $<LINK_ONLY:libabc-pic>)
+        target_link_options(test_cone_check PRIVATE ${ODIN3_ABC_WRAPS} -Wl,--wrap=pthread_create)
+        set_target_properties(test_cone_check PROPERTIES LINKER_LANGUAGE CXX)
+        set_tests_properties(test_cone_check PROPERTIES
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+    endif()
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
@@ -2167,6 +2185,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_sm_dir}/adder_hard_block.parmys.blif ${_sm_dir}/ansiportlist_2.parmys.blif
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(submod_equiv_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # Phase 7 (7.4c, spec 3.3 C-5): cone_check on generated BLIF micros through the odin3 binary
+        # (real ABC): ripple adder vs $add, AND vs $and, a swapped binding, 0 s timeout, a register.
+        add_test(NAME cone_check_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/cone_check_micros.py
+                    $<TARGET_FILE:odin3> ${PROJECT_BINARY_DIR}/cone_check_micros
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(cone_check_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
