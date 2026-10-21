@@ -56,6 +56,7 @@ _DECL = re.compile(
     r"^\s*(?:wire|input|output|inout)\b\s*(?:\[[^\]]*\]\s*)?(\\\S+|[A-Za-z_]\w*)\s*;")
 _INSTANCE = re.compile(r"^\s*([A-Za-z_]\w*)\s+(\\\S+|[A-Za-z_]\w*)\s*\($")
 _MODULE = re.compile(r"^\s*module\s+([A-Za-z_]\w*)")
+_SRC_RTL = re.compile(r'\(\*\s*src\s*=\s*"rtl\.v:')
 _BLIF_PIN = re.compile(r"^\S+=(\S+)$")
 
 
@@ -164,7 +165,7 @@ def dump_lines(binary: str, read: str) -> tuple[list[tuple[str, str, str, str]],
         return [], first_error(text)
     rows = []
     for line in text.splitlines():
-        fields = line.split("|")
+        fields = line.split("|", 3)  # a location may hold "|" (several, joined)
         if len(fields) == 4 and fields[1] in ("module", "wire", "net", "node"):
             rows.append((fields[0], fields[1], fields[2], fields[3]))
     return rows, ""
@@ -231,6 +232,11 @@ def check_names(args: argparse.Namespace) -> int:
         print(f"FAIL {args.micro} verilog: {why}")
         return EXIT_FAIL
     wires, instances, types = verilog_names(micro / "mapped.v")
+    for what, found in (("wires", wires), ("instances", instances), ("cell types", types)):
+        if not found:
+            print(f"FAIL {args.micro}: no {what} found in {micro / 'mapped.v'} (the name "
+                  f"extraction matched nothing, so the check would pass vacuously)")
+            return EXIT_FAIL
     failures += [f"wire {n}" for n in missing(wires, rows, top, ("wire",))]
     failures += [f"instance {n}" for n in missing(instances, rows, top, ("node",))]
     modules = {name for _, kind, name, _ in rows if kind == "module"}
@@ -249,7 +255,7 @@ def check_names(args: argparse.Namespace) -> int:
 
 
 def check_prov(args: argparse.Namespace) -> int:
-    """G-6: Verilog objects carry a netlist location, BLIF objects none (IMPORTED)."""
+    """G-6: Verilog objects (module, wires, instances) carry a netlist location, BLIF objects none (IMPORTED)."""
     micro = micro_dir(args.micro)
     top = top_of(micro / "mapped.v")
     netlist_file = str(micro / "mapped.v")
@@ -257,7 +263,11 @@ def check_prov(args: argparse.Namespace) -> int:
     if why:
         print(f"FAIL {args.micro} verilog: {why}")
         return EXIT_FAIL
-    own = [row for row in rows if row[0] == top and row[1] in ("module", "wire")]
+    own = [row for row in rows if row[0] == top and row[1] in ("module", "wire", "node")]
+    if not any(row[1] == "wire" for row in own) or not any(row[1] == "node" for row in own):
+        print(f"FAIL {args.micro} verilog: the dump of {top} lists no wire or no instance "
+              f"(the check would pass vacuously)")
+        return EXIT_FAIL
     bad = [row[2] for row in own if not row[3].startswith(netlist_file + ":")]
     brows, why = dump_lines(args.odin3, read_script(micro, "blif"))
     if why:
@@ -288,11 +298,24 @@ def check_src(args: argparse.Namespace) -> int:
         return EXIT_FAIL
     # The reader keeps the file name as the ``src`` attribute spells it (``rtl.v``, relative).
     rtl = "rtl.v"
-    restored = [row for row in rows if row[3].startswith(rtl + ":")]
-    print(f"netlist_src {args.micro}: {len(restored)} objects restored to {rtl}")
-    if not restored:
-        print(f"FAIL no object has an {rtl} location")
-    return EXIT_PASS if restored else EXIT_FAIL
+    top = top_of(micro / "mapped_src.v")
+    # ``src`` sits on the module, its wires and its instances; the derived nets and nodes (``$n``,
+    # ``$c``) are not counted. A value that names only the techmap (``../cells/cmos_map.v``) has
+    # no RTL location to restore, so only the values that start with ``rtl.v:`` count.
+    restored = [row for row in rows
+                if row[0] == top and row[1] in ("module", "wire", "node")
+                and not row[2].startswith("$") and row[3].startswith(rtl + ":")]
+    expected = len(_SRC_RTL.findall((ROOT / micro / "mapped_src.v").read_text()))
+    print(f"netlist_src {args.micro}: {len(restored)} of {expected} src attributes with an "
+          f"{rtl} location restored")
+    if expected == 0:
+        print(f"FAIL {micro / 'mapped_src.v'} has no rtl.v src attribute (the check would be vacuous)")
+        return EXIT_FAIL
+    if len(restored) != expected:
+        print(f"FAIL {len(restored)} objects have an {rtl} location, "
+              f"{expected} src attributes exist")
+        return EXIT_FAIL
+    return EXIT_PASS
 
 
 def check_unknown(args: argparse.Namespace) -> int:
@@ -337,7 +360,7 @@ def main(argv: Sequence[str]) -> int:
     try:
         return COMMANDS[args.command](args)
     except memcap.CapUnavailable as exc:
-        print(f"SKIP netlist-ingest: {exc}")
+        print(f"SKIP netlist-ingest {args.command} {getattr(args, 'micro', '')}: {exc}")
         return EXIT_SKIP
     except ToolError as exc:
         print(f"netlist-ingest: {exc}", file=sys.stderr)

@@ -5,9 +5,12 @@ fixtures). The planted-difference tests need ``ODIN3_CLI`` (CTest python_tools).
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import os
 import shutil
 import unittest
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -70,6 +73,9 @@ class NameTests(unittest.TestCase):
         self.assertEqual(ni.missing({"a", "b", "c"}, rows, "t", ("wire",)), ["b", "c"])
 
 
+Rows = list[tuple[str, str, str, str]]
+
+
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
 class PlantedTests(unittest.TestCase):
     def copy_fixtures(self) -> Path:
@@ -81,29 +87,161 @@ class PlantedTests(unittest.TestCase):
         equiv = str(REPO_ROOT / "tools/equiv-check/equiv-check")
         return argparse.Namespace(odin3=ODIN3, equiv_check=equiv, **extra)
 
-    def test_equivalent_fixture_passes(self) -> None:
-        tmp = self.copy_fixtures()
-        with mock.patch.object(ni, "ROOT", tmp):
-            self.assertEqual(ni.check_equiv(self.args(micro="cone", form="verilog")), 0)
+    def run_check(self, check: Callable[[argparse.Namespace], int], root: Path | None = None,
+                  **extra: str) -> tuple[int, str]:
+        """(exit code, output) of a check, with ROOT optionally a fixture copy."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            if root is None:
+                code = check(self.args(**extra))
+            else:
+                with mock.patch.object(ni, "ROOT", root):
+                    code = check(self.args(**extra))
+        return code, out.getvalue()
 
-    def test_planted_difference_fails(self) -> None:
-        tmp = self.copy_fixtures()
-        mapped = tmp / "tests/netlist/cone/mapped.v"
-        text = mapped.read_text()
-        self.assertIn("NAND2 ", text)
-        mapped.write_text(text.replace("NAND2 ", "NOR2 ", 1))
-        with mock.patch.object(ni, "ROOT", tmp):
-            self.assertEqual(ni.check_equiv(self.args(micro="cone", form="verilog")), 1)
-
-    def test_missing_name_fails(self) -> None:
+    def edit_dump(self, keep: Callable[[str, Rows], Rows]) -> mock._patch:
+        """Patch dump_lines: ``keep(read script, rows)`` gives the rows the check sees."""
         real = ni.dump_lines
 
-        def without_a_wire(binary: str, read: str) -> tuple[list[tuple[str, str, str, str]], str]:
+        def planted(binary: str, read: str) -> tuple[Rows, str]:
             rows, why = real(binary, read)
-            return [row for row in rows if not (row[1] == "wire" and row[2] == "a")], why
+            return keep(read, rows), why
 
-        with mock.patch.object(ni, "dump_lines", without_a_wire):
-            self.assertEqual(ni.check_names(self.args(micro="cone")), 1)
+        return mock.patch.object(ni, "dump_lines", planted)
+
+    def plant_equiv(self, name: str, old: str, new: str, form: str) -> tuple[int, str]:
+        if not os.environ.get("ODIN3_ABC"):
+            self.skipTest("ODIN3_ABC not set (the equivalence leg maps to LUTs with ABC)")
+        tmp = self.copy_fixtures()
+        path = tmp / "tests/netlist/cone" / name
+        text = path.read_text()
+        self.assertIn(old, text)
+        path.write_text(text.replace(old, new, 1))
+        return self.run_check(ni.check_equiv, tmp, micro="cone", form=form)
+
+    def test_equivalent_fixture_passes(self) -> None:
+        if not os.environ.get("ODIN3_ABC"):
+            self.skipTest("ODIN3_ABC not set (the equivalence leg maps to LUTs with ABC)")
+        for form in ni.FORMS:
+            code, text = self.run_check(ni.check_equiv, self.copy_fixtures(), micro="cone",
+                                        form=form)
+            self.assertEqual(code, 0, text)
+            self.assertNotIn("NOT equivalent", text)
+
+    def test_planted_difference_fails_verilog(self) -> None:
+        code, text = self.plant_equiv("mapped.v", "NAND2 ", "NOR2 ", "verilog")
+        self.assertEqual(code, 1, text)
+        self.assertIn("NOT equivalent", text)
+
+    def test_planted_difference_fails_blif(self) -> None:
+        code, text = self.plant_equiv("mapped.blif", "$_NAND_", "$_NOR_", "blif")
+        self.assertEqual(code, 1, text)
+        self.assertIn("NOT equivalent", text)
+
+    def test_missing_name_fails(self) -> None:
+        with self.edit_dump(lambda _, rows: [r for r in rows if r[2:3] != ("a",)
+                                             or r[1] != "wire"]):
+            code, text = self.run_check(ni.check_names, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL missing wire a", text)
+
+    def test_missing_blif_net_fails(self) -> None:
+        def drop(read: str, rows: Rows) -> Rows:
+            if "read_blif" not in read:
+                return rows
+            return [r for r in rows if r[1] not in ("net", "wire") or r[2] != "a"]
+
+        with self.edit_dump(drop):
+            code, text = self.run_check(ni.check_names, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL missing blif net", text)
+
+    def test_names_fail_when_nothing_matches(self) -> None:
+        tmp = self.copy_fixtures()
+        (tmp / "tests/netlist/cone/mapped.v").write_text("module cone;\nendmodule\n")
+        code, text = self.run_check(ni.check_names, tmp, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("no wires found", text)
+
+    def test_missing_cell_module_fails(self) -> None:
+        with self.edit_dump(lambda _, rows: [r for r in rows
+                                             if not (r[1] == "module" and r[2] == "NAND2")]):
+            code, text = self.run_check(ni.check_names, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL missing cell module NAND2", text)
+
+    def test_prov_missing_location_fails(self) -> None:
+        def strip(read: str, rows: Rows) -> Rows:
+            if "read_blif" in read:
+                return rows
+            return [(m, k, n, "" if k == "node" else loc) for m, k, n, loc in rows]
+
+        with self.edit_dump(strip):
+            code, text = self.run_check(ni.check_prov, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("no location in", text)
+
+    def test_prov_blif_location_fails(self) -> None:
+        def locate(read: str, rows: Rows) -> Rows:
+            if "read_blif" not in read:
+                return rows
+            return [(m, k, n, "rtl.v:1.1-2.2") for m, k, n, _ in rows]
+
+        with self.edit_dump(locate):
+            code, text = self.run_check(ni.check_prov, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("has a location", text)
+
+    def test_prov_fails_when_nothing_to_check(self) -> None:
+        with self.edit_dump(lambda _, rows: [r for r in rows if r[1] == "module"]):
+            code, text = self.run_check(ni.check_prov, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("vacuously", text)
+
+    def test_src_unrestored_object_fails(self) -> None:
+        dropped = []
+
+        def lose_one(_: str, rows: Rows) -> Rows:
+            for row in rows:
+                if row[1] == "wire" and row[3].startswith("rtl.v:") and not dropped:
+                    dropped.append(row)
+            return [r for r in rows if r not in dropped]
+
+        with self.edit_dump(lose_one):
+            code, text = self.run_check(ni.check_src, micro="cone")
+        self.assertEqual(code, 1, text)
+        self.assertIn("src attributes exist", text)
+
+    def test_src_passes_on_the_fixture(self) -> None:
+        code, text = self.run_check(ni.check_src, micro="cone")
+        self.assertEqual(code, 0, text)
+
+    def test_unknown_cell_accepted_fails(self) -> None:
+        with mock.patch.object(ni, "odin3", lambda *_: (0, "")):
+            code, text = self.run_check(ni.check_unknown)
+        self.assertEqual(code, 1, text)
+        self.assertIn("expected a located unresolved_module error", text)
+
+    def test_unknown_blackbox_refused_fails(self) -> None:
+        real = ni.odin3
+
+        def refuse(binary: str, script: str) -> tuple[int, str]:
+            if "--auto-blackbox" in script:
+                return 1, "odin3: error: refused"
+            return real(binary, script)
+
+        with mock.patch.object(ni, "odin3", refuse):
+            code, text = self.run_check(ni.check_unknown)
+        self.assertEqual(code, 1, text)
+        self.assertIn("with --auto-blackbox", text)
+
+    def test_cells_broken_library_fails(self) -> None:
+        tmp = self.copy_fixtures()
+        cells = tmp / "tests/netlist/cells/cmos.v"
+        cells.write_text(cells.read_text() + "\nmodule broken (\n")
+        code, text = self.run_check(ni.check_cells, tmp)
+        self.assertEqual(code, 1, text)
+        self.assertIn("FAIL", text)
 
 
 if __name__ == "__main__":
