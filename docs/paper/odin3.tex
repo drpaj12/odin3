@@ -1,8 +1,8 @@
 % Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
-% from the repository's docs (DESIGN.md, IR.md, PHASE0-6.md, specs/, and ADR D10 and D11 for the v1.0 scope) and git log as of
-% 2026-10-20 (the cost as of the v1.0 close, 2026-10-21); gaps are marked with \todo{}. The M2 QoR ratios come from the vtr-qor table
+% from the repository's docs (DESIGN.md, IR.md, PHASE0-7.md, specs/, RELEASE-NOTES-1.0.md, CHANGELOG.md, and ADR D10 and D11 for the v1.0 scope) and git log as of
+% v1.0.0 (tagged 2026-10-21; the cost is as of the v1.0 close); gaps are marked with \todo{}. The M2 QoR ratios come from the vtr-qor table
 % 20261020-1642-M2 (published to odin3-golden, qor/3c9a4d23b27d/M2), the cost from
 % docs/log_cost_of_tokens_and_time.md.
 % Structure: Part I (Sections I-VI, then the references) is the 8-page FCCM paper; Part II
@@ -129,8 +129,8 @@ Windows laptop (Intel i7-13700) inside a WSL2 virtual machine with 12 logical pr
 virtual machine and every agent in it, so heavy jobs run one at a time under a machine-wide lock in
 a memory-capped slice, and the largest VTR designs were shipped out to a bigger machine instead of
 being run. The software exists, but its code base has not been deeply read by a human. The code
-took \todo{X} days to reach version~1.0: the first commit is dated 2026-10-08 and v1.0 is dated
-\todo{Peter: v1.0 date}. It was tested with a subset of the possible test scenarios. Because
+took 14 calendar days to reach version~1.0: the first commit is dated 2026-10-08 and v1.0.0 was
+released on 2026-10-21 (both days counted). It was tested with a subset of the possible test scenarios. Because
 Odin~II and Yosys with Parmys exist, this approach has one advantage: they are oracles, the truth
 of production, so more testing can always be done. During this process we found defects in the
 Parmys flow (Sec.~\ref{sec:parmys-bugs}), which we will report to those projects in good faith,
@@ -452,8 +452,9 @@ at 1.42$\times$ in the earlier run, is now 1.03. An earlier run showed \code{mkP
 VTR's ABC step lost RAMs whose outputs drove primary outputs directly, and plain \code{opt}
 turned \code{x} multiplexer data into constants. The fix adds a port buffer and uses Parmys's
 \code{opt -full} after \code{flatten}; \code{vtr-qor} now also flags any lost hard block. Both
-designs pack all their memories (15 and 1, equal to Parmys). Phase~3 was closed on the earlier data. With its linked ABC (leg O), Odin~III also routes \code{arm\_core}, in 148\,s.
-\todo{O-leg QoR table at v1.0}
+designs pack all their memories (15 and 1, equal to Parmys). Phase~3 was closed on the earlier data. With its linked ABC (leg O), Odin~III also routes \code{arm\_core}, in 148\,s. No O-leg QoR table was run for v1.0: Phase~3
+closed on the existing M2 and M3 data, because the front end to elaboration is the priority
+(PHASE3 decision 58).
 
 \subsection{Verification evidence}
 
@@ -643,7 +644,7 @@ HDL locations, and that offers an analysis flow for netlists.
 After v1.0 Odin~III is meant to be used as a platform, not changed at its core. The experiments
 that motivated it are designed after v1.0 as plugins that read the analysis flow's outputs (ADR
 D10): reverse engineering from gate-level netlists (for example a redo of Gate-Breaker on
-VerilogEval \todo{cite Gate-Breaker and VerilogEval}), Bayesian hypotheses of control and datapath
+VerilogEval~\cite{faruque2025gatebreaker,liu2023verilogeval}), Bayesian hypotheses of control and datapath
 raised by known design patterns, levelization, graphlet signatures for hardware trojans, the graph
 sandwich coupling, graph neural networks, and a redo of the placement-correlation
 experiment~\cite{gharibian2010finding,gharibian2013analyzing} with provenance from the final
@@ -2175,8 +2176,9 @@ netlists identical to Yosys~0.55's on 547, and the other 6 made Yosys fail an as
 open-mux fix (\S20 \#18) found 2E byte-identical to Yosys on 319 of 330 random processes, in the
 same normal form on 4 more, and \code{sat}-equivalent on all 323 that Yosys lowers. 2D's targets
 are \code{mcml.v} in at most 0.5\,s and Koios \code{lenet.v} in at most 10\,s, against
-Yosys~0.55's measured 0.48\,s and 14.3\,s
-\todo{measured 2D elaboration results on mcml.v and lenet.v}.
+Yosys~0.55's measured 0.48\,s and 14.3\,s. Elaboration of \code{mcml.v} took 0.279\,s at
+61\,MB peak (PHASE2, smoke run). The \code{lenet.v} run was not made for v1.0: the Yosys-side
+legs of the \code{lenet} set need an idle machine and are listed as untested for now.
 
 \begin{table}[t]
 \caption{The first Parmys baseline (leg P) through \code{vtr-qor} on
@@ -2280,8 +2282,7 @@ Five items are open. (1) \emph{After Phase~3.} The five largest designs, \code{m
 \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}, are shipped out to a larger
 machine as ``untested here: too big for this machine'', and their tables are report-only (PHASE3
 decisions 54 and 55). No new Parmys-parity work starts: comparable results are the target, not
-parity (PHASE3 decision 53). The O-leg QoR table is not run. \todo{Odin III (leg O) against the
-Parmys baseline} (2) \emph{The in-memory ABC exchange.} It is built (3D-7, 3D-8); its default
+parity (PHASE3 decision 53). The O-leg QoR table was not run for v1.0 (PHASE3 decision 58). (2) \emph{The in-memory ABC exchange.} It is built (3D-7, 3D-8); its default
 flip awaits its gate. (3) \emph{Partial mapping.} Multiplier splitting from the architecture (4.3,
 PR~F) is in progress, and the architecture sweep (4.13) follows. (4) \emph{Name style.} The cost
 of provenance names in VPR (the Oprov leg) is not measured, so short names stay the default
