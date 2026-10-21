@@ -361,6 +361,21 @@ static void test_raise_refuses_edited_binding(void) {
     REFUSED(ADD4, "changed since");
 }
 
+/* A node outside the group reads an internal net after the proof: raise refuses, unchanged. */
+static void test_raise_refuses_new_outside_reader(void) {
+    prove_adder();
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_NOT_"), &type));
+    odin3_net_id c1 = odin3_module_find_net(top(), intern("c1"));
+    TEST_ASSERT_TRUE(odin3_net_valid(c1));
+    odin3_net_id none = {0};
+    odin3_netvec ports[2] = {{&c1, 1}, {&none, 1}};
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &node));
+    REFUSED(ADD4, "raise:");
+}
+
 static void test_raise_refuses_other_cell(void) {
     prove_adder();
     REFUSED("-attr grp=add4 -cell $sub -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4",
@@ -393,6 +408,7 @@ int main(void) {
     RUN_TEST(test_raise_refuses_unproven);
     RUN_TEST(test_raise_refuses_stale_proof);
     RUN_TEST(test_raise_refuses_edited_binding);
+    RUN_TEST(test_raise_refuses_new_outside_reader);
     RUN_TEST(test_raise_refuses_other_cell);
     RUN_TEST(test_raise_cell_text_ignores_param_order);
     RUN_TEST(test_raise_usage_errors);
