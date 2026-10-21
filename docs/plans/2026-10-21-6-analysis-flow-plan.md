@@ -279,6 +279,41 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
   `--max-nodes` reject a value that starts with `--`. `test_graphviz_nop` finds `nop` on PATH and
   passes when it ran.
 
+6.4 levelize (lane p6-levelize):
+
+1. Ownership of an existing `<key>` (V-1). Attributes carry no author, so "written by levelize" cannot
+   be told from a user INT of the same name. The pass accepts an existing `<key>` or `<key>_cut` that is
+   an INT (a rerun, idempotence V-7 c) and refuses any other kind (`INVALID_ARG`, nothing written). A
+   user INT under the default key is therefore overwritten. A `<key>_cut` left on a cell that is not cut
+   in this run is removed. Fix round: with a custom `--key`, any existing `<key>` or `<key>_cut` of any
+   kind is refused (`INVALID_ARG`), so a user value is never overwritten or deleted; the price is that a
+   second run with the same custom key is refused too. The default key keeps the INT rerun rule.
+2. V-7 (d), levels surviving `write_json --odin3` then `read_json`, is not testable on this branch (the
+   option is lane 6.3). `test_levelize` and the `levelize_micro_*` script tests check the plain attribute
+   in the default `write_json` text instead; (d) belongs to the integration check after 6.3 merges.
+3. Library cells. The registry flags `SEQ_EDGE`/`SEQ_LEVEL` are not set on tech-library cells, so a
+   library cell with a `seq` statement (generic_gates DFFP and the like) or a `memory` statement (hard
+   RAM) is also a source (level 0 outputs, inputs end paths) through `odin3_celltype_lib`. A plugin
+   black box with the registry flag follows the same rule. A cell that has both state and combinational
+   outputs is treated as a whole: all its outputs are level 0.
+4. INOUT pins count as drivers only (never as inputs), so a tristate or bus cell has no self-edge.
+5. Loop cut cost. Each stall runs one iterative Tarjan over the unfinished cells, O(cells + pins) per
+   stall. Fix round: one pass cuts the lowest-ID cell of every cyclic component (ascending ID order, one
+   warning each), so K independent loops cost one pass; only loops that survive a cut (overlapping
+   cycles in one component) need another.
+6. Micros. The three `levelize_micro_*` tests start from committed Parmys BLIFs in `tests/golden/blif`
+   (`ff`, `adder_hard_block`, `ansiportlist_2`; netlist view needs no front end) and
+   `levelize_micro_word_refused` runs `pow`, whose `$pow` word cell must be refused.
+7. Base. Branched from `origin/docs/phase6-spec` (PR #185 not merged when the lane started); merge
+   `origin/main` after it merges.
+8. Allocation failure (fix round). Attributes are written after the sweep of each module, so a
+   `NO_MEMORY` can leave some attributes written. Cells, nets, pins and provenance never change; the
+   pass help says so. `test_oom_leaves_structure_alone` injects a failure at every allocation point.
+9. Memories without a library entry (fix round, agent default, Peter's rule: a memory's inputs are
+   primary outputs, its outputs primary inputs). A black box named `single_port_ram` or
+   `dual_port_ram` (BLIF `.subckt`, VTR primitives) or whose model is the `.subckt` of a
+   `class="memory"` leaf of the loaded arch record is a source like a library `memory` cell.
+
 6.1 (Tasks 3 and 4, lane feat/6.1-ingest):
 
 1. Script order is `proc; flatten; lower`, not `flatten; proc; lower` (spec G-3): `flatten` refuses

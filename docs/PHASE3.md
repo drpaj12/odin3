@@ -142,6 +142,7 @@ with its evidence or left open with what is missing.
   signed adders sign-extend, the declared divergence from Parmys of decision 29); **M2**: O′ leg
   routes all 15 (the local gate; `mcml`, `LU32PEEng`, `bgm`, `LU8PEEng` shipped out, decision 54).
   PRs #109 (plan), #125, #128, #136, #146, then the partial_map rework #158, #164, #174, #179.
+  `hardmap` is now `partial_map` (Phase 4, 4.2 to 4.7; `hardmap` stays registered as an alias).
   M2 table `work/vtr-qor/tables/20261020-1642-M2` (main 69f92d1c): O' routed 15 of 15; geomeans
   O'/P: CLB 0.976, channel width 0.967, critical-path delay 0.974, routed wirelength 0.811. Outliers
   `blob_merge` (LUTs 1.87x) and `raygentop` (1.42x) not investigated (Peter, 2026-10-20: VTR-link

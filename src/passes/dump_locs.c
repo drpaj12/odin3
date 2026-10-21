@@ -5,10 +5,14 @@
  * empty for an object with none. In the module, kind and name fields a backslash is written as two,
  * a `|` as backslash and `|`, and a newline as backslash and `n`, so the first three unescaped
  * `|` end the fields and SRC (the rest of the line, its own `|` unescaped) is unambiguous. An
- * unnamed object is `$w<ID>`, `$n<ID>` or `$c<ID>`. The tool that
+ * unnamed object is `$w<ID>`, `$n<ID>` or `$c<ID>`. With `--types` a node's kind field is
+ * `node:TYPE` (the cell type name, escaped like the other fields; only the first `:` splits kind
+ * from type, no field is added, so the parse rule above holds); the default output is unchanged.
+ * The tool that
  * measures a write and read back (tools/loc-check) runs it before and after and compares.
  */
 #include "backends/common/hdl_loc.h"
+#include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
@@ -22,6 +26,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 /* One line of the dump. */
 typedef struct dump_line {
@@ -30,10 +35,13 @@ typedef struct dump_line {
     char prefix;   /* the generated name of an unnamed object is `$<prefix><id>` */
     uint32_t id;
     odin3_prov_id prov;
+    const char *type; /* cell type name for a typed node line, else NULL */
 } dump_line;
 
 typedef struct dump {
+    bool types; /* --types: node lines carry the cell type in the kind field */
     odin3_hdl_ctx *hdl;
+    const odin3_design *design;
     const odin3_strtab *tab;
     const char *module_name;
     odin3_strbuf text;
@@ -64,7 +72,12 @@ static odin3_status add_line(dump *state, const dump_line *line) {
     st = st == ODIN3_OK && locs.n > 0 ? odin3_hdl_src_text(state->hdl, &req, &state->src, &written)
                                       : st;
     st = st == ODIN3_OK ? append_escaped(&state->text, state->module_name) : st;
-    st = st == ODIN3_OK ? odin3_strbuf_appendf(&state->text, "|%s|", line->kind) : st;
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(&state->text, "|%s", line->kind) : st;
+    if (st == ODIN3_OK && line->type != NULL) {
+        st = odin3_strbuf_append(&state->text, odin3_bytes_cstr(":"));
+        st = st == ODIN3_OK ? append_escaped(&state->text, line->type) : st;
+    }
+    st = st == ODIN3_OK ? odin3_strbuf_append(&state->text, odin3_bytes_cstr("|")) : st;
     if (st == ODIN3_OK && line->name != 0) {
         st = append_escaped(&state->text, odin3_strtab_get(state->tab, line->name));
     } else if (st == ODIN3_OK) {
@@ -81,8 +94,8 @@ static odin3_status dump_wires(dump *state, const odin3_module *module) {
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_wire_end(module); i++) {
         odin3_wire_id wire = {i};
         if (odin3_wire_live(module, wire)) {
-            dump_line line = {"wire", odin3_wire_name(module, wire), 'w', i,
-                              odin3_wire_prov(module, wire)};
+            dump_line line = {"wire", odin3_wire_name(module, wire), 'w',
+                              i,      odin3_wire_prov(module, wire), NULL};
             st = add_line(state, &line);
         }
     }
@@ -94,8 +107,8 @@ static odin3_status dump_nets(dump *state, const odin3_module *module) {
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_net_end(module); i++) {
         odin3_net_id net = {i};
         if (odin3_net_live(module, net)) {
-            dump_line line = {"net", odin3_net_name(module, net), 'n', i,
-                              odin3_net_prov(module, net)};
+            dump_line line = {"net", odin3_net_name(module, net), 'n',
+                              i,     odin3_net_prov(module, net), NULL};
             st = add_line(state, &line);
         }
     }
@@ -107,8 +120,15 @@ static odin3_status dump_nodes(dump *state, const odin3_module *module) {
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
         odin3_node_id node = {i};
         if (odin3_node_live(module, node)) {
-            dump_line line = {"node", odin3_node_name(module, node), 'c', i,
-                              odin3_node_prov(module, node)};
+            const odin3_celltype_def *def =
+                state->types ? odin3_celltype_get(state->design, odin3_node_type(module, node))
+                             : NULL;
+            const char *type = NULL;
+            if (state->types) {
+                type = def != NULL ? def->name : ""; /* never mix plain and typed lines */
+            }
+            dump_line line = {"node", odin3_node_name(module, node), 'c',
+                              i,      odin3_node_prov(module, node), type};
             st = add_line(state, &line);
         }
     }
@@ -117,7 +137,7 @@ static odin3_status dump_nodes(dump *state, const odin3_module *module) {
 
 static odin3_status dump_module(dump *state, const odin3_module *module) {
     state->module_name = odin3_strtab_get(state->tab, odin3_module_name(module));
-    dump_line line = {"module", odin3_module_name(module), 'm', 0, odin3_module_prov(module)};
+    dump_line line = {"module", odin3_module_name(module), 'm', 0, odin3_module_prov(module), NULL};
     odin3_status st = add_line(state, &line);
     st = st == ODIN3_OK ? dump_wires(state, module) : st;
     st = st == ODIN3_OK ? dump_nets(state, module) : st;
@@ -134,19 +154,51 @@ static odin3_status write_stdout(const odin3_strbuf *text) {
     return ODIN3_OK;
 }
 
+typedef struct dump_args {
+    bool types;
+    odin3_bytes path; /* ptr NULL: stdout */
+} dump_args;
+
+/* Reads `[--types] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated --types, an
+ * empty or a second path. A literal `--` ends the options, so a path may start with `--`. */
+static odin3_status parse_args(odin3_bytes args, dump_args *out) {
+    *out = (dump_args){false, {NULL, 0}};
+    bool options = true;
+    for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
+         word = odin3_pass_arg_next(&args)) {
+        if (options && word.len == 2 && memcmp(word.ptr, "--", 2) == 0) {
+            options = false;
+        } else if (options && word.len == strlen("--types") &&
+                   memcmp(word.ptr, "--types", word.len) == 0) {
+            if (out->types) {
+                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --types given twice");
+                return ODIN3_ERR_INVALID_ARG;
+            }
+            out->types = true;
+        } else if (out->path.ptr != NULL || word.len == 0 ||
+                   (options && word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
+            return ODIN3_ERR_INVALID_ARG;
+        } else {
+            out->path = word;
+        }
+    }
+    return ODIN3_OK;
+}
+
 static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)ctx;
     (void)user;
-    odin3_bytes path = odin3_pass_arg_next(&args);
-    if (odin3_pass_arg_next(&args).ptr != NULL || (path.ptr != NULL && path.len == 0)) {
-        odin3_log(ODIN3_LOG_ERROR, "dump_locs: expects at most one non-empty path");
+    dump_args parsed;
+    if (parse_args(args, &parsed) != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "dump_locs: expects [--types] [--] and at most one non-empty path");
         return ODIN3_ERR_INVALID_ARG;
     }
-    dump state = {odin3_hdl_ctx_create(design, "dump_locs"),
-                  odin3_design_strtab(design),
-                  NULL,
-                  {NULL, 0, 0},
+    odin3_bytes path = parsed.path;
+    dump state = {parsed.types, odin3_hdl_ctx_create(design, "dump_locs"),
+                  design,       odin3_design_strtab(design),
+                  NULL,         {NULL, 0, 0},
                   {NULL, 0, 0}};
     odin3_strbuf name;
     odin3_strbuf_init(&state.text);
@@ -172,8 +224,11 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 
 const odin3_pass_def odin3_pass_dump_locs = {
     "dump_locs",
-    "dump_locs [<file>]: list every module, wire, net and node with its HDL locations, one "
-    "`module|kind|name|SRC` line each (stdout without a file)",
+    "dump_locs [--types] [--] [<file>]: list every module, wire, net and node with its HDL "
+    "locations, "
+    "one "
+    "`module|kind|name|SRC` line each, `node:TYPE` as the node kind with --types (stdout without a "
+    "file)",
     dump_locs_run,
     NULL,
     false,
