@@ -2,8 +2,10 @@
  * raise.c — one module's run of `raise` (Phase 7 spec 3.4, R-1 to R-3): the group KEY=V that
  * `cone_check` proved equivalent to one cell of TYPE is replaced by that cell, connected through
  * the binding. Nothing changes unless the module holds the proof for this group, this template and
- * this exact group and binding (R-2). The cell is created first, on the boundary nets, so a
- * failure leaves the module as it was; then the group's nodes and the nets only they touched go.
+ * this exact group and binding (R-2). Everything is checked first (proof, group, template,
+ * binding); then the cell is created on the boundary nets; then the group's nodes, and the wires
+ * and nets only they touched, go. The deletes can fail only for lack of memory; when the first one
+ * fails the new cell is removed again and the module is as it was, later failures are logged.
  * The new cell's provenance is one DERIVED record over the provenance of every replaced node (R-3).
  */
 #include "ir/celltype.h"
@@ -209,36 +211,59 @@ static odin3_status make_prov(const rs_job *job, odin3_prov_id *out) {
 
 /* --- the replacement ----------------------------------------------------------------------- */
 
-static odin3_status create_cell(rs_job *job) {
+static odin3_status create_cell(rs_job *job, odin3_node_id *cell) {
     odin3_prov_id prov = {0};
     odin3_status st = make_prov(job, &prov);
     odin3_node_spec spec = {job->tmpl.type, 0, prov, job->tmpl.params.data,
                             job->tmpl.def->n_params};
-    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, job->ports.data,
-                                                        &(odin3_node_id){0})
+    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, job->ports.data, cell)
                           : st;
 }
 
-/* Deletes the group's nodes, then the nets only they touched that nothing else holds. */
-static odin3_status delete_group(rs_job *job) {
+/* True when net is a net only the group touched: no pin left, not on the boundary. */
+static bool net_is_spent(rs_job *job, uint32_t nid) {
+    return *(uint8_t *)odin3_vec_at(&job->state, nid) == NET_TOUCHED &&
+           odin3_net_pins(job->module, (odin3_net_id){nid}).count == 0;
+}
+
+/* The primary wire of a spent net goes when every bit of it is on a spent net and it is no port
+ * wire; a wire that also holds a net of the boundary stays, its spent nets stay with it. */
+static odin3_status drop_wire(rs_job *job, uint32_t nid) {
+    odin3_wire_id wire = odin3_net_primary(job->module, (odin3_net_id){nid}).wire;
+    if (!odin3_wire_valid(wire) || odin3_wire_port_node(job->module, wire).v != 0) {
+        return ODIN3_OK;
+    }
+    for (uint32_t bit = 0; bit < odin3_wire_width(job->module, wire); bit++) {
+        odin3_net_id net = odin3_wire_net(job->module, wire, bit);
+        if (!odin3_net_valid(net) || !net_is_spent(job, net.v)) {
+            return ODIN3_OK;
+        }
+    }
+    return odin3_wire_delete(job->module, wire);
+}
+
+/* Deletes the group's nodes, then the wires and nets only they touched that nothing else holds. */
+static odin3_status delete_group(rs_job *job, size_t *deleted) {
     const uint32_t *nodes = job->group.nodes.data;
-    for (size_t i = 0; i < job->group.nodes.len; i++) {
-        odin3_status st = odin3_node_delete(job->module, (odin3_node_id){nodes[i]});
+    for (; *deleted < job->group.nodes.len; (*deleted)++) {
+        odin3_status st = odin3_node_delete(job->module, (odin3_node_id){nodes[*deleted]});
         if (st != ODIN3_OK) {
             return st;
         }
     }
-    for (uint32_t nid = 1; nid < job->state.len; nid++) {
-        odin3_net_id net = {nid};
-        if (*(uint8_t *)odin3_vec_at(&job->state, nid) != NET_TOUCHED ||
-            odin3_net_pins(job->module, net).count != 0 ||
-            odin3_wire_valid(odin3_net_primary(job->module, net).wire) ||
-            odin3_net_alias_count(job->module, net) != 0) {
-            continue;
-        }
-        (void)odin3_net_delete(job->module, net);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t nid = 1; st == ODIN3_OK && nid < job->state.len; nid++) {
+        st = net_is_spent(job, nid) ? drop_wire(job, nid) : ODIN3_OK;
     }
-    return ODIN3_OK;
+    for (uint32_t nid = 1; st == ODIN3_OK && nid < job->state.len; nid++) {
+        odin3_net_id net = {nid};
+        if (net_is_spent(job, nid) && odin3_net_live(job->module, net) &&
+            !odin3_wire_valid(odin3_net_primary(job->module, net).wire) &&
+            odin3_net_alias_count(job->module, net) == 0) {
+            st = odin3_net_delete(job->module, net);
+        }
+    }
+    return st;
 }
 
 static odin3_status prepare(rs_job *job) {
@@ -251,6 +276,38 @@ static odin3_status prepare(rs_job *job) {
     return st == ODIN3_OK ? make_ports(job) : st;
 }
 
+odin3_status raise_check_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
+                                bool *found) {
+    rs_job job;
+    job_init(&job, ctx, module, opts);
+    odin3_status st = cc_group_collect(&job.group, opts);
+    *found = st == ODIN3_OK && job.group.nodes.len > 0;
+    st = *found && st == ODIN3_OK ? prepare(&job) : st;
+    job_free(&job);
+    return st;
+}
+
+/* Creates the cell, then deletes the group; the cell is taken back when no node is gone yet. */
+static odin3_status replace_group(rs_job *job) {
+    odin3_node_id cell = {0};
+    odin3_status st = create_cell(job, &cell);
+    size_t deleted = 0;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = delete_group(job, &deleted);
+    if (st != ODIN3_OK && deleted == 0) {
+        /* nothing of the group is gone yet: take the new cell back so it never double-drives */
+        (void)odin3_node_delete(job->module, cell);
+    }
+    if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "raise: module '%s': replacing the group failed (%d)%s",
+                  module_name(job->module), (int)st,
+                  deleted == 0 ? "" : ": the module is partly changed");
+    }
+    return st;
+}
+
 odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
                               bool *found) {
     rs_job job;
@@ -258,9 +315,8 @@ odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const c
     odin3_status st = cc_group_collect(&job.group, opts);
     *found = st == ODIN3_OK && job.group.nodes.len > 0;
     st = *found && st == ODIN3_OK ? prepare(&job) : st;
-    st = *found && st == ODIN3_OK ? create_cell(&job) : st;
     size_t count = job.group.nodes.len;
-    st = *found && st == ODIN3_OK ? delete_group(&job) : st;
+    st = *found && st == ODIN3_OK ? replace_group(&job) : st;
     if (*found && st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "raise: module '%s': group '%s=%s': %zu nodes replaced by one %s",
                   module_name(module), opts->key, opts->value, count, opts->cell);

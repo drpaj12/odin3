@@ -310,6 +310,58 @@ static void test_raise_replaces_proven_group(void) {
     TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, run_raise(ADD4));
 }
 
+/* A one-bit wire named wname on the net named nname. */
+static void add_wire(const char *wname, const char *nname) {
+    odin3_net_id net = odin3_module_find_net(top(), intern(nname));
+    TEST_ASSERT_TRUE(odin3_net_valid(net));
+    odin3_wire_spec spec = {intern(wname), 0, 0, false, {0}};
+    odin3_wire_id wire = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(top(), &spec, &net, &wire));
+}
+
+/* The wire of an internal net goes with the net: nothing dangles, and the boundary wires stay. */
+static void test_raise_drops_internal_wires(void) {
+    prove_adder();
+    add_wire("w_c1", "c1");
+    add_wire("w_c3", "c3");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_raise(ADD4), log_text);
+    TEST_ASSERT_FALSE(odin3_wire_live(top(), odin3_module_find_wire(top(), intern("w_c1"))));
+    TEST_ASSERT_FALSE(odin3_wire_live(top(), odin3_module_find_wire(top(), intern("w_c3"))));
+    check_clean();
+}
+
+/* Puts one logic node of module 2 in group grp=add4, which has no proof there. */
+static void mark_second_module(void) {
+    odin3_module *second = odin3_module_get(design, (odin3_module_id){2});
+    TEST_ASSERT_NOT_NULL(second);
+    odin3_node_id found = {0};
+    for (uint32_t nid = 1; nid < odin3_module_node_end(second); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(second, node) &&
+            odin3_celltype_get(design, odin3_node_type(second, node))->gran != ODIN3_GRAN_PORT) {
+            found = node;
+        }
+    }
+    TEST_ASSERT_TRUE(found.v != 0);
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern("add4"), 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(second, (odin3_objref){ODIN3_OBJ_NODE, found.v},
+                                                   intern("grp"), &value));
+}
+
+/* A later module refused: an earlier module that holds a valid proof is left unchanged too. */
+static void test_raise_all_or_nothing_across_modules(void) {
+    use_real_abc();
+    read_blif(RIPPLE ".model m2\n.inputs x\n.outputs y\n.names x y\n1 1\n.end\n");
+    mark_all();
+    bind_adder(false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4), log_text);
+    mark_second_module();
+    uint32_t live = live_count();
+    TEST_ASSERT_TRUE(live > 1);
+    REFUSED(ADD4, "no cone_check result");
+    TEST_ASSERT_EQUAL_UINT32(live, live_count());
+}
+
 static void test_raise_provenance_union(void) {
     prove_adder();
     leaves before = all_sources();
@@ -361,6 +413,21 @@ static void test_raise_refuses_edited_binding(void) {
     REFUSED(ADD4, "changed since");
 }
 
+/* A node outside the group reads an internal net after the proof: raise refuses, unchanged. */
+static void test_raise_refuses_new_outside_reader(void) {
+    prove_adder();
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_NOT_"), &type));
+    odin3_net_id c1 = odin3_module_find_net(top(), intern("c1"));
+    TEST_ASSERT_TRUE(odin3_net_valid(c1));
+    odin3_net_id none = {0};
+    odin3_netvec ports[2] = {{&c1, 1}, {&none, 1}};
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &node));
+    REFUSED(ADD4, "raise:");
+}
+
 static void test_raise_refuses_other_cell(void) {
     prove_adder();
     REFUSED("-attr grp=add4 -cell $sub -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4",
@@ -389,10 +456,13 @@ static void test_raise_usage_errors(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_raise_replaces_proven_group);
+    RUN_TEST(test_raise_drops_internal_wires);
+    RUN_TEST(test_raise_all_or_nothing_across_modules);
     RUN_TEST(test_raise_provenance_union);
     RUN_TEST(test_raise_refuses_unproven);
     RUN_TEST(test_raise_refuses_stale_proof);
     RUN_TEST(test_raise_refuses_edited_binding);
+    RUN_TEST(test_raise_refuses_new_outside_reader);
     RUN_TEST(test_raise_refuses_other_cell);
     RUN_TEST(test_raise_cell_text_ignores_param_order);
     RUN_TEST(test_raise_usage_errors);

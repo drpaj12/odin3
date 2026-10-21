@@ -12,10 +12,15 @@
 #include <stdbool.h>
 
 /*
- * Runs the pass on one module: *found says whether it has a group KEY=V at all (when not, nothing
- * else happens). A module with the group is refused, unchanged, unless it holds the cone_check
- * proof for exactly this group, binding and template (spec 3.4 R-2); the reasons are logged.
+ * Checks one module without changing it (same refusals as a run): *found says whether it has a
+ * group KEY=V at all (when not, nothing else happens). A module with the group is refused,
+ * unchanged, unless it holds the cone_check proof for exactly this group, binding and template
+ * (spec 3.4 R-2); the reasons are logged.
  */
+odin3_status raise_check_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
+                                bool *found);
+
+/* The same run, changing the module; call raise_check_module on every module first. */
 odin3_status raise_run_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts,
                               bool *found);
 

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# make-tarball: the source release, with the ABC and Unity submodules (GitHub's archives leave
+# submodules out). Writes odin3-<version>.tar.gz and SHA256SUMS into --out (default: the current
+# directory). Needs the submodules checked out (git submodule update --init). Never tags or uploads.
+#
+# Usage: tools/release/make-tarball [--out DIR]
+# Exit: 0 ok; 1 failed; 2 usage error.
+set -euo pipefail
+
+out="."
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --out) [ $# -ge 2 ] || { echo "make-tarball: --out needs a directory" >&2; exit 2; }
+               out="$2"; shift 2 ;;
+        *) echo "usage: make-tarball [--out DIR]" >&2; exit 2 ;;
+    esac
+done
+
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+version="$(sed -n 's/^project(odin3 VERSION \([0-9.]*\) .*/\1/p' "$root/CMakeLists.txt")"
+[ -n "$version" ] || { echo "make-tarball: no version in CMakeLists.txt" >&2; exit 1; }
+for sub in third_party/abc third_party/unity; do
+    [ -e "$root/$sub/.git" ] || { echo "make-tarball: submodule $sub is not checked out" >&2; exit 1; }
+done
+mkdir -p "$out"
+out="$(cd "$out" && pwd)"
+name="odin3-$version"
+list="$(mktemp)"
+trap 'rm -f "$list"' EXIT
+git -C "$root" ls-files --recurse-submodules -z > "$list"
+mtime="$(git -C "$root" log -1 --format=%ct)"
+tar -C "$root" --null -T "$list" --transform "s,^,$name/," --sort=name --owner=0 --group=0 \
+    --numeric-owner --mtime="@$mtime" -cf - | gzip -n > "$out/$name.tar.gz"
+(cd "$out" && sha256sum "$name.tar.gz" > SHA256SUMS)
+echo "make-tarball: $out/$name.tar.gz"
