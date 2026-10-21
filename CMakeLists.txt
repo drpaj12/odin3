@@ -3680,6 +3680,35 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 endforeach()
             endif()
         endif()
+        # 6.5b (spec 6 section 5; tools/prov-cover): how many final-netlist objects (LUTs, latches,
+        # hard blocks, LPM instances) have an HDL location, per design and leg: (a) BLIF after abc
+        # in memory, (b) written and read back with --hdl-locs, (c) the LPM flow in memory and read
+        # back with -netlist. prov_cover_<micro>: the loc default set, all legs (a and b need ABC).
+        # tests/prov/expect.txt lists the known defects (a listed leg that passes is stale).
+        # prov_cover_sweep (label sweep, ODIN3_HEAVY_OK): legs a and b on the 14 small VTR designs,
+        # smallest first, tests/prov/expect_vtr14.txt; prov_cover_sweep_lpm: leg c on the LPM micros.
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/prov_tmp)
+        set(_prov_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/prov_tmp
+            ${PROJECT_SOURCE_DIR}/tools/prov-cover/prov-cover --odin3 $<TARGET_FILE:odin3>)
+        if(ODIN3_WITH_ABC)
+            set(_prov_legs a,b,c)
+        else()
+            set(_prov_legs c)
+        endif()
+        foreach(_f IN LISTS _json_default)
+            get_filename_component(_n ${_f} NAME_WE)
+            add_test(NAME prov_cover_${_n}
+                COMMAND ${_prov_run} --legs ${_prov_legs}
+                    --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect.txt ${_f})
+            set_tests_properties(prov_cover_${_n} PROPERTIES LABELS "prov;unit" TIMEOUT 600)
+        endforeach()
+        odin3_add_sweep_test(prov_cover_sweep_lpm LABEL sweep
+            COMMAND ${_prov_run} --legs c --smallest-first ${_loc_lpm})
+        if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
+            odin3_add_sweep_test(prov_cover_sweep LABEL sweep
+                COMMAND ${_prov_run} --legs a,b --smallest-first
+                    --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14.txt ${_json_vtr14})
+        endif()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# prov-cover: HDL-location coverage of the final-netlist objects per design and leg (6.5b, spec 6
+# section 5). Exit codes: 0 the gate passes; 1 a defect, a cross-check mismatch or nothing compared;
+# 2 usage or tool error; 3 a child crashed or timed out. See prov_cover.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../loc-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/prov_cover.py" "$@"

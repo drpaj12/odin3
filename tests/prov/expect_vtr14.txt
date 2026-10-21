@@ -1,0 +1,32 @@
+# 6.5b prov-cover sweep: known leg-b defects on the 14 small VTR designs, per defect (format and
+# rules: see tests/prov/expect.txt, which also explains D1).
+# D2: a single_port_ram hard block has no location after BLIF VTR read-back. Its output net is also
+#   an output port bit, so blif/writer.c hard_port_net/name_hard_unnamed names the unnamed net
+#   `$n<ID>` for name-style provenance (only name-style hash names it by provenance, via
+#   generate_provenance) and adds a `.names $n<ID> <port>` buffer. The net has a location in leg a
+#   but its written name carries no @file:line, so D-5 has nothing to inherit. Seen on
+#   ch_intrinsics (the 8 RAMs). Reproduce: the Phase 3 flow + write_blif --vtr --name-style
+#   provenance of ch_intrinsics.v, `grep 'out=\$n102' W.blif`, then read_blif --hdl-locs and
+#   dump_locs --types: the 8 single_port_ram nodes have an empty SRC. Fix lives in the BLIF writer.
+# D3: leg a-vs-b object count of LUTs drops: a LUT with a location in leg a that drives an output
+#   port bit is written as a `.names net port` buffer; its output net is the port name (no
+#   location), so after read-back it is an unlocated identity table, classed port-buffer and
+#   removed from the LUT count. The object lost its location (same X-8 root as D1), seen on
+#   ch_intrinsics and ch_intrinsics_nolatches (32 and 40 LUTs).
+b single_ff.v unresolved/latch/drives-output-port@9125bd88 1 D1: cell drives an output port bit (name has no location, X-8)
+b and_latch.v unresolved/latch/drives-output-port@089b8a67 1 D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_output_and_latch.v unresolved/lut/drives-output-port@a224e542 1 D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_separate_and_latch.v unresolved/latch/drives-output-port@4052d632 2 D1: cell drives an output port bit (name has no location, X-8)
+b multiclock_reader_writer.v unresolved/latch/drives-output-port@dd102881 1 D1: cell drives an output port bit (name has no location, X-8)
+b ch_intrinsics.v count-drop/lut@8a5bb95e 32 D3: a located identity LUT at an output port bit is a port-buffer table after read-back
+b ch_intrinsics.v unresolved/latch/drives-output-port@fc60fd02 33 D1: cell drives an output port bit (name has no location, X-8)
+b ch_intrinsics.v unresolved/single_port_ram@a147ca00 8 D2: single_port_ram output net is a port-bit net, written without @file:line
+b ch_intrinsics_nolatches.v count-drop/lut@7cb75594 40 D3: a located identity LUT at an output port bit is a port-buffer table after read-back
+b ch_intrinsics_nolatches.v unresolved/latch/drives-output-port@3f2c0f14 34 D1: cell drives an output port bit (name has no location, X-8)
+b ch_intrinsics_nolatches.v unresolved/lut/drives-output-port@62e118b9 32 D1: cell drives an output port bit (name has no location, X-8)
+b diffeq1.v unresolved/latch/drives-output-port@92116ff8 96 D1: cell drives an output port bit (name has no location, X-8)
+b diffeq2.v unresolved/latch/drives-output-port@a745c4e9 96 D1: cell drives an output port bit (name has no location, X-8)
+b mkPktMerge.v unresolved/latch/drives-output-port@f5765543 3 D1: cell drives an output port bit (name has no location, X-8)
+b sha.v unresolved/latch/drives-output-port@9ac6f9bc 36 D1: cell drives an output port bit (name has no location, X-8)
+b blob_merge.v unresolved/latch/drives-output-port@987d65de 61 D1: cell drives an output port bit (name has no location, X-8)
+b stereovision3.v unresolved/latch/drives-output-port@2021597c 28 D1: cell drives an output port bit (name has no location, X-8)

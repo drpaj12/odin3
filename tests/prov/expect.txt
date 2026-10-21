@@ -1,0 +1,24 @@
+# 6.5b prov-cover: known defects, one per line: <leg> <design file name> <defect id> <count> <reason>.
+# The defect id is <kind>/<class, or the hard block type>[/<note>]@<8 hex> as the report prints it
+# (report.json "defect_ids"); the hash is of the sorted module/name list of the objects, so a swapped
+# object changes the id. A leg is excepted only when every defect it has is listed with exactly its count: a
+# new kind or a larger count fails; a smaller count, a listed leg that passes or did not run is stale
+# and fails the run. A flow-error and a cross-check mismatch are never excepted.
+#
+# Defect D1 (reported in the 6.5b lane result): in leg b a cell that drives a module output port
+# bit directly has no location after `write_blif --vtr --name-style provenance` + `read_blif
+# --hdl-locs`: the port bit's name carries no `@file:line` (X-8), so D-5 has no output net location
+# to inherit, and the cell is neither a P-3 class nor resolved. Reproduce:
+#   odin3 -p "read_techlib lib/vtr.o3lib; read_verilog --nolatches --vtr-compat \
+#     tests/micro/verilog/micro/bm_DL_2_1_mux.v; proc; fsm; opt; flatten; opt -full; wreduce; \
+#     hardmap; lower; abc --lut 6; write_blif --vtr --name-style provenance W.blif" \
+#   then "read_techlib lib/vtr.o3lib; read_blif --hdl-locs W.blif; dump_locs --types -" : the $sop
+#   that drives output f has an empty SRC.
+b plain_mux.v unresolved/lut/drives-output-port@faea02d3 4 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_2_1_mux.v unresolved/lut/drives-output-port@04f14ede 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_D_flipflop.v unresolved/latch/drives-output-port@d78fff8c 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_4_1_mux.v unresolved/lut/drives-output-port@667c03a4 1 D1: cell drives an output port bit (name has no location, X-8)
+b ff.v unresolved/latch/drives-output-port@6f11026c 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_2_cascaded_flip_flops.v unresolved/latch/drives-output-port@f28b1713 2 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_logic_w_Dff.v unresolved/latch/drives-output-port@13130edf 2 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_structural_logic.v unresolved/lut/drives-output-port@bee34267 1 D1: cell drives an output port bit (name has no location, X-8)
