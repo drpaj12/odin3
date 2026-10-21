@@ -266,7 +266,7 @@ static void test_levels_survive_levelize_write_read(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(rj_design, "read_blif", odin3_bytes_cstr(blif)));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(rj_design, "levelize", odin3_bytes_cstr("")));
     char args[PATH_BUF];
-    (void)snprintf(args, sizeof args, "%s --odin3", rj_path("l.json"));
+    (void)snprintf(args, sizeof args, "%.400s --odin3", rj_path("l.json"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_pass_run(rj_design, "write_json", odin3_bytes_cstr(args)));
     int64_t before[LEVEL_MAX];

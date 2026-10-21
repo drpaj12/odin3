@@ -313,3 +313,42 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
    primary outputs, its outputs primary inputs). A black box named `single_port_ram` or
    `dual_port_ram` (BLIF `.subckt`, VTR primitives) or whose model is the `.subckt` of a
    `class="memory"` leaf of the loaded arch record is a source like a library `memory` cell.
+
+6.3 graph export (lane p6-graph-export):
+
+1. E-3 (i) as written (A equals B once `odin3_prov` is dropped) cannot hold for a file whose bit numbers
+   have gaps: `read_json` numbers nets by ascending bit and the constants last, so the same A and B
+   differ for a default `write_json` of ff.parmys (checked without `--odin3`). It is tested as what
+   `--odin3` adds: A without the Odin III keys equals the default write of the design, B without them
+   equals the default write after one read, and B equals C byte for byte (E-3 ii holds on every
+   readable micro). `test_json_odin3` checks A equals B after dropping `odin3_prov` on a hand design
+   without gaps.
+2. Micro set (`graph_export_*`): 11 committed BLIFs of tests/golden/blif. dffsre.parmys,
+   ansiportlist_2.parmys and hand_ports are counted (E-6) but left out of the round trip: `read_json`
+   already refuses their default `write_json` output (check rule 4, a net with sinks and no driver),
+   independent of `--odin3`; a test keeps them honest. pow.parmys (a `$pow`) is left out of the level
+   tests because `levelize` refuses a word-level cell (V-1).
+3. `odin3_level` is a JSON integer under `--odin3` and reads back as an INT attribute. The default
+   attribute form is a 32-bit bit string and reads back as BITS, so "the same result as reading the
+   attribute form" holds for the value, not the value kind.
+4. `odin3_prov` is left out of an object that has no provenance record (no `kind` to state). Wires
+   (multi-bit netnames) carry `odin3_level` only when the wire itself has the attribute (a net that
+   belongs to a wire has no netname entry of its own); `levelize` writes it on nets, so those levels
+   are not in the file. E-7 (cells) is unaffected.
+5. `read_json` counts a valid `odin3_prov` in its own INFO line (`validated N odin3_prov objects (not
+   restored)`); a malformed one, and `odin3_level` that is not an integer, stay in the skipped `odin3_`
+   count. `odin3_version` is still counted there as before (test_read_json unchanged).
+6. E-7: the C ABI has no getter for the registry flags (SEQ_EDGE, SEQ_LEVEL), and the lane may not
+   change the ABI. The test exempts edges into a cell of level 0 (a register, latch or memory starts a
+   path; a combinational cell with an input has level >= 1), into cut cells and into port nodes. No
+   type-name list is used.
+7. E-6 reference: nodes are the `dump_locs` node lines minus constant-driver cells (`$_CONST*_`, a
+   `$sop` with no input pin), which the JSON does not write (E-4); edges are counted from the ABI
+   over pins and nets, a net driven by a constant cell having none. Inout pins count as driver and
+   sink.
+8. The loader returns plain `parse_graph` lists too (nodes, edges) so the counts need no networkx; the
+   networkx and Torch paths have their own CTest `graph_loader_packages` (a named skip without the
+   packages, none installed here). pyproject.toml gains `ignore_missing_imports` for networkx, torch
+   and torch_geometric (optional, imported lazily).
+9. The Python CTests skip in an environment whose Python lacks cffi (`graph_export_counts`); they ran
+   here with the repo venv's Python (cffi 2.1.1) and passed.
