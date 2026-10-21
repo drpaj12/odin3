@@ -409,3 +409,13 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 12. Fix round, E-7 non-vacuity: every micro with a cell must have a cell above level 0 and compare at
     least one edge. `hand_ports` has no cell at all (ports and black boxes only), so it is listed in
     `CELLLESS` and asserted to compare nothing.
+13. 6.5b: `inherited` and `pad` are ON by default (spec P-3, approved by Peter 2026-10-20); the plan text at
+    line 256 said off. `--allow` narrows the set. The strict figure is printed as "strict (no
+    inherited/pad)" and is 0 on every leg b by design.
+14. 6.5b fix round: the P-3 exception rules (const-driver, const-table, port-buffer, not-helper) apply to
+    read-back dumps only (legs b and c-rb); legs a and c have none. Expect files key each defect by
+    `<leg> <design> <defect id> <count> <reason>`; a new kind or a larger count fails, a smaller count is
+    stale. The tool prints an a-vs-b object count per class and a drop is one `count-drop` defect per
+    lost object (found: D3, 32 and 40 located LUTs on ch_intrinsics and ch_intrinsics_nolatches become
+    port-buffer tables after read-back). D2 root cause is in `blif/writer.c` (`name_hard_unnamed`), not
+    fixed here.

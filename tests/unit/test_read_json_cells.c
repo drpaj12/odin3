@@ -420,6 +420,53 @@ static void test_techlib_type(void) {
     TEST_ASSERT_EQUAL_INT64(2, int_param(mod, node, 1));
 }
 
+/* --- M-6 follow-up: Yosys's positional parameter of an unresolved hard block ------------------ */
+
+#define POSITIONAL_PORTS                                                                           \
+    IN_PORT("x", "[2]")                                                                            \
+    ", " IN_PORT("y", "[3]") ", " IN_PORT("c", "[4]") ", " OUT_PORT("s", "[5]") ", " OUT_PORT(     \
+        "o", "[6]")
+#define POSITIONAL_CONNS "\"a\": [2], \"b\": [3], \"cin\": [4], \"sumout\": [5], \"cout\": [6]"
+
+static const char *adder_cell(const char *params) {
+    static char buf[BUF];
+    (void)snprintf(buf, sizeof buf,
+                   "\"g\": {\"type\": \"adder\", \"parameters\": {%s}, \"connections\": {%s}}",
+                   params, POSITIONAL_CONNS);
+    return buf;
+}
+
+/* `$1` on the VTR `adder` (no parameters) is kept as the attribute parameter:$1. */
+static void test_positional_parameter(void) {
+    rj_fresh();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(rj_design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    rj_log_clear();
+    const char *json = top_json(
+        POSITIONAL_PORTS, adder_cell("\"$1\": \"00000000000000000000000000000010\", \"$2\": 7"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_json_read(rj_design, rj_put("pos.json", json), NULL));
+    odin3_module *mod = rj_module("top");
+    odin3_objref node = {ODIN3_OBJ_NODE, the_cell(mod).v};
+    const odin3_value *one = odin3_attr_get(mod, node, rj_str("parameter:$1"));
+    TEST_ASSERT_NOT_NULL(one);
+    TEST_ASSERT_EQUAL_INT(ODIN3_VAL_BITS, one->kind);
+    TEST_ASSERT_EQUAL_UINT32(32, one->len);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, one->bits[1]);
+    const odin3_value *two = odin3_attr_get(mod, node, rj_str("parameter:$2"));
+    TEST_ASSERT_NOT_NULL(two);
+}
+
+/* Only `$` and digits, only on a hard cell, black box or module: anything else is the error. */
+static void test_positional_parameter_limits(void) {
+    rj_fresh();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(rj_design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    rj_log_clear();
+    const char *bad = top_json(POSITIONAL_PORTS, adder_cell("\"$1x\": 2"));
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, odin3_json_read(rj_design, rj_put("bad.json", bad), NULL));
+    rj_log_has("modules.top.cells.g.parameters.$1x: 'adder' has no parameter '$1x'");
+    rj_expect_error(top_json(AND_PORTS, and_cell("\"$1\": 2", AND2_CONNS, "")),
+                    "modules.top.cells.g.parameters.$1: '$and' has no parameter '$1'");
+}
+
 /* --- M-6: parameters ------------------------------------------------------------------------- */
 
 static void test_int_parameters(void) {
@@ -958,6 +1005,8 @@ int main(void) {
     RUN_TEST(test_long_names);
     RUN_TEST(test_scopeinfo_is_dropped);
     RUN_TEST(test_techlib_type);
+    RUN_TEST(test_positional_parameter);
+    RUN_TEST(test_positional_parameter_limits);
     RUN_TEST(test_int_parameters);
     RUN_TEST(test_default_parameters);
     RUN_TEST(test_mem_parameters);
