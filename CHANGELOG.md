@@ -4,6 +4,14 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
+## [Unreleased]
+
+### Fixed
+
+- `odin3_flow` retries the VPR route at fixed wider channel widths when the final route at 1.3 x
+  the minimum width fails after a finished minimum-width search (tiny devices such as
+  `bm_DL_2_4_encoder` on k6); `summary.json` gets `route_retry`.
+
 ## [1.0.0] - 2026-10-21
 
 First release. Source tarball with submodules, `cmake --install`, and a pip wheel

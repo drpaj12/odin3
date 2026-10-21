@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import re
 import shutil
@@ -233,27 +234,116 @@ def parse_vpr(ctx: qor_legs.LegContext, blif: Path, started: float) -> dict[str,
                             vpr_out, count_luts(blif))
 
 
+_MIN_W = re.compile(r"^\s*Best routing used a channel width factor of (\d+)\.", re.M)
+_UNROUTABLE = re.compile(r"Circuit is unroutable with a channel width factor of (\d+)\.")
+_FINAL_CPD = re.compile(r"^Final critical path delay \(least slack\): ([-\d.e+]+) ns", re.M)
+_TOTAL_WL = re.compile(r"^\s*Total wirelength: (\d+)", re.M)
+_RELAX_FACTOR = 1.3  # run_vtr_flow.py's -relax_w_factor default
+
+
+def even_up(width: float) -> int:
+    """``width`` rounded up to the next even integer."""
+    whole = math.ceil(width)
+    return whole + whole % 2
+
+
+def route_failure(run_dir: Path) -> tuple[int, int] | None:
+    """(minimum, relaxed) channel width of a VTR run whose final route failed, else None.
+
+    The minimum is the last "Best routing used a channel width factor of N" of ``vpr.out`` (the
+    binary search finished); the relaxed width is the one the final route reports as unroutable
+    in ``vpr.crit_path.out`` (VTR's 1.3 x minimum, made even, when that line is missing). None when
+    the search did not finish or the final route did not fail on the route."""
+    def read(name: str) -> str:
+        path = run_dir / name
+        return path.read_text(errors="replace") if path.is_file() else ""
+    found = _MIN_W.findall(read("vpr.out"))
+    if not found:
+        return None
+    crit = _UNROUTABLE.findall(read("vpr.crit_path.out"))
+    if not crit and not _UNROUTABLE.search(read("vpr_stdout.log")):
+        return None  # the step failed on something other than the final route
+    minimum = int(found[-1])
+    return minimum, int(crit[-1]) if crit else even_up(_RELAX_FACTOR * minimum)
+
+
+def retry_widths(minimum: int, relaxed: int) -> list[int]:
+    """The widths to try after the relaxed one failed: relaxed + 2, relaxed + 4, 2 x minimum."""
+    widths: list[int] = []
+    for width in (relaxed + 2, relaxed + 4, even_up(2 * minimum)):
+        if width not in widths and width != relaxed:
+            widths.append(width)
+    return widths
+
+
+def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_dir: Path,
+            width: int | None) -> tuple[qor_legs.LegContext, StepResult, float]:
+    """One ``run_vtr_flow.py -start vpr`` in ``job_dir``; ``width`` fixes ``--route_chan_width``
+    (VTR then skips the minimum-width search)."""
+    ctx = qor_legs.LegContext(vtr_root, vtr_root / ".venv" / "bin" / "python", arch, args.odin3,
+                              resource_root(), job_dir, k, "A")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy(blif, job_dir / blif.name)  # build_commands reads <job_dir>/<design>.blif
+    cmd = qor_legs.build_commands("O", blif.stem, ctx)[1]
+    argv = [*cmd.argv, "--route_chan_width", str(width)] if width is not None else cmd.argv
+    started = time.time()
+    step = run_step("vpr", argv, job_dir, {**os.environ, **dict(cmd.env)},
+                    qor_legs.stage_timeout("A") + 60)
+    return ctx, step, started
+
+
 def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
-    """Pack, place and route ``blif`` at the minimum channel width with vtr-qor's options."""
+    """Pack, place and route ``blif`` at the minimum channel width with vtr-qor's options.
+
+    VTR routes once at 1.3 x the minimum width, and on a tiny device that width can be
+    unroutable while its neighbours route. When the search finished and only that final route
+    failed, the route is retried at fixed wider widths (``route_retry`` in ``summary.json``)."""
     vtr_root = vtr_root_from_env()
     if vtr_root is None:
         raise UsageError("--vpr needs VTR_ROOT")
     arch = args.arch or qor_legs.arch_xml_path(vtr_root, DEFAULT_ARCH)
-    ctx = qor_legs.LegContext(vtr_root, vtr_root / ".venv" / "bin" / "python", arch, args.odin3,
-                              resource_root(), args.out / "vpr", k, "A")
-    ctx.job_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy(blif, ctx.job_dir / blif.name)  # build_commands reads <job_dir>/<design>.blif
-    cmd = qor_legs.build_commands("O", blif.stem, ctx)[1]
-    started = time.time()
-    step = run_step("vpr", cmd.argv, ctx.job_dir, {**os.environ, **dict(cmd.env)},
-                    qor_legs.stage_timeout("A") + 60)
+    job_dir = args.out / "vpr"
+    ctx, step, started = vpr_run(args, vtr_root, arch, k, blif, job_dir, None)
     result.steps.append(step)
-    if step.ok:
-        try:
-            result.summary.update(parse_vpr(ctx, blif, started))
-        except (HeavyError, OSError) as exc:
-            step.log.write_text(f"{step.log.read_text()}\nsummary: {exc}\n")
-            result.steps[-1] = StepResult("vpr", False, step.log, step.seconds)
+    retry: dict[str, int] | None = None
+    if not step.ok:
+        failure = route_failure(job_dir / "run")
+        if failure is None:
+            return
+        minimum, relaxed = failure
+        tried = [relaxed]
+        for width in retry_widths(minimum, relaxed):
+            tried.append(width)
+            rctx, rstep, rstarted = vpr_run(args, vtr_root, arch, k, blif,
+                                            job_dir / f"retry-{width}", width)
+            if rstep.ok:
+                print(f"NOTE: route at W={relaxed} failed (VPR); routed at W={width}")
+                ctx, step, started = rctx, rstep, rstarted
+                result.steps[-1] = step
+                retry = {"min_chan_width": minimum, "failed_width": relaxed, "used_width": width}
+                break
+        else:
+            step.log.write_text(f"{step.log.read_text()}\nroute failed at every width tried: "
+                                f"{', '.join(str(w) for w in tried)} (min {minimum}); retry "
+                                f"logs in {job_dir}/retry-<W>/\n")
+            return
+    try:
+        result.summary.update(parse_vpr(ctx, blif, started))
+    except (HeavyError, OSError) as exc:
+        step.log.write_text(f"{step.log.read_text()}\nsummary: {exc}\n")
+        result.steps[-1] = StepResult("vpr", False, step.log, step.seconds)
+        return
+    if retry is not None:
+        # A fixed-width run reports its route under the min-width columns of VTR's parse, so the
+        # critical-path figures come from the VPR log.
+        text = (ctx.job_dir / "run" / "vpr.out").read_text(errors="replace")
+        cpd, wirelength = _FINAL_CPD.findall(text), _TOTAL_WL.findall(text)
+        if result.summary.get("crit_path_ns") is None and cpd:
+            result.summary["crit_path_ns"] = float(cpd[-1])
+        if result.summary.get("wirelength") is None and wirelength:
+            result.summary["wirelength"] = int(wirelength[-1])
+        result.summary["min_chan_width"] = retry["min_chan_width"]
+        result.summary["route_retry"] = retry
 
 
 def analysis_script(top: str, adir: Path) -> str:
