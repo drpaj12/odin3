@@ -154,7 +154,7 @@ with its evidence or left open with what is missing.
   `stereovision0` classified untested, not Odin III bugs (decision 57, which lands with PR #181;
   `work/controller-scripts/reports/m3-fcheck-classify.md`). `equiv`: `sha` and `blob_merge`
   equivalent; `ch_intrinsics` and `mkPktMerge` ram; `stereovision3` multiclock; `stereovision0`
-  timeout; `diffeq1` and `diffeq2` error (`equiv-check` cannot name an unnamed multiply black box:
+  timeout; `diffeq1` and `diffeq2` error (`equiv-check` cannot name an unnamed multiply black box (fixed by input-signature pairing, 2026-10-21):
   tool limit, untested). Byte-identical reruns: `rerun-check` 15 of 15 same. EArch smoke ok. Seed
   reruns (step 6) ran 8 ok. QoR table: the M2 table above (O'/P geomeans inside decision 3's
   bands: at most 1.20; per-design outliers `blob_merge` and `raygentop` are listed above, not

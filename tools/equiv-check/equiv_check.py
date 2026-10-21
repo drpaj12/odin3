@@ -49,7 +49,12 @@ Instances are matched across the files by instance name: the ``.cname`` if the i
 one, else the first output pin (lowest port, lowest bit) whose net has a stable name (not
 ``$``-prefixed), as ``out=memtroll.str_out[0]`` (a one-bit port is ``p`` whether written
 ``p`` or ``p[0]``); the name is normalized like a primary I/O
-name.  Matching is exact and never guessed: instances that exist on one side only, two
+name.  An instance with none of these (no ``.cname``, no named output net, no port buffer) is
+paired by input signature: its model plus, per input pin, the normalized name of the named net
+that drives it, or the pin of the named or already paired box that drives it (so a box fed by
+such a box is paired after it, to a fixpoint); one NOTE per pair.  A signature shared by two
+boxes of one file, or found in one file only, exits 2 (``cannot name black box``).
+Matching is exact and never guessed: instances that exist on one side only, two
 instances with one name, an instance with no usable name, a different cell type, different
 port widths or different ``.param`` lists (a RAM mode, an INIT value: a box's configuration is
 part of what it is) all exit 2 with a message listing them.  The cut makes two netlists equivalent
