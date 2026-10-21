@@ -255,6 +255,9 @@ static odin3_status read_all(jr *rd) {
         st = jr_scan_types(rd);
     }
     if (st == ODIN3_OK) {
+        st = jr_infer_implicit(rd);
+    }
+    if (st == ODIN3_OK) {
         st = jr_make_implicit(rd);
     }
     if (st == ODIN3_OK) {

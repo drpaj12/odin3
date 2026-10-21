@@ -484,7 +484,7 @@ odin3_status odin3_elab1_auto_blackbox(odin3_elab1 *e1, const odin3_elab_inst *i
 }
 
 odin3_status odin3_elab1_write_implicit(odin3_elab1 *e1) {
-    odin3_status st = ODIN3_OK;
+    odin3_status st = building(e1) ? odin3_elab1_infer_directions(e1) : ODIN3_OK;
     for (uint32_t idx = 0; st == ODIN3_OK && building(e1) && idx < e1->bboxes.len; idx++) {
         const odin3_elab1_bbox *box = odin3_elab1_bbox_at(e1, idx);
         if (!box->implicit) {
@@ -494,7 +494,7 @@ odin3_status odin3_elab1_write_implicit(odin3_elab1 *e1) {
             odin3_elab1_bbport *port = odin3_vec_at(&e1->bbports, at - 1);
             if (port->port.width == 0) { /* no connection gave one (EL-11): 1 bit */
                 port->port = (odin3_elab1_port){
-                    .name = port->port.name, .dir = ODIN3_DIR_INOUT, .width = 1, .scalar = true};
+                    .name = port->port.name, .dir = port->port.dir, .width = 1, .scalar = true};
             }
             at = port->next;
         }

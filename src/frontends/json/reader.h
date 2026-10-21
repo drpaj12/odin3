@@ -48,11 +48,13 @@ typedef struct odin3_json_opts {
  * third file (R-1). Cells are nodes in file order, named by their key, with their connections
  * made at creation; widths are checked, never changed. A cell type is a module of the file, a
  * registered cell type or a black-box module of the file (M-5); anything else is a located error,
- * or with opts->auto_blackbox an implicit black box (every port INOUT unless `port_directions`
- * gives the direction, the widths the connections give) and a WARNING per type. `$scopeinfo` cells
- * are dropped. Yosys `$sop` (DEPTH, TABLE, WIDTH) is read as the `$sop` cover cell and a `$lut`
- * without inputs as a constant `$sop`; other parameters are typed by the registry (M-6) and for
- * an instance of a module or black box of the file they are attributes `parameter:<NAME>`.
+ * or with opts->auto_blackbox an implicit black box (a port without `port_directions` takes its
+ * direction from its bits: output on bits nothing else drives, inout on a module inout or when two
+ * unknown ports drive one bit, input otherwise; EL-11; `port_directions` gives it when a cell has
+ * one; the widths the connections give) and a WARNING per type listing the directions. `$scopeinfo`
+ * cells are dropped. Yosys `$sop` (DEPTH, TABLE, WIDTH) is read as the `$sop` cover cell and a
+ * `$lut` without inputs as a constant `$sop`; other parameters are typed by the registry (M-6) and
+ * for an instance of a module or black box of the file they are attributes `parameter:<NAME>`.
  * Attributes are typed as Yosys types them (J-10). A `src` of a module, netname or cell that
  * parses (odin3_hdl_loc_parse, L-1) is restored (D-1, D-2): the object takes one DERIVED record,
  * parents the restored SOURCE then its own IMPORTED record, made in one operation of the run

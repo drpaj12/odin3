@@ -77,3 +77,22 @@ the Phase 3 design set and the Phase 5 LPM micros.
    perspective; timing detail can be added later (no delays, arcs or criticality). Amendment to
    decision 2: `inherited` and `pad` are approved named exception classes (strict figure always
    reported).
+5. **`--auto-blackbox` infers port directions** (Peter, 2026-10-21; amends 2D EL-11, spec v4.32):
+   every port of an implicit black box was `inout`, so an unknown cell wired to a driven net failed
+   with "has two drivers", and reverse engineering reads netlists full of unknown library cells.
+   Per cell type: a port that drives an otherwise undriven net bit is an output, every other port
+   is an input, one WARNING per type lists the directions. The inference is order-independent
+   (agent defaults inside the ruling, Peter may override): each instance connection votes per net
+   bit (output: no known driver, a known reader, and the only unknown port on the bit; input: a
+   known driver; inout: a module or cell `inout`; no vote: dangling or ambiguous bit, a constant
+   casts none), and a port settles per type from all its votes: only output votes, output; only
+   input votes or none, input; both kinds or an `inout` vote, `inout` with a WARNING note (no false
+   two-driver error). There is no "first in source order" rule: a net with several unknown ports and
+   no known driver casts no vote, and when no settled output drives it the WARNING names the net.
+   Tie-break (agent default, 2026-10-21): every cell type should have an output, so on an ambiguous
+   net the only port of an output-less type becomes that type's output (fixpoint; two output-less
+   types on the net, or two candidate ports in a type, stay inputs; the WARNING says "chosen as
+   output: the type had none").
+   Two settled outputs on one net are reported in the WARNING naming both ports. `read_json
+   --auto-blackbox` follows the same rule, with the same text, when no cell gives
+   `port_directions`.
