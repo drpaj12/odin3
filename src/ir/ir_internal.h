@@ -63,6 +63,25 @@ typedef struct odin3_prov_store {
 /* Creates the design's provenance store (design.c calls it); ODIN3_ERR_NO_MEMORY on OOM. */
 odin3_status odin3_prov_store_init(odin3_design *design);
 
+/*
+ * Makes dst's provenance store (freshly created, empty) a deep copy of src's: records (their
+ * location and parent arrays, the hash-consing index), pass-run rows, tombstones (their parameter
+ * values and pin names) and the walk marks; every ID is the same. ODIN3_ERR_NO_MEMORY on out of
+ * memory (dst's store is then partly filled: the caller destroys dst).
+ */
+odin3_status odin3_prov_store_clone(odin3_design *dst, const odin3_design *src);
+
+/*
+ * Gives dst (modules already cloned, cell-type table empty) a copy of src's cell-type table: the
+ * same IDs and names, the global definitions shared (they live as long as the process), each
+ * module's type bound to its module in dst, every other local definition deep-copied into dst's
+ * arena, the instance counts and the declared-model list. ODIN3_ERR_INVALID_ARG (logged) when a
+ * local type holds a width expression or tech-library data, which are not copied and live in
+ * src's arena; ODIN3_ERR_NO_MEMORY on out of memory. dst is partly filled on failure: the
+ * caller destroys it.
+ */
+odin3_status odin3_celltype_table_clone(odin3_design *dst, const odin3_design *src);
+
 /* Frees the provenance store (design.c calls it; safe on a partly initialised design). */
 void odin3_prov_store_free(odin3_design *design);
 
@@ -259,6 +278,17 @@ void odin3_module_dead_pins_free(odin3_module *module);
 
 /* Sets up the design's module list (design.c calls it); ODIN3_ERR_NO_MEMORY on out of memory. */
 odin3_status odin3_module_table_init(odin3_design *design);
+
+/*
+ * Appends to dst's module list a deep copy of module src of another design (same ID, because the
+ * caller clones the modules in order into a list that holds the earlier ones): stores, name maps,
+ * aliases, ports, attributes, dead-pin tables and everything in the module arena (parameter
+ * values, wire net lists, net pin arrays, attribute values). Names are re-pointed into dst's
+ * strtab, which must hold the same strings under the same IDs. The change journal is not copied
+ * (the copy's is off). ODIN3_ERR_NO_MEMORY on out of memory; a partly built module is destroyed
+ * and the list is unchanged.
+ */
+odin3_status odin3_module_clone(odin3_design *dst, const odin3_module *src);
 
 /* Destroys every module and the list (design.c calls it; safe on a partly initialised design). */
 void odin3_module_table_free(odin3_design *design);

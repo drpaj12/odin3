@@ -590,3 +590,145 @@ odin3_status odin3_module_add_port(odin3_module *module, const odin3_port_spec *
     }
     return ODIN3_OK;
 }
+
+/* --- deep copy (odin3_design_copy) --------------------------------------------------------- */
+
+/* Replaces the module's stores and name maps with copies of src's. */
+static bool clone_stores(odin3_module *dup, const odin3_module *src) {
+    odin3_pagevec_destroy(dup->nodes);
+    odin3_pagevec_destroy(dup->pins);
+    odin3_pagevec_destroy(dup->nets);
+    odin3_pagevec_destroy(dup->wires);
+    dup->nodes = odin3_pagevec_clone(src->nodes);
+    dup->pins = odin3_pagevec_clone(src->pins);
+    dup->nets = odin3_pagevec_clone(src->nets);
+    dup->wires = odin3_pagevec_clone(src->wires);
+    odin3_u64map_destroy(dup->node_names);
+    odin3_u64map_destroy(dup->net_names);
+    odin3_u64map_destroy(dup->wire_names);
+    odin3_u64map_destroy(dup->attr_heads);
+    dup->node_names = odin3_u64map_clone(src->node_names);
+    dup->net_names = odin3_u64map_clone(src->net_names);
+    dup->wire_names = odin3_u64map_clone(src->wire_names);
+    dup->attr_heads = odin3_u64map_clone(src->attr_heads);
+    dup->dead_pins = src->dead_pins != NULL ? odin3_u64map_clone(src->dead_pins) : NULL;
+    return dup->nodes != NULL && dup->pins != NULL && dup->nets != NULL && dup->wires != NULL &&
+           dup->node_names != NULL && dup->net_names != NULL && dup->wire_names != NULL &&
+           dup->attr_heads != NULL && (src->dead_pins == NULL || dup->dead_pins != NULL);
+}
+
+/* Copies the plain vectors; the port definitions are re-pointed in clone_type_def. */
+static bool clone_vecs(odin3_module *dup, const odin3_module *src) {
+    return odin3_vec_copy(&dup->aliases, &src->aliases) == ODIN3_OK &&
+           odin3_vec_copy(&dup->ports, &src->ports) == ODIN3_OK &&
+           odin3_vec_copy(&dup->port_defs, &src->port_defs) == ODIN3_OK &&
+           odin3_vec_copy(&dup->attrs, &src->attrs) == ODIN3_OK &&
+           odin3_vec_copy(&dup->dead_pin_names, &src->dead_pin_names) == ODIN3_OK;
+}
+
+/* The module type's definition: names point into dup's design's strtab, ports into dup. */
+static bool clone_type_def(odin3_module *dup, const odin3_module *src) {
+    const odin3_strtab *strtab = odin3_design_strtab(dup->design);
+    dup->type_def = src->type_def;
+    dup->type_def.name = odin3_strtab_get(strtab, dup->name);
+    dup->type_def.ports = dup->port_defs.data;
+    for (size_t i = 0; i < dup->port_defs.len; i++) {
+        odin3_port_def *def = odin3_vec_at(&dup->port_defs, i);
+        uint32_t str = 0;
+        if (!odin3_strtab_find(strtab, odin3_bytes_cstr(def->name), &str)) {
+            return false; /* the strtab is a clone: every port name is in it */
+        }
+        def->name = odin3_strtab_get(strtab, str);
+    }
+    return true;
+}
+
+/* A copy of count values (payloads included) in the arena; NULL on out of memory. */
+static odin3_value *values_clone(odin3_arena *arena, const odin3_value *from, uint32_t count) {
+    odin3_value *vals = odin3_arena_alloc(arena, sizeof *vals * count);
+    for (uint32_t i = 0; vals != NULL && i < count; i++) {
+        if (odin3_value_copy(arena, &from[i], &vals[i]) != ODIN3_OK) {
+            return NULL;
+        }
+    }
+    return vals;
+}
+
+/* Each node's parameter values and each wire's net list (dead records too), in dup's arena. */
+static bool clone_nodes_and_wires(odin3_module *dup) {
+    for (uint32_t id = 1; id < odin3_pagevec_len(dup->nodes); id++) {
+        odin3_node_rec *rec = odin3_pagevec_at(dup->nodes, id);
+        if (rec->params != NULL) {
+            rec->params = values_clone(dup->arena, rec->params, rec->n_params);
+            if (rec->params == NULL) {
+                return false;
+            }
+        }
+    }
+    for (uint32_t id = 1; id < odin3_pagevec_len(dup->wires); id++) {
+        odin3_wire_rec *rec = odin3_pagevec_at(dup->wires, id);
+        const odin3_net_id *from = rec->nets;
+        if (from == NULL) {
+            continue;
+        }
+        rec->nets = odin3_arena_alloc(dup->arena, sizeof *rec->nets * rec->width);
+        if (rec->nets == NULL) {
+            return false;
+        }
+        memcpy(rec->nets, from, sizeof *rec->nets * rec->width);
+    }
+    return true;
+}
+
+/* Each net's pin array in a fresh pool block of the same class, and each attribute's value. */
+static bool clone_nets_and_attrs(odin3_module *dup) {
+    for (uint32_t id = 1; id < odin3_pagevec_len(dup->nets); id++) {
+        odin3_net_rec *rec = odin3_pagevec_at(dup->nets, id);
+        const odin3_pin_id *from = rec->pins;
+        if (from == NULL) {
+            continue;
+        }
+        rec->pins = odin3_pinpool_alloc(&dup->pinpool, rec->cls);
+        if (rec->pins == NULL) {
+            return false;
+        }
+        memcpy(rec->pins, from, sizeof *rec->pins * rec->count);
+    }
+    for (size_t i = 0; i < dup->attrs.len; i++) {
+        odin3_attr_rec *rec = odin3_vec_at(&dup->attrs, i);
+        const odin3_value *from = rec->value;
+        if (from == NULL) {
+            continue;
+        }
+        rec->value = values_clone(dup->arena, from, 1);
+        if (rec->value == NULL) {
+            return false;
+        }
+    }
+    return true;
+}
+
+odin3_status odin3_module_clone(odin3_design *dst, const odin3_module *src) {
+    if (odin3_vec_reserve(&dst->modules, dst->modules.len + 1) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_module *dup = module_alloc(dst);
+    if (dup == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    dup->id = src->id;
+    dup->name = src->name;
+    dup->prov = src->prov;
+    dup->type = src->type;
+    dup->proc_count = src->proc_count;
+    if (!clone_stores(dup, src) || !clone_vecs(dup, src) || !clone_type_def(dup, src) ||
+        !clone_nodes_and_wires(dup) || !clone_nets_and_attrs(dup)) {
+        module_destroy(dup);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    assert(dst->modules.len == src->id.v);
+    odin3_module **slot = (odin3_module **)odin3_vec_push(&dst->modules);
+    assert(slot != NULL); /* reserved above */
+    *slot = dup;
+    return ODIN3_OK;
+}

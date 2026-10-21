@@ -41,6 +41,47 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     return design;
 }
 
+/* Fills dst, a zeroed design with an empty AST list, from src. */
+static odin3_status clone_into(odin3_design *dst, const odin3_design *src) {
+    dst->arena = odin3_arena_create(0);
+    dst->strtab = odin3_strtab_clone(src->strtab);
+    if (dst->arena == NULL || dst->strtab == NULL || odin3_module_table_init(dst) != ODIN3_OK ||
+        odin3_prov_store_init(dst) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_prov_store_clone(dst, src);
+    if (st == ODIN3_OK && src->srcman != NULL) {
+        dst->srcman = odin3_srcman_clone(src->srcman, dst->strtab);
+        st = dst->srcman != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t id = 1; st == ODIN3_OK && id < src->modules.len; id++) {
+        st = odin3_module_clone(dst, *(odin3_module *const *)odin3_vec_cat(&src->modules, id));
+    }
+    if (st == ODIN3_OK) {
+        st = odin3_celltype_table_clone(dst, src);
+    }
+    dst->top = src->top;
+    dst->keep_ast = src->keep_ast;
+    dst->diag_paths = src->diag_paths;
+    return st;
+}
+
+odin3_status odin3_design_clone(const odin3_design *src, odin3_design **out) {
+    *out = NULL;
+    odin3_design *dst = odin3_util_calloc(sizeof *dst);
+    if (dst == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_vec_init(&dst->asts, sizeof(odin3_ast *));
+    odin3_status st = clone_into(dst, src);
+    if (st != ODIN3_OK) {
+        odin3_design_destroy(dst);
+        return st;
+    }
+    *out = dst;
+    return ODIN3_OK;
+}
+
 ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;

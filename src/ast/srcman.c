@@ -34,6 +34,43 @@ odin3_srcman *odin3_srcman_create(odin3_strtab *strtab) {
     return sm;
 }
 
+/* Copies the line and segment vectors of every file record of dup (already a copy of src's). */
+static bool clone_files(odin3_srcman *dup, const odin3_srcman *src) {
+    for (size_t i = 1; i < dup->files.len;
+         i++) { /* the byte copy shares src's vectors: drop them */
+        odin3_srcfile_rec *to = odin3_vec_at(&dup->files, i);
+        odin3_vec_init(&to->lines, sizeof(uint32_t));
+        odin3_vec_init(&to->segs, sizeof(odin3_srcseg_rec));
+    }
+    for (size_t i = 1; i < dup->files.len; i++) { /* record 0 is reserved and empty */
+        const odin3_srcfile_rec *from = odin3_vec_cat(&src->files, i);
+        odin3_srcfile_rec *to = odin3_vec_at(&dup->files, i);
+        if (odin3_vec_copy(&to->lines, &from->lines) != ODIN3_OK ||
+            odin3_vec_copy(&to->segs, &from->segs) != ODIN3_OK) {
+            return false;
+        }
+    }
+    return true;
+}
+
+odin3_srcman *odin3_srcman_clone(const odin3_srcman *src, odin3_strtab *strtab) {
+    odin3_srcman *dup = odin3_srcman_create(strtab);
+    if (dup == NULL) {
+        return NULL;
+    }
+    odin3_vec_clear(&dup->bufs);
+    odin3_vec_clear(&dup->files);
+    dup->next = src->next;
+    dup->max_buffers = src->max_buffers;
+    dup->space_end = src->space_end;
+    if (odin3_vec_copy(&dup->bufs, &src->bufs) != ODIN3_OK ||
+        odin3_vec_copy(&dup->files, &src->files) != ODIN3_OK || !clone_files(dup, src)) {
+        odin3_srcman_destroy(dup); /* frees the files copied so far; the rest are zeroed */
+        return NULL;
+    }
+    return dup;
+}
+
 void odin3_srcman_destroy(odin3_srcman *sm) {
     if (sm == NULL) {
         return;

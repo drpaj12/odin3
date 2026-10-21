@@ -226,3 +226,19 @@ bool odin3_u64map_next(const odin3_u64map *map, size_t *cursor, odin3_kv *entry)
     }
     return false;
 }
+
+odin3_u64map *odin3_u64map_clone(const odin3_u64map *src) {
+    odin3_u64map *map = odin3_u64map_create(odin3_u64map_count(src));
+    if (map == NULL) {
+        return NULL;
+    }
+    size_t cursor = 0;
+    odin3_kv entry = {0, 0};
+    while (odin3_u64map_next(src, &cursor, &entry)) {
+        if (odin3_u64map_put(map, entry) != ODIN3_OK) {
+            odin3_u64map_destroy(map);
+            return NULL;
+        }
+    }
+    return map;
+}

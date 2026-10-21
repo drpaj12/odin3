@@ -58,6 +58,22 @@ static void load_verilog(const char *path) {
     run(g_src, "proc", "");
 }
 
+/* The whole file at path, NUL-terminated; the caller frees it. */
+static char *slurp(const char *path) {
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_END));
+    long size = ftell(file);
+    TEST_ASSERT_TRUE(size > 0);
+    TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_SET));
+    char *text = malloc((size_t)size + 1);
+    TEST_ASSERT_NOT_NULL(text);
+    TEST_ASSERT_EQUAL_UINT((size_t)size, fread(text, 1, (size_t)size, file));
+    text[size] = '\0';
+    (void)fclose(file);
+    return text;
+}
+
 /* The text write_json (with --odin3, which adds the provenance) gives; the caller frees it. */
 static char *json_of(odin3_design *design) {
     char path[] = "/tmp/odin3_design_copy_XXXXXX";
@@ -67,17 +83,7 @@ static char *json_of(odin3_design *design) {
     char args[ARGS_CAP];
     (void)snprintf(args, sizeof args, "\"%s\" --odin3", path);
     run(design, "write_json", args);
-    FILE *file = fopen(path, "rb");
-    TEST_ASSERT_NOT_NULL(file);
-    TEST_ASSERT_EQUAL_INT(0, fseek(file, 0, SEEK_END));
-    long size = ftell(file);
-    TEST_ASSERT_TRUE(size > 0);
-    rewind(file);
-    char *text = malloc((size_t)size + 1);
-    TEST_ASSERT_NOT_NULL(text);
-    TEST_ASSERT_EQUAL_UINT((size_t)size, fread(text, 1, (size_t)size, file));
-    text[size] = '\0';
-    (void)fclose(file);
+    char *text = slurp(path);
     (void)remove(path);
     return text;
 }
@@ -129,22 +135,28 @@ static void test_copy_is_independent(void) {
 }
 
 static void assert_same_ids(void) {
-    uint32_t top = 0, top_copy = 0;
+    uint32_t top = 0;
+    uint32_t top_copy = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_top_module(g_src, &top));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_top_module(g_copy, &top_copy));
     TEST_ASSERT_EQUAL_UINT32(top, top_copy);
-    uint32_t count = 0, count_copy = 0;
+    uint32_t count = 0;
+    uint32_t count_copy = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(g_src, &count));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(g_copy, &count_copy));
     TEST_ASSERT_EQUAL_UINT32(count, count_copy);
     TEST_ASSERT_TRUE(count > 0);
     for (uint32_t mod = 1; mod <= count; mod++) {
-        uint32_t end = 0, end_copy = 0;
+        uint32_t end = 0;
+        uint32_t end_copy = 0;
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_node_end(g_src, mod, &end));
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_node_end(g_copy, mod, &end_copy));
         TEST_ASSERT_EQUAL_UINT32(end, end_copy);
         for (uint32_t id = 1; id < end; id++) {
-            const char *name = NULL, *name_copy = NULL, *type = NULL, *type_copy = NULL;
+            const char *name = NULL;
+            const char *name_copy = NULL;
+            const char *type = NULL;
+            const char *type_copy = NULL;
             odin3_ref ref = {mod, id};
             odin3_status st = odin3_node_get_name(g_src, ref, &name);
             if (st != ODIN3_OK) {
@@ -208,6 +220,23 @@ static void test_copy_invalid_args(void) {
     TEST_ASSERT_NULL(out);
 }
 
+/* Copies with every allocation from the nth on failing; true when the copy succeeded. */
+static bool copy_with_failures_from(long nth) {
+    odin3_design *out = g_src; /* a non-NULL stand-in the call must overwrite */
+    odin3_util_set_alloc_fail_from(nth);
+    odin3_status st = odin3_design_copy(g_src, &out);
+    odin3_util_set_alloc_fail_after(-1);
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_NOT_NULL(out);
+        assert_same_json(g_src, out);
+        odin3_design_destroy(out);
+        return true;
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+    TEST_ASSERT_NULL(out);
+    return false;
+}
+
 /*
  * Every allocation from the n-th on fails, for each n up to the first copy that succeeds: each
  * failure returns NO_MEMORY with *out NULL, and the sanitizers show nothing left allocated.
@@ -216,19 +245,7 @@ static void test_copy_oom_leaves_nothing(void) {
     load_verilog(VERILOG("bm_DL_four_bit_adder_continuous_assign_using_vectors"));
     run(g_src, "opt", ""); /* dead objects, tombstones and provenance in the store */
     long failures = 0;
-    for (long nth = 0; nth < OOM_LIMIT; nth++) {
-        odin3_design *out = (odin3_design *)(uintptr_t)1; /* must be overwritten */
-        odin3_util_set_alloc_fail_from(nth);
-        odin3_status st = odin3_design_copy(g_src, &out);
-        odin3_util_set_alloc_fail_after(-1);
-        if (st == ODIN3_OK) {
-            TEST_ASSERT_NOT_NULL(out);
-            assert_same_json(g_src, out);
-            odin3_design_destroy(out);
-            break;
-        }
-        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
-        TEST_ASSERT_NULL(out);
+    while (failures < OOM_LIMIT && !copy_with_failures_from(failures)) {
         failures++;
     }
     TEST_ASSERT_TRUE(failures > 10);
@@ -255,24 +272,24 @@ static odin3_status wexpr_eval(const odin3_width_expr *wexpr, const odin3_width_
 static void test_copy_refuses_width_expression(void) {
     static const odin3_width_expr wexpr = {wexpr_check, wexpr_eval, NULL};
     const odin3_port_def ports[1] = {{"o", ODIN3_DIR_OUT, true, 1, NULL, NULL, &wexpr, false}};
-    const odin3_celltype_def def = {"copy_wexpr_type", ODIN3_GRAN_BLACKBOX, 0, ports, 1, NULL, 0,
-                                    NULL, NULL, NULL, NULL};
+    const odin3_celltype_def def = {
+        "copy_wexpr_type", ODIN3_GRAN_BLACKBOX, 0, ports, 1, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(g_src, &def, &id));
-    odin3_design *out = (odin3_design *)(uintptr_t)1;
+    odin3_design *out = g_src;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_copy(g_src, &out));
     TEST_ASSERT_NULL(out);
 }
 
 static void test_copy_refuses_techlib_data(void) {
     static const int stand_in = 0;
-    const odin3_celltype_def def = {"copy_lib_type", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0,
-                                    NULL, NULL, NULL, NULL};
+    const odin3_celltype_def def = {
+        "copy_lib_type", ODIN3_GRAN_BLACKBOX, 0, NULL, 0, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(g_src, &def, &id));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_celltype_set_lib(g_src, id, (const odin3_techlib_cell *)&stand_in));
-    odin3_design *out = (odin3_design *)(uintptr_t)1;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_celltype_set_lib(g_src, id, (const odin3_techlib_cell *)&stand_in));
+    odin3_design *out = g_src;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_copy(g_src, &out));
     TEST_ASSERT_NULL(out);
 }

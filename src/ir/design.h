@@ -29,6 +29,16 @@
  */
 uint64_t odin3_design_bytes_reserved(const odin3_design *design);
 
+/*
+ * Makes *out a deep copy of src (odin3_design_copy, odin3.h, is the public face): strtab, cell-type
+ * table, modules, provenance store, source manager, top module, keep level and diagnostic path
+ * style, all with the same IDs. It holds no AST stores, project record or architecture record
+ * (they describe the reading of src, not the netlist), and its journals are off. ODIN3_OK;
+ * ODIN3_ERR_INVALID_ARG (logged) when a local cell type holds a width expression or tech-library
+ * data; ODIN3_ERR_NO_MEMORY. *out is NULL on failure and nothing stays allocated.
+ */
+odin3_status odin3_design_clone(const odin3_design *src, odin3_design **out);
+
 /* The design-global string table (names, string parameter values). */
 odin3_strtab *odin3_design_strtab(const odin3_design *design);
 

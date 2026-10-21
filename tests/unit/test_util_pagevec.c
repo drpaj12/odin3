@@ -244,8 +244,46 @@ static void test_bytes_reserved_shift8(void) {
     odin3_pagevec_destroy(pv);
 }
 
+/* A pagevec of COUNT ascending uint32_t values (1..COUNT), across a page boundary. */
+enum { CLONE_COUNT = ODIN3_PAGEVEC_PAGE_ELEMS + 5 };
+
+static odin3_pagevec *ascending(void) {
+    odin3_pagevec *pv = odin3_pagevec_create(sizeof(uint32_t));
+    TEST_ASSERT_NOT_NULL(pv);
+    for (uint32_t i = 0; i < CLONE_COUNT; i++) {
+        uint32_t *slot = odin3_pagevec_push(pv, NULL);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = i + 1;
+    }
+    return pv;
+}
+
+/* odin3_pagevec_clone: same layout, length and bytes across a page boundary; own pages. */
+static void test_clone_copies_pages(void) {
+    odin3_pagevec *pv = ascending();
+    odin3_pagevec *dup = odin3_pagevec_clone(pv);
+    TEST_ASSERT_NOT_NULL(dup);
+    TEST_ASSERT_EQUAL_UINT(CLONE_COUNT, odin3_pagevec_len(dup));
+    *(uint32_t *)odin3_pagevec_at(pv, CLONE_COUNT - 1) = 0;
+    TEST_ASSERT_EQUAL_UINT32(CLONE_COUNT,
+                             *(const uint32_t *)odin3_pagevec_cat(dup, CLONE_COUNT - 1));
+    TEST_ASSERT_EQUAL_UINT32(1, *(const uint32_t *)odin3_pagevec_cat(dup, 0));
+    odin3_pagevec_destroy(dup);
+    odin3_pagevec_destroy(pv);
+}
+
+static void test_clone_oom_returns_null(void) {
+    odin3_pagevec *pv = ascending();
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_NULL(odin3_pagevec_clone(pv));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_pagevec_destroy(pv);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_clone_copies_pages);
+    RUN_TEST(test_clone_oom_returns_null);
     RUN_TEST(test_push_across_pages);
     RUN_TEST(test_addresses_stable);
     RUN_TEST(test_page_boundary_4095_4096);

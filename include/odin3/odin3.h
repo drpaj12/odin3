@@ -18,6 +18,7 @@
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
+ * ABI v4 (cont., 7.4b): odin3_design_copy.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -200,6 +201,23 @@ odin3_design *odin3_design_create(void);
 
 /* Frees the design and everything it owns (every string it handed out). NULL is a no-op. */
 void odin3_design_destroy(odin3_design *design);
+
+/*
+ * Makes *out a deep copy of src: every module with its nodes, pins, nets, wires, attributes and
+ * provenance records, the design's strings and cell types, the source manager, the top module and
+ * the pass-run table. Every ID (module, node, pin, net, wire, provenance record, string, cell type)
+ * is the same in the copy, so an ID read from one design names the same object in the other, and
+ * a pass on the copy never touches src (they share no memory, and the copy may outlive src). Not
+ * copied: held AST stores, the project record and the architecture record (they describe how src
+ * was read, not the netlist), and the change journals (off in the copy).
+ *
+ * The caller owns *out and frees it with odin3_design_destroy. *out is NULL on failure. Failures:
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or when a design-local cell type holds a
+ * width expression or tech-library data (read_techlib types, some black boxes), which live in
+ * src's own memory and cannot be copied; ODIN3_ERR_NO_MEMORY on out of memory, with nothing left
+ * allocated. src is not changed.
+ */
+odin3_status odin3_design_copy(const odin3_design *src, odin3_design **out);
 
 /*
  * Runs the pass named name on the design, with args as its argument text (NULL or "" for none;

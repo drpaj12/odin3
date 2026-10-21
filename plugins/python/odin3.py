@@ -258,6 +258,15 @@ class Design:
         design.run_pass("read_blif", _quote(path))
         return design
 
+    def copy(self) -> Design:
+        """A deep copy (odin3_design_copy): the same IDs, no memory shared with this design, so a
+        pass on the copy leaves this design unchanged and either may be closed first. Held AST
+        stores, the project and the architecture are not copied. Odin3Error with the status when
+        a design-local cell type holds a width expression or tech-library data (INVALID_ARG) or on
+        out of memory."""
+        ptr = self.get("odin3_design_copy", "odin3_design *")
+        return Design(self.odin3, handle=ptr)
+
     def close(self) -> None:
         """Destroy the design now (else when it is garbage-collected)."""
         if self.ptr is not None:
