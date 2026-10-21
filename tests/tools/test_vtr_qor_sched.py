@@ -340,7 +340,7 @@ class PlanTest(PlanTestBase):
             lib_sha256=sha((self.repo / "lib/vtr.o3lib").read_bytes()).hexdigest(),
             abc_script_sha256=sha((self.repo / "lib/abc/vtr.abc").read_bytes()).hexdigest(),
             script="read_techlib $LIB; read_verilog --nolatches --vtr-compat $IN; proc; fsm; "
-            "opt -full; flatten; wreduce; hardmap; lower; abc --lut 6; "
+            "opt; flatten; opt -full; wreduce; hardmap; lower; abc --lut 6; "
             "write_blif --vtr --lut-k 6 $OUT",
         )
         pprime = dataclasses.replace(

@@ -31,7 +31,7 @@ decisions 2–3 and 16 below):
    lib/vtr.o3lib; read_verilog --nolatches --vtr-compat; proc; opt; wreduce; opt_clean; opt -full;
    flatten; opt -full; hardmap; opt -full -ffbits; lower; opt -fast; compact; abc; write_blif --vtr` (3C spec H-2, decision 49 for `opt_merge -ffbits`; the part
    up to `lower` is `tools/hardmap-check/phase3_pre_abc.script`, run by `hardmap-diff`) (`wreduce` before `flatten` as Parmys, decisions 7 and 31 and 3G WR-9; `opt -full`
-   after `flatten` as Parmys runs it, decision 30). Then
+   after `flatten` as Parmys runs it, decision 30: `flatten` leaves x mux data that plain `opt` keeps, which hides RAM reads, boundtop). Then
    `run_vtr_flow.py <design>.blif <arch> -start vpr -track_memory_usage
    -crit_path_router_iterations 100` (the `vtr_reg_qor_chain` options) must end with
    `vpr_status=success`. That means VPR packs and places, finds the minimum channel width by

@@ -2754,6 +2754,38 @@ static void test_subckt_unconnected_outputs_named(void) {
                              write_vtr());
 }
 
+/* A RAM output net the user named `y` on the port bit `o`: the box writes `y` (the name of
+ * provenance), the port bit `o` is its buffer, and the rename is not counted (the name is kept). */
+static void test_hard_port_net_keeps_name(void) {
+    odin3_module *top = hand_top();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read(tc.design, ODIN3_LIB_DIR "/vtr.o3lib"));
+    odin3_net_id d_net = hand_scalar(top, "d", ODIN3_DIR_IN);
+    odin3_net_id a_net = hand_scalar(top, "a", ODIN3_DIR_IN);
+    odin3_net_id w_net = hand_scalar(top, "w", ODIN3_DIR_IN);
+    odin3_net_id o_net = hand_scalar(top, "o", ODIN3_DIR_OUT);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top, o_net, intern("y")));
+    odin3_value params[2] = {odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_id ram = hand_cell(top, "single_port_ram", params, 2);
+    pin_onto(ram, 0, const_net("$_CONST0_"));
+    pin_onto(ram, 1, d_net);
+    pin_onto(ram, 2, a_net);
+    pin_onto(ram, 3, w_net);
+    pin_onto(ram, 4, o_net);
+    const char *body = write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "out=y we=w\n.names y o\n1 1\n"), body);
+    TEST_ASSERT_NULL_MESSAGE(strstr(body, "$n"), body);
+}
+
+/* A RAM output net named like its port bit: the port bit keeps the name (name of record), the
+ * box writes `$n<ID>`, and N counts it. */
+static void test_hard_port_net_same_name_counted(void) {
+    read_ok(RAM_CLOCK, true);
+    const char *body = write_vtr();
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(body, "out=$n"), body);
+    odin3_blif_vtr_report report = vtr_report();
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT32_MESSAGE(1, report.renamed, body);
+}
+
 /* A hand-built RAM (library loaded, so <loc> is the top) whose clk is on $_CONST0_: written
  * `clk=gnd`, with the hard-cell clock warning. */
 static void test_ram_clock_constant(void) {
@@ -3167,6 +3199,8 @@ static void run_task_5(void) {
     RUN_TEST(test_ram_one_bit_slice_scalar);
     RUN_TEST(test_subckt_unconnected_outputs_named);
     RUN_TEST(test_ram_clock_constant);
+    RUN_TEST(test_hard_port_net_keeps_name);
+    RUN_TEST(test_hard_port_net_same_name_counted);
     RUN_TEST(test_stub_width_max);
     RUN_TEST(test_stub_declared_order_kept);
     RUN_TEST(test_stub_unused_dropped);
