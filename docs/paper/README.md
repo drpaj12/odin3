@@ -11,7 +11,7 @@ in detail for its users after v1.0.
 
 ## Figures
 
-Fourteen figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
+Fifteen figures are TikZ, drawn at print size in the paper's fonts; one, the byte-level AST record,
 is a hand-drawn SVG.
 
 - `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
@@ -66,6 +66,7 @@ features table and the phases table together.
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
 | `fig_re` | the reverse-engineering and analysis flow | TikZ | `\columnwidth` |
+| `fig_yggdrasil` | Yggdrasil: Odin III as the trunk, with Wyrd-I, Loki, Leman Russ, Bifrost and Midgard | TikZ | `\textwidth` |
 | `fig_flow` | the flow of a design, with what each stage does (drawn by `fig_flow_base`) | TikZ | `\textwidth` |
 | `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
 | `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
