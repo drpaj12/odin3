@@ -18,7 +18,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { ODIN3_NAME_MISS_FIRST = 64 }; /* bytes of the first missed name kept, NUL included */
+enum {
+    ODIN3_NAME_MISS_FIRST = 64,               /* bytes of the first missed name, NUL incl. */
+    ODIN3_NAME_RESOLVE_MAX_BYTES = 256 << 20, /* the largest map file a reader takes */
+    ODIN3_NAME_RESOLVE_MAX_ENTRIES = 1 << 22  /* and the most entries it keeps */
+};
 
 typedef struct odin3_name_resolver {
     odin3_name_map map;
@@ -39,12 +43,31 @@ void odin3_name_resolver_close(odin3_name_resolver *res);
 bool odin3_name_hash_shaped(odin3_bytes text);
 
 /*
- * The full name for the hash name `name` in `module` (any kind: a net, wire or node of that module
- * with that hash name), or false when name is not hash-shaped or the map has no such entry. *full
- * views the map and lives until odin3_name_resolver_close.
+ * The full name for the hash name `name` of `kind` in `module`, or false when name is not
+ * hash-shaped or the map has no such entry of that kind. *full views the map and lives until
+ * odin3_name_resolver_close. Kinds are the writers' (name_map.h): BLIF nets are NET, JSON cells
+ * NODE.
  */
-bool odin3_name_resolver_find(const odin3_name_resolver *res, odin3_bytes module, odin3_bytes name,
-                              odin3_bytes *full);
+bool odin3_name_resolver_find(const odin3_name_resolver *res, odin3_bytes module,
+                              odin3_name_kind kind, odin3_bytes name, odin3_bytes *full);
+
+/*
+ * The same for a name declared as a wire: a JSON netname or a Verilog declarator, which the writers
+ * name as a WIRE or, for an IR net they declare, as a NET (the wire entry first).
+ */
+bool odin3_name_resolver_find_decl(const odin3_name_resolver *res, odin3_bytes module,
+                                   odin3_bytes name, odin3_bytes *full);
+
+/*
+ * The bounds on a map a reader takes: the file size and the entry count. open fails with a located
+ * error over either. (0, 0) restores the defaults (ODIN3_NAME_RESOLVE_MAX_BYTES and
+ * ODIN3_NAME_RESOLVE_MAX_ENTRIES); a nonzero value replaces one. For tests.
+ */
+typedef struct odin3_name_resolver_limits {
+    uint64_t max_bytes;
+    uint32_t max_entries;
+} odin3_name_resolver_limits;
+void odin3_name_resolver_set_limits(odin3_name_resolver_limits limits);
 
 /* The hash-shaped names the map did not hold: how many and the first (with its line). */
 typedef struct odin3_name_miss {

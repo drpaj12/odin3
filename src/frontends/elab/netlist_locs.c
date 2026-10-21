@@ -129,7 +129,7 @@ static odin3_bytes resolve_hash(odin3_elab2 *e2, odin3_bytes raw, odin3_loc at) 
     odin3_bytes module = {odin3_strtab_get(tab, odin3_module_name(e2->mod)),
                           odin3_strtab_len(tab, odin3_module_name(e2->mod))};
     odin3_bytes full = {NULL, 0};
-    if (odin3_name_resolver_find(e2->opts.names, module, raw, &full)) {
+    if (odin3_name_resolver_find_decl(e2->opts.names, module, raw, &full)) {
         return full;
     }
     if (e2->nl_miss.count == 0) {

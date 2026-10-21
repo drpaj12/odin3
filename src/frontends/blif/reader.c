@@ -1795,7 +1795,8 @@ static odin3_status read_passes(blif_reader *rd) {
 static odin3_status read_mapped(blif_reader *rd, const odin3_blif_read_opts *opts) {
     odin3_status st = ODIN3_OK;
     if (opts != NULL && opts->name_map != NULL) {
-        rd->nmap = blif_names_create(opts->name_map, &st);
+        const blif_names_files files = {opts->name_map, rd->path, opts->hdl_locs};
+        rd->nmap = blif_names_create(&files, &st);
     }
     st = st == ODIN3_OK ? read_passes(rd) : st;
     if (st == ODIN3_OK && rd->nmap != NULL) {

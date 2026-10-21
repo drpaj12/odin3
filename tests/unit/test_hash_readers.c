@@ -5,6 +5,7 @@
  * the build tree.
  */
 #include "frontends/blif/reader.h"
+#include "frontends/name_resolve.h"
 #include "ir/design.h"
 #include "passes/manager.h"
 #include "unity.h"
@@ -73,6 +74,7 @@ void tearDown(void) {
     }
     (void)rmdir(dir);
     odin3_log_set_sink(NULL, NULL);
+    odin3_name_resolver_set_limits((odin3_name_resolver_limits){0, 0});
     odin3_design_destroy(design);
     design = NULL;
 }
@@ -210,8 +212,8 @@ static void settle_json(void) {
  * read of a provenance write (H-6: the rest of the read is exactly that). JSON compares with the
  * direct write of a design that went through the reader once (settle_json).
  */
-static void hash_roundtrip(const format_case *fc) {
-    load_text(INPUT);
+static void hash_roundtrip_of(const format_case *fc, const char *input) {
+    load_text(input);
     if (fc == &FORMATS[2]) {
         settle_json();
     }
@@ -232,6 +234,10 @@ static void hash_roundtrip(const format_case *fc) {
         (void)snprintf(want, sizeof want, "direct%s", fc->ext);
     }
     expect_same_files(want, back);
+}
+
+static void hash_roundtrip(const format_case *fc) {
+    hash_roundtrip_of(fc, INPUT);
 }
 
 /* The hierarchy of a hash name survives the JSON read (the key is the full name again). */
@@ -354,6 +360,325 @@ static void test_option_errors(void) {
     TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, run("read_json", fmt_args("%s/x.json --name-map", dir)));
 }
 
+/* --- 5.4f-c fix round: raw names win, kinds, caps, modules ---------------------------------------
+ */
+
+static char *replace_once(const char *text, const char *from, const char *to) {
+    const char *at = strstr(text, from);
+    TEST_ASSERT_NOT_NULL_MESSAGE(at, from);
+    size_t head = (size_t)(at - text);
+    char *out = odin3_util_calloc(strlen(text) + strlen(to) + 1);
+    memcpy(out, text, head);
+    strcpy(out + head, to);
+    strcat(out, at + strlen(from));
+    return out;
+}
+
+typedef struct hash_req {
+    const char *map_file, *full;
+} hash_req;
+
+/* The hash name the map file holds for the full name `full` (any module, any kind). */
+static void hash_of(const hash_req *req, char *out) {
+    char *text = slurp(req->map_file);
+    const char *full = req->full;
+    char needle[LOG_MAX];
+    (void)snprintf(needle, sizeof needle, "\t%s\t", full);
+    const char *at = strstr(text, needle);
+    TEST_ASSERT_NOT_NULL_MESSAGE(at, needle);
+    const char *from = at;
+    while (from > text && from[-1] != '\t') {
+        from--;
+    }
+    TEST_ASSERT_TRUE((size_t)(at - from) < 64);
+    memcpy(out, from, (size_t)(at - from));
+    out[at - from] = '\0';
+    odin3_util_free(text);
+}
+
+enum { HASH_BUF = 64 };
+
+typedef struct json_hashes {
+    char net_w[HASH_BUF], net_v[HASH_BUF], cell_g[HASH_BUF], cell_c[HASH_BUF];
+} json_hashes;
+
+static char *hashed_json(json_hashes *hs) {
+    const format_case *fc = &FORMATS[2];
+    load_text(INPUT);
+    write_style(fc, "hash", "hashed");
+    hash_of(&(hash_req){"hashed.json.names", "top/u1/w@d.v:3"}, hs->net_w);
+    hash_of(&(hash_req){"hashed.json.names", "v@d.v:4"}, hs->net_v);
+    hash_of(&(hash_req){"hashed.json.names", "top/u1/g1@d.v:3"}, hs->cell_g);
+    hash_of(&(hash_req){"hashed.json.names", "$c8@d.v:4"}, hs->cell_c);
+    return slurp("hashed.json");
+}
+
+/* Reads text (JSON) with the map of hashed_json and writes it back; the result is in back.json. */
+static void read_edited_json(const char *text) {
+    put_file("edit.json", odin3_bytes_cstr(text));
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, read_with_map(&FORMATS[2], "edit", "hashed.json.names"),
+                                  log_text);
+    write_style(&FORMATS[2], "provenance", "back");
+}
+
+static void expect_back_has(const char *what) {
+    char *back = slurp("back.json");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(back, what), back);
+    odin3_util_free(back);
+}
+
+/* Replaces the key `from` by `to`. */
+typedef struct key_pair {
+    const char *from, *to;
+} key_pair;
+
+static char *rekey(const char *json, key_pair keys) {
+    char old_key[HASH_BUF + 4];
+    char new_key[HASH_BUF + 4];
+    (void)snprintf(old_key, sizeof old_key, "\"%s\"", keys.from);
+    (void)snprintf(new_key, sizeof new_key, "\"%s\"", keys.to);
+    return replace_once(json, old_key, new_key);
+}
+
+static const char *const RAW_W_FIRST =
+    "\"netnames\": {\n\"w\": {\"hide_name\": 0, \"bits\": [ 2 ], \"attributes\": {}},";
+
+/* J-raw: a raw netname equal to a decoded SHORT wins whatever the key order (H-6). */
+static void test_json_raw_netname_wins(void) {
+    json_hashes hs;
+    char *json = hashed_json(&hs);
+    char *before = replace_once(json, "\"netnames\": {", RAW_W_FIRST);
+    read_edited_json(before);
+    expect_back_has("\"w\": {");
+    expect_back_has("w$1@d.v:3");
+    odin3_util_free(before);
+    char *after = rekey(json, (key_pair){hs.net_v, "w"});
+    read_edited_json(after);
+    expect_back_has("\"w@d.v:4\": {"); /* the raw netname keeps its own location */
+    expect_back_has("w$1@d.v:3");
+    odin3_util_free(after);
+    odin3_util_free(json);
+}
+
+/* A raw `w` and a raw `w$1`: the decoded name takes the first free N, here 2. */
+static void test_json_raw_suffix_wins(void) {
+    json_hashes hs;
+    char *json = hashed_json(&hs);
+    char *one = rekey(json, (key_pair){hs.net_v, "w$1"});
+    char *two = replace_once(one, "\"netnames\": {", RAW_W_FIRST);
+    read_edited_json(two);
+    expect_back_has("w$2@d.v:3");
+    odin3_util_free(one);
+    odin3_util_free(two);
+    odin3_util_free(json);
+}
+
+/* The same for cell keys, raw key before and after the hashed one. */
+static void test_json_raw_cell_wins(void) {
+    json_hashes hs;
+    char *json = hashed_json(&hs);
+    char *before = rekey(json, (key_pair){"$c6", "g1"});
+    read_edited_json(before);
+    expect_back_has("\"g1\"");
+    expect_back_has("g1$1@d.v:3");
+    odin3_util_free(before);
+    char *after = rekey(json, (key_pair){hs.cell_c, "g1"});
+    read_edited_json(after);
+    expect_back_has("\"g1@d.v:4\"");
+    expect_back_has("g1$1@d.v:3");
+    odin3_util_free(after);
+    odin3_util_free(json);
+}
+
+/* BLIF without --hdl-locs: a full name equal to a raw net moves aside, never merges two nets. */
+static void test_blif_raw_net_wins(void) {
+    load_text(INPUT);
+    write_style(&FORMATS[0], "hash", "hashed");
+    char *text = slurp("hashed.blif");
+    char *edit = replace_once(text, ".end", ".names a v@d.v:4\n1 1\n.end");
+    put_file("edit.blif", odin3_bytes_cstr(edit));
+    odin3_util_free(text);
+    odin3_util_free(edit);
+    fresh_design();
+    log_text[0] = '\0';
+    run_ok("read_blif", fmt_args("--name-map %s/hashed.blif.names %s/edit.blif", dir, dir));
+    write_style(&FORMATS[0], "provenance", "back");
+    char *back = slurp("back.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(back, "v@d.v:4$1"), back);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(back, "top/u1/w@d.v:3"), back);
+    odin3_util_free(back);
+}
+
+/* A name of the wrong kind in the map is no hit: nets and nodes swapped, every use is a miss. */
+/* Replaces every occurrence of `from` by `to`; returns a new text. */
+static char *replace_all(char *text, key_pair words) {
+    while (strstr(text, words.from) != NULL) {
+        char *next = replace_once(text, words.from, words.to);
+        odin3_util_free(text);
+        text = next;
+    }
+    return text;
+}
+
+/* The map text with the kind word `net` and `node` of every line exchanged. */
+static char *swap_kinds(const char *text) {
+    char *out = odin3_util_calloc(strlen(text) + 1);
+    strcpy(out, text);
+    out = replace_all(out, (key_pair){"\tnet\t", "\tNET\t"});
+    out = replace_all(out, (key_pair){"\tnode\t", "\tnet\t"});
+    return replace_all(out, (key_pair){"\tNET\t", "\tnode\t"});
+}
+
+static void swapped_kinds_case(const format_case *fc) {
+    char map[PATH_BUF];
+    load_text(INPUT);
+    write_style(fc, "hash", "hashed");
+    (void)snprintf(map, sizeof map, "hashed%s.names", fc->ext);
+    char *text = slurp(map);
+    char *swapped = swap_kinds(text);
+    put_file("swap.names", odin3_bytes_cstr(swapped));
+    odin3_util_free(text);
+    odin3_util_free(swapped);
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, read_with_map(fc, "hashed", "swap.names"), log_text);
+    expect_miss_warning(fc);
+}
+
+static void test_kind_is_matched(void) {
+    for (int i = 0; i < N_FORMATS; i++) {
+        swapped_kinds_case(&FORMATS[i]);
+        fresh_design();
+    }
+}
+
+/* Two modules whose objects have one hash name: each resolves in its own module. */
+static const char *const TWO_MODULES = ".model top\n.inputs a b\n.outputs y\n"
+                                       ".subckt sub i=a o=v@d.v:4\n"
+                                       ".names v@d.v:4 b y\n11 1\n.end\n"
+                                       ".model sub\n.inputs i\n.outputs o\n"
+                                       ".names i v@d.v:4\n1 1\n.names v@d.v:4 o\n1 1\n.end\n";
+
+static void blif_two_modules(void) {
+    char hash[HASH_BUF];
+    load_text(INPUT);
+    write_style(&FORMATS[0], "hash", "flat");
+    hash_of(&(hash_req){"flat.blif.names", "v@d.v:4"}, hash);
+    char text[LOG_MAX];
+    (void)snprintf(text, sizeof text,
+                   ".model top\n.inputs a b\n.outputs y\n.subckt sub i=a o=%s\n"
+                   ".names %s b y\n11 1\n.end\n"
+                   ".model sub\n.inputs i\n.outputs o\n.names i %s\n1 1\n.names %s o\n1 1\n.end\n",
+                   hash, hash, hash, hash);
+    put_file("two.blif", odin3_bytes_cstr(text));
+    (void)snprintf(text, sizeof text,
+                   "# odin3-names 1 hash=sha256 width=10\n"
+                   "sub\tnet\t%s\tv@d.v:4\t\td.v\t4\ntop\tnet\t%s\tv@d.v:4\t\td.v\t4\n",
+                   hash, hash);
+    put_file("two.names", odin3_bytes_cstr(text));
+    fresh_design();
+    log_text[0] = '\0';
+    run_ok("read_blif", fmt_args("--hdl-locs --name-map %s/two.names %s/two.blif", dir, dir));
+    TEST_ASSERT_EQUAL_STRING("", log_text);
+    run_ok("write_json", fmt_args("--name-style provenance %s/two.json", dir));
+    char *json = slurp("two.json");
+    const char *first = strstr(json, "\"v@d.v:4\"");
+    TEST_ASSERT_NOT_NULL_MESSAGE(first, json);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(first + 1, "\"v@d.v:4\""), json);
+    odin3_util_free(json);
+}
+
+static void test_same_hash_two_modules(void) {
+    blif_two_modules();
+    fresh_design();
+    hash_roundtrip_of(&FORMATS[2], TWO_MODULES);
+    fresh_design();
+    /* the Verilog reader decodes wire declarators only: an instance name stays a hash name */
+    const format_case *fc = &FORMATS[1];
+    load_text(TWO_MODULES);
+    write_style(fc, "hash", "hashed");
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, read_with_map(fc, "hashed", "hashed.v.names"),
+                                  log_text);
+    TEST_ASSERT_EQUAL_STRING("", log_text);
+    write_style(fc, "provenance", "back");
+    char *back = slurp("back.v");
+    const char *first = strstr(back, "wire \\v@d.v:4");
+    TEST_ASSERT_NOT_NULL_MESSAGE(first, back);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(first + 1, "wire \\v@d.v:4"), back);
+    odin3_util_free(back);
+}
+
+/* Escapes in names: `%`, `=` and a backslash survive the map text and each reader. */
+static const char *const ESCAPES = ".model top\n.inputs a b\n.outputs y\n"
+                                   ".names a b top/u1/p%25q@d.v:3\n11 1\n"
+                                   ".names top/u1/p%25q@d.v:3 v%3Dw@d.v:4\n1 1\n"
+                                   ".names v%3Dw@d.v:4 y\n1 1\n.end\n";
+
+static void test_escapes_roundtrip(void) {
+    for (int i = 0; i < N_FORMATS; i++) {
+        hash_roundtrip_of(&FORMATS[i], ESCAPES);
+        fresh_design();
+    }
+}
+
+/* A model name the VTR writer changes (VB-10): the map's module key is what the reader looks up. */
+static const char *const ODD_MODEL = ".model m%3Dx\n.inputs a b\n.outputs y\n"
+                                     ".names a b top/u1/w@d.v:3\n11 1\n"
+                                     ".names top/u1/w@d.v:3 y\n1 1\n.end\n";
+
+static void test_blif_model_key(void) {
+    load_text(ODD_MODEL);
+    write_style(&FORMATS[0], "hash", "hashed");
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, read_with_map(&FORMATS[0], "hashed", "hashed.blif.names"), log_text);
+    TEST_ASSERT_EQUAL_STRING("", log_text);
+    write_style(&FORMATS[0], "provenance", "back");
+    char *back = slurp("back.blif");
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(back, "top/u1/w@d.v:3"), back);
+    odin3_util_free(back);
+}
+
+/* The reader caps the size and the entries of a map, with a located error. */
+static void test_map_caps(void) {
+    const format_case *fc = &FORMATS[0];
+    load_text(INPUT);
+    write_style(fc, "hash", "hashed");
+    odin3_name_resolver_set_limits((odin3_name_resolver_limits){16, 0});
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, read_with_map(fc, "hashed", "hashed.blif.names"));
+    expect_log_has("hashed.blif.names");
+    expect_log_has("name map is over 16 bytes");
+    odin3_name_resolver_set_limits((odin3_name_resolver_limits){0, 1});
+    fresh_design();
+    log_text[0] = '\0';
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, read_with_map(fc, "hashed", "hashed.blif.names"));
+    expect_log_has("hashed.blif.names");
+    expect_log_has("more than 1 entries");
+    odin3_name_resolver_set_limits((odin3_name_resolver_limits){0, 0});
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, read_with_map(fc, "hashed", "hashed.blif.names"),
+                                  log_text);
+}
+
+/* -name-map without -netlist is refused whatever the other options and their order. */
+static void test_name_map_needs_netlist(void) {
+    static const char *const FORMS[] = {
+        "-name-map m.names y.v", "y.v -name-map m.names", "--lib -name-map m.names y.v",
+        "--parse-only -name-map m.names y.v", "-icells -name-map m.names y.v"};
+    for (size_t i = 0; i < sizeof FORMS / sizeof FORMS[0]; i++) {
+        log_text[0] = '\0';
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, run("read_verilog", fmt_args("%s", FORMS[i])));
+        expect_log_has("-name-map is an option of -netlist");
+    }
+}
+
 /* --- T-hash-2: determinism ---------------------------------------------------------------------
  */
 
@@ -441,6 +766,16 @@ int main(void) {
     RUN_TEST(test_missing_entry_warns);
     RUN_TEST(test_bad_map);
     RUN_TEST(test_option_errors);
+    RUN_TEST(test_json_raw_netname_wins);
+    RUN_TEST(test_json_raw_suffix_wins);
+    RUN_TEST(test_json_raw_cell_wins);
+    RUN_TEST(test_blif_raw_net_wins);
+    RUN_TEST(test_kind_is_matched);
+    RUN_TEST(test_same_hash_two_modules);
+    RUN_TEST(test_escapes_roundtrip);
+    RUN_TEST(test_blif_model_key);
+    RUN_TEST(test_map_caps);
+    RUN_TEST(test_name_map_needs_netlist);
     RUN_TEST(test_construction_order);
     RUN_TEST(test_locales);
     return UNITY_END();

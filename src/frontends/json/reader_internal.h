@@ -120,6 +120,8 @@ typedef struct jr {
     odin3_name_miss name_miss; /* hash-shaped keys the map lacks */
     bool have_names;
     odin3_strbuf name_buf; /* scratch for unique decoded names (reader_names.c) */
+    odin3_u64map
+        *raw_names; /* (kind << 32 | name) of the keys of the module that stay as written */
 } jr;
 
 /* NULL-safe views of the parser's accessors (an absent member is a NULL node). */
@@ -204,6 +206,10 @@ struct jr_named {
 typedef enum jr_name_kind { JR_NAME_WIRE, JR_NAME_NODE } jr_name_kind;
 /* Interns the key of a netname or cell; node is its JSON member (for the line of a miss). */
 odin3_status jr_name_key(jr *rd, const odin3_json_node *node, jr_name_kind kind, jr_named *out);
+/* Around the body of a module under --name-map: reserves the names of its raw netname and cell keys
+ * first, so a decoded name never takes one of them whatever the key order (H-6: raw wins). */
+odin3_status jr_names_begin(jr *rd, const odin3_json_node *mod);
+void jr_names_end(jr *rd);
 /* The one WARNING of H-6. */
 void jr_report_names(const jr *rd);
 /* *out is the record the object takes: the DERIVED of D-1 when its `src` restores, else base. */

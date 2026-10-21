@@ -569,6 +569,9 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     rd->cur_name = mod->name;
     odin3_status st = jr_cur_begin(rd, mod);
     if (st == ODIN3_OK) {
+        st = jr_names_begin(rd, mod->node);
+    }
+    if (st == ODIN3_OK) {
         st = jr_scan_bits(rd);
     }
     if (st == ODIN3_OK) {
@@ -583,6 +586,7 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     if (st == ODIN3_OK) {
         st = jr_read_memories(rd, jr_member(mod->node, "memories"));
     }
+    jr_names_end(rd);
     jr_cur_end(rd);
     return st;
 }

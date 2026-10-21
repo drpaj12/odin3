@@ -17,8 +17,18 @@
 
 typedef struct blif_names blif_names;
 
-/* Loads the map at path; NULL with *st set (logged) on failure. */
-blif_names *blif_names_create(const char *path, odin3_status *st);
+/*
+ * Loads the map at files->map_path; NULL with *st set (logged) on failure. Without files->hdl_locs
+ * the reader keeps every name as written, so a full name that equals a raw net of its model would
+ * merge two nets: the file at files->read_path is scanned first, and such a name takes the first
+ * free `$N` (raw names win; with hdl_locs the reader itself moves the decoded name aside).
+ */
+typedef struct blif_names_files {
+    const char *map_path;
+    const char *read_path;
+    bool hdl_locs;
+} blif_names_files;
+blif_names *blif_names_create(const blif_names_files *files, odin3_status *st);
 void blif_names_destroy(blif_names *names);
 
 /* Starts a pass over the file; only the pass with count true counts the names the map lacks. */
