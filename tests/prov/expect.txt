@@ -1,5 +1,8 @@
-# 6.5b prov-cover: known defects, one per line: <leg> <design file name> <reason>. A listed leg
-# that fails is "excepted"; a listed leg that passes, and an unlisted failure, fail the run.
+# 6.5b prov-cover: known defects, one per line: <leg> <design file name> <defect id> <count> <reason>.
+# The defect id is <kind>/<class, or the hard block type>[/<note>] as the report prints it (report.json
+# "defect_ids"). A leg is excepted only when every defect it has is listed with exactly its count: a
+# new kind or a larger count fails; a smaller count, a listed leg that passes or did not run is stale
+# and fails the run. A flow-error and a cross-check mismatch are never excepted.
 #
 # Defect D1 (reported in the 6.5b lane result): in leg b a cell that drives a module output port
 # bit directly has no location after `write_blif --vtr --name-style provenance` + `read_blif
@@ -10,11 +13,11 @@
 #     hardmap; lower; abc --lut 6; write_blif --vtr --name-style provenance W.blif" \
 #   then "read_techlib lib/vtr.o3lib; read_blif --hdl-locs W.blif; dump_locs --types -" : the $sop
 #   that drives output f has an empty SRC.
-b bm_DL_2_1_mux.v D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_D_flipflop.v D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_4_1_mux.v D1: cell drives an output port bit (name has no location, X-8)
-b ff.v D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_2_cascaded_flip_flops.v D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_logic_w_Dff.v D1: cell drives an output port bit (name has no location, X-8)
-b bm_DL_structural_logic.v D1: cell drives an output port bit (name has no location, X-8)
-b plain_mux.v D1: cell drives an output port bit (name has no location, X-8)
+b plain_mux.v unresolved/lut/drives-output-port 4 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_2_1_mux.v unresolved/lut/drives-output-port 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_D_flipflop.v unresolved/latch/drives-output-port 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_4_1_mux.v unresolved/lut/drives-output-port 1 D1: cell drives an output port bit (name has no location, X-8)
+b ff.v unresolved/latch/drives-output-port 1 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_2_cascaded_flip_flops.v unresolved/latch/drives-output-port 2 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_logic_w_Dff.v unresolved/latch/drives-output-port 2 D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_structural_logic.v unresolved/lut/drives-output-port 1 D1: cell drives an output port bit (name has no location, X-8)

@@ -101,14 +101,14 @@ class ClassTests(unittest.TestCase):
 
     def test_const_driver(self) -> None:
         rows = dump(("$_CONST0_", "$c1", ""), ("$_CONST1_", "$c2", A), ("$lut", "$c3", A))
-        rep = pc.classify(rows, {}, allow=frozenset())
+        rep = pc.classify(rows, {}, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["const-driver"], 1)
         self.assertTrue(rep.ok)
 
     def test_const_table(self) -> None:
         rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""), ("$lut", "$c3", A))
         f = facts({"$c1": cell("$sop", (), ("gnd",)), "$c2": cell("$sop", (), ("n9",))})
-        rep = pc.classify(rows, f, allow=frozenset())
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["const-table"], 1)
         self.assertEqual([d.name for d in rep.defects], ["$c2"])
 
@@ -116,9 +116,9 @@ class ClassTests(unittest.TestCase):
         # write_json folds a zero-input table into a constant: no cell, a gnd net of constant bits
         rows = dump(("$sop", "$c1", ""))
         mod = pc.Mod({}, generators=frozenset({"gnd"}))
-        rep = pc.classify(rows, {"m": mod}, allow=frozenset())
+        rep = pc.classify(rows, {"m": mod}, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["const-table"], 1)
-        rep = pc.classify(rows, {"m": pc.Mod({})}, allow=frozenset())
+        rep = pc.classify(rows, {"m": pc.Mod({})}, allow=frozenset(), readback=True)
         self.assertEqual(len(rep.defects), 1)
 
     def test_port_buffer_output_and_input_side(self) -> None:
@@ -132,7 +132,7 @@ class ClassTests(unittest.TestCase):
             port_in=("i",),
             port_out=("o",),
         )
-        rep = pc.classify(rows, f, allow=frozenset())
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["port-buffer"], 2)
         self.assertEqual([d.name for d in rep.defects], ["$c3"])
 
@@ -145,14 +145,14 @@ class ClassTests(unittest.TestCase):
             },
             port_out=("o",),
         )
-        rep = pc.classify(rows, f, allow=frozenset())
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["port-buffer"], 0)
         self.assertEqual(len(rep.defects), 2)
 
     def test_port_buffer_with_located_leg_a_driver_is_a_lost_location(self) -> None:
         rows = dump(("$sop", "$c1", ""))
         f = facts({"$c1": cell("$sop", ("n1",), ("o",), True)}, port_out=("o",))
-        rep = pc.classify(rows, f, allow=frozenset(), located={("m", "o")})
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True, located={("m", "o")})
         self.assertEqual(rep.exceptions["port-buffer"], 0)
         self.assertEqual(rep.defects[0].kind, "lost-location")
         self.assertFalse(rep.ok)
@@ -168,7 +168,7 @@ class ClassTests(unittest.TestCase):
                 "$c3": cell("$_NOT_", ("a",), ("n3",)),
             }
         )
-        rep = pc.classify(rows, f, allow=frozenset())
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
         self.assertEqual(rep.exceptions["not-helper"], 1)
         self.assertEqual([d.name for d in rep.defects], ["$c3"])
 
@@ -192,7 +192,7 @@ class ClassTests(unittest.TestCase):
     def test_strict_figure_excludes_exceptions(self) -> None:
         rows = dump(("$lut", "$c1", A), ("$sop", "$c2", ""), ("$lut", "$c3", A))
         f = facts({"$c2": cell("$sop", (), ("vcc",))})
-        rep = pc.classify(rows, f, allow=pc.DEFAULT_ALLOW)
+        rep = pc.classify(rows, f, allow=pc.DEFAULT_ALLOW, readback=True)
         self.assertEqual(rep.coverage, 1.0)  # 2 of 2 once the const table is removed
         self.assertAlmostEqual(rep.strict or 0.0, 2 / 3)
 
@@ -214,7 +214,7 @@ class CrossCheckTests(unittest.TestCase):
             },
             port_out=("o",),
         )
-        return pc.classify(rows, f, allow=frozenset(), written=written)
+        return pc.classify(rows, f, allow=frozenset(), readback=True, written=written)
 
     def test_equal_counts_pass(self) -> None:
         rep = self._rep({"const-table": 1, "port-buffer": 1, "not-helper": 0})
@@ -317,7 +317,7 @@ class FactsTests(unittest.TestCase):
 
     def test_json_facts_feed_the_rules(self) -> None:
         rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""))
-        rep = pc.classify(rows, legs.facts_from_json(JSON), allow=frozenset())
+        rep = pc.classify(rows, legs.facts_from_json(JSON), allow=frozenset(), readback=True)
         # $c1 copies input x to an internal net: the input side is a port bit
         self.assertEqual(rep.exceptions["port-buffer"], 1)
         self.assertEqual([d.name for d in rep.defects], ["$c2"])
@@ -413,7 +413,7 @@ class CliTests(unittest.TestCase):
         bad = pc.classify(dump(("$_AND_", "$c1", "")), {}, allow=pc.DEFAULT_ALLOW)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "expect.txt"
-            path.write_text("# known\nb e port bits carry no location\n")
+            path.write_text("# known\nb e unresolved/$_AND_ 1 port bits carry no location\n")
             args = ["--legs", "a", "--expect", str(path), "x.v"]
             with fake_leg(("d", "a", good), ("e", "b", bad)):
                 code, out, _ = run_main(pc.main, args)
@@ -427,9 +427,170 @@ class CliTests(unittest.TestCase):
                 code, _, _ = run_main(pc.main, args)
             self.assertEqual(code, pc.EXIT_FAIL)
 
-    def test_expect_line_needs_a_reason(self) -> None:
+    def test_expect_line_needs_id_count_and_reason(self) -> None:
+        for text in ("b only_two\n", "b d id 1\n", "b d id many reason\n"):
+            with self.assertRaises(pc.ToolError, msg=text):
+                pc.parse_expect(text)
+        table = pc.parse_expect("b d x/y 3 why not\nb d x/z 1 other\n")
+        self.assertEqual(table[("d", "b")], {"x/y": (3, "why not"), "x/z": (1, "other")})
+
+    def test_flow_error_is_never_excepted(self) -> None:
         with self.assertRaises(pc.ToolError):
-            pc.parse_expect("b only_two\n")
+            pc.parse_expect("a d flow-error 1 tool broke\n")
+        rep = pc.LegReport()
+        rep.defects.append(pc.Defect("flow-error", "", "d", "boom"))
+        bad, excepted, _ = pc.judge([("d", "a", rep)], {})
+        self.assertEqual((bad, excepted), (1, 0))
+
+
+def lut_rep(n: int, note: str = "") -> pc.LegReport:
+    """A leg report with n unlocated LUT defects of one note."""
+    rep = pc.LegReport()
+    rep.defects += [pc.Defect("unresolved", "m", f"$c{i}", "$sop", note) for i in range(n)]
+    return rep
+
+
+class JudgeTests(unittest.TestCase):
+    D1 = "unresolved/lut/drives-output-port"
+
+    def test_listed_defect_alone_is_excepted(self) -> None:
+        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
+        bad, excepted, problems = pc.judge([("d", "b", lut_rep(2, "drives-output-port"))], expect)
+        self.assertEqual((bad, excepted, problems), (0, 1, []))
+
+    def test_extra_unlisted_loss_on_a_listed_leg_fails(self) -> None:
+        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
+        rep = lut_rep(2, "drives-output-port")
+        rep.defects.append(pc.Defect("unresolved", "m", "$x", "single_port_ram"))
+        self.assertEqual(pc.judge([("d", "b", rep)], expect)[:2], (1, 0))
+
+    def test_more_of_a_listed_defect_fails_and_fewer_is_stale(self) -> None:
+        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
+        self.assertEqual(
+            pc.judge([("d", "b", lut_rep(3, "drives-output-port"))], expect)[:2], (1, 0)
+        )
+        bad, _, problems = pc.judge([("d", "b", lut_rep(1, "drives-output-port"))], expect)
+        self.assertEqual(bad, 0)
+        self.assertTrue(any("lists 2, found 1" in p for p in problems))
+
+    def test_a_listed_leg_that_did_not_run_is_stale(self) -> None:
+        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
+        good = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
+        _, _, problems = pc.judge([("d", "a", good)], expect)
+        self.assertEqual(problems, ["stale expect line: b d did not run"])
+
+    def test_mismatch_is_never_excepted(self) -> None:
+        expect = pc.parse_expect(f"b d {self.D1} 1 D1\n")
+        rep = lut_rep(1, "drives-output-port")
+        rep.mismatches.append("port-buffer: 1 in the dump, 2 in the written file")
+        self.assertEqual(pc.judge([("d", "b", rep)], expect)[:2], (1, 0))
+
+
+class ReadBackOnlyTests(unittest.TestCase):
+    """P-3: the exception rules apply to a read-back dump only; in memory every unlocated object is
+    a loss."""
+
+    def test_unlocated_identity_lut_at_a_port_bit_fails_leg_a(self) -> None:
+        rows = dump(("$lut", "$c1", ""))
+        f = facts({"$c1": cell("$lut", ("n1",), ("o",), True)}, port_out=("o",))
+        rep = pc.classify(rows, f, allow=pc.DEFAULT_ALLOW)
+        self.assertFalse(rep.ok)
+        self.assertEqual(rep.exceptions["port-buffer"], 0)
+        again = pc.classify(rows, f, allow=pc.DEFAULT_ALLOW, readback=True)
+        self.assertTrue(again.ok)
+
+    def test_unlocated_const_and_not_helper_fail_in_memory(self) -> None:
+        rows = dump(("$_CONST0_", "$c1", ""), ("$sop", "$c2", ""))
+        f = facts({"$c2": cell("$sop", (), ("gnd",))})
+        rep = pc.classify(rows, f, allow=frozenset())
+        self.assertEqual(len(rep.defects), 2)
+        self.assertEqual(sum(rep.exceptions.values()), 0)
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
+        self.assertTrue(rep.ok)
+
+
+class ConstTableTests(unittest.TestCase):
+    def test_dropped_real_table_is_not_a_const_table(self) -> None:
+        # two tables folded away, one generator net: only one can be the generator's
+        rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""))
+        mod = pc.Mod({}, generators=frozenset({"gnd"}))
+        rep = pc.classify(rows, {"m": mod}, allow=frozenset(), readback=True)
+        self.assertEqual(rep.exceptions["const-table"], 1)
+        self.assertEqual(len(rep.defects), 1)
+
+    def test_table_with_inputs_is_not_a_const_table(self) -> None:
+        rows = dump(("$sop", "$c1", ""))
+        f = facts({"$c1": cell("$sop", ("a",), ("gnd",))})
+        rep = pc.classify(rows, f, allow=frozenset(), readback=True)
+        self.assertEqual(rep.exceptions["const-table"], 0)
+        self.assertEqual(len(rep.defects), 1)
+
+
+class VersusTests(unittest.TestCase):
+    def _pair(self, after: tuple[tuple[str, str, str], ...]) -> pc.LegReport:
+        first = pc.classify(
+            dump(("$lut", "$c1", A), ("$lut", "$c2", A), ("$_DFF_P_", "$c3", A)),
+            {},
+            allow=frozenset(),
+        )
+        second = pc.classify(dump(*after), {}, allow=pc.DEFAULT_ALLOW, inherits=True)
+        pc.compare_counts(first, second)
+        return second
+
+    def test_same_counts_pass(self) -> None:
+        rep = self._pair((("$sop", "$c1", A), ("$sop", "$c2", A), ("$_DFF_P_", "$c3", A)))
+        self.assertEqual(rep.versus["lut"], (2, 2))
+        self.assertTrue(rep.ok)
+        self.assertIn("a-vs-b lut 2->2", pc.render_table([("d", "b", rep)]))
+
+    def test_fewer_objects_is_a_count_drop(self) -> None:
+        rep = self._pair((("$sop", "$c1", A), ("$_DFF_P_", "$c3", A)))
+        self.assertEqual([d.kind for d in rep.defects], ["count-drop"])  # one per lost object
+        self.assertEqual(pc.defect_id(rep.defects[0]), "count-drop/lut")
+
+    def test_only_modules_the_second_leg_holds_count(self) -> None:
+        first = pc.classify(
+            pc.parse_dump("t|node:$lut|$c1|a.v:1.1-1.2\nu|node:$lut|$c2|a.v:1.1-1.2\n"),
+            {},
+            allow=frozenset(),
+        )
+        second = pc.classify(pc.parse_dump("t|node:$sop|$c1|a.v:1.1-1.2\n"), {}, allow=frozenset())
+        pc.compare_counts(first, second)
+        self.assertEqual(second.versus["lut"], (1, 1))
+
+
+class LegsTests(unittest.TestCase):
+    def _args(self, legs_arg: str) -> mock.MagicMock:
+        return mock.MagicMock(legs=legs_arg, allow_set=pc.DEFAULT_ALLOW)
+
+    def _run(self, legs_arg: str, fail_second: bool) -> list[tuple[str, pc.LegReport]]:
+        calls = []
+
+        def run(odin3: str, script: str, work: Path, flags: tuple[str, ...] = ()) -> str:
+            calls.append(script)
+            if fail_second and len(calls) == 2:
+                raise pc.ToolError("read_blif broke")
+            return ""
+
+        dumped = legs.Dumped(dump(("$lut", "$c1", A)), {}, "")
+        with (
+            mock.patch("legs.run_odin3", run),
+            mock.patch("legs.dump_state", return_value=dumped),
+            mock.patch("legs.parse_techlibs", return_value={}),
+            mock.patch("legs.written_counts", return_value={}),
+            mock.patch.object(Path, "read_text", return_value=".model t\n"),
+        ):
+            return legs.lut_legs(self._args(legs_arg), "odin3", Path("d.v"), Path("."))
+
+    def test_leg_a_only_when_requested(self) -> None:
+        self.assertEqual([n for n, _ in self._run("b", False)], ["b"])
+        self.assertEqual([n for n, _ in self._run("a,b", False)], ["a", "b"])
+
+    def test_a_failure_in_leg_b_keeps_leg_a(self) -> None:
+        got = self._run("a,b", True)
+        self.assertEqual([n for n, _ in got], ["a", "b"])
+        self.assertTrue(got[0][1].ok)
+        self.assertEqual(got[1][1].defects[0].kind, "flow-error")
 
     def test_nothing_compared_fails(self) -> None:
         with fake_leg():

@@ -16,8 +16,10 @@ Legs: (a) BLIF after ``abc``, in memory; (b) the same BLIF written and read back
 ``--hdl-locs``; (c) the LPM flow, in memory and (``c2``) written and read back; (d) the VPR
 ``.place`` file (``place_check``; the tool never starts VPR).
 
-P-3 exception classes, each counted, none silent (the report lists every class, zero included,
-and the strict figure with none of them). The rules, evidence in brackets:
+P-3 exception classes apply to a read-back dump only (legs b and c-rb): in memory (legs a and c)
+every object without a location is a loss. Each class is counted, none silent (the report lists
+every class, zero included, and the strict figure with none of them). The rules, evidence in
+brackets:
 
 ``const-driver``  a ``$_CONST*_`` node with no location. [writer.c: the BLIF writer folds a
                   constant cell into the generator ``.names gnd|vcc|unconn``, X-9]
@@ -41,12 +43,16 @@ tool also writes ``write_json`` at the same point and joins the cells by name (`
 exception class (but ``inherited`` and ``pad``) is also counted in the written BLIF text
 (``written_counts``); the two counts must be equal, else the rule is wrong and the gate fails.
 
+A-vs-b: the objects per class before and after the write and read-back (the modules the read-back
+holds, less the tables the writer adds) are printed; fewer after is one ``count-drop`` defect per
+lost object.
+
 Gate (P-4): exit status 0 when no object is unresolved outside the classes, no cross-check
 differs, and something was compared. Anything else unresolved is a defect; the first ten are
 named. Recorded (P-5): objects per class, resolved, coverage (resolved / objects less the
-removed exceptions), the strict figure (directly located / all objects), and the specificity
-(median and p90 of distinct file:line pairs per object, ``capped`` = objects at the 8-location
-cap of 5.4 W-3).
+removed exceptions), the strict figure (directly located / all objects; 0 where every location
+is inherited), and the specificity (median and p90 of distinct file:line pairs per object,
+``capped`` = objects at the 8-location cap of 5.4 W-3).
 
 Exit codes: 0 gate passes; 1 a defect, a mismatch or nothing compared; 2 usage or tool error; 3 a
 child crashed or timed out.
@@ -149,6 +155,8 @@ class LegReport:
     capped: int = 0
     blocks: int = 0
     nodes: int = 0  # the nodes counted: objects and the exception nodes that are not objects
+    modules: dict[str, dict[str, int]] = field(default_factory=dict)  # objects per module, class
+    versus: dict[str, tuple[int, int]] = field(default_factory=dict)  # class -> (before, after)
 
     @property
     def total(self) -> int:
@@ -179,8 +187,39 @@ class LegReport:
     def ok(self) -> bool:
         return not self.defects and not self.mismatches
 
+    def kept(self, cls: str) -> int:
+        """Objects of a class once the writer-made exception tables are taken out: the LUT and
+        latch counts that stand against the other leg's."""
+        extra = self.exceptions["const-table"] + self.exceptions["port-buffer"]
+        return self.objects.get(cls, 0) - (extra if cls == "lut" else 0)
+
     def named_defects(self) -> list[Defect]:
         return self.defects[:NAMED_DEFECTS]
+
+
+def compare_counts(first: LegReport, second: LegReport) -> None:
+    """A-vs-b: the objects per class in the modules ``second`` holds (the writer writes the top
+    only) against ``second``'s, less the tables the writer added. A class with fewer objects after
+    the write and read-back is a ``count-drop`` defect: objects were lost, not only locations. A
+    class with more is only shown (the writer adds buffer tables)."""
+    for cls in OBJECT_CLASSES:
+        before = sum(first.modules.get(m, {}).get(cls, 0) for m in second.modules)
+        after = second.kept(cls)
+        second.versus[cls] = (before, after)
+        if after < before:
+            note = f"{cls}: {before} before, {after} after"
+            second.defects += [Defect("count-drop", "", note, cls)] * (before - after)
+
+
+def defect_id(d: Defect) -> str:
+    """The key of a defect kind in an expect file: kind / class (a hard block: its type) / note."""
+    if d.kind == "flow-error":
+        return d.kind
+    cls = object_class(d.ctype)
+    what = cls if cls in ("lut", "latch", "lpm") else (d.ctype or "none")
+    if d.kind == "count-drop":
+        what = d.ctype
+    return "/".join(x for x in (d.kind, what, d.note) if x)
 
 
 def parse_allow(text: str | None) -> frozenset[str]:
@@ -236,6 +275,8 @@ class _Ctx:
         self.facts = facts
         self.located = located
         self.types = {(r.module, r.name): r.ctype for r in rows if r.kind == "node"}
+        # one folded zero-input table per generator net of a module (gnd, vcc, unconn)
+        self.folded = {module: len(mod.generators) for module, mod in facts.items()}
         self.drivers: dict[tuple[str, str], str] = {}
         for module, mod in facts.items():
             for name, cell in mod.cells.items():
@@ -256,7 +297,12 @@ def _const_table(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     if mod is None:
         return False
     if cell is None:  # folded into a constant by write_json: a zero-input table
-        return bool(mod.generators)
+        # no pins to check, so the table must be one of the generator nets' own: at most one per
+        # generator net, else a dropped real table would pass as a constant
+        if ctx.folded.get(row.module, 0) <= 0:
+            return False
+        ctx.folded[row.module] -= 1
+        return True
     if cell.ins or len(cell.outs) != 1:
         return False
     return mod.net_name(cell.outs[0]) in GENERATOR_NETS
@@ -294,11 +340,14 @@ def classify(
     *,
     allow: frozenset[str] = DEFAULT_ALLOW,
     inherits: bool = False,
+    readback: bool = False,
     located: Collection[tuple[str, str]] = frozenset(),
     written: Mapping[str, int] | None = None,
 ) -> LegReport:
-    """Counts the nodes of one typed dump. ``inherits``: the dump is a BLIF VTR read-back, where
-    a located cell has its location through D-5. ``located``: (module, net name) pairs a located
+    """Counts the nodes of one typed dump. ``readback``: the dump is of a written file read back
+    (legs b and c-rb); only there the P-3 exception rules apply, in memory (leg a, leg c) every
+    object without a location is a loss. ``inherits``: the dump is a BLIF VTR read-back, where a
+    located cell has its location through D-5. ``located``: (module, net name) pairs a located
     leg-(a) node drives. ``written``: the class counts of the written file, for the cross-check
     (None: not checked)."""
     ctx = _Ctx(facts, rows, located)
@@ -308,22 +357,31 @@ def classify(
     for row in rows:
         if row.kind != "node" or row.ctype in PORT_TYPES:
             continue
-        _count_node(ctx, row, rep, allow, inherits)
+        _count_node(ctx, row, rep, allow, inherits, readback)
     _cross_check(rep, written)
     return rep
 
 
-def _count_node(ctx: _Ctx, row: Obj, rep: LegReport, allow: frozenset[str], inherits: bool) -> None:
+def _count_node(
+    ctx: _Ctx, row: Obj, rep: LegReport, allow: frozenset[str], inherits: bool, readback: bool
+) -> None:
     cls = object_class(row.ctype)
     has = bool(row.src)
     cell = ctx.cell(row.module, row.name)
     if cls is None:
-        _count_other(ctx, row, rep, cell)
+        _count_other(ctx, row, rep, cell, readback)
         return
     rep.objects[cls] += 1
     rep.nodes += 1
+    per = rep.modules.setdefault(row.module, {})
+    per[cls] = per.get(cls, 0) + 1
     if has:
         _count_located(row, rep, cls, allow, inherits)
+        return
+    if not readback:
+        rep.defects.append(
+            Defect("unresolved", row.module, row.name, row.ctype, _port_note(ctx, row, cell))
+        )
         return
     if cls == "lut" and _const_table(ctx, row, cell):
         rep.exceptions["const-table"] += 1
@@ -354,15 +412,17 @@ def _count_located(
     rep.direct += 1
 
 
-def _count_other(ctx: _Ctx, row: Obj, rep: LegReport, cell: Cell | None) -> None:
+def _count_other(ctx: _Ctx, row: Obj, rep: LegReport, cell: Cell | None, readback: bool) -> None:
     if row.ctype in CONST_TYPES:
-        if not row.src:
+        if not row.src and readback:
             rep.exceptions["const-driver"] += 1
             rep.nodes += 1
+        elif not row.src:
+            rep.defects.append(Defect("unresolved", row.module, row.name, row.ctype))
         return
     if row.src:
         return
-    if row.ctype in NOT_TYPES and _not_helper(ctx, row, cell):
+    if readback and row.ctype in NOT_TYPES and _not_helper(ctx, row, cell):
         rep.exceptions["not-helper"] += 1
         rep.nodes += 1
         return
@@ -495,9 +555,16 @@ def render_table(items: Sequence[tuple[str, str, LegReport]]) -> str:
             n = rep.exceptions[name]
             out.append(f"  except {name:<13} {n:>7} share {_pct(n / base)}")
         out.append(
-            f"  coverage {_pct(rep.coverage)}  strict {_pct(rep.strict)}  objects {rep.total}"
+            f"  coverage {_pct(rep.coverage)}  strict (no inherited/pad) {_pct(rep.strict)}"
+            f"  objects {rep.total}"
             f"  median {rep.median:g}  p90 {rep.p90:g}  capped {rep.capped}"
         )
+        if rep.versus:
+            out.append(
+                "  a-vs-b "
+                + " ".join(f"{c} {x}->{y}" for c, (x, y) in rep.versus.items())
+                + "  (objects before and after the write and read-back, less writer tables)"
+            )
         out += [f"  MISMATCH {m}" for m in rep.mismatches]
         out += [f"  DEFECT {d.text()}" for d in rep.named_defects()]
         if rep.defects:
@@ -521,6 +588,8 @@ def report_dict(items: Sequence[tuple[str, str, LegReport]]) -> dict[str, Any]:
             "exceptions": rep.exceptions,
             "coverage": rep.coverage,
             "strict": rep.strict,
+            "versus": {c: list(v) for c, v in rep.versus.items()},
+            "defect_ids": dict(Counter(defect_id(d) for d in rep.defects)),
             "median": rep.median,
             "p90": rep.p90,
             "capped": rep.capped,
@@ -534,39 +603,62 @@ def report_dict(items: Sequence[tuple[str, str, LegReport]]) -> dict[str, Any]:
 # --- driving ----------------------------------------------------------------------------------
 
 
-def parse_expect(text: str) -> dict[tuple[str, str], str]:
-    """``(design, leg) -> reason`` from ``<leg> <design file name> <reason...>`` lines."""
-    table: dict[tuple[str, str], str] = {}
+Expect = dict[tuple[str, str], dict[str, tuple[int, str]]]
+
+
+def parse_expect(text: str) -> Expect:
+    """``(design, leg) -> {defect id: (count, reason)}`` from lines
+    ``<leg> <design file name> <defect id> <count> <reason...>``. A ``flow-error`` is never
+    listed."""
+    table: Expect = {}
     for raw in text.splitlines():
         words = raw.split("#", 1)[0].split()
         if not words:
             continue
-        if len(words) < 3:
-            raise ToolError(f"expect line wants '<leg> <design> <reason>': {raw!r}")
-        table[(words[1], words[0])] = " ".join(words[2:])
+        if len(words) < 5 or not words[3].isdigit():
+            raise ToolError(
+                f"expect line wants '<leg> <design> <defect id> <count> <reason>': {raw!r}"
+            )
+        if words[2].startswith("flow-error"):
+            raise ToolError(f"a flow-error is never excepted: {raw!r}")
+        entry = table.setdefault((words[1], words[0]), {})
+        if words[2] in entry:
+            raise ToolError(f"expect: {words[2]} listed twice for {words[0]} {words[1]}")
+        entry[words[2]] = (int(words[3]), " ".join(words[4:]))
     return table
 
 
 def judge(
-    items: Sequence[tuple[str, str, LegReport]], expect: Mapping[tuple[str, str], str]
+    items: Sequence[tuple[str, str, LegReport]], expect: Expect
 ) -> tuple[int, int, list[str]]:
-    """(failed, excepted, problems): a failing leg the expect file lists is excepted; a listed leg
-    that passes or did not run is stale, and fails the run."""
+    """(failed, excepted, problems). A leg fails unless it is clean or every defect kind it has is
+    listed with exactly its count (more is a new defect; fewer is a stale line, a problem). A
+    mismatch or a flow-error is never excepted. A listed leg that passes or did not run is stale."""
     bad = excepted = 0
+    problems: list[str] = []
     seen: set[tuple[str, str]] = set()
     for design, leg, rep in items:
         key = (design, leg)
         seen.add(key)
+        listed = expect.get(key, {})
+        found = Counter(defect_id(d) for d in rep.defects)
         if rep.ok:
+            problems += [f"stale expect line: {leg} {design} {i}" for i in sorted(listed)]
             continue
-        if key in expect:
-            excepted += 1
-        else:
+        extra = [i for i, n in found.items() if i not in listed or n > listed[i][0]]
+        stale = [i for i in listed if found.get(i, 0) < listed[i][0]]
+        problems += [
+            f"stale expect line: {leg} {design} {i} lists {listed[i][0]}, found {found.get(i, 0)}"
+            for i in sorted(stale)
+        ]
+        if rep.mismatches or extra or "flow-error" in {i.split("/")[0] for i in found}:
             bad += 1
-    problems = [
-        f"stale expect line: {leg} {design} {expect[(design, leg)]}"
+        else:
+            excepted += 1
+    problems += [
+        f"stale expect line: {leg} {design} did not run"
         for design, leg in sorted(expect)
-        if (design, leg) in seen and next(r.ok for d, lg, r in items if (d, lg) == (design, leg))
+        if (design, leg) not in seen
     ]
     return bad, excepted, problems
 
@@ -584,7 +676,9 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--allow", help="exception classes to enable (default inherited,pad)")
     ap.add_argument("--odin3", default=None)
     ap.add_argument("--report", type=Path, help="write report.json here")
-    ap.add_argument("--expect", type=Path, help="known defects: '<leg> <design> <reason>' lines")
+    ap.add_argument(
+        "--expect", type=Path, help="known defects: '<leg> <design> <defect id> <count> <reason>'"
+    )
     ap.add_argument("--work", type=Path, help="keep every file here")
     ap.add_argument("--smallest-first", action="store_true")
     ap.add_argument("files", nargs="*", type=Path)

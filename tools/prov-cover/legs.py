@@ -34,6 +34,7 @@ from prov_cover import (
     Obj,
     ToolError,
     classify,
+    compare_counts,
     parse_dump,
     written_counts,
 )
@@ -181,31 +182,49 @@ def flow_lut(design: Path, libs: Sequence[str]) -> str:
     )
 
 
+def flow_error(design: str, exc: ToolError) -> LegReport:
+    rep = LegReport()
+    rep.defects.append(Defect("flow-error", "", design, str(exc)[:200]))
+    return rep
+
+
 def lut_legs(
     args: argparse.Namespace, odin3: str, design: Path, work: Path
 ) -> list[tuple[str, LegReport]]:
+    """Leg a is run for leg b's file; its result is kept only when asked for, and a failure of
+    leg b keeps leg a's result."""
+    wanted = args.legs.split(",")
     libs = parse_techlibs(TECHLIBS).get(design.name, [])
     blif = work / "W.blif"
     script = (
         f"{flow_lut(design, libs)}; {tail_commands('a')}; "
         f"write_blif --vtr --lut-k {LUT_K} --name-style provenance {blif}"
     )
-    run_odin3(odin3, script, work)
-    a = dump_state(work, "a", "")
-    out = [("a", classify(a.rows, a.facts, allow=args.allow_set))]
-    if "b" not in args.legs.split(","):
+    try:
+        run_odin3(odin3, script, work)
+        a = dump_state(work, "a", "")
+    except ToolError as exc:
+        return [("a" if "a" in wanted else "b", flow_error(design.name, exc))]
+    rep_a = classify(a.rows, a.facts, allow=args.allow_set)
+    out = [("a", rep_a)] if "a" in wanted else []
+    if "b" not in wanted:
         return out
     pre = "; ".join(libs) if libs else f"read_techlib {LIB_VTR}"
-    log = run_odin3(odin3, f"{pre}; read_blif --hdl-locs {blif}; {tail_commands('b')}", work)
-    b = dump_state(work, "b", log)
+    try:
+        log = run_odin3(odin3, f"{pre}; read_blif --hdl-locs {blif}; {tail_commands('b')}", work)
+        b = dump_state(work, "b", log)
+    except ToolError as exc:
+        return [*out, ("b", flow_error(design.name, exc))]
     rep = classify(
         b.rows,
         b.facts,
         allow=args.allow_set,
         inherits=True,
+        readback=True,
         located=located_nets(a.rows, a.facts),
         written=written_counts(blif.read_text(encoding="utf-8")),
     )
+    compare_counts(rep_a, rep)
     info = INFO_INHERITED.search(log)
     if info and int(info.group(1)) != rep.exceptions["inherited"]:
         rep.mismatches.append(
@@ -230,13 +249,21 @@ def lpm_legs(
     verilog = work / "W.v"
     run_odin3(odin3, f"{flow}; {tail_commands('c', False)}; write_verilog {verilog}", work)
     c = dump_state(work, "c", "", False)
-    out = [("c", classify(c.rows, c.facts, allow=args.allow_set))]
+    rep_c = classify(c.rows, c.facts, allow=args.allow_set)
+    out = [("c", rep_c)]
     pre = "; ".join([f"read_techlib {LIB_LPM}", *libs])
-    run_odin3(
-        odin3, f"{pre}; read_verilog -netlist -icells {verilog}; {tail_commands('c2', False)}", work
-    )
-    c2 = dump_state(work, "c2", "", False)
-    out.append(("c-rb", classify(c2.rows, c2.facts, allow=args.allow_set)))
+    try:
+        run_odin3(
+            odin3,
+            f"{pre}; read_verilog -netlist -icells {verilog}; {tail_commands('c2', False)}",
+            work,
+        )
+        c2 = dump_state(work, "c2", "", False)
+    except ToolError as exc:
+        return [*out, ("c-rb", flow_error(design.name, exc))]
+    rep_rb = classify(c2.rows, c2.facts, allow=args.allow_set, readback=True)
+    compare_counts(rep_c, rep_rb)
+    out.append(("c-rb", rep_rb))
     return out
 
 
@@ -265,7 +292,5 @@ def run_designs(args: argparse.Namespace, work: Path) -> list[tuple[str, str, Le
                     (design.name, name, rep) for name, rep in flow(args, odin3, design, run_dir)
                 ]
             except ToolError as exc:
-                rep = LegReport()
-                rep.defects.append(Defect("flow-error", "", design.name, str(exc)[:200]))
-                items.append((design.name, leg, rep))
+                items.append((design.name, leg, flow_error(design.name, exc)))
     return items
