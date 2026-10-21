@@ -1,0 +1,26 @@
+
+.model add
+.inputs rst x_top[0] x_top[1] y_top[0] y_top[1]
+.outputs q_top[0] q_top[1]
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NOT_ A=rst Y=$abc$120$new_n8
+.subckt $_NAND_ A=y_top[0] B=x_top[0] Y=$abc$120$new_n9
+.subckt $_NOR_ A=y_top[0] B=x_top[0] Y=$abc$120$new_n10
+.subckt $_NAND_ A=$abc$120$new_n8 B=$abc$120$new_n9 Y=$abc$120$new_n11
+.subckt $_NOR_ A=$abc$120$new_n10 B=$abc$120$new_n11 Y=q_top[0]
+.subckt $_NOR_ A=y_top[1] B=x_top[1] Y=$abc$120$new_n13
+.subckt $_NOT_ A=$abc$120$new_n13 Y=$abc$120$new_n14
+.subckt $_NAND_ A=y_top[1] B=x_top[1] Y=$abc$120$new_n15
+.subckt $_NAND_ A=$abc$120$new_n14 B=$abc$120$new_n15 Y=$abc$120$new_n16
+.subckt $_NOR_ A=$abc$120$new_n9 B=$abc$120$new_n16 Y=$abc$120$new_n17
+.subckt $_NAND_ A=$abc$120$new_n9 B=$abc$120$new_n16 Y=$abc$120$new_n18
+.subckt $_NAND_ A=$abc$120$new_n8 B=$abc$120$new_n18 Y=$abc$120$new_n19
+.subckt $_NOR_ A=$abc$120$new_n17 B=$abc$120$new_n19 Y=q_top[1]
+.subckt $_BUF_ A=x_top[0] Y=uut.x_add2[0]
+.subckt $_BUF_ A=x_top[1] Y=uut.x_add2[1]
+.subckt $_BUF_ A=y_top[0] Y=uut.y_add2[0]
+.subckt $_BUF_ A=y_top[1] Y=uut.y_add2[1]
+.end
