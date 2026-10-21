@@ -323,6 +323,78 @@ static void test_cone_check_hash_stable(void) {
     TEST_ASSERT_NOT_EQUAL_INT(0, strcmp(first, direct));
 }
 
+static void test_cone_check_hash_sees_rewiring(void) {
+    load_adder(false);
+    char before[HASH_HEX];
+    char after[HASH_HEX];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cone_hash(top(), "grp", "add4", before));
+    /* a0 feeds two nodes; one reads b1 instead: same node IDs, same boundary nets, same bindings */
+    odin3_module *mod = top();
+    odin3_net_id a0 = odin3_module_find_net(mod, intern("a0"));
+    odin3_net_id b1 = odin3_module_find_net(mod, intern("b1"));
+    odin3_pinlist sinks = odin3_net_sinks(mod, a0);
+    TEST_ASSERT_TRUE(sinks.count >= 2);
+    odin3_pin_id pin = sinks.pins[0];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(mod, pin));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(mod, pin, b1));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cone_hash(mod, "grp", "add4", after));
+    TEST_ASSERT_NOT_EQUAL_INT(0, strcmp(before, after));
+}
+
+static void test_cone_check_hash_sees_key_value(void) {
+    load_adder(false);
+    char one[HASH_HEX];
+    char two[HASH_HEX];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cone_hash(top(), "grp", "add4", one));
+    odin3_module *mod = top();
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+        if (odin3_node_live(mod, (odin3_node_id){nid}) &&
+            odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_NODE, nid}, intern("grp")) != NULL) {
+            set_str((odin3_objref){ODIN3_OBJ_NODE, nid}, "grp2", "add4");
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cone_hash(mod, "grp2", "add4", two));
+    TEST_ASSERT_NOT_EQUAL_INT(0, strcmp(one, two));
+}
+
+#define AND2_BLIF ".model m\n.inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n"
+
+static void load_and2(void) {
+    read_blif(AND2_BLIF);
+    mark_all();
+    bind("a=A[0]");
+    bind("b=A[1]");
+    bind("y=Y[0]");
+}
+
+static void test_cone_check_template_xz_refused(void) {
+    load_and2();
+    shape before = shape_of();
+    FAILS_WITH("-attr grp=add4 -cell $lut -param WIDTH=2 -param LUT=10x0", "x or z");
+    log_text[0] = '\0';
+    FAILS_WITH("-attr grp=add4 -cell $lut -param WIDTH=2 -param LUT=1z00", "x or z");
+    TEST_ASSERT_NULL(text_attr("odin3:cone_check"));
+    expect_same(before);
+}
+
+static void test_cone_check_constant_x_unproven(void) {
+    load_and2();
+    odin3_module *mod = top();
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_CONSTX_"), &type));
+    odin3_node_id node = {0};
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(mod, 0, (odin3_prov_id){0}, &net));
+    odin3_netvec ports = {&net, 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(mod, &spec, &ports, &node));
+    set_str((odin3_objref){ODIN3_OBJ_NODE, node.v}, "grp", "add4");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, run("-attr grp=add4 -cell $lut -param WIDTH=2 -param LUT=1000"), log_text);
+    TEST_ASSERT_EQUAL_STRING("unproven", text_attr("odin3:cone_check"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "x/z constant in the cone: proof is modulo x=0"));
+}
+
 static void test_cone_check_usage_errors(void) {
     load_adder(false);
     FAILS_WITH("-cell $add", "-attr");
@@ -342,6 +414,10 @@ int main(void) {
     RUN_TEST(test_cone_check_binding_incomplete);
     RUN_TEST(test_cone_check_binding_missing_and_unknown);
     RUN_TEST(test_cone_check_hash_stable);
+    RUN_TEST(test_cone_check_hash_sees_rewiring);
+    RUN_TEST(test_cone_check_hash_sees_key_value);
+    RUN_TEST(test_cone_check_template_xz_refused);
+    RUN_TEST(test_cone_check_constant_x_unproven);
     RUN_TEST(test_cone_check_usage_errors);
     return UNITY_END();
 }

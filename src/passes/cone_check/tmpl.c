@@ -73,7 +73,7 @@ static odin3_status parse_int(const cc_tmpl *tmpl, const cc_param *param, odin3_
     return ODIN3_OK;
 }
 
-/* BITS: the text is MSB first, characters 0 1 x z; the value stores LSB first. */
+/* BITS: the text is MSB first, characters 0 and 1 (x and z are refused); LSB first inside. */
 static odin3_status parse_bits(cc_tmpl *tmpl, const cc_param *param, odin3_value *val) {
     size_t len = strlen(param->value);
     uint8_t *bits = len > 0 ? odin3_arena_alloc(tmpl->arena, len) : NULL;
@@ -87,6 +87,12 @@ static odin3_status parse_bits(cc_tmpl *tmpl, const cc_param *param, odin3_value
         const char *found = ch != '\0' ? strchr("01xz", ch) : NULL;
         if (found == NULL) {
             return TMPL_ERR(tmpl, "cone_check: parameter '%s': '%s' is not a bit string",
+                            param->name, param->value);
+        }
+        if (ch == 'x' || ch == 'z') {
+            return TMPL_ERR(tmpl,
+                            "cone_check: parameter '%s': '%s' has x or z: the proof reads x and z "
+                            "as 0, so the template must not use them",
                             param->name, param->value);
         }
         bits[i] = (uint8_t)(found - "01xz");

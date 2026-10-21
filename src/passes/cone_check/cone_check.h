@@ -16,11 +16,13 @@ enum { ODIN3_CONE_HASH_BYTES = 65 };
 /*
  * Writes into out the SHA-256 (lower-case hex, NUL-terminated) of the group of `module` whose node
  * attribute `key` has the text `value` (a STRING with that text, or an INT with that decimal
- * text). The hashed text is, for each live group node in ascending ID order, the line `n<ID>`, then
- * for each boundary net of the group in ascending net ID order that carries `odin3:bind`, the line
- * `b<net ID>:<binding>`. A boundary net is a net a group node touches that is driven by a group
- * node and read outside the group, or read by a group node and not driven by one. Nothing changes
- * and nothing is logged. Failure: INVALID_ARG for a NULL argument or an empty group; NO_MEMORY.
+ * text). The hashed text is the line `<key>=<value>`, then for each live group node in ascending ID
+ * order its ID, type name, parameter values (whole payload) and, per pin in pin order, the port,
+ * bit and net ID it connects to (0 when open), then for each boundary net of the group in
+ * ascending net ID order that carries `odin3:bind`, the line `b<net ID>:<binding>`. A boundary net
+ * is a net a group node touches that is driven by a group node and read outside the group, or read
+ * by a group node and not driven by one. Nothing changes and nothing is logged. Failure:
+ * INVALID_ARG for a NULL argument or an empty group; NO_MEMORY.
  */
 odin3_status odin3_cone_hash(const odin3_module *module, const char *key, const char *value,
                              char out[ODIN3_CONE_HASH_BYTES]);

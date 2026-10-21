@@ -331,22 +331,64 @@ odin3_status cc_group_check(const cc_group *group, const char *key, const char *
 
 /* --- the hash ------------------------------------------------------------------------------ */
 
-static void hash_text(odin3_sha256 *sha, const char *line, int len) {
-    if (len > 0) {
-        odin3_sha256_update(sha, line, (size_t)len < LINE_BYTES ? (size_t)len : LINE_BYTES - 1);
-    }
+/* Feeds the whole of text, however long. */
+static void hash_str(odin3_sha256 *sha, const char *text) {
+    odin3_sha256_update(sha, text, strlen(text));
 }
 
-/* The line `n<ID>` of a node. */
-static void hash_node(odin3_sha256 *sha, uint32_t node) {
+static void hash_fmt(odin3_sha256 *sha, const char *fmt, ...) ODIN3_PRINTF(2, 3);
+
+/* Feeds one formatted line of at most LINE_BYTES - 1 bytes (numbers and fixed text only). */
+static void hash_fmt(odin3_sha256 *sha, const char *fmt, ...) {
     char line[LINE_BYTES];
-    hash_text(sha, line, snprintf(line, sizeof line, "n%" PRIu32 "\n", node));
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(line, sizeof line, fmt, args);
+    va_end(args);
+    if (len > 0) {
+        odin3_sha256_update(sha, line, (size_t)len < sizeof line ? (size_t)len : sizeof line - 1);
+    }
 }
 
 /* The line `b<net>:<binding>` of a bound boundary net. */
 static void hash_bind(odin3_sha256 *sha, uint32_t net, const char *binding) {
-    char line[LINE_BYTES];
-    hash_text(sha, line, snprintf(line, sizeof line, "b%" PRIu32 ":%s\n", net, binding));
+    hash_fmt(sha, "b%" PRIu32 ":", net);
+    hash_str(sha, binding);
+    hash_str(sha, "\n");
+}
+
+/* One parameter value: its kind and the whole of its payload. */
+static void hash_value(odin3_sha256 *sha, const odin3_design *design, const odin3_value *val) {
+    hash_fmt(sha, "p%d:%" PRId64 ":%" PRIu32 ":%" PRIu32 ":", (int)val->kind, val->i, val->len,
+             val->cover_inputs);
+    if (val->kind == ODIN3_VAL_STRING) {
+        hash_str(sha, odin3_strtab_get(odin3_design_strtab(design), val->str));
+    } else if (val->bits != NULL && val->len > 0) {
+        odin3_sha256_update(sha, val->bits, val->len);
+    }
+    hash_str(sha, "\n");
+}
+
+/* A node: `n<ID>:<type>`, its parameters, then `c<port>.<bit>=<net>` for each pin (net 0: open). */
+static void hash_node(odin3_sha256 *sha, const cc_group *group, uint32_t id) {
+    const odin3_module *mod = group->module;
+    odin3_node_id node = {id};
+    const odin3_celltype_def *def = odin3_celltype_get(group->design, odin3_node_type(mod, node));
+    hash_fmt(sha, "n%" PRIu32 ":", id);
+    hash_str(sha, def->name);
+    hash_str(sha, "\n");
+    for (uint32_t k = 0; k < def->n_params; k++) {
+        const odin3_value *val = odin3_node_param(mod, node, k);
+        if (val != NULL) {
+            hash_value(sha, group->design, val);
+        }
+    }
+    odin3_pinslice pins = odin3_node_pins(mod, node);
+    for (uint32_t k = 0; k < pins.count; k++) {
+        odin3_pin_id pin = {pins.first.v + k};
+        hash_fmt(sha, "c%" PRIu32 ".%" PRIu32 "=%" PRIu32 "\n", odin3_pin_port(mod, pin),
+                 odin3_pin_bit(mod, pin), odin3_pin_net(mod, pin).v);
+    }
 }
 
 odin3_status odin3_cone_hash(const odin3_module *module, const char *key, const char *value,
@@ -365,9 +407,13 @@ odin3_status odin3_cone_hash(const odin3_module *module, const char *key, const 
     if (st == ODIN3_OK) {
         odin3_sha256 sha;
         odin3_sha256_init(&sha);
+        hash_str(&sha, key);
+        hash_str(&sha, "=");
+        hash_str(&sha, value);
+        hash_str(&sha, "\n");
         const uint32_t *nodes = group.nodes.data;
         for (size_t i = 0; i < group.nodes.len; i++) {
-            hash_node(&sha, nodes[i]);
+            hash_node(&sha, &group, nodes[i]);
         }
         const cc_bnet *nets = group.nets.data;
         for (size_t i = 0; i < group.nets.len; i++) {

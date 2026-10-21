@@ -28,10 +28,16 @@ enum {
     XS_LEFT_1 = 13, /* xorshift64 shifts */
     XS_RIGHT = 7,
     XS_LEFT_2 = 17,
-    WORD_BITS = 64
+    WORD_BITS = 64,
+    SM_SHIFT_1 = 30, /* splitmix64 constants */
+    SM_SHIFT_2 = 27,
+    SM_SHIFT_3 = 31
 };
 
 static const uint64_t k_seed = 0x9E3779B97F4A7C15ULL;
+static const uint64_t k_sm_gamma = 0x9E3779B97F4A7C15ULL;
+static const uint64_t k_sm_mul_1 = 0xBF58476D1CE4E5B9ULL;
+static const uint64_t k_sm_mul_2 = 0x94D049BB133111EBULL;
 
 void cc_proof_init(cc_proof *proof) {
     proof->verdict = CC_UNPROVEN;
@@ -255,26 +261,52 @@ static uint64_t next_random(uint64_t *state) {
     return *state;
 }
 
-/* Fills val[1 .. n_pi] with pattern number `number`: counting when exhaustive, else random. */
-static void set_pattern(uint8_t *val, uint32_t n_pi, uint64_t number, uint64_t *rng) {
-    uint64_t bits = n_pi <= EXHAUSTIVE_BITS ? number : next_random(rng);
-    for (uint32_t pi = 0; pi < n_pi; pi++) {
-        val[pi + 1U] = (uint8_t)((bits >> (pi % WORD_BITS)) & 1U);
+/* Which pattern to fill: the input count and the pattern number. */
+typedef struct cc_which {
+    uint32_t n_pi;
+    uint64_t number;
+} cc_which;
+
+/* The seed of input `pi`'s own generator: splitmix64 of the global seed plus the input number. */
+static uint64_t input_seed(uint32_t pi) {
+    uint64_t mix = k_seed + (uint64_t)(pi + 1U) * k_sm_gamma;
+    mix = (mix ^ (mix >> SM_SHIFT_1)) * k_sm_mul_1;
+    mix = (mix ^ (mix >> SM_SHIFT_2)) * k_sm_mul_2;
+    return mix ^ (mix >> SM_SHIFT_3);
+}
+
+/* Fills val[1 .. n_pi] with pattern number `number`: counting when exhaustive, else every input
+ * takes the next bit of its own generator (rng[pi]), so no two inputs share values. */
+static void set_pattern(uint8_t *val, const cc_which *which, uint64_t *rng) {
+    for (uint32_t pi = 0; pi < which->n_pi; pi++) {
+        uint64_t bit =
+            rng == NULL ? (which->number >> pi) & 1U : next_random(&rng[pi]) >> (WORD_BITS - 1);
+        val[pi + 1U] = (uint8_t)bit;
     }
 }
 
 /* The first pattern the miter answers 1 on, in val; false when none of those tried does. */
 static bool find_cex(const cc_mit *mit, uint32_t n_pi, odin3_vec *val) {
     size_t count = mit->objs.len;
-    uint64_t total = n_pi <= EXHAUSTIVE_BITS ? (uint64_t)1 << n_pi : RANDOM_PATTERNS;
-    uint64_t rng = k_seed;
-    for (uint64_t number = 0; number < total; number++) {
-        set_pattern(val->data, n_pi, number, &rng);
-        if (eval_miter(mit->objs.data, count, val->data)) {
-            return true;
+    bool exhaustive = n_pi <= EXHAUSTIVE_BITS;
+    uint64_t total = exhaustive ? (uint64_t)1 << n_pi : RANDOM_PATTERNS;
+    odin3_vec seeds;
+    odin3_vec_init(&seeds, sizeof(uint64_t));
+    for (uint32_t pi = 0; !exhaustive && pi < n_pi; pi++) {
+        uint64_t *slot = odin3_vec_push(&seeds);
+        if (slot == NULL) {
+            odin3_vec_free(&seeds);
+            return false; /* no memory: no counterexample text, the verdict stands */
         }
+        *slot = input_seed(pi);
     }
-    return false;
+    bool found = false;
+    for (uint64_t number = 0; !found && number < total; number++) {
+        set_pattern(val->data, &(cc_which){n_pi, number}, exhaustive ? NULL : seeds.data);
+        found = eval_miter(mit->objs.data, count, val->data);
+    }
+    odin3_vec_free(&seeds);
+    return found;
 }
 
 /* `PORT[i]=v,...` over the template's input bits in port order; a bit no PI carries reads 0. */

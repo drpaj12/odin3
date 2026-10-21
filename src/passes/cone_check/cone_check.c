@@ -63,6 +63,17 @@ static odin3_status clear_attr(odin3_module *module, const char *key) {
     return odin3_attr_remove(module, module_ref(module), key_str);
 }
 
+/* Sets the attributes of the result one after another; the first failure stops. */
+static odin3_status set_all(odin3_module *module, const char *const keys[],
+                            const char *const texts[], size_t count) {
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < count; i++) {
+        st = set_text(module, keys[i], texts[i]);
+    }
+    return st;
+}
+
+/* All or nothing: every text is computed first; when a set fails, the keys of this run go again. */
 static odin3_status write_result(const cc_job *job, const cc_proof *proof) {
     odin3_module *module = job->src;
     const cc_opts *opts = job->opts;
@@ -70,13 +81,40 @@ static odin3_status write_result(const cc_job *job, const cc_proof *proof) {
     char group[ODIN3_LOG_BUF / 4];
     (void)snprintf(group, sizeof group, "%s=%s", opts->key, opts->value);
     odin3_status st = odin3_cone_hash(module, opts->key, opts->value, hash);
-    st = st == ODIN3_OK ? set_text(module, CC_KEY_CHECK, k_verdicts[proof->verdict]) : st;
-    st = st == ODIN3_OK ? set_text(module, CC_KEY_GROUP, group) : st;
-    st = st == ODIN3_OK ? set_text(module, CC_KEY_HASH, hash) : st;
-    if (st == ODIN3_OK && proof->cex.len > 0) {
-        return set_text(module, CC_KEY_CEX, proof->cex.data);
+    if (st != ODIN3_OK) {
+        return st;
     }
-    return st == ODIN3_OK ? clear_attr(module, CC_KEY_CEX) : st;
+    const char *keys[] = {CC_KEY_CHECK, CC_KEY_GROUP, CC_KEY_HASH, CC_KEY_CEX};
+    const char *texts[] = {k_verdicts[proof->verdict], group, hash, proof->cex.data};
+    bool has_cex = proof->cex.len > 0;
+    size_t count = has_cex ? 4U : 3U;
+    st = set_all(module, keys, texts, count);
+    if (st == ODIN3_OK && !has_cex) {
+        st = clear_attr(module, CC_KEY_CEX);
+    }
+    if (st != ODIN3_OK) {
+        for (size_t i = 0; i < 4U; i++) {
+            (void)clear_attr(module, keys[i]);
+        }
+    }
+    return st;
+}
+
+/* The group has a constant x or z driver: the proof reads those as 0, so it proves nothing. */
+static bool group_has_xz(const cc_group *group) {
+    const uint32_t *nodes = group->nodes.data;
+    for (size_t i = 0; i < group->nodes.len; i++) {
+        odin3_node_id node = {nodes[i]};
+        const odin3_celltype_def *def =
+            odin3_celltype_get(group->design, odin3_node_type(group->module, node));
+        odin3_const val = def->const_value != NULL
+                              ? def->const_value(odin3_node_param(group->module, node, 0))
+                              : ODIN3_CONST_NONE;
+        if (val == ODIN3_CONST_X || val == ODIN3_CONST_Z) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* --- the run ------------------------------------------------------------------------------- */
@@ -100,7 +138,14 @@ odin3_status cc_run_module(odin3_pass_ctx *ctx, odin3_module *module, const cc_o
     odin3_status st = cc_group_collect(&job.group, opts);
     *found = st == ODIN3_OK && job.group.nodes.len > 0;
     st = *found && st == ODIN3_OK ? prepare(&job) : st;
-    st = *found && st == ODIN3_OK ? cc_prove(&job, &proof) : st;
+    if (*found && st == ODIN3_OK && group_has_xz(&job.group)) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "cone_check: group '%s=%s': x/z constant in the cone: proof is modulo x=0",
+                  opts->key, opts->value);
+        proof.verdict = CC_UNPROVEN;
+    } else {
+        st = *found && st == ODIN3_OK ? cc_prove(&job, &proof) : st;
+    }
     st = *found && st == ODIN3_OK ? write_result(&job, &proof) : st;
     if (*found && st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "cone_check: module '%s': group '%s=%s' vs %s: %s",
