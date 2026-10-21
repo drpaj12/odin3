@@ -48,6 +48,9 @@ the Phase 3 design set and the Phase 5 LPM micros.
   do. The only exceptions are named classes (constant drivers, buffers the writers add), each
   counted. An unresolved object outside those classes is a bug. Recorded per design: the
   coverage, and the specificity (median and 90th percentile of distinct HDL lines per object).
+  Baseline for the read-back cases: `docs/specs/2026-10-20-5.4-hdl-locations-design.md` section 14
+  (`tools/loc-check`, 5.4e): per format and object kind, what survives a write and read, the lost
+  objects by class X-1 to X-9, and the specificity before and after.
 
 ## Dependencies
 

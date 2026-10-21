@@ -46,7 +46,7 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
   (PRs 5.3a parser, 5.3b reader and pass, 5.3c round-trip tool and Yosys fixtures; decision 10). The
   fixpoint is generation 2 to 3 (spec R-1); `netlist-compare` is identical where covers survive the
   `$sop` to `$lut` write (spec R-3, question 3).
-- [ ] 5.4 HDL locations survive write and read:
+- [x] 5.4 HDL locations survive write and read (5.4a to 5.4e merged; 5.4f hashed names has its own PRs):
   - BLIF: `read_blif` decodes `--name-style provenance` names (`hier/<name>@file:line`) back
     into provenance records pointing at the HDL, beside the IMPORTED record of the BLIF line;
   - Verilog: the writer adds `(* src = "file:line" *)` where Verilog allows an attribute
@@ -206,3 +206,16 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
     readers decode only under `read_verilog -netlist`, `read_blif --hdl-locs`, `read_json` (default,
     `--keep-src-attr` to keep the string); `tools/loc-check` reports same, line, inherited, lost by class
     and gained per format, level and object kind, the baseline for 6.5.
+    Implemented as 5.4a to 5.4e (spec v1.1 section 14, plan deviations; agent defaults, Peter may override).
+    `tools/loc-check` over `tests/loc/{word,gate,lut,lpm}.script`, measured in Release over the 68 micros
+    (word, LPM, gate, LUT) and the 14 small VTR designs (word, gate, LUT), every design passing, `gained` 0
+    and every loss in a class: JSON modules, wires and cells keep the full location list (cells lose only
+    X-9 constant drivers, 306 of 41746 over the micros); Verilog `-netlist` keeps modules and wires
+    (declarations) in full, and cells in full for 5570 of 41746 over the micros; the other 35031 keep file and line
+    (X-2, the cells written as `assign`); BLIF VTR `--hdl-locs` restores net names (line-only) and 33361 of 38698 cells by
+    inheritance (X-6 3114 lost); plain BLIF `--src-attr` keeps every cell (37128 of 38698; the rest are port
+    cells X-8 and constants X-9). Ports and unnamed nets are X-8 and X-1. The exit test sentence "keeps the HDL
+    locations" holds per (file, line) for every object kind except the named classes, each counted in the
+    spec's section 14 tables, which are Phase 6.5's baseline. The measurement found that constant drivers have
+    a location before writing (the spec assumed none) and that the Verilog reader gives a constant the module's
+    location (`modgained` 3 over the micros): both are listed in section 14.
