@@ -200,7 +200,7 @@ must be traced and mapped back to the source, and they built signal-tracing and 
 techniques for such circuits on
 FPGAs~\cite{goeders2014effective,goeders2015dynamic,goeders2017signaltracing}. Each line of work had
 to recover a link that the synthesis tool did not keep. Odin~III keeps it (Sec.~\ref{sec:arch}),
-and its analysis flow (provenance coverage, \code{levelize} and graph export, being built for
+and its analysis flow (provenance coverage, \code{levelize} and graph export, built for
 v1.0; Sec.~\ref{sec:re-graph}) can be used to redo the placement-correlation experiment with the
 link to the HDL measured rather than recovered.
 
@@ -1056,8 +1056,8 @@ instances, level latches and other domains' flip-flops are cut points. Soft cell
 (\code{--via-blif}). The in-memory exchange (3D-7, PR~148) passes ABC's own in-memory network
 (\code{Abc\_FrameGiaInputMiniAig}, \code{\&put}, the script, \code{\&get -m -n},
 \code{Abc\_FrameGiaOutputMiniLut}; PHASE3 \#22). On the 29 k6 goldens every design that
-finished is equivalent across the two exchanges, and the exchange awaits its default flip
-(Sec.~\ref{sec:status}).
+finished is equivalent across the two exchanges, and BLIF text is still the default
+exchange at v1.0.
 
 The BLIF writers emit \code{\$lut} as a \code{.names} cover: the shorter of the on-set and
 off-set irredundant sum of products (Minato--Morreale ISOP), the on-set on a tie (3E-5). Each
@@ -1225,6 +1225,7 @@ Release & source tarball with submodules, \code{cmake --install}, pip wheel, cle
 FF feature matching & matching flip-flop features to the architecture & --- & 4.6 & dropped from v1.0 \\
 CIRCT, EDIF and VQM writers & --- & --- & --- & dropped (ADR D12, D10) \\
 \bottomrule
+\end{tabular}
 \end{table*}
 
 % ------------------------------------------------------------------------------------------
