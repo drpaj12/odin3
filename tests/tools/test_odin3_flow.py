@@ -21,6 +21,7 @@ import lpm_check
 
 import odin3_flow as flow
 import odin3_graph
+import qor_legs
 import qor_parse
 
 from .helpers import run_main
@@ -204,7 +205,7 @@ class HardBlocks(unittest.TestCase):
 
 
 FAKE_VTR_FLOW = r"""
-import os, sys
+import os, sys, time
 from pathlib import Path
 argv = sys.argv[1:]
 run = Path(argv[argv.index("-temp_dir") + 1])
@@ -214,7 +215,13 @@ UNROUTABLE = "Circuit is unroutable with a channel width factor of {}.\n"
 good = {int(w) for w in os.environ.get("FAKE_GOOD", "").split(",") if w}
 if "--route_chan_width" in argv:
     width = int(argv[argv.index("--route_chan_width") + 1])
-    (run / "vpr.out").write_text(f"routed at {width}\n")
+    time.sleep(float(os.environ.get("FAKE_SLEEP", "0")))
+    (run / "vpr.out").write_text(
+        f"routed at {width}\n"
+        "Placement estimated critical path delay (least slack): 0.5 ns, Fmax: 2000 MHz\n"
+        "\tTotal wirelength: 99, average net length: 4.00000\n"
+        "Final critical path delay (least slack): 1.55626 ns, Fmax: 642.565 MHz\n"
+        "\tTotal wirelength: 28, average net length: 4.00000\n")
     if width in good:
         sys.exit(0)
     (run / "vpr.crit_path.out").write_text(UNROUTABLE.format(width))
@@ -224,7 +231,7 @@ if mode == "search_failed":
     sys.exit(1)
 (run / "vpr.out").write_text("Best routing used a channel width factor of 28.\n")
 if mode == "packing":
-    (run / "vpr_stdout.log").write_text("Error 1: packing failed\n")
+    (run / "vpr.crit_path.out").write_text("Error 1: packing failed\n")
     sys.exit(1)
 (run / "vpr.crit_path.out").write_text("Cannot route\n" + UNROUTABLE.format(36))
 sys.exit(1)
@@ -249,8 +256,10 @@ class RouteRetry(FlowCase):
         self.args = flow.FlowArgs([self.blif], "d", "vtr", arch, "", True, False,
                                   Path("/unused"), self.tmp / "out")
 
-    def run_vpr(self, mode: str, good: str = "") -> tuple[flow.FlowResult, str]:
+    def run_vpr(self, mode: str, good: str = "",
+                sleep: str = "0") -> tuple[flow.FlowResult, str]:
         env = {"VTR_ROOT": str(self.vtr), "FAKE_MODE": mode, "FAKE_GOOD": good,
+               "FAKE_SLEEP": sleep,
                "PATH": os.environ.get("PATH", "")}
         result = flow.FlowResult(ok=False)
         parsed = {"min_chan_width": None, "clbs": 1}
@@ -268,6 +277,8 @@ class RouteRetry(FlowCase):
         self.assertEqual(result.summary["route_retry"],
                          {"min_chan_width": 28, "failed_width": 36, "used_width": 38})
         self.assertEqual(result.summary["min_chan_width"], 28)
+        self.assertEqual(result.summary["crit_path_ns"], 1.55626)
+        self.assertEqual(result.summary["wirelength"], 28)
         self.assertTrue((self.tmp / "out" / "vpr" / "retry-38" / "vpr.log").is_file())
         self.assertFalse((self.tmp / "out" / "vpr" / "retry-40").exists())
 
@@ -295,10 +306,21 @@ class RouteRetry(FlowCase):
         self.assertFalse(result.steps[-1].ok)
         self.assertEqual([p.name for p in (self.tmp / "out" / "vpr").glob("retry-*")], [])
 
+    def test_spent_time_budget_stops_retries(self) -> None:
+        # Each fixed-width retry hangs 3 s; the 1 s budget is spent by the first one.
+        with mock.patch.object(qor_legs, "stage_timeout", return_value=1):
+            result, _ = self.run_vpr("route_failed", "38,40,56", sleep="3")
+        self.assertFalse(result.steps[-1].ok)
+        self.assertEqual([p.name for p in (self.tmp / "out" / "vpr").glob("retry-*")],
+                         ["retry-38"])
+        self.assertIn("widths not tried: 40, 56", result.steps[-1].log.read_text())
+
     def test_retry_widths(self) -> None:
         self.assertEqual(flow.retry_widths(28, 36), [38, 40, 56])
         self.assertEqual(flow.retry_widths(21, 28), [30, 32, 42])
         self.assertEqual(flow.even_up(36.4), 38)
+        self.assertEqual(flow.relax_w(28), 36)
+        self.assertEqual(flow.relax_w(21), 28)  # 27.3 / 2 = 13.65 -> 14
 
 
 @unittest.skipUnless(os.environ.get("VTR_ROOT") and ODIN3, "VTR_ROOT and ODIN3_CLI needed")
@@ -316,8 +338,14 @@ class RouteRetryReal(FlowCase):
             capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
         summary = json.loads((out / "summary.json").read_text())
-        self.assertIn("route_retry", summary, proc.stdout)
-        self.assertIn("NOTE: route at W=36 failed (VPR)", proc.stdout)
+        retry = summary.get("route_retry")
+        if retry is None:
+            self.assertNotIn("NOTE: route at W=", proc.stdout)  # no retry was needed
+            return
+        self.assertLess(retry["failed_width"], retry["used_width"])
+        self.assertIn(retry["used_width"],
+                      flow.retry_widths(retry["min_chan_width"], retry["failed_width"]))
+        self.assertIn(f"NOTE: route at W={retry['failed_width']} failed (VPR)", proc.stdout)
 
 
 class Robustness(FlowCase):

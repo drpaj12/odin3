@@ -241,6 +241,12 @@ _TOTAL_WL = re.compile(r"^\s*Total wirelength: (\d+)", re.M)
 _RELAX_FACTOR = 1.3  # run_vtr_flow.py's -relax_w_factor default
 
 
+def relax_w(minimum: int) -> int:
+    """VTR's relaxed width: ``2 * round(minimum * 1.3 / 2)`` (vtr/util.py ``relax_w``; Python's
+    round, half to even)."""
+    return 2 * round(minimum * _RELAX_FACTOR / 2)
+
+
 def even_up(width: float) -> int:
     """``width`` rounded up to the next even integer."""
     whole = math.ceil(width)
@@ -252,7 +258,7 @@ def route_failure(run_dir: Path) -> tuple[int, int] | None:
 
     The minimum is the last "Best routing used a channel width factor of N" of ``vpr.out`` (the
     binary search finished); the relaxed width is the one the final route reports as unroutable
-    in ``vpr.crit_path.out`` (VTR's 1.3 x minimum, made even, when that line is missing). None when
+    in ``vpr.crit_path.out`` (``relax_w`` of the minimum when that line is missing). None when
     the search did not finish or the final route did not fail on the route."""
     def read(name: str) -> str:
         path = run_dir / name
@@ -261,10 +267,10 @@ def route_failure(run_dir: Path) -> tuple[int, int] | None:
     if not found:
         return None
     crit = _UNROUTABLE.findall(read("vpr.crit_path.out"))
-    if not crit and not _UNROUTABLE.search(read("vpr_stdout.log")):
+    if not crit:
         return None  # the step failed on something other than the final route
     minimum = int(found[-1])
-    return minimum, int(crit[-1]) if crit else even_up(_RELAX_FACTOR * minimum)
+    return minimum, int(crit[-1]) if crit else relax_w(minimum)
 
 
 def retry_widths(minimum: int, relaxed: int) -> list[int]:
@@ -277,9 +283,10 @@ def retry_widths(minimum: int, relaxed: int) -> list[int]:
 
 
 def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_dir: Path,
-            width: int | None) -> tuple[qor_legs.LegContext, StepResult, float]:
+            width: int | None, timeout: int | None = None
+            ) -> tuple[qor_legs.LegContext, StepResult, float]:
     """One ``run_vtr_flow.py -start vpr`` in ``job_dir``; ``width`` fixes ``--route_chan_width``
-    (VTR then skips the minimum-width search)."""
+    (VTR then skips the minimum-width search). ``timeout`` defaults to the stage timeout + 60 s."""
     ctx = qor_legs.LegContext(vtr_root, vtr_root / ".venv" / "bin" / "python", arch, args.odin3,
                               resource_root(), job_dir, k, "A")
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -288,7 +295,7 @@ def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_
     argv = [*cmd.argv, "--route_chan_width", str(width)] if width is not None else cmd.argv
     started = time.time()
     step = run_step("vpr", argv, job_dir, {**os.environ, **dict(cmd.env)},
-                    qor_legs.stage_timeout("A") + 60)
+                    timeout if timeout is not None else qor_legs.stage_timeout("A") + 60)
     return ctx, step, started
 
 
@@ -312,20 +319,31 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
             return
         minimum, relaxed = failure
         tried = [relaxed]
-        for width in retry_widths(minimum, relaxed):
+        widths = retry_widths(minimum, relaxed)
+        deadline = time.monotonic() + qor_legs.stage_timeout("A")  # shared by all retries
+        skipped: list[int] = []
+        for index, width in enumerate(widths):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                skipped = widths[index:]
+                break
             tried.append(width)
             rctx, rstep, rstarted = vpr_run(args, vtr_root, arch, k, blif,
-                                            job_dir / f"retry-{width}", width)
+                                            job_dir / f"retry-{width}", width, math.ceil(remaining))
             if rstep.ok:
                 print(f"NOTE: route at W={relaxed} failed (VPR); routed at W={width}")
                 ctx, step, started = rctx, rstep, rstarted
                 result.steps[-1] = step
                 retry = {"min_chan_width": minimum, "failed_width": relaxed, "used_width": width}
                 break
-        else:
-            step.log.write_text(f"{step.log.read_text()}\nroute failed at every width tried: "
-                                f"{', '.join(str(w) for w in tried)} (min {minimum}); retry "
-                                f"logs in {job_dir}/retry-<W>/\n")
+        if retry is None:
+            note = (f"\nroute failed at every width tried: "
+                    f"{', '.join(str(w) for w in tried)} (min {minimum}); retry "
+                    f"logs in {job_dir}/retry-<W>/\n")
+            if skipped:
+                note += (f"retry time budget spent; widths not tried: "
+                         f"{', '.join(str(w) for w in skipped)}\n")
+            step.log.write_text(step.log.read_text() + note)
             return
     try:
         result.summary.update(parse_vpr(ctx, blif, started))
