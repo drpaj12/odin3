@@ -594,7 +594,7 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     flags = ["--top", top.group(1)] if top else []
     prefix = "".join(f"{c}; " for c in libs)
     if level == "lpm":
-        prefix = f"read_techlib {cfg.lib}; "
+        prefix = f"read_techlib {cfg.lib}; {prefix}"
     results: dict[str, Result] = {}
     written = json_cells(paths["json"])
     rows = parse_dump(before.read_text(encoding="utf-8"))
