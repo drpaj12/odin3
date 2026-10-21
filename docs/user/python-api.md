@@ -81,3 +81,9 @@ the file has them. A file whose `odin3_version` is not 1 is refused.
 A shared-object plugin is loaded with `odin3 --plugin FILE` (C ABI, repeatable) or from Python
 with `Odin3.load_plugin(path)`. `plugins/python/example_plugin.py` is the smallest Python
 program over the binding.
+
+The `abc` and `cone_check` passes need the linked ABC engine, which the `odin3` command registers
+at start-up and a bare library does not: call `Odin3.load_abc()` once first (it loads
+`libodin3_abc.so` from next to the library, or from `$ODIN3_ABC_LIB`). A worked example of a
+round of the reverse-engineering loop is on the [reverse-engineering workflow](re-workflow.md)
+page.

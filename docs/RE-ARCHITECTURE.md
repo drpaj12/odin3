@@ -73,4 +73,41 @@ write_verilog / write_json --odin3  hierarchical, word-level, traceable to gates
 
 ## 5. Gaps found by the 7.4e review
 
-(Filled in by 7.4e.)
+Read-only review of `include/odin3/odin3.h` and `plugins/python/odin3.py` against section 2 and
+the loop of section 4, done while writing `re_round.py` (7.4e). One line each: gap, then the
+suggested fix.
+
+Fixed in 7.4e:
+
+- The Python binding did not register the linked ABC, so `cone_check` and `abc` failed with
+  `ENGINE` outside the CLI. Fix made: `Odin3.load_abc()` (loads `libodin3_abc.so` as a plugin).
+
+Open:
+
+1. Attributes are strings only, with no remove and no enumeration (`odin3_attr_get_string`,
+   `odin3_attr_set_string`): a mark (`grp`, `odin3:bind`) cannot be cleared, and a tool cannot
+   list the attributes of an object. Fix: `odin3_attr_remove` and `odin3_attr_visit`.
+2. `cone_check` keeps one result per module (`odin3:cone_check` and friends): a second call
+   overwrites the first, so a tool must read the result and `raise` before the next check. Fix:
+   result attributes per key (`odin3:cone_check.<KEY=V>`), or an out-parameter in the ABI.
+3. `cone_check` is combinational only (spec 3.3 C-3): clusters with registers (counters, FSMs,
+   register files) cannot be proved. Fix: cut registers into template ports and compare per
+   cycle (bounded sequential equivalence), as a later pass.
+4. Reading is one cffi call per field, so a pass over 10^6 nodes from Python is slow. Fix: bulk
+   array getters (`odin3_module_get_nodes`, a node's pins and nets in one call); until then use
+   the JSON export and `plugins/python/odin3_graph.py` for whole-graph analysis.
+5. Node, net and pin IDs are module-local (IR.md). After `submod` the moved nodes have new IDs in
+   the new module, and a compacting pass (`abc`, `flatten`) renumbers: an overlay keyed by IDs
+   is valid on one level only. Fix: an ID map output from `submod` and compaction, or key the
+   overlay by provenance (`Node.sources()`), which survives.
+6. `odin3_design_copy` does not copy held AST stores, the project or the architecture (spec
+   3.2): a copy cannot run `write_verilog_ast` or architecture-aware passes. Fix: document in
+   the ABI comment (done in `Design.copy`), copy the project when a later phase needs it.
+7. No cell can be created or edited through the ABI: all mutation is a pass. A tool that wants a
+   cell type other than those `raise` templates (`$add`, `$and`, ...) must add a pass. Fix: a
+   generic `raise` with a plugin-supplied template, or `odin3_node_create` guarded by `check`.
+8. The counterexample `odin3:cone_cex` is text (`PORT[i]=v,...`); the binding has no parser.
+   Fix: `Module.cone_cex() -> dict[str, int]` once a tool needs it.
+9. One linked ABC engine per process, passes run serially: scoring thousands of hypotheses is
+   single-core. Fix: one process per worker over a `write_json` snapshot, or a re-entrant
+   session in the adapter.
