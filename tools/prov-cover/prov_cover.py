@@ -216,7 +216,8 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
         second.versus[cls] = (before, after)
         for mod in sorted(second.modules):
             lost = first.modules.get(mod, {}).get(cls, 0) - _kept_in(second, mod, cls)
-            second.defects += [Defect("count-drop", mod, f"{cls}-{n}", cls) for n in range(1, lost + 1)]
+            for n in range(1, lost + 1):
+                second.defects.append(Defect("count-drop", mod, f"{cls}-{n}", cls))
 
 
 def defect_id(d: Defect) -> str:

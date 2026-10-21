@@ -468,7 +468,8 @@ class JudgeTests(unittest.TestCase):
         self.assertEqual((bad, excepted, problems), (0, 1, []))
 
     def test_id_carries_a_hash_of_the_objects(self) -> None:
-        self.assertRegex(idof(lut_rep(2, self.NOTE)), r"^unresolved/lut/drives-output-port@[0-9a-f]{8}$")
+        pattern = r"^unresolved/lut/drives-output-port@[0-9a-f]{8}$"
+        self.assertRegex(idof(lut_rep(2, self.NOTE)), pattern)
 
     def test_swapped_object_with_same_kind_and_count_fails(self) -> None:
         old = lut_rep(2, self.NOTE)
