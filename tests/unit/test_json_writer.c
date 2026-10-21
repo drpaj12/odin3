@@ -1037,12 +1037,13 @@ static const odin3_port_def WBB_PORTS[] = {
     {"q", ODIN3_DIR_OUT, true, 1, NULL, NULL, NULL, false},
 };
 
-static const odin3_param_def WBB_PARAMS[] = {{"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 3, NULL, 0, 0, 0}}};
+static const odin3_param_def WBB_PARAMS[] = {
+    {"W", ODIN3_VAL_INT, {ODIN3_VAL_INT, 3, NULL, 0, 0, 0}}};
 
 /* Declares black box "wbb" whose port d is W bits wide. */
 static odin3_celltype_id declare_wbb(void) {
-    odin3_celltype_def def = {"wbb", ODIN3_GRAN_BLACKBOX, 0, WBB_PORTS, 2, WBB_PARAMS, 1, NULL,
-                              NULL,  NULL,                NULL};
+    odin3_celltype_def def = {
+        "wbb", ODIN3_GRAN_BLACKBOX, 0, WBB_PORTS, 2, WBB_PARAMS, 1, NULL, NULL, NULL, NULL};
     odin3_celltype_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_declare_blackbox(design, &def, &id));
     return id;
@@ -1073,10 +1074,10 @@ static void test_mixed_width_instances_refused(void) {
     odin3_status status = odin3_json_write(design, "t18.json");
     odin3_log_set_sink(NULL, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, status);
-    TEST_ASSERT_NOT_NULL(strstr(json_error, "'wbb'"));
-    TEST_ASSERT_NOT_NULL(strstr(json_error, "'u1'"));
-    TEST_ASSERT_NOT_NULL(strstr(json_error, "'u2'"));
-    TEST_ASSERT_NOT_NULL(strstr(json_error, "'top'"));
+    assert_has(json_error, "'wbb'");
+    assert_has(json_error, "'u1'");
+    assert_has(json_error, "'u2'");
+    assert_has(json_error, "'top'");
     TEST_ASSERT_NOT_EQUAL_INT(0, access("t18.json", F_OK));
 }
 
@@ -1107,8 +1108,8 @@ static void add_imp(odin3_module *mod, odin3_celltype_id type, const char *name)
 
 /* Two instances of one implicit black box (no declaration) write one module. */
 static void test_implicit_blackbox_one_module(void) {
-    odin3_celltype_def def = {"imp", ODIN3_GRAN_BLACKBOX, 0, IMP_PORTS, 2, NULL, 0, NULL, NULL,
-                              NULL,  NULL};
+    odin3_celltype_def def = {
+        "imp", ODIN3_GRAN_BLACKBOX, 0, IMP_PORTS, 2, NULL, 0, NULL, NULL, NULL, NULL};
     odin3_celltype_id type = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &type));
     odin3_module *mod = new_module("top");
@@ -1124,10 +1125,10 @@ static void test_implicit_blackbox_one_module(void) {
 /* A tech-library black box or hard cell without a `.blackbox` declaration is not an implicit black
  * box: it is not written as a module (the library supplies it on read). */
 static void test_techlib_cells_not_written(void) {
-    const odin3_techlib_text lib = {"t.o3lib",
-                                    odin3_bytes_cstr("library L\n"
-                                                     "cell tb blackbox ; in a 1 ; out y 1 ; end\n"
-                                                     "cell th hard ; in a 1 ; out y 1 ; fn y = a ; end\n")};
+    const odin3_techlib_text lib = {
+        "t.o3lib", odin3_bytes_cstr("library L\n"
+                                    "cell tb blackbox ; in a 1 ; out y 1 ; end\n"
+                                    "cell th hard ; in a 1 ; out y 1 ; fn y = a ; end\n")};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_techlib_read_text(design, &lib));
     odin3_module *mod = new_module("top");
     add_imp(mod, type_id("tb"), "u1");

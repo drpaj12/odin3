@@ -493,8 +493,8 @@ static uint32_t first_width_diff(const uint32_t *lhs, const uint32_t *rhs, uint3
 /* The port widths of the module written for type: those of its first live instance, which every
  * other instance must share (else a located error, out->status set). Without an instance: the
  * type's defaults. widths and scratch hold n_ports entries, params n_params. */
-static void blackbox_widths(jw *out, odin3_celltype_id type, odin3_value *params,
-                            uint32_t *widths, uint32_t *scratch) {
+static void blackbox_widths(jw *out, odin3_celltype_id type, odin3_value *params, uint32_t *widths,
+                            uint32_t *scratch) {
     const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
     node_cursor cur = {NULL, 0, 0};
     bb_instance first = {NULL, {0}};
@@ -669,7 +669,8 @@ static odin3_status write_implicit_blackboxes(jw *out, jw_list *modules) {
         if (is_implicit_blackbox(out, type, def) && type_list_add(&done, type, &status)) {
             if (module_named(out, def->name)) {
                 odin3_log(ODIN3_LOG_ERROR,
-                          "write_json: implicit black box '%s' has the name of a module", def->name);
+                          "write_json: implicit black box '%s' has the name of a module",
+                          def->name);
                 status = ODIN3_ERR_INVALID_ARG;
             } else {
                 write_blackbox(out, modules, type);
