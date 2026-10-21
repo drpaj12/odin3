@@ -225,7 +225,7 @@ this background in full.
 \odinfit{\textwidth}{\input{IMAGE/fig_flow}}
 \caption{The flow of a Verilog design through Odin III, in the order of the production script.
 Each box is a stage; the text under it says what it does. The dotted box marks a stage that does
-nothing, and the dashed box a stage that is specified but not yet built. Every stage from
+nothing. Every stage from
 \code{proc} to \code{write\_blif} is a registered pass.}
 \label{fig:flow}
 \end{figure*}
@@ -343,9 +343,9 @@ scripts and reading its tools' exit codes, which follow one convention (0 holds,
 error, 3 hard failure, 4 unproven, 77 skipped), so a controller can act on a result without
 parsing text. Through the Python binding an agent, or a learned model, can walk the IR and its
 provenance and add cell types for the structures it recognises; recording its own decisions as
-DERIVED provenance records is the interface that Phase~7's extension-API review checks. The analysis flow being built for v1.0 adds a graph export (Yosys JSON
+DERIVED provenance records is the interface that Phase~7's extension-API review checked. The analysis flow of v1.0 includes a graph export (Yosys JSON
 plus versioned Odin~III keys) that networkx and PyTorch Geometric load without Odin~III, and the
-design specifies executable hooks that exchange the IR as JSON for Phase~7. A tool-calling server
+review lists the gaps of the ABI for tools that edit the IR (Sec.~\ref{sec:re}). A tool-calling server
 for language models would be one more plugin over this ABI; none is built yet. \todo{Peter: which
 AI-tool links to claim or plan}
 
@@ -604,8 +604,9 @@ file and partial mapping), follows Yosys's semantics, and plugs into the VTR flo
 against Parmys. It adds what neither predecessor has: provenance from every netlist object back to
 its HDL, and a versioned C ABI through which plugins and AI tools extend it. The code has not been
 deeply read by a human and has been tested on a subset of scenarios, and the oracles make more
-testing possible. The experiments I could not run with Yosys come next. Part~II describes the
-system in detail and how it will be used after version~1.0.
+testing possible. The experiments I could not run with Yosys come next: version~1.0.0 was released on
+2026-10-21, and Wyrd-I (a GUI and experiment runner) and Loki (reverse engineering) will use it
+as a package. Part~II describes the system in detail and how it will be used after version~1.0.
 
 \section*{Acknowledgment}
 \todo{acknowledgments and funding}
@@ -738,7 +739,7 @@ LUT mapping & enumerate cuts of the AIG and choose a cover of $K$-input LUTs \\
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_pipeline}}
-\caption{The Odin III pipeline and its status on 2026-10-20. Built: merged on the main branch.
+\caption{The Odin III pipeline and its status at v1.0 (2026-10-21). Built: released in v1.0.
 Every step inside the core is a pass registered with the pass manager, which runs
 \code{check} before and after each pass in Debug builds. The elaborated AST is the seam between
 the language-specific half of elaboration and the shared half. \code{partial\_map} (script name
@@ -1017,7 +1018,7 @@ Nodes are named \code{<cell>.<role>} and carry a \code{hardmap} attribute.
 
 Phase~4 generalises the pass from the architecture record. \code{read\_arch} (4.1) reads the
 \code{<models>} and \code{pb\_type}s of a VPR architecture file into a tech library and an
-\emph{arch record} on the design. Five pull requests of \code{partial\_map} are merged. PR~A
+\emph{arch record} on the design. Six pull requests of \code{partial\_map} were merged. PR~A
 is the pass shell, the rule table, the alias and an identity gate, which requires the new pass
 to give the same netlist as \code{hardmap} on the k6 architecture. PR~B is \code{memory\_merge}
 (4.7), which merges registered reads and writes into the ports of a \code{\$mem}; a
@@ -1026,8 +1027,7 @@ arch record (4.2), matched by exact port signature as in Odin~II. PR~D (4.4) map
 read enable to the architecture's RAM and emulates the enable exactly in logic, because the
 architecture's RAMs have no read-enable pin (PHASE3 decision 56, approved by the architect on
 2026-10-20); it also declares D17 and D18 (Sec.~\ref{sec:parmys-bugs}). PR~E (4.5) builds carry
-chains from the architecture model. PR~F, multiplier splitting from the architecture (4.3), is in
-progress; it declares D19.
+chains from the architecture model. PR~F, multiplier splitting from the architecture (4.3), declares D19.
 
 \subsection{Lowering to bits: \code{lower}}
 
@@ -1118,13 +1118,11 @@ functional check of Sec.~\ref{sec:verify}.
 \label{sec:features}
 
 Tables~\ref{tab:features} and~\ref{tab:features2} list the features, the pass or tool that provides each, the phase and
-sub-phase that delivered or will deliver it, and the status on 2026-10-20. ``Done'' means
-merged on the main branch with its exit test; ``in progress'' means being implemented or
-measured now; ``specified'' means the specification and plan are approved; ``planned'' means in
-the v1.0 plan (ADR D11). The figures use the build-status key of Fig.~\ref{fig:pipeline}.
+sub-phase that delivered it, and the status at the v1.0.0 release on 2026-10-21. ``Done''
+means released in v1.0 with its exit test. The figures use the build-status key of Fig.~\ref{fig:pipeline}.
 
 \begin{table*}[t]
-\caption{Odin III features that are built, status on 2026-10-20 (the v1.0 plan is ADR D11)}
+\caption{Odin III features that are built, status at v1.0 (the plan is ADR D11)}
 \label{tab:features}
 \centering
 \footnotesize
@@ -1178,8 +1176,8 @@ Lowering & word cells to bit cells; flip-flops to \code{\$\_DFF\_P\_}; \code{\$m
   and muxes; bit nodes named after the word cell & \code{lower} & 3B & done \\
 Partial mapping & Parmys-default binding of adders, multipliers and RAM; generic hard blocks from
   the arch record; \code{memory\_merge}; RAMs with read enables mapped hard, the enable emulated in
-  logic (4.4); carry chains from the arch model (4.5) & \code{partial\_map} (\code{hardmap}) & 3C,
-  4.2, 4.4, 4.5, 4.7 & done (PRs A to E) \\
+  logic (4.4); carry chains from the arch model (4.5); multiplier splitting (4.3) & \code{partial\_map} (\code{hardmap}) & 3C,
+  4.2, 4.3, 4.4, 4.5, 4.7 & done \\
 VPR-XML import & \code{read\_arch} fills a tech library and the arch record from a VPR architecture
   & \code{read\_arch} & 4.1 & done \\
 Yosys JSON reader & reads the schema that \code{write\_json} writes, and Yosys's own JSON;
@@ -1202,7 +1200,7 @@ Equivalence tools & \code{opt-equiv}, \code{lower-equiv}, \code{hardmap-diff}, \
 \end{table*}
 
 \begin{table*}[t]
-\caption{Odin III features, continued: in progress, specified and planned (2026-10-20)}
+\caption{Odin III features, continued: the architecture sweep, analysis flow, reverse-engineering support and release (status at v1.0)}
 \label{tab:features2}
 \centering
 \footnotesize
@@ -1212,18 +1210,21 @@ Equivalence tools & \code{opt-equiv}, \code{lower-equiv}, \code{hardmap-diff}, \
 \toprule
 Feature & What it does & Pass or tool & Phase & Status \\
 \midrule
-Partial mapping, more & multiplier splitting from the architecture (4.3, PR~F) &
-  \code{partial\_map} & 4.3 & in progress \\
 Architecture sweep & the VTR designs on several VTR architectures route and pass \code{fcheck}
-  & \code{vtr-qor} & 4.13 & planned \\
+  (Table~\ref{tab:sweep}) & \code{vtr-qor} & 4.13 & done \\
 HDL locations through write and read & locations survive write and read in BLIF, Verilog and JSON
-  & writers, readers & 5.4 & 5.4a, 5.4d, 5.4f-a done; rest in progress \\
+  & writers, readers & 5.4 & done \\
 Analysis flow & gate-level ingest, \code{write\_dot --color-by}, graph export, \code{levelize},
-  provenance coverage gate & several & 6.1 to 6.5 & specified; first items in progress \\
-Interop and release & CIRCT writer, visual tooling, docs with the extension-API review, release &
-  --- & 7 & planned \\
+  provenance coverage gate & several & 6.1 to 6.5 & done \\
+Reverse-engineering support & \code{submod}, \code{Design.copy}, \code{cone\_check}, \code{raise},
+  \code{re\_round.py} (Sec.~\ref{sec:re}) & several & 7.4 & done \\
+Flow command and manual & \code{odin3-flow} (targets \code{vtr} and \code{lpm}, \code{--analysis});
+  user manual in Sphinx and MyST & \code{odin3-flow} & 7 & done \\
+Release & source tarball with submodules, \code{cmake --install}, pip wheel, clean-machine test
+  & \code{tools/release} & 7.6 & released 2026-10-21 \\
+FF feature matching & matching flip-flop features to the architecture & --- & 4.6 & dropped from v1.0 \\
+CIRCT, EDIF and VQM writers & --- & --- & --- & dropped (ADR D12, D10) \\
 \bottomrule
-\end{tabular}
 \end{table*}
 
 % ------------------------------------------------------------------------------------------
@@ -1558,8 +1559,8 @@ loaded.
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_flow_prov}}
 \caption{The flow of Fig.~\ref{fig:flow}, annotated with the provenance records that each stage
-makes or reads. SOURCE, DERIVED and IMPORTED are the three record kinds. The plan for Phase~5.4 is
-shown where it applies; it is approved and partly built (5.4a, 5.4d and 5.4f-a are merged).}
+makes or reads. SOURCE, DERIVED and IMPORTED are the three record kinds. Phase~5.4 is
+shown where it applies; it is built and closed for v1.0.}
 \label{fig:flow-prov}
 \end{figure*}
 
@@ -1591,8 +1592,8 @@ file and line of the netlist, so that an object read from BLIF still says where 
 \code{hier/path/name@file:line} from the first location of its backward walk, so a VPR block can
 be traced to a source line without Odin III loaded.
 
-\emph{Plan 5.4: locations survive write and read.} The IMPORTED record points at the netlist, not
-at the HDL, so after a read-back the HDL location of a written object is lost. Phase~5.4 fixes
+\emph{5.4: locations survive write and read.} The IMPORTED record points at the netlist, not
+at the HDL, so after a read-back the HDL location of a written object was lost. Phase~5.4 fixed
 that. Writers print only the HDL locations, which are the SOURCE leaves of an object's walk:
 the provenance name in BLIF, a \code{src} attribute in Verilog, and the \code{src} field in
 JSON. Readers decode them. The architect approved an amendment to IR-13 on 2026-10-20: a reader
@@ -1730,9 +1731,9 @@ boundary, and every declaration has a paragraph on purpose, ownership and failur
 Plugins are shared objects with an \code{odin3\_plugin\_init(abi\_version)} entry point that
 registers passes and cell types (a mismatched ABI is refused); cell-type structs reserve hook
 slots so later hooks do not break the ABI. Python uses the same header through cffi in ABI
-mode, and executable hooks exchanging JSON are planned for Phase~7: an executable run at a hook
+mode, and executable hooks exchanging JSON are specified (DESIGN \S15.3) and were not built for v1.0: an executable run at a hook
 point (\code{--hook after:partial\_map ./myscript}) gets the IR as JSON on its standard input and
-returns it on its standard output, so any language works (DESIGN \S15.3). Because the IR is IDs, the
+returns it on its standard output, so any language works. Because the IR is IDs, the
 ABI can hand them out safely and the IR serialises trivially.
 
 \subsection{Caps and out-of-memory safety}
