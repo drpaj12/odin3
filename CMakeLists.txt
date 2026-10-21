@@ -3523,8 +3523,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         list(SORT _icells_insttext)
         list(SORT _icells_micros)
         file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/icells_tmp)
+        # Without ABC the word/lpm levels still run; gate/lut tests are not added (below).
+        set(_icells_abc_env "")
+        if(ODIN3_WITH_ABC)
+            set(_icells_abc_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
+        endif()
         set(_icells_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/icells_tmp
-            ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+            ${_icells_abc_env}
             ${PROJECT_SOURCE_DIR}/tools/icells-check/icells-check
             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
             --expect ${PROJECT_SOURCE_DIR}/tests/icells/expect.txt)
@@ -3578,8 +3583,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             ${_json_micro_dir}/ff.v ${_json_micro_dir}/bm_DL_2_cascaded_flip_flops.v
             ${_json_micro_dir}/bm_DL_logic_w_Dff.v ${_json_micro_dir}/bm_DL_structural_logic.v)
         file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/json_tmp)
+        set(_json_abc_env "")
+        if(ODIN3_WITH_ABC)
+            set(_json_abc_env "ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>")
+        endif()
         set(_json_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/json_tmp
-            ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+            ${_json_abc_env}
             ${PROJECT_SOURCE_DIR}/tools/json-check/json-check
             --odin3 $<TARGET_FILE:odin3> --yosys ${ODIN3_YOSYS055}
             --expect ${PROJECT_SOURCE_DIR}/tests/json/expect.txt)
