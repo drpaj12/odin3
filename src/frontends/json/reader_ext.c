@@ -16,12 +16,6 @@ typedef struct odin3_json_ext_key {
 
 enum { PROV_HDL_MAX = 8 };
 
-/* odin3_version: an integer; a value above 1 is the error of jr_check_version. */
-static bool ext_version(jr *rd, const odin3_json_node *value) {
-    (void)rd;
-    return jr_kind(value) == ODIN3_JSON_INT;
-}
-
 /* odin3_level: an integer, set as the attribute odin3_level once the object exists. */
 static bool ext_level(jr *rd, const odin3_json_node *value) {
     if (jr_kind(value) != ODIN3_JSON_INT) {
@@ -68,10 +62,9 @@ static bool ext_prov(jr *rd, const odin3_json_node *value) {
     return true;
 }
 
-static const odin3_json_ext_key odin3_json_ext_keys[] = {{"odin3_version", ext_version},
-                                                         {"odin3_level", ext_level},
-                                                         {"odin3_prov", ext_prov},
-                                                         {NULL, NULL}};
+/* odin3_version is read by jr_check_version and, as before, counted with the skipped members. */
+static const odin3_json_ext_key odin3_json_ext_keys[] = {
+    {"odin3_level", ext_level}, {"odin3_prov", ext_prov}, {NULL, NULL}};
 
 static const char EXT_PREFIX[] = "odin3_";
 

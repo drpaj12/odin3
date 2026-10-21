@@ -204,8 +204,9 @@ static void test_reader_sets_level_attribute_and_counts_prov(void) {
     build_design();
     odin3_util_free(write_text("a.json", &k_odin3));
     read_back("a.json");
-    assert_has(rj_log, "validated ");
-    assert_lacks(rj_log, "skipped");
+    assert_has(rj_log, "validated 7 odin3_prov objects");
+    /* only odin3_version is counted as skipped: odin3_level and odin3_prov are consumed */
+    assert_has(rj_log, "skipped 0 members the schema does not list, 1 odin3_ members");
     odin3_module *mod = odin3_module_get(rj_design, (odin3_module_id){1});
     odin3_node_id g2 = odin3_module_find_node(mod, intern("g2"));
     TEST_ASSERT_TRUE(odin3_node_valid(g2));
