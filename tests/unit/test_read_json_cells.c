@@ -115,7 +115,8 @@ static void test_auto_blackbox(void) {
     TEST_ASSERT_EQUAL_UINT32(2, def->ports[0].width);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, def->ports[2].dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT,
+                          def->ports[2].dir); /* E: no port_directions, bit 5 undriven */
     TEST_ASSERT_EQUAL_UINT32(2, odin3_celltype_instances(rj_design, type));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
@@ -142,6 +143,55 @@ static void test_auto_blackbox_conflicts(void) {
                                        &opts));
     rj_log_has("'$alu' is a Yosys internal cell type this tool has no cell for");
     rj_log_has("not equivalent to its source");
+}
+
+/* EL-11 (2026-10-21): without port_directions a port's direction comes from its bits: an output on
+ * bits nothing else drives, an input on a module input or a driven bit; one warning lists them. */
+static void test_implicit_infers_directions(void) {
+    const odin3_json_opts opts = {.auto_blackbox = true};
+    const char *json =
+        top_json(IN_PORT("a", "[2]") ", " OUT_PORT("y", "[4]"),
+                 "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"Q\": [3]}}, "
+                 "\"v\": {\"type\": \"other\", \"connections\": {\"D\": [3], \"Q\": [4]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("mystery"), &type));
+    const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
+    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("other"), &type));
+    def = odin3_celltype_get(rj_design, type);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
+    rj_log_has("implicit black box; port directions inferred from its connections: A input, Q "
+               "output");
+    rj_log_has("implicit black box; port directions inferred from its connections: D input, Q "
+               "output");
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_check_design(rj_design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+}
+
+/* A bit driven by a known cell's output makes the unknown port an input; a module inout bit keeps
+ * it inout and the warning says so. */
+static void test_implicit_infers_known_and_inout(void) {
+    const odin3_json_opts opts = {.auto_blackbox = true};
+    const char *json =
+        top_json(IN_PORT("a", "[2]") ", " OUT_PORT(
+                     "y", "[5]") ", "
+                                 "\"io\": {\"direction\": \"inout\", \"bits\": [6]}",
+                 "\"g\": {\"type\": \"$not\", \"parameters\": {\"A_WIDTH\": 1, \"A_SIGNED\": 0, "
+                 "\"Y_WIDTH\": 1}, \"connections\": {\"A\": [2], \"Y\": [3]}}, "
+                 "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [3], \"Q\": [5], "
+                 "\"P\": [6]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("mystery"), &type));
+    const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, def->ports[2].dir);
+    rj_log_has("A input, Q output, P inout (its net has no known direction)");
 }
 
 /* A type the IR refuses (a port with an empty name) is a located error naming the first cell. */
@@ -728,6 +778,8 @@ int main(void) {
     RUN_TEST(test_unknown_type_is_an_error);
     RUN_TEST(test_auto_blackbox);
     RUN_TEST(test_auto_blackbox_conflicts);
+    RUN_TEST(test_implicit_infers_directions);
+    RUN_TEST(test_implicit_infers_known_and_inout);
     RUN_TEST(test_implicit_type_refused);
     RUN_TEST(test_long_names);
     RUN_TEST(test_scopeinfo_is_dropped);
