@@ -47,7 +47,7 @@ The status shown is as of the v1.0.0 release, 2026-10-21 (v1.0 phases: ADR D11):
 - **Built:** Phases 0 to 7, all closed (see `docs/RELEASE-NOTES-1.0.md`). FF feature matching (4.6)
   and the CIRCT, EDIF and VQM writers were dropped from v1.0.
 - **Planned (white, dotted):** the `slang` front end and the executable hooks.
-- **After v1.0:** SystemVerilog (slang), VHDL (GHDL), Wyrd-I and Loki, in their own repositories.
+- **After v1.0:** SystemVerilog (slang), VHDL (GHDL), Wyrd III and Loki III, in their own repositories.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
 features table and the phases table together.
@@ -66,7 +66,7 @@ features table and the phases table together.
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
 | `fig_re` | the reverse-engineering and analysis flow | TikZ | `\columnwidth` |
-| `fig_yggdrasil` | Yggdrasil: Odin III as the trunk, with Wyrd-I, Loki, Leman Russ, Bifrost and Midgard | TikZ | `\textwidth` |
+| `fig_yggdrasil` | Yggdrasil: Odin III as the trunk, with Wyrd III, Loki III, Leman Russ III, Bifrost III and Midgard III | TikZ | `\textwidth` |
 | `fig_flow` | the flow of a design, with what each stage does (drawn by `fig_flow_base`) | TikZ | `\textwidth` |
 | `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
 | `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
