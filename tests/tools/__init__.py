@@ -40,6 +40,7 @@ for _sub in (
     "tools/json-check",
     "tools/loc-check",
     "tools/prov-cover",
+    "tools/flow",
     "tools/exit-check",
     "tools/proc-check",
     "tools/vtr-qor",

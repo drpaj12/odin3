@@ -3737,6 +3737,29 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         ${_json_vtr14})
             endif()
         endif()
+        # 7.3 (spec 7 section 2.1; tools/flow/odin3_flow.py): a micro through the flow script.
+        # flow_vtr_<micro>: target vtr without VPR (the vtr-qor O-leg script, BLIF written);
+        # flow_lpm_<micro>: target lpm (the 5.1 LPM script, then the -icells read-back). VTR_ROOT
+        # is unset: neither needs VTR. flow_vtr_* need ABC.
+        set(_flow_run ${CMAKE_COMMAND} -E env --unset=VTR_ROOT
+            ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow --odin3 $<TARGET_FILE:odin3>)
+        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/flow_tmp)
+        if(ODIN3_WITH_ABC)
+            foreach(_n IN ITEMS bm_DL_logic_w_Dff bm_DL_2_cascaded_flip_flops)
+                add_test(NAME flow_vtr_${_n}
+                    COMMAND ${_flow_run} --top ${_n} --no-vpr
+                        --out ${PROJECT_BINARY_DIR}/flow_tmp/vtr_${_n}
+                        ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/${_n}.v)
+                set_tests_properties(flow_vtr_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
+            endforeach()
+        endif()
+        foreach(_n IN ITEMS lpm_add_sub altsyncram_sp)
+            add_test(NAME flow_lpm_${_n}
+                COMMAND ${_flow_run} --target lpm --top ${_n}_micro
+                    --out ${PROJECT_BINARY_DIR}/flow_tmp/lpm_${_n}
+                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_n}.v)
+            set_tests_properties(flow_lpm_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
+        endforeach()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,

@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# odin3-flow: a design through Odin III (and VPR, or the LPM write-out). Exit codes: 0 ok; 1 a step
+# failed; 2 usage error. See odin3_flow.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/odin3_flow.py" "$@"
