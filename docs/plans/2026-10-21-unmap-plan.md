@@ -369,13 +369,13 @@ Failure modes the spec implies that no single rule test covers; each has its tes
 ### Task 17: Docs, lint, final gates (T-9)
 
 **Files:**
-- Modify: `docs/PASSES.md` (final text of the row: options, phases, attributes `unmap`, `unmap_pieces`, `unmap_origin`, `unmap_w`, `unmap_note`, `unmap_cand`), `docs/PHASE7.md` (a checklist item `7.7 unmap` and a decisions-log entry marked agent default: the spec's open questions with their recommendations), `docs/user/` (the passes page if it lists passes: grep `raise` in `docs/user`; add a short `unmap` entry), `CHANGELOG.md` (one line under unreleased), `docs/RE-ARCHITECTURE.md` (one line: `unmap` gives the F1 floor its word-level cells)
+- Modify: `docs/PASSES.md` (final text of the row: options, phases, attributes `unmap`, `unmap_pieces`, `unmap_origin`, `unmap_w`, `unmap_note`, `unmap_cand`), `docs/V1.3.md` (create it if absent: title `Odin III v1.3: unmap`, a checklist item `unmap` and a decisions log holding the spec's section 10 decisions with their recommendations), `docs/user/` (the passes page if it lists passes: grep `raise` in `docs/user`; add a short `unmap` entry), `CHANGELOG.md` (one line under unreleased), `docs/RE-ARCHITECTURE.md` (one line: `unmap` gives the F1 floor its word-level cells)
 - Test: whole suite
 
 - [ ] **Step 1: Run the full gates:** `tools/lint.sh` (clang-tidy included), `cmake --build --preset debug && ctest --preset debug` and `cmake --preset release && cmake --build --preset release && ctest --preset release -L unit`. Expected: all PASS, no new warning.
 - [ ] **Step 2: Fix anything red** at the source (never `NOLINT`); each fix with its unit test.
 - [ ] **Step 3: Write the docs** above. `docs/PASSES.md` is the pass table; keep the row to the length of the `raise` row plus the attribute list.
-- [ ] **Step 4: Verify** `grep -rn "unmap" docs/PASSES.md docs/PHASE7.md | head` shows the entries, `cmake --build --preset debug` passes, and `python3 tools/check_rules.py` (if wired by lint) is clean.
+- [ ] **Step 4: Verify** `grep -rn "unmap" docs/PASSES.md docs/V1.3.md | head` shows the entries, `cmake --build --preset debug` passes, and `python3 tools/check_rules.py` (if wired by lint) is clean.
 - [ ] **Step 5: Commit** `docs(unmap): pass table, phase log, user manual`; then `git push -u origin feat/unmap`. Open the PR only after a read-only critique agent has reviewed the branch (CLAUDE.md rule 12) and the VTR sweep rows of Task 14 are attached to the PR description.
 
 ---

@@ -417,9 +417,16 @@ Algorithm (explicit worklist, no recursion):
   Equivalence is not checked for the big designs (Phase 3 exit rule).
 - **T-8 Idempotence and determinism.** Two runs equal; `write_rtlil` of two separate sessions equal.
 - **T-9 Gates.** `tools/lint.sh` clean, `check` FULL before and after, ASan/UBSan debug build,
-  PASSES.md row, `docs/PHASE7.md` decision entry.
+  PASSES.md row, `docs/V1.3.md` decision entry.
 
-## 10. Open questions (recommendations are agent defaults)
+## 10. Decisions (Peter, 2026-10-21: all good)
+
+Versioning (Peter): core features after v1.0 step the version so the v1.0 base stays clean:
+v1.0.1 route-retry fix, v1.1 gate mapping, v1.2 S1 simulation API, v1.3 `unmap`. Each release has its
+own log `docs/V1.<n>.md` (checklist + decisions log, as the PHASE files) and release notes, tagged
+only on Peter's go. `unmap` is v1.3; question 1's Phase 7 placement is replaced by this.
+
+The recommendations below are the decisions:
 
 1. **Where does `unmap` sit in the phases?** Recommendation: a Phase 7 add-on (item 7.7 "unmap, for
    Loki"), allowed because it needs no core change; log it as an agent default.
