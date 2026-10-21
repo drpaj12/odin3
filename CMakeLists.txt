@@ -2448,6 +2448,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND ${CMAKE_COMMAND} -E chdir ${PROJECT_SOURCE_DIR}
                 ${CMAKE_COMMAND} -E env ODIN3_WHEEL_TEST=1
                 ${Python3_EXECUTABLE} -m unittest tests.tools.test_wheel.WheelTest)
+    # Phase 7 Task 12: the clean-machine test: fresh clone, minimal env, Release build, install,
+    # wheel, and the getting-started commands (tools/release/clean-check). Local only: it needs
+    # the network for pip and builds ABC twice (skips 77 without ODIN3_HEAVY_OK=1, like wheel_build).
+    odin3_add_sweep_test(release_clean LABEL sweep
+        COMMAND ${PROJECT_SOURCE_DIR}/tools/release/clean-check)
     # test_vtr_abc_hardblocks runs VTR's ABC (build/abc/abc under VTR_ROOT): in python_tools it
     # skips (loudly) without it; here it must run, so a missing ABC or odin3 fails
     # (ODIN3_REQUIRE_VTR_ABC=1). Registered when VTR_ROOT has the binary; a heavy run.

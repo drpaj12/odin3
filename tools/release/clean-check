@@ -1,0 +1,108 @@
+#!/usr/bin/env bash
+# clean-check: the clean-machine test of the release (Phase 7 Task 12; spec 4, P-7). Clones this
+# repository's HEAD into an empty temp directory, initialises the submodules, then under a minimal
+# environment (env -i, PATH=/usr/bin:/bin) does what a new user does: Release build, `cmake
+# --install` into a temp prefix, build the pip wheel and install it in a fresh venv, and run the
+# shell code blocks of docs/user/getting-started.md. Exit 0 only if every stage passes.
+# Blocks that need VTR_ROOT or vpr are skipped and listed. Only committed files are tested
+# (the clone is of HEAD); the pip build tools come from the network. Never tags or uploads.
+#
+# Usage: ODIN3_HEAVY_OK=1 tools/heavy-run tools/release/clean-check [--keep]
+# Environment: ODIN3_CLEAN_REF  repo whose third_party checkouts serve as the submodule source
+#                               (default ~/odin3-ws/odin3; the network URL is used when absent)
+#              ODIN3_CLEAN_TMP  parent of the temp dir (default /tmp/claude-1000 or $TMPDIR)
+# Exit: 0 ok; 1 a stage failed; 2 usage error. CTest `release_clean` skips (77) without
+# ODIN3_HEAVY_OK=1 (tools/heavy-run) and in CI.
+set -euo pipefail
+
+keep=0
+case "${1:-}" in
+    "") ;;
+    --keep) keep=1 ;;
+    *) echo "usage: clean-check [--keep]" >&2; exit 2 ;;
+esac
+root="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/../.." && pwd)"
+base="${ODIN3_CLEAN_TMP:-}"
+if [ -z "$base" ]; then
+    if [ -d /tmp/claude-1000 ]; then base=/tmp/claude-1000; else base="${TMPDIR:-/tmp}"; fi
+fi
+ref="${ODIN3_CLEAN_REF:-$HOME/odin3-ws/odin3}"
+work="$(mktemp -d "$base/odin3-clean.XXXXXX")"
+logs="$work/logs"
+mkdir -p "$logs" "$work/home"
+cleanup() {
+    if [ "$keep" = 1 ]; then echo "clean-check: kept $work"; else rm -rf "$work"; fi
+}
+trap cleanup EXIT
+
+minenv() { env -i HOME="$work/home" PATH=/usr/bin:/bin CMAKE_BUILD_PARALLEL_LEVEL=4 "$@"; }
+stage() { # stage NAME CMD... : run with output in logs/NAME.log, tail it on failure
+    local name="$1"; shift
+    echo "stage $name"
+    if ! "$@" > "$logs/$name.log" 2>&1; then
+        echo "clean-check: FAILED at stage $name; log $logs/$name.log" >&2
+        tail -15 "$logs/$name.log" >&2
+        keep=1
+        exit 1
+    fi
+}
+
+clone="$work/odin3"
+stage clone git clone --quiet "$root" "$clone"
+# Submodules from the reference checkout when it has them (no network), else from GitHub.
+git -C "$clone" submodule init > /dev/null 2>&1
+for sub in third_party/abc third_party/unity; do
+    if [ -e "$ref/$sub/.git" ]; then
+        git -C "$clone" config "submodule.$sub.url" "$ref/$sub"
+    fi
+done
+stage submodules git -C "$clone" -c protocol.file.allow=always submodule update --init
+stage configure minenv cmake -S "$clone" --preset release
+stage build minenv cmake --build "$clone/build/release" -j4
+prefix="$work/prefix"
+stage install minenv cmake --install "$clone/build/release" --prefix "$prefix"
+[ -x "$prefix/bin/odin3" ] || { echo "clean-check: no $prefix/bin/odin3" >&2; keep=1; exit 1; }
+
+# The wheel: build in one venv, install in a second.
+stage venv-build minenv python3 -m venv "$work/buildvenv"
+stage pip-tools minenv "$work/buildvenv/bin/python" -m pip install --quiet \
+    scikit-build-core==0.11.6 build==1.2.2.post1 cffi==1.17.1
+stage wheel-build minenv "$work/buildvenv/bin/python" -m build --wheel --no-isolation \
+    --outdir "$work/dist" "$clone"
+wheel="$(ls "$work"/dist/odin3-*.whl)"
+stage venv-install minenv python3 -m venv "$work/installvenv"
+stage wheel-install minenv "$work/installvenv/bin/python" -m pip install --quiet "$wheel"
+stage wheel-import minenv "$work/installvenv/bin/python" -c \
+    "import odin3, sys; d = odin3.Design.read_blif(sys.argv[1]); print(odin3.find_library())" \
+    "$clone/tests/cli/example_plugin.blif"
+
+# The installed CLI and flow script, run from outside the clone.
+mkdir -p "$work/outside"
+stage installed-version bash -c "cd '$work/outside' && env -i HOME='$work/home' \
+    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 '"
+stage installed-flow bash -c "cd '$work/outside' && env -i HOME='$work/home' \
+    PATH='$prefix/bin:/usr/bin:/bin' '$prefix/share/odin3/tools/flow/odin3-flow' \
+    --no-vpr --out '$work/outside/enc' '$clone/tests/micro/verilog/micro/bm_DL_2_4_encoder.v'"
+
+# The getting-started blocks, in order, in the clone. `git clone` and `cd odin3` are what this
+# script already did; blocks that need VTR_ROOT or vpr are skipped.
+doc="$clone/docs/user/getting-started.md"
+awk -v dir="$work/blocks" '
+    /^```bash/ { n++; inb = 1; f = sprintf("%s.%02d.sh", dir, n); next }
+    /^```/ { inb = 0; next }
+    inb { print > f }
+' "$doc"
+nblocks=0
+for blk in "$work"/blocks.*.sh; do
+    [ -e "$blk" ] || break
+    nblocks=$((nblocks + 1))
+    if grep -Eq 'VTR_ROOT|vpr' "$blk"; then
+        echo "skip $(basename "$blk"): needs VTR_ROOT or vpr"
+        continue
+    fi
+    grep -Ev '^(git clone|cd odin3)' "$blk" > "$blk.run" || true
+    stage "doc-$(basename "$blk" .sh)" bash -c "cd '$clone' && env -i HOME='$work/home' \
+        PATH=/usr/bin:/bin bash -e '$blk.run'"
+done
+[ "$nblocks" -gt 0 ] || { echo "clean-check: no bash blocks in $doc" >&2; keep=1; exit 1; }
+echo "clean-check: ok ($nblocks getting-started blocks)"
