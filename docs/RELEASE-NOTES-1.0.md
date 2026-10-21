@@ -62,7 +62,7 @@ keys may change in later releases.
 
 - Plain-LUT architecture `k4_N4_90nm` (4.13 arch sweep): 14 of 15 designs route; `mkDelayWorker32B`
   hits the 3600 s ABC limit with all adders soft (`docs/PHASE4.md` decision 18).
-- Dead-adder warning: on 5 of the EArch sweep designs the QoR harness prints the
+- Dead-adder warning: on some EArch sweep designs the QoR harness prints the
   `hardblocks_lost` WARNING (adders unused after VTR's ABC; `tools/vtr-qor/qor_table.py`). Not
   investigated.
 - Functional check (`fcheck`): designs with latches or the `--nolatches` precheck are classified

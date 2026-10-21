@@ -11,11 +11,13 @@
 # Environment: ODIN3_CLEAN_REF  repo whose third_party checkouts serve as the submodule source
 #                               (default ~/odin3-ws/odin3; the network URL is used when absent)
 #              ODIN3_CLEAN_TMP  parent of the temp dir (default /tmp/claude-1000 or $TMPDIR)
-# Exit: 0 ok; 1 a stage failed; 2 usage error. CTest `release_clean` skips (77) without
-# ODIN3_HEAVY_OK=1 (tools/heavy-run) and in CI.
+# Exit: 0 ok; 1 a stage failed; 2 usage error. The script never skips: CTest `release_clean`
+# skips (77) through tools/heavy-run without ODIN3_HEAVY_OK=1, and CI excludes the sweep label.
+# On failure the work dir (several GB) is removed and only the stage logs are kept.
 set -euo pipefail
 
 keep=0
+failed=0
 case "${1:-}" in
     "") ;;
     --keep) keep=1 ;;
@@ -31,7 +33,12 @@ work="$(mktemp -d "$base/odin3-clean.XXXXXX")"
 logs="$work/logs"
 mkdir -p "$logs" "$work/home"
 cleanup() {
-    if [ "$keep" = 1 ]; then echo "clean-check: kept $work"; else rm -rf "$work"; fi
+    if [ "$keep" = 1 ]; then echo "clean-check: kept $work"; return; fi
+    if [ "$failed" = 1 ]; then
+        local saved="$base/odin3-clean-logs.$$"
+        mv "$logs" "$saved" && echo "clean-check: logs kept in $saved" >&2
+    fi
+    rm -rf "$work"
 }
 trap cleanup EXIT
 
@@ -42,7 +49,7 @@ stage() { # stage NAME CMD... : run with output in logs/NAME.log, tail it on fai
     if ! "$@" > "$logs/$name.log" 2>&1; then
         echo "clean-check: FAILED at stage $name; log $logs/$name.log" >&2
         tail -15 "$logs/$name.log" >&2
-        keep=1
+        failed=1
         exit 1
     fi
 }
@@ -61,7 +68,7 @@ stage configure minenv cmake -S "$clone" --preset release
 stage build minenv cmake --build "$clone/build/release" -j4
 prefix="$work/prefix"
 stage install minenv cmake --install "$clone/build/release" --prefix "$prefix"
-[ -x "$prefix/bin/odin3" ] || { echo "clean-check: no $prefix/bin/odin3" >&2; keep=1; exit 1; }
+[ -x "$prefix/bin/odin3" ] || { echo "clean-check: no $prefix/bin/odin3" >&2; failed=1; exit 1; }
 
 # The wheel: build in one venv, install in a second.
 stage venv-build minenv python3 -m venv "$work/buildvenv"
@@ -69,7 +76,9 @@ stage pip-tools minenv "$work/buildvenv/bin/python" -m pip install --quiet \
     scikit-build-core==0.11.6 build==1.2.2.post1 cffi==1.17.1
 stage wheel-build minenv "$work/buildvenv/bin/python" -m build --wheel --no-isolation \
     --outdir "$work/dist" "$clone"
-wheel="$(ls "$work"/dist/odin3-*.whl)"
+# The version and platform tag the release notes state.
+wheel="$work/dist/odin3-1.0.0-py3-none-linux_x86_64.whl"
+[ -f "$wheel" ] || { echo "clean-check: no $(basename "$wheel")" >&2; failed=1; exit 1; }
 stage venv-install minenv python3 -m venv "$work/installvenv"
 stage wheel-install minenv "$work/installvenv/bin/python" -m pip install --quiet "$wheel"
 stage wheel-import minenv "$work/installvenv/bin/python" -c \
@@ -79,7 +88,7 @@ stage wheel-import minenv "$work/installvenv/bin/python" -c \
 # The installed CLI and flow script, run from outside the clone.
 mkdir -p "$work/outside"
 stage installed-version bash -c "cd '$work/outside' && env -i HOME='$work/home' \
-    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 '"
+    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 1\.0\.0 '"
 stage installed-flow bash -c "cd '$work/outside' && env -i HOME='$work/home' \
     PATH='$prefix/bin:/usr/bin:/bin' '$prefix/share/odin3/tools/flow/odin3-flow' \
     --no-vpr --out '$work/outside/enc' '$clone/tests/micro/verilog/micro/bm_DL_2_4_encoder.v'"
@@ -104,5 +113,5 @@ for blk in "$work"/blocks.*.sh; do
     stage "doc-$(basename "$blk" .sh)" bash -c "cd '$clone' && env -i HOME='$work/home' \
         PATH=/usr/bin:/bin bash -e '$blk.run'"
 done
-[ "$nblocks" -gt 0 ] || { echo "clean-check: no bash blocks in $doc" >&2; keep=1; exit 1; }
+[ "$nblocks" -gt 0 ] || { echo "clean-check: no bash blocks in $doc" >&2; failed=1; exit 1; }
 echo "clean-check: ok ($nblocks getting-started blocks)"
