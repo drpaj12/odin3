@@ -1330,12 +1330,13 @@ def _input_signature(box: BlackBox, flat: Flat, drivers: dict[str, tuple[BlackBo
     keys = [_driver_key(net, flat, drivers, normalize) for net in box.inputs.values()]
     if any(k is None for k in keys):
         return None
-    return (box.cell_type, *sorted(f"{f}={k}" for f, k in zip(box.inputs, keys, strict=True)))
+    pins = sorted(f"{f}={k}" for f, k in zip(box.inputs, keys, strict=True))
+    return (box.cell_type, *pins, *(f"param:{a} {v}" for a, v in box.params))
 
 
 def pair_by_input_signature(flats: Sequence[Flat], normalize: bool = True) -> int:
     """Pair the boxes that have no name at all (``BlackBox.pending``) across the two flats by
-    input signature: the model plus, per input pin, the named net or the named/paired box pin
+    input signature: the model, its .param list, plus, per input pin, the named net or the named/paired box pin
     that drives it.  A box fed by an unnamed box is signed once that box is paired (rounds, to a
     fixpoint).  A signature shared by two boxes of one file, or found in one file only, is
     EquivError (exit 2).  Each pair gets one key in both files and is cut like a named box.
@@ -1355,9 +1356,9 @@ def pair_by_input_signature(flats: Sequence[Flat], normalize: bool = True) -> in
                 if len(boxes) > 1:
                     lines = ", ".join(f"line {b.line}" for b in boxes)
                     raise EquivError(
-                        f"{flat.path}: cannot name black box {sig[0]}: no .cname, no named "
-                        f"output net, and {len(boxes)} boxes have the same input signature "
-                        f"({lines})")
+                        f"{flat.path}: cannot name black box {sig[0]}: no .cname and no named "
+                        f"output net to match it by, and {len(boxes)} boxes have the same "
+                        f"input signature ({lines})")
         both = sorted(s for s in sigs[0] if s in sigs[1])
         if not both:
             break

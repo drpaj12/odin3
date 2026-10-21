@@ -494,6 +494,7 @@ class InputSignaturePairingTest(unittest.TestCase):
                 equiv_check.pair_by_input_signature(self.flats(*pair))
             self.assertIn("cannot name black box multiply", str(ctx.exception))
             self.assertIn("same input signature", str(ctx.exception))
+            self.assertIn("no .cname and no named output net to match it by", str(ctx.exception))
 
     def test_signature_on_one_side_only_is_an_error(self) -> None:
         a = self.netlist(self.box("$n1", "a", "b"), ["$n1"])
@@ -506,6 +507,21 @@ class InputSignaturePairingTest(unittest.TestCase):
         gone = self.HEAD.format("y0 z0") + self.read("a") + ".end\n"
         with self.assertRaises(equiv_check.EquivError):
             equiv_check.pair_by_input_signature(self.flats(a, gone))
+
+    def test_params_are_part_of_the_signature(self) -> None:
+        def pbox(out: str, mode: str) -> str:
+            return self.box(out) + f".param MODE {mode}\n"
+        a = self.netlist(pbox("$n1", "01") + pbox("$n2", "10"), ["$n1", "$n2"])
+        b = self.netlist(pbox("$n9", "10") + pbox("$n8", "01"), ["$n8", "$n9"])
+        flats = self.flats(a, b)
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 2)
+        self.assertEqual(sorted(x.params for x in flats[0].blackboxes),
+                         sorted(x.params for x in flats[1].blackboxes))
+        c = self.netlist(pbox("$n1", "01"), ["$n1"])
+        d = self.netlist(pbox("$n1", "10"), ["$n1"])
+        with self.assertRaises(equiv_check.EquivError) as ctx:
+            equiv_check.pair_by_input_signature(self.flats(c, d))
+        self.assertIn("no box of the other file", str(ctx.exception))
 
     def test_model_is_part_of_the_signature(self) -> None:
         a = self.netlist(self.box("$n1"), ["$n1"])
