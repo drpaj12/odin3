@@ -413,7 +413,7 @@ class CliTests(unittest.TestCase):
         bad = pc.classify(dump(("$_AND_", "$c1", "")), {}, allow=pc.DEFAULT_ALLOW)
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "expect.txt"
-            path.write_text("# known\nb e unresolved/$_AND_ 1 port bits carry no location\n")
+            path.write_text(f"# known\nb e {idof(bad)} 1 port bits carry no location\n")
             args = ["--legs", "a", "--expect", str(path), "x.v"]
             with fake_leg(("d", "a", good), ("e", "b", bad)):
                 code, out, _ = run_main(pc.main, args)
@@ -450,40 +450,62 @@ def lut_rep(n: int, note: str = "") -> pc.LegReport:
     return rep
 
 
+def idof(rep: pc.LegReport) -> str:
+    """The one defect id (with its object hash) of a report."""
+    (only,) = pc.defect_ids(rep.defects)
+    return only
+
+
 class JudgeTests(unittest.TestCase):
-    D1 = "unresolved/lut/drives-output-port"
+    NOTE = "drives-output-port"
+
+    def listed(self, rep: pc.LegReport, count: int) -> pc.Expect:
+        return pc.parse_expect(f"b d {idof(rep)} {count} D1\n")
 
     def test_listed_defect_alone_is_excepted(self) -> None:
-        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
-        bad, excepted, problems = pc.judge([("d", "b", lut_rep(2, "drives-output-port"))], expect)
+        rep = lut_rep(2, self.NOTE)
+        bad, excepted, problems = pc.judge([("d", "b", rep)], self.listed(rep, 2))
         self.assertEqual((bad, excepted, problems), (0, 1, []))
 
+    def test_id_carries_a_hash_of_the_objects(self) -> None:
+        self.assertRegex(idof(lut_rep(2, self.NOTE)), r"^unresolved/lut/drives-output-port@[0-9a-f]{8}$")
+
+    def test_swapped_object_with_same_kind_and_count_fails(self) -> None:
+        old = lut_rep(2, self.NOTE)
+        new = pc.LegReport()
+        new.defects += [pc.Defect("unresolved", "m", n, "$sop", self.NOTE) for n in ("$c0", "$z")]
+        self.assertNotEqual(idof(old), idof(new))
+        bad, _, problems = pc.judge([("d", "b", new)], self.listed(old, 2))
+        self.assertEqual(bad, 1)
+        self.assertTrue(any("lists 2, found 0" in p for p in problems))
+
     def test_extra_unlisted_loss_on_a_listed_leg_fails(self) -> None:
-        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
-        rep = lut_rep(2, "drives-output-port")
+        rep = lut_rep(2, self.NOTE)
+        expect = self.listed(rep, 2)
         rep.defects.append(pc.Defect("unresolved", "m", "$x", "single_port_ram"))
         self.assertEqual(pc.judge([("d", "b", rep)], expect)[:2], (1, 0))
 
     def test_more_of_a_listed_defect_fails_and_fewer_is_stale(self) -> None:
-        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
-        self.assertEqual(
-            pc.judge([("d", "b", lut_rep(3, "drives-output-port"))], expect)[:2], (1, 0)
-        )
-        bad, _, problems = pc.judge([("d", "b", lut_rep(1, "drives-output-port"))], expect)
-        self.assertEqual(bad, 0)
-        self.assertTrue(any("lists 2, found 1" in p for p in problems))
+        expect = self.listed(lut_rep(2, self.NOTE), 2)
+        self.assertEqual(pc.judge([("d", "b", lut_rep(3, self.NOTE))], expect)[:2], (1, 0))
+        bad, _, problems = pc.judge([("d", "b", lut_rep(1, self.NOTE))], expect)
+        self.assertEqual(bad, 1)  # the remaining object set differs: a new id
+        self.assertTrue(any("lists 2, found 0" in p for p in problems))
 
     def test_a_listed_leg_that_did_not_run_is_stale(self) -> None:
-        expect = pc.parse_expect(f"b d {self.D1} 2 D1\n")
+        expect = self.listed(lut_rep(2, self.NOTE), 2)
         good = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
         _, _, problems = pc.judge([("d", "a", good)], expect)
         self.assertEqual(problems, ["stale expect line: b d did not run"])
+        # a leg that was not requested is not stale; a requested one is
+        self.assertEqual(pc.judge([("d", "c", good)], expect, ["c"])[2], [])
+        self.assertEqual(len(pc.judge([("d", "a", good)], expect, ["a", "b"])[2]), 1)
         # a design that was not run at all is not listed stale: one expect file serves many runs
         self.assertEqual(pc.judge([("other", "a", good)], expect)[2], [])
 
     def test_mismatch_is_never_excepted(self) -> None:
-        expect = pc.parse_expect(f"b d {self.D1} 1 D1\n")
-        rep = lut_rep(1, "drives-output-port")
+        rep = lut_rep(1, self.NOTE)
+        expect = self.listed(rep, 1)
         rep.mismatches.append("port-buffer: 1 in the dump, 2 in the written file")
         self.assertEqual(pc.judge([("d", "b", rep)], expect)[:2], (1, 0))
 
@@ -549,6 +571,25 @@ class VersusTests(unittest.TestCase):
         rep = self._pair((("$sop", "$c1", A), ("$_DFF_P_", "$c3", A)))
         self.assertEqual([d.kind for d in rep.defects], ["count-drop"])  # one per lost object
         self.assertEqual(pc.defect_id(rep.defects[0]), "count-drop/lut")
+
+    def test_gain_in_another_module_does_not_offset_a_drop(self) -> None:
+        first = pc.classify(
+            pc.parse_dump(f"t|node:$lut|$c1|{A}\nt|node:$lut|$c2|{A}\nu|node:$lut|$c3|{A}\n"),
+            {},
+            allow=frozenset(),
+        )
+        second = pc.classify(
+            pc.parse_dump(
+                f"t|node:$sop|$c1|{A}\nu|node:$sop|$c3|{A}\nu|node:$sop|$c4|{A}\n"
+            ),
+            {},
+            allow=pc.DEFAULT_ALLOW,
+            inherits=True,
+        )
+        pc.compare_counts(first, second)
+        self.assertEqual(second.versus["lut"], (3, 3))  # the class totals are equal
+        self.assertEqual([d.module for d in second.defects], ["t"])  # but t lost one
+        self.assertFalse(second.ok)
 
     def test_only_modules_the_second_leg_holds_count(self) -> None:
         first = pc.classify(

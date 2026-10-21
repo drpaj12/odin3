@@ -61,6 +61,7 @@ child crashed or timed out.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import re
@@ -197,18 +198,25 @@ class LegReport:
         return self.defects[:NAMED_DEFECTS]
 
 
+def _kept_in(rep: LegReport, mod: str, cls: str) -> int:
+    """``kept`` for one module: its objects less the writer-made tables in it."""
+    per = rep.modules.get(mod, {})
+    return per.get(cls, 0) - (per.get("_extra", 0) if cls == "lut" else 0)
+
+
 def compare_counts(first: LegReport, second: LegReport) -> None:
     """A-vs-b: the objects per class in the modules ``second`` holds (the writer writes the top
-    only) against ``second``'s, less the tables the writer added. A class with fewer objects after
-    the write and read-back is a ``count-drop`` defect: objects were lost, not only locations. A
-    class with more is only shown (the writer adds buffer tables)."""
+    only) against ``second``'s, less the tables the writer added. A module with fewer objects of a
+    class after the write and read-back gets one ``count-drop`` defect per lost object: objects
+    were lost, not only locations. A gain never offsets a drop in another module; it is only shown
+    in ``versus`` (the writer adds buffer tables)."""
     for cls in OBJECT_CLASSES:
         before = sum(first.modules.get(m, {}).get(cls, 0) for m in second.modules)
         after = second.kept(cls)
         second.versus[cls] = (before, after)
-        if after < before:
-            note = f"{cls}: {before} before, {after} after"
-            second.defects += [Defect("count-drop", "", note, cls)] * (before - after)
+        for mod in sorted(second.modules):
+            lost = first.modules.get(mod, {}).get(cls, 0) - _kept_in(second, mod, cls)
+            second.defects += [Defect("count-drop", mod, f"{cls}-{n}", cls) for n in range(1, lost + 1)]
 
 
 def defect_id(d: Defect) -> str:
@@ -220,6 +228,23 @@ def defect_id(d: Defect) -> str:
     if d.kind == "count-drop":
         what = d.ctype
     return "/".join(x for x in (d.kind, what, d.note) if x)
+
+
+def defect_ids(defects: Sequence[Defect]) -> Counter[str]:
+    """Defect kind -> count. The id is the kind id plus ``@`` and the first 8 hex of the sha256 of
+    the sorted ``module/name`` list of its objects, so swapping a fixed defect for a new one of the
+    same kind and count changes the id. A flow-error has no objects."""
+    groups: dict[str, list[str]] = {}
+    for d in defects:
+        groups.setdefault(defect_id(d), []).append(f"{d.module}/{d.name}")
+    ids: Counter[str] = Counter()
+    for base, objs in groups.items():
+        if base == "flow-error":
+            ids[base] += len(objs)
+            continue
+        digest = hashlib.sha256("\n".join(sorted(objs)).encode()).hexdigest()[:8]
+        ids[f"{base}@{digest}"] += len(objs)
+    return ids
 
 
 def parse_allow(text: str | None) -> frozenset[str]:
@@ -385,11 +410,13 @@ def _count_node(
         return
     if cls == "lut" and _const_table(ctx, row, cell):
         rep.exceptions["const-table"] += 1
+        per["_extra"] = per.get("_extra", 0) + 1
         rep.removed += 1
         return
     verdict = _port_buffer(ctx, row, cell) if cls == "lut" else None
     if verdict == "yes":
         rep.exceptions["port-buffer"] += 1
+        per["_extra"] = per.get("_extra", 0) + 1
         rep.removed += 1
         return
     kind = "lost-location" if verdict == "lost" else "unresolved"
@@ -589,7 +616,7 @@ def report_dict(items: Sequence[tuple[str, str, LegReport]]) -> dict[str, Any]:
             "coverage": rep.coverage,
             "strict": rep.strict,
             "versus": {c: list(v) for c, v in rep.versus.items()},
-            "defect_ids": dict(Counter(defect_id(d) for d in rep.defects)),
+            "defect_ids": dict(defect_ids(rep.defects)),
             "median": rep.median,
             "p90": rep.p90,
             "capped": rep.capped,
@@ -629,12 +656,15 @@ def parse_expect(text: str) -> Expect:
 
 
 def judge(
-    items: Sequence[tuple[str, str, LegReport]], expect: Expect
+    items: Sequence[tuple[str, str, LegReport]],
+    expect: Expect,
+    requested: Collection[str] | None = None,
 ) -> tuple[int, int, list[str]]:
     """(failed, excepted, problems). A leg fails unless it is clean or every defect kind it has is
     listed with exactly its count (more is a new defect; fewer is a stale line, a problem). A
     mismatch or a flow-error is never excepted. A listed leg that passes, or that did not run for a
-    design that ran, is stale."""
+    design that ran, is stale; a listed leg that was not in ``requested`` (``c-rb`` counts as ``c``)
+    is not checked for that."""
     bad = excepted = 0
     problems: list[str] = []
     seen: set[tuple[str, str]] = set()
@@ -642,7 +672,7 @@ def judge(
         key = (design, leg)
         seen.add(key)
         listed = expect.get(key, {})
-        found = Counter(defect_id(d) for d in rep.defects)
+        found = defect_ids(rep.defects)
         if rep.ok:
             problems += [f"stale expect line: {leg} {design} {i}" for i in sorted(listed)]
             continue
@@ -659,7 +689,9 @@ def judge(
     problems += [
         f"stale expect line: {leg} {design} did not run"
         for design, leg in sorted(expect)
-        if design in {d for d, _ in seen} and (design, leg) not in seen
+        if design in {d for d, _ in seen}
+        and (design, leg) not in seen
+        and (requested is None or leg.split("-")[0] in requested)
     ]
     return bad, excepted, problems
 
@@ -706,7 +738,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"{TOOL}: nothing was compared", file=sys.stderr)
             return EXIT_FAIL
         expect = parse_expect(args.expect.read_text(encoding="utf-8")) if args.expect else {}
-        bad, excepted, problems = judge(items, expect)
+        bad, excepted, problems = judge(items, expect, args.legs.split(","))
         for line in problems:
             print(f"{TOOL}: {line}")
         print(f"{TOOL}: compared {len(items)} legs, {bad} failed, {excepted} excepted", flush=True)
