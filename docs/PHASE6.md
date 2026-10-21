@@ -159,7 +159,10 @@ Source: `prov-cover --legs a,b|c|d --smallest-first` reports (`tests/prov/expect
    cell or LUT that drives a module output port bit loses its location after the BLIF VTR write
    and read-back (X-8: the port-bit net name has no `@file:line`). It is a counted class in
    read-back dumps (legs b, c-rb) and leg d, never in leg a, and only when a located node drove
-   the same port bit in leg a (matched by port bit name); otherwise it stays a defect. The D3
+   the same port bit in leg a (matched by port bit name) and the leg-a driver had the same class
+   (lut, latch, hard, lpm) as the read-back object; otherwise it stays a defect. The D3
    LUT-count drop (a located identity LUT at a port bit becomes a port-buffer table) is
-   reported as this class with the same proof. Result: 0 defects on the 14 designs in legs a, b
+   reported as this class only per port bit: leg a had a located identity LUT at that bit and the
+   read-back driver of it is a port-buffer table; other drops stay `count-drop`. Each leg prints
+   "port-driver K of N objects (P%)", so the share that leaves the coverage base is visible. Result: 0 defects on the 14 designs in legs a, b
    and d; the D1/D3 expect lines are removed.

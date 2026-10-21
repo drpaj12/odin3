@@ -811,6 +811,13 @@ class PortDriverTests(unittest.TestCase):
         self.assertEqual(rep.exceptions["port-driver"], 0)
         self.assertFalse(rep.ok)
 
+    def test_ratio_line_is_printed_per_leg(self) -> None:
+        rep = pc.classify(
+            dump(("$sop", "$c1", ""), ("$lut", "$c2", A)), self._f(), allow=pc.DEFAULT_ALLOW,
+            readback=True, ports={("m", "o"): ("lut", False)},
+        )
+        self.assertIn("port-driver 1 of 2 objects (50.0%)", pc.render_table([("d", "b", rep)]))
+
     def test_class_is_printed_at_zero(self) -> None:
         rep = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
         self.assertEqual(rep.exceptions["port-driver"], 0)
@@ -902,7 +909,10 @@ class PortDriverTests(unittest.TestCase):
         )
         first = pc.classify(dump(("$lut", "$c1", A), ("$lut", "$c2", A)), fa, allow=frozenset())
         fb = facts(
-            {"$c1": cell("$sop", ("n1",), ("o1",), True), "$c2": cell("$sop", ("n1",), ("o2",), True)},
+            {
+                "$c1": cell("$sop", ("n1",), ("o1",), True),
+                "$c2": cell("$sop", ("n1",), ("o2",), True),
+            },
             port_out=("o1", "o2"),
         )
         rep = pc.classify(

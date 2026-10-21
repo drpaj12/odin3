@@ -38,8 +38,9 @@ brackets:
 ``port-driver``   (Peter decision 2026-10-21, D1/D3) an object of a read-back dump with no
                   location whose output net is a module output port bit (X-8: the port-bit net
                   name carries no ``@file:line``, so D-5 has nothing to inherit), when the same
-                  net name was driven by a located node in leg (a). Without that leg-(a)
-                  proof it stays a defect. It stays an object (counted in its class and in the
+                  port bit was driven by a located node of the same class (lut, latch, hard,
+                  lpm) in leg (a). Without that per-bit, per-class leg-(a) proof it stays a
+                  defect. It stays an object (counted in its class and in the
                   a-vs-b counts) and is removed from the coverage base; never applied to leg (a).
                   An identity table at a port bit that leg (a) located is this class, not a
                   ``port-buffer``. Leg (d): the same rule on the driver block of a port bit.
@@ -638,6 +639,8 @@ def render_table(items: Sequence[tuple[str, str, LegReport]]) -> str:
             f"  objects {rep.total}"
             f"  median {rep.median:g}  p90 {rep.p90:g}  capped {rep.capped}"
         )
+        drv = rep.exceptions["port-driver"]
+        out.append(f"  port-driver {drv} of {rep.total} objects ({_pct(drv / max(rep.total, 1))})")
         if rep.versus:
             out.append(
                 "  a-vs-b "
