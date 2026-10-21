@@ -942,6 +942,17 @@ class PortDriverTests(unittest.TestCase):
         rep = vpr.place_check("#h\no\t1\t3\t0\t0\t#6\n", without)
         self.assertEqual((rep.exceptions["port-driver"], len(rep.defects)), (0, 1))
 
+    def test_place_leg_port_driver_same_bit_name_in_two_modules(self) -> None:
+        # a submodule with an output of the same name and another class (the and_latch of
+        # multiclock_output_and_latch) must not hide the top module's proof
+        rows = pc.parse_dump("top|node:$sop|g|\nsub|node:$_DFF_P_|h|\n")
+        top = pc.Mod({"g": cell("$sop", ("a",), ("o",))}, frozenset({"a"}), frozenset({"o"}))
+        sub = pc.Mod({"h": cell("$_DFF_P_", ("a",), ("o",))}, frozenset({"a"}), frozenset({"o"}))
+        proof = {("top", "o"): ("lut", False), ("sub", "o"): ("latch", False)}
+        index = vpr.build_index(rows, {"sub": sub, "top": top}, proof)
+        rep = vpr.place_check("#h\no\t1\t3\t0\t0\t#6\n", index)
+        self.assertEqual((rep.exceptions["port-driver"], len(rep.defects)), (1, 0))
+
 
 class LegsTests(unittest.TestCase):
     def _args(self, legs_arg: str) -> mock.MagicMock:

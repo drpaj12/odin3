@@ -108,10 +108,11 @@ class Index:
     outputs: frozenset[str]
     # net name -> the (file, line) of the net and of every located node that drives it
     where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
-    # port-driver proof: output port bit name -> class of the located leg-(a) node that drove it
-    a_ports: dict[str, str] = field(default_factory=dict)
-    # output port bit name -> class of the read-back node that drives it now
-    driver_class: dict[str, str] = field(default_factory=dict)
+    # port-driver proof: (module, output port bit name) -> class of the located leg-(a) node
+    # that drove it; per module, as two modules can have an output of one name
+    a_ports: dict[tuple[str, str], str] = field(default_factory=dict)
+    # (module, output port bit name) -> class of the read-back node that drives it now
+    driver_class: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
 def build_index(
@@ -122,7 +123,7 @@ def build_index(
     driver counts only for a port bit whose leg-(a) driver had the same class."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
     kinds = {(r.module, r.name): object_class(r.ctype) or "" for r in rows if r.kind == "node"}
-    driver_class: dict[str, str] = {}
+    driver_class: dict[tuple[str, str], str] = {}
     where: dict[str, set[tuple[str, int]]] = {}
     for r in rows:  # the net's own location is what the written name carries (a hard block's)
         if r.kind == "net":
@@ -137,9 +138,9 @@ def build_index(
                 net = mod.net_name(out)
                 driven.add(net)
                 if out in mod.port_out:
-                    driver_class[net] = driver_class[mod.port_bit_name(out)] = kinds.get(
-                        (module, name), ""
-                    )
+                    cls = kinds.get((module, name), "")
+                    driver_class[(module, net)] = cls
+                    driver_class[(module, mod.port_bit_name(out))] = cls
                 if src.get((module, name)):
                     located.add(net)
                     where.setdefault(net, set()).update(
@@ -154,7 +155,7 @@ def build_index(
         frozenset(inputs),
         frozenset(outputs),
         {net: frozenset(locs) for net, locs in where.items()},
-        {bit: cls for (_, bit), (cls, _) in (a_ports or {}).items()},
+        {key: cls for key, (cls, _) in (a_ports or {}).items()},
         driver_class,
     )
 
@@ -234,8 +235,10 @@ def _resolve(
     elif key in index.located:
         return "resolved", "net"
     if key in index.driven:
-        if key in index.outputs and key in index.a_ports and (
-            index.a_ports[key] == index.driver_class.get(key)
+        if key in index.outputs and any(
+            cls == index.driver_class.get((module, bit))
+            for (module, bit), cls in index.a_ports.items()
+            if bit == key
         ):
             return "port-driver", ""  # Peter 2026-10-21: located in leg a, lost at the port bit
         note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
