@@ -401,7 +401,7 @@ superiority; Sec.~\ref{sec:compare} gives the reasoning behind each.
 
 \begin{table}[t]
 \caption{Odin III through VTR's ABC stage (leg O$'$) against the Parmys flow (P) on
-\code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}: ratios O$'$/P (M2 run, 2026-10-20, VTR commit
+\code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}: ratios O$'$/P (M2 run, 2026-10-21, VTR commit
 3c9a4d23)}
 \label{tab:m2}
 \centering
@@ -411,24 +411,23 @@ superiority; Sec.~\ref{sec:compare} gives the reasoning behind each.
 \toprule
 Design & LUTs & CLBs & $W$ & Delay & WL \\
 \midrule
-\code{ch\_intrinsics} & 1.320 & 1.059 & 0.950 & 1.102 & 1.511 \\
+\code{ch\_intrinsics} & 0.990 & 1.000 & 1.050 & 1.062 & 1.233 \\
 \code{stereovision3} & 1.000 & 1.067 & 1.077 & 0.959 & 1.288 \\
 \code{diffeq2} & 0.990 & 0.957 & 0.735 & 1.025 & 1.120 \\
-\code{diffeq1} & 1.003 & 0.886 & 0.960 & 1.012 & 0.974 \\
-\code{mkPktMerge} & 1.085 & 0.235 & 0.550 & 0.691 & 0.016 \\
-\code{raygentop} & 1.419 & 1.234 & 1.034 & 0.987 & 1.302 \\
-\code{sha} & 1.023 & 1.053 & 0.970 & 1.079 & 1.064 \\
-\code{boundtop} & 0.757 & 1.635 & 1.263 & 1.108 & 0.635 \\
-\code{mkSMAdapter4B} & 1.007 & 1.068 & 1.130 & 0.976 & 0.979 \\
-\code{or1200} & 1.047 & 1.053 & 0.923 & 0.964 & 1.010 \\
-\code{stereovision0} & 1.096 & 1.078 & 1.087 & 0.847 & 1.087 \\
-\code{stereovision1} & 1.009 & 1.036 & 1.054 & 1.027 & 1.001 \\
-\code{mkDelayWorker32B} & 1.007 & 0.981 & 0.950 & 0.924 & 1.077 \\
-\code{stereovision2} & 1.069 & 1.060 & 1.093 & 0.980 & 1.156 \\
-\code{blob\_merge} & 1.872 & 1.108 & 0.969 & 1.018 & 1.075 \\
+\code{diffeq1} & 1.000 & 0.943 & 1.000 & 0.993 & 0.978 \\
+\code{mkPktMerge} & 1.000 & 0.971 & 1.000 & 1.016 & 0.984 \\
+\code{raygentop} & 1.026 & 1.000 & 1.138 & 0.961 & 0.995 \\
+\code{sha} & 0.998 & 1.046 & 1.000 & 1.046 & 1.050 \\
+\code{boundtop} & 0.994 & 1.077 & 0.895 & 0.995 & 0.986 \\
+\code{mkSMAdapter4B} & 1.021 & 1.028 & 1.043 & 1.102 & 0.981 \\
+\code{or1200} & 1.015 & 1.038 & 1.000 & 0.965 & 1.033 \\
+\code{stereovision0} & 0.995 & 1.008 & 1.043 & 0.846 & 1.001 \\
+\code{stereovision1} & 1.000 & 1.035 & 1.000 & 1.002 & 1.020 \\
+\code{mkDelayWorker32B} & 1.000 & 1.008 & 0.950 & 0.913 & 1.002 \\
+\code{stereovision2} & 1.000 & 0.979 & 1.000 & 0.949 & 0.947 \\
+\code{blob\_merge} & 1.777 & 1.038 & 0.906 & 0.979 & 0.951 \\
 \midrule
-Geomean (15) & 1.091 & 0.976 & 0.967 & 0.974 & 0.811 \\
-Geomean without \code{mkPktMerge} & 1.091 & 1.080 & 1.007 & 0.998 & 1.073 \\
+Geomean (15) & 1.041 & 1.012 & 0.985 & 0.986 & 1.034 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -444,17 +443,16 @@ the weakness of my development machine: they are shipped out to a bigger machine
 claimed for them here.
 
 Table~\ref{tab:m2} gives the M2 run: Odin~III's netlist of every one of the 15 designs routes in
-VPR. The geomean ratios against Parmys are 0.976 for CLBs, 0.967 for minimum channel width, 0.974
-for critical-path delay and 0.811 for routed wirelength, inside the 1.20 gate. Two LUT outliers,
-\code{blob\_merge} (1.87$\times$) and \code{raygentop} (1.42$\times$), are not investigated; my
-reading is that they come from the link to VTR, not from the front end. One design pulls the
-geomeans down. The O$'$ netlist of \code{mkPktMerge} packs no memory block in VPR, where Parmys's
-packs 15, and its CLB and wirelength ratios are 0.235 and 0.016; without it the geomeans are 1.080,
-1.007, 0.998 and 1.073, still inside the gate. \todo{Peter: explain or investigate the
-\code{mkPktMerge} memory difference before submission} Two designs exceed the per-design bound of
-1.50 on a gated metric: \code{boundtop} on CLBs (1.635) and \code{ch\_intrinsics} on wirelength
-(1.511). \todo{Peter: accept or explain the two per-design excesses} Phase~3 was closed on this
-data. With its linked ABC (leg O), Odin~III also routes \code{arm\_core}, in 148\,s.
+VPR. The geomean ratios against Parmys are 1.041 for LUTs, 1.012 for CLBs, 1.000 for memories,
+0.985 for minimum channel width, 0.986 for critical-path delay and 1.034 for routed wirelength,
+inside the 1.20 gate, and no design exceeds the per-design bound of 1.50 on a gated metric. The one
+LUT outlier is \code{blob\_merge} (1.78$\times$), whose CLB ratio is only 1.04; \code{raygentop},
+at 1.42$\times$ in the earlier run, is now 1.03. An earlier run showed \code{mkPktMerge} and
+\code{boundtop} packing no memory blocks, and that was a real bug, found by the oracle comparison:
+VTR's ABC step lost RAMs whose outputs drove primary outputs directly, and plain \code{opt}
+turned \code{x} multiplexer data into constants. The fix adds a port buffer and uses Parmys's
+\code{opt -full} after \code{flatten}; \code{vtr-qor} now also flags any lost hard block. Both
+designs pack all their memories (15 and 1, equal to Parmys). Phase~3 was closed on the earlier data. With its linked ABC (leg O), Odin~III also routes \code{arm\_core}, in 148\,s.
 \todo{O-leg QoR table at v1.0}
 
 \subsection{Verification evidence}
@@ -526,7 +524,7 @@ disagree, a probe or an equivalence check decides which one matches the RTL, and
 the RTL and declares the divergence. Table~\ref{tab:parmys-bugs} lists the defects found so far.
 D1, where Parmys pads signed adder operands with \code{unconn} instead of sign-extending them, is
 also declared, and I ruled it RTL-correct for Odin~III. We will report these to the VTR and Yosys
-projects in good faith. \todo{Peter: confirm before filing upstream}
+projects in good faith. \todo{Peter: confirm before filing upstream} The comparison also found a defect in Odin~III itself: the lost memories above surfaced only because the QoR table disagreed with the oracle, which is the oracle-driven testing this paper argues for.
 
 \subsection{Process, time and token cost}
 
@@ -2261,7 +2259,7 @@ Phase & Result \\
 3D-7 \code{abc-diff} & 29 k6 goldens: every design that finished is equivalent across the BLIF
   and in-memory exchanges. LUT ratios are 0.95 to 1.02 (\code{sha} 1.077). \\
 M1 & the P$'$ leg routes all 19 VTR designs with VPR. \\
-M2 (2026-10-20) & the O$'$ leg routes all 15 designs of the local gate; geomeans O$'$/P inside the
+M2 (2026-10-21) & the O$'$ leg routes all 15 designs of the local gate; geomeans O$'$/P inside the
   1.20 gate (Table~\ref{tab:m2}). \\
 M3 (2026-10-20) & O-leg \code{fcheck}: 12 pass, 3 classified untested; byte-identical reruns 15 of
   15; \code{lower-equiv} on the 14 small designs: 8 ok, 1 empty, 5 unproven, 0 differ. \\
