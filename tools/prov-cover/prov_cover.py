@@ -633,7 +633,8 @@ def judge(
 ) -> tuple[int, int, list[str]]:
     """(failed, excepted, problems). A leg fails unless it is clean or every defect kind it has is
     listed with exactly its count (more is a new defect; fewer is a stale line, a problem). A
-    mismatch or a flow-error is never excepted. A listed leg that passes or did not run is stale."""
+    mismatch or a flow-error is never excepted. A listed leg that passes, or that did not run for a
+    design that ran, is stale."""
     bad = excepted = 0
     problems: list[str] = []
     seen: set[tuple[str, str]] = set()
@@ -658,7 +659,7 @@ def judge(
     problems += [
         f"stale expect line: {leg} {design} did not run"
         for design, leg in sorted(expect)
-        if (design, leg) not in seen
+        if design in {d for d, _ in seen} and (design, leg) not in seen
     ]
     return bad, excepted, problems
 

@@ -478,6 +478,8 @@ class JudgeTests(unittest.TestCase):
         good = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
         _, _, problems = pc.judge([("d", "a", good)], expect)
         self.assertEqual(problems, ["stale expect line: b d did not run"])
+        # a design that was not run at all is not listed stale: one expect file serves many runs
+        self.assertEqual(pc.judge([("other", "a", good)], expect)[2], [])
 
     def test_mismatch_is_never_excepted(self) -> None:
         expect = pc.parse_expect(f"b d {self.D1} 1 D1\n")
