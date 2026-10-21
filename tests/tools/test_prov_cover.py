@@ -75,6 +75,21 @@ class ClassTests(unittest.TestCase):
         self.assertEqual([d.name for d in rep.defects], ["$c2"])
         self.assertEqual(rep.coverage, 0.5)
 
+    def test_defect_on_an_output_port_net_is_noted(self) -> None:
+        rows = dump(("$sop", "$c1", ""), ("$sop", "$c2", ""))
+        f = facts(
+            {
+                "$c1": cell("$sop", ("a", "b"), ("o",)),
+                "$c2": cell("$sop", ("a", "b"), ("n",)),
+            },
+            port_out=("o",),
+        )
+        rep = pc.classify(rows, f, allow=pc.DEFAULT_ALLOW)
+        self.assertEqual([d.note for d in rep.defects], ["drives-output-port", ""])
+        self.assertIn(
+            "defects by note: drives-output-port 1, other 1", pc.render_table([("d", "b", rep)])
+        )
+
     def test_every_class_listed_zero_included(self) -> None:
         rep = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
         self.assertEqual(set(rep.exceptions), set(pc.EXCEPTIONS))
@@ -379,6 +394,31 @@ class CliTests(unittest.TestCase):
         self.assertEqual(data["designs"][0]["design"], "d")
         self.assertIn("strict", data["designs"][0]["legs"]["a"])
         self.assertEqual(set(data["designs"][0]["legs"]["a"]["exceptions"]), set(pc.EXCEPTIONS))
+
+    def test_expect_file_excepts_a_known_defect(self) -> None:
+        import tempfile
+
+        good = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
+        bad = pc.classify(dump(("$_AND_", "$c1", "")), {}, allow=pc.DEFAULT_ALLOW)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "expect.txt"
+            path.write_text("# known\nb e port bits carry no location\n")
+            args = ["--legs", "a", "--expect", str(path), "x.v"]
+            with fake_leg(("d", "a", good), ("e", "b", bad)):
+                code, out, _ = run_main(pc.main, args)
+            self.assertEqual(code, pc.EXIT_OK)
+            self.assertIn("1 excepted", out)
+            with fake_leg(("d", "a", good), ("e", "b", good)):  # listed but passes: stale
+                code, out, _ = run_main(pc.main, args)
+            self.assertEqual(code, pc.EXIT_FAIL)
+            self.assertIn("stale expect line: b e", out)
+            with fake_leg(("d", "a", bad), ("e", "b", bad)):  # an unlisted failure still fails
+                code, _, _ = run_main(pc.main, args)
+            self.assertEqual(code, pc.EXIT_FAIL)
+
+    def test_expect_line_needs_a_reason(self) -> None:
+        with self.assertRaises(pc.ToolError):
+            pc.parse_expect("b only_two\n")
 
     def test_nothing_compared_fails(self) -> None:
         with fake_leg():

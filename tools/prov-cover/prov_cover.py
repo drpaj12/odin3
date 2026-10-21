@@ -59,6 +59,7 @@ import json
 import math
 import re
 import sys
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -123,9 +124,11 @@ class Defect:
     module: str
     name: str
     ctype: str
+    note: str = ""  # drives-output-port: the cell's output net is a module output port bit
 
     def text(self) -> str:
-        return f"{self.kind}: {self.module}.{self.name} ({self.ctype or 'no type'})"
+        extra = f", {self.note}" if self.note else ""
+        return f"{self.kind}: {self.module}.{self.name} ({self.ctype or 'no type'}{extra})"
 
 
 @dataclass
@@ -251,6 +254,13 @@ def _const_table(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     return ctx.facts[row.module].net_name(cell.outs[0]) in GENERATOR_NETS
 
 
+def _port_note(ctx: _Ctx, row: Obj, cell: Cell | None) -> str:
+    mod = ctx.facts.get(row.module)
+    if cell is not None and mod is not None and any(o in mod.port_out for o in cell.outs):
+        return "drives-output-port"
+    return ""
+
+
 def _port_buffer(ctx: _Ctx, row: Obj, cell: Cell | None) -> str | None:
     """'yes' (an exception), 'lost' (a located leg-(a) driver of the net) or None."""
     if cell is None or not cell.identity or len(cell.ins) != 1 or len(cell.outs) != 1:
@@ -317,7 +327,7 @@ def _count_node(ctx: _Ctx, row: Obj, rep: LegReport, allow: frozenset[str], inhe
         rep.removed += 1
         return
     kind = "lost-location" if verdict == "lost" else "unresolved"
-    rep.defects.append(Defect(kind, row.module, row.name, row.ctype))
+    rep.defects.append(Defect(kind, row.module, row.name, row.ctype, _port_note(ctx, row, cell)))
 
 
 def _count_located(
@@ -482,6 +492,11 @@ def render_table(items: Sequence[tuple[str, str, LegReport]]) -> str:
         )
         out += [f"  MISMATCH {m}" for m in rep.mismatches]
         out += [f"  DEFECT {d.text()}" for d in rep.named_defects()]
+        if rep.defects:
+            notes = Counter(d.note or "other" for d in rep.defects)
+            out.append(
+                "  defects by note: " + ", ".join(f"{k} {v}" for k, v in sorted(notes.items()))
+            )
         if len(rep.defects) > NAMED_DEFECTS:
             out.append(f"  ... and {len(rep.defects) - NAMED_DEFECTS} more")
     return "\n".join(out) + "\n"
@@ -511,6 +526,43 @@ def report_dict(items: Sequence[tuple[str, str, LegReport]]) -> dict[str, Any]:
 # --- driving ----------------------------------------------------------------------------------
 
 
+def parse_expect(text: str) -> dict[tuple[str, str], str]:
+    """``(design, leg) -> reason`` from ``<leg> <design file name> <reason...>`` lines."""
+    table: dict[tuple[str, str], str] = {}
+    for raw in text.splitlines():
+        words = raw.split("#", 1)[0].split()
+        if not words:
+            continue
+        if len(words) < 3:
+            raise ToolError(f"expect line wants '<leg> <design> <reason>': {raw!r}")
+        table[(words[1], words[0])] = " ".join(words[2:])
+    return table
+
+
+def judge(
+    items: Sequence[tuple[str, str, LegReport]], expect: Mapping[tuple[str, str], str]
+) -> tuple[int, int, list[str]]:
+    """(failed, excepted, problems): a failing leg the expect file lists is excepted; a listed leg
+    that passes or did not run is stale, and fails the run."""
+    bad = excepted = 0
+    seen: set[tuple[str, str]] = set()
+    for design, leg, rep in items:
+        key = (design, leg)
+        seen.add(key)
+        if rep.ok:
+            continue
+        if key in expect:
+            excepted += 1
+        else:
+            bad += 1
+    problems = [
+        f"stale expect line: {leg} {design} {expect[(design, leg)]}"
+        for design, leg in sorted(expect)
+        if (design, leg) in seen and next(r.ok for d, lg, r in items if (d, lg) == (design, leg))
+    ]
+    return bad, excepted, problems
+
+
 def run_designs(args: argparse.Namespace, work: Path) -> list[tuple[str, str, LegReport]]:
     """The reports of every design and leg (legs.py runs odin3)."""
     import legs
@@ -524,6 +576,7 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap.add_argument("--allow", help="exception classes to enable (default inherited,pad)")
     ap.add_argument("--odin3", default=None)
     ap.add_argument("--report", type=Path, help="write report.json here")
+    ap.add_argument("--expect", type=Path, help="known defects: '<leg> <design> <reason>' lines")
     ap.add_argument("--work", type=Path, help="keep every file here")
     ap.add_argument("--smallest-first", action="store_true")
     ap.add_argument("files", nargs="*", type=Path)
@@ -549,9 +602,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not items:
             print(f"{TOOL}: nothing was compared", file=sys.stderr)
             return EXIT_FAIL
-        bad = sum(not rep.ok for _, _, rep in items)
-        print(f"{TOOL}: compared {len(items)} legs, {bad} failed", flush=True)
-        return EXIT_FAIL if bad else EXIT_OK
+        expect = parse_expect(args.expect.read_text(encoding="utf-8")) if args.expect else {}
+        bad, excepted, problems = judge(items, expect)
+        for line in problems:
+            print(f"{TOOL}: {line}")
+        print(f"{TOOL}: compared {len(items)} legs, {bad} failed, {excepted} excepted", flush=True)
+        return EXIT_FAIL if bad or problems else EXIT_OK
     except CrashError as exc:
         print(f"{TOOL}: HARD: {exc}", file=sys.stderr)
         return EXIT_CRASH

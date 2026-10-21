@@ -1,0 +1,20 @@
+# 6.5b prov-cover: known defects, one per line: <leg> <design file name> <reason>. A listed leg
+# that fails is "excepted"; a listed leg that passes, and an unlisted failure, fail the run.
+#
+# Defect D1 (reported in the 6.5b lane result): in leg b a cell that drives a module output port
+# bit directly has no location after `write_blif --vtr --name-style provenance` + `read_blif
+# --hdl-locs`: the port bit's name carries no `@file:line` (X-8), so D-5 has no output net location
+# to inherit, and the cell is neither a P-3 class nor resolved. Reproduce:
+#   odin3 -p "read_techlib lib/vtr.o3lib; read_verilog --nolatches --vtr-compat \
+#     tests/micro/verilog/micro/bm_DL_2_1_mux.v; proc; fsm; opt; flatten; opt -full; wreduce; \
+#     hardmap; lower; abc --lut 6; write_blif --vtr --name-style provenance W.blif" \
+#   then "read_techlib lib/vtr.o3lib; read_blif --hdl-locs W.blif; dump_locs --types -" : the $sop
+#   that drives output f has an empty SRC.
+b bm_DL_2_1_mux.v D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_D_flipflop.v D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_4_1_mux.v D1: cell drives an output port bit (name has no location, X-8)
+b ff.v D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_2_cascaded_flip_flops.v D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_logic_w_Dff.v D1: cell drives an output port bit (name has no location, X-8)
+b bm_DL_structural_logic.v D1: cell drives an output port bit (name has no location, X-8)
+b plain_mux.v D1: cell drives an output port bit (name has no location, X-8)
