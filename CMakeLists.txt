@@ -3545,33 +3545,49 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/loc_tmp)
         set(_loc_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/loc_tmp
             ${PROJECT_SOURCE_DIR}/tools/loc-check/loc-check
-            --odin3 $<TARGET_FILE:odin3> --expect ${PROJECT_SOURCE_DIR}/tests/loc/expect.txt)
+            --odin3 $<TARGET_FILE:odin3> --expect ${PROJECT_SOURCE_DIR}/tests/loc/expect.txt
+            --pins ${PROJECT_SOURCE_DIR}/tests/loc/pins.txt)
+        # SET names the design set: the key of its pinned class counts in tests/loc/pins.txt (a
+        # count above its pin fails; below it prints a note to lower the pin).
         function(odin3_add_loc_test name)
-            cmake_parse_arguments(ARG "" "LEVEL;LABELS" "FILES" ${ARGN})
+            cmake_parse_arguments(ARG "" "LEVEL;LABELS;SET" "FILES" ${ARGN})
             add_test(NAME ${name}
-                COMMAND ${_loc_run} --level ${ARG_LEVEL} --smallest-first ${ARG_FILES})
+                COMMAND ${_loc_run} --level ${ARG_LEVEL} --set ${ARG_SET} --smallest-first
+                    ${ARG_FILES})
             set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}" TIMEOUT 3600)
         endfunction()
         file(GLOB _loc_lpm ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_*.v
                            ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_s[dp]*.v)
         list(SORT _loc_lpm)
-        odin3_add_loc_test(loc_word LEVEL word LABELS "loc;unit" FILES ${_json_default})
-        odin3_add_loc_test(loc_lpm LEVEL lpm LABELS "loc;unit" FILES ${_loc_lpm})
-        odin3_add_loc_test(loc_micros_word LEVEL word LABELS "sweep;loc" FILES ${_json_micros})
-        odin3_add_loc_test(loc_micros_lpm LEVEL lpm LABELS "sweep;loc" FILES ${_json_micros})
+        odin3_add_loc_test(loc_word LEVEL word SET default LABELS "loc;unit" FILES ${_json_default})
+        odin3_add_loc_test(loc_lpm LEVEL lpm SET lpm LABELS "loc;unit" FILES ${_loc_lpm})
+        odin3_add_loc_test(loc_micros_word LEVEL word SET micros LABELS "sweep;loc" FILES ${_json_micros})
+        odin3_add_loc_test(loc_micros_lpm LEVEL lpm SET micros LABELS "sweep;loc" FILES ${_json_micros})
         if(ODIN3_WITH_ABC)
             foreach(_lvl IN ITEMS gate lut)
-                odin3_add_loc_test(loc_${_lvl} LEVEL ${_lvl} LABELS "loc;unit" FILES ${_json_default})
-                odin3_add_loc_test(loc_micros_${_lvl} LEVEL ${_lvl} LABELS "sweep;loc"
+                odin3_add_loc_test(loc_${_lvl} LEVEL ${_lvl} SET default LABELS "loc;unit"
+                    FILES ${_json_default})
+                odin3_add_loc_test(loc_micros_${_lvl} LEVEL ${_lvl} SET micros LABELS "sweep;loc"
                     FILES ${_json_micros})
+            endforeach()
+        else()
+            # ABC is off: the gate and LUT levels cannot run. A named skip (CTest "Skipped", exit
+            # 77) in their place, so the gap shows in every report instead of the tests missing.
+            message(STATUS "loc-check: ODIN3_WITH_ABC is off, loc_gate and loc_lut are skipped")
+            foreach(_lvl IN ITEMS gate lut)
+                add_test(NAME loc_${_lvl}
+                    COMMAND sh -c
+                        "echo 'loc_${_lvl}: SKIPPED, the ${_lvl} level needs ABC (ODIN3_WITH_ABC is off)'; exit 77")
+                set_tests_properties(loc_${_lvl} PROPERTIES LABELS "loc;unit" SKIP_RETURN_CODE 77)
             endforeach()
         endif()
         if(EXISTS ${_json_vtr_dir}/sha.v)
-            odin3_add_loc_test(loc_vtr14_word LEVEL word LABELS "sweep;loc" FILES ${_json_vtr14})
+            odin3_add_loc_test(loc_vtr14_word LEVEL word SET vtr14 LABELS "sweep;loc"
+                FILES ${_json_vtr14})
             if(ODIN3_WITH_ABC)
                 foreach(_lvl IN ITEMS gate lut)
-                    odin3_add_loc_test(loc_vtr14_${_lvl} LEVEL ${_lvl} LABELS "sweep;loc"
-                        FILES ${_json_vtr14})
+                    odin3_add_loc_test(loc_vtr14_${_lvl} LEVEL ${_lvl} SET vtr14
+                        LABELS "sweep;loc" FILES ${_json_vtr14})
                 endforeach()
             endif()
         endif()

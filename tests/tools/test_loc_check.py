@@ -177,7 +177,10 @@ class CompareTests(unittest.TestCase):
         before = dump(("wire", "x", A), ("net", "$n1", ""), ("net", "$n2", ""))
         after = dump(("wire", "x", A), ("net", "$n1", A), ("net", "$n2", B))
         t = lc.compare("json", before, after)["net"]
-        self.assertEqual((t.inherited, t.gained), (0, 2))
+        # $n1 takes the location of a wire (one net had none before); $n2 has no wire's location
+        self.assertEqual((t.inherited, t.gained), (1, 1))
+        more = lc.compare("json", dump(("wire", "x", A), ("net", "$n1", A)), dump(("net", "$n1", A), ("net", "$n2", A)))
+        self.assertEqual((more["net"].inherited, more["net"].gained), (0, 1))  # no net to give it to
         named = lc.compare("json", dump(("wire", "n", A), ("net", "n", "")), dump(("net", "n", A)))
         self.assertEqual((named["net"].inherited, named["net"].gained), (1, 0))
         # a net named for another wire, or a generated name no wire can be told from: gained
@@ -191,11 +194,10 @@ class CompareTests(unittest.TestCase):
         t = lc.compare("verilog", before, after)["node"]
         self.assertEqual((t.modgained, t.gained), (1, 1))
         tally = {"node": lc.Tally(had=1, modgained=1)}
-        self.assertEqual(lc.check_tallies("verilog", tally, lc.Allow(modgained=1)), [])
+        self.assertEqual(lc.check_tallies("verilog", tally, lc.Allow(modgained=True)), [])
         problems = lc.check_tallies("verilog", tally)  # not listed: a failure
         self.assertTrue(any("module's location" in p for p in problems), problems)
-        stale = lc.check_tallies("verilog", {"node": lc.Tally(had=1)}, lc.Allow(modgained=2))
-        self.assertTrue(any("module's location" in p for p in stale), stale)
+        self.assertEqual(lc.check_tallies("verilog", {"node": lc.Tally(had=1)}), [])
 
     def test_new_objects_are_gained(self) -> None:
         before = dump(("wire", "x", A))
@@ -316,17 +318,19 @@ class ExpectTests(unittest.TestCase):
         table = lc.parse_expect(
             "# c\nlut x.v error:script no lower for it\n\n"
             "absent lut x.v verilog sub not instantiated\n"
-            "modgained lut x.v verilog 3 a literal 1'b1 driver\n"
+            "modgained verilog a literal 1'b1 driver\n"
         )
         self.assertEqual(table.designs, {("lut", "x.v"): ("error:script", "no lower for it")})
-        self.assertEqual(table.allow("lut", "x.v", "verilog"), lc.Allow(frozenset({"sub"}), 3))
+        self.assertEqual(table.allow("lut", "x.v", "verilog"), lc.Allow(frozenset({"sub"}), True))
         self.assertEqual(table.allow("lut", "x.v", "json"), lc.Allow())
+        self.assertEqual(table.allow("lut", "y.v", "verilog"), lc.Allow(frozenset(), True))
         for bad in (
             "lut x.v\n",
             "lut x.v bogus why\n",
             "absent lut x.v json sub no module-less json\n",  # JSON always has every module
             "absent lut x.v plain sub nor plain BLIF\n",
-            "modgained lut x.v verilog many why\n",
+            "modgained blah why\n",
+            "modgained verilog\n",
             "absent lut x.v verilog sub\n",  # no reason
         ):
             with self.assertRaises(lc.ToolError, msg=bad):
@@ -361,6 +365,13 @@ class AbsentModuleTests(unittest.TestCase):
         t = lc.compare("verilog", self.BEFORE, self.AFTER, None, allow)
         self.assertEqual(lc.check_tallies("verilog", t, allow), [])
         self.assertEqual(t["wire"].lost, {"X-1": 1})
+
+    def test_listed_module_that_is_instantiated_still_fails(self) -> None:
+        before = self.BEFORE + [lc.Obj("top", "node", "$c1", A, "sub")]
+        after = self.AFTER + [lc.Obj("top", "node", "$c1", A, "")]
+        allow = lc.Allow(absent=frozenset({"sub"}))
+        problems = lc.check_tallies("verilog", lc.compare("verilog", before, after, None, allow), allow)
+        self.assertTrue(any("instantiates it" in p for p in problems), problems)
 
     def test_stale_entry_fails(self) -> None:
         allow = lc.Allow(absent=frozenset({"top"}))
@@ -423,6 +434,15 @@ class PinTests(unittest.TestCase):
         run = {"node": lc.Tally(lost={"X-9": 5})}
         lines = lc.pin_lines("micros", "lut", "json", run)
         self.assertEqual(lc.parse_pins("\n".join(lines)), {("micros", "lut", "json", "node", "X-9"): 5})
+
+    def test_modgained_is_pinned(self) -> None:
+        pins = lc.parse_pins("micros lut verilog node modgained 3\n")
+        run = {"node": lc.Tally(modgained=4)}
+        fails, _ = lc.pin_problems(pins, "micros", {("lut", "verilog"): [run]})
+        self.assertEqual(len(fails), 1)
+        self.assertIn("modgained", fails[0])
+        lines = lc.pin_lines("micros", "lut", "verilog", run)
+        self.assertEqual(lines, ["micros lut verilog node modgained 4"])
 
     def test_bad_pins(self) -> None:
         for bad in ("micros lut json node X-9\n", "micros lut json node lost 5\n"):

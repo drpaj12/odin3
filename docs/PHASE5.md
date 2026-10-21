@@ -218,4 +218,4 @@ trip in 5.2 to 5.4 is equivalent (`equiv-check`) and keeps the HDL locations.
     locations" holds per (file, line) for every object kind except the named classes, each counted in the
     spec's section 14 tables, which are Phase 6.5's baseline. The measurement found that constant drivers have
     a location before writing (the spec assumed none) and that the Verilog reader gives a constant the module's
-    location (`modgained` 3 over the micros): both are listed in section 14.
+    location (`modgained`: 81 cells and 748 nets over the micros, allowed in `expect.txt` and pinned in `pins.txt`): both are listed in section 14.
