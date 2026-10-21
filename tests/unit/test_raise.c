@@ -310,6 +310,26 @@ static void test_raise_replaces_proven_group(void) {
     TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, run_raise(ADD4));
 }
 
+/* A one-bit wire named wname on the net named nname. */
+static void add_wire(const char *wname, const char *nname) {
+    odin3_net_id net = odin3_module_find_net(top(), intern(nname));
+    TEST_ASSERT_TRUE(odin3_net_valid(net));
+    odin3_wire_spec spec = {intern(wname), 0, 0, false, {0}};
+    odin3_wire_id wire = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(top(), &spec, &net, &wire));
+}
+
+/* The wire of an internal net goes with the net: nothing dangles, and the boundary wires stay. */
+static void test_raise_drops_internal_wires(void) {
+    prove_adder();
+    add_wire("w_c1", "c1");
+    add_wire("w_c3", "c3");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_raise(ADD4), log_text);
+    TEST_ASSERT_FALSE(odin3_wire_live(top(), odin3_module_find_wire(top(), intern("w_c1"))));
+    TEST_ASSERT_FALSE(odin3_wire_live(top(), odin3_module_find_wire(top(), intern("w_c3"))));
+    check_clean();
+}
+
 static void test_raise_provenance_union(void) {
     prove_adder();
     leaves before = all_sources();
@@ -404,6 +424,7 @@ static void test_raise_usage_errors(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_raise_replaces_proven_group);
+    RUN_TEST(test_raise_drops_internal_wires);
     RUN_TEST(test_raise_provenance_union);
     RUN_TEST(test_raise_refuses_unproven);
     RUN_TEST(test_raise_refuses_stale_proof);
