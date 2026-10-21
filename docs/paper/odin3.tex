@@ -2,7 +2,7 @@
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
 % from the repository's docs (DESIGN.md, IR.md, PHASE0-6.md, specs/, and ADR D10 and D11 for the v1.0 scope) and git log as of
-% 2026-10-20; gaps are marked with \todo{}. The M2 QoR ratios come from the vtr-qor table
+% 2026-10-20 (the cost as of the v1.0 close, 2026-10-21); gaps are marked with \todo{}. The M2 QoR ratios come from the vtr-qor table
 % 20261020-1642-M2 (published to odin3-golden, qor/3c9a4d23b27d/M2), the cost from
 % docs/log_cost_of_tokens_and_time.md.
 % Structure: Part I (Sections I-VI, then the references) is the 8-page FCCM paper; Part II
@@ -529,7 +529,7 @@ projects in good faith. \todo{Peter: confirm before filing upstream} The compari
 \subsection{Process, time and token cost}
 
 \begin{table}[t]
-\caption{Agent cost from the Claude Code transcripts, 2026-10-08 16:15 to 2026-10-20 15:17 UTC}
+\caption{Agent cost of Odin~III v1.0 from the Claude Code transcripts, 2026-10-08 16:15 to 2026-10-21 19:43 UTC}
 \label{tab:cost}
 \centering
 \footnotesize
@@ -537,13 +537,13 @@ projects in good faith. \todo{Peter: confirm before filing upstream} The compari
 \toprule
 Model & Requests & Tokens \\
 \midrule
-Claude Opus 5.5 & 27,679 & 7.89\,G \\
-Claude Sonnet 5.5 & 26,196 & 5.42\,G \\
+Claude Opus 5.5 & 28,931 & 8.31\,G \\
+Claude Sonnet 5.5 & 32,865 & 6.47\,G \\
 Claude Fable 5.1 & 1,470 & 0.28\,G \\
 Claude Haiku 5.5 & 57 & 0.003\,G \\
 DeepSeek & 0 & 0 \\
 \midrule
-Total & 55,402 & 13.60\,G \\
+Total & 63,323 & 15.06\,G \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -556,12 +556,12 @@ agent owns git and dispatches the others. I approve the specifications and the d
 the agents proceed on their own recommendations elsewhere, logging each as a default I may
 override.
 
-Cost is logged from the agents' transcripts (Table~\ref{tab:cost}). Over 287.0\,h of wall-clock
-time, 182.1\,h of it active, 55,402 requests used 13.6 billion tokens, 95\% of them prompt-cache
-reads and 60.0 million of them output, across 16 main sessions and 742 subagent runs. The work ran
-on a Claude Max subscription. Controller sessions may also run on DeepSeek's
-Anthropic-compatible API; no DeepSeek window falls in this span. \todo{final Claude and DeepSeek
-figures at v1.0}
+Cost is logged from the agents' transcripts (Table~\ref{tab:cost}). From the first session to the
+v1.0 close, 315.5\,h of wall-clock time, 209.9\,h of it active, 63,323 requests used 15.1 billion
+tokens, 95\% of them prompt-cache reads and 65.7 million of them output, across 16 main sessions
+and 877 subagent runs; 225 pull requests merged. The work ran on a Claude Max subscription.
+Controller sessions may also run on DeepSeek's Anthropic-compatible API; no DeepSeek window fell
+before v1.0.
 
 % ------------------------------------------------------------------------------------------
 \section{Discussion: What the Process Suggests for CAD Research}
