@@ -10,6 +10,7 @@ a temporary directory.
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import shutil
@@ -83,6 +84,11 @@ def run(leg: str, design: str, scale: float = 1.0, status: str = "ok",
         override: Mapping[str, object] | None = None) -> Run:
     return Run(leg=leg, design=design, arch=ARCH, key12="0123456789ab", status=status,
                gating=design in GATE, metrics=metrics(leg, design, scale, override))
+
+
+def replace_job(item: Run, job: Mapping[str, object]) -> Run:
+    """``item`` with the job.json record ``job``."""
+    return dataclasses.replace(item, job=dict(job))
 
 
 def table(scale: float = 1.0, *, legs: Sequence[str] = ("P", "O"),
@@ -610,7 +616,7 @@ RUNS_CSV_HEADER = (
     "abc_depth,num_clb,num_memories,num_mult,device_width,device_height,min_chan_width,"
     "critical_path_delay_ns,fmax_mhz,crit_path_routed_wirelength,frontend_wall_s,"
     "frontend_peak_rss_mib,vpr_time_s,vpr_total_runtime_s,max_vpr_mem_mib,fcheck,equiv,rerun,"
-    "blif_sha256,vtr_commit,odin3_commit")
+    "blif_sha256,vtr_commit,odin3_commit,hardblocks_lost")
 RATIOS_CSV_HEADER = (
     "arch,pair,design,n,luts,ffs,adders,mults,ram_slices,depth,num_clb,num_memories,num_mult,"
     "min_chan_width,critical_path_delay_ns,crit_path_routed_wirelength,frontend_wall_s,"
@@ -982,13 +988,32 @@ class WriterTest(unittest.TestCase):
             assert got is not None
             self.assertEqual(state(got), verdict_.state)
 
+    def test_hardblocks_lost_column_and_flag(self) -> None:
+        """A run whose job.json says the flow dropped hard blocks: its runs.csv cell and a
+        WARNING line under the Netlist table; no line for a clean table."""
+        clean = table()
+        qor_table.write_csv(clean, self.dir / "runs.csv", self.dir / "ratios.csv")
+        base = replace(clean, replace_job(run("O", "sha"), {}))
+        flagged = replace(clean, replace_job(run("O", "sha"),
+                                             {"hardblocks_lost": "single_port_ram:32"}))
+        qor_table.write_csv(flagged, self.dir / "runs.csv", self.dir / "ratios.csv")
+        row = next(line for line in (self.dir / "runs.csv").read_text(encoding="utf-8")
+                   .splitlines() if ",sha,O," in line)
+        self.assertTrue(row.endswith(",single_port_ram:32"), row)
+        sha = next(r for r in flagged if (r.leg, r.design) == ("O", "sha"))
+        self.assertEqual(qor_table.hardblocks_lost(sha), "single_port_ram:32")
+        layout = qor_table._layout(flagged, None, None)
+        self.assertEqual(sum("single_port_ram:32" in line
+                             for line in qor_table._lost_lines(layout)), 1)
+        self.assertEqual(qor_table._lost_lines(qor_table._layout(base, None, None)), [])
+
     def test_numbers_from_ok_runs_only(self) -> None:
         runs = replace(table(), run("O", "sha", status="failed"))
         qor_table.write_csv(runs, self.dir / "runs.csv", self.dir / "ratios.csv")
         row = next(line for line in (self.dir / "runs.csv").read_text(encoding="utf-8")
                    .splitlines() if ",sha,O," in line)
         self.assertEqual(row, f"{ARCH},sha,O,0123456789ab,failed,true" + "," * 27
-                         + qor_legs.VTR_PIN + ",")
+                         + qor_legs.VTR_PIN + ",,")
         ratios = (self.dir / "ratios.csv").read_text(encoding="utf-8").splitlines()
         self.assertIn(f"{ARCH},O/P,GEOMEAN_GATE,14,", "\n".join(ratios))
 

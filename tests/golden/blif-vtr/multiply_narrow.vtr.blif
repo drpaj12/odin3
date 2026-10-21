@@ -4,9 +4,41 @@
 .inputs x~0 x~1 x~2 x~3 x~4 x~5 x~6 x~7 y~0 y~1 y~2 y~3 y~4 y~5 y~6 y~7
 .outputs p~0 p~1 p~2 p~3 p~4 p~5 p~6 p~7 p~8 p~9 p~10 p~11 p~12 p~13 p~14 p~15
 .subckt multiply a[0]=x~0 a[1]=x~1 a[2]=x~2 a[3]=x~3 a[4]=x~4 a[5]=x~5 a[6]=x~6 a[7]=x~7 b[0]=y~0 \
-  b[1]=y~1 b[2]=y~2 b[3]=y~3 b[4]=y~4 b[5]=y~5 b[6]=y~6 b[7]=y~7 out[0]=p~0 out[1]=p~1 out[2]=p~2 \
-  out[3]=p~3 out[4]=p~4 out[5]=p~5 out[6]=p~6 out[7]=p~7 out[8]=p~8 out[9]=p~9 out[10]=p~10 \
-  out[11]=p~11 out[12]=p~12 out[13]=p~13 out[14]=p~14 out[15]=p~15
+  b[1]=y~1 b[2]=y~2 b[3]=y~3 b[4]=y~4 b[5]=y~5 b[6]=y~6 b[7]=y~7 out[0]=$n17 out[1]=$n18 \
+  out[2]=$n19 out[3]=$n20 out[4]=$n21 out[5]=$n22 out[6]=$n23 out[7]=$n24 out[8]=$n25 out[9]=$n26 \
+  out[10]=$n27 out[11]=$n28 out[12]=$n29 out[13]=$n30 out[14]=$n31 out[15]=$n32
+.names $n17 p~0
+1 1
+.names $n18 p~1
+1 1
+.names $n19 p~2
+1 1
+.names $n20 p~3
+1 1
+.names $n21 p~4
+1 1
+.names $n22 p~5
+1 1
+.names $n23 p~6
+1 1
+.names $n24 p~7
+1 1
+.names $n25 p~8
+1 1
+.names $n26 p~9
+1 1
+.names $n27 p~10
+1 1
+.names $n28 p~11
+1 1
+.names $n29 p~12
+1 1
+.names $n30 p~13
+1 1
+.names $n31 p~14
+1 1
+.names $n32 p~15
+1 1
 .end
 
 .model multiply

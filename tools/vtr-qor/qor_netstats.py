@@ -363,6 +363,106 @@ def netstats(path: Path) -> NetStats:
     )
 
 
+# Output formals of the hard blocks (spec §4.1) when the file carries no stub model for them.
+HARD_OUTPUTS = {
+    ADDER: frozenset({"sumout", "cout"}),
+    MULTIPLY: frozenset({"out"}),
+    SINGLE_PORT_RAM: frozenset({"out"}),
+    DUAL_PORT_RAM: frozenset({"out1", "out2"}),
+}
+
+
+def _base(formal: str) -> str:
+    """The port of a formal: ``out[3]`` -> ``out``."""
+    return formal.partition("[")[0]
+
+
+class _Hard:
+    """The ``.subckt`` instances of the first model with their pins, and what the model reads."""
+
+    def __init__(self) -> None:
+        self.models = 0
+        self.stub: str | None = None
+        self.stub_outputs: dict[str, frozenset[str]] = {}
+        self.boxes: list[tuple[str, list[tuple[str, str]]]] = []
+        self.reads: set[str] = set()
+
+    def feed(self, words: list[str]) -> None:
+        head = words[0]
+        if head == ".model":
+            self.models += 1
+            self.stub = words[1] if len(words) > 1 and self.models > 1 else None
+        elif self.models > 1:
+            if head == ".outputs" and self.stub is not None:
+                self.stub_outputs[self.stub] = frozenset(_base(w) for w in words[1:])
+        elif head == ".names":
+            self.reads.update(words[1:-1])
+        elif head == ".latch" and len(words) > 1:
+            self.reads.add(words[1])
+            self.reads.update(words[4:5])
+        elif head == ".outputs":
+            self.reads.update(words[1:])
+        elif head == ".subckt" and len(words) > 1:
+            pins = [(f, a) for f, _, a in (w.partition("=") for w in words[2:])]
+            self.boxes.append((words[1], pins))
+
+    def dead(self) -> dict[str, int]:
+        """Per model, the instances none of whose output nets a live reader reads. A box is live
+        when a ``.names``, ``.latch`` or primary output reads one of its outputs, or a live box
+        does; found to a fixpoint, so a chain of dead blocks is reported whole. A box of a model
+        with no known outputs is live (and warned about: it cannot be judged)."""
+        reads = set(self.reads)
+        outputs_of = {**HARD_OUTPUTS, **self.stub_outputs}
+        for model in sorted({m for m, _ in self.boxes if m not in outputs_of}):
+            print(f"vtr-qor: netstats: WARNING: cannot judge {model}: no stub", file=sys.stderr)
+        todo = []
+        for model, pins in self.boxes:
+            outs = outputs_of.get(model, frozenset())
+            nets = [a for f, a in pins if _base(f) in outs]
+            ins = [a for f, a in pins if _base(f) not in outs]
+            todo.append((model, nets, ins))
+        changed = True
+        while changed:
+            changed = False
+            rest = []
+            for model, nets, ins in todo:
+                if not nets or any(n in reads for n in nets):
+                    reads.update(ins)
+                    changed = True
+                else:
+                    rest.append((model, nets, ins))
+            todo = rest
+        dead: dict[str, int] = {}
+        for model, _nets, _ins in todo:
+            dead[model] = dead.get(model, 0) + 1
+        return dead
+
+
+def dead_hardblocks(path: Path) -> dict[str, int]:
+    """The hard-block instances of the first ``.model`` of ``path`` whose outputs nothing reads
+    (no ``.names``, ``.latch`` or ``.subckt`` input and no primary output), per model name. VPR
+    sweeps such a block with the logic behind it, so it never reaches the packed netlist.
+    Raises ``MalformedBlif`` or ``OSError`` as ``netstats`` does for a file it cannot read."""
+    scan = _Hard()
+    try:
+        with _open(path) as raw:
+            for words in _logical_lines(raw, lambda _chunk: None):
+                scan.feed(words)
+    except GZIP_ERRORS as exc:
+        raise MalformedBlif(f"{path}: malformed BLIF: truncated or corrupt gzip ({exc})") from None
+    return scan.dead()
+
+
+def hardblocks_lost(before: Path, after: Path) -> dict[str, int]:
+    """The hard blocks a stage left with no reader: per model, how many more instances of
+    ``after`` (the BLIF the stage produced) are dead than of ``before`` (the BLIF into it).
+    VTR's ABC step once dropped the primary outputs that RAMs drove, and with them every RAM
+    behind them (the RAMs stayed in the file; VPR swept them). Empty when none was lost."""
+    then, now = dead_hardblocks(before), dead_hardblocks(after)
+    return {model: n - then.get(model, 0) for model, n in sorted(now.items())
+            if n > then.get(model, 0)}
+
+
 # ----------------------------------------------------------------------------------------------
 # The ``# abc:`` header
 

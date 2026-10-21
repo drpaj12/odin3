@@ -58,3 +58,10 @@ fixtures, table + summary, `-j` ≤ 2), CTest `writer_check_fixtures`.
 
 Altera-primitive Verilog flavour (Phase 6), JSON reading (Phase 7), CIRCT (Phase 7), word-level
 Verilog with `always` blocks recovered from mux trees (that is `raise`, Phase 6).
+
+## Amendment (5.4, 2026-10-20)
+
+HDL locations in the JSON `src` attribute and the Verilog `(* src *)` and `// file:line` comments are
+now written by the 5.4 helper (`src/backends/common/hdl_loc.c`): only HDL (`SOURCE`) leaves, Yosys's
+`file:L.C-EL.EC` form, up to eight locations. See `docs/specs/2026-10-20-5.4-hdl-locations-design.md`
+section 3 (W-1 to W-6); the numbers are in its section 14.

@@ -98,6 +98,10 @@ if start is None:
     (temp / "parmys.out").write_text({TIMEV!r})
 else:
     shutil.copyfile(circuit, pre)
+    drop = root / "drop"  # designs whose ABC step drops all POs
+    if drop.exists() and design in drop.read_text().split():
+        lines = pre.read_text().splitlines(True)
+        pre.write_text("".join(".outputs\\n" if l.startswith(".outputs") else l for l in lines))
 if start != "vpr":
     (temp / "abc0.out").write_text("top : lev = 3\\n" + {TIMEV!r})
 (temp / "vpr.out").write_text("The entire flow of VPR took 0.25 seconds\\n")
@@ -167,7 +171,9 @@ if Path(__file__).with_name("fail").exists():
     sys.exit(1)
 script = sys.argv[sys.argv.index("-p") + 1]
 header = Path(__file__).with_name("abc_line.txt")  # a test's own # abc: line ("" for none)
-text = header.read_text() + {BLIF!r} if header.exists() else {ABC_LINE + BLIF!r}
+body = Path(__file__).with_name("blif.txt")  # a test's own netlist body
+body = body.read_text() if body.exists() else {BLIF!r}
+text = header.read_text() + body if header.exists() else {ABC_LINE!r} + body
 if "--name-style provenance" in script:
     text += "# names: provenance\\n"
 if "write_blif" in script:  # the fcheck pre-check's read_verilog-only script writes nothing
@@ -1000,6 +1006,28 @@ class ControlLegTest(CliTestBase):
         netlist = self.load(self.job_dirs("Pprime", "ch_intrinsics")[0] / "metrics.json")[
             "netlist"]
         self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (None, None))
+
+    def test_hardblocks_lost_warning(self) -> None:
+        """O': hard blocks in <d>.blif that the flow's ABC step drops give a WARNING and
+        job.json hardblocks_lost; a clean run leaves it empty and says nothing."""
+        self.golden_for("ch_intrinsics")
+        (self.bin / "blif.txt").write_text(
+            BLIF.replace(".outputs y", ".outputs y z").replace(
+                ".end\n", ".subckt single_port_ram clk=clk out=z\n"
+                          ".subckt single_port_ram clk=clk out=w\n.end\n"))
+        code, _, err = self.cli("run", "--leg", "Oprime", "--designs", "ch_intrinsics")
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("hardblocks_lost", err)
+        (job,) = self.job_dirs("Oprime", "ch_intrinsics")
+        self.assertEqual(self.load(job / "job.json")["hardblocks_lost"], "")
+        (self.vtr / "drop").write_text("ch_intrinsics\n")
+        code, _, err = self.cli("run", "--leg", "Oprime", "--designs", "ch_intrinsics",
+                                "--rerun")
+        self.assertEqual(code, 0, err)
+        self.assertIn("WARNING", err)
+        self.assertIn("hardblocks_lost single_port_ram:1", err)
+        (job,) = self.job_dirs("Oprime", "ch_intrinsics")
+        self.assertEqual(self.load(job / "job.json")["hardblocks_lost"], "single_port_ram:1")
 
     def test_pprime_parmys_part(self) -> None:
         """Point (o): the Parmys stage cost comes from the latest P job's parmys.out; without a P

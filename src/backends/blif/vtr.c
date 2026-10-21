@@ -660,13 +660,25 @@ static odin3_status refuse_inout(vtr_walk *walk, odin3_node_id node) {
     return ODIN3_OK;
 }
 
-/* Output-port bits: X and UNDRIVEN are written from gnd (§9.2). */
+/* True when a hard cell's output pin drives net: the writer gives such a port bit a `.names`
+ * buffer (spec 3E §9.2). */
+static bool hard_driven(const vtr_walk *walk, odin3_net_id net) {
+    odin3_pin_id driver = odin3_net_driver(walk->top, net);
+    return odin3_pin_valid(driver) &&
+           odin3_arch_writes_subckt(walk->design,
+                                    odin3_node_type(walk->top, odin3_pin_node(walk->top, driver)));
+}
+
+/* Output-port bits: X and UNDRIVEN are written from gnd (§9.2); a bit a hard cell drives gets a
+ * buffer `.names`. */
 static void count_port_out(vtr_walk *walk, odin3_node_id node) {
     odin3_pinslice pins = odin3_node_pins(walk->top, node);
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(walk->top, (odin3_pin_id){pins.first.v + k});
         if (is_x(odin3_blif_vtr_net_class(walk->top, net))) {
             walk->report->x_to_gnd++;
+        } else if (hard_driven(walk, net)) {
+            walk->report->names++;
         }
     }
 }
