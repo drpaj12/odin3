@@ -16,7 +16,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -26,7 +26,6 @@ from loc_check import level_script, parse_techlibs
 import vpr_leg
 from prov_cover import (
     GENERATOR_NETS,
-    PORT_TAG,
     ROOT_DIR,
     Cell,
     CrashError,
@@ -35,9 +34,11 @@ from prov_cover import (
     LegReport,
     Mod,
     Obj,
+    PortProof,
     ToolError,
     classify,
     compare_counts,
+    object_class,
     parse_dump,
     written_counts,
 )
@@ -155,8 +156,21 @@ def located_nets(rows: Sequence[Any], facts: Facts) -> set[tuple[str, str]]:
         cell = mod.cells.get(row.name) if mod else None
         if row.kind == "node" and row.src and mod and cell:
             found.update((row.module, mod.net_name(o)) for o in cell.outs)
-            ports = (o for o in cell.outs if o in mod.port_out)
-            found.update((row.module, PORT_TAG + mod.port_bit_name(o)) for o in ports)
+    return found
+
+
+def located_ports(rows: Sequence[Any], facts: Facts) -> dict[tuple[str, str], tuple[str, bool]]:
+    """(module, output port bit name) -> (class, identity table) of the located node that drives
+    the bit: the leg-(a) proof of the ``port-driver`` class, per bit and per class."""
+    found: dict[tuple[str, str], tuple[str, bool]] = {}
+    for row in rows:
+        mod = facts.get(row.module)
+        cell = mod.cells.get(row.name) if mod else None
+        cls = object_class(row.ctype) if row.kind == "node" else None
+        if cls and row.src and mod and cell:
+            for o in cell.outs:
+                if o in mod.port_out:
+                    found[(row.module, mod.port_bit_name(o))] = (cls, cell.identity)
     return found
 
 
@@ -228,6 +242,7 @@ def lut_legs(
     except ToolError as exc:
         return [*out, ("b" if "b" in wanted else "d", flow_error(design.name, exc))]
     located = located_nets(a.rows, a.facts)
+    ports = located_ports(a.rows, a.facts)
     rep = classify(
         b.rows,
         b.facts,
@@ -236,6 +251,7 @@ def lut_legs(
         readback=True,
         located=located,
         written=written_counts(blif.read_text(encoding="utf-8")),
+        ports=ports,
     )
     compare_counts(rep_a, rep)
     info = INFO_INHERITED.search(log)
@@ -247,7 +263,7 @@ def lut_legs(
     if "b" in wanted:
         out.append(("b", rep))
     if "d" in wanted:
-        out.append(("d", leg_d(args, design, work, b, located)))
+        out.append(("d", leg_d(args, design, work, b, ports)))
     return out
 
 
@@ -261,7 +277,7 @@ def leg_d(
     design: Path,
     work: Path,
     b: Dumped,
-    located: Collection[tuple[str, str]] = frozenset(),
+    ports: PortProof | None = None,
 ) -> LegReport:
     """VPR (pack and place) on leg b's BLIF, then ``place_check`` against leg b's read-back."""
     vpr = args.vpr or vtr_root() / "vpr" / "vpr"
@@ -272,7 +288,7 @@ def leg_d(
         )
         return vpr_leg.place_check(
             place.read_text(encoding="utf-8", errors="replace"),
-            vpr_leg.build_index(b.rows, b.facts, located),
+            vpr_leg.build_index(b.rows, b.facts, ports),
             net.read_text(encoding="utf-8", errors="replace"),
             allow=args.allow_set,
         )

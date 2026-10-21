@@ -96,7 +96,9 @@ EXCEPTIONS = (
 APPROVED = frozenset({"inherited", "pad"})  # approved by Peter 2026-10-20 (PHASE6 decision 2)
 DEFAULT_ALLOW = APPROVED
 NAMED_DEFECTS = 10
-PORT_TAG = "port:"  # in the ``located`` set: (module, PORT_TAG + port bit name) of a located driver
+# Port-driver proof of leg (a): (module, output port bit name) -> (class, identity table) of the
+# located node that drives that bit. Kept apart from the net names of ``located``.
+PortProof = Mapping[tuple[str, str], tuple[str, bool]]
 CONST_TYPES = frozenset({"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"})
 PORT_TYPES = frozenset({"$port_in", "$port_out", "$port_inout"})
 LUT_TYPES = frozenset({"$lut", "$sop"})
@@ -168,6 +170,10 @@ class LegReport:
     exceptions: dict[str, int] = field(default_factory=lambda: dict.fromkeys(EXCEPTIONS, 0))
     direct: int = 0  # objects located without an exception class (the strict figure)
     driver_buffers: int = 0  # port-driver objects that are also an identity table at a port bit
+    # module -> output port bits: leg a, a located identity LUT drives the bit; read-back, a
+    # port-buffer table drives a bit whose leg-a driver was one
+    id_ports: dict[str, set[str]] = field(default_factory=dict)
+    buf_ports: dict[str, set[str]] = field(default_factory=dict)
     removed: int = 0  # objects of the exception classes that stand in for a location
     defects: list[Defect] = field(default_factory=list)
     mismatches: list[str] = field(default_factory=list)
@@ -243,20 +249,22 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
 def _port_driver_drops(first: LegReport, second: LegReport) -> None:
     """D3 (Peter 2026-10-21): a located identity LUT at a port bit in leg (a) is written as a
     ``.names net port`` table without a location, which the read-back counts as a ``port-buffer``
-    and takes out of the LUT count. As many LUT drops in a module as leg (a) had such LUTs, and
-    the read-back has port-buffer tables, are moved from ``port-buffer`` to ``port-driver``: the
-    object stays, at the count it had, in the same dump and the written-file cross-check."""
+    and takes out of the LUT count. Per port bit: a drop counts as ``port-driver`` only for a bit
+    whose leg-(a) driver was a located identity LUT and whose read-back driver is a port-buffer
+    table; at most as many drops in a module as there are such bits move from ``port-buffer`` to
+    ``port-driver``: the object stays, at the count it had, in the same dump and the written-file
+    cross-check."""
     for mod in sorted(second.modules):
         per = second.modules[mod]
         lost = first.modules.get(mod, {}).get("lut", 0) - _kept_in(second, mod, "lut")
-        move = min(lost, first.modules.get(mod, {}).get("_pid", 0), per.get("_pbuf", 0))
+        paired = first.id_ports.get(mod, set()) & second.buf_ports.get(mod, set())
+        move = min(lost, len(paired))
         if move <= 0:
             continue
         second.exceptions["port-buffer"] -= move
         second.exceptions["port-driver"] += move
         second.driver_buffers += move
         per["_extra"] -= move
-        per["_pbuf"] -= move
 
 
 def defect_id(d: Defect) -> str:
@@ -335,10 +343,15 @@ class _Ctx:
     file calls a ``$sop`` a ``$lut``), the driver of every net, and the leg-(a) located nets."""
 
     def __init__(
-        self, facts: Facts, rows: Sequence[Obj], located: Collection[tuple[str, str]]
+        self,
+        facts: Facts,
+        rows: Sequence[Obj],
+        located: Collection[tuple[str, str]],
+        ports: PortProof | None = None,
     ) -> None:
         self.facts = facts
         self.located = located
+        self.ports: PortProof = ports or {}
         self.types = {(r.module, r.name): r.ctype for r in rows if r.kind == "node"}
         # one folded zero-input table per generator net of a module (gnd, vcc, unconn)
         self.folded = {module: len(mod.generators) for module, mod in facts.items()}
@@ -393,18 +406,27 @@ def _port_buffer(ctx: _Ctx, row: Obj, cell: Cell | None) -> str | None:
     return "yes"
 
 
-def _drives_port(ctx: _Ctx, row: Obj, cell: Cell) -> bool:
+def _out_bits(ctx: _Ctx, row: Obj, cell: Cell, identity_proof: bool = False) -> set[str]:
+    """The output port bit names the cell drives; with ``identity_proof`` only those whose leg-(a)
+    driver was a located identity LUT."""
     mod = ctx.facts.get(row.module)
-    return mod is not None and any(o in mod.port_out for o in cell.outs)
+    if mod is None:
+        return set()
+    bits = {mod.port_bit_name(o) for o in cell.outs if o in mod.port_out}
+    if identity_proof:
+        bits = {b for b in bits if ctx.ports.get((row.module, b)) == ("lut", True)}
+    return bits
 
 
-def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
-    """True when the object drives a module output port bit that a located leg-(a) node drove."""
+def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None, cls: str) -> bool:
+    """True when the object drives a module output port bit that a located leg-(a) node of the
+    same class drove (per bit, per class)."""
     mod = ctx.facts.get(row.module)
     if cell is None or mod is None:
         return False
     return any(
-        o in mod.port_out and (row.module, PORT_TAG + mod.port_bit_name(o)) in ctx.located
+        o in mod.port_out
+        and ctx.ports.get((row.module, mod.port_bit_name(o)), ("", False))[0] == cls
         for o in cell.outs
     )
 
@@ -424,14 +446,16 @@ def classify(
     readback: bool = False,
     located: Collection[tuple[str, str]] = frozenset(),
     written: Mapping[str, int] | None = None,
+    ports: PortProof | None = None,
 ) -> LegReport:
     """Counts the nodes of one typed dump. ``readback``: the dump is of a written file read back
     (legs b and c-rb); only there the P-3 exception rules apply, in memory (leg a, leg c) every
     object without a location is a loss. ``inherits``: the dump is a BLIF VTR read-back, where a
     located cell has its location through D-5. ``located``: (module, net name) pairs a located
     leg-(a) node drives. ``written``: the class counts of the written file, for the cross-check
-    (None: not checked)."""
-    ctx = _Ctx(facts, rows, located)
+    (None: not checked). ``ports``: the port-driver proof of leg (a), per output port bit and
+    class (see ``PortProof``)."""
+    ctx = _Ctx(facts, rows, located, ports)
     rep = LegReport(
         objects=dict.fromkeys(OBJECT_CLASSES, 0), resolved=dict.fromkeys(OBJECT_CLASSES, 0)
     )
@@ -457,8 +481,8 @@ def _count_node(
     per = rep.modules.setdefault(row.module, {})
     per[cls] = per.get(cls, 0) + 1
     if has:
-        if cls == "lut" and cell is not None and cell.identity and _drives_port(ctx, row, cell):
-            per["_pid"] = per.get("_pid", 0) + 1  # a located identity table at a port bit
+        if cls == "lut" and cell is not None and cell.identity:
+            rep.id_ports.setdefault(row.module, set()).update(_out_bits(ctx, row, cell))
         _count_located(row, rep, cls, allow, inherits)
         return
     if not readback:
@@ -472,14 +496,15 @@ def _count_node(
         rep.removed += 1
         return
     verdict = _port_buffer(ctx, row, cell) if cls == "lut" else None
-    if verdict is None and _port_driver(ctx, row, cell):
+    if verdict is None and _port_driver(ctx, row, cell, cls):
         rep.exceptions["port-driver"] += 1
         rep.removed += 1
         return
     if verdict == "yes":
         rep.exceptions["port-buffer"] += 1
         per["_extra"] = per.get("_extra", 0) + 1
-        per["_pbuf"] = per.get("_pbuf", 0) + 1
+        paired = _out_bits(ctx, row, cell, identity_proof=True) if cell is not None else set()
+        rep.buf_ports.setdefault(row.module, set()).update(paired)
         rep.removed += 1
         return
     kind = "lost-location" if verdict == "lost" else "unresolved"

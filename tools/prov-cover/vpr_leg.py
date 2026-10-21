@@ -46,20 +46,21 @@ import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
-from collections.abc import Collection, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from prov_cover import (
     DEFAULT_ALLOW,
     GENERATOR_NETS,
-    PORT_TAG,
     CrashError,
     Defect,
     Facts,
     LegReport,
     Obj,
+    PortProof,
     ToolError,
+    object_class,
     parse_locs,
 )
 
@@ -107,17 +108,21 @@ class Index:
     outputs: frozenset[str]
     # net name -> the (file, line) of the net and of every located node that drives it
     where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
-    # port-driver proof: the net names a located leg-(a) node drives
-    a_located: frozenset[str] = frozenset()
+    # port-driver proof: output port bit name -> class of the located leg-(a) node that drove it
+    a_ports: dict[str, str] = field(default_factory=dict)
+    # output port bit name -> class of the read-back node that drives it now
+    driver_class: dict[str, str] = field(default_factory=dict)
 
 
 def build_index(
-    rows: Sequence[Obj], facts: Facts, a_located: Collection[tuple[str, str]] = frozenset()
+    rows: Sequence[Obj], facts: Facts, a_ports: PortProof | None = None
 ) -> Index:
     """The net names of a typed dump joined with its connections (``write_json``).
-    ``a_located``: the ``located_nets`` of leg (a); its port-bit entries are the proof of the
-    ``port-driver`` class."""
+    ``a_ports``: the ``located_ports`` of leg (a), the proof of the ``port-driver`` class: a
+    driver counts only for a port bit whose leg-(a) driver had the same class."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
+    kinds = {(r.module, r.name): object_class(r.ctype) or "" for r in rows if r.kind == "node"}
+    driver_class: dict[str, str] = {}
     where: dict[str, set[tuple[str, int]]] = {}
     for r in rows:  # the net's own location is what the written name carries (a hard block's)
         if r.kind == "net":
@@ -131,6 +136,10 @@ def build_index(
             for out in cell.outs:
                 net = mod.net_name(out)
                 driven.add(net)
+                if out in mod.port_out:
+                    driver_class[net] = driver_class[mod.port_bit_name(out)] = kinds.get(
+                        (module, name), ""
+                    )
                 if src.get((module, name)):
                     located.add(net)
                     where.setdefault(net, set()).update(
@@ -145,7 +154,8 @@ def build_index(
         frozenset(inputs),
         frozenset(outputs),
         {net: frozenset(locs) for net, locs in where.items()},
-        frozenset(net[len(PORT_TAG):] for _, net in a_located if net.startswith(PORT_TAG)),
+        {bit: cls for (_, bit), (cls, _) in (a_ports or {}).items()},
+        driver_class,
     )
 
 
@@ -224,7 +234,9 @@ def _resolve(
     elif key in index.located:
         return "resolved", "net"
     if key in index.driven:
-        if key in index.outputs and key in index.a_located:
+        if key in index.outputs and key in index.a_ports and (
+            index.a_ports[key] == index.driver_class.get(key)
+        ):
             return "port-driver", ""  # Peter 2026-10-21: located in leg a, lost at the port bit
         note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
         return "unresolved", note
