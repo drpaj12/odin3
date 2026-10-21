@@ -150,13 +150,13 @@ class ClassTests(unittest.TestCase):
         self.assertEqual(rep.exceptions["port-buffer"], 0)
         self.assertEqual(len(rep.defects), 2)
 
-    def test_port_buffer_with_located_leg_a_driver_is_a_lost_location(self) -> None:
+    def test_port_buffer_with_located_leg_a_driver_is_a_port_driver(self) -> None:
         rows = dump(("$sop", "$c1", ""))
         f = facts({"$c1": cell("$sop", ("n1",), ("o",), True)}, port_out=("o",))
         rep = pc.classify(rows, f, allow=frozenset(), readback=True, located={("m", "o")})
         self.assertEqual(rep.exceptions["port-buffer"], 0)
-        self.assertEqual(rep.defects[0].kind, "lost-location")
-        self.assertFalse(rep.ok)
+        self.assertEqual(rep.exceptions["port-driver"], 1)
+        self.assertTrue(rep.ok)
 
     def test_not_helper(self) -> None:
         rows = dump(
@@ -751,6 +751,88 @@ class VersusTests(unittest.TestCase):
         second = pc.classify(pc.parse_dump("t|node:$sop|$c1|a.v:1.1-1.2\n"), {}, allow=frozenset())
         pc.compare_counts(first, second)
         self.assertEqual(second.versus["lut"], (1, 1))
+
+
+class PortDriverTests(unittest.TestCase):
+    """Peter decision 2026-10-21 (D1/D3): a cell that drives an output port bit loses its location
+    in the read-back; counted as `port-driver` only with a leg-(a) location as proof."""
+
+    def _f(self) -> pc.Facts:
+        return facts({"$c1": cell("$sop", ("a", "b"), ("o",))}, port_out=("o",))
+
+    def test_with_a_leg_a_location_is_counted_as_the_class(self) -> None:
+        rep = pc.classify(
+            dump(("$sop", "$c1", "")), self._f(), allow=pc.DEFAULT_ALLOW,
+            readback=True, located={("m", "o")},
+        )
+        self.assertTrue(rep.ok)
+        self.assertEqual(rep.exceptions["port-driver"], 1)
+        self.assertEqual(rep.objects["lut"], 1)
+        self.assertEqual(rep.removed, 1)
+
+    def test_a_latch_is_counted_too(self) -> None:
+        f = facts({"$c1": cell("$_DFF_P_", ("d",), ("o",))}, port_out=("o",))
+        rep = pc.classify(
+            dump(("$_DFF_P_", "$c1", "")), f, allow=pc.DEFAULT_ALLOW,
+            readback=True, located={("m", "o")},
+        )
+        self.assertEqual((rep.exceptions["port-driver"], len(rep.defects)), (1, 0))
+
+    def test_without_a_leg_a_location_stays_a_defect(self) -> None:
+        for located in (frozenset(), {("m", "other")}, {("x", "o")}):
+            rep = pc.classify(
+                dump(("$sop", "$c1", "")), self._f(), allow=pc.DEFAULT_ALLOW,
+                readback=True, located=located,
+            )
+            self.assertFalse(rep.ok)
+            self.assertEqual(rep.exceptions["port-driver"], 0)
+            self.assertEqual([d.note for d in rep.defects], ["drives-output-port"])
+
+    def test_a_cell_not_at_a_port_bit_is_no_port_driver(self) -> None:
+        f = facts({"$c1": cell("$sop", ("a", "b"), ("n",))}, port_out=("o",))
+        rep = pc.classify(
+            dump(("$sop", "$c1", "")), f, allow=pc.DEFAULT_ALLOW,
+            readback=True, located={("m", "n")},
+        )
+        self.assertEqual(rep.exceptions["port-driver"], 0)
+        self.assertEqual(len(rep.defects), 1)
+
+    def test_leg_a_never_applies_it(self) -> None:
+        rep = pc.classify(
+            dump(("$sop", "$c1", "")), self._f(), allow=pc.DEFAULT_ALLOW, located={("m", "o")}
+        )
+        self.assertEqual(rep.exceptions["port-driver"], 0)
+        self.assertFalse(rep.ok)
+
+    def test_class_is_printed_at_zero(self) -> None:
+        rep = pc.classify(dump(("$lut", "$c1", A)), {}, allow=pc.DEFAULT_ALLOW)
+        self.assertEqual(rep.exceptions["port-driver"], 0)
+        self.assertIn("except port-driver", pc.render_table([("d", "a", rep)]))
+        self.assertIn("port-driver", pc.report_dict([("d", "a", rep)])["designs"][0]["legs"]["a"]["exceptions"])
+
+    def test_located_identity_lut_at_a_port_bit_is_a_port_driver_and_stays_counted(self) -> None:
+        # D3: located in leg a, an identity table at the port bit after read-back
+        f = facts({"$c1": cell("$sop", ("n1",), ("o",), True)}, port_out=("o",))
+        first = pc.classify(dump(("$lut", "$c1", A)), {"m": pc.Mod({}, frozenset(), frozenset())},
+                            allow=frozenset())
+        rep = pc.classify(
+            dump(("$sop", "$c1", "")), f, allow=frozenset(), readback=True,
+            located={("m", "o")}, written={"port-buffer": 1},
+        )
+        pc.compare_counts(first, rep)
+        self.assertTrue(rep.ok, rep.defects)
+        self.assertEqual(rep.exceptions["port-driver"], 1)
+        self.assertEqual(rep.versus["lut"], (1, 1))
+
+    def test_place_leg_port_driver_needs_the_leg_a_net(self) -> None:
+        rows = pc.parse_dump("m|node:$sop|g|\n")
+        mod = pc.Mod({"g": cell("$sop", ("a",), ("o",))}, frozenset({"a"}), frozenset({"o"}))
+        with_a = vpr.build_index(rows, {"m": mod}, {("m", "o")})
+        rep = vpr.place_check("#h\no\t1\t3\t0\t0\t#6\n", with_a)
+        self.assertEqual((rep.exceptions["port-driver"], len(rep.defects)), (1, 0))
+        without = vpr.build_index(rows, {"m": mod})
+        rep = vpr.place_check("#h\no\t1\t3\t0\t0\t#6\n", without)
+        self.assertEqual((rep.exceptions["port-driver"], len(rep.defects)), (0, 1))
 
 
 class LegsTests(unittest.TestCase):

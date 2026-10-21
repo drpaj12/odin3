@@ -35,6 +35,14 @@ brackets:
 ``not-helper``    a ``$not``/``$_NOT_`` with no location whose single input net is driven by a
                   ``$sop``. [5.4 X-9 names it; evidence 6.5b: ``read_blif`` makes one ``$sop`` that
                   keeps the OFF-set cover, no ``$not``, so the class is 0 for the BLIF legs]
+``port-driver``   (Peter decision 2026-10-21, D1/D3) an object of a read-back dump with no
+                  location whose output net is a module output port bit (X-8: the port-bit net
+                  name carries no ``@file:line``, so D-5 has nothing to inherit), when the same
+                  net name was driven by a located node in leg (a). Without that leg-(a)
+                  proof it stays a defect. It stays an object (counted in its class and in the
+                  a-vs-b counts) and is removed from the coverage base; never applied to leg (a).
+                  An identity table at a port bit that leg (a) located is this class, not a
+                  ``port-buffer``. Leg (d): the same rule on the driver block of a port bit.
 ``inherited``     (``--allow``) a cell whose location exists only through 5.4 D-5: in a BLIF VTR
                   read-back every located cell, as the dialect writes none for a cell (X-6).
 ``pad``           (``--allow``) a VPR I/O pad block of the ``.place`` file (5.4 X-8).
@@ -82,7 +90,9 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH = 0, 1, 2, 3
 CAP = 8  # 5.4 W-3: at most 8 locations in a record
 OBJECT_CLASSES = ("lut", "latch", "hard", "lpm")
-EXCEPTIONS = ("const-driver", "const-table", "port-buffer", "not-helper", "inherited", "pad")
+EXCEPTIONS = (
+    "const-driver", "const-table", "port-buffer", "not-helper", "port-driver", "inherited", "pad"
+)
 APPROVED = frozenset({"inherited", "pad"})  # approved by Peter 2026-10-20 (PHASE6 decision 2)
 DEFAULT_ALLOW = APPROVED
 NAMED_DEFECTS = 10
@@ -150,6 +160,7 @@ class LegReport:
     resolved: dict[str, int] = field(default_factory=dict)
     exceptions: dict[str, int] = field(default_factory=lambda: dict.fromkeys(EXCEPTIONS, 0))
     direct: int = 0  # objects located without an exception class (the strict figure)
+    driver_buffers: int = 0  # port-driver objects that are also an identity table at a port bit
     removed: int = 0  # objects of the exception classes that stand in for a location
     defects: list[Defect] = field(default_factory=list)
     mismatches: list[str] = field(default_factory=list)
@@ -355,6 +366,16 @@ def _port_buffer(ctx: _Ctx, row: Obj, cell: Cell | None) -> str | None:
     return "yes"
 
 
+def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
+    """True when the object drives a module output port bit that a located leg-(a) node drove."""
+    mod = ctx.facts.get(row.module)
+    if cell is None or mod is None:
+        return False
+    return any(
+        o in mod.port_out and (row.module, mod.net_name(o)) in ctx.located for o in cell.outs
+    )
+
+
 def _not_helper(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     if cell is None or len(cell.ins) != 1:
         return False
@@ -416,6 +437,11 @@ def _count_node(
         rep.removed += 1
         return
     verdict = _port_buffer(ctx, row, cell) if cls == "lut" else None
+    if verdict != "yes" and _port_driver(ctx, row, cell):
+        rep.exceptions["port-driver"] += 1
+        rep.driver_buffers += verdict == "lost"  # the written file counts it as a buffer table
+        rep.removed += 1
+        return
     if verdict == "yes":
         rep.exceptions["port-buffer"] += 1
         per["_extra"] = per.get("_extra", 0) + 1
@@ -463,9 +489,10 @@ def _cross_check(rep: LegReport, written: Mapping[str, int] | None) -> None:
     if written is None:
         return
     for name in ("const-table", "port-buffer", "not-helper"):
-        if name in written and written[name] != rep.exceptions[name]:
+        have = rep.exceptions[name] + (rep.driver_buffers if name == "port-buffer" else 0)
+        if name in written and written[name] != have:
             rep.mismatches.append(
-                f"{name}: {rep.exceptions[name]} in the dump, {written[name]} in the written file"
+                f"{name}: {have} in the dump, {written[name]} in the written file"
             )
 
 

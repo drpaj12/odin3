@@ -16,7 +16,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -218,13 +218,14 @@ def lut_legs(
         b = dump_state(work, "b", log)
     except ToolError as exc:
         return [*out, ("b" if "b" in wanted else "d", flow_error(design.name, exc))]
+    located = located_nets(a.rows, a.facts)
     rep = classify(
         b.rows,
         b.facts,
         allow=args.allow_set,
         inherits=True,
         readback=True,
-        located=located_nets(a.rows, a.facts),
+        located=located,
         written=written_counts(blif.read_text(encoding="utf-8")),
     )
     compare_counts(rep_a, rep)
@@ -237,7 +238,7 @@ def lut_legs(
     if "b" in wanted:
         out.append(("b", rep))
     if "d" in wanted:
-        out.append(("d", leg_d(args, design, work, b)))
+        out.append(("d", leg_d(args, design, work, b, located)))
     return out
 
 
@@ -246,7 +247,13 @@ def vtr_root() -> Path:
     return Path(os.environ.get("VTR_ROOT") or default)
 
 
-def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegReport:
+def leg_d(
+    args: argparse.Namespace,
+    design: Path,
+    work: Path,
+    b: Dumped,
+    located: Collection[tuple[str, str]] = frozenset(),
+) -> LegReport:
     """VPR (pack and place) on leg b's BLIF, then ``place_check`` against leg b's read-back."""
     vpr = args.vpr or vtr_root() / "vpr" / "vpr"
     arch = args.arch or vtr_root() / vpr_leg.DEFAULT_ARCH
@@ -256,7 +263,7 @@ def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegR
         )
         return vpr_leg.place_check(
             place.read_text(encoding="utf-8", errors="replace"),
-            vpr_leg.build_index(b.rows, b.facts),
+            vpr_leg.build_index(b.rows, b.facts, located),
             net.read_text(encoding="utf-8", errors="replace"),
             allow=args.allow_set,
         )

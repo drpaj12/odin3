@@ -46,7 +46,7 @@ import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -106,10 +106,16 @@ class Index:
     outputs: frozenset[str]
     # net name -> the (file, line) of the net and of every located node that drives it
     where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
+    # port-driver proof: the net names a located leg-(a) node drives
+    a_located: frozenset[str] = frozenset()
 
 
-def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
-    """The net names of a typed dump joined with its connections (``write_json``)."""
+def build_index(
+    rows: Sequence[Obj], facts: Facts, a_located: Collection[tuple[str, str]] = frozenset()
+) -> Index:
+    """The net names of a typed dump joined with its connections (``write_json``).
+    ``a_located``: (module, net name) pairs a located leg-(a) node drives, the proof of the
+    ``port-driver`` class."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
     where: dict[str, set[tuple[str, int]]] = {}
     for r in rows:  # the net's own location is what the written name carries (a hard block's)
@@ -137,6 +143,7 @@ def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
         frozenset(inputs),
         frozenset(outputs),
         {net: frozenset(locs) for net, locs in where.items()},
+        frozenset(net for _, net in a_located),
     )
 
 
@@ -215,6 +222,8 @@ def _resolve(
     elif key in index.located:
         return "resolved", "net"
     if key in index.driven:
+        if key in index.outputs and key in index.a_located:
+            return "port-driver", ""  # Peter 2026-10-21: located in leg a, lost at the port bit
         note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
         return "unresolved", note
     return "unmapped", "no-such-net"
@@ -237,6 +246,7 @@ def place_check(
     seen: set[str] = set()
     excepted: set[str] = set()
     failed: set[str] = set()
+    drivers: set[str] = set()
 
     def count(cls: str, name: str) -> None:
         verdict, note = _resolve(name, index, allow, pads)
@@ -246,7 +256,12 @@ def place_check(
                 rep.exceptions["pad" if verdict == "pad" else "const-table"] += 1
         else:
             rep.objects[cls] += 1
-            if verdict == "resolved":
+            if verdict == "port-driver":  # a cluster and its same-named atom: counted once
+                if name not in drivers:
+                    drivers.add(name)
+                    rep.exceptions["port-driver"] += 1
+                    rep.removed += 1
+            elif verdict == "resolved":
                 rep.resolved[cls] += 1
                 rep.direct += 1
             elif name not in failed:  # a cluster and its same-named atom are one defect
