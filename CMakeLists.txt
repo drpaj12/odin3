@@ -3736,6 +3736,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14_d.txt
                         ${_json_vtr14})
             endif()
+            # 7.3 (spec 7 section 2.1 F-6): the flow script with VPR on single_ff and
+            # ch_intrinsics, smallest first. Needs VTR's vpr and ODIN3_HEAVY_OK.
+            if(EXISTS ${_json_vtr_root}/vpr/vpr)
+                set(_flow_vpr ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow
+                    --odin3 $<TARGET_FILE:odin3> --vpr)
+                odin3_add_sweep_test(flow_vpr_sweep LABEL sweep
+                    COMMAND ${CMAKE_COMMAND} -E env VTR_ROOT=${_json_vtr_root}
+                        ${PROJECT_SOURCE_DIR}/tools/flow/flow-sweep.sh ${_flow_vpr}
+                        --out-base ${PROJECT_BINARY_DIR}/flow_tmp/sweep
+                        ${_json_vtr_dir}/single_ff.v ${_json_vtr_dir}/ch_intrinsics.v)
+            endif()
         endif()
         # 7.3 (spec 7 section 2.1; tools/flow/odin3_flow.py): a micro through the flow script.
         # flow_vtr_<micro>: target vtr without VPR (the vtr-qor O-leg script, BLIF written);

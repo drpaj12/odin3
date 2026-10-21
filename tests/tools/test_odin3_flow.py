@@ -5,6 +5,7 @@ The tests that run odin3 need ODIN3_CLI (CTest python_tools); none needs VTR."""
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import tempfile
@@ -15,6 +16,7 @@ from unittest import mock
 import lpm_check
 
 import odin3_flow as flow
+import qor_parse
 
 from .helpers import run_main
 
@@ -22,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 DFF = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_logic_w_Dff.v"
 LPM_MICRO = ROOT / "tests" / "lpm" / "lpm_add_sub.v"
+VPR_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "vtr_qor" / "blink_P"
 needs_odin3 = unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
 
 
@@ -68,6 +71,12 @@ class VtrTarget(FlowCase):
         self.assertIn("alpha", out + err)
         self.assertIn("beta", out + err)
 
+    def test_no_vpr_without_vtr_root(self) -> None:
+        code, out, err = self.run_flow(str(DFF), "--top", "bm_DL_logic_w_Dff")
+        self.assertEqual(code, 0, out + err)
+        self.assertIn("NOTE", out + err)
+        self.assertFalse((self.tmp / "out" / "vpr").exists())
+
 
 @needs_odin3
 class LpmTarget(FlowCase):
@@ -89,6 +98,34 @@ class LpmTarget(FlowCase):
             want = lpm_check.script_text(lpm_check.DEFAULT_SCRIPT, lib, LPM_MICRO, out, family)
             got = flow.lpm_script([LPM_MICRO], out, family or "")
             self.assertEqual(got, want)
+
+
+class SummaryFromLogs(unittest.TestCase):
+    def results(self, patch: dict[str, str] | None = None) -> tuple[dict[str, str], dict[str, str]]:
+        parse = qor_parse.read_parse_results(VPR_FIXTURE / "parse_results.txt",
+                                             not_before=0.0, label="t")
+        qor = qor_parse.read_parse_results(VPR_FIXTURE / "qor_results.txt",
+                                           not_before=0.0, label="t")
+        return {**parse, **(patch or {})}, qor
+
+    def test_summary_from_vpr_logs(self) -> None:
+        parse, qor = self.results({"min_chan_width": "34", "critical_path_delay": "2.5",
+                                   "crit_path_routed_wirelength": "77"})
+        text = (VPR_FIXTURE / "vpr.out").read_text()
+        got = flow.summary_from_vpr(parse, qor, text, luts=3)
+        self.assertEqual(got["luts"], 3)
+        self.assertEqual(got["clbs"], 1)
+        self.assertEqual(got["hard_blocks"], {"mult_36": 0, "memory": 0})
+        self.assertEqual(got["min_chan_width"], 34)
+        self.assertEqual(got["crit_path_ns"], 2.5)
+        self.assertEqual(got["wirelength"], 77)
+
+    def test_summary_missing_values_are_null(self) -> None:
+        parse, qor = self.results()
+        got = flow.summary_from_vpr(parse, qor, (VPR_FIXTURE / "vpr.out").read_text(), luts=0)
+        self.assertIsNone(got["min_chan_width"])
+        self.assertIsNone(got["crit_path_ns"])
+        json.dumps(got)
 
 
 if __name__ == "__main__":

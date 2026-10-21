@@ -3,4 +3,5 @@
 # failed; 2 usage error. See odin3_flow.py.
 set -euo pipefail
 here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here/../vtr-qor${PYTHONPATH:+:$PYTHONPATH}"
 exec python3 "$here/odin3_flow.py" "$@"
