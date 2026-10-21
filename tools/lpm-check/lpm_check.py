@@ -9,7 +9,7 @@ Usage::
 
 Legs, in order (the first failure is printed and the exit status is 1):
 
-1. ``counts``: Odin III runs the script (``tests/lpm/lpm.script``) on the micro and writes
+1. ``counts``: Odin III runs the script (``tools/flow/lpm.script``) on the micro and writes
    Verilog; the INFO line ``lpmmap: N lpm_add_sub, ...`` must equal the ``counts`` row of the
    expect file, and every ``param`` row must be found on an instance of its type.
    Rows ``pin <micro> <type> <pin> <value>`` do the same for a pin connection, and ``noroundtrip
@@ -54,7 +54,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_LIB = ROOT / "lib" / "lpm.o3lib"
-DEFAULT_SCRIPT = ROOT / "tests" / "lpm" / "lpm.script"
+DEFAULT_SCRIPT = ROOT / "tools" / "flow" / "lpm.script"
 DEFAULT_EXPECT = ROOT / "tests" / "lpm" / "expect.txt"
 DEFAULT_COMPARE = ROOT / "tools" / "netlist-compare" / "netlist-compare"
 TIMEOUT = 120
