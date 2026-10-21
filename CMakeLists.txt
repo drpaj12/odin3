@@ -116,6 +116,8 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/miter.c
     src/passes/cone_check/prove.c
     src/passes/cone_check/register.c
+    src/passes/raise/raise.c
+    src/passes/raise/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -2206,6 +2208,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     $<TARGET_FILE:odin3> ${PROJECT_BINARY_DIR}/cone_check_micros
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(cone_check_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # Phase 7 (7.4d, spec 3.4 R-4): cone_check then raise on the same micros, lowered, LUT-mapped
+        # and equivalent to the input (equiv-check); a differing proof and a missing one are refused.
+        add_test(NAME raise_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/raise_micros.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/raise_micros
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(raise_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).

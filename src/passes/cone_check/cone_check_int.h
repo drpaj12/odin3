@@ -31,6 +31,7 @@ enum { CC_DEFAULT_TIMEOUT = 60, CC_MAX_TIMEOUT = 1000000 };
 #define CC_KEY_GROUP "odin3:cone_key"
 #define CC_KEY_HASH "odin3:cone_hash"
 #define CC_KEY_CEX "odin3:cone_cex"
+#define CC_KEY_CELL "odin3:cone_cell"
 
 /* What a net is to the group: boundary input, boundary output, or neither. */
 enum { CC_NET_INTERNAL = 0, CC_NET_IN = 1, CC_NET_OUT = 2 };
@@ -70,6 +71,9 @@ typedef struct cc_opts {
     const char *cell;
     odin3_vec params; /* cc_param */
     uint32_t timeout;
+    const char *who;   /* the pass name in messages: cone_check or raise */
+    const char *usage; /* its usage line */
+    bool timeout_ok;   /* whether -timeout is an option of the pass */
 } cc_opts;
 
 /* The template cell, in the temporary design, and where each of its port bits sits. */
@@ -106,6 +110,15 @@ typedef struct cc_proof {
     cc_verdict verdict;
     odin3_strbuf cex;
 } cc_proof;
+
+/* --- register.c ------------------------------------------------------------------------------ */
+
+/*
+ * Parses `-attr KEY=V -cell TYPE [-param P=V ...]` (and `-timeout S` when opts->timeout_ok) into
+ * opts, whose arena, params, who, usage and timeout_ok are set by the caller. Usage errors are
+ * logged and ODIN3_ERR_INVALID_ARG.
+ */
+odin3_status cc_parse_args(odin3_bytes args, cc_opts *opts);
 
 /* --- cone_check.c ---------------------------------------------------------------------------- */
 
@@ -149,6 +162,13 @@ odin3_status cc_tmpl_bind(const cc_tmpl *tmpl, cc_group *group);
 /* The direction of flat bit `bit`, and its name `PORT[i]` in buf. */
 odin3_dir cc_tmpl_dir(const cc_tmpl *tmpl, uint32_t bit);
 const char *cc_tmpl_name(const cc_tmpl *tmpl, uint32_t bit, char *buf, size_t size);
+
+/*
+ * The text of the template the proof was made for, appended to out: the cell type, then every
+ * `-param NAME=VALUE` as ` NAME=VALUE` sorted by name (a stable order, so the order of the
+ * options does not matter). `raise` compares it with the one the proof recorded as CC_KEY_CELL.
+ */
+odin3_status cc_cell_text(const cc_opts *opts, odin3_strbuf *out);
 
 /* --- miter.c --------------------------------------------------------------------------------- */
 

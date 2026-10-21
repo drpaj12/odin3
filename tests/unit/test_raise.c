@@ -175,11 +175,11 @@ static uint32_t live_count(void) {
     uint32_t live = 0;
     for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
         odin3_node_id node = {nid};
-        live += odin3_node_live(mod, node) &&
-                        odin3_celltype_get(design, odin3_node_type(mod, node))->gran !=
-                            ODIN3_GRAN_PORT
-                    ? 1U
-                    : 0U;
+        live +=
+            odin3_node_live(mod, node) &&
+                    odin3_celltype_get(design, odin3_node_type(mod, node))->gran != ODIN3_GRAN_PORT
+                ? 1U
+                : 0U;
     }
     return live;
 }
@@ -231,36 +231,43 @@ static void prove_adder(void) {
     TEST_ASSERT_EQUAL_STRING("equivalent", text_attr("odin3:cone_check"));
 }
 
-static void expect_refused(const char *args, const char *must_log) {
+/* The text a refusal must log. */
+typedef struct needle {
+    const char *text;
+} needle;
+
+#define REFUSED(args, text) expect_refused(args, (needle){text})
+
+static void expect_refused(const char *args, needle must_log) {
     uint32_t live = live_count();
     TEST_ASSERT_NOT_EQUAL_INT_MESSAGE(ODIN3_OK, run_raise(args), log_text);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, must_log), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, must_log.text), log_text);
     TEST_ASSERT_EQUAL_UINT32(live, live_count());
     check_clean();
 }
 
-/* --- leaves of provenance ---------------------------------------------------------------------- */
+/* --- leaves of provenance ----------------------------------------------------------------------
+ */
 
 typedef struct leaves {
     uint32_t ids[MAX_LEAVES];
     size_t count;
 } leaves;
 
+/* Adds leaf to the set, which stays sorted; a leaf already in it is not added again. */
 static void add_leaf(void *user, odin3_prov_id leaf) {
     leaves *set = user;
-    for (size_t i = 0; i < set->count; i++) {
-        if (set->ids[i] == leaf.v) {
-            return;
-        }
+    size_t at = 0;
+    while (at < set->count && set->ids[at] < leaf.v) {
+        at++;
+    }
+    if (at < set->count && set->ids[at] == leaf.v) {
+        return;
     }
     TEST_ASSERT_TRUE(set->count < MAX_LEAVES);
-    set->ids[set->count++] = leaf.v;
-}
-
-static int cmp_u32(const void *left, const void *right) {
-    uint32_t lhs = *(const uint32_t *)left;
-    uint32_t rhs = *(const uint32_t *)right;
-    return lhs < rhs ? -1 : (lhs > rhs ? 1 : 0);
+    memmove(&set->ids[at + 1], &set->ids[at], (set->count - at) * sizeof set->ids[0]);
+    set->ids[at] = leaf.v;
+    set->count++;
 }
 
 /* The sources of every live non-port node, as a sorted set. */
@@ -276,11 +283,11 @@ static leaves all_sources(void) {
                 ODIN3_OK, odin3_prov_sources(design, odin3_node_prov(mod, node), add_leaf, &set));
         }
     }
-    qsort(set.ids, set.count, sizeof set.ids[0], cmp_u32);
     return set;
 }
 
-/* --- the cases of plan Task 8 step 1 ----------------------------------------------------------- */
+/* --- the cases of plan Task 8 step 1 -----------------------------------------------------------
+ */
 
 static void test_raise_replaces_proven_group(void) {
     prove_adder();
@@ -320,19 +327,19 @@ static void test_raise_provenance_union(void) {
 static void test_raise_refuses_unproven(void) {
     use_real_abc();
     load_adder(false);
-    expect_refused(ADD4, "cone_check");
+    REFUSED(ADD4, "cone_check");
     /* a proof that differs does not count either */
     design_reset();
     load_adder(true);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4), log_text);
     TEST_ASSERT_EQUAL_STRING("differs", text_attr("odin3:cone_check"));
-    expect_refused(ADD4, "not equivalent");
+    REFUSED(ADD4, "not equivalent");
     /* nor a proof under a 0 s limit */
     design_reset();
     load_adder(false);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4 " -timeout 0"), log_text);
     TEST_ASSERT_EQUAL_STRING("unproven", text_attr("odin3:cone_check"));
-    expect_refused(ADD4, "not equivalent");
+    REFUSED(ADD4, "not equivalent");
 }
 
 static void test_raise_refuses_stale_proof(void) {
@@ -344,22 +351,22 @@ static void test_raise_refuses_stale_proof(void) {
     odin3_node_spec spec = {type, 0, {0}, NULL, 0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(top(), &spec, &node));
     set_str((odin3_objref){ODIN3_OBJ_NODE, node.v}, "grp", "add4");
-    expect_refused(ADD4, "changed since");
+    REFUSED(ADD4, "changed since");
 }
 
 static void test_raise_refuses_edited_binding(void) {
     prove_adder();
     bind("a0=A[1]");
     bind("a1=A[0]");
-    expect_refused(ADD4, "changed since");
+    REFUSED(ADD4, "changed since");
 }
 
 static void test_raise_refuses_other_cell(void) {
     prove_adder();
-    expect_refused("-attr grp=add4 -cell $sub -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4",
-                   "proved");
-    expect_refused("-attr grp=add4 -cell $add -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=5",
-                   "proved");
+    REFUSED("-attr grp=add4 -cell $sub -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4",
+            "proved");
+    REFUSED("-attr grp=add4 -cell $add -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=5",
+            "proved");
 }
 
 static void test_raise_cell_text_ignores_param_order(void) {
@@ -373,10 +380,10 @@ static void test_raise_cell_text_ignores_param_order(void) {
 
 static void test_raise_usage_errors(void) {
     prove_adder();
-    expect_refused("-cell $add", "-attr");
-    expect_refused("-attr grp=add4", "-cell");
-    expect_refused("-attr grp=nothing -cell $add", "empty");
-    expect_refused(ADD4 " -bogus", "-bogus");
+    REFUSED("-cell $add", "-attr");
+    REFUSED("-attr grp=add4", "-cell");
+    REFUSED("-attr grp=nothing -cell $add", "empty");
+    REFUSED(ADD4 " -bogus", "-bogus");
 }
 
 int main(void) {

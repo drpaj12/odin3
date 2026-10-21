@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <string.h>
 
+enum { N_KEYS = 5 };
+
 static const char *const k_verdicts[] = {"equivalent", "differs", "unproven"};
 
 static void job_init(cc_job *job, odin3_pass_ctx *ctx, odin3_module *module, const cc_opts *opts) {
@@ -81,22 +83,27 @@ static odin3_status write_result(const cc_job *job, const cc_proof *proof) {
     char group[ODIN3_LOG_BUF / 4];
     (void)snprintf(group, sizeof group, "%s=%s", opts->key, opts->value);
     odin3_status st = odin3_cone_hash(module, opts->key, opts->value, hash);
+    odin3_strbuf cell;
+    odin3_strbuf_init(&cell);
+    st = st == ODIN3_OK ? cc_cell_text(opts, &cell) : st;
     if (st != ODIN3_OK) {
+        odin3_strbuf_free(&cell);
         return st;
     }
-    const char *keys[] = {CC_KEY_CHECK, CC_KEY_GROUP, CC_KEY_HASH, CC_KEY_CEX};
-    const char *texts[] = {k_verdicts[proof->verdict], group, hash, proof->cex.data};
+    const char *keys[] = {CC_KEY_CHECK, CC_KEY_GROUP, CC_KEY_HASH, CC_KEY_CELL, CC_KEY_CEX};
+    const char *texts[] = {k_verdicts[proof->verdict], group, hash, cell.data, proof->cex.data};
     bool has_cex = proof->cex.len > 0;
-    size_t count = has_cex ? 4U : 3U;
+    size_t count = has_cex ? N_KEYS : N_KEYS - 1U;
     st = set_all(module, keys, texts, count);
     if (st == ODIN3_OK && !has_cex) {
         st = clear_attr(module, CC_KEY_CEX);
     }
     if (st != ODIN3_OK) {
-        for (size_t i = 0; i < 4U; i++) {
+        for (size_t i = 0; i < N_KEYS; i++) {
             (void)clear_attr(module, keys[i]);
         }
     }
+    odin3_strbuf_free(&cell);
     return st;
 }
 
