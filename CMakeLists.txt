@@ -116,6 +116,8 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/miter.c
     src/passes/cone_check/prove.c
     src/passes/cone_check/register.c
+    src/passes/raise/raise.c
+    src/passes/raise/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1749,6 +1751,18 @@ if(BUILD_TESTING)
         set_tests_properties(test_cone_check PROPERTIES
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
+    # Phase 7 (7.4d): the raise pass; it needs the cone_check proof, so the unit test links the ABC too.
+    odin3_add_unit_test(test_raise)
+    target_compile_definitions(test_raise PRIVATE ODIN3_RS_ROOT="${PROJECT_BINARY_DIR}")
+    if(ODIN3_WITH_ABC)
+        target_include_directories(test_raise PRIVATE ${PROJECT_SOURCE_DIR}/adapters/abc)
+        target_compile_definitions(test_raise PRIVATE ODIN3_HAVE_REAL_ABC)
+        target_link_libraries(test_raise PRIVATE odin3_abc_testlib $<LINK_ONLY:libabc-pic>)
+        target_link_options(test_raise PRIVATE ${ODIN3_ABC_WRAPS} -Wl,--wrap=pthread_create)
+        set_target_properties(test_raise PROPERTIES LINKER_LANGUAGE CXX)
+        set_tests_properties(test_raise PROPERTIES
+            ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
+    endif()
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
@@ -2233,6 +2247,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     $<TARGET_FILE:odin3> ${PROJECT_BINARY_DIR}/cone_check_micros
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(cone_check_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # Phase 7 (7.4d, spec 3.4 R-4): cone_check then raise on the same micros, lowered, LUT-mapped
+        # and equivalent to the input (equiv-check); a differing proof and a missing one are refused.
+        add_test(NAME raise_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/raise_micros.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/raise_micros
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(raise_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).

@@ -315,3 +315,37 @@ odin3_status cc_tmpl_bind(const cc_tmpl *tmpl, cc_group *group) {
     odin3_vec_free(&state.owner);
     return st != ODIN3_OK ? st : worst;
 }
+
+/* --- the canonical text of the template ---------------------------------------------------- */
+
+/* Moves the entry at index at down to its place among the sorted entries before it (stable). */
+static void sort_in(cc_param *items, size_t at) {
+    cc_param item = items[at];
+    while (at > 0 && strcmp(items[at - 1].name, item.name) > 0) {
+        items[at] = items[at - 1];
+        at--;
+    }
+    items[at] = item;
+}
+
+odin3_status cc_cell_text(const cc_opts *opts, odin3_strbuf *out) {
+    odin3_vec sorted;
+    odin3_vec_init(&sorted, sizeof(cc_param));
+    odin3_status st = odin3_strbuf_appendf(out, "%s", opts->cell);
+    const cc_param *given = opts->params.data;
+    for (size_t i = 0; st == ODIN3_OK && i < opts->params.len; i++) {
+        cc_param *slot = odin3_vec_push(&sorted);
+        if (slot == NULL) {
+            st = ODIN3_ERR_NO_MEMORY;
+        } else {
+            *slot = given[i];
+            sort_in(sorted.data, i);
+        }
+    }
+    const cc_param *items = sorted.data;
+    for (size_t i = 0; st == ODIN3_OK && i < sorted.len; i++) {
+        st = odin3_strbuf_appendf(out, " %s=%s", items[i].name, items[i].value);
+    }
+    odin3_vec_free(&sorted);
+    return st;
+}
