@@ -23,7 +23,15 @@ from pathlib import Path
 from unittest import mock
 
 import qor_netstats
-from qor_netstats import AbcHeader, MalformedBlif, NetStats, abc_header, netstats
+from qor_netstats import (
+    AbcHeader,
+    MalformedBlif,
+    NetStats,
+    abc_header,
+    hardblocks_lost,
+    netstats,
+    subckt_counts,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "vtr_qor" / "netstats"
@@ -65,6 +73,37 @@ class TempTest(unittest.TestCase):
 
     def depth(self, text: str) -> int:
         return self.stats(text).depth
+
+
+class HardBlocksLostTest(TempTest):
+    """subckt_counts and hardblocks_lost: the guard for hard blocks that VTR's ABC step drops."""
+
+    BEFORE = (
+        ".model top\n.inputs a\n.outputs o\n"
+        ".subckt single_port_ram clk=a out=o\n.subckt single_port_ram clk=a out=p\n"
+        ".subckt adder a=a\n.end\n.model adder\n.inputs a\n.outputs c\n.blackbox\n.end\n"
+    )
+
+    def test_counts_per_model_first_model_only(self) -> None:
+        got = subckt_counts(self.write(self.BEFORE))
+        self.assertEqual(got, {"single_port_ram": 2, "adder": 1})
+
+    def test_drop_is_reported(self) -> None:
+        after = self.BEFORE.replace(".subckt single_port_ram clk=a out=p\n", "")
+        before_path = self.write(self.BEFORE)
+        after_path = before_path.with_name("after.blif")
+        after_path.write_bytes(after.encode("latin-1"))
+        self.assertEqual(hardblocks_lost(before_path, after_path), {"single_port_ram": (2, 1)})
+        self.assertEqual(hardblocks_lost(before_path, before_path), {})
+
+    def test_all_gone_and_extra_models_ignored(self) -> None:
+        before_path = self.write(self.BEFORE)
+        after_path = before_path.with_name("after.blif")
+        after_path.write_bytes(b".model top\n.inputs a\n.outputs o\n.subckt mult a=a\n.end\n")
+        self.assertEqual(
+            hardblocks_lost(before_path, after_path),
+            {"adder": (1, 0), "single_port_ram": (2, 0)},
+        )
 
 
 class CountsTest(TempTest):

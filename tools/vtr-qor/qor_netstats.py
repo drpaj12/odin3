@@ -363,6 +363,35 @@ def netstats(path: Path) -> NetStats:
     )
 
 
+def subckt_counts(path: Path) -> dict[str, int]:
+    """The ``.subckt`` instances of the first ``.model`` of ``path`` per model name (every hard
+    block, not only the four ``netstats`` counts). Raises ``MalformedBlif`` or ``OSError`` as
+    ``netstats`` does for a file it cannot read."""
+    counts: dict[str, int] = {}
+    models = 0
+    try:
+        with _open(path) as raw:
+            for words in _logical_lines(raw, lambda _chunk: None):
+                if words[0] == ".model":
+                    models += 1
+                elif models > 1:
+                    break
+                elif words[0] == ".subckt" and len(words) > 1:
+                    counts[words[1]] = counts.get(words[1], 0) + 1
+    except GZIP_ERRORS as exc:
+        raise MalformedBlif(f"{path}: malformed BLIF: truncated or corrupt gzip ({exc})") from None
+    return counts
+
+
+def hardblocks_lost(before: Path, after: Path) -> dict[str, tuple[int, int]]:
+    """The models whose ``.subckt`` count dropped from ``before`` (a BLIF into a stage) to
+    ``after`` (the BLIF it produced): model -> (count before, count after). Empty when no
+    hard block was lost. A model that appears only in ``after`` is not a loss."""
+    then, now = subckt_counts(before), subckt_counts(after)
+    return {model: (n, now.get(model, 0)) for model, n in sorted(then.items())
+            if now.get(model, 0) < n}
+
+
 # ----------------------------------------------------------------------------------------------
 # The ``# abc:`` header
 

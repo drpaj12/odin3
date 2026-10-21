@@ -469,6 +469,19 @@ def _netlist(job: Job, parse: Mapping[str, str], attempt_start: float) -> dict[s
             "blif_sha256": stats.blif_sha256, "abc_exchange": exchange}
 
 
+def _hardblocks_lost(job: Job) -> str:
+    """The hard blocks VTR's flow lost between the BLIF the job started from (``<J>/<d>.blif``:
+    Odin III's own, or its ABC output) and ``run/<d>.pre-vpr.blif``, as ``model:before>after``
+    joined by ``;``; empty when none dropped or either file is missing or unreadable. VTR's ABC
+    step once dropped every RAM behind an output port bit, silently."""
+    pre = job.job_dir / "run" / f"{job.design}.pre-vpr.blif"
+    try:
+        lost = qor_netstats.hardblocks_lost(job.job_dir / f"{job.design}.blif", pre)
+    except (OSError, ValueError):
+        return ""
+    return ";".join(f"{model}:{n}>{now}" for model, (n, now) in lost.items())
+
+
 def _frontend_cost(job: Job) -> tuple[float | None, int | None, list[str]]:
     """Spec §4.3-4.4: P's front end is the parmys and ABC stages; an odin3 leg's is
     ``frontend.time``, plus VTR's ABC stage for Oprime and R. (Pprime's Parmys part, point (o),
@@ -546,6 +559,10 @@ def finish_job(job: Job, attempt_start: float, *, ctx: RunContext) -> dict[str, 
     if job.leg == "Pprime" and parmys_wall is None:
         warnings.append(f"{PREFIX}Pprime {job.design}: no P job for the Parmys stage cost")
     _warn(ctx, warnings)
+    lost = _hardblocks_lost(job)
+    if lost:
+        _warn(ctx, [f"{PREFIX}WARNING: {label}: hardblocks_lost {lost}: hard blocks dropped "
+                    f"between {job.design}.blif and {job.design}.pre-vpr.blif"])
     inputs = job.inputs
     odin3 = job.leg != "P"
     metrics: dict[str, object] = {
@@ -564,7 +581,8 @@ def finish_job(job: Job, attempt_start: float, *, ctx: RunContext) -> dict[str, 
     }
     record = job_record(job, ctx, attempt_start)
     record.update(ended=_utc(time.time()), cost_warnings=[w.removeprefix(PREFIX)
-                                                          for w in warnings])
+                                                          for w in warnings],
+                  hardblocks_lost=lost)
     if job.leg == "P":
         record.update(_parmys_fields(job))
     if job.leg == "Pprime":

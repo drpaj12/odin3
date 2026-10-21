@@ -695,7 +695,7 @@ RUNS_HEADER = (
     "device_width", "device_height", "min_chan_width", "critical_path_delay_ns", "fmax_mhz",
     "crit_path_routed_wirelength", "frontend_wall_s", "frontend_peak_rss_mib", "vpr_time_s",
     "vpr_total_runtime_s", "max_vpr_mem_mib", "fcheck", "equiv", "rerun", "blif_sha256",
-    "vtr_commit", "odin3_commit")
+    "vtr_commit", "odin3_commit", "hardblocks_lost")
 RATIO_METRICS = (
     "luts", "ffs", "adders", "mults", "ram_slices", "depth", "num_clb", "num_memories",
     "num_mult", "min_chan_width", "critical_path_delay_ns", "crit_path_routed_wirelength",
@@ -929,6 +929,8 @@ def _run_cells(layout: _Layout, run: Run) -> list[str]:
             cells.append(leg_name(run.leg))
         elif name == "gating":
             cells.append("true" if run.gating else "false")
+        elif name == "hardblocks_lost":
+            cells.append(hardblocks_lost(run))
         elif name in ("vtr_commit", "odin3_commit"):
             value = run.metrics.get(name)
             cells.append(value if isinstance(value, str) else "")
@@ -1275,6 +1277,13 @@ def _with_ratios(layout: _Layout, rows: list[list[str]], names: Sequence[str],
     return out
 
 
+def hardblocks_lost(run: Run) -> str:
+    """The hard blocks VTR's flow dropped in this run (job.json ``hardblocks_lost``, e.g.
+    ``single_port_ram:32>0``), empty when none."""
+    value = run.job.get("hardblocks_lost")
+    return value if isinstance(value, str) else ""
+
+
 def _md_netlist(layout: _Layout) -> list[str]:
     def cells(run: Run) -> list[str]:
         ok = run.status == OK
@@ -1282,7 +1291,18 @@ def _md_netlist(layout: _Layout) -> list[str]:
                   for n in (*NETLIST_COLUMNS, "abc_depth")), _exchange(run)]
     head = ["design", "leg", *NETLIST_COLUMNS, "abc_depth", "exchange"]
     rows = _with_ratios(layout, _per_leg_rows(layout, cells), NETLIST_COLUMNS, len(head))
-    return ["## Netlist", "", *_md_table(head, rows)]
+    return ["## Netlist", "", *_md_table(head, rows), *_lost_lines(layout)]
+
+
+def _lost_lines(layout: _Layout) -> list[str]:
+    """One WARNING line per run that lost hard blocks in VTR's flow (``hardblocks_lost``, also
+    a runs.csv column); nothing when no run did."""
+    lost = [f"- {run.design} {leg_name(run.leg)}: {hardblocks_lost(run)}"
+            for run in layout.runs if hardblocks_lost(run)]
+    if not lost:
+        return []
+    return ["", "WARNING hardblocks_lost (model:before>after, `.subckt` count of the BLIF the "
+            "flow started from vs the pre-VPR BLIF):", "", *lost, ""]
 
 
 def _hard_blocks(layout: _Layout, run: Run) -> str:
