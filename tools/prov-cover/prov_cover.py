@@ -35,6 +35,15 @@ brackets:
 ``not-helper``    a ``$not``/``$_NOT_`` with no location whose single input net is driven by a
                   ``$sop``. [5.4 X-9 names it; evidence 6.5b: ``read_blif`` makes one ``$sop`` that
                   keeps the OFF-set cover, no ``$not``, so the class is 0 for the BLIF legs]
+``port-driver``   (Peter decision 2026-10-21, D1/D3) an object of a read-back dump with no
+                  location whose output net is a module output port bit (X-8: the port-bit net
+                  name carries no ``@file:line``, so D-5 has nothing to inherit), when the same
+                  port bit was driven by a located node of the same class (lut, latch, hard,
+                  lpm) in leg (a). Without that per-bit, per-class leg-(a) proof it stays a
+                  defect. It stays an object (counted in its class and in the
+                  a-vs-b counts) and is removed from the coverage base; never applied to leg (a).
+                  An identity table at a port bit that leg (a) located is this class, not a
+                  ``port-buffer``. Leg (d): the same rule on the driver block of a port bit.
 ``inherited``     (``--allow``) a cell whose location exists only through 5.4 D-5: in a BLIF VTR
                   read-back every located cell, as the dialect writes none for a cell (X-6).
 ``pad``           (``--allow``) a VPR I/O pad block of the ``.place`` file (5.4 X-8).
@@ -82,10 +91,15 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 EXIT_OK, EXIT_FAIL, EXIT_ERROR, EXIT_CRASH = 0, 1, 2, 3
 CAP = 8  # 5.4 W-3: at most 8 locations in a record
 OBJECT_CLASSES = ("lut", "latch", "hard", "lpm")
-EXCEPTIONS = ("const-driver", "const-table", "port-buffer", "not-helper", "inherited", "pad")
+EXCEPTIONS = (
+    "const-driver", "const-table", "port-buffer", "not-helper", "port-driver", "inherited", "pad"
+)
 APPROVED = frozenset({"inherited", "pad"})  # approved by Peter 2026-10-20 (PHASE6 decision 2)
 DEFAULT_ALLOW = APPROVED
 NAMED_DEFECTS = 10
+# Port-driver proof of leg (a): (module, output port bit name) -> (class, identity table) of the
+# located node that drives that bit. Kept apart from the net names of ``located``.
+PortProof = Mapping[tuple[str, str], tuple[str, bool]]
 CONST_TYPES = frozenset({"$_CONST0_", "$_CONST1_", "$_CONSTX_", "$_CONSTZ_"})
 PORT_TYPES = frozenset({"$port_in", "$port_out", "$port_inout"})
 LUT_TYPES = frozenset({"$lut", "$sop"})
@@ -121,6 +135,12 @@ class Mod:
     # gnd, vcc or unconn nets that hold a constant bit: write_json folds a zero-input table into
     # the constant, so the cell has no entry in ``cells`` and only this net name remains
     generators: frozenset[str] = frozenset()
+    # output port bit key -> its port bit name (``y`` or ``y[2]``): the name the same bit has in
+    # every leg, where a net's own name may be the whole bus in one and the single bit in another
+    port_bits: Mapping[str, str] = field(default_factory=dict)
+
+    def port_bit_name(self, net: str) -> str:
+        return self.port_bits.get(net, self.net_name(net))
 
     def net_name(self, net: str) -> str:
         return self.names.get(net, net)
@@ -150,6 +170,11 @@ class LegReport:
     resolved: dict[str, int] = field(default_factory=dict)
     exceptions: dict[str, int] = field(default_factory=lambda: dict.fromkeys(EXCEPTIONS, 0))
     direct: int = 0  # objects located without an exception class (the strict figure)
+    driver_buffers: int = 0  # port-driver objects that are also an identity table at a port bit
+    # module -> output port bits: leg a, a located identity LUT drives the bit; read-back, a
+    # port-buffer table drives a bit whose leg-a driver was one
+    id_ports: dict[str, set[str]] = field(default_factory=dict)
+    buf_ports: dict[str, set[str]] = field(default_factory=dict)
     removed: int = 0  # objects of the exception classes that stand in for a location
     defects: list[Defect] = field(default_factory=list)
     mismatches: list[str] = field(default_factory=list)
@@ -211,6 +236,7 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
     class after the write and read-back gets one ``count-drop`` defect per lost object: objects
     were lost, not only locations. A gain never offsets a drop in another module; it is only shown
     in ``versus`` (the writer adds buffer tables)."""
+    _port_driver_drops(first, second)
     for cls in OBJECT_CLASSES:
         before = sum(first.modules.get(m, {}).get(cls, 0) for m in second.modules)
         after = second.kept(cls)
@@ -219,6 +245,27 @@ def compare_counts(first: LegReport, second: LegReport) -> None:
             lost = first.modules.get(mod, {}).get(cls, 0) - _kept_in(second, mod, cls)
             for n in range(1, lost + 1):
                 second.defects.append(Defect("count-drop", mod, f"{cls}-{n}", cls))
+
+
+def _port_driver_drops(first: LegReport, second: LegReport) -> None:
+    """D3 (Peter 2026-10-21): a located identity LUT at a port bit in leg (a) is written as a
+    ``.names net port`` table without a location, which the read-back counts as a ``port-buffer``
+    and takes out of the LUT count. Per port bit: a drop counts as ``port-driver`` only for a bit
+    whose leg-(a) driver was a located identity LUT and whose read-back driver is a port-buffer
+    table; at most as many drops in a module as there are such bits move from ``port-buffer`` to
+    ``port-driver``: the object stays, at the count it had, in the same dump and the written-file
+    cross-check."""
+    for mod in sorted(second.modules):
+        per = second.modules[mod]
+        lost = first.modules.get(mod, {}).get("lut", 0) - _kept_in(second, mod, "lut")
+        paired = first.id_ports.get(mod, set()) & second.buf_ports.get(mod, set())
+        move = min(lost, len(paired))
+        if move <= 0:
+            continue
+        second.exceptions["port-buffer"] -= move
+        second.exceptions["port-driver"] += move
+        second.driver_buffers += move
+        per["_extra"] -= move
 
 
 def defect_id(d: Defect) -> str:
@@ -297,10 +344,15 @@ class _Ctx:
     file calls a ``$sop`` a ``$lut``), the driver of every net, and the leg-(a) located nets."""
 
     def __init__(
-        self, facts: Facts, rows: Sequence[Obj], located: Collection[tuple[str, str]]
+        self,
+        facts: Facts,
+        rows: Sequence[Obj],
+        located: Collection[tuple[str, str]],
+        ports: PortProof | None = None,
     ) -> None:
         self.facts = facts
         self.located = located
+        self.ports: PortProof = ports or {}
         self.types = {(r.module, r.name): r.ctype for r in rows if r.kind == "node"}
         # one folded zero-input table per generator net of a module (gnd, vcc, unconn)
         self.folded = {module: len(mod.generators) for module, mod in facts.items()}
@@ -355,6 +407,31 @@ def _port_buffer(ctx: _Ctx, row: Obj, cell: Cell | None) -> str | None:
     return "yes"
 
 
+def _out_bits(ctx: _Ctx, row: Obj, cell: Cell, identity_proof: bool = False) -> set[str]:
+    """The output port bit names the cell drives; with ``identity_proof`` only those whose leg-(a)
+    driver was a located identity LUT."""
+    mod = ctx.facts.get(row.module)
+    if mod is None:
+        return set()
+    bits = {mod.port_bit_name(o) for o in cell.outs if o in mod.port_out}
+    if identity_proof:
+        bits = {b for b in bits if ctx.ports.get((row.module, b)) == ("lut", True)}
+    return bits
+
+
+def _port_driver(ctx: _Ctx, row: Obj, cell: Cell | None, cls: str) -> bool:
+    """True when the object drives a module output port bit that a located leg-(a) node of the
+    same class drove (per bit, per class)."""
+    mod = ctx.facts.get(row.module)
+    if cell is None or mod is None:
+        return False
+    return any(
+        o in mod.port_out
+        and ctx.ports.get((row.module, mod.port_bit_name(o)), ("", False))[0] == cls
+        for o in cell.outs
+    )
+
+
 def _not_helper(ctx: _Ctx, row: Obj, cell: Cell | None) -> bool:
     if cell is None or len(cell.ins) != 1:
         return False
@@ -370,14 +447,16 @@ def classify(
     readback: bool = False,
     located: Collection[tuple[str, str]] = frozenset(),
     written: Mapping[str, int] | None = None,
+    ports: PortProof | None = None,
 ) -> LegReport:
     """Counts the nodes of one typed dump. ``readback``: the dump is of a written file read back
     (legs b and c-rb); only there the P-3 exception rules apply, in memory (leg a, leg c) every
     object without a location is a loss. ``inherits``: the dump is a BLIF VTR read-back, where a
     located cell has its location through D-5. ``located``: (module, net name) pairs a located
     leg-(a) node drives. ``written``: the class counts of the written file, for the cross-check
-    (None: not checked)."""
-    ctx = _Ctx(facts, rows, located)
+    (None: not checked). ``ports``: the port-driver proof of leg (a), per output port bit and
+    class (see ``PortProof``)."""
+    ctx = _Ctx(facts, rows, located, ports)
     rep = LegReport(
         objects=dict.fromkeys(OBJECT_CLASSES, 0), resolved=dict.fromkeys(OBJECT_CLASSES, 0)
     )
@@ -403,6 +482,8 @@ def _count_node(
     per = rep.modules.setdefault(row.module, {})
     per[cls] = per.get(cls, 0) + 1
     if has:
+        if cls == "lut" and cell is not None and cell.identity:
+            rep.id_ports.setdefault(row.module, set()).update(_out_bits(ctx, row, cell))
         _count_located(row, rep, cls, allow, inherits)
         return
     if not readback:
@@ -416,9 +497,15 @@ def _count_node(
         rep.removed += 1
         return
     verdict = _port_buffer(ctx, row, cell) if cls == "lut" else None
+    if verdict is None and _port_driver(ctx, row, cell, cls):
+        rep.exceptions["port-driver"] += 1
+        rep.removed += 1
+        return
     if verdict == "yes":
         rep.exceptions["port-buffer"] += 1
         per["_extra"] = per.get("_extra", 0) + 1
+        paired = _out_bits(ctx, row, cell, identity_proof=True) if cell is not None else set()
+        rep.buf_ports.setdefault(row.module, set()).update(paired)
         rep.removed += 1
         return
     kind = "lost-location" if verdict == "lost" else "unresolved"
@@ -463,9 +550,10 @@ def _cross_check(rep: LegReport, written: Mapping[str, int] | None) -> None:
     if written is None:
         return
     for name in ("const-table", "port-buffer", "not-helper"):
-        if name in written and written[name] != rep.exceptions[name]:
+        have = rep.exceptions[name] + (rep.driver_buffers if name == "port-buffer" else 0)
+        if name in written and written[name] != have:
             rep.mismatches.append(
-                f"{name}: {rep.exceptions[name]} in the dump, {written[name]} in the written file"
+                f"{name}: {have} in the dump, {written[name]} in the written file"
             )
 
 
@@ -551,6 +639,8 @@ def render_table(items: Sequence[tuple[str, str, LegReport]]) -> str:
             f"  objects {rep.total}"
             f"  median {rep.median:g}  p90 {rep.p90:g}  capped {rep.capped}"
         )
+        drv = rep.exceptions["port-driver"]
+        out.append(f"  port-driver {drv} of {rep.total} objects ({_pct(drv / max(rep.total, 1))})")
         if rep.versus:
             out.append(
                 "  a-vs-b "

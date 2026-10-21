@@ -312,6 +312,18 @@ evidence in the tool's docstring):
   location); counted both ways, resolved and strict (Question 5).
 - `pad` (approved): a VPR I/O pad block of leg (d): the port bit carries no location (5.4 X-8)
   (Question 7).
+- `port-driver` (**Peter decision 2026-10-21**, D1/D3): an object of a read-back dump (legs b,
+  c-rb) or a leg-(d) block with no location whose output net is a module output port bit (X-8: the
+  port-bit net name carries no `@file:line`), when a node with a location drove the same port bit
+  in leg (a) and the leg-(a) driver of that bit had the same class (lut, latch, hard, lpm) as the
+  object. Matched by port bit name (`y` or `y[2]`), so a bus net name in one leg and a bit
+  name in another still pair. Without that per-bit, per-class leg-(a) proof the object stays a
+  defect. Each leg prints "port-driver K of N objects (P%)". It stays an
+  object (counted in its class, in the a-vs-b counts) and leaves the coverage base. D3: a
+  located identity LUT at a port bit that read-back sees as a `port-buffer` table is this class
+  too, per port bit: leg (a) had a located identity LUT at that bit and the read-back driver of it
+  is a `port-buffer` table; a drop elsewhere stays a `count-drop` (the written-file cross-check
+  of `port-buffer` adds the moved ones back). Never applies to leg (a).
 
 Anything else unresolved is a bug: the tool exits non-zero and names the first ten. The report
 **always** prints per-class counts (every class, zero included), the share of objects each class
