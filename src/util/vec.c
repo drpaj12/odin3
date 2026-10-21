@@ -86,3 +86,15 @@ void odin3_vec_shrink_to_fit(odin3_vec *vec) {
         vec->cap = vec->len;
     }
 }
+
+odin3_status odin3_vec_copy(odin3_vec *dst, const odin3_vec *src) {
+    assert(dst->elem_size == src->elem_size && dst->len == 0);
+    if (odin3_vec_reserve(dst, src->len) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (src->len > 0) {
+        memcpy(dst->data, src->data, src->len * src->elem_size);
+    }
+    dst->len = src->len;
+    return ODIN3_OK;
+}

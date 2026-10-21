@@ -34,9 +34,11 @@ from prov_cover import (
     LegReport,
     Mod,
     Obj,
+    PortProof,
     ToolError,
     classify,
     compare_counts,
+    object_class,
     parse_dump,
     written_counts,
 )
@@ -130,7 +132,13 @@ def _module_facts(mod: dict[str, Any]) -> Mod:
         for n, net in mod.get("netnames", {}).items()
         if n in GENERATOR_NETS and net.get("bits") and all(str(b) in consts for b in net["bits"])
     )
-    return Mod(cells, frozenset(port_in), frozenset(port_out), names, generators)
+    port_bits = {
+        b: (pname if len(p["bits"]) == 1 else f"{pname}[{i}]")
+        for pname, p in mod.get("ports", {}).items()
+        if p.get("direction") == "output"
+        for i, b in enumerate(_bits(p["bits"]))
+    }
+    return Mod(cells, frozenset(port_in), frozenset(port_out), names, generators, port_bits)
 
 
 def facts_from_json(text: str) -> Facts:
@@ -148,6 +156,21 @@ def located_nets(rows: Sequence[Any], facts: Facts) -> set[tuple[str, str]]:
         cell = mod.cells.get(row.name) if mod else None
         if row.kind == "node" and row.src and mod and cell:
             found.update((row.module, mod.net_name(o)) for o in cell.outs)
+    return found
+
+
+def located_ports(rows: Sequence[Any], facts: Facts) -> dict[tuple[str, str], tuple[str, bool]]:
+    """(module, output port bit name) -> (class, identity table) of the located node that drives
+    the bit: the leg-(a) proof of the ``port-driver`` class, per bit and per class."""
+    found: dict[tuple[str, str], tuple[str, bool]] = {}
+    for row in rows:
+        mod = facts.get(row.module)
+        cell = mod.cells.get(row.name) if mod else None
+        cls = object_class(row.ctype) if row.kind == "node" else None
+        if cls and row.src and mod and cell:
+            for o in cell.outs:
+                if o in mod.port_out:
+                    found[(row.module, mod.port_bit_name(o))] = (cls, cell.identity)
     return found
 
 
@@ -218,14 +241,17 @@ def lut_legs(
         b = dump_state(work, "b", log)
     except ToolError as exc:
         return [*out, ("b" if "b" in wanted else "d", flow_error(design.name, exc))]
+    located = located_nets(a.rows, a.facts)
+    ports = located_ports(a.rows, a.facts)
     rep = classify(
         b.rows,
         b.facts,
         allow=args.allow_set,
         inherits=True,
         readback=True,
-        located=located_nets(a.rows, a.facts),
+        located=located,
         written=written_counts(blif.read_text(encoding="utf-8")),
+        ports=ports,
     )
     compare_counts(rep_a, rep)
     info = INFO_INHERITED.search(log)
@@ -237,7 +263,7 @@ def lut_legs(
     if "b" in wanted:
         out.append(("b", rep))
     if "d" in wanted:
-        out.append(("d", leg_d(args, design, work, b)))
+        out.append(("d", leg_d(args, design, work, b, ports)))
     return out
 
 
@@ -246,7 +272,13 @@ def vtr_root() -> Path:
     return Path(os.environ.get("VTR_ROOT") or default)
 
 
-def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegReport:
+def leg_d(
+    args: argparse.Namespace,
+    design: Path,
+    work: Path,
+    b: Dumped,
+    ports: PortProof | None = None,
+) -> LegReport:
     """VPR (pack and place) on leg b's BLIF, then ``place_check`` against leg b's read-back."""
     vpr = args.vpr or vtr_root() / "vpr" / "vpr"
     arch = args.arch or vtr_root() / vpr_leg.DEFAULT_ARCH
@@ -256,7 +288,7 @@ def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegR
         )
         return vpr_leg.place_check(
             place.read_text(encoding="utf-8", errors="replace"),
-            vpr_leg.build_index(b.rows, b.facts),
+            vpr_leg.build_index(b.rows, b.facts, ports),
             net.read_text(encoding="utf-8", errors="replace"),
             allow=args.allow_set,
         )

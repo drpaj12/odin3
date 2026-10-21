@@ -28,6 +28,17 @@ ODIN3_EXPORT odin3_status odin3_design_run_pass(odin3_design *design, const char
     return odin3_pass_run(design, name, odin3_bytes_cstr(args));
 }
 
+ODIN3_EXPORT odin3_status odin3_design_copy(const odin3_design *src, odin3_design **out) {
+    if (out == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    *out = NULL;
+    if (src == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    return odin3_design_clone(src, out);
+}
+
 ODIN3_EXPORT bool odin3_design_has_project(const odin3_design *design) {
     const odin3_project *proj = design != NULL ? odin3_design_project(design) : NULL;
     return proj != NULL && proj->finished;

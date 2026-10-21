@@ -41,6 +41,53 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     return design;
 }
 
+/* Fills dst, a zeroed design with an empty AST list, from src. */
+static odin3_status clone_into(odin3_design *dst, const odin3_design *src) {
+    dst->arena = odin3_arena_create(0);
+    dst->strtab = odin3_strtab_clone(src->strtab);
+    if (dst->arena == NULL || dst->strtab == NULL || odin3_module_table_init(dst) != ODIN3_OK ||
+        odin3_prov_store_init(dst) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_prov_store_clone(dst, src);
+    if (st == ODIN3_OK && src->srcman != NULL) {
+        dst->srcman = odin3_srcman_clone(src->srcman, dst->strtab);
+        st = dst->srcman != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t id = 1; st == ODIN3_OK && id < src->modules.len; id++) {
+        st = odin3_module_clone(dst, *(odin3_module *const *)odin3_vec_cat(&src->modules, id));
+    }
+    if (st == ODIN3_OK) {
+        st = odin3_celltype_table_clone(dst, src);
+    }
+    if (st == ODIN3_OK && src->arch != NULL) {
+        odin3_arch_retain(src->arch); /* shared, immutable after read_arch */
+        dst->arch = src->arch;
+    }
+    dst->top = src->top;
+    dst->keep_ast = src->keep_ast;
+    dst->diag_paths = src->diag_paths;
+    return st;
+}
+
+odin3_status odin3_design_clone(const odin3_design *src, odin3_design **out) {
+    *out = NULL;
+    odin3_design *dst = odin3_util_calloc(sizeof *dst);
+    if (dst == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_vec_init(&dst->asts, sizeof(odin3_ast *));
+    odin3_status st = clone_into(dst, src);
+    if (st != ODIN3_OK) {
+        /* dst may hold half a table (entries still pointing at src's defs): destroy only frees
+         * the table and never dereferences a definition, so this is safe */
+        odin3_design_destroy(dst);
+        return st;
+    }
+    *out = dst;
+    return ODIN3_OK;
+}
+
 ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
@@ -91,6 +138,7 @@ uint64_t odin3_design_bytes_reserved(const odin3_design *design) {
     bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design);
     bytes += design->srcman != NULL ? odin3_srcman_bytes_reserved(design->srcman) : 0;
     bytes += odin3_arena_bytes_reserved(design->arena) + vec_bytes(&design->celltypes) +
+             (design->types != NULL ? odin3_arena_bytes_reserved(design->types->arena) : 0) +
              odin3_u64map_bytes(design->celltype_names) + vec_bytes(&design->declared);
     bytes += vec_bytes(&design->modules) + vec_bytes(&design->asts);
     for (size_t i = 1; i < design->modules.len; i++) {

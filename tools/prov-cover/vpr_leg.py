@@ -58,7 +58,9 @@ from prov_cover import (
     Facts,
     LegReport,
     Obj,
+    PortProof,
     ToolError,
+    object_class,
     parse_locs,
 )
 
@@ -106,11 +108,22 @@ class Index:
     outputs: frozenset[str]
     # net name -> the (file, line) of the net and of every located node that drives it
     where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
+    # port-driver proof: (module, output port bit name) -> class of the located leg-(a) node
+    # that drove it; per module, as two modules can have an output of one name
+    a_ports: dict[tuple[str, str], str] = field(default_factory=dict)
+    # (module, output port bit name) -> class of the read-back node that drives it now
+    driver_class: dict[tuple[str, str], str] = field(default_factory=dict)
 
 
-def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
-    """The net names of a typed dump joined with its connections (``write_json``)."""
+def build_index(
+    rows: Sequence[Obj], facts: Facts, a_ports: PortProof | None = None
+) -> Index:
+    """The net names of a typed dump joined with its connections (``write_json``).
+    ``a_ports``: the ``located_ports`` of leg (a), the proof of the ``port-driver`` class: a
+    driver counts only for a port bit whose leg-(a) driver had the same class."""
     src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
+    kinds = {(r.module, r.name): object_class(r.ctype) or "" for r in rows if r.kind == "node"}
+    driver_class: dict[tuple[str, str], str] = {}
     where: dict[str, set[tuple[str, int]]] = {}
     for r in rows:  # the net's own location is what the written name carries (a hard block's)
         if r.kind == "net":
@@ -124,6 +137,10 @@ def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
             for out in cell.outs:
                 net = mod.net_name(out)
                 driven.add(net)
+                if out in mod.port_out:
+                    cls = kinds.get((module, name), "")
+                    driver_class[(module, net)] = cls
+                    driver_class[(module, mod.port_bit_name(out))] = cls
                 if src.get((module, name)):
                     located.add(net)
                     where.setdefault(net, set()).update(
@@ -131,12 +148,15 @@ def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
                     )
         inputs.update(mod.net_name(b) for b in mod.port_in)
         outputs.update(mod.net_name(b) for b in mod.port_out)
+        outputs.update(mod.port_bit_name(b) for b in mod.port_out)
     return Index(
         frozenset(located),
         frozenset(driven),
         frozenset(inputs),
         frozenset(outputs),
         {net: frozenset(locs) for net, locs in where.items()},
+        {key: cls for key, (cls, _) in (a_ports or {}).items()},
+        driver_class,
     )
 
 
@@ -215,6 +235,12 @@ def _resolve(
     elif key in index.located:
         return "resolved", "net"
     if key in index.driven:
+        if key in index.outputs and any(
+            cls == index.driver_class.get((module, bit))
+            for (module, bit), cls in index.a_ports.items()
+            if bit == key
+        ):
+            return "port-driver", ""  # Peter 2026-10-21: located in leg a, lost at the port bit
         note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
         return "unresolved", note
     return "unmapped", "no-such-net"
@@ -237,6 +263,7 @@ def place_check(
     seen: set[str] = set()
     excepted: set[str] = set()
     failed: set[str] = set()
+    drivers: set[str] = set()
 
     def count(cls: str, name: str) -> None:
         verdict, note = _resolve(name, index, allow, pads)
@@ -246,7 +273,12 @@ def place_check(
                 rep.exceptions["pad" if verdict == "pad" else "const-table"] += 1
         else:
             rep.objects[cls] += 1
-            if verdict == "resolved":
+            if verdict == "port-driver":
+                rep.removed += 1  # every object of the class leaves the coverage base
+                if name not in drivers:  # a cluster and its same-named atom: one exception
+                    drivers.add(name)
+                    rep.exceptions["port-driver"] += 1
+            elif verdict == "resolved":
                 rep.resolved[cls] += 1
                 rep.direct += 1
             elif name not in failed:  # a cluster and its same-named atom are one defect

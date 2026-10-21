@@ -35,6 +35,13 @@ const void *odin3_vec_cat(const odin3_vec *vec, size_t idx);
 /* Drops the last element; requires len > 0. */
 void odin3_vec_pop(odin3_vec *vec);
 
+/*
+ * Makes dst (initialised, same elem_size, empty) a byte-for-byte copy of src's elements.
+ * ODIN3_ERR_NO_MEMORY on out of memory (dst unchanged). Pointers inside the elements are copied
+ * as they are: the caller re-points them.
+ */
+odin3_status odin3_vec_copy(odin3_vec *dst, const odin3_vec *src);
+
 /* len = 0, keeps capacity. */
 void odin3_vec_clear(odin3_vec *vec);
 

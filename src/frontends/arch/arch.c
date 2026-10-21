@@ -22,6 +22,7 @@ odin3_arch *odin3_arch_create(void) {
         odin3_util_free(arch);
         return NULL;
     }
+    atomic_init(&arch->refs, 1);
     odin3_vec_init(&arch->leaves, sizeof(odin3_arch_leaf));
     odin3_vec_init(&arch->ics, sizeof(odin3_arch_ic));
     odin3_vec_init(&arch->directs, sizeof(odin3_arch_direct));
@@ -29,8 +30,12 @@ odin3_arch *odin3_arch_create(void) {
     return arch;
 }
 
+void odin3_arch_retain(odin3_arch *arch) {
+    atomic_fetch_add_explicit(&arch->refs, 1, memory_order_relaxed);
+}
+
 void odin3_arch_destroy(odin3_arch *arch) {
-    if (arch == NULL) {
+    if (arch == NULL || atomic_fetch_sub_explicit(&arch->refs, 1, memory_order_acq_rel) != 1) {
         return;
     }
     odin3_vec_free(&arch->leaves);

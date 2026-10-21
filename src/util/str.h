@@ -39,6 +39,9 @@ size_t odin3_strtab_len(const odin3_strtab *tab, uint32_t id);
 /* Number of interned strings, including the empty string. */
 size_t odin3_strtab_count(const odin3_strtab *tab);
 
+/* A table with the same strings under the same IDs; NULL on out of memory (nothing is left). */
+odin3_strtab *odin3_strtab_clone(const odin3_strtab *src);
+
 /* Bytes the table holds: its struct, arena chunks, entry vector and index (0 for NULL). */
 size_t odin3_strtab_bytes_reserved(const odin3_strtab *tab);
 
