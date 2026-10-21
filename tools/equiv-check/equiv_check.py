@@ -527,11 +527,12 @@ class _Flattener:
                          f"{cell.model}: no .cname and no named output net to match it by")
 
     def port_buffers(self, frame: _Frame) -> dict[str, str]:
-        """Flat net -> flat net for each generated net (``$...``) read by exactly one cell of the
-        frame's model (and on at most one box pin, its driver), a one-input ``.names`` buffer (row ``1 1``) that drives another net.
-        write_blif --vtr puts a hard block's primary output on its own ``$n<ID>`` net behind
-        such a buffer; the box is then named by the buffer's output. A net with any other
-        reader maps to nothing, so the box stays unnameable (an error, never a silent pass)."""
+        """Flat net -> flat net for each generated net (``$...``) that has one reader in the
+        frame's model, a one-input ``.names`` buffer (row ``1 1``), and no other pin but its
+        driver's; the value is the buffer's output. write_blif --vtr puts a hard block's
+        primary output on its own ``$n<ID>`` net behind such a buffer; the box is then named by
+        the buffer's output. A net with any other reader maps to nothing, so the box stays
+        unnameable (an error, never a silent pass)."""
         cached = self.buffer_maps.get(frame.prefix)
         if cached is not None:
             return cached
