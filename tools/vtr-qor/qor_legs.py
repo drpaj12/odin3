@@ -35,7 +35,11 @@ LIB_REL = Path("lib") / "vtr.o3lib"
 ABC_SCRIPT_REL = Path("lib") / "abc" / "vtr.abc"
 # The golden tree (read only; spec §3.4), from the account's home, never $HOME.
 GOLDEN_ROOT = Path(pwd.getpwuid(os.getuid()).pw_dir) / "odin3-ws" / "golden"
-ARCH_BASES = {"k6": "k6_frac_N10_frac_chain_mem32K_40nm", "earch": "EArch"}
+ARCH_BASES = {
+    "k6": "k6_frac_N10_frac_chain_mem32K_40nm",
+    "earch": "EArch",
+    "k4": "k4_N4_90nm",
+}
 TIME_BIN = "/usr/bin/time"
 # Spec §3 <T>: the VTR stage timeout (-timeout) per group (plan, Global Constraints caps).
 STAGE_TIMEOUT_S = {"A": 7200, "B": 14400}
@@ -121,7 +125,7 @@ def normalise_leg(name: str) -> str:
 
 
 def arch_base(arch: str) -> str:
-    """The arch basename for ``k6``/``earch`` or a basename itself."""
+    """The arch basename for ``k6``/``earch``/``k4`` or a basename itself."""
     if arch in ARCH_BASES:
         return ARCH_BASES[arch]
     if arch in ARCH_BASES.values():
