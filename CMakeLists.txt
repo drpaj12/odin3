@@ -103,6 +103,7 @@ add_library(odin3_core OBJECT
     src/passes/sim_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
+    src/passes/names.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/arch_pass.c
@@ -403,12 +404,14 @@ add_library(odin3_core OBJECT
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
+    src/backends/json/names.c
     src/backends/json/cells.c
     src/backends/json/lut.c
     src/backends/json/writer.c
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
     src/backends/common/hash_name.c
+    src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/frontends/hdl_restore.c
     src/backends/verilog/escape.c
@@ -1567,6 +1570,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_hdl_loc)
     odin3_add_unit_test(test_hash_name)
     odin3_add_unit_test(test_name_map)
+    # 5.4f-b: --name-style hash in the three writers and the names pass, each case in a mkdtemp dir.
+    odin3_add_unit_test(test_hash_writers)
+    target_compile_definitions(test_hash_writers PRIVATE ODIN3_HASHW_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)

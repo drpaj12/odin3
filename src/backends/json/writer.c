@@ -8,7 +8,6 @@
 #include "util/file.h"
 #include "util/log.h"
 
-#include <errno.h>
 #include <string.h>
 
 enum {
@@ -206,18 +205,38 @@ static void write_attrs(jw *out, jw_list *entry, const netname_bits *bits, odin3
     jw_close(out, &attrs);
 }
 
+/* The key of a non-port wire's netname under provenance or hash names (names.c), NULL when the
+ * wire keeps its name: a port, or no HDL location. */
+static const char *wire_key(jw *out, odin3_wire_id wire, const char *text) {
+    if (out->names == JW_NAMES_SHORT || text == NULL ||
+        odin3_node_valid(odin3_wire_port_node(out->module, wire))) {
+        return NULL;
+    }
+    jw_keyspec spec = {JW_KEY_NETNAME,  false, text, "", odin3_wire_prov(out->module, wire),
+                       ODIN3_NAME_WIRE, wire.v};
+    return jw_prov_key(out, &spec);
+}
+
 static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     uint32_t name = odin3_wire_name(out->module, wire);
     jw_list fields = {false, FIELD_DEPTH};
     netname_bits bits = {NULL, wire, odin3_wire_width(out->module, wire)};
     const char *text = odin3_strtab_get(out->strtab, name);
-    jw_record_key(out, text != NULL ? text : "");
+    const char *renamed = wire_key(out, wire, text);
+    bool hidden = renamed != NULL ? out->hide : name_hidden(out, name);
+    if (renamed == NULL) {
+        jw_record_key(out, text != NULL ? text : "");
+    }
     jw_item(out, names);
-    jw_str_id(out, name);
+    if (renamed != NULL) {
+        jw_string(out, odin3_bytes_cstr(renamed));
+    } else {
+        jw_str_id(out, name);
+    }
     jw_raw(out, ": ");
     jw_open(out, &fields);
     jw_key(out, &fields, "hide_name");
-    jw_raw(out, name_hidden(out, name) ? "1" : "0");
+    jw_raw(out, hidden ? "1" : "0");
     jw_key(out, &fields, "bits");
     write_wire_bits(out, wire);
     write_wire_shape(out, &fields, wire);
@@ -237,8 +256,13 @@ static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     jw_list fields = {false, FIELD_DEPTH};
     netname_bits bits = {&entry->net, (odin3_wire_id){0}, 1};
     (void)snprintf(tail, sizeof tail, "%s%u", entry->clash ? "$net" : "", (unsigned)entry->net.v);
-    jw_keyspec spec = {JW_KEY_NETNAME, entry->clash, odin3_strtab_get(out->strtab, entry->name),
-                       entry->clash ? tail : ""};
+    jw_keyspec spec = {JW_KEY_NETNAME,
+                       entry->clash,
+                       odin3_strtab_get(out->strtab, entry->name),
+                       entry->clash ? tail : "",
+                       odin3_net_prov(out->module, entry->net),
+                       ODIN3_NAME_NET,
+                       entry->net.v};
     if (entry->name == 0) {
         spec.generated = true;
         spec.head = "$n";
@@ -250,7 +274,7 @@ static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     jw_raw(out, ": ");
     jw_open(out, &fields);
     jw_key(out, &fields, "hide_name");
-    jw_raw(out, key[0] == '$' ? "1" : "0");
+    jw_raw(out, out->hide ? "1" : "0");
     jw_key(out, &fields, "bits");
     jw_raw(out, "[ ");
     jw_bit(out, jw_net_code(out, entry->net));
@@ -357,12 +381,14 @@ static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     }
     out->extra_bit = net_end + 1;
     mark_inits(out);
+    out->module_rows = odin3_hash_rows_count(&out->rows);
     jw_item(out, modules);
     jw_str_id(out, odin3_module_name(mod));
     jw_raw(out, ": ");
     jw_open(out, &entry);
     write_module_body(out, &entry);
     jw_close(out, &entry);
+    jw_names_module_end(out);
     odin3_util_free(out->init);
     out->init = NULL;
     odin3_strtab_destroy(out->written);
@@ -484,12 +510,14 @@ static odin3_status write_design(jw *out) {
     jw_close(out, &modules);
     jw_close(out, &top);
     jw_raw(out, "\n");
+    jw_names_done(out);
     return status != ODIN3_OK ? status : out->status;
 }
 
 /* Writes a private temporary beside the destination, then renames it over the destination: a
- * failure leaves the destination as it was and removes only the temporary. */
-static odin3_status save_design(jw *state, const char *path) {
+ * failure leaves the destination as it was and removes only the temporary. With a map (HASH) the
+ * map is renamed first and then the netlist, both or neither (odin3_hash_map_close). */
+static odin3_status save_design(jw *state, const char *path, odin3_hash_map_file *map) {
     odin3_atomic_file file;
     odin3_status status = odin3_atomic_file_open(&file, path);
     if (status != ODIN3_OK) {
@@ -501,12 +529,63 @@ static odin3_status save_design(jw *state, const char *path) {
         odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", path, strerror(state->write_errno));
     }
     state->fp = NULL;
-    return odin3_atomic_file_close(&file, status);
+    if (map == NULL) {
+        return odin3_atomic_file_close(&file, status);
+    }
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    status = status == ODIN3_OK ? odin3_hash_rows_map_text(&state->rows, &text) : status;
+    status = odin3_hash_map_close(map, (odin3_bytes){text.data, text.len}, &file, status);
+    odin3_strbuf_free(&text);
+    return status;
+}
+
+/* HASH, the first pass: writes provenance names to a counting sink (no file) and collects the
+ * renamed objects with their hash names (names.c). */
+static odin3_status collect_names(jw *state) {
+    state->fp = NULL;
+    state->sunk = 0;
+    state->names = JW_NAMES_COLLECT;
+    odin3_status status = write_design(state);
+    state->status = ODIN3_OK;
+    return status;
+}
+
+/* HASH: the name map's temporary is opened first, so a map that cannot be written refuses the
+ * write (H-1); then the two passes; then the map and the netlist are renamed into place. */
+static odin3_status save_hashed(jw *state, const char *path, const char *name_map) {
+    odin3_strbuf map_path;
+    odin3_hash_map_file map = {.open = false};
+    odin3_strbuf_init(&map_path);
+    odin3_status status =
+        odin3_hash_map_path(&(odin3_hash_map_req){"write_json", path, name_map}, &map_path);
+    status = status == ODIN3_OK ? odin3_hash_map_open(&map, map_path.data) : status;
+    status = status == ODIN3_OK ? collect_names(state) : status;
+    if (status == ODIN3_OK) {
+        state->names = JW_NAMES_APPLY;
+        state->row_cursor = 0;
+        status = save_design(state, path, &map);
+    } else {
+        status = odin3_hash_map_close(&map, (odin3_bytes){NULL, 0}, NULL, status);
+    }
+    odin3_strbuf_free(&map_path);
+    return status;
 }
 
 odin3_status odin3_json_write(const odin3_design *design, const char *path) {
+    return odin3_json_write_with(design, path, NULL);
+}
+
+odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
+                                   const odin3_json_write_opts *opts) {
     if (design == NULL || path == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_json_name_style style = opts != NULL ? opts->name_style : ODIN3_JSON_NAMES_SHORT;
+    if (style != ODIN3_JSON_NAMES_SHORT && style != ODIN3_JSON_NAMES_PROVENANCE &&
+        style != ODIN3_JSON_NAMES_HASH) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: unknown name style");
         return ODIN3_ERR_INVALID_ARG;
     }
     if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
@@ -515,14 +594,26 @@ odin3_status odin3_json_write(const odin3_design *design, const char *path) {
     /* odin3_module_get takes a mutable design; the writer never changes it. */
     jw state = {.design = (odin3_design *)design,
                 .strtab = odin3_design_strtab(design),
-                .status = ODIN3_OK};
+                .status = ODIN3_OK,
+                .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE};
     odin3_strbuf_init(&state.key);
     odin3_strbuf_init(&state.src);
+    odin3_strbuf_init(&state.pname);
+    odin3_strbuf_init(&state.pshort);
+    odin3_hash_rows_init(&state.rows);
     odin3_wattr_seen_init(&state.seen);
     state.hdl = odin3_hdl_ctx_create(design, "write_json");
-    odin3_status status = state.hdl != NULL ? save_design(&state, path) : ODIN3_ERR_NO_MEMORY;
+    odin3_status status = state.hdl != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    if (status == ODIN3_OK && style == ODIN3_JSON_NAMES_HASH) {
+        status = save_hashed(&state, path, opts->name_map);
+    } else if (status == ODIN3_OK) {
+        status = save_design(&state, path, NULL);
+    }
     odin3_hdl_ctx_destroy(state.hdl);
     odin3_wattr_seen_free(&state.seen);
+    odin3_hash_rows_free(&state.rows);
+    odin3_strbuf_free(&state.pshort);
+    odin3_strbuf_free(&state.pname);
     odin3_strbuf_free(&state.src);
     odin3_strbuf_free(&state.key);
     return status;

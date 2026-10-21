@@ -2040,7 +2040,7 @@ static prov_fixture build_prov_names(void) {
 
 static void test_name_style_short(void) {
     prov_fixture fix = build_prov_names();
-    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_SHORT};
+    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_SHORT, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out_path, &opts));
     (void)slurp(out_path, text);
     (void)iverilog_compiles(out_path);
@@ -2056,7 +2056,7 @@ static void test_name_style_short(void) {
 /* PROVENANCE: hier/name@file:line for objects with a location; ports and the rest unchanged. */
 static void test_name_style_provenance(void) {
     prov_fixture fix = build_prov_names();
-    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_PROVENANCE};
+    odin3_verilog_opts opts = {ODIN3_VERILOG_NAMES_PROVENANCE, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_verilog_write(design, out_path, &opts));
     (void)slurp(out_path, text);
     (void)iverilog_compiles(out_path);
