@@ -208,6 +208,41 @@ static odin3_status record_intern(odin3_prov_store *store, const odin3_prov_reco
     return ODIN3_OK;
 }
 
+/* Re-points every record's arrays at copies in dst's arena and indexes it. */
+static odin3_status clone_records(odin3_prov_store *dst) {
+    for (uint32_t id = 1; id < record_end(dst); id++) {
+        odin3_prov_record *rec = odin3_pagevec_at(dst->records, id);
+        odin3_status st = copy_arrays(dst, rec);
+        if (st == ODIN3_OK) {
+            st = odin3_idindex_insert(dst->index, (odin3_identry){record_hash(rec), id});
+        }
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status odin3_prov_store_clone(odin3_design *dst, const odin3_design *src) {
+    odin3_prov_store *to = dst->prov;
+    const odin3_prov_store *from = src->prov;
+    odin3_pagevec_destroy(to->records); /* the empty one init made */
+    to->records = odin3_pagevec_clone(from->records);
+    odin3_vec_clear(&to->runs);
+    odin3_vec_clear(&to->tombstones);
+    if (to->records == NULL || odin3_vec_copy(&to->runs, &from->runs) != ODIN3_OK ||
+        odin3_vec_copy(&to->tombstones, &from->tombstones) != ODIN3_OK ||
+        odin3_vec_copy(&to->marks, &from->marks) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    to->gen = from->gen;
+    odin3_status st = clone_records(to);
+    for (uint32_t id = 1; st == ODIN3_OK && id < to->tombstones.len; id++) {
+        st = odin3_tombstone_own(dst, odin3_vec_at(&to->tombstones, id));
+    }
+    return st;
+}
+
 /* --- pass runs and operations -------------------------------------------------------------- */
 
 /* Appends the row {name, args, 0} (both checked by the caller) and fills *ctx. */

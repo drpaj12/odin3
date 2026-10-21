@@ -88,6 +88,13 @@ typedef struct odin3_srcman_cursor {
  */
 odin3_srcman *odin3_srcman_create(odin3_strtab *strtab);
 
+/*
+ * A manager with the same buffers, files, line maps and segment maps as src, whose names live in
+ * strtab (borrowed; a clone of src's with the same IDs). NULL on out of memory (nothing is left
+ * allocated).
+ */
+odin3_srcman *odin3_srcman_clone(const odin3_srcman *src, odin3_strtab *strtab);
+
 /* Frees the source manager; NULL is a no-op. */
 void odin3_srcman_destroy(odin3_srcman *sm);
 

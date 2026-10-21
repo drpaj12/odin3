@@ -142,8 +142,32 @@ static void test_shrink_to_fit(void) {
     odin3_vec_free(&vec);
 }
 
+/* odin3_vec_copy: same elements, own storage; an allocation failure leaves dst unchanged. */
+static void test_copy_is_independent_and_oom_safe(void) {
+    odin3_vec src;
+    odin3_vec dst;
+    odin3_vec_init(&src, sizeof(int));
+    odin3_vec_init(&dst, sizeof(int));
+    for (int i = 0; i < 100; i++) {
+        int *slot = odin3_vec_push(&src);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = i * 3;
+    }
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_vec_copy(&dst, &src));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_UINT(0, dst.len);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_vec_copy(&dst, &src));
+    TEST_ASSERT_EQUAL_UINT(100, dst.len);
+    *(int *)odin3_vec_at(&src, 5) = -1;
+    TEST_ASSERT_EQUAL_INT(15, *(const int *)odin3_vec_cat(&dst, 5));
+    odin3_vec_free(&src);
+    odin3_vec_free(&dst);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_copy_is_independent_and_oom_safe);
     RUN_TEST(test_push_get_10000_ints);
     RUN_TEST(test_push_is_zeroed);
     RUN_TEST(test_reserve_overflow);

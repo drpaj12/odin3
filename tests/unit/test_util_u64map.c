@@ -270,8 +270,44 @@ static void test_mod_counter_changes_on_put_and_remove(void) {
     odin3_u64map_destroy(map);
 }
 
+static odin3_u64map *filled(void) {
+    odin3_u64map *map = odin3_u64map_create(0);
+    TEST_ASSERT_NOT_NULL(map);
+    for (uint64_t k = 0; k < 500; k++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_u64map_put(map, (odin3_kv){k, k * 7}));
+    }
+    return map;
+}
+
+/* odin3_u64map_clone: every entry (key 0 included), independent of the source afterwards. */
+static void test_clone_copies_entries(void) {
+    odin3_u64map *map = filled();
+    odin3_u64map *dup = odin3_u64map_clone(map);
+    TEST_ASSERT_NOT_NULL(dup);
+    TEST_ASSERT_TRUE(odin3_u64map_remove(map, 3));
+    TEST_ASSERT_EQUAL_UINT(500, odin3_u64map_count(dup));
+    uint64_t sum = 0;
+    for (uint64_t k = 0; k < 500; k++) {
+        uint64_t value = 0;
+        sum += odin3_u64map_get(dup, k, &value) && value == k * 7 ? 1 : 0;
+    }
+    TEST_ASSERT_EQUAL_UINT64(500, sum);
+    odin3_u64map_destroy(dup);
+    odin3_u64map_destroy(map);
+}
+
+static void test_clone_oom_returns_null(void) {
+    odin3_u64map *map = filled();
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_NULL(odin3_u64map_clone(map));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_u64map_destroy(map);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_clone_copies_entries);
+    RUN_TEST(test_clone_oom_returns_null);
     RUN_TEST(test_put_get_overwrite);
     RUN_TEST(test_key_zero_valid);
     RUN_TEST(test_remove_then_reinsert);

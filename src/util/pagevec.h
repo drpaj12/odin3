@@ -34,6 +34,13 @@ odin3_status odin3_pagevec_reserve(odin3_pagevec *pv, size_t extra);
  * zeroed slot at the same address; pages are kept. */
 void odin3_pagevec_truncate(odin3_pagevec *pv, size_t new_len);
 
+/*
+ * A pagevec with the same layout, length and element bytes as src; NULL on out of memory (nothing
+ * is left allocated). Pointers inside the elements are copied as they are: the caller re-points
+ * them.
+ */
+odin3_pagevec *odin3_pagevec_clone(const odin3_pagevec *src);
+
 /* Frees every page and the pagevec. NULL is a no-op. */
 void odin3_pagevec_destroy(odin3_pagevec *pv);
 

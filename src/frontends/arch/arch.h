@@ -18,6 +18,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -108,6 +109,7 @@ typedef struct odin3_arch_direct {
 } odin3_arch_direct;
 
 typedef struct odin3_arch {
+    atomic_uint refs; /* a design copy shares the record: odin3_arch_retain; immutable after read */
     odin3_arena *arena;
     const char *file;    /* the source name */
     const char *library; /* the generated library's name */
@@ -124,7 +126,10 @@ typedef struct odin3_arch {
 
 /* An empty record; NULL on out of memory. */
 odin3_arch *odin3_arch_create(void);
-void odin3_arch_destroy(odin3_arch *arch); /* NULL is a no-op */
+/* Drops one reference (create gives one); the last frees the record. NULL is a no-op. */
+void odin3_arch_destroy(odin3_arch *arch);
+/* Adds a reference (odin3_design_clone shares the record, read-only after read_arch). */
+void odin3_arch_retain(odin3_arch *arch);
 
 /* A source in memory: the name used in messages and the XML bytes. */
 typedef struct odin3_arch_src {

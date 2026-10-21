@@ -50,6 +50,24 @@ odin3_pagevec *odin3_pagevec_create(size_t elem_size) {
     return odin3_pagevec_create_paged(spec);
 }
 
+odin3_pagevec *odin3_pagevec_clone(const odin3_pagevec *src) {
+    odin3_pagevec *pv =
+        odin3_pagevec_create_paged((odin3_pagevec_spec){src->elem_size, src->shift});
+    if (pv == NULL) {
+        return NULL;
+    }
+    if (odin3_pagevec_reserve(pv, src->len) != ODIN3_OK) {
+        odin3_pagevec_destroy(pv);
+        return NULL;
+    }
+    size_t used = (src->len >> src->shift) + ((src->len & src->mask) != 0);
+    for (size_t i = 0; i < used; i++) {
+        memcpy(pv->pages[i].base, src->pages[i].base, src->page_bytes);
+    }
+    pv->len = src->len;
+    return pv;
+}
+
 void odin3_pagevec_destroy(odin3_pagevec *pv) {
     if (pv == NULL) {
         return;

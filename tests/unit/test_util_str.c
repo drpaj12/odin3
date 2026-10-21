@@ -321,8 +321,37 @@ static void test_strbuf_reserve_exact(void) {
     odin3_strbuf_free(&buf);
 }
 
+/* odin3_strtab_clone: the same strings under the same IDs, in a table of its own. */
+static void test_clone_keeps_ids(void) {
+    odin3_strtab *tab = odin3_strtab_create();
+    TEST_ASSERT_NOT_NULL(tab);
+    uint32_t alpha = 0;
+    uint32_t beta = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strtab_intern(tab, odin3_bytes_cstr("alpha"), &alpha));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strtab_intern(tab, odin3_bytes_cstr("beta"), &beta));
+    odin3_strtab *dup = odin3_strtab_clone(tab);
+    TEST_ASSERT_NOT_NULL(dup);
+    TEST_ASSERT_EQUAL_UINT(odin3_strtab_count(tab), odin3_strtab_count(dup));
+    TEST_ASSERT_EQUAL_STRING("alpha", odin3_strtab_get(dup, alpha));
+    TEST_ASSERT_EQUAL_STRING("beta", odin3_strtab_get(dup, beta));
+    TEST_ASSERT_TRUE(odin3_strtab_get(dup, beta) != odin3_strtab_get(tab, beta));
+    odin3_strtab_destroy(dup);
+    odin3_strtab_destroy(tab);
+}
+
+static void test_clone_oom_returns_null(void) {
+    odin3_strtab *tab = odin3_strtab_create();
+    TEST_ASSERT_NOT_NULL(tab);
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_NULL(odin3_strtab_clone(tab));
+    odin3_util_set_alloc_fail_after(-1);
+    odin3_strtab_destroy(tab);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_clone_keeps_ids);
+    RUN_TEST(test_clone_oom_returns_null);
     RUN_TEST(test_empty_string_is_id_zero);
     RUN_TEST(test_intern_is_idempotent_and_dense);
     RUN_TEST(test_find_does_not_insert);

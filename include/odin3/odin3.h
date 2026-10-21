@@ -18,6 +18,7 @@
  * ABI v4 (cont., 3D): pass-run arguments and run information; odin3_pass_set_abc_script;
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
+ * ABI v4 (cont., 7.4b): odin3_design_copy.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -200,6 +201,26 @@ odin3_design *odin3_design_create(void);
 
 /* Frees the design and everything it owns (every string it handed out). NULL is a no-op. */
 void odin3_design_destroy(odin3_design *design);
+
+/*
+ * Makes *out a deep copy of src: every module with its nodes, pins, nets, wires, attributes and
+ * provenance records, the design's strings and cell types, the source manager, the top module and
+ * the pass-run table. Every ID (module, node, pin, net, wire, provenance record, string, cell type)
+ * is the same in the copy, so an ID read from one design names the same object in the other, and
+ * a pass on the copy never touches src; the copy may outlive src. Shared, not copied: the
+ * cell-type arena (tech-library data, width expressions) and the architecture record, both
+ * immutable once registered and reference counted, so a read_techlib or read_arch design copies
+ * and hardmap, partial_map and the writers work on the copy. Not copied: held AST stores (passes
+ * that need the AST see none; provenance resolves through the copied source manager), the project
+ * record (defaults apply on the copy) and the change journals (off in the copy). src must not be
+ * mutated during the call. A black-box or tech-library read on the copy allocates in the shared
+ * cell-type arena, which is not thread safe: do not do that on two designs of one family at once.
+ *
+ * The caller owns *out and frees it with odin3_design_destroy. *out is NULL on failure. Failures:
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument; ODIN3_ERR_NO_MEMORY on out of memory, with
+ * nothing left allocated. src is not changed.
+ */
+odin3_status odin3_design_copy(const odin3_design *src, odin3_design **out);
 
 /*
  * Runs the pass named name on the design, with args as its argument text (NULL or "" for none;

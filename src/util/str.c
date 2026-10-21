@@ -114,6 +114,22 @@ size_t odin3_strtab_len(const odin3_strtab *tab, uint32_t id) {
     return id < tab->entries.len ? ((const str_entry *)odin3_vec_cat(&tab->entries, id))->len : 0;
 }
 
+odin3_strtab *odin3_strtab_clone(const odin3_strtab *src) {
+    odin3_strtab *tab = odin3_strtab_create();
+    if (tab == NULL) {
+        return NULL;
+    }
+    for (uint32_t id = 1; id < src->entries.len; id++) { /* ID 0 (the empty string) exists */
+        uint32_t got = 0;
+        const odin3_bytes str = {odin3_strtab_get(src, id), odin3_strtab_len(src, id)};
+        if (odin3_strtab_intern(tab, str, &got) != ODIN3_OK || got != id) {
+            odin3_strtab_destroy(tab); /* a got != id is impossible: the source's IDs are unique */
+            return NULL;
+        }
+    }
+    return tab;
+}
+
 size_t odin3_strtab_count(const odin3_strtab *tab) {
     return tab->entries.len;
 }
