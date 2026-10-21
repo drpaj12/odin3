@@ -329,8 +329,10 @@ def check_unknown_directions(args: argparse.Namespace) -> list[str]:
     if code != 0:
         failures.append(f"unknown_drv with --auto-blackbox: {first_error(text)}")
     for want in (
-        "implicit black box 'MYSTERY': inferred port directions: A input, B input, Q output",
-        "implicit black box 'OTHER': inferred port directions: D input, Q output",
+        "implicit black box 'MYSTERY': inferred port directions: A=input, B=input, Q=input; "
+        "Q: its net 'w' has no driver",
+        "implicit black box 'OTHER': inferred port directions: D=input, Q=output; "
+        "D: its net 'w' has no driver",
     ):
         if want not in text:
             failures.append(f"unknown_drv: missing warning: {want}")

@@ -55,9 +55,10 @@ typedef struct jr_edge {
 } jr_edge;
 
 /* What the cells showed of a port of an implicit black box that no cell gave port_directions
- * (reader_implicit_dirs.c): a cell needs it to drive its bits, its bits have no known direction,
- * it is an input to bits a known driver drives, another unknown port also drives its bits. */
-enum { JR_ROLE_OUT = 1, JR_ROLE_BIDI = 2, JR_ROLE_IN_KNOWN = 4, JR_ROLE_CONFLICT = 8 };
+ * (reader_implicit_dirs.c): the votes its instances cast (output: it alone is on a bit nothing
+ * known drives and something reads; input: a known driver is on the bit; bidirectional: the bit has
+ * no known direction), and a net it is an input to that nothing drives. */
+enum { JR_ROLE_OUT = 1, JR_ROLE_IN = 2, JR_ROLE_BIDI = 4, JR_ROLE_UNDRIVEN = 8 };
 
 /* A port of an implicit black box; the direction is inferred from the bits (jr_infer_implicit)
  * until a cell gives port_directions. */
@@ -65,7 +66,10 @@ typedef struct jr_iport {
     odin3_port_def def; /* name is set when the type is made */
     uint32_t name_str;
     bool dir_known;
-    uint8_t role; /* JR_ROLE_* */
+    uint8_t role;       /* JR_ROLE_* */
+    uint32_t peer_type; /* +1: the type of another output port on a net this port drives, or 0 */
+    uint32_t peer_port; /* +1: its position in that type */
+    uint64_t net;       /* with JR_ROLE_UNDRIVEN: the bit label */
 } jr_iport;
 
 /* An implicit black box (M-5 rule 4, --auto-blackbox): its ports in first-use order. */

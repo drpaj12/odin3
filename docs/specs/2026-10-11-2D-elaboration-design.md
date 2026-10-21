@@ -468,9 +468,11 @@ second warning) are unchanged.
 v4.32 (2026-10-21; Peter's ruling on `--auto-blackbox` directions, PHASE6 decision 5). EL-11 (§3.6): the
 ports of an implicit black box take their directions from their nets instead of all being `inout`
 (the rule is in §3.6; the unknown cells of a reverse-engineered netlist sit on driven nets, which
-all-`inout` ports reported as two drivers). Agent defaults inside the ruling: a net with several
-unknown ports is driven by the first in source order; two ports driving one net bit stay `inout`;
-a connection to a constant or expression is an input; an unconnected port is an input. The
+all-`inout` ports reported as two drivers). Agent defaults inside the ruling: the directions are
+settled by votes per cell type and do not depend on the order of the instances (the rule is in
+§3.6; no "first in source order"); a net with several unknown ports and no known driver casts no
+vote and is named in the WARNING when no settled output drives it; a connection to a constant or
+expression, or an unconnected port, is an input. The
 elaborated `MODULE` of an implicit black box (§5.1) now has `input`, `output` or `inout` ports.
 
 ## 1. Purpose and scope (EL-1)
@@ -1062,24 +1064,7 @@ and makes one specialization per level.
   element's slice, else W: EL-10's two forms, read with the slice preferred; later instances must
   agree, an array's connection being one element's width or N times it; 1 bit when no connection
   gives one; v4.10), an info line names it, and it is written as a ports-only black-box `MODULE`
-  (EL-4, v4.8). **Port directions are inferred (v4.32, Peter 2026-10-21).** Stage 1 gives each port a
-  direction from the nets it connects to, bit by bit, in the elaborated modules (after every
-  specialization, before the black-box `MODULE`s are written): an **output** when a connected bit
-  has no other driver (no module input, no `assign` or `always` target, no output of a module, gate
-  or registered cell type, no earlier unknown port); an **inout** when a connected bit has no known
-  direction (a module `inout` port, or an `inout` of a known cell); an **input** otherwise (a bit
-  that something else drives, a constant or other expression, no connection). A port has one
-  direction per cell type: output if any instance needs one (an instance that connects it to a
-  driven net, such as a module input, then reports two drivers in stage 2), inout if any
-  instance is bidirectional. Two unknown ports on one undriven net: the first in source order
-  drives it. Two ports that drive the same net bit (two instances of one type on one net) are a
-  real conflict: the port stays `inout`. One WARNING per cell type, at its first instance, lists
-  the directions: `implicit black box 'm': inferred port directions: A input, Q output`, with a
-  note on a port that is an input at some instances but made an output, and on an `inout`
-  (`its net has no known direction`, or `another port also drives its net`). Coverage row I7's
-  black box keeps `inout` ports because its nets are module `inout` ports. The JSON reader
-  (`read_json --auto-blackbox`) follows the same rule on net labels when no cell gives
-  `port_directions`.
+  (EL-4, v4.8). **Port directions are inferred (v4.32, Peter 2026-10-21; voting rule, same day).** A port that drives an otherwise undriven net is an output; every other port is an input. The result does not depend on the order of the instances. Stage 1 counts, per net bit, the unknown ports on it (none, one, several) after marking what is known (module ports, `assign` and `always` targets and sources, gates, ports of modules and registered cell types), then each instance connection votes per bit: **output** when no known driver is on the bit, something known reads it (a module output, an `assign` source, a known input) and this is the only unknown port on it; **input** when a known driver is on it; **inout** when it is a module or cell `inout`; no vote for a dangling bit (nothing else connects) or an ambiguous one (several unknown ports, no known driver); a constant casts none. The votes of all instances settle each port per cell type: only output votes, output; only input votes or none, input; both kinds, or an `inout` vote, `inout` (no false two-driver error). A second pass with the settled directions finds ambiguous nets that no settled output drives, and nets that two settled outputs share. One WARNING per cell type, at its first instance, lists the directions and notes: `implicit black box 'm': inferred port directions: A=input, Q=output`, then `; Q: <note>` for an `inout` (`its net has no known direction`, or `an input at some instances, an output at others`), a shared net (`its net is also driven by 'n.Z'`, naming both ports) and an undriven net (`its net 'w' has no driver`). Coverage row I7's black box keeps `inout` ports because its nets are module `inout` ports. The JSON reader (`read_json --auto-blackbox`) follows the same rule on net bit labels when no cell gives `port_directions`, with the same text (`its net bit 3 has no driver`).
 - Cell-type instances keep their parameter values as node parameters; module instances keep the
   overridden values as node attributes `parameter:<NAME>` (BITS or STRING; IR-7's "source-level
   parameter values as attributes").

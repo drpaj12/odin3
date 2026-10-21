@@ -781,9 +781,9 @@ static void test_implicit_union(void) {
     TEST_ASSERT_EQUAL_STRING("top,foo", module_names());
     odin3_ast_id module = expect_blackbox("foo", 3);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_ast_child(rs.elab, module, 0).v);
-    expect_port(module, 0, "a output"); /* each drives a net nothing else drives */
-    expect_port(module, 1, "b output");
-    expect_port(module, 2, "c output");
+    expect_port(module, 0, "a input"); /* a dangling or lone net casts no vote: an input */
+    expect_port(module, 1, "b input");
+    expect_port(module, 2, "c input");
     odin3_ast_id one = instance("u1");
     expect_conn(one, 0, "a", "x"); /* one per port of the union, in its order */
     expect_conn(one, 1, "b", "y");
@@ -801,8 +801,8 @@ static void test_implicit_widths(void) {
     expect_clean();
     TEST_ASSERT_EQUAL_STRING("top,sub,foo", module_names());
     odin3_ast_id module = expect_blackbox("foo", 3);
-    expect_port(module, 0, "d output [5:0]"); /* the union in source order */
-    expect_port(module, 1, "a output [3:0]");
+    expect_port(module, 0, "d input [5:0]"); /* the union in source order */
+    expect_port(module, 1, "a input [3:0]");
     expect_port(module, 2, "e input"); /* connected to no net */
     expect_conn(instance("u"), 0, "d", "");
 }
@@ -816,8 +816,8 @@ static void test_implicit_width_from_array(void) {
             &k_auto, NULL);
     expect_clean();
     odin3_ast_id module = expect_blackbox("foo", 2);
-    expect_port(module, 0, "a output [1:0]");
-    expect_port(module, 1, "c inout"); /* five instances drive clk: a real conflict */
+    expect_port(module, 0, "a input [1:0]");
+    expect_port(module, 1, "c input"); /* five instances share clk, nothing known drives it */
 }
 
 /* A black box's body adds no port to an implicit black box's union (Task 12 review n3, Q10). */
@@ -849,8 +849,8 @@ static void test_implicit_dirs_basic(void) {
     const char *const want[] = {"A input", "Q output"};
     expect_dirs("foo", want, 2);
     et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: A input, "
-              "Q output");
+              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: A=input, "
+              "Q=output");
     TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "implicit black box"));
 }
 
@@ -880,44 +880,112 @@ static void test_implicit_dirs_bits(void) {
     expect_dirs("foo", want, 2);
 }
 
-/* Two unknown ports on a net nothing known drives: the first in source order drives it. */
-static void test_implicit_dirs_first_drives(void) {
-    run_req("module top (output y);\n  wire w;\n  foo u1 (.P(w));\n  bar u2 (.Z(w));\n"
-            "  assign y = w;\nendmodule\n",
-            &k_auto, NULL);
-    expect_clean();
-    const char *const first[] = {"P output"};
-    const char *const second[] = {"Z input"};
-    expect_dirs("foo", first, 1);
-    expect_dirs("bar", second, 1);
+/* Frees the run so a test can elaborate a second source. */
+static void reset_run(void) {
+    et_free(&rs);
+    memset(&rs, 0, sizeof rs);
 }
 
-/* A port that is an input at one instance and needs to be an output at another is an output, and
- * the WARNING says so. */
+/* The WARNING of one implicit type, as one line (the location prefix is not compared). */
+static void expect_warn_has(const char *text) {
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, text));
+}
+
+/* A chain of two unknown types: the directions do not depend on the order of the instances.
+ * Nothing known tells which of foo.Q and bar.D drives net m, so both are inputs (bar.Q drives the
+ * module output), and the WARNING names the net that stays without a driver. */
+static void check_chain(const char *src) {
+    run_req(src, &k_auto, NULL);
+    expect_clean();
+    const char *const foo[] = {"A input", "Q input"};
+    const char *const bar[] = {"D input", "Q output"};
+    expect_dirs("foo", foo, 2);
+    expect_dirs("bar", bar, 2);
+    expect_warn_has(
+        "'foo': inferred port directions: A=input, Q=input; Q: its net 'm' has no driver");
+    expect_warn_has(
+        "'bar': inferred port directions: D=input, Q=output; D: its net 'm' has no driver");
+}
+
+static void test_implicit_dirs_order_consumer_first(void) {
+    check_chain("module top (input a, output y);\n  wire m;\n  bar v (.D(m), .Q(y));\n"
+                "  foo u (.A(a), .Q(m));\nendmodule\n");
+}
+
+static void test_implicit_dirs_order_producer_first(void) {
+    check_chain("module top (input a, output y);\n  wire m;\n  foo u (.A(a), .Q(m));\n"
+                "  bar v (.D(m), .Q(y));\nendmodule\n");
+}
+
+/* Another instance of a type decides: foo.Q is an output where only it is on the net, so the chain
+ * net m has a driver in either order. */
+static void check_chain_voted(const char *src) {
+    run_req(src, &k_auto, NULL);
+    expect_clean();
+    const char *const foo[] = {"A input", "Q output"};
+    expect_dirs("foo", foo, 2);
+    expect_warn_has("'foo': inferred port directions: A=input, Q=output");
+}
+
+static void test_implicit_dirs_voted_chain_orders(void) {
+    check_chain_voted("module top (input a, output y);\n  wire m, z;\n  bar v (.D(m), .Q(y));\n"
+                      "  foo u (.A(a), .Q(m));\n  foo u2 (.A(a), .Q(z));\n  assign y = z;\n"
+                      "endmodule\n");
+    reset_run();
+    check_chain_voted("module top (input a, output y);\n  wire m, z;\n  foo u2 (.A(a), .Q(z));\n"
+                      "  assign y = z;\n  foo u (.A(a), .Q(m));\n  bar v (.D(m), .Q(y));\n"
+                      "endmodule\n");
+}
+
+/* A floating input at one instance casts no vote: it does not make the port an output. */
+static void test_implicit_dirs_floating_input(void) {
+    run_req("module top (input a, output y);\n  wire w, f, g;\n  foo u1 (.A(a), .Q(w));\n"
+            "  assign y = w;\n  foo u2 (.A(f), .Q(g));\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"A input", "Q output"};
+    expect_dirs("foo", want, 2);
+    expect_warn_has("'foo': inferred port directions: A=input, Q=output");
+}
+
+/* A port that is an input at one instance and an output at another is an inout, and the WARNING
+ * names it. */
 static void test_implicit_dirs_ambiguous(void) {
     run_req("module top (input a, output y);\n  wire w;\n  foo u1 (.R(a));\n  foo u2 (.R(w));\n"
             "  assign y = w;\nendmodule\n",
             &k_auto, NULL);
     expect_clean();
-    const char *const want[] = {"R output"};
+    const char *const want[] = {"R inout"};
     expect_dirs("foo", want, 1);
-    et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: R output "
-              "(an input at some instances, made an output)");
+    expect_warn_has("'foo': inferred port directions: R=inout; R: an input at some instances, an "
+                    "output at others");
 }
 
-/* Two instances of one cell type driving one net is a real conflict: inout, and the WARNING says
- * so. */
-static void test_implicit_dirs_conflict(void) {
-    run_req("module top (output y);\n  wire w;\n  foo u1 (.Q(w));\n  foo u2 (.Q(w));\n"
-            "  assign y = w;\nendmodule\n",
-            &k_auto, NULL);
+/* Two ports that are outputs by their own instances and share one net are a conflict: the WARNING
+ * names both, in either order. */
+static void check_conflict_both(const char *src) {
+    run_req(src, &k_auto, NULL);
     expect_clean();
-    const char *const want[] = {"Q inout"};
-    expect_dirs("foo", want, 1);
-    et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:3:3: warning: implicit black box 'foo': inferred port directions: Q inout "
-              "(another port also drives its net)");
+    const char *const foo[] = {"Q output"};
+    const char *const bar[] = {"Z output"};
+    expect_dirs("foo", foo, 1);
+    expect_dirs("bar", bar, 1);
+    expect_warn_has("'foo': inferred port directions: Q=output; Q: its net is also driven by "
+                    "'bar.Z'");
+    expect_warn_has("'bar': inferred port directions: Z=output; Z: its net is also driven by "
+                    "'foo.Q'");
+}
+
+static void test_implicit_dirs_conflict(void) {
+    const char *head = "module top (output y1, output y2, output y3);\n  wire w1, w2, n;\n"
+                       "  foo a1 (.Q(w1));\n  bar a2 (.Z(w2));\n  assign y1 = w1;\n"
+                       "  assign y2 = w2;\n  assign y3 = n;\n";
+    char src[512];
+    (void)snprintf(src, sizeof src, "%s  foo b1 (.Q(n));\n  bar b2 (.Z(n));\nendmodule\n", head);
+    check_conflict_both(src);
+    reset_run();
+    (void)snprintf(src, sizeof src, "%s  bar b2 (.Z(n));\n  foo b1 (.Q(n));\nendmodule\n", head);
+    check_conflict_both(src);
 }
 
 /* A net with no known direction (a module inout) keeps the port inout, and the WARNING says so. */
@@ -926,9 +994,63 @@ static void test_implicit_dirs_inout(void) {
     expect_clean();
     const char *const want[] = {"A inout"};
     expect_dirs("foo", want, 1);
-    et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:2:3: warning: implicit black box 'foo': inferred port directions: A inout "
-              "(its net has no known direction)");
+    expect_warn_has("'foo': inferred port directions: A=inout; A: its net has no known direction");
+}
+
+/* One undriven bit and one module-inout bit in one connection: an inout, not an output. */
+static void test_implicit_dirs_mixed_slice_inout(void) {
+    run_req("module top (inout p, output y);\n  wire [1:0] w;\n  foo u (.X({p, w[0]}));\n"
+            "  assign y = w[0];\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"X inout [1:0]"};
+    expect_dirs("foo", want, 1);
+}
+
+/* A constant connection is a known driver: an input. */
+static void test_implicit_dirs_constant(void) {
+    run_req("module top (output y);\n  wire w;\n  foo u (.A(1'b1), .B(2'b01), .Q(w));\n"
+            "  assign y = w;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"A input", "B input [1:0]", "Q output"};
+    expect_dirs("foo", want, 3);
+}
+
+/* A net declared with a range that is not constant: a select beyond bit 0 is not clipped away. */
+static void test_implicit_dirs_unknown_range(void) {
+    run_req("module top (input a, output y);\n  parameter W = 2;\n  wire [W-1:0] w;\n"
+            "  foo u (.Q(w[1]));\n  assign y = w[1];\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"Q output"};
+    expect_dirs("foo", want, 1);
+}
+
+/* An assignment inside a named block to a block-local variable does not drive a module net of the
+ * same name. */
+static void test_implicit_dirs_block_local(void) {
+    run_req("module top (input a, output y);\n  wire t;\n  foo u (.Q(t));\n  assign y = t;\n"
+            "  always @(*) begin : blk\n    reg t;\n    t = a;\n  end\nendmodule\n",
+            &k_auto, NULL);
+    const char *const want[] = {"Q output"};
+    expect_dirs("foo", want, 1);
+}
+
+/* An explicit black box keeps its declared directions and gets no inference WARNING, with or
+ * without --auto-blackbox. */
+static void test_implicit_dirs_explicit_unchanged(void) {
+    const char *src = "(* blackbox *) module bb (input a, output y);\nendmodule\n"
+                      "module top (input p, output q);\n  bb u (.a(p), .y(q));\nendmodule\n";
+    run_req(src, &k_auto, NULL);
+    expect_clean();
+    const char *const want[] = {"a input", "y output"};
+    expect_dirs("bb", want, 2);
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_WARN, "inferred port directions"));
+    reset_run();
+    run_req(src, NULL, NULL);
+    expect_clean();
+    expect_dirs("bb", want, 2);
 }
 
 static bool port_signed(odin3_ast_id module, uint32_t pos) {
@@ -1069,6 +1191,28 @@ static void test_oom(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_check(rs.parsed, ODIN3_CHECK_FULL));
 }
 
+/* The implicit black box tests (EL-11 inference included). */
+static void run_implicit_tests(void) {
+    RUN_TEST(test_implicit_union);
+    RUN_TEST(test_implicit_dirs_basic);
+    RUN_TEST(test_implicit_dirs_known_drivers);
+    RUN_TEST(test_implicit_dirs_bits);
+    RUN_TEST(test_implicit_dirs_order_consumer_first);
+    RUN_TEST(test_implicit_dirs_order_producer_first);
+    RUN_TEST(test_implicit_dirs_voted_chain_orders);
+    RUN_TEST(test_implicit_dirs_floating_input);
+    RUN_TEST(test_implicit_dirs_mixed_slice_inout);
+    RUN_TEST(test_implicit_dirs_constant);
+    RUN_TEST(test_implicit_dirs_unknown_range);
+    RUN_TEST(test_implicit_dirs_block_local);
+    RUN_TEST(test_implicit_dirs_explicit_unchanged);
+    RUN_TEST(test_implicit_dirs_ambiguous);
+    RUN_TEST(test_implicit_dirs_inout);
+    RUN_TEST(test_implicit_dirs_conflict);
+    RUN_TEST(test_implicit_widths);
+    RUN_TEST(test_implicit_width_from_array);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ordered_with_empty);
@@ -1108,16 +1252,7 @@ int main(void) {
     RUN_TEST(test_celltype_adder_has_no_width_parameter);
     RUN_TEST(test_celltype_adder_named_width_parameter);
     RUN_TEST(test_celltype_array);
-    RUN_TEST(test_implicit_union);
-    RUN_TEST(test_implicit_dirs_basic);
-    RUN_TEST(test_implicit_dirs_known_drivers);
-    RUN_TEST(test_implicit_dirs_bits);
-    RUN_TEST(test_implicit_dirs_first_drives);
-    RUN_TEST(test_implicit_dirs_ambiguous);
-    RUN_TEST(test_implicit_dirs_inout);
-    RUN_TEST(test_implicit_dirs_conflict);
-    RUN_TEST(test_implicit_widths);
-    RUN_TEST(test_implicit_width_from_array);
+    run_implicit_tests();
     RUN_TEST(test_blackbox_body_not_in_union);
     RUN_TEST(test_blackbox_port_signed);
     RUN_TEST(test_implicit_needs_named);

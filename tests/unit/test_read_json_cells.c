@@ -105,7 +105,7 @@ static void test_auto_blackbox(void) {
                  "\"Y\": \"output\"}, \"connections\": {\"A\": [2, 3], \"Y\": [4], \"E\": [5]}}, "
                  "\"v\": {\"type\": \"mystery\", \"connections\": {\"A\": [2, 3], \"E\": [5]}}");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
-    rj_log_has("cell type 'mystery' is neither a module of the file nor a registered cell type");
+    rj_log_has("implicit black box 'mystery': inferred port directions");
     odin3_celltype_id type = {0};
     TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("mystery"), &type));
     const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
@@ -115,9 +115,9 @@ static void test_auto_blackbox(void) {
     TEST_ASSERT_EQUAL_UINT32(2, def->ports[0].width);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    /* E: no port_directions; both cells drive bit 5, nothing else does: a real conflict */
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, def->ports[2].dir);
-    rj_log_has("A input, Y output, E inout (another port also drives its net)");
+    /* E: no port_directions; both cells have it on bit 5, nothing else does: nothing drives it */
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[2].dir);
+    rj_log_has("A=input, Y=output, E=input; E: its net bit 5 has no driver");
     TEST_ASSERT_EQUAL_UINT32(2, odin3_celltype_instances(rj_design, type));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
@@ -146,37 +146,52 @@ static void test_auto_blackbox_conflicts(void) {
     rj_log_has("not equivalent to its source");
 }
 
+static void expect_type_dirs(const char *name, const odin3_dir *want, uint32_t n) {
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str(name), &type));
+    const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
+    TEST_ASSERT_EQUAL_UINT32(n, def->n_ports);
+    for (uint32_t i = 0; i < n; i++) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(want[i], def->ports[i].dir, def->ports[i].name);
+    }
+}
+
+static const odin3_json_opts k_auto = {.auto_blackbox = true};
+
 /* EL-11 (2026-10-21): without port_directions a port's direction comes from its bits: an output on
- * bits nothing else drives, an input on a module input or a driven bit; one warning lists them. */
+ * a bit nothing else drives and something reads, an input on a module input or a driven bit; one
+ * warning lists them. The text is the one the Verilog front end prints for the same design. */
 static void test_implicit_infers_directions(void) {
-    const odin3_json_opts opts = {.auto_blackbox = true};
     const char *json =
         top_json(IN_PORT("a", "[2]") ", " OUT_PORT("y", "[4]"),
-                 "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"Q\": [3]}}, "
-                 "\"v\": {\"type\": \"other\", \"connections\": {\"D\": [3], \"Q\": [4]}}");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
-    odin3_celltype_id type = {0};
-    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("mystery"), &type));
-    const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("other"), &type));
-    def = odin3_celltype_get(rj_design, type);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    rj_log_has("implicit black box; port directions inferred from its connections: A input, Q "
-               "output");
-    rj_log_has("implicit black box; port directions inferred from its connections: D input, Q "
-               "output");
+                 "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"Q\": [4]}}, "
+                 "\"v\": {\"type\": \"other\", \"connections\": {\"D\": [2], \"Q\": [5]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir mystery[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT};
+    const odin3_dir other[] = {ODIN3_DIR_IN, ODIN3_DIR_IN};
+    expect_type_dirs("mystery", mystery, 2);
+    expect_type_dirs("other", other, 2);
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, Q=output");
+    rj_log_has("implicit black box 'other': inferred port directions: D=input, Q=input");
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
         odin3_check_design(rj_design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
 }
 
+/* Parity with the Verilog front end: test_elab_stage1_inst.c elaborates the same design
+ * (module top (input a, output y); wire w; foo u (.A(a), .Q(w)); assign y = w;) and expects this
+ * very text. */
+static void test_implicit_infers_text_parity(void) {
+    const char *json = top_json(IN_PORT("a", "[2]") ", " OUT_PORT("y", "[3]"),
+                                "\"u\": {\"type\": \"foo\", \"connections\": {\"A\": [2], "
+                                "\"Q\": [3]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    rj_log_has("implicit black box 'foo': inferred port directions: A=input, Q=output");
+}
+
 /* A bit driven by a known cell's output makes the unknown port an input; a module inout bit keeps
  * it inout and the warning says so. */
 static void test_implicit_infers_known_and_inout(void) {
-    const odin3_json_opts opts = {.auto_blackbox = true};
     const char *json =
         top_json(IN_PORT("a", "[2]") ", " OUT_PORT(
                      "y", "[5]") ", "
@@ -185,14 +200,86 @@ static void test_implicit_infers_known_and_inout(void) {
                  "\"Y_WIDTH\": 1}, \"connections\": {\"A\": [2], \"Y\": [3]}}, "
                  "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [3], \"Q\": [5], "
                  "\"P\": [6]}}");
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &opts));
-    odin3_celltype_id type = {0};
-    TEST_ASSERT_TRUE(odin3_celltype_find(rj_design, rj_str("mystery"), &type));
-    const odin3_celltype_def *def = odin3_celltype_get(rj_design, type);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, def->ports[0].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, def->ports[1].dir);
-    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_INOUT, def->ports[2].dir);
-    rj_log_has("A input, Q output, P inout (its net has no known direction)");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT};
+    expect_type_dirs("mystery", want, 3);
+    rj_log_has("A=input, Q=output, P=inout; P: its net has no known direction");
+}
+
+/* The directions do not depend on the order of the cells (Yosys writes them alphabetically, and a
+ * consumer is often before its producer). Nothing known tells which of mystery.Q and other.D drives
+ * bit 3, so both are inputs and the warning names the bit that stays without a driver. */
+static void check_chain(const char *first, const char *second) {
+    char both[1024];
+    (void)snprintf(both, sizeof both, "%s, %s", first, second);
+    const char *json = top_json(IN_PORT("a", "[2]") ", " OUT_PORT("y", "[4]"), both);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir mystery[] = {ODIN3_DIR_IN, ODIN3_DIR_IN};
+    const odin3_dir other[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT};
+    expect_type_dirs("mystery", mystery, 2);
+    expect_type_dirs("other", other, 2);
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, Q=input; Q: its "
+               "net bit 3 has no driver");
+    rj_log_has("implicit black box 'other': inferred port directions: D=input, Q=output; D: its "
+               "net bit 3 has no driver");
+}
+
+static void test_implicit_infers_order_independent(void) {
+    const char *prod = "\"b_prod\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], "
+                       "\"Q\": [3]}}";
+    const char *cons = "\"a_cons\": {\"type\": \"other\", \"connections\": {\"D\": [3], "
+                       "\"Q\": [4]}}";
+    check_chain(cons, prod);
+    const char *prod2 = "\"a_prod\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], "
+                        "\"Q\": [3]}}";
+    const char *cons2 = "\"b_cons\": {\"type\": \"other\", \"connections\": {\"D\": [3], "
+                        "\"Q\": [4]}}";
+    check_chain(prod2, cons2);
+}
+
+/* A floating input at one cell casts no vote; one connection with an input bit and an output bit,
+ * or a module inout bit and an output bit, is an inout; a constant is a known driver. */
+static void test_implicit_infers_floating_slices_constants(void) {
+    const char *json =
+        top_json(IN_PORT("a", "[2]") ", " OUT_PORT(
+                     "y", "[3, 6, 7]") ", "
+                                       "\"io\": {\"direction\": \"inout\", \"bits\": [5]}",
+                 "\"u1\": {\"type\": \"foo\", \"connections\": {\"A\": [2], \"Q\": [3], "
+                 "\"X\": [2, 6], \"P\": [5, 7], \"K\": [\"1\", \"0\"]}}, "
+                 "\"u2\": {\"type\": \"foo\", \"connections\": {\"A\": [11], \"Q\": [12], "
+                 "\"X\": [2, 13], \"P\": [5, 14], \"K\": [\"0\", \"1\"]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT, ODIN3_DIR_INOUT, ODIN3_DIR_INOUT,
+                              ODIN3_DIR_IN};
+    expect_type_dirs("foo", want, 5);
+    rj_log_has("implicit black box 'foo': inferred port directions: A=input, Q=output, X=inout, "
+               "P=inout, K=input; X: an input at some instances, an output at others; "
+               "P: its net has no known direction");
+}
+
+/* Two ports that are outputs by their own cells and share a bit are a conflict: the warning names
+ * both, whatever the order (the net with two drivers is then an error of the reader). */
+static void check_conflict(const char *last, const char *prior) {
+    char cells[1024];
+    (void)snprintf(cells, sizeof cells,
+                   "\"a1\": {\"type\": \"foo\", \"connections\": {\"Q\": [3]}}, "
+                   "\"a2\": {\"type\": \"bar\", \"connections\": {\"Z\": [4]}}, %s, %s",
+                   last, prior);
+    const char *json = top_json(OUT_PORT("y", "[3, 4, 5]"), cells);
+    /* the reader then refuses the net with two drivers; the warnings come first */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rj_read_opts(json, &k_auto));
+    rj_log_has("net is driven by 2 cell outputs");
+    rj_log_has("implicit black box 'foo': inferred port directions: Q=output; Q: its net is also "
+               "driven by 'bar.Z'");
+    rj_log_has("implicit black box 'bar': inferred port directions: Z=output; Z: its net is also "
+               "driven by 'foo.Q'");
+}
+
+static void test_implicit_infers_conflict_both_ports(void) {
+    const char *foo = "\"b1\": {\"type\": \"foo\", \"connections\": {\"Q\": [5]}}";
+    const char *bar = "\"b2\": {\"type\": \"bar\", \"connections\": {\"Z\": [5]}}";
+    check_conflict(foo, bar);
+    check_conflict(bar, foo);
 }
 
 /* A type the IR refuses (a port with an empty name) is a located error naming the first cell. */
@@ -781,6 +868,10 @@ int main(void) {
     RUN_TEST(test_auto_blackbox_conflicts);
     RUN_TEST(test_implicit_infers_directions);
     RUN_TEST(test_implicit_infers_known_and_inout);
+    RUN_TEST(test_implicit_infers_text_parity);
+    RUN_TEST(test_implicit_infers_order_independent);
+    RUN_TEST(test_implicit_infers_floating_slices_constants);
+    RUN_TEST(test_implicit_infers_conflict_both_ports);
     RUN_TEST(test_implicit_type_refused);
     RUN_TEST(test_long_names);
     RUN_TEST(test_scopeinfo_is_dropped);
