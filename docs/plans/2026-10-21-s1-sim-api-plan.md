@@ -27,7 +27,7 @@ section 10 is the reference trace).
   memory, failure modes. The cdef block (between `ODIN3_CDEF_BEGIN` and `ODIN3_CDEF_END`) has no
   preprocessor lines and no attributes. Every new public function is `ODIN3_EXPORT` (from
   `src/util/attr.h`) so the `abi_exports` test passes.
-- `ODIN3_ABI_VERSION` stays `4` (SA-12); only the history comment gains the S1 line.
+- `ODIN3_ABI_VERSION`: if gate mapping has not yet set it to `5` when S1b lands, S1b sets it to `5` (spec section 9.2); the history comment gains the S1 line either way.
 - Python: stdlib plus cffi only, `ruff check` and `mypy --strict` clean, `unittest`.
 - Hierarchical separator `.`; signal IDs start at 1, 0 = none.
 - No change to existing vector output: every existing `sim` CLI and unit test stays green

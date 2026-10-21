@@ -418,12 +418,13 @@ register), `mixclk.v` (a 2-bit input port whose bit 0 is a clock). Reference val
 Independent check: `cli_sim_vcd` also compares the port values of our VCD with an Icarus run of a
 generated testbench using the SW-3 timing when `iverilog` is found (skipped otherwise).
 
-## 9. Questions for Peter (with recommendations; the plan follows the recommendation)
+## 9. Decisions (Peter, 2026-10-21: yes to all; the plan follows them)
 
 1. One step ticks every clock of the top together (D-1). Recommend: yes for S1; add
    `odin3_simulation_step_clock` when a multi-clock consumer appears.
-2. `ODIN3_ABI_VERSION` stays 4 (D-4). Recommend: stay at 4 (additive, precedent); bump only on an
-   incompatible change.
+2. ABI version (D-4): S1 alone is additive, but gate mapping (docs/specs/2026-10-21-gatemap-design.md)
+   changes the ABC engine struct and needs 5. Decision: whichever of the two lands first sets
+   `ODIN3_ABI_VERSION` to 5; the other keeps 5. The next release notes say ABI 5.
 3. Passes refused while a simulation is open (D-5), rather than documenting "do not". Recommend:
    enforce; a pass that frees module storage under an open simulation is a use-after-free in
    Python.
