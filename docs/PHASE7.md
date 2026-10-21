@@ -23,7 +23,7 @@ clean-machine test passes.
 - [x] 7.4d (#222) `raise` pass (Peter reviews).
 - [x] 7.4e (#223) ABI fitness review, `docs/RE-ARCHITECTURE.md` gaps, `plugins/python/re_round.py` in CTest.
 - [x] 7.5 EDIF writer: dropped (D10).
-- [x] 7.6 Release (#221 and this PR): tarball with submodules, `cmake --install`, pip package, CHANGELOG, docs,
+- [x] 7.6 Release (#221, #225): tarball with submodules, `cmake --install`, pip package, CHANGELOG, docs,
   clean-machine test; tag `v1.0.0` pushed by Peter or after his go.
 
 ## Decisions log
