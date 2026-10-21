@@ -56,7 +56,7 @@ static odin3_status attach_stream(odin3_atomic_file *file, int fd) {
 }
 
 odin3_status odin3_atomic_file_open(odin3_atomic_file *file, const char *path) {
-    *file = (odin3_atomic_file){.fp = NULL, .path = path, .to_stdout = false};
+    *file = (odin3_atomic_file){.fp = NULL, .path = path, .to_stdout = false, .finished = false};
     odin3_strbuf_init(&file->tmp_path);
     if (path == NULL || path[0] == '\0') {
         odin3_log(ODIN3_LOG_ERROR, "atomic_file_open: no destination path");
@@ -94,7 +94,7 @@ static odin3_status close_stdout(odin3_atomic_file *file, odin3_status status) {
     return result;
 }
 
-odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status status) {
+odin3_status odin3_atomic_file_finish(odin3_atomic_file *file, odin3_status status) {
     if (file->to_stdout) {
         return close_stdout(file, status);
     }
@@ -105,10 +105,19 @@ odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status statu
         failed = fclose(file->fp) != 0 || failed;
         int saved = errno != 0 ? errno : EIO;
         file->fp = NULL;
+        file->finished = true;
         if (failed && result == ODIN3_OK) {
             odin3_log(ODIN3_LOG_ERROR, "%s: write failed: %s", file->path, strerror(saved));
             result = ODIN3_ERR_IO;
         }
+    }
+    return result;
+}
+
+odin3_status odin3_atomic_file_commit(odin3_atomic_file *file, odin3_status status) {
+    odin3_status result = status;
+    if (file->finished) {
+        file->finished = false;
         if (result == ODIN3_OK && rename(file->tmp_path.data, file->path) != 0) {
             odin3_log(ODIN3_LOG_ERROR, "%s: cannot rename %s over it: %s", file->path,
                       file->tmp_path.data, strerror(errno));
@@ -120,6 +129,13 @@ odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status statu
     }
     odin3_strbuf_free(&file->tmp_path);
     return result;
+}
+
+odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status status) {
+    if (file->to_stdout) {
+        return close_stdout(file, status);
+    }
+    return odin3_atomic_file_commit(file, odin3_atomic_file_finish(file, status));
 }
 
 /* --- whole-file reads ---------------------------------------------------------------------- */

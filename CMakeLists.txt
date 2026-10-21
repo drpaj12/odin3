@@ -103,6 +103,7 @@ add_library(odin3_core OBJECT
     src/passes/sim_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
+    src/passes/names.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/arch_pass.c
@@ -403,12 +404,14 @@ add_library(odin3_core OBJECT
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
+    src/backends/json/names.c
     src/backends/json/cells.c
     src/backends/json/lut.c
     src/backends/json/writer.c
     src/backends/prov_name.c
     src/backends/common/hdl_loc.c
     src/backends/common/hash_name.c
+    src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/frontends/hdl_restore.c
     src/backends/verilog/escape.c
@@ -1159,6 +1162,29 @@ if(BUILD_TESTING)
                 tests/flatten/nested.blif)
     set_tests_properties(flatten_sim_fixtures flatten_sim_roundtrip flatten_golden PROPERTIES
                          LABELS flatten SKIP_RETURN_CODE 77 TIMEOUT 600)
+    # 6.1 gate-level netlist ingest (spec G-2 to G-7; fixtures tests/netlist, generator gen.sh,
+    # driver tools/netlist-ingest). The equivalence legs are netlist_ingest_<micro>_<form> (with
+    # ABC, below). netlist_cells_elab: the cell models elaborate alone and as --lib;
+    # netlist_dump_<micro>: cells stay cells, instance and net names kept, netlist locations
+    # (G-3, G-4, G-6); netlist_src_<micro>: the `src` restoration through
+    # `read_verilog -netlist` (5.4c); netlist_unknown: an unknown cell (G-7).
+    set(ODIN3_NETLIST_MICROS dffsr dff dffe adff mux adder bm_DL_Dff_w_synch_reset regen cone)
+    set(_ni_tool ${PROJECT_SOURCE_DIR}/tools/netlist-ingest/netlist-ingest
+                 --odin3 $<TARGET_FILE:odin3>)
+    add_test(NAME netlist_cells_elab COMMAND ${_ni_tool} cells
+             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    add_test(NAME netlist_unknown COMMAND ${_ni_tool} unknown
+             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(netlist_cells_elab netlist_unknown PROPERTIES
+        LABELS tools SKIP_RETURN_CODE 77 TIMEOUT 300)
+    foreach(_ni_micro IN LISTS ODIN3_NETLIST_MICROS)
+        add_test(NAME netlist_dump_${_ni_micro} COMMAND ${_ni_tool} dump ${_ni_micro}
+                 WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        add_test(NAME netlist_src_${_ni_micro} COMMAND ${_ni_tool} src ${_ni_micro}
+                 WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(netlist_dump_${_ni_micro} netlist_src_${_ni_micro} PROPERTIES
+            LABELS tools SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
     # cli_flatten: the CLI runs read_blif; flatten; check on a hierarchical BLIF (hand_body: sub is
     # expanded, bb is a black box and stays).
     add_test(NAME cli_flatten
@@ -1567,6 +1593,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_hdl_loc)
     odin3_add_unit_test(test_hash_name)
     odin3_add_unit_test(test_name_map)
+    # 5.4f-b: --name-style hash in the three writers and the names pass, each case in a mkdtemp dir.
+    odin3_add_unit_test(test_hash_writers)
+    target_compile_definitions(test_hash_writers PRIVATE ODIN3_HASHW_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
@@ -2097,6 +2126,26 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
+        # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
+        # own flow (tools/netlist-ingest, equiv-check).
+        # The 18 legs take about 5 s in total in a release build (13 s debug, ctest -j1). With no
+        # memory cap available the driver prints `SKIP netlist-ingest equiv <micro>: <reason>` and
+        # exits 77, which CTest reports as Skipped.
+        foreach(_ni_micro IN LISTS ODIN3_NETLIST_MICROS)
+            foreach(_ni_form IN ITEMS verilog blif)
+                add_test(NAME netlist_ingest_${_ni_micro}_${_ni_form}
+                    COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                            ODIN3_REQUIRE_ABC=1
+                            ${PROJECT_SOURCE_DIR}/tools/netlist-ingest/netlist-ingest
+                            --odin3 $<TARGET_FILE:odin3>
+                            --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                            equiv ${_ni_micro} ${_ni_form}
+                    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+                set_tests_properties(netlist_ingest_${_ni_micro}_${_ni_form} PROPERTIES
+                    LABELS tools SKIP_RETURN_CODE 77 TIMEOUT 900)
+            endforeach()
+        endforeach()
         # 3D Task 21: the same micros through both exchanges (abc-diff): each result equivalent to
         # the input and to the other, the LUT, FF and depth counts printed.
         add_test(NAME abc_diff_micro

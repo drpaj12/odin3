@@ -41,4 +41,34 @@
  */
 odin3_status odin3_json_write(const odin3_design *design, const char *path);
 
+/* Which names cell and netname keys get (5.4f, spec section 13; the write_json --name-style). */
+typedef enum odin3_json_name_style {
+    ODIN3_JSON_NAMES_SHORT,      /* the IR names, else generated (default; odin3_json_write) */
+    ODIN3_JSON_NAMES_PROVENANCE, /* hier/<short name>@file:line where provenance has one */
+    ODIN3_JSON_NAMES_HASH,       /* those names as `h` + 10 base32 characters */
+} odin3_json_name_style;
+
+typedef struct odin3_json_write_opts {
+    odin3_json_name_style name_style;
+    const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (H-4) */
+} odin3_json_write_opts;
+
+/*
+ * odin3_json_write with name options; opts NULL is odin3_json_write. PROVENANCE: a cell, a
+ * non-port wire's netname and a named net's netname that has an HDL location (spec 5.4 W-2) take
+ * the key `hier/<key>@file:line` (backends/prov_name.h), where <key> is the key they would have
+ * (a generated `$c5`, `$n7`, a `$sop` suffix included); the "$u<n>" uniqueness suffix follows when
+ * the key is taken, and `hide_name` says whether the key before this renaming started with `$`.
+ * Ports (the "ports" entries and the netnames of port wires) and objects without an HDL location
+ * keep their keys. HASH: those objects get `h` and 10 lower-case base32 characters of the SHA-256
+ * of the PROVENANCE key (backends/common/hash_name.h; cells and netnames share one namespace, so a
+ * collision extends the names of both), and the name map (H-4) is written to opts->name_map, else
+ * `<path>.names`, as a private temporary opened before the netlist and renamed after it: a map
+ * that cannot be created refuses the write (ODIN3_ERR_IO), a path of "-" with no name_map is
+ * ODIN3_ERR_INVALID_ARG. The writer runs twice (the first pass to a null sink). The netlist is
+ * otherwise the PROVENANCE one.
+ */
+odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
+                                   const odin3_json_write_opts *opts);
+
 #endif

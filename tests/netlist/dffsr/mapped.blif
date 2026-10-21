@@ -1,0 +1,26 @@
+
+.model dffsr
+.inputs clk rst a[0] a[1] b[0] b[1]
+.outputs w[0] w[1]
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NOT_ A=$abc$93$new_n13 Y=$abc$93$auto$rtlil.cc:3195:AndGate$92
+.subckt $_NOT_ A=rst Y=$abc$93$new_n8
+.subckt $_NOR_ A=$abc$93$new_n8 B=b[1] Y=$abc$93$auto$rtlil.cc:3201:AndnotGate$90
+.subckt $_NOR_ A=$abc$93$new_n8 B=b[0] Y=$abc$93$auto$rtlil.cc:3201:AndnotGate$86
+.subckt $_NAND_ A=rst B=b[0] Y=$abc$93$new_n11
+.subckt $_NOT_ A=$abc$93$new_n11 Y=$abc$93$auto$rtlil.cc:3195:AndGate$88
+.subckt $_NAND_ A=rst B=b[1] Y=$abc$93$new_n13
+.subckt $_DFFSR_PPP_ C=clk D=a[0] Q=w[0] R=$abc$93$auto$rtlil.cc:3201:AndnotGate$86 S=$abc$93$auto$rtlil.cc:3195:AndGate$88
+.subckt $_DFFSR_PPP_ C=clk D=a[1] Q=w[1] R=$abc$93$auto$rtlil.cc:3201:AndnotGate$90 S=$abc$93$auto$rtlil.cc:3195:AndGate$92
+.end
+.model $_DFFSR_PPP_
+.inputs C S R D
+.outputs Q
+.names R S D N
+01- 1
+001 1
+.latch N Q re C 3
+.end

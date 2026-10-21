@@ -15,10 +15,12 @@
 typedef enum odin3_verilog_name_style {
     ODIN3_VERILOG_NAMES_SHORT,      /* own name, else a generated $n<ID>/$c<ID>/… (default) */
     ODIN3_VERILOG_NAMES_PROVENANCE, /* hier/<short name>@file:line from the provenance record */
+    ODIN3_VERILOG_NAMES_HASH,       /* those names as `h` + 10 base32 characters (5.4f, H-1) */
 } odin3_verilog_name_style;
 
 typedef struct odin3_verilog_opts {
     odin3_verilog_name_style name_style;
+    const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (H-4) */
 } odin3_verilog_opts;
 
 /*
@@ -65,7 +67,13 @@ typedef struct odin3_verilog_opts {
  * `hier/<short name>@file:line` (the hierarchy and first HDL location of the object's first SOURCE
  * leaf; `hier/` left out when that leaf has none) for wires, nets and cells; ports keep their
  * names, and objects without an HDL location, or whose provenance name is taken, get their short
- * name.
+ * name. Name style HASH (5.4f, spec section 13) names the same objects `h` and 10 lower-case
+ * base32 characters of the SHA-256 of the provenance name (backends/common/hash_name.h; a name
+ * that collides with another name of the module, whatever its kind, takes 5 characters more), and
+ * writes the name map (H-4) to opts->name_map, else to `<path>.names`: a private temporary opened
+ * before the netlist and renamed after it, so a map that cannot be created refuses the write
+ * (ODIN3_ERR_IO) and a path of "-" with no name_map is ODIN3_ERR_INVALID_ARG. The map lists
+ * every module's renamed objects, kind `wire`, `net` or `node`.
  *
  * Vectors: a port's nets are written MSB first as a concatenation `{…}`, consecutive bits of one
  * wire as a part-select (`w[3:1]`, or `w` for a whole unsigned wire), consecutive literals as one

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# netlist-ingest: the Phase 6.1 conformance driver for gate-level netlist ingest (spec G-1 to G-7):
+# fixtures under tests/netlist read by the existing readers, flattened and lowered, compared with
+# tools/equiv-check. Exit codes: 0 pass; 1 a check failed; 2 usage or tool error; 77 skipped (no
+# memory cap, or a named skip). See netlist_ingest.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/netlist_ingest.py" "$@"

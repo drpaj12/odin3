@@ -31,23 +31,31 @@ Each item has a one-line acceptance test.
 - [x] 4.1 VPR-XML import: `read_arch` reads a VPR arch's `<models>` and pb_types into a
   `.o3lib` tech library. Test: the imported library for the Phase 3 arch yields the same hard
   cells and ports as `lib/vtr.o3lib`; each sweep arch imports without error.
-- [ ] 4.2 Generic hard blocks matched by exact port signature (Odin II style). Test: a
+- [x] 4.2 Generic hard blocks matched by exact port signature (Odin II style). Test: a
   design instantiating a model of an arch binds to that model; a port-signature mismatch is a
   located error or soft logic, as specified in the 4.2 spec.
-- [ ] 4.3 Multiplier splitting generalised from the arch: split size and small-multiplier
+  Evidence: merged PRs #158 (A, shell and identity gate), #164 (C, `test_pm_generic`,
+  `test_pm_generic_vtr`), #179 (D, D18 soft bodies for absent models).
+- [x] 4.3 Multiplier splitting generalised from the arch: split size and small-multiplier
   threshold from the XML; signed multipliers (light). Test: on the DSP arch the micros with
   `$mul` of several widths and signs are equivalent; on `k6_frac_N10` the output equals the 3C
   fixed k6 rules (which stay Parmys's).
-- [ ] 4.4 Memory depth/width splitting to whatever RAM blocks the arch has. Test: memory
+  Evidence: merged PR #189 (F, `test_pm_mul_arch`, `test_pm_mul_split`, COFFE micros through
+  `hardmap-diff --arch`; D19 recorded). The threshold is not in the XML: decision 12 (d).
+- [x] 4.4 Memory depth/width splitting to whatever RAM blocks the arch has. Test: memory
   micros are equivalent on every sweep arch; `k6_frac_N10` output equals the 3C k6 result.
-- [ ] 4.5 Carry chains read from the arch model (light). Test: adder micros equivalent on the
+  Evidence: merged PR #179 (D, `test_pm_mem_arch`, `test_pm_mem_width`; D17 and D18 ruled).
+- [x] 4.5 Carry chains read from the arch model (light). Test: adder micros equivalent on the
   arch with a carry model; 3C maps to k6's `adder` only and stays unchanged.
-- [ ] 4.6 FF feature matching: enable and sync/async reset mapped onto what the arch's FF
-  supports, soft glue for the rest. Test: FF micros (enable, sync reset, async reset) are
-  equivalent on an arch with a featureful FF and on a plain one.
-- [ ] 4.7 Memory port merge: registered reads and writes merged into `$mem` ports; no
+  Evidence: merged PR #174 (E, `test_pm_carry`, `test_pm_carry_vtr`, `cli_pm_carry_arch`); the
+  close-out follow-ups are in PR H.
+- [ ] 4.6 DROPPED from v1.0 (Peter 2026-10-20; later plugin / v1.1). FF feature matching: enable
+  and sync/async reset mapped onto what the arch's FF supports, soft glue for the rest. Test: FF
+  micros (enable, sync reset, async reset) are equivalent on an arch with a featureful FF and on a plain one.
+- [x] 4.7 Memory port merge: registered reads and writes merged into `$mem` ports; no
   `ram_style` attribute overrides. Test: a registered-read RAM micro yields one `$mem` with the
   read register merged, and is equivalent.
+  Evidence: merged PR #162 (B, `test_memory_merge`, `test_pm_ramstyle`, `cli_memory_merge`).
 - [x] 4.8 FSM detect and recode (restored, decision 6): a port of Yosys 0.55's `fsm` as its
   default script runs it (`fsm_detect`, `fsm_extract`, `fsm_opt`, `fsm_recode`, `fsm_map`;
   `-expand` and `-export` are not in v1.0). It runs where Parmys runs it, right after `proc`
@@ -251,6 +259,20 @@ DESIGN §12.1.
    own behavioural bodies, read as library units on demand) with a located WARNING, as Parmys
    does; without `--vtr-compat` the unresolved-module error stays. Including `adder` in D18 is an
    agent default, Peter may override. 4.2 plan PR D.
+
+17. **Phase 4 close-out** (Peter, 2026-10-20; PR H). (a) 4.6 (PR G, FF feature matching,
+   `read_arch --ff-file`) is DROPPED from v1.0: a later plugin or v1.1. The spec section 6 (F-n) and
+   the plan's PR G (Tasks 17 to 20) stay as the design for that work; nothing of it is coded.
+   (b) The k4/COFFE latch-count investigation and the blob_merge/raygentop LUT-count outlier
+   investigation are SKIPPED: they show up in the VTR flow, not in the front end. (c) D17 stays
+   RTL-correct (Parmys defect); D18 builds the block soft under `--vtr-compat` with a WARNING, and
+   `adder` is in the D18 set (agent default, Peter may override); D19 (zero extension in the B
+   split where Parmys sign-extends) stays, with `--parmys-split-ext` for the diff retry. The
+   divergence table is the 3C spec section 10. (d) Agent defaults of the follow-ups: `--min-add`
+   compares max(A_WIDTH, B_WIDTH) as Parmys does (read from `adder.cc`/`partial_map.cc`); the
+   carry-pack warning needs an `$add` or `$sub` in the design; `hardmap-diff` lists a D18 design
+   only for an unresolved `single_port_ram`, `dual_port_ram`, `multiply` or `adder`; an `--arch`
+   path with `;`, `#` or blanks is refused. 4.13 (the arch sweep) is the controller's run.
 
 ## Open items
 

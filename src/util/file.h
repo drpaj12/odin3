@@ -24,6 +24,7 @@ typedef struct odin3_atomic_file {
     const char *path;      /* the destination, borrowed */
     odin3_strbuf tmp_path; /* the temporary's name */
     bool to_stdout;        /* path was "-": fp is stdout, no temporary */
+    bool finished;         /* odin3_atomic_file_finish closed the temporary; commit is pending */
 } odin3_atomic_file;
 
 /*
@@ -50,6 +51,16 @@ odin3_status odin3_atomic_file_open(odin3_atomic_file *file, const char *path);
  * final status (the given failure status unchanged). Frees the file's memory; fp becomes NULL.
  */
 odin3_status odin3_atomic_file_close(odin3_atomic_file *file, odin3_status status);
+
+/*
+ * Close in two steps, for a caller that commits two files together. finish flushes and closes the
+ * temporary and keeps it (a write or close failure is logged and returned; a "-" file is flushed
+ * and is then done). commit renames the finished temporary over the destination when status is
+ * ODIN3_OK, else removes it, and frees the file's memory. close is finish then commit. Calling
+ * commit on a file that is not finished (never opened, or "-") only frees it.
+ */
+odin3_status odin3_atomic_file_finish(odin3_atomic_file *file, odin3_status status);
+odin3_status odin3_atomic_file_commit(odin3_atomic_file *file, odin3_status status);
 
 /* A whole file read into memory (odin3_file_read_all). */
 typedef struct odin3_file_bytes {

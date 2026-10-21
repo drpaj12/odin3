@@ -86,6 +86,8 @@ EQUIV_UNPROVEN, EQUIV_HARD = 4, 5
 DIVERGENCE = re.compile(r"D\d+[a-z]?")
 PLAIN_IDS = ("unproven", "no-golden", "lower-gap")
 UNRESOLVED_NEEDLE = "unresolved_module:"
+UNRESOLVED_NAME = re.compile(r"unresolved_module: (?:module|cell type) '([^']*)'")
+D18_MODULES = ("single_port_ram", "dual_port_ram", "multiply", "adder")
 GAP_NEEDLES = ("no lowering rule for cell type", "has no bit-level form")
 MODEL = re.compile(r"^\.model\s+(\S+)", re.MULTILINE)
 SUBCKT = re.compile(r"^\.subckt\s+(\S+)")
@@ -171,6 +173,9 @@ def script_text(template: Path, lib: Path, design: Path, out: Path,
     if rtlil:  # stop before `lower` and write the RTLIL view (the lower-gap fallback)
         commands = [*commands[:commands.index("lower")], "write_rtlil @OUT@"]
     if arch is not None:
+        if re.search(r"[;#\s]", arch):
+            raise ToolError(f"--arch path '{arch}' has ';', '#' or whitespace: the -p script "
+                            "cannot hold it")
         commands = [f"read_arch {arch}" if ln.startswith("read_techlib") else ln for ln in commands]
     if adder_lib is None:
         commands = [ln for ln in commands if "@ADDERLIB@" not in ln]
@@ -317,7 +322,8 @@ def run_odin(cfg: Config, design: Path, top: str, work: Path, compat: bool = Fal
         gap = gap_lines[0]
         raise LowerGap(gap.replace("odin3: error: ", "").strip(), log)
     if proc.returncode != 0 and UNRESOLVED_NEEDLE in proc.stderr:
-        raise UnresolvedModule(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
+        hits = [ln.strip() for ln in proc.stderr.splitlines() if UNRESOLVED_NEEDLE in ln]
+        raise UnresolvedModule(f"odin3 exited {proc.returncode}: " + " | ".join(hits))
     if proc.returncode != 0:
         raise ToolError(f"odin3 exited {proc.returncode}: {tail(proc.stderr)}")
     return out, log
@@ -575,6 +581,11 @@ def find_golden(cfg: Config, design: Path) -> Path:
         raise ToolError(f"{design}: {exc}") from None
 
 
+def unresolved_names(message: str) -> list[str]:
+    """The modules named by every ``unresolved_module`` line of ``message``."""
+    return UNRESOLVED_NAME.findall(message)
+
+
 def check_design(cfg: Config, design: Path, work: Path) -> Result:
     key = design_key(design, cfg.root)
     entries = cfg.expect.get(key, [])
@@ -586,9 +597,10 @@ def check_design(cfg: Config, design: Path, work: Path) -> Result:
     check_arch(cfg, golden)
     try:
         out, log = run_odin(cfg, design, first_model(golden), work)
-    except UnresolvedModule:
+    except UnresolvedModule as exc:
         listed = [e for e in entries if e.ident == D18]
-        if not listed:
+        names = unresolved_names(str(exc))
+        if not listed or not names or any(n not in D18_MODULES for n in names):
             raise
         return Result(key, f"listed:{D18}", True, listed[0].reason)
     except LowerGap as gap:

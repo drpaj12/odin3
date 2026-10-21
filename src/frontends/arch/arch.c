@@ -211,9 +211,11 @@ static bool pack_reaches(const odin3_arch *arch, const odin3_arch_ic *ic,
     uint32_t idx = 0;
     for (uint32_t from = 0; odin3_arch_next_leaf_of(arch, "adder", from, &idx); from = idx + 1) {
         const odin3_arch_leaf *leaf = odin3_arch_leaf_at(arch, idx);
+        if (!ic_owns_leaf(ic, leaf)) { /* also guarantees n_levels >= 2 for the read below */
+            continue;
+        }
         const char *pb = leaf->levels[leaf->n_levels - 1U].pb;
-        if (ic_owns_leaf(ic, leaf) &&
-            (ref_is(pack->in_port, pb, port) || ref_is(pack->out_port, pb, port))) {
+        if (ref_is(pack->in_port, pb, port) || ref_is(pack->out_port, pb, port)) {
             return true;
         }
     }

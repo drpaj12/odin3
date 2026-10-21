@@ -1,0 +1,23 @@
+
+.model multiplexer
+.inputs sel1 sel2 x_top[0] x_top[1] y_top[0] y_top[1] z_top[0] z_top[1]
+.outputs q_top[0] q_top[1]
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NAND_ A=$abc$89$new_n19 B=$abc$89$new_n20 Y=$abc$89$new_n21
+.subckt $_NAND_ A=$abc$89$new_n12 B=$abc$89$new_n21 Y=$abc$89$new_n22
+.subckt $_NAND_ A=sel1 B=x_top[1] Y=$abc$89$new_n23
+.subckt $_NAND_ A=$abc$89$new_n22 B=$abc$89$new_n23 Y=q_top[1]
+.subckt $_NOT_ A=sel2 Y=$abc$89$new_n11
+.subckt $_NOT_ A=sel1 Y=$abc$89$new_n12
+.subckt $_NAND_ A=y_top[0] B=sel2 Y=$abc$89$new_n13
+.subckt $_NAND_ A=z_top[0] B=$abc$89$new_n11 Y=$abc$89$new_n14
+.subckt $_NAND_ A=$abc$89$new_n13 B=$abc$89$new_n14 Y=$abc$89$new_n15
+.subckt $_NAND_ A=$abc$89$new_n12 B=$abc$89$new_n15 Y=$abc$89$new_n16
+.subckt $_NAND_ A=x_top[0] B=sel1 Y=$abc$89$new_n17
+.subckt $_NAND_ A=$abc$89$new_n16 B=$abc$89$new_n17 Y=q_top[0]
+.subckt $_NAND_ A=sel2 B=y_top[1] Y=$abc$89$new_n19
+.subckt $_NAND_ A=$abc$89$new_n11 B=z_top[1] Y=$abc$89$new_n20
+.end

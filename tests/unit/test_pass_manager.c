@@ -1130,12 +1130,12 @@ static void test_register_rejects_bad_processes(void) {
 /* Each built-in's value (2D EL-33 and plan point (x)). */
 static void test_builtin_processes_values(void) {
     static const char *const ok[] = {
-        "read_blif",    "read_json",  "read_techlib",      "check",        "stats",
-        "compact",      "hierarchy",  "write_verilog_ast", "read_project", "dump_project",
-        "dump_locs",    "preprocess", "write_rtlil",       "proc",         "read_verilog",
-        "opt",          "opt_expr",   "opt_merge",         "opt_muxtree",  "opt_reduce",
-        "opt_share",    "opt_dff",    "opt_clean",         "wreduce",      "read_arch",
-        "write_techlib"};
+        "read_blif",     "read_json",  "read_techlib",      "check",        "stats",
+        "compact",       "hierarchy",  "write_verilog_ast", "read_project", "dump_project",
+        "dump_locs",     "preprocess", "write_rtlil",       "proc",         "read_verilog",
+        "opt",           "opt_expr",   "opt_merge",         "opt_muxtree",  "opt_reduce",
+        "opt_share",     "opt_dff",    "opt_clean",         "wreduce",      "read_arch",
+        "write_techlib", "names"};
     static const char *const refuse[] = {
         "write_blif", "write_json", "write_verilog", "write_dot",    "flatten",
         "lower",      "hardmap",    "partial_map",   "memory_merge", "lpmmap",

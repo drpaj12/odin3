@@ -5,6 +5,7 @@
 #define ODIN3_BACKENDS_JSON_JW_H
 
 #include "backends/common/attrs.h"
+#include "backends/common/hash_rows.h"
 #include "backends/common/hdl_loc.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -26,9 +27,20 @@
 #define JW_BIT_X (UINT32_MAX - 1)
 #define JW_BIT_Z UINT32_MAX
 
+/* How cell and netname keys are formed (the write_json --name-style). COLLECT and APPLY are the
+ * two passes of HASH: the first writes provenance names to a sink and collects the objects it
+ * renamed, the second writes the hash names the first resolved (names.c). */
+typedef enum jw_names_mode {
+    JW_NAMES_SHORT,
+    JW_NAMES_PROVENANCE,
+    JW_NAMES_COLLECT,
+    JW_NAMES_APPLY
+} jw_names_mode;
+
 /* Output state; one writer per odin3_json_write call, module fields reset per module. */
 typedef struct jw {
-    FILE *fp;
+    FILE *fp;      /* NULL for the counting sink of the first hash pass */
+    uint64_t sunk; /* bytes the counting sink took */
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;
@@ -41,6 +53,13 @@ typedef struct jw {
     odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
     odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
     odin3_strtab *written; /* cell and netname keys written in the current module */
+    jw_names_mode names;   /* how keys are formed */
+    odin3_hash_rows rows;  /* COLLECT/APPLY: the objects named by provenance, all modules */
+    size_t row_cursor;     /* APPLY: the next row to use */
+    size_t module_rows;    /* COLLECT: the first row of the current module */
+    odin3_strbuf pname;    /* scratch: a provenance name */
+    odin3_strbuf pshort;   /* scratch: the short name it wraps */
+    bool hide;             /* the key last made would be hidden (its provenance name starts `$`) */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */
@@ -69,10 +88,24 @@ typedef struct jw_keyspec {
     bool generated; /* false: head+tail is a user name, used as is */
     const char *head;
     const char *tail;
+    odin3_prov_id prov;       /* the object's provenance (none: the key is never renamed) */
+    odin3_name_kind obj_kind; /* with prov: the object's kind and ID, for the name map */
+    uint32_t obj_id;
 } jw_keyspec;
 /* The unique key text (valid until the next call), recorded as written; "" after an
- * out-of-memory status. */
+ * out-of-memory status. With a names mode other than SHORT, an object with an HDL location
+ * (spec.prov) has `hier/<head+tail>@file:line` for its key, or in APPLY its hash name; out->hide
+ * says whether the key written would start with `$` without the hash. */
 const char *jw_make_key(jw *out, const jw_keyspec *spec);
+/* The same, never renamed by provenance (emit.c). */
+const char *jw_plain_key(jw *out, const jw_keyspec *spec);
+/* names.c: the renamed key of spec, or NULL when the mode is SHORT or the object has no HDL
+ * location (then jw_plain_key applies). Recorded as written. */
+const char *jw_prov_key(jw *out, const jw_keyspec *spec);
+/* names.c: COLLECT, at the end of a module: resolves the module's rows to hash names (H-3). */
+void jw_names_module_end(jw *out);
+/* names.c: APPLY, at the end of the design: every collected row must have been used. */
+void jw_names_done(jw *out);
 /* Records a key written as is (a wire's netname). */
 void jw_record_key(jw *out, const char *key);
 

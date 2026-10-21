@@ -3,6 +3,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/common/attrs.h"
+#include "backends/common/hash_rows.h"
 #include "backends/common/hdl_loc.h"
 #include "backends/prov_name.h"
 #include "ir/celltype.h"
@@ -182,6 +183,7 @@ typedef struct verilog_writer {
     odin3_strbuf cand;     /* a candidate generated name */
     odin3_u64map *builtin; /* cell type ID -> BUILTINS index */
     odin3_hdl_ctx *hdl;    /* HDL locations and the records that name objects (hdl_loc.h) */
+    odin3_hash_rows rows;  /* HASH: the objects named by provenance, all modules (5.4f) */
     odin3_strbuf src;      /* scratch: the text of a src attribute */
     odin3_u64map *stubbed; /* cell type ID -> 1 once its stub is written */
     odin3_wattr_seen seen; /* attribute names written in the current (* … *) */
@@ -601,6 +603,37 @@ typedef struct vw_named {
     const char *prefix;
 } vw_named;
 
+/* True for the styles that try a provenance name first: provenance and hash (5.4f). */
+static bool prov_style(const verilog_writer *wr) {
+    return wr->name_style == ODIN3_VERILOG_NAMES_PROVENANCE ||
+           wr->name_style == ODIN3_VERILOG_NAMES_HASH;
+}
+
+/* The map kind of an object kind that provenance names. */
+static odin3_name_kind name_kind_of(vw_obj kind) {
+    if (kind == OBJ_WIRE) {
+        return ODIN3_NAME_WIRE;
+    }
+    return kind == OBJ_NET ? ODIN3_NAME_NET : ODIN3_NAME_NODE;
+}
+
+/* HASH: remembers obj, just named wr->cand by provenance, for hash_apply. */
+static void note_hashed(verilog_writer *wr, const vw_named *obj) {
+    if (wr->name_style != ODIN3_VERILOG_NAMES_HASH) {
+        return;
+    }
+    odin3_status st = odin3_hash_rows_add(
+        &wr->rows, &(odin3_hash_row_req){
+                       .module = odin3_module_id_of(wr->mod.module).v,
+                       .module_name = odin3_bytes_cstr(wr->mod.name != NULL ? wr->mod.name : ""),
+                       .kind = name_kind_of(obj->kind),
+                       .key = obj_key(obj->kind, obj->id),
+                       .full = {wr->cand.data, wr->cand.len}});
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+    }
+}
+
 /* PROVENANCE style (IR §6): tries hier/<short name>@file:line from the record naming the object
  * (backends/prov_name.h); nothing when the record has neither a hierarchy nor a location. */
 static void claim_provenance(verilog_writer *wr, const vw_named *obj) {
@@ -623,18 +656,22 @@ static void claim_provenance(verilog_writer *wr, const vw_named *obj) {
         (void)vw_fail(wr, st);
         return;
     }
-    if (wr->cand.len != 0) {
-        (void)claim(wr, obj_key(obj->kind, obj->id), (odin3_bytes){wr->cand.data, wr->cand.len});
+    if (wr->cand.len != 0 &&
+        claim(wr, obj_key(obj->kind, obj->id), (odin3_bytes){wr->cand.data, wr->cand.len})) {
+        note_hashed(wr, obj);
     }
 }
 
 /* The object's provenance name (PROVENANCE style), else its own name when writable and free. */
 static void claim_object(verilog_writer *wr, vw_named obj) {
-    if (wr->name_style == ODIN3_VERILOG_NAMES_PROVENANCE) {
+    if (prov_style(wr)) {
         claim_provenance(wr, &obj);
     }
+    /* No warning for an object a provenance (or hash) name already names: its own name is not in
+     * the output and the message would say a generated name is used. */
     if (obj.own != 0 && !claim(wr, obj_key(obj.kind, obj.id), str_bytes(wr, obj.own)) &&
         wr->st == ODIN3_OK &&
+        !odin3_u64map_get(wr->mod.obj_names, obj_key(obj.kind, obj.id), NULL) &&
         odin3_verilog_ident_kind(str_bytes(wr, obj.own)) == ODIN3_VERILOG_UNWRITABLE) {
         odin3_bytes own = str_bytes(wr, obj.own);
         odin3_log(ODIN3_LOG_WARN,
@@ -643,6 +680,51 @@ static void claim_object(verilog_writer *wr, vw_named obj) {
                   wr->path, wr->mod.name != NULL ? wr->mod.name : "", (int)own.len,
                   (const char *)own.ptr, obj.prefix);
     }
+}
+
+/* HASH: the names of the module that stay as they are (H-3): every name but the provenance names
+ * the rows from `first` on hold. */
+static odin3_status hash_reserved(verilog_writer *wr, size_t first, odin3_bytes **out,
+                                  uint32_t *count) {
+    odin3_u64map *renamed = odin3_u64map_create(0);
+    size_t names = odin3_strtab_count(wr->mod.names);
+    *out = odin3_util_calloc((names + 1) * sizeof **out);
+    *count = 0;
+    odin3_status st = renamed != NULL && *out != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    for (size_t i = first; st == ODIN3_OK && i < odin3_hash_rows_count(&wr->rows); i++) {
+        uint64_t str = 0;
+        (void)odin3_u64map_get(wr->mod.obj_names, odin3_hash_rows_at(&wr->rows, i)->key, &str);
+        st = odin3_u64map_put(renamed, (odin3_kv){str, 1});
+    }
+    for (uint32_t id = 1; st == ODIN3_OK && id < names; id++) {
+        if (!odin3_u64map_get(renamed, id, NULL)) {
+            (*out)[(*count)++] = (odin3_bytes){odin3_strtab_get(wr->mod.names, id),
+                                               odin3_strtab_len(wr->mod.names, id)};
+        }
+    }
+    odin3_u64map_destroy(renamed);
+    return st;
+}
+
+/* HASH (5.4f): the objects named by provenance since row `first` take their hash names (H-3), in
+ * place of the provenance names: one namespace for all kinds, since Verilog has one. */
+static odin3_status hash_apply(verilog_writer *wr, size_t first) {
+    odin3_bytes *reserved = NULL;
+    uint32_t nreserved = 0;
+    odin3_status st = hash_reserved(wr, first, &reserved, &nreserved);
+    st = st == ODIN3_OK
+             ? odin3_hash_rows_resolve(&wr->rows,
+                                       &(odin3_hash_resolve_req){first, reserved, nreserved, true})
+             : st;
+    for (size_t i = first; st == ODIN3_OK && i < odin3_hash_rows_count(&wr->rows); i++) {
+        const odin3_hash_row *row = odin3_hash_rows_at(&wr->rows, i);
+        uint32_t str = 0;
+        st = odin3_strtab_intern(wr->mod.names,
+                                 (odin3_bytes){row->hash.text, strlen(row->hash.text)}, &str);
+        st = st == ODIN3_OK ? odin3_u64map_put(wr->mod.obj_names, (odin3_kv){row->key, str}) : st;
+    }
+    odin3_util_free(reserved);
+    return st;
 }
 
 /* Real names first (wires, nets, cells in ID order); generated names only for the rest. */
@@ -758,7 +840,12 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
         }
     }
     if (wr->st == ODIN3_OK) {
+        size_t first = odin3_hash_rows_count(&wr->rows);
         claim_names(wr);
+        odin3_status st = wr->st == ODIN3_OK && wr->name_style == ODIN3_VERILOG_NAMES_HASH
+                              ? hash_apply(wr, first)
+                              : ODIN3_OK;
+        (void)(st != ODIN3_OK ? vw_fail(wr, st) : st);
         generate_names(wr);
     }
     return wr->st;
@@ -1850,6 +1937,7 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
     wr->hdl = odin3_hdl_ctx_create(design, "write_verilog");
     wr->stubbed = odin3_u64map_create(0);
     odin3_strbuf_init(&wr->src);
+    odin3_hash_rows_init(&wr->rows);
     if (wr->builtin == NULL || wr->hdl == NULL || wr->stubbed == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
@@ -1898,14 +1986,51 @@ static void wr_free(verilog_writer *wr) {
     odin3_u64map_destroy(wr->builtin);
     odin3_hdl_ctx_destroy(wr->hdl);
     odin3_strbuf_free(&wr->src);
+    odin3_hash_rows_free(&wr->rows);
     odin3_u64map_destroy(wr->stubbed);
+}
+
+/* HASH: opens the name map's temporary before the netlist, so a map that cannot be written refuses
+ * the write (H-1). */
+static odin3_status map_begin(const verilog_writer *wr, const odin3_verilog_opts *opts,
+                              odin3_hash_map_file *map) {
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    odin3_status st = odin3_hash_map_path(
+        &(odin3_hash_map_req){"write_verilog", wr->path, opts->name_map}, &path);
+    st = st == ODIN3_OK ? odin3_hash_map_open(map, path.data) : st;
+    odin3_strbuf_free(&path);
+    return st;
+}
+
+/* HASH: closes the netlist and the name map together (the map is renamed first, then the netlist;
+ * a failed write removes both). The status is sticky in wr->st. */
+static void map_end(verilog_writer *wr, odin3_hash_map_file *map) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st = wr->st == ODIN3_OK ? odin3_hash_rows_map_text(&wr->rows, &text) : wr->st;
+    odin3_atomic_file *netlist = wr->opened ? &wr->file : NULL;
+    wr->opened = false;
+    wr->st = odin3_hash_map_close(map, (odin3_bytes){text.data, text.len}, netlist, st);
+    odin3_strbuf_free(&text);
+}
+
+/* Opens the name map's temporary (HASH), then the netlist's. */
+static odin3_status open_outputs(verilog_writer *wr, const odin3_verilog_opts *opts,
+                                 odin3_hash_map_file *map) {
+    odin3_status st = ODIN3_OK;
+    if (wr->name_style == ODIN3_VERILOG_NAMES_HASH) {
+        st = vw_fail(wr, map_begin(wr, opts, map));
+    }
+    return st == ODIN3_OK ? wr_open(wr) : st;
 }
 
 odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
                                  const odin3_verilog_opts *opts) {
     if (design == NULL || path == NULL ||
         (opts != NULL && opts->name_style != ODIN3_VERILOG_NAMES_SHORT &&
-         opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE)) {
+         opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE &&
+         opts->name_style != ODIN3_VERILOG_NAMES_HASH)) {
         odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path, or an unknown name style");
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -1915,9 +2040,8 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
     verilog_writer wr;
     odin3_status st = wr_init(&wr, design, path);
     wr.name_style = opts != NULL ? opts->name_style : ODIN3_VERILOG_NAMES_SHORT;
-    if (st == ODIN3_OK) {
-        st = wr_open(&wr);
-    }
+    odin3_hash_map_file map = {.open = false};
+    st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
         st = write_module(&wr, i);
     }
@@ -1925,7 +2049,11 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
         (void)write_stubs(&wr);
     }
     vw_flush(&wr);
-    wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
+    if (map.open) {
+        map_end(&wr, &map);
+    } else {
+        wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
+    }
     st = wr.st;
     wr_free(&wr);
     return st;

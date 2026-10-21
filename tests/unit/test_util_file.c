@@ -143,6 +143,38 @@ static void test_failure_status_discards(void) {
     TEST_ASSERT_EQUAL_INT(1, dir_entries(out_dir));
 }
 
+/* finish keeps the temporary and leaves the destination alone; commit renames it (OK) or removes
+ * it (any failure status). */
+static void test_finish_then_commit(void) {
+    put_old("old");
+    odin3_atomic_file file;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_open(&file, out_path));
+    TEST_ASSERT_TRUE(fputs("new", file.fp) >= 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_finish(&file, ODIN3_OK));
+    TEST_ASSERT_NULL(file.fp);
+    TEST_ASSERT_EQUAL_INT(2, dir_entries(out_dir)); /* old and the finished temporary */
+    char text[TEXT_MAX];
+    slurp(out_path, text);
+    TEST_ASSERT_EQUAL_STRING("old", text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_commit(&file, ODIN3_OK));
+    slurp(out_path, text);
+    TEST_ASSERT_EQUAL_STRING("new", text);
+    TEST_ASSERT_EQUAL_INT(1, dir_entries(out_dir));
+}
+
+static void test_finish_then_commit_failure(void) {
+    put_old("old");
+    odin3_atomic_file file;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_open(&file, out_path));
+    TEST_ASSERT_TRUE(fputs("new", file.fp) >= 0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_atomic_file_finish(&file, ODIN3_OK));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, odin3_atomic_file_commit(&file, ODIN3_ERR_IO));
+    char text[TEXT_MAX];
+    slurp(out_path, text);
+    TEST_ASSERT_EQUAL_STRING("old", text);
+    TEST_ASSERT_EQUAL_INT(1, dir_entries(out_dir));
+}
+
 /* Two open temporaries for one destination never share a name. */
 static void test_concurrent_temporaries_differ(void) {
     odin3_atomic_file first;
@@ -362,6 +394,8 @@ int main(void) {
     RUN_TEST(test_new_file_mode_follows_umask);
     RUN_TEST(test_replace_keeps_mode);
     RUN_TEST(test_failure_status_discards);
+    RUN_TEST(test_finish_then_commit);
+    RUN_TEST(test_finish_then_commit_failure);
     RUN_TEST(test_concurrent_temporaries_differ);
     RUN_TEST(test_old_tmp_name_untouched);
     RUN_TEST(test_write_failure_at_close);
