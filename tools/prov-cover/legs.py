@@ -251,7 +251,9 @@ def leg_d(args: argparse.Namespace, design: Path, work: Path, b: Dumped) -> LegR
     vpr = args.vpr or vtr_root() / "vpr" / "vpr"
     arch = args.arch or vtr_root() / vpr_leg.DEFAULT_ARCH
     try:
-        net, place = vpr_leg.run_vpr(Path(vpr), Path(arch), work / "W.blif", work)
+        net, place = vpr_leg.run_vpr(
+            Path(vpr), Path(arch), work / "W.blif", work, args.vpr_timeout
+        )
         return vpr_leg.place_check(
             place.read_text(encoding="utf-8", errors="replace"),
             vpr_leg.build_index(b.rows, b.facts),

@@ -27,20 +27,26 @@ Block name to netlist name, with the evidence (ch_intrinsics, VTR 12 ``vpr``, k6
    ``const-table`` class (P-3), not blocks to resolve.
 
 Resolution of an atom: pad (``--allow pad``) or generator name, else the name decodes to
-``SHORT`` (with a location in the name, the net must exist in the read-back design: the name
-mapping is exact) or the name is the net, whose driver cell must carry a location (inherited
+``SHORT`` (with a location in the name, a node driving a net ``SHORT`` must carry exactly that
+file and line: the same short name in two scopes does not pair, the read-back has no hierarchy
+to key on) or the name is the net, whose driver cell must carry a location (inherited
 through D-5 in a BLIF VTR read-back). Anything else is a defect: ``unmapped`` (no such net: the
 rule above is wrong for this block) or ``unresolved`` (the driver has no location). A cluster
-resolves when its own name resolves and, with the ``.net`` file, every atom in it does.
+resolves when its own name resolves and, with the ``.net`` file, every atom in it does; a
+``.place`` name that is no block of the ``.net`` file is a defect too (``unnetted``). With the
+``.net`` file a pad is a block whose ``mode`` is ``inpad``/``outpad`` (the name must then be a
+port bit), not any block named like a port; pad counts are unique names. VPR runs only with
+``ODIN3_HEAVY_OK=1`` (``tools/heavy-run``), per design ``--vpr-timeout`` seconds (default 1800).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from prov_cover import (
@@ -52,12 +58,13 @@ from prov_cover import (
     LegReport,
     Obj,
     ToolError,
+    parse_locs,
 )
 
 PERCENT = re.compile(r"%([0-9A-F]{2})")
 LOC_TAIL = re.compile(r"(.+:\d+)(?:\$\d+)?")
 OUT_PREFIX = "out:"
-VPR_TIMEOUT = 7200.0
+VPR_TIMEOUT = 1800.0
 CHAN_WIDTH = "100"
 DEFAULT_ARCH = Path("vtr_flow") / "arch" / "timing" / "k6_frac_N10_frac_chain_mem32K_40nm.xml"
 
@@ -96,11 +103,14 @@ class Index:
     driven: frozenset[str]
     inputs: frozenset[str]
     outputs: frozenset[str]
+    # net name -> the (file, line) of every located node that drives a net of that name
+    where: dict[str, frozenset[tuple[str, int]]] = field(default_factory=dict)
 
 
 def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
     """The net names of a typed dump joined with its connections (``write_json``)."""
-    src = {(r.module, r.name): bool(r.src) for r in rows if r.kind == "node"}
+    src = {(r.module, r.name): r.src for r in rows if r.kind == "node"}
+    where: dict[str, set[tuple[str, int]]] = {}
     located: set[str] = set()
     driven: set[str] = set()
     inputs: set[str] = set()
@@ -112,9 +122,18 @@ def build_index(rows: Sequence[Obj], facts: Facts) -> Index:
                 driven.add(net)
                 if src.get((module, name)):
                     located.add(net)
+                    where.setdefault(net, set()).update(
+                        (loc.file, loc.line) for loc in parse_locs(src[(module, name)])
+                    )
         inputs.update(mod.net_name(b) for b in mod.port_in)
         outputs.update(mod.net_name(b) for b in mod.port_out)
-    return Index(frozenset(located), frozenset(driven), frozenset(inputs), frozenset(outputs))
+    return Index(
+        frozenset(located),
+        frozenset(driven),
+        frozenset(inputs),
+        frozenset(outputs),
+        {net: frozenset(locs) for net, locs in where.items()},
+    )
 
 
 def parse_place(text: str) -> list[str]:
@@ -149,22 +168,48 @@ def parse_net_atoms(text: str) -> dict[str, list[str]]:
     }
 
 
+def parse_net_pads(text: str) -> dict[str, str]:
+    """Top-level block name -> ``inpad`` or ``outpad``: the clusters VPR made for I/O pads (the
+    ``mode`` of the block), the only blocks that are pads."""
+    try:
+        root = ET.fromstring(text)  # noqa: S314 (the file is VPR's own output)
+    except ET.ParseError as exc:
+        raise ToolError(f"vpr: unreadable .net file: {exc}") from exc
+    return {
+        top.get("name", ""): top.get("mode", "")
+        for top in root.findall("block")
+        if top.get("mode") in ("inpad", "outpad")
+    }
+
+
+def _is_pad(atom: str, index: Index, pads: dict[str, str] | None) -> bool:
+    """A pad by its kind in the ``.net`` file when there is one (an input pad is named after an
+    input port bit, an output pad ``out:`` plus an output port bit); by name alone without."""
+    plain = atom[len(OUT_PREFIX):] if atom.startswith(OUT_PREFIX) else None
+    kind = pads.get(atom, "") if pads is not None else ("outpad" if plain else "inpad")
+    if kind == "outpad":
+        return plain is not None and plain in index.outputs
+    return kind == "inpad" and plain is None and atom in index.inputs
+
+
 def _resolve(
-    atom: str, index: Index, allow: frozenset[str]
+    atom: str, index: Index, allow: frozenset[str], pads: dict[str, str] | None = None
 ) -> tuple[str, str]:
     """(verdict, note): verdict is pad, const, resolved, unresolved or unmapped."""
-    plain = atom[len(OUT_PREFIX):] if atom.startswith(OUT_PREFIX) else None
-    if "pad" in allow:
-        if plain is not None and plain in index.outputs:
-            return "pad", ""
-        if plain is None and atom in index.inputs:
-            return "pad", ""
+    if "pad" in allow and _is_pad(atom, index, pads):
+        return "pad", ""
     if atom in GENERATOR_NETS:
         return "const", ""
     decoded = decode_name(atom)
     key = decoded.short if decoded else percent_decode(atom)
-    if key in index.located:
-        return "resolved", "decode" if decoded else "net"
+    if decoded:
+        file, _, line = decoded.loc.rpartition(":")
+        if (file, int(line)) in index.where.get(key, frozenset()):
+            return "resolved", "decode"
+        if key in index.located:
+            return "unresolved", "location-differs"
+    elif key in index.located:
+        return "resolved", "net"
     if key in index.driven:
         note = "drives-output-port" if key in index.outputs else "driver-has-no-location"
         return "unresolved", note
@@ -184,12 +229,13 @@ def place_check(
         objects={"block": 0, "atom": 0}, resolved={"block": 0, "atom": 0}
     )
     atoms = parse_net_atoms(net_text) if net_text is not None else {}
+    pads = parse_net_pads(net_text) if net_text is not None else None
     seen: set[str] = set()
     excepted: set[str] = set()
     failed: set[str] = set()
 
     def count(cls: str, name: str) -> None:
-        verdict, note = _resolve(name, index, allow)
+        verdict, note = _resolve(name, index, allow, pads)
         if verdict in ("pad", "const"):
             if name not in excepted:  # a pad cluster and its atom have one name: count it once
                 excepted.add(name)
@@ -213,6 +259,9 @@ def place_check(
                 count("atom", atom)
     for name in sorted(atoms.keys() - set(names)):
         rep.defects.append(Defect("unplaced", "", name, "block", "in-net-not-in-place"))
+    if net_text is not None:
+        for name in sorted(set(names) - atoms.keys()):
+            rep.defects.append(Defect("unnetted", "", name, "block", "in-place-not-in-net"))
     return rep
 
 
@@ -224,13 +273,18 @@ def vpr_command(vpr: Path, arch: Path, blif: Path, net: Path, place: Path) -> li
     ]
 
 
-def run_vpr(vpr: Path, arch: Path, blif: Path, work: Path) -> tuple[Path, Path]:
-    """Runs VPR in ``work``; (net file, place file). A failing VPR is a ToolError."""
+def run_vpr(
+    vpr: Path, arch: Path, blif: Path, work: Path, timeout: float = VPR_TIMEOUT
+) -> tuple[Path, Path]:
+    """Runs VPR in ``work``; (net file, place file). A failing VPR is a ToolError. Heavy: it
+    refuses to run unless ``ODIN3_HEAVY_OK=1`` (``tools/heavy-run`` sets it)."""
+    if os.environ.get("ODIN3_HEAVY_OK") != "1":
+        raise ToolError("vpr: refusing to run outside tools/heavy-run (ODIN3_HEAVY_OK is not 1)")
     net, place = work / "d.net", work / "d.place"
     try:
         done = subprocess.run(
             vpr_command(vpr, arch, blif, net, place),
-            capture_output=True, text=True, timeout=VPR_TIMEOUT, cwd=work, check=False,
+            capture_output=True, text=True, timeout=timeout, cwd=work, check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise CrashError(f"vpr: {exc}") from exc

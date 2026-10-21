@@ -3,7 +3,8 @@
 Usage::
 
     prov-cover [--legs a,b,c,d] [--allow inherited,pad] [--odin3 O] [--report report.json]
-               [--work DIR] [--smallest-first] [--vpr VPR] [--arch XML] DESIGN.v...
+               [--work DIR] [--smallest-first] [--vpr VPR] [--vpr-timeout S]
+               [--arch XML] DESIGN.v...
 
 P-1 to P-8 of the spec.
 
@@ -671,6 +672,8 @@ def parse(argv: Sequence[str] | None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(prog=TOOL, description=__doc__.split("\n")[0])
     ap.add_argument("--legs", default="a,b", help="a, b, c, d (comma separated)")
     ap.add_argument("--vpr", type=Path, help="leg d: the vpr binary (default $VTR_ROOT/vpr/vpr)")
+    ap.add_argument("--vpr-timeout", type=float, default=1800.0,
+                    help="leg d: seconds per design for VPR (default 1800)")
     ap.add_argument("--arch", type=Path, help="leg d: the architecture XML (default k6_frac)")
     ap.add_argument("--allow", help="exception classes to enable (default inherited,pad)")
     ap.add_argument("--odin3", default=None)

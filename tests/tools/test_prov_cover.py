@@ -382,6 +382,7 @@ gnd\t3\t1\t0\t0\t#5
             frozenset((*located, *driven)),
             frozenset({"in[0]"}),
             frozenset({"o"}),
+            {n: frozenset({("/d/a.v", 7)}) for n in located},
         )
 
     def test_decode_name_is_l5(self) -> None:
@@ -442,7 +443,50 @@ gnd\t3\t1\t0\t0\t#5
     def test_cluster_in_net_but_not_placed(self) -> None:
         rep = vpr.place_check(self.PLACE.replace("q\t1\t2", "zz\t1\t2"), self.index(("n1", "q",
                               "$n9", "zz")), self.NET)
-        self.assertEqual([d.kind for d in rep.defects], ["unplaced"])
+        self.assertEqual([d.kind for d in rep.defects], ["unplaced", "unnetted"])
+        self.assertEqual([d.name for d in rep.defects], ["q", "zz"])
+
+    def test_same_short_name_in_two_scopes_does_not_pair(self) -> None:
+        # n1 is located at /d/a.v:7 only; a name decoding to n1 at another line is not it
+        rep = vpr.place_check(
+            self.PLACE.replace("top/n1@/d/a.v:7", "top/n1@/d/b.v:9"),
+            self.index(("n1", "q", "$n9")),
+        )
+        self.assertEqual(
+            [(d.kind, d.note) for d in rep.defects], [("unresolved", "location-differs")]
+        )
+
+    def test_pad_is_by_kind_in_the_net_file(self) -> None:
+        # a logic atom named like an input port is no pad: the block is not an inpad
+        net = self.NET.replace(
+            '<block name="in[0]" instance="io[0]" mode="inpad">',
+            '<block name="in[0]" instance="clb[3]" mode="default">',
+        )
+        rep = vpr.place_check(self.PLACE, self.index(("n1", "q", "$n9")), net)
+        self.assertEqual(rep.exceptions["pad"], 1)
+        self.assertEqual([(d.kind, d.name) for d in rep.defects], [("unmapped", "in[0]")])
+        self.assertEqual(vpr.parse_net_pads(self.NET), {"in[0]": "inpad", "out:o": "outpad"})
+
+    def test_vpr_refuses_without_heavy_ok(self) -> None:
+        with (
+            mock.patch.dict("os.environ", {"ODIN3_HEAVY_OK": ""}),
+            mock.patch("subprocess.run") as run,
+            self.assertRaises(pc.ToolError) as ctx,
+        ):
+            vpr.run_vpr(Path("v"), Path("a"), Path("b.blif"), Path("w"))
+        self.assertIn("ODIN3_HEAVY_OK", str(ctx.exception))
+        run.assert_not_called()
+
+    def test_vpr_timeout_is_passed(self) -> None:
+        done = mock.Mock(returncode=1, stdout="", stderr="Error")
+        with (
+            mock.patch.dict("os.environ", {"ODIN3_HEAVY_OK": "1"}),
+            mock.patch("subprocess.run", return_value=done) as run,
+            self.assertRaises(pc.ToolError),
+        ):
+            vpr.run_vpr(Path("v"), Path("a"), Path("b.blif"), Path("w"), 42.0)
+        self.assertEqual(run.call_args.kwargs["timeout"], 42.0)
+        self.assertEqual(vpr.VPR_TIMEOUT, 1800.0)
 
     def test_index_from_a_dump_and_its_connections(self) -> None:
         rows = pc.parse_dump(
@@ -460,6 +504,7 @@ gnd\t3\t1\t0\t0\t#5
         )
         index = vpr.build_index(rows, {"m": mod})
         self.assertEqual(index.located, {"x"})
+        self.assertEqual(index.where, {"x": {("a.v", 3)}})
         self.assertEqual(index.driven, {"x", "y", "a"})
         self.assertEqual((index.inputs, index.outputs), ({"a"}, {"y"}))
 
@@ -473,6 +518,7 @@ gnd\t3\t1\t0\t0\t#5
     def test_a_vpr_failure_is_a_tool_error(self) -> None:
         done = mock.Mock(returncode=1, stdout="", stderr="Error 3: no device")
         with (
+            mock.patch.dict("os.environ", {"ODIN3_HEAVY_OK": "1"}),
             mock.patch("subprocess.run", return_value=done),
             self.assertRaises(pc.ToolError) as ctx,
         ):
@@ -743,11 +789,13 @@ class LegsTests(unittest.TestCase):
     def test_leg_d_runs_vpr_on_the_leg_b_file_and_reports_only_d(self) -> None:
         args = self._args("d")
         args.vpr = args.arch = None
+        args.vpr_timeout = 1800.0
         place = "#x\nin\t0\t0\t0\t0\t#0\n"
         net = Path("n")
+        net_xml = '<block name="x"><block name="in" instance="clb[0]"/></block>'
         with (
             mock.patch("legs.vpr_leg.run_vpr", return_value=(net, Path("p"))) as run_vpr,
-            mock.patch.object(Path, "read_text", side_effect=[place, "<block/>"]),
+            mock.patch.object(Path, "read_text", side_effect=[place, net_xml]),
         ):
             rep = legs.leg_d(args, Path("d.v"), Path("w"), legs.Dumped(dump(), {}, ""))
         self.assertEqual(run_vpr.call_args.args[2], Path("w") / "W.blif")
@@ -757,6 +805,7 @@ class LegsTests(unittest.TestCase):
     def test_leg_d_vpr_failure_is_a_flow_error(self) -> None:
         args = self._args("d")
         args.vpr = args.arch = None
+        args.vpr_timeout = 1800.0
         with mock.patch("legs.vpr_leg.run_vpr", side_effect=pc.ToolError("vpr: no device")):
             rep = legs.leg_d(args, Path("d.v"), Path("w"), legs.Dumped([], {}, ""))
         self.assertEqual(rep.defects[0].kind, "flow-error")
