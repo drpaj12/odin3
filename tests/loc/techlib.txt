@@ -1,0 +1,21 @@
+# 5.4e loc-check: designs that instantiate tech library cells read the library first. Format as
+# tests/icells/techlib.txt: <design file name> <tech library> [<soft library>], paths relative to the
+# repository root. The icells entries are repeated; the 14 small VTR designs read lib/vtr.o3lib for their
+# memories (single_port_ram, dual_port_ram) and hard blocks.
+adder_hard_block.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+hard_adder_cin_propagation.v lib/vtr.o3lib tests/hardmap/adder_lib.v
+multiply_hard_block.v lib/vtr.o3lib
+single_wire.v lib/vtr.o3lib
+single_ff.v lib/vtr.o3lib
+and_latch.v lib/vtr.o3lib
+multiclock_output_and_latch.v lib/vtr.o3lib
+multiclock_separate_and_latch.v lib/vtr.o3lib
+multiclock_reader_writer.v lib/vtr.o3lib
+ch_intrinsics.v lib/vtr.o3lib
+ch_intrinsics_nolatches.v lib/vtr.o3lib
+diffeq1.v lib/vtr.o3lib
+diffeq2.v lib/vtr.o3lib
+mkPktMerge.v lib/vtr.o3lib
+sha.v lib/vtr.o3lib
+blob_merge.v lib/vtr.o3lib
+stereovision3.v lib/vtr.o3lib

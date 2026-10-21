@@ -1,0 +1,8 @@
+# The 5.4 word level (spec T-3): the netlist after opt. Latches are allowed (no --nolatches).
+# @DESIGN@ is the design, @TECHLIB@ the design's `read_techlib` commands (tests/icells/techlib.txt).
+# The tool appends dump_locs, the writes and the read-backs.
+@TECHLIB@
+read_verilog @DESIGN@
+proc
+opt
+opt_clean

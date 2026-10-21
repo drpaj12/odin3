@@ -101,3 +101,10 @@ format Yosys `write_blif -param` uses (`backends/blif/blif.cc`, `dump_params`).
   inside a string becomes one.
 - **Round trip.** Write, read, write is identical; `netlist-compare` needs a `.blackbox` stub per
   library model (`lpm-check` builds them from the `.o3lib`).
+
+## Amendment (5.4, 2026-10-20)
+
+`read_blif --hdl-locs` restores HDL locations from provenance net names and `.attr src`, and
+`write_blif --src-attr` (plain dialect) writes `.attr src`; both are off by default and change nothing
+for a read or write without them. See `docs/specs/2026-10-20-5.4-hdl-locations-design.md` sections 3 and 4
+(W-6, D-4, D-5); the numbers are in its section 14.

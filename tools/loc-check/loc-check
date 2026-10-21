@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# loc-check: how many objects keep an HDL location through write and read-back, per format (5.4
+# spec T-3). Exit codes: 0 every design passes; 1 a rule failed (gained, an unclassified loss, a
+# line count where the format is lossless, nothing compared) or an expect line is stale; 2 usage or
+# tool error; 3 a child crashed or timed out. See loc_check.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/loc_check.py" "$@"
