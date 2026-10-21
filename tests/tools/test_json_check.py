@@ -6,6 +6,8 @@ read-back end to end, one per leg.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -141,6 +143,13 @@ class JudgeListedTests(unittest.TestCase):
         self.assertFalse(jc.judge_listed(ic.Verdict("ok"), self.CELL)[0])
         self.assertFalse(jc.judge_listed(ic.Verdict("fail:read", "$_SDFF_PP0_"), None)[0])
 
+
+    def test_unproven_entry_not_stale_without_equivalence(self) -> None:
+        entry = ("unproven", "no plain flip-flop form")
+        skipped = jc.Row("ok", "equivalence not run: no Yosys 0.55", equivalence=False)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(jc.report("y-gate", Path("d.json"), skipped, entry)[0])
+            self.assertFalse(jc.report("y-gate", Path("d.json"), jc.Row("ok"), entry)[0])
 
 class FirstErrorTests(unittest.TestCase):
     def test_marker_line_beats_earlier_mention(self) -> None:

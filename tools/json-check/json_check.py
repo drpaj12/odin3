@@ -512,7 +512,11 @@ class Tally:
 def report(level: str, item: Path, row: Row, listed: tuple[str, str] | None) -> tuple[bool, str]:
     """Prints one row; returns (passes the run, the report word)."""
     cells, wires, nets = row.counts
-    passed, word = judge_listed(ic.Verdict(row.outcome, row.reason), listed)
+    if listed is not None and listed[0] == "unproven" and row.outcome == "ok" and not row.equivalence:
+        # without Yosys the equivalence leg did not run, so an unproven entry is not stale
+        passed, word = True, "ok (listed unproven; equivalence not run)"
+    else:
+        passed, word = judge_listed(ic.Verdict(row.outcome, row.reason), listed)
     detail = f" ({row.reason})" if row.reason and row.outcome != "ok" else ""
     kind = f" {row.kind}" if row.kind else ""
     note = row.reason if row.outcome == "ok" and row.reason else ""
