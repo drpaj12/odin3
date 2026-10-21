@@ -439,68 +439,117 @@ static bool cursor_next(const jw *out, node_cursor *cur) {
     }
 }
 
-/* The parameter values of the first live instance of type in the design, over params (defaults):
- * the module in the file gets that instance's port widths, so its connections fit (the instances
- * of a type with differing widths are not representable by one module). */
-static void use_first_instance(const jw *out, odin3_celltype_id type, odin3_value *params) {
-    node_cursor cur = {NULL, 0, 0};
-    while (cursor_next(out, &cur)) {
-        odin3_node_id node = {cur.node_idx};
-        if (odin3_node_type(cur.mod, node).v == type.v) {
-            const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
-            for (uint32_t i = 0; i < def->n_params; i++) {
-                const odin3_value *val = odin3_node_param(cur.mod, node, i);
-                params[i] = val != NULL ? *val : params[i];
-            }
-            return;
-        }
+/* One live instance of a type, with where it is. */
+typedef struct bb_instance {
+    const odin3_module *mod;
+    odin3_node_id node;
+} bb_instance;
+
+/* The text of a strtab ID, or "?" for none. */
+static const char *name_text(const jw *out, uint32_t str) {
+    return str != 0 ? odin3_strtab_get(out->strtab, str) : "?";
+}
+
+/* The widths of every port of type for the parameters of one instance (the type's defaults where
+ * the instance has none); inst NULL: the defaults alone. */
+static void instance_widths(const jw *out, odin3_celltype_id type, const bb_instance *inst,
+                            odin3_value *params, uint32_t *widths) {
+    const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        const odin3_value *val = inst != NULL ? odin3_node_param(inst->mod, inst->node, i) : NULL;
+        params[i] = val != NULL ? *val : def->params[i].dflt;
+    }
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        widths[i] = odin3_celltype_port_width(out->design, type, params, i);
     }
 }
 
-/* A port's width; a width parameter or function is evaluated at the type's defaults. */
-static uint32_t blackbox_port_width(jw *out, odin3_celltype_id type, uint32_t port) {
+/* Reports two instances of one type whose resolved port widths differ: the types of one module
+ * cannot have both (read_json would reject the file), so nothing is written. */
+static void report_width_clash(jw *out, odin3_celltype_id type, const bb_instance *first,
+                               const bb_instance *other, uint32_t port) {
     const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
-    if (def->ports[port].width_param == NULL && def->ports[port].width_fn == NULL &&
-        def->ports[port].width_expr == NULL) {
-        return def->ports[port].width;
+    odin3_log(ODIN3_LOG_ERROR,
+              "write_json: black box '%s' is used with different port widths (port '%s'): "
+              "instance '%s' in module '%s' and instance '%s' in module '%s'; one module cannot "
+              "describe both",
+              def->name, def->ports[port].name,
+              name_text(out, odin3_node_name(first->mod, first->node)),
+              name_text(out, odin3_module_name(first->mod)),
+              name_text(out, odin3_node_name(other->mod, other->node)),
+              name_text(out, odin3_module_name(other->mod)));
+    out->status = out->status != ODIN3_OK ? out->status : ODIN3_ERR_INVALID_ARG;
+}
+
+/* The first port whose width differs between two width lists, or n_ports when none. */
+static uint32_t first_width_diff(const uint32_t *lhs, const uint32_t *rhs, uint32_t n_ports) {
+    uint32_t port = 0;
+    while (port < n_ports && lhs[port] == rhs[port]) {
+        port++;
     }
-    odin3_value *params = odin3_util_calloc(sizeof(odin3_value) * (def->n_params + 1));
-    if (params == NULL) {
-        out->status = out->status != ODIN3_OK ? out->status : ODIN3_ERR_NO_MEMORY;
-        return 0;
+    return port;
+}
+
+/* The port widths of the module written for type: those of its first live instance, which every
+ * other instance must share (else a located error, out->status set). Without an instance: the
+ * type's defaults. widths and scratch hold n_ports entries, params n_params. */
+static void blackbox_widths(jw *out, odin3_celltype_id type, odin3_value *params,
+                            uint32_t *widths, uint32_t *scratch) {
+    const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    node_cursor cur = {NULL, 0, 0};
+    bb_instance first = {NULL, {0}};
+    while (out->status == ODIN3_OK && cursor_next(out, &cur)) {
+        bb_instance inst = {cur.mod, {cur.node_idx}};
+        if (odin3_node_type(cur.mod, inst.node).v != type.v) {
+            continue;
+        }
+        if (first.mod == NULL) {
+            first = inst;
+            instance_widths(out, type, &first, params, widths);
+            continue;
+        }
+        instance_widths(out, type, &inst, params, scratch);
+        uint32_t port = first_width_diff(widths, scratch, def->n_ports);
+        if (port < def->n_ports) {
+            report_width_clash(out, type, &first, &inst, port);
+        }
     }
-    for (uint32_t i = 0; i < def->n_params; i++) {
-        params[i] = def->params[i].dflt;
+    if (first.mod == NULL) {
+        instance_widths(out, type, NULL, params, widths);
     }
-    use_first_instance(out, type, params);
-    uint32_t width = odin3_celltype_port_width(out->design, type, params, port);
-    odin3_util_free(params);
-    return width;
 }
 
 static void write_blackbox_ports(jw *out, jw_list *entry, odin3_celltype_id type) {
     const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+    odin3_value *params = odin3_util_calloc(sizeof(odin3_value) * (def->n_params + 1));
+    uint32_t *widths = odin3_util_calloc(sizeof(uint32_t) * 2 * (def->n_ports + 1));
+    if (params == NULL || widths == NULL) {
+        out->status = out->status != ODIN3_OK ? out->status : ODIN3_ERR_NO_MEMORY;
+    } else {
+        blackbox_widths(out, type, params, widths, widths + def->n_ports + 1);
+    }
     jw_list ports = {false, ENTRY_DEPTH};
     uint32_t bit = 2;
     jw_key(out, entry, "ports");
     jw_open(out, &ports);
-    for (uint32_t i = 0; i < def->n_ports; i++) {
+    for (uint32_t i = 0; out->status == ODIN3_OK && i < def->n_ports; i++) {
         jw_list fields = {false, FIELD_DEPTH};
-        uint32_t width = blackbox_port_width(out, type, i);
         jw_key(out, &ports, def->ports[i].name);
         jw_open(out, &fields);
         jw_key(out, &fields, "direction");
         jw_string(out, odin3_bytes_cstr(dir_text(def->ports[i].dir)));
         jw_key(out, &fields, "bits");
         jw_raw(out, "[");
-        for (uint32_t j = 0; j < width; j++) {
+        for (uint32_t j = 0; j < widths[i]; j++) {
             jw_raw(out, j > 0 ? ", " : " ");
             jw_bit(out, bit++);
         }
-        jw_raw(out, width > 0 ? " ]" : "]");
+        jw_raw(out, widths[i] > 0 ? " ]" : "]");
         jw_close(out, &fields);
     }
     jw_close(out, &ports);
+    odin3_util_free(params);
+    odin3_util_free(widths);
 }
 
 /* A declared black-box or hard model (BLIF `.blackbox`) as a Yosys blackbox module: ports with
@@ -585,6 +634,28 @@ static bool type_list_add(type_list *list, odin3_celltype_id type, odin3_status 
     return true;
 }
 
+/* An implicit black box: a design-local BLACKBOX type no `.blackbox` declared and no tech library
+ * supplied (an undefined BLIF .subckt, or --auto-blackbox). A tech-library black box (it has
+ * library data) is not: the library defines it again on read. Registered `$` cells are never
+ * BLACKBOX. An undeclared HARD type is not written either (the library supplies it). */
+static bool is_implicit_blackbox(const jw *out, odin3_celltype_id type,
+                                 const odin3_celltype_def *def) {
+    return def != NULL && def->gran == ODIN3_GRAN_BLACKBOX && !is_declared_model(out, type) &&
+           odin3_celltype_lib(out->design, type) == NULL;
+}
+
+/* True when a module of the design is named name. */
+static bool module_named(const jw *out, const char *name) {
+    const uint32_t end = odin3_design_module_end(out->design);
+    for (uint32_t i = 1; i < end; i++) {
+        const odin3_module *mod = odin3_module_get(out->design, (odin3_module_id){i});
+        if (mod != NULL && strcmp(name_text(out, odin3_module_name(mod)), name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* An implicit black box (BLIF .subckt of a type nothing defines, e.g. Yosys' `$_DFFSR_PPP_`) is a
  * design-local type that is no declared model: written from its instances, or the file would
  * not read back without --auto-blackbox. Each type once, in first-use order. */
@@ -595,9 +666,14 @@ static odin3_status write_implicit_blackboxes(jw *out, jw_list *modules) {
     while (status == ODIN3_OK && cursor_next(out, &cur)) {
         odin3_celltype_id type = odin3_node_type(cur.mod, (odin3_node_id){cur.node_idx});
         const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
-        if (def != NULL && def->gran == ODIN3_GRAN_BLACKBOX && !is_declared_model(out, type) &&
-            type_list_add(&done, type, &status)) {
-            write_blackbox(out, modules, type);
+        if (is_implicit_blackbox(out, type, def) && type_list_add(&done, type, &status)) {
+            if (module_named(out, def->name)) {
+                odin3_log(ODIN3_LOG_ERROR,
+                          "write_json: implicit black box '%s' has the name of a module", def->name);
+                status = ODIN3_ERR_INVALID_ARG;
+            } else {
+                write_blackbox(out, modules, type);
+            }
         }
     }
     odin3_util_free(done.ids);
