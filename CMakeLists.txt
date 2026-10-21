@@ -108,6 +108,8 @@ add_library(odin3_core OBJECT
     src/passes/names.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
+    src/passes/submod/submod.c
+    src/passes/submod/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1687,6 +1689,9 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif/pow.parmys.blif
                 ${PROJECT_BINARY_DIR}/levelize_micro refuse)
     set_tests_properties(levelize_micro_word_refused PROPERTIES LABELS unit)
+    # Phase 7 (7.4a): the submod pass.
+    odin3_add_unit_test(test_submod)
+    target_compile_definitions(test_submod PRIVATE ODIN3_SM_ROOT="${PROJECT_BINARY_DIR}")
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
@@ -2142,6 +2147,22 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # Phase 7 (7.4a, spec 3.1 S-6): submod then flatten on every second logic cell of the BLIF
+        # micros, equivalent to the input. Left out: pow.parmys (equiv-check cannot read $pow),
+        # hand_body (an unnamed black box equiv-check cannot pair) and hand_writers (the JSON round
+        # trip alone renames its black box ports, so the instance pairing fails).
+        set(_sm_dir ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        add_test(NAME submod_equiv_micros
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/submod_equiv.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/submod_equiv
+                    ${_sm_dir}/ff.odin.blif ${_sm_dir}/ff.parmys.blif ${_sm_dir}/dffsre.parmys.blif
+                    ${_sm_dir}/hand_cname.blif ${_sm_dir}/hand_ports.blif ${_sm_dir}/hand_wide.blif
+                    ${_sm_dir}/adder_hard_block.parmys.blif ${_sm_dir}/ansiportlist_2.parmys.blif
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(submod_equiv_micros PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
