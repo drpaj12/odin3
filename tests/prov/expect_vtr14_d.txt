@@ -1,0 +1,15 @@
+# Leg d (VPR placed blocks), the 14 small VTR designs: known defects. '<leg> <design> <defect id> <count> <reason>'.
+# Every placed block maps to a netlist name (no unmapped, unplaced or unnetted); these are leg-b defects seen from the placed side.
+d single_ff.v unresolved/block/drives-output-port@a5bcd92e 1 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d and_latch.v unresolved/block/drives-output-port@a5bcd92e 1 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d multiclock_separate_and_latch.v unresolved/block/drives-output-port@ab21e466 2 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d multiclock_output_and_latch.v unresolved/block/drives-output-port@a5bcd92e 1 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d multiclock_reader_writer.v unresolved/block/drives-output-port@a5bcd92e 1 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d diffeq1.v unresolved/block/drives-output-port@18294f22 96 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d diffeq2.v unresolved/block/drives-output-port@92006a1c 96 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d ch_intrinsics.v unresolved/block/drives-output-port@1fd3269e 33 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d ch_intrinsics_nolatches.v unresolved/block/drives-output-port@93c37000 66 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d stereovision3.v unresolved/block/drives-output-port@35188be6 28 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d sha.v unresolved/block/drives-output-port@7f636275 36 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d mkPktMerge.v unresolved/block/drives-output-port@fbed13af 3 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)
+d blob_merge.v unresolved/block/drives-output-port@cb267e29 61 driver of an output port bit has no location (D1/D3, port-driver class pending Peter)

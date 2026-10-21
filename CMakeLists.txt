@@ -3717,6 +3717,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             odin3_add_sweep_test(prov_cover_sweep LABEL sweep
                 COMMAND ${_prov_run} --legs a,b --smallest-first
                     --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14.txt ${_json_vtr14})
+            # 6.5c: leg d, VPR (pack and place only) on the written BLIF of leg b; every placed
+            # block and atom is joined to the read-back by name (tools/prov-cover/vpr_leg.py).
+            # Needs VTR's vpr binary; tests/prov/expect_vtr14_d.txt lists the known defects.
+            if(EXISTS ${_json_vtr_root}/vpr/vpr)
+                odin3_add_sweep_test(prov_cover_sweep_place LABEL sweep
+                    COMMAND ${_prov_run} --legs d --smallest-first
+                        --vpr ${_json_vtr_root}/vpr/vpr
+                        --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14_d.txt
+                        ${_json_vtr14})
+            endif()
         endif()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
