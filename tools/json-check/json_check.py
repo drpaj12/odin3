@@ -512,7 +512,8 @@ class Tally:
 def report(level: str, item: Path, row: Row, listed: tuple[str, str] | None) -> tuple[bool, str]:
     """Prints one row; returns (passes the run, the report word)."""
     cells, wires, nets = row.counts
-    if listed is not None and listed[0] == "unproven" and row.outcome == "ok" and not row.equivalence:
+    skipped = row.outcome == "ok" and not row.equivalence
+    if listed is not None and listed[0] == "unproven" and skipped:
         # without Yosys the equivalence leg did not run, so an unproven entry is not stale
         passed, word = True, "ok (listed unproven; equivalence not run)"
     else:
