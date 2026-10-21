@@ -91,7 +91,8 @@ to `$_DFF_P_` and `$_DFFSR_PPP_` only, `abc -g NAND,NOR` (gives `$_NAND_`, `$_NO
 `$_DFFSR_PPP_` to `DFFSR`, `$_NAND_` to `NAND2`, `$_NOR_` to `NOR2`, `$_NOT_` to `NOT`, `$_BUF_` to
 `BUF`), and `check -assert` fails the script if any other cell type is left; Task 3 verifies the exact
 Yosys cell names against 0.55 before relying on them. An unknown cell in a netlist is `unresolved_module`, located (no change);
-with `--auto-blackbox` it is a black box. T: both.
+with `--auto-blackbox` it is a black box whose port directions are inferred from the nets it
+connects to (2D EL-11, v4.32; PHASE6 decision 5), so it may sit on driven nets. T: both.
 
 ## 2. 6.2 `write_dot --color-by` and location labels (C-1 to C-8)
 

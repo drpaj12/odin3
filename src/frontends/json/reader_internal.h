@@ -54,11 +54,25 @@ typedef struct jr_edge {
     uint32_t from, to;
 } jr_edge;
 
-/* A port of an implicit black box; the direction is INOUT until a cell gives port_directions. */
+/* What the cells showed of a port of an implicit black box that no cell gave port_directions
+ * (reader_implicit_dirs.c): the votes its instances cast (output: it alone is on a bit nothing
+ * known drives and something reads; input: a known driver is on the bit; bidirectional: the bit has
+ * no known direction), a net it is an input to that nothing drives, and the tie-break that made it
+ * the output of a type that had none. */
+enum { JR_ROLE_OUT = 1, JR_ROLE_IN = 2, JR_ROLE_BIDI = 4, JR_ROLE_UNDRIVEN = 8, JR_ROLE_TIED = 16 };
+
+/* A port of an implicit black box; the direction is inferred from the bits (jr_infer_implicit)
+ * until a cell gives port_directions. */
 typedef struct jr_iport {
     odin3_port_def def; /* name is set when the type is made */
     uint32_t name_str;
     bool dir_known;
+    uint8_t role;       /* JR_ROLE_* */
+    uint32_t peer_type; /* +1: the type of another output port on a net this port drives, or 0 */
+    uint32_t peer_port; /* +1: its position in that type */
+    uint64_t net;       /* with JR_ROLE_UNDRIVEN: the bit label */
+    bool want;          /* tie-break candidate: no votes, and its type has no output */
+    bool pick;          /* the only candidate on an ambiguous bit */
 } jr_iport;
 
 /* An implicit black box (M-5 rule 4, --auto-blackbox): its ports in first-use order. */
@@ -334,6 +348,11 @@ odin3_status jr_read_cells(jr *rd, const odin3_json_node *obj);
 odin3_status jr_note_implicit(jr *rd, const odin3_json_node *cell, const char *type_name);
 /* Implicit black boxes: the types the scan found (declared after pass 1, before pass 2). */
 odin3_status jr_make_implicit(jr *rd);
+/* EL-11: the direction of every implicit port no cell gave port_directions for, from the bits its
+ * cells connect it to (reader_implicit_dirs.c); before jr_make_implicit. */
+odin3_status jr_infer_implicit(jr *rd);
+/* The direction the roles of a port settle on: inout, else output, else input. */
+odin3_dir jr_role_dir(uint8_t role);
 void jr_free_implicit(jr *rd);
 
 /* --- reader_sop.c: `$sop` and `$lut` --------------------------------------------------- */
