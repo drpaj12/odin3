@@ -30,7 +30,7 @@ R = qor_legs.REPO_ROOT
 SHA_V = "/v/vtr_flow/benchmarks/verilog/sha.v"
 O_SCRIPT = (
     f"read_techlib {R}/lib/vtr.o3lib; read_verilog --nolatches --vtr-compat {SHA_V}; "
-    "proc; fsm; opt; flatten; wreduce; hardmap; lower; abc --lut 6; "
+    "proc; fsm; opt -full; flatten; wreduce; hardmap; lower; abc --lut 6; "
     "write_blif --vtr --lut-k 6 /w/j/sha.blif"
 )
 O_PASSES = ("read_techlib", "read_verilog", "proc", "fsm", "opt", "flatten", "wreduce", "hardmap",
