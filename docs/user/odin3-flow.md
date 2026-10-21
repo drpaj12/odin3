@@ -24,6 +24,14 @@ Every step runs in its own subdirectory of `--out` with its own log, and the fir
 `odin3` log is the exact command. `summary.json` holds the LUT count and the step times (and the VPR
 summary when VPR ran).
 
+VTR routes once at 1.3 x the minimum channel width, and on a tiny device that width can be
+unroutable while its neighbours route. When the minimum-width search finished and only that final
+route failed, `odin3_flow` retries the route at fixed widths (relaxed + 2, relaxed + 4, then 2 x
+minimum), each in `vpr/retry-<W>/`, and stops at the first success. It prints `NOTE: route at
+W=<relaxed> failed (VPR); routed at W=<W>` and adds `route_retry` (`min_chan_width`,
+`failed_width`, `used_width`) to `summary.json`; `min_chan_width` stays the true minimum. If every
+width fails, the VPR step fails and its log lists the widths tried.
+
 Exit codes: 0 all steps passed, 1 a step failed, 2 usage error.
 
 The `vtr` target reuses the Odin III script of the QoR flow (`tools/vtr-qor/qor_legs.py`), so the
