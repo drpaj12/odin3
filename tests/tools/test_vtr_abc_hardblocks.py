@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -57,7 +58,11 @@ class VtrAbcHardBlocks(unittest.TestCase):
         self.odin3 = os.environ.get("ODIN3_CLI")
         self.abc = abc_binary()
         if not self.odin3 or self.abc is None:
-            self.skipTest("needs ODIN3_CLI and VTR's abc")
+            why = "needs ODIN3_CLI and VTR's abc (build/abc/abc under VTR_ROOT)"
+            if os.environ.get("ODIN3_REQUIRE_VTR_ABC") == "1":
+                self.fail(f"vtr_abc_hardblocks: {why}; ODIN3_REQUIRE_VTR_ABC=1 forbids a skip")
+            print(f"SKIP vtr_abc_hardblocks: {why}", file=sys.stderr)
+            self.skipTest(why)
         self.work = helpers.scratch(self, "vtr-abc-hb-")
 
     def run_abc(self, blif: str) -> str:

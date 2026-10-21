@@ -121,6 +121,28 @@ class HardBlocksLostTest(TempTest):
             {"dual_port_ram": 1, "box": 1},
         )
 
+    def test_chain_of_dead_blocks_is_reported_whole(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs\n"
+            ".subckt adder a=a b=a cin=a cout=c1 sumout=s1\n"
+            ".subckt adder a=s1 b=a cin=a cout=c2 sumout=s2\n.end\n"
+            ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
+        )
+        self.assertEqual(dead_hardblocks(self.write(text)), {"adder": 2})
+        live = text.replace(".outputs\n", ".outputs s2\n")
+        self.assertEqual(dead_hardblocks(self.write(live, "live.blif")), {})
+
+    def test_box_without_stub_warns_and_is_not_judged(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs\n.subckt mystery i=a o=u\n"
+            ".subckt adder a=u b=a cin=a cout=c sumout=s\n.end\n"
+        )
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            dead = dead_hardblocks(self.write(text))
+        self.assertEqual(dead, {"adder": 1})
+        self.assertIn("WARNING: cannot judge mystery: no stub", err.getvalue())
+
 
 class CountsTest(TempTest):
     def test_counts(self) -> None:

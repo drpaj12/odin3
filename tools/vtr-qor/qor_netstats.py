@@ -407,18 +407,34 @@ class _Hard:
             self.boxes.append((words[1], pins))
 
     def dead(self) -> dict[str, int]:
-        """Per model, the instances none of whose output nets anything reads."""
+        """Per model, the instances none of whose output nets a live reader reads. A box is live
+        when a ``.names``, ``.latch`` or primary output reads one of its outputs, or a live box
+        does; found to a fixpoint, so a chain of dead blocks is reported whole. A box of a model
+        with no known outputs is live (and warned about: it cannot be judged)."""
         reads = set(self.reads)
         outputs_of = {**HARD_OUTPUTS, **self.stub_outputs}
-        for model, pins in self.boxes:
-            outs = outputs_of.get(model, frozenset())
-            reads.update(a for f, a in pins if _base(f) not in outs)
-        dead: dict[str, int] = {}
+        for model in sorted({m for m, _ in self.boxes if m not in outputs_of}):
+            print(f"vtr-qor: netstats: WARNING: cannot judge {model}: no stub", file=sys.stderr)
+        todo = []
         for model, pins in self.boxes:
             outs = outputs_of.get(model, frozenset())
             nets = [a for f, a in pins if _base(f) in outs]
-            if nets and not any(n in reads for n in nets):
-                dead[model] = dead.get(model, 0) + 1
+            ins = [a for f, a in pins if _base(f) not in outs]
+            todo.append((model, nets, ins))
+        changed = True
+        while changed:
+            changed = False
+            rest = []
+            for model, nets, ins in todo:
+                if not nets or any(n in reads for n in nets):
+                    reads.update(ins)
+                    changed = True
+                else:
+                    rest.append((model, nets, ins))
+            todo = rest
+        dead: dict[str, int] = {}
+        for model, _nets, _ins in todo:
+            dead[model] = dead.get(model, 0) + 1
         return dead
 
 

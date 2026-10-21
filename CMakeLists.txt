@@ -2262,6 +2262,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # test_vtr_abc_hardblocks runs VTR's ABC (build/abc/abc under VTR_ROOT): in python_tools it
+    # skips (loudly) without it; here it must run, so a missing ABC or odin3 fails
+    # (ODIN3_REQUIRE_VTR_ABC=1). Registered when VTR_ROOT has the binary; a heavy run.
+    if(DEFINED ENV{VTR_ROOT} AND EXISTS $ENV{VTR_ROOT}/build/abc/abc)
+        odin3_add_sweep_test(vtr_abc_hardblocks LABEL sweep
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_REQUIRE_VTR_ABC=1 ODIN3_CLI=$<TARGET_FILE:odin3>
+                    VTR_ROOT=$ENV{VTR_ROOT}
+                    ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_vtr_abc_hardblocks)
+        set_tests_properties(vtr_abc_hardblocks PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    endif()
     # 2F Task 16 (spec 20.1, plan points (f), (g)): one tiny source per opt rule (tests/opt/rules/
     # <sub>/<rule>.v or .blif, with its golden .il and the row in rules.txt). Odin III runs
     # `read_verilog --nolatches; proc --noopt; <sub-pass> --opt-stats` on each, smallest first: the
