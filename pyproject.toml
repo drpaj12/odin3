@@ -1,9 +1,27 @@
+[build-system]
+requires = ["scikit-build-core==0.11.6"]
+build-backend = "scikit_build_core.build"
+
 [project]
-name = "odin3-tools"
-version = "0.0.1"
-description = "Python tooling for Odin III: netlist-compare, equiv-check and the cffi plugin binding"
+name = "odin3"
+version = "1.0.0"
+description = "Odin III: HDL elaboration and front-end synthesis for FPGA CAD research (cffi binding, CLI and library)"
 license = "MIT"
 requires-python = ">=3.10"
+dependencies = ["cffi>=1.15"]
+
+[tool.scikit-build]
+# The wheel is built by CMake (CMakeLists.txt, SKBUILD branch): libodin3.so, the odin3 CLI and the
+# binding (plugins/python/odin3.py, installed as odin3/__init__.py) go into the odin3 package.
+minimum-version = "build-system.requires"
+cmake.version = ">=3.25"
+cmake.build-type = "Release"
+build.targets = ["libodin3", "odin3", "odin3_abc_exe"]
+wheel.packages = []
+sdist.include = ["third_party/abc", "third_party/unity"]
+
+[tool.scikit-build.cmake.define]
+BUILD_TESTING = "OFF"
 
 [tool.ruff]
 line-length = 100
