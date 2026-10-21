@@ -123,8 +123,8 @@ static uint32_t spelling(uint32_t loc) {
 
 /* --- version ------------------------------------------------------------------------------- */
 
-static void test_abi_version_is_4(void) {
-    TEST_ASSERT_EQUAL_UINT32(4, odin3_abi_version()); /* 2A's AST; 2D's additions stay v4 (I1) */
+static void test_abi_version_is_5(void) {
+    TEST_ASSERT_EQUAL_UINT32(5, odin3_abi_version()); /* gatemap (ABI 5) */
     TEST_ASSERT_EQUAL_INT(69, ODIN3_AST_KIND_COUNT);
     TEST_ASSERT_EQUAL_INT(1, ODIN3_AST_UNIT);
     TEST_ASSERT_EQUAL_INT(68, ODIN3_AST_MINTYPMAX);
@@ -778,7 +778,7 @@ static void test_script_with_ast_pass_raises_keep_level(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_abi_version_is_4);
+    RUN_TEST(test_abi_version_is_5);
     RUN_TEST(test_srcman_example_decodes);
     RUN_TEST(test_srcman_segments_and_bad_arguments);
     RUN_TEST(test_module_store_fields);
