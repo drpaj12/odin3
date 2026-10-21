@@ -128,11 +128,13 @@ static odin3_status read_netname(jr *rd, const odin3_json_node *name) {
     if (jr_kind(name) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, name, &where, "the netname is not an object");
     }
-    jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
+    odin3_status st =
+        jr_audit(rd, name, NETNAME_KEYS, sizeof NETNAME_KEYS / sizeof NETNAME_KEYS[0]);
     const odin3_json_node *bits = jr_member(name, "bits");
     uint32_t width = 0;
-    odin3_status st =
-        jr_bits_count(rd, bits, &(jr_where){"netnames", where.key, "bits"}, false, &width);
+    if (st == ODIN3_OK) {
+        st = jr_bits_count(rd, bits, &(jr_where){"netnames", where.key, "bits"}, false, &width);
+    }
     if (st == ODIN3_OK) {
         st = collect_nets(rd, bits, &(jr_where){"netnames", where.key, "bits"});
     }
@@ -150,8 +152,9 @@ static odin3_status read_netname(jr *rd, const odin3_json_node *name) {
     } else if (st == ODIN3_OK) {
         st = make_wire(rd, name, (wire_shape_in){width, prov}, &wire);
     }
-    return st == ODIN3_OK ? name_attrs(rd, (odin3_objref){ODIN3_OBJ_WIRE, wire.v}, name, &where)
-                          : st;
+    odin3_objref obj = {ODIN3_OBJ_WIRE, wire.v};
+    st = st == ODIN3_OK ? name_attrs(rd, obj, name, &where) : st;
+    return st == ODIN3_OK ? jr_apply_ext(rd, rd->cur.module, obj) : st;
 }
 
 odin3_status jr_read_netnames(jr *rd, const odin3_json_node *obj) {
@@ -238,9 +241,8 @@ static odin3_status read_memory(jr *rd, const odin3_json_node *mem) {
     if (jr_kind(mem) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, mem, &where, "the memory is not an object");
     }
-    jr_audit(rd, mem, MEMORY_KEYS, sizeof MEMORY_KEYS / sizeof MEMORY_KEYS[0]);
+    odin3_status st = jr_audit(rd, mem, MEMORY_KEYS, sizeof MEMORY_KEYS / sizeof MEMORY_KEYS[0]);
     static const char *const numbers[] = {"width", "size", "start_offset"};
-    odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < sizeof numbers / sizeof numbers[0]; i++) {
         st = memory_number(rd, mem, numbers[i]);
     }

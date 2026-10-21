@@ -44,22 +44,26 @@ typedef struct jw {
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;
-    uint8_t *init;         /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
-    uint32_t extra_bit;    /* next bit number no net uses (helper nets of OFF-set $sop) */
-    odin3_status status;   /* first failure; later output is skipped */
-    int write_errno;       /* errno of the failed write when status is ODIN3_ERR_IO */
-    odin3_hdl_ctx *hdl;    /* HDL locations of the objects (backends/common/hdl_loc.h) */
-    odin3_strbuf src;      /* scratch: the src text jw_src builds */
-    odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
-    odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
-    odin3_strtab *written; /* cell and netname keys written in the current module */
-    jw_names_mode names;   /* how keys are formed */
-    odin3_hash_rows rows;  /* COLLECT/APPLY: the objects named by provenance, all modules */
-    size_t row_cursor;     /* APPLY: the next row to use */
-    size_t module_rows;    /* COLLECT: the first row of the current module */
-    odin3_strbuf pname;    /* scratch: a provenance name */
-    odin3_strbuf pshort;   /* scratch: the short name it wraps */
-    bool hide;             /* the key last made would be hidden (its provenance name starts `$`) */
+    uint8_t *init;          /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
+    uint32_t extra_bit;     /* next bit number no net uses (helper nets of OFF-set $sop) */
+    odin3_status status;    /* first failure; later output is skipped */
+    int write_errno;        /* errno of the failed write when status is ODIN3_ERR_IO */
+    odin3_hdl_ctx *hdl;     /* HDL locations of the objects (backends/common/hdl_loc.h) */
+    odin3_strbuf src;       /* scratch: the src text jw_src builds */
+    odin3_prov_id src_prov; /* the prov out->src holds the text of (0: none) */
+    uint32_t src_written;   /* its HDL location count */
+    odin3_strbuf key;       /* scratch: the key being built by jw_make_key */
+    odin3_wattr_seen seen;  /* keys written in the current attributes/parameters object */
+    odin3_strtab *written;  /* cell and netname keys written in the current module */
+    bool odin3_keys;        /* write_json --odin3: the Odin III keys (E-2) */
+    uint32_t level_key;     /* strtab ID of "odin3_level", 0 when the design has none */
+    jw_names_mode names;    /* how keys are formed */
+    odin3_hash_rows rows;   /* COLLECT/APPLY: the objects named by provenance, all modules */
+    size_t row_cursor;      /* APPLY: the next row to use */
+    size_t module_rows;     /* COLLECT: the first row of the current module */
+    odin3_strbuf pname;     /* scratch: a provenance name */
+    odin3_strbuf pshort;    /* scratch: the short name it wraps */
+    bool hide;              /* the key last made would be hidden (its provenance name starts `$`) */
 } jw;
 
 /* A JSON object or array being written: depth is its members' indentation level. */
@@ -139,6 +143,10 @@ void jw_param(jw *out, jw_list *list, const char *key, const odin3_value *val);
  * `|`; only SOURCE leaves, spec 5.4 W-2 to W-4), if it has one and no "src" was written to this
  * object yet (a user src attribute wins). */
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov);
+/* Under --odin3 (E-2), as further members of list: `odin3_level` when obj has the INT attribute of
+ * that name (the attribute is then not repeated under `attributes`), then `odin3_prov`
+ * {kind, hier, hdl} of prov (left out when prov is none). Nothing otherwise. */
+void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov);
 /* True (and recorded) when key is new in the current object; false after out of memory. */
 bool jw_claim(jw *out, odin3_wattr_role role, const char *key);
 /* The attributes of obj with the given role as members of list (odin3_attr_foreach order),
@@ -171,6 +179,7 @@ typedef struct jw_cell_ref {
 /* The state of one cell being written: its parent list and its three member lists. */
 typedef struct jw_cell {
     const jw_list *cells;
+    odin3_node_id node;
     jw_list params;
     jw_list dirs;
     jw_list conns;
