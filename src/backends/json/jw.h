@@ -38,6 +38,8 @@ typedef struct jw {
     int write_errno;       /* errno of the failed write when status is ODIN3_ERR_IO */
     odin3_hdl_ctx *hdl;    /* HDL locations of the objects (backends/common/hdl_loc.h) */
     odin3_strbuf src;      /* scratch: the src text jw_src builds */
+    odin3_prov_id src_prov; /* the prov out->src holds the text of (0: none) */
+    uint32_t src_written;   /* its HDL location count */
     odin3_strbuf key;      /* scratch: the key being built by jw_make_key */
     odin3_wattr_seen seen; /* keys written in the current attributes/parameters object */
     odin3_strtab *written; /* cell and netname keys written in the current module */

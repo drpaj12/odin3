@@ -207,12 +207,13 @@ void jr_report_src(const jr *rd);
 /* --- reader_ext.c: J-8, J-9 -------------------------------------------------------------- */
 
 /* The members of obj that are not in known[] (n entries) are counted as skipped (an `odin3_`
- * prefixed one is offered to the extension table first). */
-void jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count);
+ * prefixed one is offered to the extension table first; a malformed odin3_level or odin3_prov is
+ * an error). */
+odin3_status jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count);
 /* Sets the attribute odin3_level (INT) on obj when the object just audited had that member (6.3
  * E-3: the same attribute `levelize` writes); nothing otherwise. */
 odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj);
-/* `odin3_version` of the root: above 1 is an error. */
+/* `odin3_version` of the root: anything but the integer 1 is an error. */
 odin3_status jr_check_version(const jr *rd, const odin3_json_node *root);
 /* One INFO line with the counts, when anything was skipped. */
 void jr_report_skipped(const jr *rd);

@@ -41,7 +41,10 @@ static jr_where member_where(const jr_cell *cell, const char *path) {
 static odin3_status cell_begin(jr *rd, const odin3_json_node *node, jr_cell *cell) {
     *cell = (jr_cell){
         .node = node, .key = odin3_json_key(node), .where = {"cells", odin3_json_key(node), NULL}};
-    jr_audit(rd, node, CELL_KEYS, sizeof CELL_KEYS / sizeof CELL_KEYS[0]);
+    odin3_status audited = jr_audit(rd, node, CELL_KEYS, sizeof CELL_KEYS / sizeof CELL_KEYS[0]);
+    if (audited != ODIN3_OK) {
+        return audited;
+    }
     const odin3_json_node *type = jr_member(node, "type");
     cell->type_name = jr_text(type, NULL);
     cell->params = jr_member(node, "parameters");

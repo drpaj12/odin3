@@ -197,8 +197,8 @@ static odin3_status read_root(jr *rd) {
     if (jr_kind(root) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, root, NULL, "the root is not an object");
     }
-    jr_audit(rd, root, known, sizeof known / sizeof known[0]);
-    odin3_status st = jr_check_version(rd, root);
+    odin3_status st = jr_audit(rd, root, known, sizeof known / sizeof known[0]);
+    st = st == ODIN3_OK ? jr_check_version(rd, root) : st;
     if (st == ODIN3_OK && jr_member(root, "models") != NULL) {
         odin3_log(ODIN3_LOG_INFO, "%s: the -aig models are ignored", rd->path);
     }

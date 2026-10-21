@@ -236,11 +236,95 @@ static void test_version_policy(void) {
     TEST_ASSERT_NOT_NULL(strstr(rj_log, "odin3_version 2"));
 }
 
-static void test_bad_prov_is_skipped_and_counted(void) {
+/* J-9: odin3_version is exactly the integer 1 */
+static void test_version_must_be_integer_one(void) {
+    const char *const bad[] = {"true", "false", "null", "\"1\"", "[1]", "{}", "0", "-1", "3"};
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        if (read_version(bad[i]) != ODIN3_ERR_PARSE) {
+            char msg[64];
+            (void)snprintf(msg, sizeof msg, "accepted odin3_version %s", bad[i]);
+            TEST_FAIL_MESSAGE(msg);
+        }
+        rj_log_has("odin3_version");
+    }
+}
+
+static void test_unknown_odin3_member_is_counted(void) {
     rj_expect_ok("{\"modules\": {\"m\": {\"attributes\": {}, \"ports\": {}, \"cells\": {}, "
-                 "\"netnames\": {}, \"odin3_prov\": {\"kind\": \"BOGUS\", \"hier\": \"\", "
-                 "\"hdl\": []}, \"odin3_future\": 1}}}\n");
-    TEST_ASSERT_NOT_NULL(strstr(rj_log, "2 odin3_ members"));
+                 "\"netnames\": {}, \"odin3_future\": 1}}}\n");
+    TEST_ASSERT_NOT_NULL(strstr(rj_log, "1 odin3_ members"));
+}
+
+/* Finding 4: a malformed odin3_prov or odin3_level is a located error. */
+static void expect_module_member_error(const char *member, const char *text) {
+    char json[1024];
+    (void)snprintf(json, sizeof json,
+                   "{\"modules\": {\"m\": {\"attributes\": {}, \"ports\": {}, \"cells\": {}, "
+                   "\"netnames\": {\"n\": {\"bits\": [ 2 ], %s}}}}}\n",
+                   member);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, rj_read(json));
+    rj_log_has(text);
+    rj_log_has("in.json:1:");
+}
+
+static void test_bad_prov_is_an_error(void) {
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"BOGUS\", \"hier\": \"\", \"hdl\": []}",
+                               "odin3_prov");
+    expect_module_member_error("\"odin3_prov\": 3", "odin3_prov");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": 1, \"hdl\": []}",
+                               "odin3_prov");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\"}", "odin3_prov");
+    expect_module_member_error("\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": [1]}",
+                               "odin3_prov");
+    expect_module_member_error(
+        "\"odin3_prov\": {\"kind\": \"SOURCE\", \"hier\": \"\", \"hdl\": "
+        "[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\"]}",
+        "odin3_prov");
+}
+
+static void test_good_prov_with_eight_hdl_is_read(void) {
+    rj_expect_ok("{\"modules\": {\"m\": {\"attributes\": {}, \"ports\": {}, \"cells\": {}, "
+                 "\"netnames\": {}, \"odin3_prov\": {\"kind\": \"IMPORTED\", \"hier\": \"x\", "
+                 "\"hdl\": [\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\"]}}}}\n");
+    TEST_ASSERT_NOT_NULL(strstr(rj_log, "validated 1 odin3_prov"));
+}
+
+static void test_bad_level_is_an_error(void) {
+    expect_module_member_error("\"odin3_level\": \"2\"", "odin3_level");
+    expect_module_member_error("\"odin3_level\": true", "odin3_level");
+    expect_module_member_error("\"odin3_level\": -1", "odin3_level");
+    expect_module_member_error("\"odin3_level\": 2147483648", "odin3_level");
+}
+
+static void test_level_bounds_are_accepted(void) {
+    rj_expect_ok("{\"modules\": {\"m\": {\"attributes\": {}, \"ports\": {}, \"cells\": {}, "
+                 "\"netnames\": {\"n\": {\"bits\": [ 2 ], \"odin3_level\": 2147483647}, "
+                 "\"z\": {\"bits\": [ 3 ], \"odin3_level\": 0}}}}}\n");
+}
+
+/* Finding 3 and E-2 placement: the level is a key of cells and netnames only; a module keeps its
+ * level attribute under attributes. Level then prov are the last two members, never in attributes. */
+static void test_level_key_placement(void) {
+    build_design();
+    odin3_module *mod = odin3_module_get(rj_design, (odin3_module_id){1});
+    set_int_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, 1}, "odin3_level", 5);
+    char *text = write_text("m.json", &k_odin3);
+    assert_has(text, "\"odin3_level\": \"00000000000000000000000000000101\"");
+    int keys = 0;
+    for (const char *at = strstr(text, "\"odin3_level\": "); at != NULL;
+         at = strstr(at + 1, "\"odin3_level\": ")) {
+        if (at[strlen("\"odin3_level\": ")] == '"') {
+            continue; /* the module's bit string under attributes */
+        }
+        keys++;
+        const char *after = strstr(at, ",\n");
+        TEST_ASSERT_NOT_NULL(after);
+        after += 2;
+        after += strspn(after, " ");
+        TEST_ASSERT_EQUAL_INT(0, strncmp(after, "\"odin3_prov\": {", strlen("\"odin3_prov\": {")));
+    }
+    TEST_ASSERT_EQUAL_INT(3, keys); /* g1, g2, n1 */
+    odin3_util_free(text);
 }
 
 /* --- V-7 (d): levels of a levelized BLIF survive write_json --odin3, read_json --------------- */
@@ -287,7 +371,13 @@ int main(void) {
     RUN_TEST(test_round_trip_abc);
     RUN_TEST(test_reader_sets_level_attribute_and_counts_prov);
     RUN_TEST(test_version_policy);
-    RUN_TEST(test_bad_prov_is_skipped_and_counted);
+    RUN_TEST(test_version_must_be_integer_one);
+    RUN_TEST(test_unknown_odin3_member_is_counted);
+    RUN_TEST(test_bad_prov_is_an_error);
+    RUN_TEST(test_good_prov_with_eight_hdl_is_read);
+    RUN_TEST(test_bad_level_is_an_error);
+    RUN_TEST(test_level_bounds_are_accepted);
+    RUN_TEST(test_level_key_placement);
     RUN_TEST(test_levels_survive_levelize_write_read);
     return UNITY_END();
 }

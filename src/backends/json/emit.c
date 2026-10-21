@@ -364,6 +364,10 @@ bool jw_claim(jw *out, odin3_wattr_role role, const char *key) {
  * out->status on failure. */
 static void hdl_text(jw *out, odin3_prov_id prov, uint32_t *written) {
     odin3_hdl_locs_out locs;
+    if (out->src_prov.v == prov.v && prov.v != 0) {
+        *written = out->src_written; /* already built for this object: one warning, not two */
+        return;
+    }
     *written = 0;
     odin3_status status = odin3_hdl_locs(out->hdl, prov, &locs);
     odin3_hdl_print_req req = {&locs, false};
@@ -373,6 +377,8 @@ static void hdl_text(jw *out, odin3_prov_id prov, uint32_t *written) {
     if (status != ODIN3_OK) {
         out->status = status;
     }
+    out->src_prov = prov;
+    out->src_written = *written;
 }
 
 void jw_src(jw *out, jw_list *list, odin3_prov_id prov) {
@@ -439,8 +445,10 @@ void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov)
     if (!out->odin3_keys || out->status != ODIN3_OK) {
         return;
     }
-    const odin3_value *level =
-        out->level_key != 0 ? odin3_attr_get(out->module, obj, out->level_key) : NULL;
+    /* E-2 limits the level to cells and netnames: a module keeps it under attributes */
+    const odin3_value *level = out->level_key != 0 && obj.kind != ODIN3_OBJ_MODULE
+                                   ? odin3_attr_get(out->module, obj, out->level_key)
+                                   : NULL;
     if (level != NULL && level->kind == ODIN3_VAL_INT) {
         jw_key(out, list, "odin3_level");
         jw_fmt(out, "%lld", (long long)level->i);
@@ -478,12 +486,13 @@ typedef struct user_attrs {
     jw_list *list;
     odin3_wattr_role role;
     bool is_node; /* only a cell has parameters: elsewhere `parameter:<NAME>` is an attribute */
+    bool level_is_key; /* --odin3 on a cell or netname: the level is the Odin III key only */
 } user_attrs;
 
 static odin3_status user_attr_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
     const user_attrs *ua = ctx;
     jw *out = ua->out;
-    if (out->odin3_keys && key_str == out->level_key && value->kind == ODIN3_VAL_INT) {
+    if (ua->level_is_key && key_str == out->level_key && value->kind == ODIN3_VAL_INT) {
         return out->status; /* E-2: under --odin3 the level is the Odin III key only */
     }
     odin3_wattr attr = odin3_wattr_classify(out->strtab, key_str, value);
@@ -524,7 +533,8 @@ void jw_user_attrs(jw *out, jw_list *list, odin3_objref obj, odin3_wattr_role ro
     if (out->status != ODIN3_OK) {
         return;
     }
-    user_attrs ctx = {out, list, role, obj.kind == ODIN3_OBJ_NODE};
+    user_attrs ctx = {out, list, role, obj.kind == ODIN3_OBJ_NODE,
+                      out->odin3_keys && obj.kind != ODIN3_OBJ_MODULE};
     odin3_status status = odin3_attr_foreach(out->module, obj, user_attr_visit, &ctx);
     out->status = out->status != ODIN3_OK ? out->status : status;
 }

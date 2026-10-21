@@ -71,10 +71,10 @@ static odin3_status add_port(jr *rd, odin3_module *module, const odin3_json_node
     if (jr_kind(port) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, port, &where, "the port is not an object");
     }
-    jr_audit(rd, port, PORT_KEYS, sizeof PORT_KEYS / sizeof PORT_KEYS[0]);
     odin3_port_spec spec = {.width = 0};
     odin3_wire_spec shape = {0};
-    odin3_status st = port_dir(rd, port, &where, &spec.dir);
+    odin3_status st = jr_audit(rd, port, PORT_KEYS, sizeof PORT_KEYS / sizeof PORT_KEYS[0]);
+    st = st == ODIN3_OK ? port_dir(rd, port, &where, &spec.dir) : st;
     uint32_t width = 0;
     if (st == ODIN3_OK) {
         st = jr_bits_count(rd, jr_member(port, "bits"), &(jr_where){"ports", where.key, "bits"},
@@ -225,7 +225,10 @@ static odin3_status describe(jr *rd, const odin3_json_node *obj, jr_mod *mod) {
     if (jr_kind(obj) != ODIN3_JSON_OBJECT) {
         return jr_error(rd, obj, NULL, "the module is not an object");
     }
-    jr_audit(rd, obj, MODULE_KEYS, sizeof MODULE_KEYS / sizeof MODULE_KEYS[0]);
+    odin3_status st = jr_audit(rd, obj, MODULE_KEYS, sizeof MODULE_KEYS / sizeof MODULE_KEYS[0]);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     const odin3_json_node *attrs = jr_member(obj, "attributes");
     const odin3_json_node *cells = jr_member(obj, "cells");
     const odin3_json_node *black = attrs != NULL ? jr_member(attrs, "blackbox") : NULL;
