@@ -254,6 +254,48 @@ static void test_index_sequential_flag(void) {
     odin3_fsm_index_free(&ix);
 }
 
+static const char *const k_gate_mod = "module \\m\n"
+                                      "  wire input 1 \\clk\n"
+                                      "  wire input 2 \\r\n"
+                                      "  wire input 3 \\d\n"
+                                      "  wire width 1 \\q1\n"
+                                      "  wire width 1 \\q2\n"
+                                      "  wire width 1 \\q3\n"
+                                      "  cell $_SDFF_PP0_ \\f1\n"
+                                      "    connect \\C \\clk\n"
+                                      "    connect \\R \\r\n"
+                                      "    connect \\D \\d\n"
+                                      "    connect \\Q \\q1\n"
+                                      "  end\n"
+                                      "  cell $_SDFFE_PP0P_ \\f2\n"
+                                      "    connect \\C \\clk\n"
+                                      "    connect \\R \\r\n"
+                                      "    connect \\E \\r\n"
+                                      "    connect \\D \\d\n"
+                                      "    connect \\Q \\q2\n"
+                                      "  end\n"
+                                      "  cell $_SDFFCE_PP0P_ \\f3\n"
+                                      "    connect \\C \\clk\n"
+                                      "    connect \\R \\r\n"
+                                      "    connect \\E \\r\n"
+                                      "    connect \\D \\d\n"
+                                      "    connect \\Q \\q3\n"
+                                      "  end\n"
+                                      "end\n";
+
+static void test_index_sync_reset_gate_ffs_are_sequential(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(k_gate_mod, &res));
+    odin3_fsm_index ix;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_fsm_index_build(res.design, res.module, &ix));
+    static const char *const k_q[] = {"q1", "q2", "q3"};
+    for (size_t i = 0; i < sizeof k_q / sizeof k_q[0]; i++) {
+        odin3_fsm_refs span = odin3_fsm_ix_refs(&ix, wire_net(k_q[i], 0));
+        TEST_ASSERT_EQUAL_UINT_MESSAGE(1, span.count, k_q[i]);
+        TEST_ASSERT_TRUE_MESSAGE((span.refs[0].flags & ODIN3_FSM_REF_SEQ) != 0, k_q[i]);
+    }
+    odin3_fsm_index_free(&ix);
+}
+
 static void test_index_ports_and_unknown(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, pb_build(k_mod, &res));
     odin3_fsm_index ix;
@@ -351,6 +393,7 @@ int main(void) {
     RUN_TEST(test_data_fill_oom);
     RUN_TEST(test_index_refs);
     RUN_TEST(test_index_sequential_flag);
+    RUN_TEST(test_index_sync_reset_gate_ffs_are_sequential);
     RUN_TEST(test_index_ports_and_unknown);
     RUN_TEST(test_index_constants);
     RUN_TEST(test_index_whole_wire);

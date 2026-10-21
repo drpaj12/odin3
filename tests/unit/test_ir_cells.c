@@ -32,13 +32,14 @@ enum {
     ROW_LEN = 4,
     N_TYPES = 68,
     STRUCTURAL_TYPES = 7,
+    DFFX_TYPES = 68,  /* the 5.3 follow-up flip-flops of dffx.h; tests/unit/test_dffx_cells.c */
     SOP_INDEX = 52,   /* the last 1B type; 2D appends after it (plan point (f)) */
     NEG_INDEX = 53,   /* the first of the nine 2D word cells (IR change A, EL-31) */
     POW_INDEX = 61,   /* the last of the nine */
     PROC_INDEX = 62,  /* the process cell (IR change B, EL-33), after the nine */
     ADFFE_INDEX = 63, /* the first of the eleven 2E flip-flops and latches (IR change D, §13) */
     SR_INDEX = 73,    /* the last of the eleven */
-    BUILTIN_COUNT = 75,
+    BUILTIN_COUNT = 143,
     FF_WIDE = 4, /* WIDTH of the pin-count and verify cases below */
     FF_WIDE_PINS = 11,
     DFFSRE_WIDTH = 3,
@@ -219,7 +220,8 @@ static void check_shape(const expect *exp) {
 static void test_every_builtin_has_expected_shape(void) {
     TEST_ASSERT_EQUAL_UINT32(N_TYPES, (uint32_t)N_EXPECT);
     /* 7 structural/constant types (Task 2) + every table row = every built-in type. */
-    TEST_ASSERT_EQUAL_UINT32(odin3_builtin_celltype_count, STRUCTURAL_TYPES + (uint32_t)N_EXPECT);
+    TEST_ASSERT_EQUAL_UINT32(odin3_builtin_celltype_count,
+                             STRUCTURAL_TYPES + (uint32_t)N_EXPECT + DFFX_TYPES);
     for (size_t i = 0; i < N_EXPECT; i++) {
         check_shape(&k_expect[i]);
     }

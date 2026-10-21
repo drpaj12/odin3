@@ -50,9 +50,9 @@ static node_kind kind_of(const odin3_design *design, const odin3_module *module,
 }
 
 /* Type-name prefixes of the sequential and memory cells (Yosys CellTypes::setup_internals_mem). */
-static const char *const k_seq_prefix[] = {"$dff",    "$adff",    "$sdff", "$aldff",
-                                           "$dlatch", "$adlatch", "$sr",   "$ff",
-                                           "$_DFF",   "$_DLATCH", "$_FF_", "$mem"};
+static const char *const k_seq_prefix[] = {"$dff",     "$adff", "$sdff", "$aldff", "$dlatch",
+                                           "$adlatch", "$sr",   "$ff",   "$_DFF",  "$_SDFF",
+                                           "$_DLATCH", "$_FF_", "$mem"};
 
 static bool is_seq(const odin3_design *design, const odin3_module *module, odin3_node_id node) {
     const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(module, node));

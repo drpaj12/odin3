@@ -386,6 +386,7 @@ add_library(odin3_core OBJECT
     src/ir/cells/tribuf.c
     src/ir/cells/gates.c
     src/ir/cells/dff.c
+    src/ir/cells/dffx.c
     src/ir/cells/sop.c
     src/ir/cells/proc.c
     src/ir/cells/lut.c
@@ -804,7 +805,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_read_json_locs)
     target_compile_definitions(test_read_json_locs PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_json_roundtrip)
-    target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
+    target_compile_definitions(test_json_roundtrip PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # Phase 6 (6.3): write_json --odin3 and the reader's handlers for its keys.
     odin3_add_unit_test(test_json_odin3)
     target_compile_definitions(test_json_odin3 PRIVATE ODIN3_RJ_ROOT="${PROJECT_BINARY_DIR}")
@@ -1248,6 +1250,8 @@ if(BUILD_TESTING)
     target_sources(test_lower_div PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_ff)
     target_sources(test_lower_ff PRIVATE tests/unit/lower_fixture.c tests/unit/lower_ffref.c)
+    odin3_add_unit_test(test_lower_gate_ff)
+    target_sources(test_lower_gate_ff PRIVATE tests/unit/lower_fixture.c)
     odin3_add_unit_test(test_lower_latch)
     target_sources(test_lower_latch PRIVATE tests/unit/lower_fixture.c tests/unit/lower_latchref.c)
     odin3_add_unit_test(test_lower_mem)
@@ -1281,7 +1285,7 @@ if(BUILD_TESTING)
                    tests/unit/proc_fixture_core.c)
     target_compile_definitions(test_lower_pass PRIVATE
         ODIN3_BLIF_DIR="${PROJECT_SOURCE_DIR}/tests/golden/blif")
-    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_ff test_lower_mem test_lower_corpus test_lower_pass PROPERTIES LABELS "unit;lower")
+    set_tests_properties(test_lower_kit test_lower_bitwise test_lower_pmux_shift test_lower_alu test_lower_mul test_lower_div test_lower_ff test_lower_gate_ff test_lower_mem test_lower_corpus test_lower_pass PROPERTIES LABELS "unit;lower")
     # 3B Task 2/3: lower-sim on the hand-built designs (the 1E simulator before = after; a design
     # with a $shiftx is reported skipped), the per-cell goldens (lower-cells) and the CLI line.
     # Labelled `lower`, never `fuzz`: the CI fuzz-smoke build has no odin3 binary.
@@ -1591,6 +1595,7 @@ if(BUILD_TESTING)
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_cells)
+    odin3_add_unit_test(test_dffx_cells)
     odin3_add_unit_test(test_sim_build)
     odin3_add_unit_test(test_sim_cycle)
     target_compile_definitions(test_sim_cycle PRIVATE
