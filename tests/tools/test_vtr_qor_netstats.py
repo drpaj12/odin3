@@ -23,7 +23,15 @@ from pathlib import Path
 from unittest import mock
 
 import qor_netstats
-from qor_netstats import AbcHeader, MalformedBlif, NetStats, abc_header, netstats
+from qor_netstats import (
+    AbcHeader,
+    MalformedBlif,
+    NetStats,
+    abc_header,
+    dead_hardblocks,
+    hardblocks_lost,
+    netstats,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "vtr_qor" / "netstats"
@@ -65,6 +73,75 @@ class TempTest(unittest.TestCase):
 
     def depth(self, text: str) -> int:
         return self.stats(text).depth
+
+
+class HardBlocksLostTest(TempTest):
+    """dead_hardblocks and hardblocks_lost: the guard for hard blocks that lose every reader."""
+
+    BEFORE = (
+        ".model top\n.inputs a\n.outputs o p\n"
+        ".subckt single_port_ram clk=a out=o\n.subckt single_port_ram clk=a out=p\n"
+        ".subckt adder a=a b=a cin=a cout=c sumout=s\n.names s q\n1 1\n.latch q r re a 0\n"
+        ".end\n.model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
+    )
+
+    def pair(self, after: str) -> tuple[Path, Path]:
+        before_path = self.write(self.BEFORE)
+        after_path = self.write(after, "after.blif")
+        return before_path, after_path
+
+    def test_nothing_dead_when_every_output_is_read(self) -> None:
+        self.assertEqual(dead_hardblocks(self.write(self.BEFORE)), {})
+
+    def test_dropped_outputs_make_rams_dead(self) -> None:
+        after = self.BEFORE.replace(".outputs o p\n", ".outputs\n")
+        before_path, after_path = self.pair(after)
+        self.assertEqual(dead_hardblocks(after_path), {"single_port_ram": 2})
+        self.assertEqual(hardblocks_lost(before_path, after_path), {"single_port_ram": 2})
+        self.assertEqual(hardblocks_lost(before_path, before_path), {})
+
+    def test_dead_before_is_not_a_loss_and_adder_needs_all_outputs_unread(self) -> None:
+        both = self.BEFORE.replace(".names s q\n1 1\n.latch q r re a 0\n", "")
+        before_path, after_path = self.pair(both)
+        self.assertEqual(dead_hardblocks(after_path), {"adder": 1})  # cout and sumout unread
+        self.assertEqual(hardblocks_lost(after_path, after_path), {})
+        self.assertEqual(hardblocks_lost(before_path, after_path), {"adder": 1})
+
+    def test_stub_outputs_and_dual_port_formals(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs o\n"
+            ".subckt dual_port_ram clk=a out1=o out2=x\n.subckt box i=a o[0]=u o[1]=v\n"
+            ".names u o2\n1 1\n.end\n.model box\n.inputs i\n.outputs o[0] o[1]\n"
+            ".blackbox\n.end\n"
+        )
+        self.assertEqual(dead_hardblocks(self.write(text)), {})
+        self.assertEqual(
+            dead_hardblocks(self.write(text.replace(".outputs o\n", ".outputs\n").replace(
+                ".names u o2\n1 1\n", ""), "d.blif")),
+            {"dual_port_ram": 1, "box": 1},
+        )
+
+    def test_chain_of_dead_blocks_is_reported_whole(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs\n"
+            ".subckt adder a=a b=a cin=a cout=c1 sumout=s1\n"
+            ".subckt adder a=s1 b=a cin=a cout=c2 sumout=s2\n.end\n"
+            ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
+        )
+        self.assertEqual(dead_hardblocks(self.write(text)), {"adder": 2})
+        live = text.replace(".outputs\n", ".outputs s2\n")
+        self.assertEqual(dead_hardblocks(self.write(live, "live.blif")), {})
+
+    def test_box_without_stub_warns_and_is_not_judged(self) -> None:
+        text = (
+            ".model top\n.inputs a\n.outputs\n.subckt mystery i=a o=u\n"
+            ".subckt adder a=u b=a cin=a cout=c sumout=s\n.end\n"
+        )
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            dead = dead_hardblocks(self.write(text))
+        self.assertEqual(dead, {"adder": 1})
+        self.assertIn("WARNING: cannot judge mystery: no stub", err.getvalue())
 
 
 class CountsTest(TempTest):

@@ -7,15 +7,33 @@
 .names vcc
 1
 .subckt adder a=vcc b=gnd cin=gnd cout=$n26 sumout=$n27
-.subckt adder a=a[0] b=b[0] cin=$n26 cout=$n28 sumout=y[0]
-.subckt adder a=a[1] b=b[1] cin=$n28 cout=$n30 sumout=y[1]
-.subckt adder a=a[2] b=b[2] cin=$n30 cout=$n32 sumout=y[2]
-.subckt adder a=a[3] b=b[3] cin=$n32 cout=$n34 sumout=y[3]
-.subckt adder a=a[4] b=b[4] cin=$n34 cout=$n36 sumout=y[4]
-.subckt adder a=a[5] b=b[5] cin=$n36 cout=$n38 sumout=y[5]
-.subckt adder a=a[6] b=gnd cin=$n38 cout=$n40 sumout=y[6]
-.subckt adder a=a[7] b=gnd cin=$n40 cout=$n42 sumout=y[7]
-.subckt adder a=gnd b=gnd cin=$n42 cout=$n44 sumout=y[8]
+.subckt adder a=a[0] b=b[0] cin=$n26 cout=$n28 sumout=$n15
+.subckt adder a=a[1] b=b[1] cin=$n28 cout=$n30 sumout=$n16
+.subckt adder a=a[2] b=b[2] cin=$n30 cout=$n32 sumout=$n17
+.subckt adder a=a[3] b=b[3] cin=$n32 cout=$n34 sumout=$n18
+.subckt adder a=a[4] b=b[4] cin=$n34 cout=$n36 sumout=$n19
+.subckt adder a=a[5] b=b[5] cin=$n36 cout=$n38 sumout=$n20
+.subckt adder a=a[6] b=gnd cin=$n38 cout=$n40 sumout=$n21
+.subckt adder a=a[7] b=gnd cin=$n40 cout=$n42 sumout=$n22
+.subckt adder a=gnd b=gnd cin=$n42 cout=$n44 sumout=$n23
+.names $n15 y[0]
+1 1
+.names $n16 y[1]
+1 1
+.names $n17 y[2]
+1 1
+.names $n18 y[3]
+1 1
+.names $n19 y[4]
+1 1
+.names $n20 y[5]
+1 1
+.names $n21 y[6]
+1 1
+.names $n22 y[7]
+1 1
+.names $n23 y[8]
+1 1
 .end
 
 .model adder

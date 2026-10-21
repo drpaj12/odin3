@@ -8,17 +8,20 @@
 1
 .names unconn
 .subckt adder a=vcc b=gnd cin=gnd cout=$add~1^ADD~0-0[0] sumout=$add~1^ADD~0-0~dummy_output~0~1
-.subckt adder a=$add~0^ADD~1-1[1] b=cin cin=$add~1^ADD~0-0[0] cout=$add~1^ADD~0-1[0] \
-  sumout=sumout~0
-.subckt adder a=$add~0^ADD~1-2[1] b=unconn cin=$add~1^ADD~0-1[0] cout=$add~1^ADD~0-2[0] \
-  sumout=sumout~1
-.subckt adder a=$add~0^ADD~1-3[1] b=unconn cin=$add~1^ADD~0-2[0] cout=$add~1^ADD~0-3[0] \
-  sumout=cout
+.subckt adder a=$add~0^ADD~1-1[1] b=cin cin=$add~1^ADD~0-0[0] cout=$add~1^ADD~0-1[0] sumout=$n6
+.subckt adder a=$add~0^ADD~1-2[1] b=unconn cin=$add~1^ADD~0-1[0] cout=$add~1^ADD~0-2[0] sumout=$n7
+.subckt adder a=$add~0^ADD~1-3[1] b=unconn cin=$add~1^ADD~0-2[0] cout=$add~1^ADD~0-3[0] sumout=$n8
 .subckt adder a=vcc b=gnd cin=gnd cout=$add~0^ADD~1-0[0] sumout=$add~0^ADD~1-0~dummy_output~0~1
 .subckt adder a=a~0 b=b~0 cin=$add~0^ADD~1-0[0] cout=$add~0^ADD~1-1[0] sumout=$add~0^ADD~1-1[1]
 .subckt adder a=a~1 b=b~1 cin=$add~0^ADD~1-1[0] cout=$add~0^ADD~1-2[0] sumout=$add~0^ADD~1-2[1]
 .subckt adder a=gnd b=gnd cin=$add~0^ADD~1-2[0] cout=$add~0^ADD~1-3~dummy_output~3~0 \
   sumout=$add~0^ADD~1-3[1]
+.names $n6 sumout~0
+1 1
+.names $n7 sumout~1
+1 1
+.names $n8 cout
+1 1
 .end
 
 .model adder

@@ -377,6 +377,20 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(self.both(once, twice, "--vtr-normalize"), 0)
         self.assertEqual(self.both(once, twice), 1)
 
+    def test_vtr_normalize_po_buffer_on_hard_block(self) -> None:
+        """The writer's `.names a y` buffer on an output a `.subckt` drives is dropped; a buffer
+        on any other output, or on a net something else reads, is kept."""
+        stub = ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
+        box = ".subckt adder a=a b=b cin=c cout=k sumout={s}\n"
+        head = ".model top\n.inputs a b c\n.outputs y\n"
+        direct = head + box.format(s="y") + ".end\n\n" + stub
+        buffered = (head + box.format(s="n") + ".names n y\n1 1\n.end\n\n" + stub)
+        self.assertEqual(self.both(direct, buffered, "--vtr-normalize"), 0)
+        self.assertEqual(self.both(direct, buffered), 1)
+        shared = (head.replace(".outputs y", ".outputs y z") + box.format(s="n")
+                  + ".names n y\n1 1\n.names n z\n1 1\n.end\n\n" + stub)
+        self.assertEqual(self.both(direct, shared, "--vtr-normalize"), 1)
+
     def test_vtr_normalize_latch_init(self) -> None:
         text = ".model top\n.inputs d c\n.outputs q\n.latch d q re c {i}\n.end\n"
         self.assertEqual(self.both(text.format(i="3"), text.format(i="2"), "--vtr-normalize"), 0)

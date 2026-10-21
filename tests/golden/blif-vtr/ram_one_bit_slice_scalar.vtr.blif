@@ -3,7 +3,9 @@
 .model ram_bit
 .inputs clk d a0 a1 w
 .outputs q
-.subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=clk data=d out=q we=w
+.subckt single_port_ram addr[0]=a0 addr[1]=a1 clk=clk data=d out=$n6 we=w
+.names $n6 q
+1 1
 .end
 
 .model single_port_ram

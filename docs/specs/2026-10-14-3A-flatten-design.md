@@ -24,6 +24,8 @@ step between `opt` and `hardmap`/`lower` in the Phase 3 script (PHASE3 exit test
 read_verilog --nolatches; proc; opt; flatten; opt -full; hardmap; lower; abc; write_blif --vtr
 ```
 
+`opt -full` after `flatten` as Parmys runs it: `flatten` leaves x mux data that plain `opt` keeps, which hides RAM reads (boundtop loses its 32 RAMs).
+
 3E's `--vtr` writer already refuses a hierarchical top (E10: "hierarchy not flattened (run
 flatten); VPR reads one model"); `lower` (3B) and `hardmap` (3C) work on one module, and `abc` (3D)
 reads one module's soft cone. 3A is the only producer of what they need.

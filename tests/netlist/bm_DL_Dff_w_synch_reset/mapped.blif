@@ -1,0 +1,12 @@
+
+.model bm_DL_Dff_w_synch_reset
+.inputs D Clock Resetn
+.outputs Q
+.names $false
+.names $true
+1
+.names $undef
+.subckt $_NAND_ A=D B=Resetn Y=$abc$89$new_n4
+.subckt $_NOT_ A=$abc$89$new_n4 Y=$abc$89$auto$rtlil.cc:3203:MuxGate$88
+.subckt $_DFF_P_ C=Clock D=$abc$89$auto$rtlil.cc:3203:MuxGate$88 Q=Q
+.end
