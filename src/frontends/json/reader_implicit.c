@@ -175,6 +175,9 @@ static odin3_status port_notes(const jr *rd, const jr_iport *port, odin3_strbuf 
         st = odin3_strbuf_appendf(text, "; %s: its net is also driven by '%s.%s'", name,
                                   jr_str(rd, peer->name_str), jr_str(rd, other->name_str));
     }
+    if (st == ODIN3_OK && (port->role & JR_ROLE_TIED) != 0) {
+        st = odin3_strbuf_appendf(text, "; %s: chosen as output: the type had none", name);
+    }
     if (st == ODIN3_OK && (port->role & JR_ROLE_UNDRIVEN) != 0) {
         st = odin3_strbuf_appendf(text, "; %s: its net bit %llu has no driver", name,
                                   (unsigned long long)port->net);

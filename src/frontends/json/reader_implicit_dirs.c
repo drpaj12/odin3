@@ -9,9 +9,10 @@
  * something known reads it and this is the only unknown port on it; input when a known driver is
  * on it; bidirectional when it is a module or cell inout; no vote for a dangling or ambiguous bit.
  * The votes of all modules settle a port per type (output only: output; input only or none:
- * input; both, or a bidirectional vote: inout). A second visit of the modules, with the settled
- * directions, finds the nets two outputs share and the ambiguous nets nothing drives; the WARNING
- * of the type (reader_implicit.c) names them.
+ * input; both, or a bidirectional vote: inout). A tie-break then gives a type that has no output
+ * one (tie_break), to a fixpoint. A further visit of the modules, with the settled directions,
+ * finds the nets two outputs share and the ambiguous nets nothing drives; the WARNING of the type
+ * (reader_implicit.c) names them.
  */
 #include "frontends/json/reader_internal.h"
 
@@ -28,14 +29,22 @@ enum {
     KEY_SHIFT = 32
 };
 
+/* Several different ports (or candidates) on a bit. */
+static const uint64_t MANY = UINT64_MAX;
+
 /* What a visit of the cells does. */
-typedef enum { SW_COUNT, SW_VOTE, SW_OWN, SW_UNDRIVEN, SW_END } dirs_sweep;
+typedef enum { SW_COUNT, SW_VOTE, SW_OWN, SW_UNDRIVEN, SW_CAND, SW_PICK, SW_END } dirs_sweep;
+
+/* The visits of the modules: the votes, the tie-break, the final visit. */
+enum { PL_VOTE, PL_TIE, PL_FINAL, PL_N };
 
 /* The state of one module's analysis: the flags of its bit labels. */
 typedef struct dirs_mod {
     jr *rd;
     odin3_u64map *bits;  /* label -> DF_* */
     odin3_u64map *owner; /* label -> ((type + 1) << 32) | (position + 1) of its first output */
+    odin3_u64map *ports; /* label -> the same, of the unknown port on it (MANY: different ports) */
+    odin3_u64map *cand;  /* label -> the same, of the tie-break candidate on it (MANY: several) */
     const odin3_json_node *cells;
 } dirs_mod;
 
@@ -274,10 +283,58 @@ static void undriven_conn(const dirs_mod *dm, jr_iport *port, const odin3_json_n
     }
 }
 
+/* A bit nothing, settled or known, drives, with two or more different unknown ports on it. */
+static bool ambiguous(const dirs_mod *dm, uint64_t label) {
+    uint64_t flags = flags_of(dm, label);
+    uint64_t port = 0;
+    return (flags & (DF_DRV | DF_BIDI | DF_ROUT | DF_RINO)) == 0 && (flags & DF_UM) != 0 &&
+           odin3_u64map_get(dm->ports, label, &port) && port == MANY;
+}
+
+/* The port self is on the bit label: the only one there so far, or MANY. */
+static odin3_status note_port(odin3_u64map *map, uint64_t label, uint64_t self) {
+    uint64_t cur = 0;
+    bool seen = odin3_u64map_get(map, label, &cur);
+    return odin3_u64map_put(map, (odin3_kv){label, !seen || cur == self ? self : MANY});
+}
+
+/* A connection: per bit, the unknown port on it (or MANY) and the one candidate port (or MANY). */
+static odin3_status cand_conn(dirs_mod *dm, const dirs_ref *ref, const odin3_json_node *conn) {
+    odin3_status st = ODIN3_OK;
+    uint64_t label = 0;
+    uint64_t self = pack_ref(ref);
+    for (const odin3_json_node *elem = jr_first(conn); st == ODIN3_OK && elem != NULL;
+         elem = odin3_json_next(elem)) {
+        if (label_of(elem, &label)) {
+            st = note_port(dm->ports, label, self);
+            st = st == ODIN3_OK && ref->port->want ? note_port(dm->cand, label, self) : st;
+        }
+    }
+    return st;
+}
+
+/* A candidate that is alone on an ambiguous bit is picked. */
+static void pick_conn(const dirs_mod *dm, jr_iport *port, uint64_t self,
+                      const odin3_json_node *conn) {
+    uint64_t label = 0;
+    for (const odin3_json_node *elem = jr_first(conn); elem != NULL && port->want;
+         elem = odin3_json_next(elem)) {
+        uint64_t cur = 0;
+        if (label_of(elem, &label) && odin3_u64map_get(dm->cand, label, &cur) && cur == self &&
+            ambiguous(dm, label)) {
+            port->pick = true;
+        }
+    }
+}
+
 static odin3_status visit_conn(dirs_mod *dm, const dirs_ref *ref, const odin3_json_node *conn,
                                dirs_sweep sweep) {
     odin3_status st = ODIN3_OK;
-    if (sweep == SW_COUNT) {
+    if (sweep == SW_CAND) {
+        st = cand_conn(dm, ref, conn);
+    } else if (sweep == SW_PICK) {
+        pick_conn(dm, ref->port, pack_ref(ref), conn);
+    } else if (sweep == SW_COUNT) {
         st = count_conn(dm, conn);
     } else if (sweep == SW_VOTE) {
         vote_conn(dm, ref->port, conn);
@@ -304,18 +361,22 @@ static odin3_status visit_cell(dirs_mod *dm, const odin3_json_node *cell, dirs_s
 
 /* The visits of a phase: 0 votes; 1 (with the settled directions) finds conflicts and nets that
  * nothing drives. */
-static const dirs_sweep k_plan[2][SW_END] = {
-    {SW_COUNT, SW_VOTE, SW_END, SW_END},
-    {SW_COUNT, SW_OWN, SW_UNDRIVEN, SW_END},
+static const dirs_sweep k_plan[PL_N][SW_END] = {
+    {SW_COUNT, SW_VOTE, SW_END, SW_END, SW_END, SW_END},
+    {SW_COUNT, SW_OWN, SW_CAND, SW_PICK, SW_END, SW_END},
+    {SW_COUNT, SW_OWN, SW_UNDRIVEN, SW_END, SW_END, SW_END},
 };
 
 static odin3_status infer_module(jr *rd, const jr_mod *mod, int phase) {
     dirs_mod dm = {.rd = rd,
                    .bits = odin3_u64map_create(0),
                    .owner = odin3_u64map_create(0),
+                   .ports = odin3_u64map_create(0),
+                   .cand = odin3_u64map_create(0),
                    .cells = jr_member(mod->node, "cells")};
-    odin3_status st = dm.bits != NULL && dm.owner != NULL ? mark_module_ports(&dm, mod->node)
-                                                          : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = dm.bits != NULL && dm.owner != NULL && dm.cand != NULL && dm.ports != NULL
+                          ? mark_module_ports(&dm, mod->node)
+                          : ODIN3_ERR_NO_MEMORY;
     for (const odin3_json_node *cell = jr_first(dm.cells); st == ODIN3_OK && cell != NULL;
          cell = odin3_json_next(cell)) {
         st = mark_cell_drivers(&dm, cell);
@@ -328,29 +389,106 @@ static odin3_status infer_module(jr *rd, const jr_mod *mod, int phase) {
     }
     odin3_u64map_destroy(dm.bits);
     odin3_u64map_destroy(dm.owner);
+    odin3_u64map_destroy(dm.cand);
+    odin3_u64map_destroy(dm.ports);
     return jr_fail(rd, st);
 }
 
-/* Settles every unknown port from its votes. */
+/* Settles every unknown port from its votes (a tied one is the output). */
 static void settle_ports(jr *rd) {
     for (size_t entry = 0; entry < rd->implicit.len; entry++) {
         jr_implicit *type = odin3_vec_at(&rd->implicit, entry);
         for (size_t pos = 0; pos < type->ports.len; pos++) {
             jr_iport *port = odin3_vec_at(&type->ports, pos);
             if (!port->dir_known) {
-                port->def.dir = jr_role_dir(port->role);
+                port->def.dir =
+                    (port->role & JR_ROLE_TIED) != 0 ? ODIN3_DIR_OUT : jr_role_dir(port->role);
             }
         }
     }
 }
 
+/* Whether the type has a port that is an output or inout. */
+static bool has_output(const jr_implicit *type) {
+    for (size_t pos = 0; pos < type->ports.len; pos++) {
+        if (((const jr_iport *)odin3_vec_cat(&type->ports, pos))->def.dir != ODIN3_DIR_IN) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Marks the candidates: the ports with no votes of a type that has no output. */
+static void mark_wanting(jr *rd) {
+    for (size_t entry = 0; entry < rd->implicit.len; entry++) {
+        jr_implicit *type = odin3_vec_at(&rd->implicit, entry);
+        bool none = !has_output(type);
+        for (size_t pos = 0; pos < type->ports.len; pos++) {
+            jr_iport *port = odin3_vec_at(&type->ports, pos);
+            uint8_t votes = port->role & (JR_ROLE_OUT | JR_ROLE_IN | JR_ROLE_BIDI);
+            port->want = none && !port->dir_known && votes == 0;
+            port->pick = false;
+        }
+    }
+}
+
+/* A type with no output and exactly one picked port makes it the output; true when one did. */
+static bool give_outputs(jr *rd) {
+    bool changed = false;
+    for (size_t entry = 0; entry < rd->implicit.len; entry++) {
+        jr_implicit *type = odin3_vec_at(&rd->implicit, entry);
+        size_t picked = 0;
+        jr_iport *last = NULL;
+        for (size_t pos = 0; pos < type->ports.len; pos++) {
+            jr_iport *port = odin3_vec_at(&type->ports, pos);
+            picked += port->pick ? 1U : 0U;
+            last = port->pick ? port : last;
+        }
+        if (picked == 1) {
+            last->role |= JR_ROLE_TIED;
+            last->def.dir = ODIN3_DIR_OUT;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/* The tie-break, a fixpoint: every cell type should have an output. On an ambiguous bit (nothing
+ * known drives it, two or more unknown ports, none settled as output) the only port of a type with
+ * no output becomes that type's output, if it is the type's only such port. Two output-less types
+ * on the bit, or two candidate ports of a type, stay inputs (no guess by order or by name). */
+static odin3_status tie_break(jr *rd) {
+    odin3_status st = ODIN3_OK;
+    bool changed = true;
+    for (size_t round = 0; changed && st == ODIN3_OK && round <= rd->implicit.len; round++) {
+        mark_wanting(rd);
+        for (uint32_t idx = 0; st == ODIN3_OK && idx < rd->mods.len; idx++) {
+            st = infer_module(rd, odin3_vec_cat(&rd->mods, idx), PL_TIE);
+        }
+        changed = give_outputs(rd);
+    }
+    for (size_t entry = 0; entry < rd->implicit.len; entry++) {
+        jr_implicit *type = odin3_vec_at(&rd->implicit, entry);
+        for (size_t pos = 0; pos < type->ports.len; pos++) {
+            jr_iport *port = odin3_vec_at(&type->ports, pos);
+            port->peer_type = 0;
+            port->peer_port = 0;
+        }
+    }
+    return st;
+}
+
 odin3_status jr_infer_implicit(jr *rd) {
     odin3_status st = ODIN3_OK;
     for (int phase = 0; phase < 2 && rd->implicit.len > 0; phase++) {
+        int plan = phase == 0 ? PL_VOTE : PL_FINAL;
         for (uint32_t idx = 0; st == ODIN3_OK && idx < rd->mods.len; idx++) {
-            st = infer_module(rd, odin3_vec_cat(&rd->mods, idx), phase);
+            st = infer_module(rd, odin3_vec_cat(&rd->mods, idx), plan);
         }
         settle_ports(rd);
+        if (phase == 0 && st == ODIN3_OK) {
+            st = tie_break(rd);
+        }
     }
     return st;
 }

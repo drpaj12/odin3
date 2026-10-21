@@ -11,8 +11,9 @@
  * when a known driver is on it; bidirectional when it is a module or cell inout; no vote for a
  * dangling or ambiguous bit (a constant casts none). The votes of all modules settle a port per
  * cell type (output only: output; input only or none: input; both, or a bidirectional vote:
- * inout). A second visit of the modules, with the settled directions, finds the nets two outputs
- * share and the ambiguous nets nothing drives. One WARNING per cell type lists the directions and
+ * inout). A tie-break then gives a type that has no output one (see tie_break), to a fixpoint. A
+ * further visit of the modules, with the settled directions, finds the nets two outputs share and
+ * the ambiguous nets nothing drives. One WARNING per cell type lists the directions and
  * those notes.
  */
 #include "frontends/verilog/elab1.h"
@@ -50,6 +51,9 @@ enum {
     BD_GATE_NOTIF1 = ODIN3_AST_GATE_DECL_NOTIF1
 };
 
+/* Several different ports (or candidates) on a bit. */
+static const uint32_t BD_MANY = UINT32_MAX;
+
 /* A closed range of bit indices (any order). */
 typedef struct bd_span {
     int64_t lo;
@@ -58,7 +62,8 @@ typedef struct bd_span {
 
 /* One net of the module being analysed: bits lo .. lo + width - 1, one flag byte each (a net wider
  * than BD_MAX_BITS, or with a range that is not constant, is one bit, coarse), and the port + 1 of
- * the first settled output on each. */
+ * the first settled output on each, and the tie-break candidate port + 1 on each (BD_MANY:
+ * several). */
 typedef struct bd_net {
     int64_t lo;
     uint32_t width;
@@ -66,6 +71,8 @@ typedef struct bd_net {
     bool coarse;
     uint8_t *bits;
     uint32_t *own;
+    uint32_t *cand;
+    uint32_t *ports; /* the port + 1 on each bit (BD_MANY: two or more different ports) */
 } bd_net;
 
 /* Bits first .. first + count - 1 (offsets from the net's low bit) of net (an index). */
@@ -76,7 +83,10 @@ typedef struct bd_seg {
 } bd_seg;
 
 /* What a visit of the implicit instances does. */
-typedef enum { BS_COUNT, BS_VOTE, BS_OWN, BS_UNDRIVEN, BS_END } bd_sweep;
+typedef enum { BS_COUNT, BS_VOTE, BS_OWN, BS_UNDRIVEN, BS_CAND, BS_PICK, BS_END } bd_sweep;
+
+/* The visits of the modules: the votes, the tie-break, the final visit. */
+enum { BP_VOTE, BP_TIE, BP_FINAL, BP_N };
 
 /* The state of one implicit port (indexed like odin3_elab1.bbports). */
 typedef struct bd_pstate {
@@ -86,6 +96,9 @@ typedef struct bd_pstate {
     uint32_t net;  /* an ambiguous net nothing drives (a name), when has_net */
     uint32_t peer; /* +1: another settled output on a net this port drives */
     uint32_t box;  /* +1: its black box */
+    bool want;     /* a tie-break candidate: no votes, and its type has no output */
+    bool pick;     /* the only candidate on an ambiguous bit */
+    bool tied;     /* given as output by the tie-break */
 } bd_pstate;
 
 /* The run: per implicit-port state and the stores. */
@@ -95,7 +108,7 @@ typedef struct bd_run {
     odin3_arena *arena;
     odin3_u64map *modules; /* MODULE name -> node + 1 */
     bd_pstate *ps;
-    bool settled; /* the votes are in: the second visit of the modules */
+    int plan; /* BP_*: which visit of the modules this is */
     odin3_status st;
 } bd_run;
 
@@ -168,8 +181,10 @@ static bool net_of(bd_mod *mod, uint32_t name, odin3_ast_id range, uint32_t *idx
     net->coarse = coarse;
     net->bits = odin3_arena_alloc(run->arena, net->width);
     net->own = odin3_arena_alloc(run->arena, net->width * sizeof *net->own);
+    net->cand = odin3_arena_alloc(run->arena, net->width * sizeof *net->cand);
+    net->ports = odin3_arena_alloc(run->arena, net->width * sizeof *net->ports);
     *idx = (uint32_t)mod->netv.len - 1;
-    if (net->bits == NULL || net->own == NULL ||
+    if (net->bits == NULL || net->own == NULL || net->cand == NULL || net->ports == NULL ||
         latch(run, odin3_u64map_put(mod->nets, (odin3_kv){name, mod->netv.len}))) {
         latch(run, ODIN3_ERR_NO_MEMORY);
         return false;
@@ -546,8 +561,50 @@ static void undriven_conn(const bd_mod *mod, uint32_t tp) {
     }
 }
 
+/* A bit nothing, settled or known, drives, with two or more different unknown ports on it (the
+ * same port of several instances is not enough: it would give them all one net to drive). */
+static bool ambiguous(const bd_net *net, uint32_t bit) {
+    uint8_t flags = net->bits[bit];
+    return (flags & (BD_DRV | BD_BIDI | BD_ROUT | BD_RINO)) == 0 && (flags & BD_UM) != 0 &&
+           net->ports[bit] == BD_MANY;
+}
+
+/* A connection: per bit, the unknown port on it (or BD_MANY) and the one candidate port (or
+ * BD_MANY). */
+static void cand_conn(const bd_mod *mod, uint32_t tp) {
+    for (size_t at = 0; at < mod->segs.len; at++) {
+        const bd_seg *seg = odin3_vec_cat(&mod->segs, at);
+        const bd_net *net = odin3_vec_cat(&mod->netv, seg->net);
+        for (uint32_t i = 0; i < seg->count; i++) {
+            uint32_t *port = &net->ports[seg->first + i];
+            uint32_t *cand = &net->cand[seg->first + i];
+            *port = *port == 0 || *port == tp + 1 ? tp + 1 : BD_MANY;
+            if (mod->run->ps[tp].want) {
+                *cand = *cand == 0 || *cand == tp + 1 ? tp + 1 : BD_MANY;
+            }
+        }
+    }
+}
+
+/* A candidate that is alone on an ambiguous bit is picked. */
+static void pick_conn(const bd_mod *mod, uint32_t tp) {
+    bd_pstate *state = &mod->run->ps[tp];
+    for (size_t at = 0; at < mod->segs.len && state->want; at++) {
+        const bd_seg *seg = odin3_vec_cat(&mod->segs, at);
+        const bd_net *net = odin3_vec_cat(&mod->netv, seg->net);
+        for (uint32_t i = 0; i < seg->count; i++) {
+            state->pick = state->pick ||
+                          (net->cand[seg->first + i] == tp + 1 && ambiguous(net, seg->first + i));
+        }
+    }
+}
+
 static void visit_conn(bd_mod *mod, uint32_t tp) {
-    if (mod->sweep == BS_COUNT) {
+    if (mod->sweep == BS_CAND) {
+        cand_conn(mod, tp);
+    } else if (mod->sweep == BS_PICK) {
+        pick_conn(mod, tp);
+    } else if (mod->sweep == BS_COUNT) {
         count_conn(mod);
     } else if (mod->sweep == BS_VOTE) {
         vote_conn(mod, tp);
@@ -630,9 +687,10 @@ static void scan_drivers(bd_mod *mod, odin3_ast_id item) {
 
 /* The visits of a phase: the first collects the votes; the second (with the settled directions)
  * finds conflicts and nets that nothing drives. */
-static const bd_sweep k_plan[2][BS_END] = {
-    {BS_COUNT, BS_VOTE, BS_END, BS_END},
-    {BS_COUNT, BS_OWN, BS_UNDRIVEN, BS_END},
+static const bd_sweep k_plan[BP_N][BS_END] = {
+    {BS_COUNT, BS_VOTE, BS_END, BS_END, BS_END, BS_END},
+    {BS_COUNT, BS_OWN, BS_CAND, BS_PICK, BS_END, BS_END},
+    {BS_COUNT, BS_OWN, BS_UNDRIVEN, BS_END, BS_END, BS_END},
 };
 
 static void analyse_module(bd_run *run, odin3_ast_id module) {
@@ -651,8 +709,8 @@ static void analyse_module(bd_run *run, odin3_ast_id module) {
     for (uint32_t i = 2; i < items.n && run->st == ODIN3_OK; i++) {
         scan_drivers(&mod, items.ids[i]);
     }
-    for (int step = 0; k_plan[run->settled][step] != BS_END; step++) {
-        mod.sweep = k_plan[run->settled][step];
+    for (int step = 0; k_plan[run->plan][step] != BS_END; step++) {
+        mod.sweep = k_plan[run->plan][step];
         for (uint32_t i = 2; i < items.n && run->st == ODIN3_OK; i++) {
             if (odin3_ast_kind_of(run->ast, items.ids[i]) == ODIN3_AST_INSTANTIATION) {
                 classify_instances(&mod, items.ids[i]);
@@ -705,6 +763,9 @@ static void port_notes(bd_run *run, uint32_t tp, odin3_strbuf *text) {
         latch(run, odin3_strbuf_appendf(text, "; %s: its net is also driven by '%s.%s'", name,
                                         odin3_elab1_str(run->e1, box->name),
                                         odin3_elab1_str(run->e1, port->port.name)));
+    }
+    if (state->tied) {
+        latch(run, odin3_strbuf_appendf(text, "; %s: chosen as output: the type had none", name));
     }
     if (state->has_net) {
         latch(run, odin3_strbuf_appendf(text, "; %s: its net '%s' has no driver", name,
@@ -768,14 +829,85 @@ static void index_ports(bd_run *run) {
 
 static void settle_votes(bd_run *run) {
     for (size_t tp = 0; tp < run->e1->bbports.len; tp++) {
-        run->ps[tp].dir = (uint8_t)settled(run->ps[tp].votes);
+        bd_pstate *state = &run->ps[tp];
+        state->dir = state->tied ? ODIN3_DIR_OUT : (uint8_t)settled(state->votes);
+    }
+}
+
+/* Whether the black box (an index) has a port settled as output or inout. */
+static bool has_output(const bd_run *run, const odin3_elab1_bbox *box) {
+    for (uint32_t at = box->first_port; at != 0;) {
+        if (run->ps[at - 1].dir != ODIN3_DIR_IN) {
+            return true;
+        }
+        at = ((const odin3_elab1_bbport *)odin3_vec_cat(&run->e1->bbports, at - 1))->next;
+    }
+    return false;
+}
+
+/* Marks the tie-break candidates: the ports with no votes of a type that has no output. */
+static void mark_wanting(bd_run *run) {
+    for (uint32_t idx = 0; idx < run->e1->bboxes.len; idx++) {
+        const odin3_elab1_bbox *box = odin3_elab1_bbox_at(run->e1, idx);
+        bool none = box->implicit && !has_output(run, box);
+        for (uint32_t at = box->first_port; at != 0;) {
+            bd_pstate *state = &run->ps[at - 1];
+            state->want = none && state->votes == 0;
+            state->pick = false;
+            at = ((const odin3_elab1_bbport *)odin3_vec_cat(&run->e1->bbports, at - 1))->next;
+        }
+    }
+}
+
+/* A type with no output and exactly one picked port makes it the output; true when one did. */
+static bool give_outputs(bd_run *run) {
+    bool changed = false;
+    for (uint32_t idx = 0; idx < run->e1->bboxes.len; idx++) {
+        const odin3_elab1_bbox *box = odin3_elab1_bbox_at(run->e1, idx);
+        uint32_t picked = 0;
+        uint32_t last = 0;
+        for (uint32_t at = box->first_port; at != 0;) {
+            picked += run->ps[at - 1].pick ? 1U : 0U;
+            last = run->ps[at - 1].pick ? at : last;
+            at = ((const odin3_elab1_bbport *)odin3_vec_cat(&run->e1->bbports, at - 1))->next;
+        }
+        if (picked == 1) {
+            run->ps[last - 1].tied = true;
+            run->ps[last - 1].dir = ODIN3_DIR_OUT;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+/* The tie-break, a fixpoint: every cell type should have an output. On an ambiguous bit (nothing
+ * known drives it, two or more unknown ports, none settled as output) the only port of a type with
+ * no output becomes that type's output, if it is the type's only such port. Two output-less types
+ * on the bit, or two candidate ports of a type, stay inputs (no guess by order or by name). */
+static void tie_break(bd_run *run, const odin3_ast_id *ids, uint32_t n) {
+    run->plan = BP_TIE;
+    bool changed = true;
+    for (uint32_t round = 0; changed && round <= run->e1->bboxes.len && run->st == ODIN3_OK;
+         round++) {
+        mark_wanting(run);
+        for (uint32_t i = 0; i < n && run->st == ODIN3_OK; i++) {
+            bool body = odin3_ast_kind_of(run->ast, ids[i]) == ODIN3_AST_MODULE &&
+                        odin3_ast_nchild(run->ast, ids[i]) > 2;
+            if (body) {
+                analyse_module(run, ids[i]);
+            }
+        }
+        changed = give_outputs(run);
+    }
+    for (size_t tp = 0; tp < run->e1->bbports.len; tp++) {
+        run->ps[tp].peer = 0;
     }
 }
 
 /* Runs both visits of every module with a body (the second with the settled directions). */
 static void analyse_modules(bd_run *run, const odin3_ast_id *ids, uint32_t n) {
     for (int phase = 0; phase < 2 && run->st == ODIN3_OK; phase++) {
-        run->settled = phase == 1;
+        run->plan = phase == 0 ? BP_VOTE : BP_FINAL;
         for (uint32_t i = 0; i < n && run->st == ODIN3_OK; i++) {
             bool body = odin3_ast_kind_of(run->ast, ids[i]) == ODIN3_AST_MODULE &&
                         odin3_ast_nchild(run->ast, ids[i]) > 2;
@@ -784,6 +916,9 @@ static void analyse_modules(bd_run *run, const odin3_ast_id *ids, uint32_t n) {
             }
         }
         settle_votes(run);
+        if (phase == 0 && run->st == ODIN3_OK) {
+            tie_break(run, ids, n);
+        }
     }
 }
 

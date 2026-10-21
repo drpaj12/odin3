@@ -892,19 +892,18 @@ static void expect_warn_has(const char *text) {
 }
 
 /* A chain of two unknown types: the directions do not depend on the order of the instances.
- * Nothing known tells which of foo.Q and bar.D drives net m, so both are inputs (bar.Q drives the
- * module output), and the WARNING names the net that stays without a driver. */
+ * Nothing known tells which of foo.Q and bar.D drives net m, but foo has no output and bar has one
+ * (Q drives the module output), so the tie-break makes foo.Q the output. */
 static void check_chain(const char *src) {
     run_req(src, &k_auto, NULL);
     expect_clean();
-    const char *const foo[] = {"A input", "Q input"};
+    const char *const foo[] = {"A input", "Q output"};
     const char *const bar[] = {"D input", "Q output"};
     expect_dirs("foo", foo, 2);
     expect_dirs("bar", bar, 2);
-    expect_warn_has(
-        "'foo': inferred port directions: A=input, Q=input; Q: its net 'm' has no driver");
-    expect_warn_has(
-        "'bar': inferred port directions: D=input, Q=output; D: its net 'm' has no driver");
+    expect_warn_has("'foo': inferred port directions: A=input, Q=output; Q: chosen as output: the "
+                    "type had none");
+    expect_warn_has("'bar': inferred port directions: D=input, Q=output");
 }
 
 static void test_implicit_dirs_order_consumer_first(void) {
@@ -935,6 +934,32 @@ static void test_implicit_dirs_voted_chain_orders(void) {
     check_chain_voted("module top (input a, output y);\n  wire m, z;\n  foo u2 (.A(a), .Q(z));\n"
                       "  assign y = z;\n  foo u (.A(a), .Q(m));\n  bar v (.D(m), .Q(y));\n"
                       "endmodule\n");
+}
+
+/* Two types with no output share net m: neither is chosen (no guess by order or name). */
+static void test_implicit_dirs_tie_two_types(void) {
+    run_req("module top (input a, output y);\n  wire m;\n  foo u (.A(a), .Q(m));\n"
+            "  bar v (.D(m), .E(a));\n  assign y = a;\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const foo[] = {"A input", "Q input"};
+    const char *const bar[] = {"D input", "E input"};
+    expect_dirs("foo", foo, 2);
+    expect_dirs("bar", bar, 2);
+    expect_warn_has(
+        "'foo': inferred port directions: A=input, Q=input; Q: its net 'm' has no driver");
+}
+
+/* A type with no output and two candidate ports stays ambiguous. */
+static void test_implicit_dirs_tie_two_ports(void) {
+    run_req("module top (input a, output y);\n  wire m1, m2;\n"
+            "  foo u (.A(a), .P(m1), .Q(m2));\n  bar v (.D(m1), .E(m2), .Q(y));\nendmodule\n",
+            &k_auto, NULL);
+    expect_clean();
+    const char *const foo[] = {"A input", "P input", "Q input"};
+    expect_dirs("foo", foo, 3);
+    expect_warn_has("'foo': inferred port directions: A=input, P=input, Q=input; P: its net 'm1' "
+                    "has no driver; Q: its net 'm2' has no driver");
 }
 
 /* A floating input at one instance casts no vote: it does not make the port an output. */
@@ -1200,6 +1225,8 @@ static void run_implicit_tests(void) {
     RUN_TEST(test_implicit_dirs_order_consumer_first);
     RUN_TEST(test_implicit_dirs_order_producer_first);
     RUN_TEST(test_implicit_dirs_voted_chain_orders);
+    RUN_TEST(test_implicit_dirs_tie_two_types);
+    RUN_TEST(test_implicit_dirs_tie_two_ports);
     RUN_TEST(test_implicit_dirs_floating_input);
     RUN_TEST(test_implicit_dirs_mixed_slice_inout);
     RUN_TEST(test_implicit_dirs_constant);

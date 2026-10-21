@@ -208,20 +208,19 @@ static void test_implicit_infers_known_and_inout(void) {
 
 /* The directions do not depend on the order of the cells (Yosys writes them alphabetically, and a
  * consumer is often before its producer). Nothing known tells which of mystery.Q and other.D drives
- * bit 3, so both are inputs and the warning names the bit that stays without a driver. */
+ * bit 3, but mystery has no output and other has one, so mystery.Q is chosen as the output. */
 static void check_chain(const char *first, const char *second) {
     char both[1024];
     (void)snprintf(both, sizeof both, "%s, %s", first, second);
     const char *json = top_json(IN_PORT("a", "[2]") ", " OUT_PORT("y", "[4]"), both);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
-    const odin3_dir mystery[] = {ODIN3_DIR_IN, ODIN3_DIR_IN};
+    const odin3_dir mystery[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT};
     const odin3_dir other[] = {ODIN3_DIR_IN, ODIN3_DIR_OUT};
     expect_type_dirs("mystery", mystery, 2);
     expect_type_dirs("other", other, 2);
-    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, Q=input; Q: its "
-               "net bit 3 has no driver");
-    rj_log_has("implicit black box 'other': inferred port directions: D=input, Q=output; D: its "
-               "net bit 3 has no driver");
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, Q=output; Q: "
+               "chosen as output: the type had none");
+    rj_log_has("implicit black box 'other': inferred port directions: D=input, Q=output");
 }
 
 static void test_implicit_infers_order_independent(void) {
@@ -235,6 +234,33 @@ static void test_implicit_infers_order_independent(void) {
     const char *cons2 = "\"b_cons\": {\"type\": \"other\", \"connections\": {\"D\": [3], "
                         "\"Q\": [4]}}";
     check_chain(prod2, cons2);
+}
+
+/* Two types with no output share bit 3: neither is chosen (no guess by order or name). */
+static void test_implicit_tie_two_types(void) {
+    const char *json =
+        top_json(IN_PORT("a", "[2]"),
+                 "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"Q\": [3]}}, "
+                 "\"v\": {\"type\": \"other\", \"connections\": {\"D\": [3], \"E\": [2]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_IN};
+    expect_type_dirs("mystery", want, 2);
+    expect_type_dirs("other", want, 2);
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, Q=input; Q: its "
+               "net bit 3 has no driver");
+}
+
+/* A type with no output and two candidate ports stays ambiguous. */
+static void test_implicit_tie_two_ports(void) {
+    const char *json = top_json(
+        IN_PORT("a", "[2]") ", " OUT_PORT("y", "[5]"),
+        "\"u\": {\"type\": \"mystery\", \"connections\": {\"A\": [2], \"P\": [3], \"Q\": [4]}}, "
+        "\"v\": {\"type\": \"other\", \"connections\": {\"D\": [3], \"E\": [4], \"Q\": [5]}}");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, rj_read_opts(json, &k_auto));
+    const odin3_dir want[] = {ODIN3_DIR_IN, ODIN3_DIR_IN, ODIN3_DIR_IN};
+    expect_type_dirs("mystery", want, 3);
+    rj_log_has("implicit black box 'mystery': inferred port directions: A=input, P=input, "
+               "Q=input; P: its net bit 3 has no driver; Q: its net bit 4 has no driver");
 }
 
 /* A floating input at one cell casts no vote; one connection with an input bit and an output bit,
@@ -870,6 +896,8 @@ int main(void) {
     RUN_TEST(test_implicit_infers_known_and_inout);
     RUN_TEST(test_implicit_infers_text_parity);
     RUN_TEST(test_implicit_infers_order_independent);
+    RUN_TEST(test_implicit_tie_two_types);
+    RUN_TEST(test_implicit_tie_two_ports);
     RUN_TEST(test_implicit_infers_floating_slices_constants);
     RUN_TEST(test_implicit_infers_conflict_both_ports);
     RUN_TEST(test_implicit_type_refused);

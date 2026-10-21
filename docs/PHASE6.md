@@ -89,6 +89,10 @@ the Phase 3 design set and the Phase 5 LPM micros.
    input votes or none, input; both kinds or an `inout` vote, `inout` with a WARNING note (no false
    two-driver error). There is no "first in source order" rule: a net with several unknown ports and
    no known driver casts no vote, and when no settled output drives it the WARNING names the net.
+   Tie-break (agent default, 2026-10-21): every cell type should have an output, so on an ambiguous
+   net the only port of an output-less type becomes that type's output (fixpoint; two output-less
+   types on the net, or two candidate ports in a type, stay inputs; the WARNING says "chosen as
+   output: the type had none").
    Two settled outputs on one net are reported in the WARNING naming both ports. `read_json
    --auto-blackbox` follows the same rule, with the same text, when no cell gives
    `port_directions`.
