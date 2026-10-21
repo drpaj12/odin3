@@ -34,6 +34,8 @@ extern const odin3_pass_def odin3_pass_names;
 extern const odin3_pass_def odin3_pass_dump_locs;
 /* src/passes/levelize/levelize.c (Phase 6, 6.4): levelize. */
 extern const odin3_pass_def odin3_pass_levelize;
+/* src/passes/submod/register.c (Phase 7, 7.4a): submod. */
+extern const odin3_pass_def odin3_pass_submod;
 extern const odin3_pass_def odin3_pass_preprocess;
 extern const odin3_pass_def odin3_pass_proc;
 /* src/passes/opt/register.c (2F Task 4): the eight opt passes. */

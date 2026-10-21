@@ -108,6 +108,8 @@ add_library(odin3_core OBJECT
     src/passes/names.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
+    src/passes/submod/submod.c
+    src/passes/submod/register.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1687,6 +1689,9 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif/pow.parmys.blif
                 ${PROJECT_BINARY_DIR}/levelize_micro refuse)
     set_tests_properties(levelize_micro_word_refused PROPERTIES LABELS unit)
+    # Phase 7 (7.4a): the submod pass.
+    odin3_add_unit_test(test_submod)
+    target_compile_definitions(test_submod PRIVATE ODIN3_SM_ROOT="${PROJECT_BINARY_DIR}")
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the
