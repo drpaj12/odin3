@@ -1,0 +1,31 @@
+# cmos6.o3lib — the six cells of Yosys's examples/cmos/cmos_cells.lib under Gate-Breaker's names
+# (gatemap spec 8): the library gate mapping (abc --gates, dfflibmap) targets for Gate-Breaker
+# style ground-truth netlists. Areas are relative, every gate being 1.
+#
+# DFFSR is a black box: .o3lib's seq has no asynchronous set or reset (GM-7). Its function:
+# Q <= D on posedge C, S low sets Q, R low resets Q, both asynchronous.
+library cmos6
+
+cell BUF gate area 1
+  in A 1 ; out Y 1
+  fn Y = A
+end
+cell INV gate area 1
+  in A 1 ; out Y 1
+  fn Y = ~A
+end
+cell NAND2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = ~(A & B)
+end
+cell NOR2 gate area 1
+  in A 1 ; in B 1 ; out Y 1
+  fn Y = ~(A | B)
+end
+cell DFF gate area 4
+  in C 1 clock ; in D 1 ; out Q 1
+  seq Q <= D @ posedge C init x
+end
+cell DFFSR blackbox area 4
+  in C 1 clock ; in D 1 ; in S 1 ; in R 1 ; out Q 1
+end
