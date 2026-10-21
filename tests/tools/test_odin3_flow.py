@@ -16,6 +16,7 @@ from unittest import mock
 import lpm_check
 
 import odin3_flow as flow
+import odin3_graph
 import qor_parse
 
 from .helpers import run_main
@@ -126,6 +127,27 @@ class SummaryFromLogs(unittest.TestCase):
         self.assertIsNone(got["min_chan_width"])
         self.assertIsNone(got["crit_path_ns"])
         json.dumps(got)
+
+
+@needs_odin3
+class Analysis(FlowCase):
+    def test_analysis_outputs(self) -> None:
+        code, out, err = self.run_flow(str(DFF), "--top", "bm_DL_logic_w_Dff", "--no-vpr",
+                                       "--analysis")
+        self.assertEqual(code, 0, out + err)
+        names = ("bm_DL_logic_w_Dff.dot", "bm_DL_logic_w_Dff.odin3.json", "levelize.txt",
+                 "locs.txt")
+        for name in names:
+            path = self.tmp / "out" / "analysis" / name
+            self.assertTrue(path.is_file() and path.stat().st_size > 0, name)
+        nodes, edges = odin3_graph.parse_graph(self.tmp / "out" / "analysis" / names[1])
+        self.assertGreater(len(nodes), 0)
+        self.assertGreater(len(edges), 0)
+
+    def test_analysis_with_lpm_is_usage_error(self) -> None:
+        code, out, err = self.run_flow(str(LPM_MICRO), "--top", "lpm_add_sub_micro",
+                                       "--target", "lpm", "--analysis")
+        self.assertEqual(code, 2, out + err)
 
 
 if __name__ == "__main__":

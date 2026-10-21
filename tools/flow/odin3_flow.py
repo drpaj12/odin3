@@ -36,6 +36,7 @@ LPM_LIB = ROOT / "lib" / "lpm.o3lib"
 DEFAULT_ARCH = "k6"
 DEFAULT_K = 6
 STEP_TIMEOUT_S = 3600
+DOT_MAX_NODES = 100000
 TARGETS = ("vtr", "lpm")
 _MODULE = re.compile(r"^\s*module\s+\\?([A-Za-z_][A-Za-z0-9_$]*)", re.M)
 _HARD_BLOCKS = re.compile(r"^Netlist (\w+) blocks:\s*(\d+)", re.M)
@@ -217,6 +218,30 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
             result.steps[-1] = StepResult("vpr", False, step.log, step.seconds)
 
 
+def analysis_script(top: str, adir: Path) -> str:
+    """The analysis passes, appended to the script (the netlist view is in memory there):
+    ``levelize`` (its info line goes to the log), ``write_dot --color-by --locs``,
+    ``write_json --odin3`` and ``dump_locs --types``."""
+    return (f"; levelize; write_dot --color-by @type --locs --max-nodes {DOT_MAX_NODES} "
+            f"{adir / (top + '.dot')}; write_json --odin3 {adir / (top + '.odin3.json')}; "
+            f"dump_locs --types {adir / 'locs.txt'}")
+
+
+def analysis_step(top: str, adir: Path, odin3_log: Path, result: FlowResult) -> None:
+    """Make ``levelize.txt`` from the levelize info line of the odin3 log and check that the four
+    analysis files exist and are not empty."""
+    start = time.monotonic()
+    text = odin3_log.read_text(errors="replace")
+    lines = [ln for ln in text.splitlines() if "info: levelize:" in ln]
+    (adir / "levelize.txt").write_text("\n".join(lines) + ("\n" if lines else ""))
+    files = [adir / name for name in (f"{top}.dot", f"{top}.odin3.json", "levelize.txt",
+                                      "locs.txt")]
+    log = adir / "analysis.log"
+    bad = [f.name for f in files if not f.is_file() or f.stat().st_size == 0]
+    log.write_text("".join(f"missing or empty: {name}\n" for name in bad) or "ok\n")
+    result.steps.append(StepResult("analysis", not bad, log, time.monotonic() - start))
+
+
 def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     """Target ``vtr``: the odin3 step, then VPR when asked. The BLIF, or None on a failure."""
     step_dir = args.out / "odin3"
@@ -225,11 +250,19 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     blif = step_dir / f"{top}.blif"
     design = " ".join(str(d) for d in args.designs)
     script = qor_legs.odin3_script("O", Path(design), blif, k, "short")
+    adir = args.out / "analysis"
+    if args.analysis:
+        adir.mkdir(parents=True, exist_ok=True)
+        script += analysis_script(top, adir)
     step = run_step("odin3", odin3_command(args, top, script), step_dir)
     result.steps.append(step)
     if not step.ok:
         return None
     result.summary["luts"] = count_luts(blif)
+    if args.analysis:
+        analysis_step(top, adir, step.log, result)
+        if not result.steps[-1].ok:
+            return None
     if args.vpr:
         vpr_step(args, blif, k, result)
     return blif if result.steps[-1].ok else None
@@ -257,6 +290,8 @@ def run_flow(args: FlowArgs) -> FlowResult:
     for design in args.designs:
         if not design.is_file():
             raise UsageError(f"no such design file: {design}")
+    if args.analysis and args.target != "vtr":
+        raise UsageError("--analysis applies to --target vtr only (levelize needs bits)")
     top = resolve_top(args.designs, args.top)
     result = FlowResult(ok=False)
     args.out.mkdir(parents=True, exist_ok=True)
@@ -313,8 +348,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                 raise UsageError(f"no such design file: {design}")
         out = Path("odin3_out") / resolve_top(ns.designs, ns.top)
     vpr = resolve_vpr(ns.vpr, ns.target)
-    return FlowArgs(ns.designs, ns.top, ns.target, ns.arch, ns.family, vpr, ns.analysis,
-                    ns.odin3 or default_odin3(), out)
+    arch = ns.arch.resolve() if ns.arch else None
+    return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
+                    ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve())
 
 
 def main(argv: Sequence[str] | None = None) -> int:
