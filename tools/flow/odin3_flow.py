@@ -37,6 +37,7 @@ DEFAULT_ARCH = "k6"
 DEFAULT_K = 6
 STEP_TIMEOUT_S = 3600
 DOT_MAX_NODES = 100000
+NOT_HARD = ("clb", "io", "EMPTY")  # packer block types that are not hard blocks
 TARGETS = ("vtr", "lpm")
 _MODULE = re.compile(r"^\s*module\s+\\?([A-Za-z_][A-Za-z0-9_$]*)", re.M)
 _HARD_BLOCKS = re.compile(r"^Netlist (\w+) blocks:\s*(\d+)", re.M)
@@ -160,11 +161,11 @@ def summary_from_vpr(parse: Mapping[str, str], qor: Mapping[str, str], vpr_out: 
     """The VPR keys of ``summary.json`` from VTR's parse results and ``vpr.out``.
 
     A figure VTR did not report is None. ``hard_blocks`` maps each ``Netlist <type> blocks``
-    line of the packer (other than ``clb``) to its count."""
+    line of the packer (other than ``clb``, ``io`` and ``EMPTY``) to its count."""
     metrics = qor_parse.metrics_from_parse(parse, qor)
     packed, routed = metrics["packed"], metrics["routed"]
     hard = {m.group(1): int(m.group(2)) for m in _HARD_BLOCKS.finditer(vpr_out)
-            if m.group(1) != "clb"}
+            if m.group(1) not in NOT_HARD}
     return {
         "luts": luts,
         "clbs": packed["num_clb"],
