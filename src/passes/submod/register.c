@@ -133,8 +133,36 @@ static odin3_status find_groups(const odin3_module *module, const char *key, sm_
 
 /* --- the run ------------------------------------------------------------------------------- */
 
+/* The new module names taken so far in the check phase: NUL-terminated texts. */
+static bool name_taken(const odin3_strbuf *claimed, const char *name) {
+    for (size_t at = 0; at < claimed->len; at += strlen(claimed->data + at) + 1) {
+        if (strcmp(claimed->data + at, name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Checks a group and claims its module name; two groups of one run with one name are refused. */
+static odin3_status check_group(odin3_pass_ctx *ctx, odin3_module_id mid,
+                                const odin3_submod_group *group, odin3_strbuf *claimed) {
+    odin3_status st = odin3_submod_check_named(ctx, mid, group);
+    if (st == ODIN3_OK && name_taken(claimed, group->name)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "submod: module name '%s' is already in use (by another group of this run)",
+                  group->name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (st == ODIN3_OK) {
+        st = odin3_strbuf_append(claimed, odin3_bytes_cstr(group->name));
+        st = st == ODIN3_OK ? odin3_strbuf_append(claimed, (odin3_bytes){"", 1}) : st;
+    }
+    return st;
+}
+
+/* The groups of module mid: with claimed set only checked (nothing changes), else moved. */
 static odin3_status extract_groups(odin3_pass_ctx *ctx, odin3_module_id mid, const sm_opts *opts,
-                                   uint32_t *moved) {
+                                   uint32_t *moved, odin3_strbuf *claimed) {
     const odin3_module *module = odin3_module_get(ctx->design, mid);
     sm_groups groups;
     odin3_strbuf_init(&groups.pool);
@@ -145,8 +173,12 @@ static odin3_status extract_groups(odin3_pass_ctx *ctx, odin3_module_id mid, con
         const char *value = groups.pool.data + offs[i];
         odin3_submod_group group = {opts->key.data, value,
                                     opts->has_name ? opts->name.data : value};
-        st = odin3_submod_extract_named(ctx, mid, &group, NULL);
-        *moved += st == ODIN3_OK ? 1U : 0U;
+        if (claimed != NULL) {
+            st = check_group(ctx, mid, &group, claimed);
+        } else {
+            st = odin3_submod_extract_named(ctx, mid, &group, NULL);
+            *moved += st == ODIN3_OK ? 1U : 0U;
+        }
     }
     odin3_vec_free(&groups.order);
     odin3_strbuf_free(&groups.pool);
@@ -201,8 +233,15 @@ static odin3_status submod_pass_run(odin3_pass_ctx *ctx, odin3_design *design, o
     uint32_t moved = 0;
     odin3_status st = parse_args(args, &opts);
     st = st == ODIN3_OK && opts.has_name ? check_single(design, end, &opts) : st;
+    /* Every group is checked before any moves, so a refusal leaves the IR unchanged. */
+    odin3_strbuf claimed;
+    odin3_strbuf_init(&claimed);
     for (uint32_t mid = 1; st == ODIN3_OK && mid < end; mid++) {
-        st = extract_groups(ctx, (odin3_module_id){mid}, &opts, &moved);
+        st = extract_groups(ctx, (odin3_module_id){mid}, &opts, &moved, &claimed);
+    }
+    odin3_strbuf_free(&claimed);
+    for (uint32_t mid = 1; st == ODIN3_OK && mid < end; mid++) {
+        st = extract_groups(ctx, (odin3_module_id){mid}, &opts, &moved, NULL);
     }
     if (st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "submod: %" PRIu32 " groups moved into new modules", moved);

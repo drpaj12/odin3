@@ -375,6 +375,234 @@ static void test_submod_options(void) {
     check_clean();
 }
 
+/* The width of the port called name of module, 0 when it has none. */
+static uint32_t port_width(const odin3_module *module, const char *name) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_module_celltype(module));
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, name) == 0) {
+            return def->ports[i].width;
+        }
+    }
+    return 0;
+}
+
+static void write_json_file(const char *text) {
+    char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/t.json", dir);
+    FILE *file = fopen(path, "wb");
+    TEST_ASSERT_NOT_NULL(file);
+    TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), file));
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/* Reads a JSON design (top module `top`) from text. */
+static void read_json(const char *text) {
+    char args[PATH_BUF];
+    write_json_file(text);
+    (void)snprintf(args, sizeof args, "--top top %s/t.json", dir);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, "read_json", odin3_bytes_cstr(args)), log_text);
+}
+
+/* top: a[4] in, y[4] out; g1 = ~a (w1 low bits of a) into the unnamed nets 10.., g2 = ~n into y. */
+#define BUS_JSON(w1, a1, n1, mark1, mark2)                                                         \
+    "{\"modules\": {\"top\": {\"ports\": {"                                                        \
+    "\"a\": {\"direction\": \"input\", \"bits\": [2, 3, 4, 5]}, "                                  \
+    "\"y\": {\"direction\": \"output\", \"bits\": [6, 7, 8, 9]}}, \"cells\": {"                    \
+    "\"g1\": {\"type\": \"$not\", \"parameters\": {\"A_WIDTH\": " w1                               \
+    ", \"A_SIGNED\": 0, \"Y_WIDTH\": " w1 "}, " mark1 "\"connections\": {\"A\": " a1               \
+    ", \"Y\": " n1 "}}, "                                                                          \
+    "\"g2\": {\"type\": \"$not\", \"parameters\": {\"A_WIDTH\": 4, \"A_SIGNED\": 0, "              \
+    "\"Y_WIDTH\": 4}, " mark2 "\"connections\": {\"A\": [10, 11, 12, 13], "                        \
+    "\"Y\": [6, 7, 8, 9]}}}}}}"
+
+#define SUB_ATTR "\"attributes\": {\"submod\": \"sub\"}, "
+
+static void test_submod_bus_in_and_out(void) {
+    read_json(BUS_JSON("4", "[2, 3, 4, 5]", "[10, 11, 12, 13]", SUB_ATTR, ""));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(5, port_count(sub)); /* the bus a and four scalar outputs */
+    TEST_ASSERT_EQUAL_UINT32(4, port_width(sub, "a"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "a"));
+    check_clean();
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    read_json(BUS_JSON("4", "[2, 3, 4, 5]", "[10, 11, 12, 13]", "", SUB_ATTR));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(5, port_count(sub)); /* four scalar inputs and the bus y */
+    TEST_ASSERT_EQUAL_UINT32(4, port_width(sub, "y"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, port_dir(sub, "y"));
+    check_clean();
+}
+
+static void test_submod_bus_partial_stays_scalar(void) {
+    read_json(BUS_JSON("2", "[2, 3]", "[10, 11]", SUB_ATTR, ""));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(4, port_count(sub));
+    TEST_ASSERT_EQUAL_UINT32(0, port_width(sub, "a"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "a[0]"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "a[1]"));
+    check_clean();
+}
+
+/* A copy of node on its input nets whose outputs go to new nets, with provenance none. */
+static odin3_node_id clone_fresh_noprov(odin3_module *module, odin3_node_id node) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_node_type(module, node));
+    odin3_value params[MAX_PINS];
+    odin3_net_id nets[MAX_PINS];
+    odin3_netvec ports[MAX_PINS];
+    TEST_ASSERT_TRUE(def->n_params <= MAX_PINS && def->n_ports <= MAX_PINS);
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        params[i] = *odin3_node_param(module, node, i);
+    }
+    uint32_t at = 0;
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        odin3_pinslice slice = odin3_node_port(module, node, port);
+        ports[port] = (odin3_netvec){nets + at, slice.count};
+        for (uint32_t bit = 0; bit < slice.count; bit++) {
+            odin3_pin_id pin = {slice.first.v + bit};
+            if (odin3_pin_drives(module, pin)) {
+                TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                                      odin3_net_create(module, 0, (odin3_prov_id){0}, &nets[at]));
+            } else {
+                nets[at] = odin3_pin_net(module, pin);
+            }
+            at++;
+        }
+    }
+    odin3_node_spec spec = {odin3_node_type(module, node), 0, {0}, params, def->n_params};
+    odin3_node_id copy = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, ports, &copy));
+    return copy;
+}
+
+static void test_submod_derived_prov_without_source_prov(void) {
+    read_blif(FOUR_GATES);
+    odin3_node_id copy = clone_fresh_noprov(top(), driver_of(top(), "n1"));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_node_prov(top(), copy).v);
+    mark_str(top(), copy, "submod", "sub");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    expect_derived(odin3_module_prov(sub));
+    expect_instance(sub);
+    check_clean();
+}
+
+static void test_submod_result_lists_instance_and_ports(void) {
+    read_blif(FOUR_GATES);
+    mark_driver("n2", "sub");
+    mark_driver("n3", "sub");
+    odin3_submod_result res;
+    memset(&res, 0, sizeof res);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_submod_extract(design, (odin3_module_id){1}, "submod", "sub", &res),
+        log_text);
+    odin3_module *sub = odin3_module_get(design, res.module);
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(4, res.n_ports);
+    TEST_ASSERT_TRUE(odin3_node_live(top(), res.instance));
+    TEST_ASSERT_EQUAL_UINT32(odin3_module_celltype(sub).v, odin3_node_type(top(), res.instance).v);
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_module_celltype(sub));
+    TEST_ASSERT_EQUAL_UINT32(res.n_ports, def->n_ports);
+    for (uint32_t i = 0; i < res.n_ports; i++) {
+        const odin3_submod_port *port = &res.ports[i];
+        TEST_ASSERT_EQUAL_STRING(def->ports[i].name,
+                                 odin3_strtab_get(odin3_design_strtab(design), port->name));
+        TEST_ASSERT_EQUAL_INT((int)def->ports[i].dir, (int)port->dir);
+        TEST_ASSERT_EQUAL_UINT32(def->ports[i].width, port->width);
+        odin3_pinslice slice = odin3_node_port(top(), res.instance, i);
+        TEST_ASSERT_EQUAL_UINT32(port->width, slice.count);
+        for (uint32_t bit = 0; bit < port->width; bit++) {
+            TEST_ASSERT_EQUAL_UINT32(port->nets[bit].v,
+                                     odin3_pin_net(top(), (odin3_pin_id){slice.first.v + bit}).v);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(net_named(top(), "n3").v, res.ports[3].nets[0].v); /* the output */
+    odin3_submod_result_free(&res);
+    odin3_submod_result_free(&res);
+    check_clean();
+}
+
+/* A one-bit wire called name on net (BLIF nets have no wires). */
+static odin3_wire_id add_wire(const char *name, odin3_net_id net) {
+    odin3_wire_spec spec = {intern(name), 0, 0, false, {0}};
+    odin3_wire_id wire = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_wire_create(top(), &spec, &net, &wire));
+    return wire;
+}
+
+static void test_submod_wire_attrs_reach_port_wires(void) {
+    read_blif(FOUR_GATES);
+    odin3_wire_id wire = add_wire("w1", net_named(top(), "n1"));
+    odin3_value val = odin3_value_int(5);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_WIRE, wire.v},
+                                                   intern("src"), &val));
+    mark_driver("n2", "sub");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    odin3_wire_id port = odin3_module_find_wire(sub, intern("n1"));
+    TEST_ASSERT_TRUE(odin3_wire_valid(port));
+    const odin3_value *got =
+        odin3_attr_get(sub, (odin3_objref){ODIN3_OBJ_WIRE, port.v}, intern("src"));
+    TEST_ASSERT_NOT_NULL(got);
+    TEST_ASSERT_EQUAL_INT64(5, got->i);
+    check_clean();
+}
+
+static void test_submod_port_name_does_not_shadow_internal_net(void) {
+    read_blif(FOUR_GATES);
+    /* n1 loses its net name (its wire stays: the port is named n1); the internal net n2 takes it */
+    odin3_net_id first = net_named(top(), "n1");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top(), first, 0));
+    (void)add_wire("n1", first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_rename(top(), net_named(top(), "n2"), intern("n1")));
+    mark_driver("n1", "sub"); /* the gate of the old n2, now named n1 */
+    mark_driver("n3", "sub");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_TRUE(odin3_wire_valid(odin3_module_find_wire(sub, intern("n1"))));
+    TEST_ASSERT_FALSE(odin3_net_valid(odin3_module_find_net(sub, intern("n1"))));
+    check_clean();
+}
+
+static void test_submod_refusal_leaves_everything_unchanged(void) {
+    read_blif(FOUR_GATES);
+    mark_driver("n1", "alpha");
+    mark_str(top(), odin3_module_port(top(), 0), "submod", "zeta"); /* a port node: refused */
+    uint32_t nodes = odin3_module_node_end(top());
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run(""));
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_design_module_end(design));
+    TEST_ASSERT_EQUAL_UINT32(nodes, odin3_module_node_end(top()));
+    TEST_ASSERT_TRUE(odin3_node_live(top(), driver_of(top(), "n1")));
+    check_clean();
+}
+
+static void test_submod_same_name_in_two_modules_refused_up_front(void) {
+    read_blif(".model top\n.inputs a b\n.outputs y z\n.names a b y\n11 1\n"
+              ".subckt leaf a=a b=b y=z\n.end\n"
+              ".model leaf\n.inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n");
+    uint32_t end = odin3_design_module_end(design);
+    TEST_ASSERT_EQUAL_UINT32(3, end);
+    for (uint32_t mid = 1; mid < end; mid++) {
+        odin3_module *module = odin3_module_get(design, (odin3_module_id){mid});
+        mark_str(module, driver_of(module, "y"), "submod", "same");
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run(""));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "already in use"));
+    TEST_ASSERT_EQUAL_UINT32(end, odin3_design_module_end(design));
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_submod_two_gates);
@@ -386,5 +614,13 @@ int main(void) {
     RUN_TEST(test_submod_multi_driver_refused);
     RUN_TEST(test_submod_two_groups_sorted_by_value);
     RUN_TEST(test_submod_options);
+    RUN_TEST(test_submod_bus_in_and_out);
+    RUN_TEST(test_submod_bus_partial_stays_scalar);
+    RUN_TEST(test_submod_derived_prov_without_source_prov);
+    RUN_TEST(test_submod_result_lists_instance_and_ports);
+    RUN_TEST(test_submod_wire_attrs_reach_port_wires);
+    RUN_TEST(test_submod_port_name_does_not_shadow_internal_net);
+    RUN_TEST(test_submod_refusal_leaves_everything_unchanged);
+    RUN_TEST(test_submod_same_name_in_two_modules_refused_up_front);
     return UNITY_END();
 }

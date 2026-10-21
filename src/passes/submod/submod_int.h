@@ -15,9 +15,16 @@ typedef struct odin3_submod_group {
 
 /*
  * odin3_submod_extract_ctx with the new module named group->name instead of the value. Same
- * failures; *out (may be NULL) gets the new module.
+ * failures; *out (may be NULL, zeroed or filled) gets the result.
  */
 odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id module_id,
-                                        const odin3_submod_group *group, odin3_module_id *out);
+                                        const odin3_submod_group *group, odin3_submod_result *out);
+
+/*
+ * The refusals of odin3_submod_extract_named for this group (same failures and log lines), without
+ * changing the IR: the pass runs it for every group before it moves any.
+ */
+odin3_status odin3_submod_check_named(odin3_pass_ctx *ctx, odin3_module_id module_id,
+                                      const odin3_submod_group *group);
 
 #endif
