@@ -249,8 +249,7 @@ def run_cli(script: str) -> str:
     """Run an odin3 script (-p) and return its stdout."""
     assert CLI is not None
     done = subprocess.run(
-        [CLI, "-p", script],
-        capture_output=True,
+        [CLI, "-p", script], capture_output=True,
         text=True,
         check=False,
         cwd=REPO_ROOT,
@@ -475,6 +474,8 @@ class RoundTripTest(unittest.TestCase):
 
     def test_levels_survive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
+            # CELLLESS (hand_ports) has no cell, so levelize assigns no level and `assertTrue(levels)`
+            # below would fail: there is nothing to compare.
             for micro in (m for m in READABLE if m in LEVELIZABLE and m not in CELLLESS):
                 with self.subTest(micro=micro):
                     a, b = (Path(tmp) / f"{micro}.{n}.json" for n in "ab")
