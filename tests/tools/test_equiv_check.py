@@ -68,6 +68,7 @@ BB_TAIL = ".names q a y\n11 1\n.end\n"
 RAM_Q = ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=c\n"
 # A generated net feeding the box's ``we`` pin: the box then has no input signature either.
 GEN_IN = ".names c $g\n1 1\n"
+GEN_RAM = RAM_Q.replace("we=c", "we=$g")
 
 
 class FindAbcTest(unittest.TestCase):
@@ -355,7 +356,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertNotIn("bbin:single_port_ram:out=q:out", flat.outputs)
 
     def test_unnameable_instance_exit_2(self) -> None:
-        text = (BB_HEAD + GEN_IN + RAM_Q.replace("we=c", "we=$g").replace("out[0]=q", "out[0]=$auto$7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$auto$7")
                 + ".names $auto$7 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
@@ -374,7 +375,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
 
     def test_generated_output_net_with_two_readers_exit_2(self) -> None:
         """No unique buffer (the net feeds a buffer and more logic): still unnameable."""
-        text = (BB_HEAD + GEN_IN + RAM_Q.replace("we=c", "we=$g").replace("out[0]=q", "out[0]=$n7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$n7")
                 + ".names $n7 q\n1 1\n.names $n7 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
@@ -382,7 +383,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertIn("no .cname and no named output net", err)
 
     def test_generated_output_net_behind_a_generated_buffer_exit_2(self) -> None:
-        text = (BB_HEAD + GEN_IN + RAM_Q.replace("we=c", "we=$g").replace("out[0]=q", "out[0]=$n7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$n7")
                 + ".names $n7 $n8\n1 1\n.names $n8 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
