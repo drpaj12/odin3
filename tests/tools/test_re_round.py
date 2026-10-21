@@ -32,9 +32,16 @@ EQUIV = REPO_ROOT / "tools" / "equiv-check" / "equiv-check"
 CLI = os.environ.get("ODIN3_CLI", "")
 
 
+def cli_env() -> dict[str, str]:
+    """Environment for a child CLI: no LD_PRELOAD (CMake preloads the ASan runtime for the
+    Python binding; a clang-built CLI rejects it as an incompatible runtime)."""
+    return {k: v for k, v in os.environ.items() if k not in ("LD_PRELOAD", "LD_AUDIT")}
+
+
 def odin3(script: str) -> str:
     """Run a pass script through the CLI; its output when it succeeds."""
-    run = subprocess.run([CLI, "-p", script], capture_output=True, text=True, check=False)
+    run = subprocess.run([CLI, "-p", script], capture_output=True, text=True, check=False,
+                         env=cli_env())
     if run.returncode != 0:
         raise AssertionError(f"odin3 -p {script!r}: {run.stderr[-300:]}")
     return run.stderr + run.stdout
@@ -87,7 +94,7 @@ class ReRoundTest(unittest.TestCase):
         mapped = scratch / "raised.blif"
         odin3(f'read_json --top add "{out}.json"; lower; abc --lut 4; write_blif "{mapped}"')
         verdict = subprocess.run([str(EQUIV), str(anon), str(mapped)], capture_output=True,
-                                 text=True, check=False)
+                                 text=True, check=False, env=cli_env())
         self.assertEqual(verdict.returncode, 0, verdict.stdout + verdict.stderr)
 
     def test_re_round_finds_add(self) -> None:
