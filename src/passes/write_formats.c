@@ -30,6 +30,7 @@ typedef struct write_args {
     odin3_strbuf focus;
     odin3_strbuf
         name_map; /* --name-map's value (write_verilog, write_json), empty when not given */
+    odin3_strbuf color;
     odin3_verilog_opts verilog;
     odin3_json_write_opts json;
     odin3_dot_opts dot;
@@ -122,20 +123,40 @@ static odin3_status parse_names_option(const char *pass, odin3_bytes *rest, odin
                                                  : parse_name_style(pass, value, out);
 }
 
-/* write_dot's options: --focus and --max-nodes. */
-static odin3_status parse_dot_option(const char *pass, odin3_bytes *rest, odin3_bytes word,
-                                     write_args *out) {
+/* A write_dot option word with its value read from rest (--locs has none). */
+static odin3_status parse_dot_option(odin3_bytes *rest, odin3_bytes word, write_args *out) {
+    if (odin3_pass_arg_is(word, "--locs")) {
+        out->dot.locs = true;
+        return ODIN3_OK;
+    }
     odin3_bytes value = {0};
-    odin3_status st = option_value(pass, rest, word, &value);
-    bool focus = odin3_pass_arg_is(word, "--focus");
-    if (st == ODIN3_OK && focus && out->focus.len > 0) {
-        odin3_log(ODIN3_LOG_ERROR, "write_dot: --focus given twice");
+    odin3_status st = option_value("write_dot", rest, word, &value);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (value.len >= 2 && memcmp(value.ptr, "--", 2) == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_dot: %.*s expects a value, got option '%.*s'",
+                  (int)word.len, (const char *)word.ptr, (int)value.len, (const char *)value.ptr);
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (st == ODIN3_OK) {
-        st = focus ? parse_focus(value, out) : parse_max_nodes(value, out);
+    bool is_focus = odin3_pass_arg_is(word, "--focus");
+    bool is_color = odin3_pass_arg_is(word, "--color-by");
+    if ((is_focus && out->focus.len > 0) || (is_color && out->color.len > 0)) {
+        odin3_log(ODIN3_LOG_ERROR, "write_dot: %.*s given twice", (int)word.len,
+                  (const char *)word.ptr);
+        return ODIN3_ERR_INVALID_ARG;
     }
-    return st;
+    if (is_color) {
+        st = odin3_strbuf_append(&out->color, value);
+        out->dot.color_attr = out->color.data;
+        return st;
+    }
+    return is_focus ? parse_focus(value, out) : parse_max_nodes(value, out);
+}
+
+static bool is_dot_option(odin3_bytes word) {
+    return odin3_pass_arg_is(word, "--focus") || odin3_pass_arg_is(word, "--max-nodes") ||
+           odin3_pass_arg_is(word, "--color-by") || odin3_pass_arg_is(word, "--locs");
 }
 
 /* Handles option word of pass (its value read from rest); unknown options are INVALID_ARG. */
@@ -147,8 +168,8 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
         (odin3_pass_arg_is(word, "--name-style") || odin3_pass_arg_is(word, "--name-map"))) {
         return parse_names_option(pass, rest, word, out);
     }
-    if (dot && (odin3_pass_arg_is(word, "--focus") || odin3_pass_arg_is(word, "--max-nodes"))) {
-        return parse_dot_option(pass, rest, word, out);
+    if (dot && is_dot_option(word)) {
+        return parse_dot_option(rest, word, out);
     }
     odin3_log(ODIN3_LOG_ERROR, "%s: unknown argument '%.*s'", pass, (int)word.len,
               (const char *)word.ptr);
@@ -198,10 +219,11 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
     write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL},
                          .json = {ODIN3_JSON_NAMES_SHORT, NULL},
-                         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0}};
+                         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
     odin3_strbuf_init(&parsed.name_map);
+    odin3_strbuf_init(&parsed.color);
     odin3_status st = parse_write_args(FORMAT_PASS[format], args, &parsed);
     st = st == ODIN3_OK ? check_name_map(FORMAT_PASS[format], &parsed) : st;
     odin3_module_id top = odin3_design_top(design);
@@ -222,6 +244,7 @@ static odin3_status write_format_run(odin3_design *design, odin3_bytes args, wri
     odin3_strbuf_free(&parsed.path);
     odin3_strbuf_free(&parsed.focus);
     odin3_strbuf_free(&parsed.name_map);
+    odin3_strbuf_free(&parsed.color);
     return st;
 }
 
@@ -273,8 +296,9 @@ const odin3_pass_def odin3_pass_write_verilog = {
     ODIN3_PASS_PROCESSES_REFUSE};
 const odin3_pass_def odin3_pass_write_dot = {
     "write_dot",
-    "write_dot <file> [--focus <path>|<file:line>|cone(<net>)] [--max-nodes N]: write Graphviz "
-    "dot (file - is stdout)",
+    "write_dot <file> [--focus <path>|<file:line>|cone(<net>)] [--max-nodes N] [--color-by "
+    "<attr>|@type] [--locs]: write Graphviz dot; --color-by fills nodes by attribute value and "
+    "adds a legend, --locs adds the first HDL file:line to each label (file - is stdout)",
     write_dot_run,
     NULL,
     false,

@@ -104,6 +104,8 @@ add_library(odin3_core OBJECT
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
+    src/passes/levelize/levelize.c
+    src/passes/levelize/sweep.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1627,6 +1629,25 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib")
+    # Phase 6 (6.4): the levelize pass.
+    odin3_add_unit_test(test_levelize)
+    target_sources(test_levelize PRIVATE tests/unit/proc_fixture.c
+                                         tests/unit/proc_fixture_core.c)
+    target_compile_definitions(test_levelize PRIVATE
+        ODIN3_LV_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    foreach(_m IN ITEMS ff.parmys adder_hard_block.parmys ansiportlist_2.parmys)
+        add_test(NAME levelize_micro_${_m}
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/levelize_cli.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif/${_m}.blif
+                    ${PROJECT_BINARY_DIR}/levelize_micro)
+        set_tests_properties(levelize_micro_${_m} PROPERTIES LABELS unit)
+    endforeach()
+    add_test(NAME levelize_micro_word_refused
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/levelize_cli.sh $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif/pow.parmys.blif
+                ${PROJECT_BINARY_DIR}/levelize_micro refuse)
+    set_tests_properties(levelize_micro_word_refused PROPERTIES LABELS unit)
     # 3D Task 8: the pass-run table's arguments and run information (IR-12).
     odin3_add_unit_test(test_passrun)
     # 2D Task 5: write_rtlil. Its designs are also written to rtlil/*.il, the input of the

@@ -257,4 +257,59 @@ log_cost_of_tokens_and_time.md` by the controller. **Acceptance:** `tools/lint.s
 
 ## Deviations
 
-(empty; each lane appends what it changed from this plan and why)
+(each lane appends what it changed from this plan and why)
+
+- 6.2 (write_dot): `odin3_dot_opts` gained `color_attr` and `locs`; every positional initializer of the
+  struct (writer, pass, writer-check tool, existing dot tests) now lists the two new fields because
+  `-Wmissing-field-initializers` is an error. No behaviour change there.
+- 6.2: the legend is emitted after the edges, just before the closing brace (last in the file and after
+  every module cluster). The `(none)` legend entry is omitted when no drawn node is in that class.
+- 6.2: `+N` counts distinct locations of `odin3_hdl_locs`, which caps at 8 (X-3), so N is at most 7.
+- 6.2: bits text is MSB first (`0`, `1`, `x`, `z`); COVER and PROC values give the class texts
+  `(cover)` and `(proc)`.
+- 6.2: the `nop` check uses `/usr/bin/nop -o /dev/null` (Graphviz 2.43 ran here); the skip line
+  `SKIP graphviz_nop: dot not installed` is printed when `nop` is absent. The structural quote/brace check
+  always runs. C-8 (b) "Verilog micro" is covered by a unit test with SOURCE provenance and by
+  `cli_writers` (read_verilog, then `--locs`); a BLIF-read design is checked byte-identical with and
+  without `--locs`.
+- 6.2 fix round (agent default): the colour legend names at most 32 classes (`LEGEND_MAX`); the
+  rest fold into one `(N more values)` entry with the neutral fill `#cfcfcf`. Node fills are
+  unchanged. Dot text keeps valid UTF-8 and replaces DEL and invalid bytes with `?`. Class texts are
+  interned once through a hash index (O(n)) and sorted (O(k log k)). `--color-by`, `--focus` and
+  `--max-nodes` reject a value that starts with `--`. `test_graphviz_nop` finds `nop` on PATH and
+  passes when it ran.
+
+6.4 levelize (lane p6-levelize):
+
+1. Ownership of an existing `<key>` (V-1). Attributes carry no author, so "written by levelize" cannot
+   be told from a user INT of the same name. The pass accepts an existing `<key>` or `<key>_cut` that is
+   an INT (a rerun, idempotence V-7 c) and refuses any other kind (`INVALID_ARG`, nothing written). A
+   user INT under the default key is therefore overwritten. A `<key>_cut` left on a cell that is not cut
+   in this run is removed. Fix round: with a custom `--key`, any existing `<key>` or `<key>_cut` of any
+   kind is refused (`INVALID_ARG`), so a user value is never overwritten or deleted; the price is that a
+   second run with the same custom key is refused too. The default key keeps the INT rerun rule.
+2. V-7 (d), levels surviving `write_json --odin3` then `read_json`, is not testable on this branch (the
+   option is lane 6.3). `test_levelize` and the `levelize_micro_*` script tests check the plain attribute
+   in the default `write_json` text instead; (d) belongs to the integration check after 6.3 merges.
+3. Library cells. The registry flags `SEQ_EDGE`/`SEQ_LEVEL` are not set on tech-library cells, so a
+   library cell with a `seq` statement (generic_gates DFFP and the like) or a `memory` statement (hard
+   RAM) is also a source (level 0 outputs, inputs end paths) through `odin3_celltype_lib`. A plugin
+   black box with the registry flag follows the same rule. A cell that has both state and combinational
+   outputs is treated as a whole: all its outputs are level 0.
+4. INOUT pins count as drivers only (never as inputs), so a tristate or bus cell has no self-edge.
+5. Loop cut cost. Each stall runs one iterative Tarjan over the unfinished cells, O(cells + pins) per
+   stall. Fix round: one pass cuts the lowest-ID cell of every cyclic component (ascending ID order, one
+   warning each), so K independent loops cost one pass; only loops that survive a cut (overlapping
+   cycles in one component) need another.
+6. Micros. The three `levelize_micro_*` tests start from committed Parmys BLIFs in `tests/golden/blif`
+   (`ff`, `adder_hard_block`, `ansiportlist_2`; netlist view needs no front end) and
+   `levelize_micro_word_refused` runs `pow`, whose `$pow` word cell must be refused.
+7. Base. Branched from `origin/docs/phase6-spec` (PR #185 not merged when the lane started); merge
+   `origin/main` after it merges.
+8. Allocation failure (fix round). Attributes are written after the sweep of each module, so a
+   `NO_MEMORY` can leave some attributes written. Cells, nets, pins and provenance never change; the
+   pass help says so. `test_oom_leaves_structure_alone` injects a failure at every allocation point.
+9. Memories without a library entry (fix round, agent default, Peter's rule: a memory's inputs are
+   primary outputs, its outputs primary inputs). A black box named `single_port_ram` or
+   `dual_port_ram` (BLIF `.subckt`, VTR primitives) or whose model is the `.subckt` of a
+   `class="memory"` leaf of the loaded arch record is a source like a library `memory` cell.
