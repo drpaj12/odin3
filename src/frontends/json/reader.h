@@ -26,6 +26,8 @@ typedef struct odin3_json_opts {
     const char *top;
     bool auto_blackbox;
     bool keep_src_attr;
+    const char *name_map; /* H-6: path of a name map; hash-shaped keys of cells and netnames become
+                             their full names, decoded to SHORT, hier and a location (NULL: none) */
 } odin3_json_opts;
 
 /*

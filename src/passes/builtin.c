@@ -173,25 +173,53 @@ static odin3_status select_auto(odin3_design *design) {
 
 /* --- read_blif, write_blif ------------------------------------------------------------------- */
 
-/* read_blif's words: the one path and the option --hdl-locs (D-4), in any order. */
-static odin3_status read_blif_parse(odin3_bytes args, odin3_strbuf *path, bool *hdl_locs) {
+/* read_blif's words: the one path and the options --hdl-locs (D-4) and --name-map <file> (H-6), in
+ * any order. */
+typedef struct read_blif_args {
+    odin3_strbuf path;
+    odin3_strbuf name_map;
+    bool hdl_locs;
+    bool have_map;
+} read_blif_args;
+
+static odin3_status read_blif_option(odin3_bytes word, odin3_bytes *rest, read_blif_args *out) {
+    if (odin3_pass_arg_is(word, "--hdl-locs")) {
+        out->hdl_locs = true;
+        return ODIN3_OK;
+    }
+    if (odin3_pass_arg_is(word, "--name-map")) {
+        odin3_bytes value = odin3_pass_arg_next(rest);
+        if (value.ptr == NULL || value.len == 0 || out->have_map) {
+            odin3_log(ODIN3_LOG_ERROR, value.ptr == NULL || value.len == 0
+                                           ? "read_blif: --name-map expects a file"
+                                           : "read_blif: --name-map given twice");
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        out->have_map = true;
+        return odin3_strbuf_append(&out->name_map, value);
+    }
+    odin3_log(ODIN3_LOG_ERROR, "read_blif: unknown option '%.*s'", (int)word.len,
+              (const char *)word.ptr);
+    return ODIN3_ERR_INVALID_ARG;
+}
+
+static odin3_status read_blif_parse(odin3_bytes args, read_blif_args *out) {
     uint32_t paths = 0;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
-        if (odin3_pass_arg_is(word, "--hdl-locs")) {
-            *hdl_locs = true;
-        } else if (word.len > 2 && memcmp(word.ptr, "--", 2) == 0) {
-            odin3_log(ODIN3_LOG_ERROR, "read_blif: unknown option '%.*s'", (int)word.len,
-                      (const char *)word.ptr);
-            return ODIN3_ERR_INVALID_ARG;
+        if (word.len > 2 && memcmp(word.ptr, "--", 2) == 0) {
+            odin3_status st = read_blif_option(word, &args, out);
+            if (st != ODIN3_OK) {
+                return st;
+            }
         } else if (++paths == 1 && word.len > 0) {
-            odin3_status st = odin3_strbuf_append(path, word);
+            odin3_status st = odin3_strbuf_append(&out->path, word);
             if (st != ODIN3_OK) {
                 return st;
             }
         }
     }
-    if (paths != 1 || path->len == 0) {
+    if (paths != 1 || out->path.len == 0) {
         odin3_log(ODIN3_LOG_ERROR, "read_blif: expects one path");
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -201,18 +229,21 @@ static odin3_status read_blif_parse(odin3_bytes args, odin3_strbuf *path, bool *
 static odin3_status read_blif_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)user;
-    odin3_strbuf path;
-    odin3_strbuf_init(&path);
-    odin3_blif_read_opts opts = {0};
-    odin3_status st = read_blif_parse(args, &path, &opts.hdl_locs);
+    read_blif_args parsed = {.hdl_locs = false};
+    odin3_strbuf_init(&parsed.path);
+    odin3_strbuf_init(&parsed.name_map);
+    odin3_status st = read_blif_parse(args, &parsed);
     if (st == ODIN3_OK) {
-        st = odin3_blif_read_ex(design, ctx, path.data, &opts);
+        odin3_blif_read_opts opts = {.hdl_locs = parsed.hdl_locs,
+                                     .name_map = parsed.have_map ? parsed.name_map.data : NULL};
+        st = odin3_blif_read_ex(design, ctx, parsed.path.data, &opts);
     }
     const char *top = odin3_pass_get_options().top;
     if (st == ODIN3_OK && top != NULL) {
         st = select_named(design, odin3_bytes_cstr(top), "read_blif: --top");
     }
-    odin3_strbuf_free(&path);
+    odin3_strbuf_free(&parsed.path);
+    odin3_strbuf_free(&parsed.name_map);
     return st;
 }
 
@@ -719,9 +750,10 @@ static odin3_status write_verilog_ast_run(odin3_pass_ctx *ctx, odin3_design *des
 
 static const odin3_pass_def READ_BLIF = {
     "read_blif",
-    "read_blif [--hdl-locs] <file>: read a BLIF netlist into an empty design (first model = top); "
-    "--hdl-locs restores HDL locations: provenance net names, `.attr src`, and cells take the "
-    "location of their output net",
+    "read_blif [--hdl-locs] [--name-map <file>] <file>: read a BLIF netlist into an empty design "
+    "(first model = top); --hdl-locs restores HDL locations: provenance net names, `.attr src`, "
+    "and cells take the location of their output net; --name-map replaces each hash name the "
+    "map (written by write_blif --name-style hash) holds by its full name before anything else",
     read_blif_run,
     NULL,
     false,

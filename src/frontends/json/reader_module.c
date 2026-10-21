@@ -200,7 +200,7 @@ static odin3_status make_module(jr *rd, jr_mod *mod) {
     odin3_status st = jr_prov(rd, mod->node, &mod->base);
     if (st == ODIN3_OK) {
         st = jr_restore_src(
-            rd, &(jr_restore_in){jr_member(mod->node, "attributes"), mod->base, true}, &prov);
+            rd, &(jr_restore_in){jr_member(mod->node, "attributes"), mod->base, true, NULL}, &prov);
     }
     if (st == ODIN3_OK) {
         st = jr_fail(rd, odin3_module_create(rd->design, mod->name_str, prov, &mod->module));
@@ -572,6 +572,9 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     rd->cur_name = mod->name;
     odin3_status st = jr_cur_begin(rd, mod);
     if (st == ODIN3_OK) {
+        st = jr_names_begin(rd, mod->node);
+    }
+    if (st == ODIN3_OK) {
         st = jr_scan_bits(rd);
     }
     if (st == ODIN3_OK) {
@@ -586,6 +589,7 @@ odin3_status jr_read_module_body(jr *rd, uint32_t index) {
     if (st == ODIN3_OK) {
         st = jr_read_memories(rd, jr_member(mod->node, "memories"));
     }
+    jr_names_end(rd);
     jr_cur_end(rd);
     return st;
 }

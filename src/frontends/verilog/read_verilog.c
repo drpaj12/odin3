@@ -7,6 +7,7 @@
  * odin3_elab_run.
  */
 #include "frontends/verilog/read_verilog.h"
+#include "frontends/name_resolve.h"
 
 #include "ast/ast.h"
 #include "ast/check.h"
@@ -381,6 +382,7 @@ typedef struct rv_args {
     bool lib; /* --lib: keep the modules as library units for later reads (2D-7b) */
     odin3_elab_opts elab;
     odin3_vec files;
+    odin3_bytes name_map; /* -name-map's file (H-6), ptr NULL when not given */
 } rv_args;
 
 /* A flag word: true when it is one of the pass's flags (and sets it). */
@@ -410,6 +412,10 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
 /* --lib reads and keeps; it elaborates nothing, so --auto-blackbox (a design read's option) has
  * nothing to act on and is refused rather than silently dropped. */
 static odin3_status check_lib_args(const rv_args *args) {
+    if (args->name_map.ptr != NULL && !args->elab.netlist) {
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: -name-map is an option of -netlist");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     if (args->elab.icells && (args->lib || args->parse_only)) {
         odin3_log(ODIN3_LOG_ERROR,
                   "read_verilog: -icells cannot be combined with %s (it is an option of the "
@@ -433,10 +439,41 @@ static odin3_status check_lib_args(const rv_args *args) {
     return ODIN3_OK;
 }
 
+/* -name-map <file> (H-6): the one map of a -netlist read. */
+static odin3_status take_name_map(odin3_bytes *rest, rv_args *out) {
+    odin3_bytes file = odin3_pass_arg_next(rest);
+    if (file.ptr == NULL || file.len == 0 || out->name_map.ptr != NULL) {
+        odin3_log(ODIN3_LOG_ERROR, file.ptr == NULL || file.len == 0
+                                       ? "read_verilog: -name-map expects a file"
+                                       : "read_verilog: -name-map given twice");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    out->name_map = file;
+    return ODIN3_OK;
+}
+
+/* A flag or -name-map <file>: *taken says the word was one. */
+static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *out, bool *taken) {
+    *taken = true;
+    if (set_flag(word, out)) {
+        return ODIN3_OK;
+    }
+    if (odin3_pass_arg_is(word, "-name-map") || odin3_pass_arg_is(word, "--name-map")) {
+        return take_name_map(rest, out);
+    }
+    *taken = false;
+    return ODIN3_OK;
+}
+
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
-        if (set_flag(word, out)) {
+        bool taken = false;
+        odin3_status st = option_word(word, &args, out, &taken);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        if (taken) {
             continue;
         }
         if (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0) {
@@ -606,6 +643,20 @@ static uint32_t soft_blocks_of(const odin3_design *design, const rv_args *args) 
                : 0U;
 }
 
+/* -name-map: loads the map into names and points the elaboration options at it. */
+static odin3_status open_names(rv_args *args, odin3_name_resolver *names) {
+    if (args->name_map.ptr == NULL) {
+        return ODIN3_OK;
+    }
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    odin3_status st = odin3_strbuf_append(&path, args->name_map);
+    st = st != ODIN3_OK ? st : odin3_name_resolver_open(names, "read_verilog", path.data);
+    args->elab.names = st == ODIN3_OK ? names : NULL;
+    odin3_strbuf_free(&path);
+    return st;
+}
+
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
@@ -616,12 +667,17 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_status st = parse_args(args, &parsed);
     st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs);
     uint32_t soft = soft_blocks_of(design, &parsed);
+    odin3_name_resolver names;
+    st = st != ODIN3_OK ? st : open_names(&parsed, &names);
     odin3_ast *ast = NULL;
     if (st == ODIN3_OK) {
         odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
         st = odin3_read_verilog_files_soft(design, &opts, soft, &ast);
     }
     st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
+    if (parsed.elab.names != NULL) {
+        odin3_name_resolver_close(&names);
+    }
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
     return st;
@@ -630,7 +686,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
-    "[--vtr-compat] [-icells] [-netlist] [<file>...]: "
+    "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
@@ -640,7 +696,10 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
     "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "
     "its records are IMPORTED, a `(* src = \"file:line\" *)` attribute, a trailing `// file:line` "
-    "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; --lib "
+    "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; "
+    "-name-map "
+    "(with -netlist) first replaces each hash net name the map (write_verilog --name-style hash) "
+    "holds by its full name; --lib "
     "keeps "
     "the modules as library units for later reads (elaborated, under this read's --nolatches, "
     "--nomem2reg and --vtr-compat, only where a later design instantiates them)",

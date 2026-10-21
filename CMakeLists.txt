@@ -88,6 +88,7 @@ add_library(odin3_core OBJECT
     src/frontends/json/reader_ext.c
     src/frontends/json/reader_implicit.c
     src/frontends/json/reader_locs.c
+    src/frontends/json/reader_names.c
     src/frontends/json/reader_module.c
     src/frontends/json/reader_net.c
     src/frontends/json/reader_sop.c
@@ -414,6 +415,8 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/frontends/hdl_restore.c
+    src/frontends/name_resolve.c
+    src/frontends/blif/reader_names.c
     src/backends/verilog/escape.c
     src/backends/verilog/writer.c
     src/backends/rtlil/writer.c)
@@ -1599,6 +1602,9 @@ if(BUILD_TESTING)
     # 5.4f-b: --name-style hash in the three writers and the names pass, each case in a mkdtemp dir.
     odin3_add_unit_test(test_hash_writers)
     target_compile_definitions(test_hash_writers PRIVATE ODIN3_HASHW_ROOT="${PROJECT_BINARY_DIR}")
+    # 5.4f-c: --name-map in the three readers (H-6), each case in a mkdtemp dir.
+    odin3_add_unit_test(test_hash_readers)
+    target_compile_definitions(test_hash_readers PRIVATE ODIN3_HASHR_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_hdl_restore)
     odin3_add_unit_test(test_json_writer)
     odin3_add_unit_test(test_verilog_writer)
