@@ -66,6 +66,9 @@ BB_HEAD = ".model t\n.inputs clk a b c\n.outputs y\n"
 BB_TAIL = ".names q a y\n11 1\n.end\n"
 # A Yosys write_blif -gates hard block: a ``.gate`` with no model and no instance name.
 RAM_Q = ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=c\n"
+# A generated net feeding the box's ``we`` pin: the box then has no input signature either.
+GEN_IN = ".names c $g\n1 1\n"
+GEN_RAM = RAM_Q.replace("we=c", "we=$g")
 
 
 class FindAbcTest(unittest.TestCase):
@@ -353,7 +356,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertNotIn("bbin:single_port_ram:out=q:out", flat.outputs)
 
     def test_unnameable_instance_exit_2(self) -> None:
-        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$auto$7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$auto$7")
                 + ".names $auto$7 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
@@ -372,7 +375,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
 
     def test_generated_output_net_with_two_readers_exit_2(self) -> None:
         """No unique buffer (the net feeds a buffer and more logic): still unnameable."""
-        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$n7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$n7")
                 + ".names $n7 q\n1 1\n.names $n7 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
@@ -380,7 +383,7 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
         self.assertIn("no .cname and no named output net", err)
 
     def test_generated_output_net_behind_a_generated_buffer_exit_2(self) -> None:
-        text = (BB_HEAD + RAM_Q.replace("out[0]=q", "out[0]=$n7")
+        text = (BB_HEAD + GEN_IN + GEN_RAM.replace("out[0]=q", "out[0]=$n7")
                 + ".names $n7 $n8\n1 1\n.names $n8 a y\n11 1\n.end\n")
         a = self.write("a.blif", text)
         code, _, err = check(a, a)
@@ -439,6 +442,159 @@ class BlackBoxCutNoAbcTest(unittest.TestCase):
 
 
 @needs_abc
+class InputSignaturePairingTest(unittest.TestCase):
+    """Boxes with no name at all (no .cname, no named output net, no port buffer) are paired by
+    input signature: model plus the named net or paired box that drives each input pin."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+
+    def write(self, name: str, text: str) -> str:
+        path = Path(self.tmp.name) / name
+        path.write_text(text, encoding="utf-8")
+        return str(path)
+
+    @staticmethod
+    def box(out: str, a: str = "a", b: str = "b") -> str:
+        return f".gate multiply a[0]={a} b[0]={b} out[0]={out}\n"
+
+    @staticmethod
+    def read(*nets: str) -> str:
+        """Two readers per net (no port buffer), so a generated net stays unnameable."""
+        return "".join(f".names {n} a y{i}\n11 1\n.names {n} b z{i}\n10 1\n"
+                       for i, n in enumerate(nets))
+
+    HEAD = ".model t\n.inputs a b\n.outputs {}\n"
+
+    def netlist(self, boxes: str, nets: list[str]) -> str:
+        outs = " ".join(f"{p}{i}" for i in range(len(nets)) for p in "yz")
+        return self.HEAD.format(outs) + boxes + self.read(*nets) + ".end\n"
+
+    def flats(self, text_a: str, text_b: str) -> list[equiv_check.Flat]:
+        return [equiv_check.flatten(blif.parse_text(t, gates=True), check=False)
+                for t in (text_a, text_b)]
+
+    def test_pairs_by_signature_whatever_the_output_nets_and_order(self) -> None:
+        a = self.netlist(self.box("$n1", "a", "b") + self.box("$n2", "b", "a"), ["$n1", "$n2"])
+        b = self.netlist(self.box("$n9", "b", "a") + self.box("$n8", "a", "b"), ["$n8", "$n9"])
+        flats = self.flats(a, b)
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 2)
+        equiv_check.match_blackboxes(flats)
+        self.assertEqual(sorted(x.key for x in flats[0].blackboxes),
+                         sorted(x.key for x in flats[1].blackboxes))
+        by_in = [{(x.inputs["a"], x.inputs["b"]): x.key for x in f.blackboxes} for f in flats]
+        self.assertEqual(by_in[0], by_in[1])
+
+    def test_same_signature_twice_in_one_file_is_an_error(self) -> None:
+        twice = self.netlist(self.box("$n1") + self.box("$n2"), ["$n1", "$n2"])
+        once = self.netlist(self.box("$n1"), ["$n1"])
+        for pair in ((twice, once), (once, twice), (twice, twice)):
+            with self.assertRaises(equiv_check.EquivError) as ctx:
+                equiv_check.pair_by_input_signature(self.flats(*pair))
+            self.assertIn("cannot name black box multiply", str(ctx.exception))
+            self.assertIn("same input signature", str(ctx.exception))
+            self.assertIn("no .cname and no named output net to match it by", str(ctx.exception))
+
+    def test_signature_on_one_side_only_is_an_error(self) -> None:
+        a = self.netlist(self.box("$n1", "a", "b"), ["$n1"])
+        b = self.netlist(self.box("$n1", "b", "a"), ["$n1"])
+        with self.assertRaises(equiv_check.EquivError) as ctx:
+            equiv_check.pair_by_input_signature(self.flats(a, b))
+        self.assertIn("cannot name black box multiply", str(ctx.exception))
+        self.assertIn("no .cname and no named output net", str(ctx.exception))
+        self.assertIn("no box of the other file", str(ctx.exception))
+        gone = self.HEAD.format("y0 z0") + self.read("a") + ".end\n"
+        with self.assertRaises(equiv_check.EquivError):
+            equiv_check.pair_by_input_signature(self.flats(a, gone))
+
+    def test_params_are_part_of_the_signature(self) -> None:
+        def pbox(out: str, mode: str) -> str:
+            return self.box(out) + f".param MODE {mode}\n"
+        a = self.netlist(pbox("$n1", "01") + pbox("$n2", "10"), ["$n1", "$n2"])
+        b = self.netlist(pbox("$n9", "10") + pbox("$n8", "01"), ["$n8", "$n9"])
+        flats = self.flats(a, b)
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 2)
+        self.assertEqual(sorted(x.params for x in flats[0].blackboxes),
+                         sorted(x.params for x in flats[1].blackboxes))
+        c = self.netlist(pbox("$n1", "01"), ["$n1"])
+        d = self.netlist(pbox("$n1", "10"), ["$n1"])
+        with self.assertRaises(equiv_check.EquivError) as ctx:
+            equiv_check.pair_by_input_signature(self.flats(c, d))
+        self.assertIn("no box of the other file", str(ctx.exception))
+
+    def test_model_is_part_of_the_signature(self) -> None:
+        a = self.netlist(self.box("$n1"), ["$n1"])
+        b = self.netlist(self.box("$n1").replace("multiply", "adder"), ["$n1"])
+        with self.assertRaises(equiv_check.EquivError):
+            equiv_check.pair_by_input_signature(self.flats(a, b))
+
+    def test_chain_of_unnamed_boxes_pairs_through_the_fixpoint(self) -> None:
+        def chain(x: str, y: str, order: int) -> str:
+            first, second = self.box(x), self.box(y, a=x)
+            return self.netlist(first + second if order else second + first, [y])
+        flats = self.flats(chain("$n1", "$n2", 0), chain("$n7", "$n8", 1))
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 2)
+        equiv_check.match_blackboxes(flats)
+
+    def test_chain_second_box_signature_differs_is_an_error(self) -> None:
+        a = self.netlist(self.box("$n1") + self.box("$n2", a="$n1"), ["$n2"])
+        b = self.netlist(self.box("$n1") + self.box("$n2", b="$n1"), ["$n2"])
+        with self.assertRaises(equiv_check.EquivError):
+            equiv_check.pair_by_input_signature(self.flats(a, b))
+
+    def test_generated_input_net_cannot_be_signed(self) -> None:
+        text = (self.HEAD.format("y0 z0") + ".names a $g\n1 1\n" + self.box("$n1", a="$g")
+                + self.read("$n1") + ".end\n")
+        with self.assertRaises(equiv_check.EquivError) as ctx:
+            equiv_check.pair_by_input_signature(self.flats(text, text))
+        self.assertIn("generated net", str(ctx.exception))
+
+    def test_named_and_cname_boxes_are_left_alone(self) -> None:
+        named = self.HEAD.format("y0") + self.box("q") + ".names q a y0\n11 1\n.end\n"
+        flats = self.flats(named, named)
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 0)
+        self.assertEqual([x.key for x in flats[0].blackboxes], ["out=q"])
+        cname = (self.HEAD.format("y0") + self.box("$n1") + ".cname foo\n"
+                 + ".names $n1 a y0\n11 1\n.names $n1 b z\n11 1\n.end\n")
+        flats = self.flats(cname, cname)
+        self.assertEqual(equiv_check.pair_by_input_signature(flats), 0)
+        self.assertEqual([x.key for x in flats[0].blackboxes], ["foo"])
+
+    def test_unpaired_box_still_stops_match_blackboxes(self) -> None:
+        a = self.netlist(self.box("$n1"), ["$n1"])
+        with self.assertRaises(equiv_check.EquivError) as ctx:
+            equiv_check.match_blackboxes(self.flats(a, a))
+        self.assertIn("cannot name black box", str(ctx.exception))
+
+    def test_cli_pairs_notes_and_proves(self) -> None:
+        if ABC is None and not REQUIRE_ABC:
+            self.skipTest(f"ABC not available ({ABC_PROBLEM})")
+        a = self.write("a.blif", self.netlist(self.box("$n1") + self.box("$n2", "b", "a"),
+                                              ["$n1", "$n2"]))
+        b = self.write("b.blif", self.netlist(self.box("$n5", "b", "a") + self.box("$n6"),
+                                              ["$n6", "$n5"]))
+        code, out, err = check(a, b)
+        self.assertEqual(code, 0, out + err)
+        self.assertEqual(err.count("paired by input signature (pair"), 4)
+        self.assertIn("2 unnamed black-box instance(s) paired by input signature", err)
+
+    def test_cli_wrong_pairing_input_still_not_equivalent(self) -> None:
+        if ABC is None and not REQUIRE_ABC:
+            self.skipTest(f"ABC not available ({ABC_PROBLEM})")
+        a = self.write("a.blif", self.netlist(self.box("$n1"), ["$n1"]))
+        b = self.write("b.blif", self.netlist(self.box("$n1"), ["$n1"]).replace(
+            ".names $n1 a y0\n11 1", ".names $n1 a y0\n10 1"))
+        self.assertEqual(check(a, b)[0], 1)
+
+    def test_cli_unmatched_exit_2(self) -> None:
+        a = self.write("a.blif", self.netlist(self.box("$n1", "a", "b"), ["$n1"]))
+        b = self.write("b.blif", self.netlist(self.box("$n1", "b", "a"), ["$n1"]))
+        code, _, err = check(a, b)
+        self.assertEqual(code, 2)
+        self.assertIn("cannot name black box multiply", err)
+
+
 class BlackBoxCutAbcTest(unittest.TestCase):
     def setUp(self) -> None:
         if ABC is None:

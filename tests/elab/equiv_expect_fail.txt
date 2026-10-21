@@ -1,11 +1,9 @@
 # Rows whose elab-equiv result is not "equivalent" (spec 14.2). `<row> <reason>`; every row listed
 # must still fail (run-rows-equiv reports a listed row that passes as stale). Checked against
 # Yosys 0.55 on 2026-10-13. `<row> [needle] <reason>`: the bracketed text must appear in the bridge's
-# output (a different failure class is unexpected). 14 rows; with T1 (3 clocks) 15 rows have no
-# equivalence evidence and rely on their goldens alone; 110 rows are equivalent.
+# output (a different failure class is unexpected). 12 rows; with T1 (3 clocks) 13 rows have no
+# equivalence evidence and rely on their goldens alone; 112 rows are equivalent.
 E17 [NOT equivalent] IEEE 1364-2005 4.1.14: an out-of-range index reads x; Yosys resolves it differently after opt (spec 17 #40)
-E7 [cannot name black box $pow: no .cname and no named output net to match it by] the Yosys back end leaves $pow as a .gate black box; equiv-check reads .gate now but cannot name or match a black box with no .cname and no named output net (tool limit)
-I7 [cannot name black box black_box_cell: no .cname and no named output net to match it by] the bridge runs odin3 with the in-file --auto-blackbox (side A elaborates; Yosys 0.55 accepts it too), but the black-box cell becomes a .gate line that equiv-check cannot read (tool limit)
 L19 [Unsupported default nettype] Yosys 0.55 rejects `default_nettype tri (and the other net types of the row)
 L22 [begin_keywords] Yosys 0.55 has no `begin_keywords
 M3 [Incompatible re-declaration] Yosys 0.55 rejects the non-ANSI `output integer n; integer n;` re-declaration
