@@ -35,7 +35,11 @@ LIB_REL = Path("lib") / "vtr.o3lib"
 ABC_SCRIPT_REL = Path("lib") / "abc" / "vtr.abc"
 # The golden tree (read only; spec §3.4), from the account's home, never $HOME.
 GOLDEN_ROOT = Path(pwd.getpwuid(os.getuid()).pw_dir) / "odin3-ws" / "golden"
-ARCH_BASES = {"k6": "k6_frac_N10_frac_chain_mem32K_40nm", "earch": "EArch"}
+ARCH_BASES = {
+    "k6": "k6_frac_N10_frac_chain_mem32K_40nm",
+    "earch": "EArch",
+    "k4": "k4_N4_90nm",
+}
 TIME_BIN = "/usr/bin/time"
 # Spec §3 <T>: the VTR stage timeout (-timeout) per group (plan, Global Constraints caps).
 STAGE_TIMEOUT_S = {"A": 7200, "B": 14400}
@@ -121,7 +125,7 @@ def normalise_leg(name: str) -> str:
 
 
 def arch_base(arch: str) -> str:
-    """The arch basename for ``k6``/``earch`` or a basename itself."""
+    """The arch basename for ``k6``/``earch``/``k4`` or a basename itself."""
     if arch in ARCH_BASES:
         return ARCH_BASES[arch]
     if arch in ARCH_BASES.values():
@@ -234,8 +238,14 @@ def common_params(job_dir: Path, group: str, seed: int = DEFAULT_SEED) -> list[s
     ]
 
 
+def imports_arch(arch: str) -> bool:
+    """True when the O/O'/Oprov front end must build its techlib from the arch XML (``read_arch``)
+    rather than read ``lib/vtr.o3lib``: any arch but the k6 and EArch ones that file describes."""
+    return ARCH_BASES.get(arch, arch) not in (ARCH_BASES["k6"], ARCH_BASES["earch"])
+
+
 def _script(leg: str, design_v: Path | str, out_blif: Path | str, k: int, name_style: str,
-            lib: Path | str) -> str:
+            lib: Path | str, arch_xml: Path | str | None = None) -> str:
     if leg == "P":
         raise ValueError("leg P runs no odin3 script")
     if leg not in _SCRIPT_BODY:
@@ -244,26 +254,32 @@ def _script(leg: str, design_v: Path | str, out_blif: Path | str, k: int, name_s
         raise ValueError(f"unknown name style '{name_style}' ({', '.join(NAME_STYLES)})")
     style = "" if name_style == "short" else f" --name-style {name_style}"
     body = _SCRIPT_BODY[leg].format(inp=design_v, k=k)
-    return f"read_techlib {lib}; {body}write_blif --vtr --lut-k {k}{style} {out_blif}"
+    # Only the legs that run hardmap need the arch's hard blocks; the netlist readers keep $LIB.
+    hardmaps = "hardmap" in body
+    if arch_xml is not None and any(c in str(arch_xml) for c in " ;#\t"):
+        raise ValueError(f"arch path '{arch_xml}' has a blank, ';' or '#' (odin3 -p splits it)")
+    head = f"read_arch {arch_xml}" if arch_xml is not None and hardmaps else f"read_techlib {lib}"
+    return f"{head}; {body}write_blif --vtr --lut-k {k}{style} {out_blif}"
 
 
 def odin3_script(leg: str, design_v: Path | str, out_blif: Path | str, k: int,
-                name_style: str) -> str:
+                name_style: str, arch_xml: Path | str | None = None) -> str:
     """The odin3 script of an odin3 leg (spec §3.2-3.6; frozen for 3F).
 
     ``design_v`` is the leg's input: the ``.v`` for O, Oprime and Oprov, the verified golden BLIF
     for Pprime and R. ``$LIB`` is ``<repo>/lib/vtr.o3lib``. ``name_style`` ``short`` (the
     writer's default) adds nothing; ``provenance`` adds ``--name-style provenance``. Leg P runs
-    no odin3: ValueError.
+    no odin3: ValueError. ``arch_xml`` (4.13): the legs that run hardmap start with
+    ``read_arch <arch_xml>`` instead of ``read_techlib $LIB``; None keeps ``$LIB``.
     """
-    return _script(leg, design_v, out_blif, k, name_style, REPO_ROOT / LIB_REL)
+    return _script(leg, design_v, out_blif, k, name_style, REPO_ROOT / LIB_REL, arch_xml)
 
 
-def key_script(leg: str, k: int, name_style: str) -> str:
+def key_script(leg: str, k: int, name_style: str, arch_import: bool = False) -> str:
     """The script as it enters the keys: the leg's text with ``$LIB``, ``$IN`` and ``$OUT`` in
     place of the paths, so the leg key is shared by every design and job directory (point (f));
     the files' contents enter the key through their own SHA-256s."""
-    return _script(leg, "$IN", "$OUT", k, name_style, "$LIB")
+    return _script(leg, "$IN", "$OUT", k, name_style, "$LIB", "$ARCH" if arch_import else None)
 
 
 def leg_name_style(leg: str) -> str:
@@ -289,7 +305,7 @@ def _frontend_command(leg: str, design: str, ctx: LegContext) -> Command:
     else:
         source = design_verilog(ctx.vtr_root, design)
     script = _script(leg, source, ctx.job_dir / f"{design}.blif", ctx.k, leg_name_style(leg),
-                     ctx.repo / LIB_REL)
+                     ctx.repo / LIB_REL, ctx.arch_xml if imports_arch(ctx.arch_xml.stem) else None)
     argv = (TIME_BIN, "-v", "-o", str(ctx.job_dir / "frontend.time"), str(ctx.odin3),
             "--diag-paths", "resolved", "-p", script)
     return Command(argv, ctx.job_dir, ctx.job_dir / "frontend.log", ())

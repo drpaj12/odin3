@@ -89,6 +89,35 @@ class CommandTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             qor_legs.odin3_script("O", Path(SHA_V), out, 6, "long")
 
+    def test_arch_import_script(self) -> None:
+        out = J / "sha.blif"
+        k4 = V / "vtr_flow" / "arch" / "timing" / "k4_N4_90nm.xml"
+        want = O_SCRIPT.replace(f"read_techlib {R}/lib/vtr.o3lib", f"read_arch {k4}")
+        for leg in ("O", "Oprime"):
+            got = qor_legs.odin3_script(leg, Path(SHA_V), out, 6, "short", arch_xml=k4)
+            self.assertNotIn("vtr.o3lib", got)
+            self.assertTrue(got.startswith(f"read_arch {k4}; read_verilog"))
+        self.assertEqual(qor_legs.odin3_script("O", Path(SHA_V), out, 6, "short", arch_xml=k4),
+                         want)
+        with self.assertRaises(ValueError):  # odin3 -p would split the path
+            qor_legs.odin3_script("O", Path(SHA_V), out, 6, "short", arch_xml=Path("/a b/k4.xml"))
+        # the readers of a netlist keep the techlib (no hardmap)
+        self.assertEqual(qor_legs.odin3_script("R", G, out, 6, "short", arch_xml=k4),
+                         qor_legs.odin3_script("R", G, out, 6, "short"))
+        self.assertEqual(qor_legs.key_script("Oprime", 4, "short", arch_import=True)[:16],
+                         "read_arch $ARCH;")
+        self.assertEqual(qor_legs.key_script("Oprime", 6, "short"),
+                         qor_legs.key_script("Oprime", 6, "short", arch_import=False))
+        self.assertFalse(qor_legs.imports_arch("k6"))
+        self.assertFalse(qor_legs.imports_arch("earch"))
+        self.assertTrue(qor_legs.imports_arch("k4"))
+        k4ctx = qor_legs.LegContext(vtr_root=V, python=PY, arch_xml=k4, odin3=ODIN3, repo=R,
+                                    job_dir=J, k=4, group="A")
+        first, _ = qor_legs.build_commands("Oprime", "sha", k4ctx)
+        self.assertIn(f"read_arch {k4}; ", first.argv[-1])
+        first6, _ = qor_legs.build_commands("Oprime", "sha", ctx())
+        self.assertIn("vtr.o3lib", first6.argv[-1])
+
     def test_frontend_commands(self) -> None:
         first, second = qor_legs.build_commands("O", "sha", ctx())
         self.assertEqual(list(first.argv), [

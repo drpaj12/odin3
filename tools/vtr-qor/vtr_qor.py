@@ -127,7 +127,7 @@ DEFAULT_OUT_REL = Path("odin3-ws") / "work" / "vtr-qor"
 # add_executable(odin3 ...) puts the binary in build/<preset>/
 ODIN3_REL = Path("build") / "release" / "odin3"
 VTR_PATHS_REL = Path("vtr_flow") / "scripts" / "python_libs" / "vtr" / "paths.py"
-ARCHES = ("k6", "earch")
+ARCHES = ("k6", "earch", "k4")
 EARCH = "earch"
 # Machine readers (module seams for the tests).
 MEMINFO = Path("/proc/meminfo")
