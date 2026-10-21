@@ -43,10 +43,8 @@ MISMATCH vec=0 port=memory_controller_write_enable rtl=0 synth=1
 aborting after 21 errors
 VCHECK_SUMMARY matched=0 mismatched=7 vectors=7 port_errors=21
 """
-PASSED = (
-    "tops: synth=memset rtl=memset\nPASS: 50000 vectors matched across rtl/post-synth\n"
-    "VCHECK_SUMMARY matched=50000 mismatched=0 vectors=50000 port_errors=0\n"
-)
+PASSED = ("tops: synth=memset rtl=memset\nPASS: 50000 vectors matched across rtl/post-synth\n"
+          "VCHECK_SUMMARY matched=50000 mismatched=0 vectors=50000 port_errors=0\n")
 
 
 class VerdictTest(unittest.TestCase):
@@ -56,9 +54,8 @@ class VerdictTest(unittest.TestCase):
         self.assertEqual(qor_legs.fcheck_verdict(1, False, MISMATCH), "fail")
         # the testbench's $stop after the mismatches exits 250 in practice
         self.assertEqual(qor_legs.fcheck_verdict(250, False, MISMATCH), "fail")
-        self.assertEqual(
-            qor_legs.fcheck_verdict(1, False, "FAIL: 3 mismatches in 100 vectors"), "fail"
-        )
+        self.assertEqual(qor_legs.fcheck_verdict(1, False, "FAIL: 3 mismatches in 100 vectors"),
+                         "fail")
 
     def test_pass_needs_the_pass_line(self) -> None:
         self.assertEqual(qor_legs.fcheck_verdict(0, False, PASSED), "pass")
@@ -73,15 +70,9 @@ class VerdictTest(unittest.TestCase):
         line = "PASS: 0 vectors matched across rtl/post-synth\n"
         for summary in ("VCHECK_SUMMARY matched=0 mismatched=0 vectors=0 port_errors=0\n", ""):
             self.assertEqual(qor_legs.fcheck_verdict(0, False, line + summary), "error")
-        self.assertEqual(
-            qor_legs.fcheck_verdict(
-                0,
-                False,
-                "PASS: 9 vectors matched\n"
-                "VCHECK_SUMMARY matched=9 mismatched=0 vectors=9 port_errors=0\n",
-            ),
-            "pass",
-        )
+        self.assertEqual(qor_legs.fcheck_verdict(
+            0, False, "PASS: 9 vectors matched\n"
+            "VCHECK_SUMMARY matched=9 mismatched=0 vectors=9 port_errors=0\n"), "pass")
 
     def test_untested_needs_its_line_and_no_mismatch(self) -> None:
         line = "UNTESTED: 3 mismatches in 3 vectors, every one on a bit whose RTL value depends\n"
@@ -117,52 +108,30 @@ class WrapperTest(unittest.TestCase):
             sample = Path(tmp) / "top.v"
             sample.write_text(YOSYS_TOP, encoding="utf-8")
             (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(text):\n    return text.replace('~', '_')\n",
-                encoding="utf-8",
-            )
+                "def pack_bit_blasted_top_ports(text):\n"
+                "    return text.replace('~', '_')\n", encoding="utf-8")
             (vdir / "run_random_check.py").write_text(
                 "import sys\nimport blif_to_verilog\n"
                 "text = blif_to_verilog.pack_bit_blasted_top_ports(open(sys.argv[1]).read())\n"
                 "dup = 'wire \\\\memory_controller_address_26' in text\n"
                 "print('ERROR duplicate' if dup else 'PASS: 1 vectors matched')\n"
-                "raise SystemExit(7 if dup else 0)\n",
-                encoding="utf-8",
-            )
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-                str(sample),
-            ]
+                "raise SystemExit(7 if dup else 0)\n", encoding="utf-8")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), str(sample)]
             done = subprocess.run(run, capture_output=True, text=True, check=False)
-            self.assertEqual(
-                (done.returncode, done.stdout.strip()), (0, "PASS: 1 vectors matched"), done.stderr
-            )
+            self.assertEqual((done.returncode, done.stdout.strip()),
+                             (0, "PASS: 1 vectors matched"), done.stderr)
             # nothing is written next to the VTR scripts (-B)
-            self.assertEqual(
-                sorted(p.name for p in vdir.iterdir()),
-                ["blif_to_verilog.py", "run_random_check.py"],
-            )
+            self.assertEqual(sorted(p.name for p in vdir.iterdir()),
+                             ["blif_to_verilog.py", "run_random_check.py"])
             # the unpatched script path fails with the same input (the test sees the bug)
-            plain = subprocess.run(
-                [sys.executable, "-B", str(vdir / "run_random_check.py"), str(sample)],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
+            plain = subprocess.run([sys.executable, "-B", str(vdir / "run_random_check.py"),
+                                    str(sample)], capture_output=True, text=True, check=False)
             self.assertEqual(plain.returncode, 7)
 
     def test_only_the_top_module_is_filtered(self) -> None:
-        two = YOSYS_TOP + (
-            r"module sub(\x~1 );"
-            "\n"
-            r"  input \x~1 ;"
-            "\n"
-            r"  wire \x~1 ;"
-            "\nendmodule\n"
-        )
+        two = YOSYS_TOP + (r"module sub(\x~1 );" "\n" r"  input \x~1 ;" "\n" r"  wire \x~1 ;"
+                           "\nendmodule\n")
         text = qor_fcheck_run.drop_port_wires(two)
         self.assertEqual(text.count(r"wire \x~1 ;"), 1)  # sub keeps its own line
         self.assertNotIn(r"wire \memory_controller_address~26", text)
@@ -171,45 +140,33 @@ class WrapperTest(unittest.TestCase):
         HEAVY_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as tmp:
             vdir = Path(tmp)
-            (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8"
-            )
-            (vdir / "run_random_check.py").write_text(
-                "raise SystemExit('boom message')\n", encoding="utf-8"
-            )
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-            ]
+            (vdir / "blif_to_verilog.py").write_text("def pack_bit_blasted_top_ports(t):\n"
+                                                     "    return t\n", encoding="utf-8")
+            (vdir / "run_random_check.py").write_text("raise SystemExit('boom message')\n",
+                                                      encoding="utf-8")
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py")]
             done = subprocess.run(run, capture_output=True, text=True, check=False)
             self.assertEqual((done.returncode, done.stderr.strip()), (1, "boom message"))
-            (vdir / "blif_to_verilog.py").write_text(
-                "def renamed(t):\n    return t\n", encoding="utf-8"
-            )
+            (vdir / "blif_to_verilog.py").write_text("def renamed(t):\n    return t\n",
+                                                     encoding="utf-8")
             done = subprocess.run(run, capture_output=True, text=True, check=False)
             self.assertEqual(done.returncode, 2)
-            self.assertIn(
-                "has no pack_bit_blasted_top_ports (renamed or removed upstream)", done.stderr
-            )
+            self.assertIn("has no pack_bit_blasted_top_ports (renamed or removed upstream)",
+                          done.stderr)
 
     def test_wrapper_usage_error(self) -> None:
-        done = subprocess.run(
-            [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER)],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        done = subprocess.run([sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER)],
+                              capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 2)
 
 
-LATCH_V = (
-    "module lat(input a, input en, output reg q);\n  always @(a or en) if (en) q = a;\nendmodule\n"
-)
-SENS_V = "module sens(input a, input b, output reg q);\n  always @(a) q = a & b;\nendmodule\n"
-CLEAN_V = "module clean(input a, input b, output reg q);\n  always @* q = a & b;\nendmodule\n"
+LATCH_V = ("module lat(input a, input en, output reg q);\n  always @(a or en) if (en) q = a;\n"
+           "endmodule\n")
+SENS_V = ("module sens(input a, input b, output reg q);\n  always @(a) q = a & b;\n"
+          "endmodule\n")
+CLEAN_V = ("module clean(input a, input b, output reg q);\n  always @* q = a & b;\n"
+           "endmodule\n")
 ODIN_SENS = (
     "odin3: info: read_verilog: 1 units\n"
     "odin3: warning: sens.v:2:1: warning: incomplete sensitivity list: 'b' is read but not "
@@ -217,8 +174,7 @@ ODIN_SENS = (
     "odin3: warning: sens.v:9:1: warning: incomplete sensitivity list: 'c' is read but not "
     "listed; the block is built as @*\n"
     "odin3: warning: sens.v:11:1: warning: incomplete sensitivity list: 'b' is read but not "
-    "listed; the block is built as @*\n"
-)
+    "listed; the block is built as @*\n")
 
 
 def _fake_tools(latches: int, odin_out: str):  # type: ignore[no-untyped-def]
@@ -273,32 +229,24 @@ class PrecheckTest(unittest.TestCase):
     def test_a_clean_rtl_has_no_reason(self) -> None:
         run, calls = _fake_tools(0, "odin3: info: read_verilog: 1 units\n")
         self.assertEqual(
-            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), []
-        )
+            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), [])
         self.assertEqual(len(calls), 2)
 
     def test_a_failing_tool_is_not_a_verdict(self) -> None:
         """A Yosys that cannot read the RTL says nothing: the check does not hide the design."""
-
         def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(argv, 1, "", "ERROR")
-
         self.assertEqual(
-            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), []
-        )
+            qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run), [])
 
     def test_timeout_and_oserror_are_no_result_never_a_traceback(self) -> None:
         for exc in (subprocess.TimeoutExpired(["yosys"], 600), OSError("exec format error")):
-
-            def run(
-                argv: list[str], exc: Exception = exc, **kwargs: object
-            ) -> subprocess.CompletedProcess[str]:
+            def run(argv: list[str], exc: Exception = exc,
+                    **kwargs: object) -> subprocess.CompletedProcess[str]:
                 raise exc
-
             notes = qor_fcheck_run.PrecheckNotes()
             reasons = qor_fcheck_run.rtl_precheck(
-                Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes
-            )
+                Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes)
             self.assertEqual(reasons, [])
             self.assertEqual(len(notes.skipped), 2, notes.skipped)
             self.assertTrue(notes.skipped[0].startswith("PRECHECK-SKIPPED yosys: "))
@@ -307,15 +255,11 @@ class PrecheckTest(unittest.TestCase):
     def test_a_failing_tool_is_reported_as_skipped(self) -> None:
         def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
             return subprocess.CompletedProcess(argv, 1, "", "ERROR")
-
         notes = qor_fcheck_run.PrecheckNotes()
-        qor_fcheck_run.rtl_precheck(
-            Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes
-        )
-        self.assertEqual(
-            [n.split(":")[0] for n in notes.skipped],
-            ["PRECHECK-SKIPPED yosys", "PRECHECK-SKIPPED odin3"],
-        )
+        qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run,
+                                    notes=notes)
+        self.assertEqual([n.split(":")[0] for n in notes.skipped],
+                         ["PRECHECK-SKIPPED yosys", "PRECHECK-SKIPPED odin3"])
         self.assertIn("exit 1", notes.skipped[0])
 
     def test_a_missing_tool_is_reported_as_skipped(self) -> None:
@@ -338,8 +282,7 @@ class PrecheckTest(unittest.TestCase):
             run, calls = _fake_tools(5, ODIN_SENS)
             notes = qor_fcheck_run.PrecheckNotes()
             reasons = qor_fcheck_run.rtl_precheck(
-                Path(name), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes
-            )
+                Path(name), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes)
             self.assertEqual((reasons, calls), ([], []), name)
             self.assertEqual(len(notes.skipped), 2, name)
             self.assertIn("unsafe", notes.skipped[0])
@@ -366,45 +309,32 @@ class PrecheckTest(unittest.TestCase):
     def test_short_reasons_for_the_table(self) -> None:
         run, _ = _fake_tools(3, ODIN_SENS)
         notes = qor_fcheck_run.PrecheckNotes()
-        qor_fcheck_run.rtl_precheck(
-            Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run, notes=notes
-        )
+        qor_fcheck_run.rtl_precheck(Path("a.v"), Path("/y/yosys"), Path("/o/odin3"), run,
+                                    notes=notes)
         self.assertEqual(notes.short, ["latches 3", "sensitivity b, c"])
         text = qor_fcheck_run.render_precheck(["x"], notes.short)
         self.assertIn("UNTESTED-REASON latches 3; sensitivity b, c\n", text)
         self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "untested")
 
-    def _wrapper(
-        self, extra_env: dict[str, str], unset: tuple[str, ...] = (), yosys_ok: bool = True
-    ) -> subprocess.CompletedProcess[str]:
+    def _wrapper(self, extra_env: dict[str, str], unset: tuple[str, ...] = (),
+                 yosys_ok: bool = True) -> subprocess.CompletedProcess[str]:
         HEAVY_DIR.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as tmp:
             vdir = Path(tmp) / "verilator_check"
             vdir.mkdir()
             (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(text):\n    return text\n", encoding="utf-8"
-            )
+                "def pack_bit_blasted_top_ports(text):\n    return text\n", encoding="utf-8")
             (vdir / "run_random_check.py").write_text("print('CHECKER RAN')\n", encoding="utf-8")
             yosys = Path(tmp) / "yosys"  # a Yosys that finds no latch
             yosys.write_text(
                 "#!/bin/sh\nout=$(echo \"$3\" | sed 's/.*tee -o \\([^ ]*\\) .*/\\1/')\n"
-                "echo '0 objects.' > \"$out\"\n",
-                encoding="utf-8",
-            )
+                "echo '0 objects.' > \"$out\"\n", encoding="utf-8")
             yosys.chmod(0o755)
             rtl = Path(tmp) / "a.v"
             rtl.write_text(CLEAN_V, encoding="utf-8")
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-                "--rtl",
-                str(rtl),
-                "--yosys",
-                str(yosys if yosys_ok else Path(tmp) / "nope"),
-            ]
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), "--rtl", str(rtl),
+                   "--yosys", str(yosys if yosys_ok else Path(tmp) / "nope")]
             env = {k: v for k, v in os.environ.items() if k not in unset}
             env.update(extra_env)
             return subprocess.run(run, capture_output=True, text=True, check=False, env=env)
@@ -423,40 +353,26 @@ class PrecheckTest(unittest.TestCase):
         self.assertIn("CHECKER RAN", done.stdout)
 
     def test_a_bad_techlib_is_logged_and_the_checker_still_runs(self) -> None:
-        done = self._wrapper(
-            {
-                qor_fcheck_run.ODIN3_ENV: sys.executable,
-                qor_fcheck_run.TECHLIB_ENV: "/nonexistent/vtr.o3lib",
-            }
-        )
+        done = self._wrapper({qor_fcheck_run.ODIN3_ENV: sys.executable,
+                              qor_fcheck_run.TECHLIB_ENV: "/nonexistent/vtr.o3lib"})
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("PRECHECK-SKIPPED odin3: techlib /nonexistent/vtr.o3lib", done.stdout)
         self.assertIn("CHECKER RAN", done.stdout)
 
     def test_a_skipped_check_does_not_hide_a_reason(self) -> None:
-        text = qor_fcheck_run.render_precheck(
-            ["RTL infers 3 latches"], ["latches 3"], ["PRECHECK-SKIPPED odin3: unset"]
-        )
+        text = qor_fcheck_run.render_precheck(["RTL infers 3 latches"], ["latches 3"],
+                                              ["PRECHECK-SKIPPED odin3: unset"])
         self.assertIn("PRECHECK-SKIPPED odin3: unset\n", text)
         self.assertEqual(qor_legs.fcheck_verdict(3, False, text), "untested")
 
     def test_real_yosys_an_unused_module_does_not_mark_a_clean_top(self) -> None:
-        yosys = (
-            Path.home()
-            / "odin3-ws"
-            / "external"
-            / "vtr-verilog-to-routing"
-            / "build"
-            / "bin"
-            / "yosys"
-        )
+        yosys = (Path.home() / "odin3-ws" / "external" / "vtr-verilog-to-routing" / "build"
+                 / "bin" / "yosys")
         if not yosys.is_file():
             self.skipTest("no Yosys build at the controller's usual path")
-        text = (
-            "module unused(input d, input en, output reg q);\n"
-            "  always @* if (en) q = d;\nendmodule\n"
-            "module top(input a, output y);\n  assign y = ~a;\nendmodule\n"
-        )
+        text = ("module unused(input d, input en, output reg q);\n"
+                "  always @* if (en) q = d;\nendmodule\n"
+                "module top(input a, output y);\n  assign y = ~a;\nendmodule\n")
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "has space.v"
             path.write_text(text, encoding="utf-8")
@@ -475,29 +391,18 @@ class PrecheckTest(unittest.TestCase):
             vdir = Path(tmp) / "verilator_check"
             vdir.mkdir()
             (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(text):\n    return text\n", encoding="utf-8"
-            )
-            (vdir / "run_random_check.py").write_text("print('CHECKER RAN')\n", encoding="utf-8")
+                "def pack_bit_blasted_top_ports(text):\n    return text\n", encoding="utf-8")
+            (vdir / "run_random_check.py").write_text(
+                "print('CHECKER RAN')\n", encoding="utf-8")
             yosys = Path(tmp) / "yosys"  # a Yosys that finds 4 latches
             yosys.write_text(
                 "#!/bin/sh\nout=$(echo \"$3\" | sed 's/.*tee -o \\([^ ]*\\) .*/\\1/')\n"
-                "echo '4 objects.' > \"$out\"\n",
-                encoding="utf-8",
-            )
+                "echo '4 objects.' > \"$out\"\n", encoding="utf-8")
             yosys.chmod(0o755)
             rtl = Path(tmp) / "a.v"
             rtl.write_text(LATCH_V, encoding="utf-8")
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-                "--rtl",
-                str(rtl),
-                "--yosys",
-                str(yosys),
-            ]
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), "--rtl", str(rtl), "--yosys", str(yosys)]
             done = subprocess.run(run, capture_output=True, text=True, check=False)
             self.assertEqual(done.returncode, 3, done.stderr)
             self.assertIn("4 latches", done.stdout)
@@ -594,27 +499,25 @@ class InstrumentTest(unittest.TestCase):
         out = qor_fcheck_run.instrument_testbench(TB, OUTPUTS)
         self.assertIsNone(re.search(r"\$urandom\w*\s*\(", out))  # the vectors follow its seed
         with self.assertRaises(RuntimeError):  # a call it does not replace is never left behind
-            qor_fcheck_run.instrument_testbench(
-                TB.replace("m = $urandom();", "m = $urandom (3);"), OUTPUTS
-            )
+            qor_fcheck_run.instrument_testbench(TB.replace("m = $urandom();", "m = $urandom (3);"),
+                                                OUTPUTS)
         self.assertIn("m = rnd32();", out)
         self.assertIn("go = (rnd32() >> 31);", out)
         self.assertEqual(out.count("function automatic [31:0] rnd32();"), 1)
         self.assertLess(out.index("SEED_HINT = 1;"), out.index("rnd_state = rnd_state ^"))
         # the generator's start depends on the seed hint, and is never 0 (xorshift sticks at 0)
-        other = qor_fcheck_run.instrument_testbench(
-            TB.replace("SEED_HINT = 1;", "SEED_HINT = 2;"), OUTPUTS
-        )
+        other = qor_fcheck_run.instrument_testbench(TB.replace("SEED_HINT = 1;", "SEED_HINT = 2;"),
+                                                    OUTPUTS)
         self.assertNotEqual(out, other)
         self.assertNotIn("32'h00000000;", out)
 
     def test_unexpected_shape_is_an_error(self) -> None:
         with self.assertRaises(RuntimeError):
-            qor_fcheck_run.instrument_testbench(TB.replace("vecMismatched++", "vecBad++"), OUTPUTS)
+            qor_fcheck_run.instrument_testbench(TB.replace("vecMismatched++", "vecBad++"),
+                                                OUTPUTS)
         with self.assertRaises(RuntimeError):
-            qor_fcheck_run.instrument_testbench(
-                TB.replace("MAX_ERRORS = 20", "MAX_ERRORS = 2 "), OUTPUTS
-            )
+            qor_fcheck_run.instrument_testbench(TB.replace("MAX_ERRORS = 20", "MAX_ERRORS = 2 "),
+                                                OUTPUTS)
         with self.assertRaises(RuntimeError):  # no seed hint to start the generator from
             qor_fcheck_run.instrument_testbench(TB.replace("SEED_HINT", "SEED_HUNT"), OUTPUTS)
 
@@ -622,10 +525,8 @@ class InstrumentTest(unittest.TestCase):
         self.assertIn('$display("VD ");', qor_fcheck_run.instrument_testbench(TB, []))
 
     def test_x_initial_flag(self) -> None:
-        self.assertEqual(
-            qor_fcheck_run._unique_x_initial(["v", "--x-initial", "0", "-O"]),
-            ["v", "--x-initial", "unique", "-O"],
-        )
+        self.assertEqual(qor_fcheck_run._unique_x_initial(["v", "--x-initial", "0", "-O"]),
+                         ["v", "--x-initial", "unique", "-O"])
         self.assertEqual(qor_fcheck_run._unique_x_initial(["v"]), ["v", "--x-initial", "unique"])
 
 
@@ -660,9 +561,8 @@ class CompareRunsTest(unittest.TestCase):
 
     def test_a_defined_bit_that_mismatches_makes_a_fail_whatever_else_is_x(self) -> None:
         # bit 2 depends on the initial state; bit 0 is 0 in every run but the netlist drives 1
-        v = self.compare(
-            [vd((0b000, 0b101), (0, 0))], [vd((0b100, 0b101), (0, 0))], [vd((0b000, 0b101), (0, 0))]
-        )
+        v = self.compare([vd((0b000, 0b101), (0, 0))], [vd((0b100, 0b101), (0, 0))],
+                         [vd((0b000, 0b101), (0, 0))])
         self.assertEqual((v.mismatched, v.x_dependent, v.port_errors), (1, 0, 1))
         self.assertEqual(v.lines, ["MISMATCH vec=0 port=q rtl=x00 synth=101"])
 
@@ -694,9 +594,8 @@ class CompareRunsTest(unittest.TestCase):
         v = self.compare([vd((0, 1), (0, 0))], [vd((0, 0), (0, 0))], [vd((0, 1), (0, 0))])
         self.assertEqual((v.matched, v.mismatched, v.x_dependent), (0, 0, 1))
         self.assertEqual(v.x_lines, [])
-        self.assertEqual(
-            v.init_depend_lines, ["NETLIST_INIT_DEPEND vec=0 port=q rtl=000 synth=00x"]
-        )
+        self.assertEqual(v.init_depend_lines, ["NETLIST_INIT_DEPEND vec=0 port=q rtl=000 "
+                                               "synth=00x"])
         self.assertEqual(v.init_depend_port_errors, 1)
         self.assertFalse(v.passed)
         text = qor_fcheck_run.render_verdict(v)
@@ -710,9 +609,8 @@ class CompareRunsTest(unittest.TestCase):
         # q bit 1: RTL varies; q bit 0: RTL stable 0, netlist varies
         v = self.compare([vd((0b00, 0b11), (0, 0))], [vd((0b10, 0b10), (0, 0))])
         self.assertEqual(v.x_lines, ["XDEPEND vec=0 port=q rtl=0x0 synth=01x"])
-        self.assertEqual(
-            v.init_depend_lines, ["NETLIST_INIT_DEPEND vec=0 port=q rtl=0x0 synth=01x"]
-        )
+        self.assertEqual(v.init_depend_lines,
+                         ["NETLIST_INIT_DEPEND vec=0 port=q rtl=0x0 synth=01x"])
         text = qor_fcheck_run.render_verdict(v)
         self.assertIn("UNTESTED-REASON XDEPEND, NETLIST_INIT_DEPEND\n", text)
 
@@ -771,8 +669,7 @@ class CompareRunsTest(unittest.TestCase):
         # only x mismatches: no PASS, no MISMATCH line, a summary with mismatched=0 and exit 3:
         # the callers' ``error``, never a pass and never a fail
         text = qor_fcheck_run.render_verdict(
-            self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))], [vd((2, 5), (1, 1))])
-        )
+            self.compare([vd((0, 5), (1, 1))], [vd((7, 5), (1, 1))], [vd((2, 5), (1, 1))]))
         self.assertNotIn("PASS:", text)
         self.assertNotIn("MISMATCH", text)
         self.assertIn("UNTESTED: 1 mismatches in 1 vectors", text)
@@ -820,12 +717,10 @@ class InitRunsTest(unittest.TestCase):
             vdir = tmp / "verilator_check"
             vdir.mkdir()
             (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8"
-            )
+                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8")
             (vdir / "tb_generator.py").write_text(
                 f"def generate_dual_testbench(ports, **kwargs):\n    return {TB!r}\n",
-                encoding="utf-8",
-            )
+                encoding="utf-8")
             (vdir / "run_random_check.py").write_text(CHECKER, encoding="utf-8")
             bindir = tmp / "bin"
             bindir.mkdir()
@@ -835,23 +730,14 @@ class InitRunsTest(unittest.TestCase):
             sim = tmp / "sim.sh"
             sim.write_text("#!/bin/sh\necho 'tb clocks: clk'\n" + sim_body, encoding="utf-8")
             env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}")
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-                str(tmp / "work"),
-                str(sim),
-            ]
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py"), str(tmp / "work"), str(sim)]
             return subprocess.run(run, capture_output=True, text=True, check=False, env=env)
 
     def test_clean_first_run_passes_and_stops(self) -> None:
         # the first run is clean: no further run (a second invocation would print the marker)
-        body = (
-            "case \"$*\" in\n  *reset+0*) echo 'VD 2:2 1:1'; echo 'VD 5:5 0:0';;\n"
-            "  *) echo 'RAN-AGAIN';;\nesac\necho 'RAW_PASS: 2'\n"
-        )
+        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 2:2 1:1'; echo 'VD 5:5 0:0';;\n"
+                "  *) echo 'RAN-AGAIN';;\nesac\necho 'RAW_PASS: 2'\n")
         done = self._run(body)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("VCHECK_SUMMARY matched=2 mismatched=0 vectors=2 port_errors=0", done.stdout)
@@ -862,10 +748,8 @@ class InitRunsTest(unittest.TestCase):
 
     def test_mismatch_on_state_dependent_bits_is_untested(self) -> None:
         # run 0: RTL q=0 (init 0) vs netlist 5; run 1: q=7; run 2: q=2: every bit is x
-        body = (
-            "case \"$*\" in\n  *reset+0*) echo 'VD 0:5 1:1';;\n"
-            "  *reset+1*) echo 'VD 7:5 1:1';;\n  *) echo 'VD 2:5 1:1';;\nesac\n"
-        )
+        body = ("case \"$*\" in\n  *reset+0*) echo 'VD 0:5 1:1';;\n"
+                "  *reset+1*) echo 'VD 7:5 1:1';;\n  *) echo 'VD 2:5 1:1';;\nesac\n")
         done = self._run(body)
         self.assertEqual(done.returncode, 3, done.stderr)
         self.assertIn("XDEPEND vec=0 port=q rtl=xxx synth=101", done.stdout)
@@ -911,20 +795,14 @@ class InitRunsTest(unittest.TestCase):
 
             out = io.StringIO()
             code = qor_fcheck_run._run_inits(
-                [str(build / "Vtb"), "+verilator+seed+7", "+verilator+rand+reset+0"],
-                OUTPUTS,
-                out,
-                fake_call,
-            )
+                [str(build / "Vtb"), "+verilator+seed+7", "+verilator+rand+reset+0"], OUTPUTS, out,
+                fake_call)
             self.assertEqual(code, 1)
-            self.assertEqual(
-                [(c[1], c[-1]) for c in calls],
-                [
-                    ("+verilator+seed+7", "+verilator+rand+reset+0"),
-                    ("+verilator+seed+7", "+verilator+rand+reset+1"),
-                ]
-                + [(f"+verilator+seed+{7 + n}", "+verilator+rand+reset+2") for n in (1, 2, 3, 4)],
-            )
+            self.assertEqual([(c[1], c[-1]) for c in calls],
+                             [("+verilator+seed+7", "+verilator+rand+reset+0"),
+                              ("+verilator+seed+7", "+verilator+rand+reset+1")]
+                             + [(f"+verilator+seed+{7 + n}", "+verilator+rand+reset+2")
+                                for n in (1, 2, 3, 4)])
             self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
             self.assertIn("FAIL: 1 mismatches in 1 vectors", out.getvalue())
 
@@ -944,11 +822,8 @@ class InitRunsTest(unittest.TestCase):
 
             out = io.StringIO()
             code = qor_fcheck_run._run_inits(
-                [str(build / "Vtb"), "+verilator+seed+1", "+verilator+rand+reset+0"],
-                OUTPUTS,
-                out,
-                fake_call,
-            )
+                [str(build / "Vtb"), "+verilator+seed+1", "+verilator+rand+reset+0"], OUTPUTS,
+                out, fake_call)
             self.assertEqual(sorted(p.name for p in Path(raw).iterdir()), ["sim_build"])
             return code, out.getvalue(), calls
 
@@ -973,11 +848,9 @@ class InitRunsTest(unittest.TestCase):
     def test_one_vector_both_kinds_and_clean_vectors_are_counted(self) -> None:
         # vector 1: bit 0 differs (stable RTL), bit 2 differs and is x; vectors 0, 2 are clean
         clean = vd((3, 3), (0, 0))
-        rows = {
-            "0": [clean, vd((0, 5), (0, 0)), clean],
-            "1": [clean, vd((4, 5), (0, 0)), clean],
-            "2": [clean, vd((0, 5), (0, 0)), clean],
-        }
+        rows = {"0": [clean, vd((0, 5), (0, 0)), clean],
+                "1": [clean, vd((4, 5), (0, 0)), clean],
+                "2": [clean, vd((0, 5), (0, 0)), clean]}
         code, text, _ = self._classify(rows)
         self.assertEqual(code, 1)
         self.assertIn("MISMATCH vec=1 port=q rtl=x00 synth=101", text)
@@ -1006,9 +879,8 @@ class InitRunsTest(unittest.TestCase):
                 return 0
 
             out = io.StringIO()
-            code = qor_fcheck_run._run_inits(
-                [str(build / "Vtb"), "+verilator+seed+1"], OUTPUTS, out, fake_call
-            )
+            code = qor_fcheck_run._run_inits([str(build / "Vtb"), "+verilator+seed+1"], OUTPUTS,
+                                             out, fake_call)
             self.assertEqual(code, 0)
             self.assertEqual(len(calls), 1)  # a clean first run needs no other initial state
             self.assertTrue(calls[0][-1].endswith("rand+reset+0"))
@@ -1020,24 +892,16 @@ class InitRunsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(dir=HEAVY_DIR) as raw:
             vdir = Path(raw)
             (vdir / "blif_to_verilog.py").write_text(
-                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8"
-            )
-            (vdir / "tb_generator.py").write_text(
-                "def renamed(ports):\n    return ''\n", encoding="utf-8"
-            )
+                "def pack_bit_blasted_top_ports(t):\n    return t\n", encoding="utf-8")
+            (vdir / "tb_generator.py").write_text("def renamed(ports):\n    return ''\n",
+                                                  encoding="utf-8")
             (vdir / "run_random_check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
-            run = [
-                sys.executable,
-                "-I",
-                "-B",
-                str(qor_legs.FCHECK_RUNNER),
-                str(vdir / "run_random_check.py"),
-            ]
+            run = [sys.executable, "-I", "-B", str(qor_legs.FCHECK_RUNNER),
+                   str(vdir / "run_random_check.py")]
             done = subprocess.run(run, capture_output=True, text=True, check=False)
             self.assertEqual(done.returncode, 2)
-            self.assertIn(
-                "has no generate_dual_testbench (renamed or removed upstream)", done.stderr
-            )
+            self.assertIn("has no generate_dual_testbench (renamed or removed upstream)",
+                          done.stderr)
 
 
 if __name__ == "__main__":

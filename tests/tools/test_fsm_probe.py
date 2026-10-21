@@ -25,17 +25,10 @@ def _binary(value: int, bits: int) -> str:
 
 def _info(cell: str, wire: str, counts: tuple[int, int, int, int, int], module: str) -> str:
     ins, outs, bits, states, trans = counts
-    out = [
-        f"FSM `{cell}' from module `{module}':",
-        "-" * 37,
-        f"  Information on FSM {cell} (\\{wire}):",
-        "",
-        f"  Number of input signals:  {ins:3d}",
-        f"  Number of output signals: {outs:3d}",
-        f"  Number of state bits:     {bits:3d}",
-        "",
-        "  State encoding:",
-    ]
+    out = [f"FSM `{cell}' from module `{module}':", "-" * 37,
+           f"  Information on FSM {cell} (\\{wire}):", "",
+           f"  Number of input signals:  {ins:3d}", f"  Number of output signals: {outs:3d}",
+           f"  Number of state bits:     {bits:3d}", "", "  State encoding:"]
     for s in range(states):
         out.append(f"    {s}: {bits:5d}'{'0' * bits}" + ("  <RESET STATE>" if s == 0 else ""))
     out += ["", "  Transition Table (state_in, ctrl_in, state_out, ctrl_out):"]
@@ -44,27 +37,23 @@ def _info(cell: str, wire: str, counts: tuple[int, int, int, int, int], module: 
     return "\n".join(out)
 
 
-CH_INTRINSICS = "\n".join(
-    [
-        "Found FSM state register memset.cur_state.",
-        "Extracting FSM `\\cur_state' from module `\\memset'.",
-        "Recoding FSM `$fsm$\\cur_state$266' from module `\\memset' using `auto' encoding:",
-        "  mapping auto encoding to `one-hot` for this FSM.",
-        *[f"  {_binary(s, 4)} -> {'-' * (14 - s)}1{'-' * s}" for s in range(15)],
-        _info("$fsm$\\cur_state$266", "cur_state", (5, 16, 15, 15, 38), "memset"),
-    ]
-)
+CH_INTRINSICS = "\n".join([
+    "Found FSM state register memset.cur_state.",
+    "Extracting FSM `\\cur_state' from module `\\memset'.",
+    "Recoding FSM `$fsm$\\cur_state$266' from module `\\memset' using `auto' encoding:",
+    "  mapping auto encoding to `one-hot` for this FSM.",
+    *[f"  {_binary(s, 4)} -> {'-' * (14 - s)}1{'-' * s}" for s in range(15)],
+    _info("$fsm$\\cur_state$266", "cur_state", (5, 16, 15, 15, 38), "memset"),
+])
 
-MCML = "\n".join(
-    [
-        "Found FSM state register LogCalc.r_indexFirstOne.",
-        "Extracting FSM `\\r_indexFirstOne' from module `\\LogCalc'.",
-        "Recoding FSM `$fsm$\\r_indexFirstOne$18550' from module `\\LogCalc' using `auto' encoding:",
-        "  mapping auto encoding to `binary` for this FSM.",
-        *[f"  {_binary(s, 6)} -> {_binary(s, 5)}" for s in range(32)],
-        _info("$fsm$\\r_indexFirstOne$18550", "r_indexFirstOne", (33, 7, 5, 32, 70), "LogCalc"),
-    ]
-)
+MCML = "\n".join([
+    "Found FSM state register LogCalc.r_indexFirstOne.",
+    "Extracting FSM `\\r_indexFirstOne' from module `\\LogCalc'.",
+    "Recoding FSM `$fsm$\\r_indexFirstOne$18550' from module `\\LogCalc' using `auto' encoding:",
+    "  mapping auto encoding to `binary` for this FSM.",
+    *[f"  {_binary(s, 6)} -> {_binary(s, 5)}" for s in range(32)],
+    _info("$fsm$\\r_indexFirstOne$18550", "r_indexFirstOne", (33, 7, 5, 32, 70), "LogCalc"),
+])
 
 NOT_MARKING = """\
 Not marking raysend.rgWE as FSM state register:
@@ -96,30 +85,22 @@ class ParseTest(unittest.TestCase):
 
     def test_not_marking_two_reasons_and_failure(self) -> None:
         facts = yosys_log.parse_log(NOT_MARKING)["raysend"]
-        self.assertEqual(
-            facts.rejected["rgWE"],
-            [
-                "Register is connected to module port",
-                "Users of register don't seem to benefit from recoding",
-            ],
-        )
+        self.assertEqual(facts.rejected["rgWE"],
+                         ["Register is connected to module port",
+                          "Users of register don't seem to benefit from recoding"])
         self.assertEqual(facts.marked, ["state"])
         self.assertEqual(facts.failures, [("state", "at least two states are required")])
 
     def test_packed_binary_keeps_codes(self) -> None:
-        text = (
-            "Recoding FSM `$fsm$\\st$14' from module `\\t1' using `binary' encoding:\n"
-            "  existing encoding is already a packed binary encoding.\n"
-            + _info("$fsm$\\st$14", "st", (1, 1, 2, 3, 4), "t1")
-        )
+        text = ("Recoding FSM `$fsm$\\st$14' from module `\\t1' using `binary' encoding:\n"
+                "  existing encoding is already a packed binary encoding.\n"
+                + _info("$fsm$\\st$14", "st", (1, 1, 2, 3, 4), "t1"))
         (fsm,) = yosys_log.parse_log(text)["t1"].fsms
         self.assertEqual((fsm.encoding, fsm.bits_before, fsm.bits_after), ("binary", 2, 2))
 
     def test_none_encoding_is_reported(self) -> None:
-        text = (
-            "Recoding FSM `$fsm$\\st$3' from module `\\t1' using `none' encoding:\n"
-            "  nothing to do for encoding `none'.\n"
-        )
+        text = ("Recoding FSM `$fsm$\\st$3' from module `\\t1' using `none' encoding:\n"
+                "  nothing to do for encoding `none'.\n")
         self.assertEqual(yosys_log.parse_log(text), {})
 
 
@@ -149,8 +130,7 @@ class ScriptTest(unittest.TestCase):
             src = Path(tmp) / "a.v"
             src.write_text("module a; endmodule\n")
             code, _, err = helpers.run_main(
-                fsm_probe.main, [str(src), "--yosys", str(Path(tmp) / "nope")]
-            )
+                fsm_probe.main, [str(src), "--yosys", str(Path(tmp) / "nope")])
         self.assertEqual(code, 2)
         self.assertIn("yosys", err)
 
@@ -170,9 +150,8 @@ class CommittedFactsTest(unittest.TestCase):
 
     def test_24_user_fsms_in_9_designs(self) -> None:
         designs = self.vtr_designs()
-        user = {
-            k: [f for f in v["fsms"] if "memwr" not in str(f["wire"])] for k, v in designs.items()
-        }
+        user = {k: [f for f in v["fsms"] if "memwr" not in str(f["wire"])]
+                for k, v in designs.items()}
         self.assertEqual(len(designs), 9)
         self.assertEqual(sum(len(v) for v in user.values()), 24)
         self.assertTrue(all(user.values()))
@@ -192,7 +171,8 @@ class CommittedFactsTest(unittest.TestCase):
 
     def test_ch_intrinsics_cur_state(self) -> None:
         (fsm,) = [f for f in self.facts["ch_intrinsics"]["fsms"] if f["wire"] == "cur_state"]
-        self.assertEqual((fsm["states"], fsm["bits_after"], fsm["encoding"]), (15, 15, "one-hot"))
+        self.assertEqual((fsm["states"], fsm["bits_after"], fsm["encoding"]),
+                         (15, 15, "one-hot"))
 
 
 if __name__ == "__main__":

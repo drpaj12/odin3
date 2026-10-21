@@ -121,7 +121,7 @@ class OperandGuardTest(unittest.TestCase):
         self.assertEqual(err, "x: e :: '+' :: operator token after e\n")
 
     def test_precedence_tokens_use_the_report_spelling(self) -> None:
-        text = "%token POW \"**\" N\n%right '?'\n%left POW /* power */ N\n%%\n"
+        text = '%token POW "**" N\n%right \'?\'\n%left POW /* power */ N\n%%\n'
         self.assertEqual(solved_conflicts.precedence_tokens(text), {"'?'", '"**"', "N"})
 
     def test_verilog_grammar_passes(self) -> None:

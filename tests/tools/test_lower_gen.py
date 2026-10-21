@@ -48,22 +48,8 @@ class ProfileTest(unittest.TestCase):
 
     def test_text_shows_each_cell_class(self) -> None:
         text = "".join(lower_profile.generate(s).text for s in SEEDS)
-        for needle in (
-            " * ",
-            " / ",
-            " % ",
-            " << s",
-            " >>> ",
-            "$signed(",
-            "$unsigned(",
-            "case (s)",
-            "[s +: ",
-            "negedge clk",
-            "posedge rst",
-            "if (!en)",
-            "reg [",
-            "<<<",
-        ):
+        for needle in (" * ", " / ", " % ", " << s", " >>> ", "$signed(", "$unsigned(", "case (s)",
+                       "[s +: ", "negedge clk", "posedge rst", "if (!en)", "reg [", "<<<"):
             self.assertIn(needle, text, needle)
         for op in ("==", "!=", "<=", ">=", "&&", "||", "~^", "-("):
             self.assertIn(op, text, op)
@@ -90,9 +76,8 @@ class ProfileTest(unittest.TestCase):
 
     def test_lower_is_exclusive_with_the_other_profiles_and_mutate(self) -> None:
         for other in ("--proc", "--elab", "--opt", "--flatten", "--mutate"):
-            code, _, _ = helpers.run_main(
-                verilog_gen.main, ["--lower", other, "--seed", "1", "--out", "/dev/null"]
-            )
+            code, _, _ = helpers.run_main(verilog_gen.main, ["--lower", other, "--seed", "1",
+                                                              "--out", "/dev/null"])
             self.assertEqual(code, 2, other)
 
     def test_parses_with_yosys_055(self) -> None:
@@ -103,12 +88,8 @@ class ProfileTest(unittest.TestCase):
             for seed in SEEDS:
                 path = Path(tmp) / f"s{seed}.v"
                 path.write_text(lower_profile.generate(seed).text, encoding="utf-8")
-                done = subprocess.run(
-                    [yosys, "-q", "-p", f"read_verilog -sv {path}; proc; opt"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                done = subprocess.run([yosys, "-q", "-p", f"read_verilog -sv {path}; proc; opt"],
+                                      capture_output=True, text=True, check=False)
                 self.assertEqual(done.returncode, 0, f"seed {seed}: {done.stderr[-300:]}")
 
 
@@ -136,27 +117,15 @@ class DriverTest(unittest.TestCase):
         self.addCleanup(patch.stop)
 
     def run_tool(self, *args: str) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            "/bin/odin3",
-            "--yosys",
-            "/bin/yosys55",
-            "--parmys-techlibs",
-            "/x",
-            "--work",
-            str(self.work),
-            *args,
-        ]
+        argv = ["--odin3", "/bin/odin3", "--yosys", "/bin/yosys55", "--parmys-techlibs", "/x",
+                "--work", str(self.work), *args]
         return helpers.run_main(lgd.main, argv)
 
     def test_clean_seeds_pass_and_write_their_files(self) -> None:
         code, out, _ = self.run_tool("--seeds", "1..10")
         self.assertEqual(code, 0, out)
-        self.assertIn(
-            "seeds 1..10: 10 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; "
-            "compared 10 of 10",
-            out,
-        )
+        self.assertIn("seeds 1..10: 10 ok, 0 structural, 0 unproven, 0 empty, 0 differ, 0 BUG; "
+                      "compared 10 of 10", out)
         text = (self.work / "seed2" / "seed2.v").read_text(encoding="utf-8")
         self.assertEqual(text, lower_profile.generate(2).text)
 
@@ -222,10 +191,8 @@ class DriverTest(unittest.TestCase):
             self.assertEqual(code, 2, text)
             self.assertIn("expected A..B", err)
 
-    HIST = (
-        "lower-diff: seed1.v [arith/T]: histogram: DIFFERS: module t: odin3 $_AND_ 10, "
-        "$_OR_ 5; yosys $_AND_ 11, $_OR_ 4\n"
-    )
+    HIST = ("lower-diff: seed1.v [arith/T]: histogram: DIFFERS: module t: odin3 $_AND_ 10, "
+            "$_OR_ 5; yosys $_AND_ 11, $_OR_ 4\n")
 
     def expect_file(self, text: str) -> Path:
         path = Path(self._tmp.name) / "expect.txt"
@@ -270,11 +237,8 @@ class DriverTest(unittest.TestCase):
         self.assertEqual(code, 1)
 
     def test_a_stale_line_beside_unproven_is_not_softened(self) -> None:
-        self.fake.diff = (
-            1,
-            "lower-diff: s: equiv: UNPROVEN: x\n"
-            "lower-diff: s: histogram: stale entry in the expect list (r)\n",
-        )
+        self.fake.diff = (1, "lower-diff: s: equiv: UNPROVEN: x\n"
+                             "lower-diff: s: histogram: stale entry in the expect list (r)\n")
         code, out, _ = self.run_tool("--seeds", "1..1")
         self.assertEqual(code, 1, out)
 
@@ -300,23 +264,15 @@ class DriverTest(unittest.TestCase):
 
     def test_an_earlier_bug_or_difference_is_not_masked_by_a_later_2_or_77(self) -> None:
         for later, expected in ((77, 1), (2, 1)):
-            for first in (
-                (0, "ok\n", 1, "lower-equiv: NOT A REFINEMENT: t\n"),
-                (1, "lower-diff: s [arith/T]: equiv: DIFFERS: x\n", 0, "ok\n"),
-            ):
-
-                def fake(
-                    argv: Sequence[str],
-                    cwd: Path,
-                    first: tuple[object, ...] = first,
-                    later: int = later,
-                ) -> tuple[int, str]:
+            for first in ((0, "ok\n", 1, "lower-equiv: NOT A REFINEMENT: t\n"),
+                          (1, "lower-diff: s [arith/T]: equiv: DIFFERS: x\n", 0, "ok\n")):
+                def fake(argv: Sequence[str], cwd: Path, first: tuple[object, ...] = first,
+                         later: int = later) -> tuple[int, str]:
                     number = int(Path(argv[-1]).stem.removeprefix("seed"))
                     diff = "lower-diff" in argv[0]
                     if number == 1:
                         return (first[0], first[1]) if diff else (first[2], first[3])  # type: ignore[return-value]
                     return (later, "later\n")
-
                 with mock.patch.object(lgd, "run_tool", fake):
                     code, out, _ = self.run_tool("--seeds", "1..3")
                 self.assertEqual(code, expected, (later, first, out))
@@ -325,7 +281,6 @@ class DriverTest(unittest.TestCase):
         def fake(argv: Sequence[str], cwd: Path) -> tuple[int, str]:
             number = int(Path(argv[-1]).stem.removeprefix("seed"))
             return (2, "err\n") if number == 1 and "lower-diff" in argv[0] else (0, "ok\n")
-
         with mock.patch.object(lgd, "run_tool", fake):
             code, _, _ = self.run_tool("--seeds", "1..3")
         self.assertEqual(code, 2)
@@ -339,9 +294,8 @@ class DriverTest(unittest.TestCase):
     def test_no_vtr_root_and_no_techlibs_is_a_skip(self) -> None:
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("VTR_ROOT", None)
-            code, _, err = helpers.run_main(
-                lgd.main, ["--odin3", "o", "--yosys", "y", "--seeds", "1..1"]
-            )
+            code, _, err = helpers.run_main(lgd.main, ["--odin3", "o", "--yosys", "y",
+                                                       "--seeds", "1..1"])
         self.assertEqual(code, 77)
         self.assertIn("VTR_ROOT", err)
 

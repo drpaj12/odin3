@@ -49,41 +49,18 @@ KIB_PER_GIB = 1024**2
 SLICE_DIRS = "user.slice/user-1000.slice/user@1000.service/odin3.slice"
 CLI = REPO_ROOT / "tools" / "vtr-qor" / "vtr_qor.py"
 SHIM = REPO_ROOT / "tools" / "vtr-qor" / "vtr-qor"
-ALL_PASSES = (
-    "read_techlib",
-    "read_verilog",
-    "read_blif",
-    "proc",
-    "fsm",
-    "opt",
-    "flatten",
-    "wreduce",
-    "hardmap",
-    "lower",
-    "abc",
-    "write_blif",
-)
-TIMEV = (
-    "\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.50\n"
-    "\tMaximum resident set size (kbytes): 20480\n"
-)
-BLIF = ".model top\n.inputs a b clk\n.outputs y\n.names a b n1\n11 1\n.latch n1 y re clk 0\n.end\n"
-ABC_LINE = (
-    f"# abc: script=lib/abc/vtr.abc sha256={'1' * 64} abc={'2' * 40} K=6 exchange=aig depth=2\n"
-)
-VPR_FIELDS = {
-    "vpr_status": "success",
-    "num_clb": "12",
-    "num_memories": "1",
-    "num_mult": "2",
-    "device_width": "8",
-    "device_height": "9",
-    "min_chan_width": "40",
-    "critical_path_delay": "2.5",
-    "crit_path_routed_wirelength": "1234",
-    "max_vpr_mem": "65536",
-    "abc_depth": "3",
-}
+ALL_PASSES = ("read_techlib", "read_verilog", "read_blif", "proc", "fsm", "opt", "flatten",
+              "wreduce", "hardmap", "lower", "abc", "write_blif")
+TIMEV = ("\tElapsed (wall clock) time (h:mm:ss or m:ss): 0:00.50\n"
+         "\tMaximum resident set size (kbytes): 20480\n")
+BLIF = (".model top\n.inputs a b clk\n.outputs y\n.names a b n1\n11 1\n"
+        ".latch n1 y re clk 0\n.end\n")
+ABC_LINE = (f"# abc: script=lib/abc/vtr.abc sha256={'1' * 64} abc={'2' * 40} K=6 "
+            "exchange=aig depth=2\n")
+VPR_FIELDS = {"vpr_status": "success", "num_clb": "12", "num_memories": "1", "num_mult": "2",
+              "device_width": "8", "device_height": "9", "min_chan_width": "40",
+              "critical_path_delay": "2.5", "crit_path_routed_wirelength": "1234",
+              "max_vpr_mem": "65536", "abc_depth": "3"}
 
 # The fake VTR flow: it logs each call to <V>/calls.log and leaves in -temp_dir what VTR would.
 FAKE_FLOW = f"""
@@ -227,27 +204,10 @@ def _shell(path: Path, body: str) -> Path:
 def _git(repo: Path, *args: str) -> str:
     # gc.auto/maintenance.auto off: a detached auto-gc could still be writing .git when the
     # TemporaryDirectory is removed ("Directory not empty: .../vtr/.git", CI 2026-10-18).
-    proc = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(repo),
-            "-c",
-            "user.name=t",
-            "-c",
-            "user.email=t@t",
-            "-c",
-            "commit.gpgsign=false",
-            "-c",
-            "gc.auto=0",
-            "-c",
-            "maintenance.auto=false",
-            *args,
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    proc = subprocess.run(["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t",
+                           "-c", "commit.gpgsign=false", "-c", "gc.auto=0",
+                           "-c", "maintenance.auto=false", *args],
+                          capture_output=True, text=True, check=True)
     return proc.stdout.strip()
 
 
@@ -259,53 +219,17 @@ def _tree(path: Any) -> Any:
 
 
 SPEC_TREE = {  # spec §5.2 plus netlist.abc_exchange (point (e))
-    "schema": None,
-    "leg": None,
-    "design": None,
-    "arch": None,
-    "key": None,
-    "status": None,
-    "gating": None,
-    "vtr_commit": None,
-    "odin3_commit": None,
-    "odin3_build": None,
-    "abc_script_sha256": None,
-    "started": None,
-    "elapsed_s": None,
-    "netlist": dict.fromkeys(
-        (
-            "luts",
-            "ffs",
-            "adders",
-            "mults",
-            "ram_slices",
-            "depth",
-            "abc_depth",
-            "blif_sha256",
-            "abc_exchange",
-        )
-    ),
-    "packed": dict.fromkeys(
-        ("num_clb", "num_memories", "num_mult", "device_width", "device_height")
-    ),
-    "routed": dict.fromkeys(
-        (
-            "vpr_status",
-            "min_chan_width",
-            "critical_path_delay_ns",
-            "fmax_mhz",
-            "crit_path_routed_wirelength",
-        )
-    ),
-    "cost": dict.fromkeys(
-        (
-            "frontend_wall_s",
-            "frontend_peak_rss_mib",
-            "vpr_time_s",
-            "vpr_total_runtime_s",
-            "max_vpr_mem_mib",
-        )
-    ),
+    "schema": None, "leg": None, "design": None, "arch": None, "key": None, "status": None,
+    "gating": None, "vtr_commit": None, "odin3_commit": None, "odin3_build": None,
+    "abc_script_sha256": None, "started": None, "elapsed_s": None,
+    "netlist": dict.fromkeys(("luts", "ffs", "adders", "mults", "ram_slices", "depth",
+                              "abc_depth", "blif_sha256", "abc_exchange")),
+    "packed": dict.fromkeys(("num_clb", "num_memories", "num_mult", "device_width",
+                             "device_height")),
+    "routed": dict.fromkeys(("vpr_status", "min_chan_width", "critical_path_delay_ns",
+                             "fmax_mhz", "crit_path_routed_wirelength")),
+    "cost": dict.fromkeys(("frontend_wall_s", "frontend_peak_rss_mib", "vpr_time_s",
+                           "vpr_total_runtime_s", "max_vpr_mem_mib")),
     "verdicts": dict.fromkeys(("fcheck", "equiv", "rerun")),
     "error": None,
 }
@@ -314,9 +238,8 @@ SPEC_TREE = {  # spec §5.2 plus netlist.abc_exchange (point (e))
 class CliTestBase(unittest.TestCase):
     def setUp(self) -> None:
         HEAVY_DIR.mkdir(parents=True, exist_ok=True)
-        self._tmp = tempfile.TemporaryDirectory(
-            dir=HEAVY_DIR, prefix="qor-cli-test-", ignore_cleanup_errors=True
-        )
+        self._tmp = tempfile.TemporaryDirectory(dir=HEAVY_DIR, prefix="qor-cli-test-",
+                                                ignore_cleanup_errors=True)
         self.addCleanup(self._tmp.cleanup)
         self.tmp = Path(self._tmp.name)
         self.out = self.tmp / "out"
@@ -337,18 +260,13 @@ class CliTestBase(unittest.TestCase):
         self.golden = self.tmp / "golden"
         self._fake_heavy()
         for module, name, value in (
-            (qor_legs, "VTR_PIN", self.pin),
-            (qor_legs, "REPO_ROOT", self.repo),
-            (qor_legs, "GOLDEN_ROOT", self.golden),
-            (qor_legs, "TIME_BIN", str(time_bin)),
+            (qor_legs, "VTR_PIN", self.pin), (qor_legs, "REPO_ROOT", self.repo),
+            (qor_legs, "GOLDEN_ROOT", self.golden), (qor_legs, "TIME_BIN", str(time_bin)),
             (qor_sched, "LDD_CMD", (str(self.ldd),)),
         ):
             self.stack.enter_context(mock.patch.object(module, name, value))
-        self.stack.enter_context(
-            mock.patch.dict(
-                os.environ, {"PATH": f"{self.bin}:{os.environ.get('PATH', os.defpath)}"}
-            )
-        )
+        self.stack.enter_context(mock.patch.dict(
+            os.environ, {"PATH": f"{self.bin}:{os.environ.get('PATH', os.defpath)}"}))
 
     def _make_vtr(self) -> str:
         v = self.vtr
@@ -365,8 +283,7 @@ class CliTestBase(unittest.TestCase):
         _script(scripts / "run_vtr_task.py", FAKE_TASK)
         _script(v / "mosaic" / "verilator_check" / "run_random_check.py", FAKE_RANDOM_CHECK)
         (v / "mosaic" / "verilator_check" / "blif_to_verilog.py").write_text(
-            "def pack_bit_blasted_top_ports(text):\n    return text\n"
-        )
+            "def pack_bit_blasted_top_ports(text):\n    return text\n")
         libs = scripts / "python_libs" / "vtr"
         _script(libs / "parse_vtr_flow.py", FAKE_PARSE)
         (libs / "__init__.py").write_text("")
@@ -405,51 +322,34 @@ class CliTestBase(unittest.TestCase):
         self.df_file = self.tmp / "df-gib"
         self.df_file.write_text("100\n")
         fake_df = self.tmp / "fake-df.py"
-        fake_df.write_text(
-            "import sys\ngib = int(open(sys.argv[1]).read())\n"
-            f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n"
-        )
+        fake_df.write_text("import sys\ngib = int(open(sys.argv[1]).read())\n"
+                           f"print('Mounted on   Avail')\nprint('/mnt/c', gib * {GIB})\n")
         self.meminfo = self.tmp / "meminfo"
-        self.meminfo.write_text(
-            f"MemTotal: {24 * KIB_PER_GIB} kB\nMemAvailable: {16 * KIB_PER_GIB} kB\n"
-        )
-        self.heavy_run = _shell(
-            self.tmp / "heavy-run", 'systemd-run --user --scope -p OOMPolicy=continue "$@"\n'
-        )
+        self.meminfo.write_text(f"MemTotal: {24 * KIB_PER_GIB} kB\n"
+                                f"MemAvailable: {16 * KIB_PER_GIB} kB\n")
+        self.heavy_run = _shell(self.tmp / "heavy-run",
+                                'systemd-run --user --scope -p OOMPolicy=continue "$@"\n')
         for module, name, value in (
-            (qor_heavy, "SELF_CGROUP", self_cgroup),
-            (qor_heavy, "CGROUP_ROOT", root),
-            (qor_heavy, "FD9", fd9),
-            (qor_heavy, "HEAVY_LOCK", self.lock),
+            (qor_heavy, "SELF_CGROUP", self_cgroup), (qor_heavy, "CGROUP_ROOT", root),
+            (qor_heavy, "FD9", fd9), (qor_heavy, "HEAVY_LOCK", self.lock),
             (qor_heavy, "HEAVY_RUN", self.heavy_run),
             (qor_heavy, "DF_CMD", (sys.executable, "-I", str(fake_df), str(self.df_file))),
-            (vtr_qor, "MEMINFO", self.meminfo),
-            (vtr_qor, "SYSTEMD_PROBE", ("true",)),
+            (vtr_qor, "MEMINFO", self.meminfo), (vtr_qor, "SYSTEMD_PROBE", ("true",)),
         ):
             self.stack.enter_context(mock.patch.object(module, name, value))
-        self.stack.enter_context(
-            mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"})
-        )
+        self.stack.enter_context(mock.patch.dict(os.environ,
+                                                 {"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"}))
 
     # -- helpers ---------------------------------------------------------------------------
 
     def set_help(self, passes: tuple[str, ...]) -> None:
-        lines = [
-            "usage: odin3 [options] -p <script>",
-            "",
-            "options:",
-            "  --help  this text",
-            "",
-            "passes:",
-        ] + [f"  {name}  the {name} pass" for name in passes]
+        lines = ["usage: odin3 [options] -p <script>", "", "options:", "  --help  this text",
+                 "", "passes:"] + [f"  {name}  the {name} pass" for name in passes]
         (self.bin / "help.txt").write_text("\n".join(lines) + "\n")
 
     def cli(self, *argv: str, common: bool = True) -> tuple[int, str, str]:
-        extra = (
-            ["--vtr-root", str(self.vtr), "--odin3", str(self.odin3), "--out", str(self.out)]
-            if common
-            else []
-        )
+        extra = ["--vtr-root", str(self.vtr), "--odin3", str(self.odin3),
+                 "--out", str(self.out)] if common else []
         return run_main(vtr_qor.main, [*argv, *extra])
 
     def calls(self) -> list[str]:
@@ -487,15 +387,14 @@ class DryRunTest(CliTestBase):
 
     def test_dry_run_order_and_cached(self) -> None:
         """Designs given out of order keep §2's (group B last); a complete job shows cached."""
-        code, out, err = self.cli(
-            "run", "--leg", "P", "--designs", "LU8PEEng,sha,ch_intrinsics", "--dry-run"
-        )
+        code, out, err = self.cli("run", "--leg", "P", "--designs",
+                                  "LU8PEEng,sha,ch_intrinsics", "--dry-run")
         self.assertEqual(code, 0, err)
-        self.assertEqual(
-            [line.split()[1] for line in out.splitlines()], ["ch_intrinsics", "sha", "LU8PEEng"]
-        )
+        self.assertEqual([line.split()[1] for line in out.splitlines()],
+                         ["ch_intrinsics", "sha", "LU8PEEng"])
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
-        code, out, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,sha", "--dry-run")
+        code, out, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,sha",
+                                "--dry-run")
         self.assertEqual([line.split()[3] for line in out.splitlines()], ["cached", "run"])
         (job,) = self.job_dirs("P", "ch_intrinsics")
         (job / "status").unlink()  # half done: metrics.json ok, no status
@@ -504,9 +403,8 @@ class DryRunTest(CliTestBase):
 
     def test_isolated_import(self) -> None:
         """Point (u): ``python3 -I vtr_qor.py --help`` works; the shim prints the same."""
-        direct = subprocess.run(
-            [sys.executable, "-I", str(CLI), "--help"], capture_output=True, text=True, check=False
-        )
+        direct = subprocess.run([sys.executable, "-I", str(CLI), "--help"],
+                                capture_output=True, text=True, check=False)
         self.assertEqual(direct.returncode, 0, direct.stderr)
         self.assertIn("usage: vtr-qor", direct.stdout)
         shim = subprocess.run([str(SHIM), "--help"], capture_output=True, text=True, check=False)
@@ -517,33 +415,20 @@ class DryRunTest(CliTestBase):
 class InputTest(CliTestBase):
     def test_vtr_errors(self) -> None:
         missing = self.tmp / "nowhere"
-        code, _, err = run_main(
-            vtr_qor.main,
-            [
-                "run",
-                "--leg",
-                "P",
-                "--set",
-                "smoke",
-                "--vtr-root",
-                str(missing),
-                "--out",
-                str(self.out),
-            ],
-        )
+        code, _, err = run_main(vtr_qor.main, ["run", "--leg", "P", "--set", "smoke",
+                                               "--vtr-root", str(missing),
+                                               "--out", str(self.out)])
         self.assertEqual(code, 2)
-        self.assertEqual(err, f"vtr-qor: VTR not found at {missing} (set VTR_ROOT or --vtr-root)\n")
+        self.assertEqual(err, f"vtr-qor: VTR not found at {missing} (set VTR_ROOT or "
+                              "--vtr-root)\n")
         # Another commit.
         (self.vtr / "README").write_text("moved on\n")
         _git(self.vtr, "commit", "-q", "-am", "next")
         other = _git(self.vtr, "rev-parse", "HEAD")
         code, _, err = self.cli("run", "--leg", "P", "--set", "smoke")
         self.assertEqual(code, 2)
-        self.assertEqual(
-            err,
-            f"vtr-qor: VTR at {self.vtr} is {other[:12]}, ORACLES.md pins "
-            f"{self.pin[:12]} (use --allow-vtr-drift for a report-only run)\n",
-        )
+        self.assertEqual(err, f"vtr-qor: VTR at {self.vtr} is {other[:12]}, ORACLES.md pins "
+                              f"{self.pin[:12]} (use --allow-vtr-drift for a report-only run)\n")
         # Back at the pin with one modified tracked file (an untracked one does not count).
         _git(self.vtr, "checkout", "-q", self.pin)
         (self.vtr / "README").write_text("edited\n")
@@ -557,9 +442,8 @@ class InputTest(CliTestBase):
         pin is refused, so nothing is cached under the clean key and latest does not move; the
         clean run afterwards starts VTR."""
         (self.vtr / "README").write_text("patched VPR, say\n")
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--allow-vtr-drift"
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--allow-vtr-drift")
         self.assertEqual(code, 2)
         self.assertEqual(err, f"vtr-qor: VTR at {self.vtr} has 1 modified tracked files\n")
         self.assertEqual(self.calls(), [])
@@ -575,9 +459,8 @@ class InputTest(CliTestBase):
         (self.vtr / "README").write_text("moved on\n")
         _git(self.vtr, "commit", "-q", "-am", "next")
         other = _git(self.vtr, "rev-parse", "HEAD")
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--allow-vtr-drift"
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--allow-vtr-drift")
         self.assertEqual(code, 0, err)
         (job,) = sorted((self.out / other[:12] / K6 / "P").glob("*/ch_intrinsics"))
         self.assertIs(self.load(job / "job.json")["vtr_drift"], True)
@@ -609,14 +492,12 @@ class InputTest(CliTestBase):
         self.set_help(tuple(p for p in ALL_PASSES if p != "wreduce"))
         code, _, err = self.cli("run", "--leg", "O", "--set", "smoke", "--dry-run")
         self.assertEqual(code, 2)
-        self.assertEqual(
-            err, f"vtr-qor: leg O needs pass 'wreduce', which {self.odin3} does not register\n"
-        )
+        self.assertEqual(err, f"vtr-qor: leg O needs pass 'wreduce', which {self.odin3} does "
+                              "not register\n")
         code, _, err = self.cli("run", "--leg", "P'", "--set", "smoke", "--dry-run")
         self.assertEqual(code, 0, err)  # Pprime needs no wreduce; P' is its alias
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--set", "smoke", "--dry-run", "--odin3", str(self.tmp / "absent")
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--set", "smoke", "--dry-run",
+                                "--odin3", str(self.tmp / "absent"))
         self.assertEqual(code, 0, err)  # P runs no odin3
 
     def test_options_refused(self) -> None:
@@ -625,13 +506,11 @@ class InputTest(CliTestBase):
         code, _, err = self.cli("run", "--leg", "P", "--set", "smoke", "--xl", "--dry-run")
         self.assertEqual(code, 2)
         self.assertIn("--xl is only for run --designs", err)
-        code, _, err = run_main(
-            vtr_qor.main, ["run", "--leg", "P", "--set", "smoke", "--dry-run", "--out", "/etc"]
-        )
+        code, _, err = run_main(vtr_qor.main, ["run", "--leg", "P", "--set", "smoke",
+                                               "--dry-run", "--out", "/etc"])
         self.assertEqual(code, 2)
-        self.assertEqual(
-            err, "vtr-qor: refusing --out /etc: not under ~/odin3-ws/work or /tmp/claude-1000\n"
-        )
+        self.assertEqual(err, "vtr-qor: refusing --out /etc: not under ~/odin3-ws/work or "
+                              "/tmp/claude-1000\n")
 
     def test_run_outside_heavy_refused(self) -> None:
         """No fake heavy run (no slice variable) and no ODIN3_HEAVY_OK: refused, nothing run."""
@@ -682,90 +561,35 @@ class RunTest(CliTestBase):
             self.assertEqual(_tree(metrics), SPEC_TREE)
             self.assertEqual(metrics["schema"], 1)
             self.assertIs(metrics["gating"], gating)
-            self.assertEqual(
-                (metrics["status"], metrics["design"], metrics["arch"]), ("ok", design, K6)
-            )
+            self.assertEqual((metrics["status"], metrics["design"], metrics["arch"]),
+                             ("ok", design, K6))
             self.assertEqual(metrics["vtr_commit"], self.pin)
             self.assertIsNone(metrics["odin3_build"])
             self.assertRegex(metrics["started"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
-            self.assertEqual(
-                metrics["netlist"],
-                {
-                    "luts": 1,
-                    "ffs": 1,
-                    "adders": 0,
-                    "mults": 0,
-                    "ram_slices": 0,
-                    "depth": 1,
-                    "abc_depth": 3,
-                    "abc_exchange": None,
-                    "blif_sha256": hashlib.sha256(BLIF.encode()).hexdigest(),
-                },
-            )
-            self.assertEqual(
-                metrics["packed"],
-                {
-                    "num_clb": 12,
-                    "num_memories": 1,
-                    "num_mult": 2,
-                    "device_width": 8,
-                    "device_height": 9,
-                },
-            )
-            self.assertEqual(
-                metrics["routed"],
-                {
-                    "vpr_status": "success",
-                    "min_chan_width": 40,
-                    "critical_path_delay_ns": 2.5,
-                    "fmax_mhz": 400.0,
-                    "crit_path_routed_wirelength": 1234,
-                },
-            )
-            self.assertEqual(
-                metrics["cost"],
-                {
-                    "frontend_wall_s": 1.0,
-                    "frontend_peak_rss_mib": 20,
-                    "vpr_time_s": 0.75,
-                    "vpr_total_runtime_s": 0.75,
-                    "max_vpr_mem_mib": 64,
-                },
-            )
-            self.assertEqual(
-                metrics["verdicts"], {"fcheck": "skipped", "equiv": "skipped", "rerun": "skipped"}
-            )
+            self.assertEqual(metrics["netlist"], {
+                "luts": 1, "ffs": 1, "adders": 0, "mults": 0, "ram_slices": 0, "depth": 1,
+                "abc_depth": 3, "abc_exchange": None,
+                "blif_sha256": hashlib.sha256(BLIF.encode()).hexdigest()})
+            self.assertEqual(metrics["packed"], {"num_clb": 12, "num_memories": 1, "num_mult": 2,
+                                                 "device_width": 8, "device_height": 9})
+            self.assertEqual(metrics["routed"], {
+                "vpr_status": "success", "min_chan_width": 40, "critical_path_delay_ns": 2.5,
+                "fmax_mhz": 400.0, "crit_path_routed_wirelength": 1234})
+            self.assertEqual(metrics["cost"], {
+                "frontend_wall_s": 1.0, "frontend_peak_rss_mib": 20, "vpr_time_s": 0.75,
+                "vpr_total_runtime_s": 0.75, "max_vpr_mem_mib": 64})
+            self.assertEqual(metrics["verdicts"],
+                             {"fcheck": "skipped", "equiv": "skipped", "rerun": "skipped"})
             self.assertEqual(metrics["key"], self._planned_key(design))
             # Cleaned up (spec §7.5): the keep list plus the gzipped pre-VPR netlist.
-            self.assertEqual(
-                sorted(p.name for p in (job / "run").iterdir()),
-                sorted(
-                    [
-                        "abc0.out",
-                        "output.txt",
-                        "parmys.out",
-                        "parse_results.txt",
-                        "qor_results.txt",
-                        "parse_results.err",
-                        "qor_results.err",
-                        "vpr.crit_path.out",
-                        "vpr.out",
-                        "vtr_flow.out",
-                        f"{design}.pre-vpr.blif.gz",
-                    ]
-                ),
-            )
+            self.assertEqual(sorted(p.name for p in (job / "run").iterdir()), sorted(
+                ["abc0.out", "output.txt", "parmys.out", "parse_results.txt", "qor_results.txt",
+                 "parse_results.err", "qor_results.err",
+                 "vpr.crit_path.out", "vpr.out", "vtr_flow.out", f"{design}.pre-vpr.blif.gz"]))
 
     def _planned_key(self, design: str) -> str:
-        req = qor_sched.PlanRequest(
-            legs=("P",),
-            designs=(design,),
-            arch="k6",
-            out=self.out,
-            vtr_root=self.vtr,
-            odin3=self.odin3,
-            rerun=False,
-        )
+        req = qor_sched.PlanRequest(legs=("P",), designs=(design,), arch="k6", out=self.out,
+                                    vtr_root=self.vtr, odin3=self.odin3, rerun=False)
         (job,) = qor_sched.plan_jobs(req, SETS)
         return job.key
 
@@ -778,16 +602,12 @@ class RunTest(CliTestBase):
         self.assertEqual(code, 0, err)
         (job_dir,) = self.job_dirs("P", "ch_intrinsics")
         record = self.load(job_dir / "job.json")
-        self.assertEqual(
-            (record["leg"], record["design"], record["key12"]),
-            ("P", "ch_intrinsics", job_dir.parent.name),
-        )
+        self.assertEqual((record["leg"], record["design"], record["key12"]),
+                         ("P", "ch_intrinsics", job_dir.parent.name))
         inputs = record["key_inputs"]
         self.assertEqual(inputs["vtr_commit"], self.pin)
-        self.assertEqual(
-            qor_sched.job_key(qor_sched.KeyInputs(**{**inputs, "params": tuple(inputs["params"])})),
-            record["key"],
-        )
+        self.assertEqual(qor_sched.job_key(qor_sched.KeyInputs(**{
+            **inputs, "params": tuple(inputs["params"])})), record["key"])
         argvs = [c["argv"] for c in record["commands"]]
         self.assertEqual(len(argvs), 3)  # VTR, then the two parse commands
         self.assertTrue(argvs[0][1].endswith("run_vtr_flow.py"))
@@ -803,9 +623,8 @@ class RunTest(CliTestBase):
         self.assertIs(record["parmys_equals_golden"], True)
         self.assertFalse((job_dir / "run" / "ch_intrinsics.parmys.blif").exists())
         golden.write_text(BLIF + "# other\n")
-        self.assertEqual(
-            self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,spree", "--rerun")[0], 0
-        )
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,spree",
+                                  "--rerun")[0], 0)
         self.assertIs(self.load(job_dir / "job.json")["parmys_equals_golden"], False)
         (spree,) = self.job_dirs("P", "spree")
         self.assertIsNone(self.load(spree / "job.json")["parmys_equals_golden"])  # no golden
@@ -818,13 +637,10 @@ class RunTest(CliTestBase):
         (job,) = self.job_dirs("O", "ch_intrinsics")
         metrics = self.load(job / "metrics.json")
         self.assertEqual(_tree(metrics), SPEC_TREE)
-        self.assertEqual(
-            (metrics["netlist"]["abc_depth"], metrics["netlist"]["abc_exchange"]), (2, "aig")
-        )
-        self.assertEqual(
-            (metrics["cost"]["frontend_wall_s"], metrics["cost"]["frontend_peak_rss_mib"]),
-            (0.5, 20),
-        )
+        self.assertEqual((metrics["netlist"]["abc_depth"], metrics["netlist"]["abc_exchange"]),
+                         (2, "aig"))
+        self.assertEqual((metrics["cost"]["frontend_wall_s"],
+                          metrics["cost"]["frontend_peak_rss_mib"]), (0.5, 20))
         self.assertRegex(metrics["odin3_build"], r"^[0-9a-f]{64}$")
         self.assertTrue((job / "ch_intrinsics.blif.sha256").is_file())
 
@@ -836,10 +652,8 @@ class RunTest(CliTestBase):
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.assertEqual((job / "status").read_text(), "failed\n")
         self.assertFalse((job / "metrics.json").exists())
-        self.assertEqual(
-            self.load(job / "job.json")["ended"],  # M7: the status file's time
-            vtr_qor._utc((job / "status").stat().st_mtime),
-        )
+        self.assertEqual(self.load(job / "job.json")["ended"],  # M7: the status file's time
+                         vtr_qor._utc((job / "status").stat().st_mtime))
 
     def latest(self, leg: str) -> Path:
         return self.out / self.pin[:12] / K6 / leg / "latest"
@@ -859,9 +673,8 @@ class RunTest(CliTestBase):
         self.assertTrue(lines[at + 1].startswith("vtr-qor: done: 1 ok"), lines)
         # A second design joins the planned set; latest stays (still complete).
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "spree")[0], 0)
-        self.assertEqual(
-            self.load(job.parent / "planned.json"), {"designs": ["ch_intrinsics", "spree"]}
-        )
+        self.assertEqual(self.load(job.parent / "planned.json"),
+                         {"designs": ["ch_intrinsics", "spree"]})
         code, out, _ = self.cli("status")
         self.assertEqual((code, out), (0, f"{K6} P latest {key12} ok 2 failed 0 age 0d\n"))
 
@@ -882,19 +695,11 @@ class RunTest(CliTestBase):
         key12 = job.parent.name
         self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
         (job / "metrics.json").unlink()
-        req = qor_sched.PlanRequest(
-            legs=("P",),
-            designs=("ch_intrinsics",),
-            arch="k6",
-            out=self.out,
-            vtr_root=self.vtr,
-            odin3=self.odin3,
-            rerun=False,
-        )
-        self.assertEqual(
-            vtr_qor.update_latest(req, SETS, drift=False),
-            [f"latest: P {key12} retracted (no longer complete)"],
-        )
+        req = qor_sched.PlanRequest(legs=("P",), designs=("ch_intrinsics",), arch="k6",
+                                    out=self.out, vtr_root=self.vtr, odin3=self.odin3,
+                                    rerun=False)
+        self.assertEqual(vtr_qor.update_latest(req, SETS, drift=False),
+                         [f"latest: P {key12} retracted (no longer complete)"])
         self.assertFalse(self.latest("P").exists())
 
     def test_latest_never_on_a_growing_key(self) -> None:
@@ -908,13 +713,11 @@ class RunTest(CliTestBase):
         (self.vtr / "term").write_text("spree\n")
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics,spree")
         self.assertEqual(code, 143, err)
-        self.assertEqual(
-            self.load(job.parent / "planned.json"), {"designs": ["ch_intrinsics", "spree"]}
-        )
+        self.assertEqual(self.load(job.parent / "planned.json"),
+                         {"designs": ["ch_intrinsics", "spree"]})
         self.assertFalse(self.latest("P").exists())
-        self.assertIn(
-            f"vtr-qor: latest: P {key12} retracted (its planned set grows)", self.harness_lines()
-        )
+        self.assertIn(f"vtr-qor: latest: P {key12} retracted (its planned set grows)",
+                      self.harness_lines())
         code, out, _ = self.cli("status")
         self.assertEqual(out, f"{K6} P latest - ok 1 failed 0 age 0d\n")
         (self.vtr / "term").unlink()
@@ -932,7 +735,8 @@ class RunTest(CliTestBase):
             self.assertEqual(code, 0, err)
             self.assertIs(signal.getsignal(signal.SIGHUP), signal.SIG_IGN)
             signal.signal(signal.SIGHUP, lambda signum, frame: None)  # not ignored
-            code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun")
+            code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                    "--rerun")
             self.assertEqual(code, 129, err)
         finally:
             signal.signal(signal.SIGHUP, previous)
@@ -951,25 +755,21 @@ class RunTest(CliTestBase):
         self.assertEqual(code, 143, err)
         self.assertFalse((job / "metrics.json").exists())
         self.assertFalse(self.latest("P").exists())
-        self.assertIn(
-            f"vtr-qor: latest: P {key12} retracted (its ch_intrinsics job reruns)",
-            self.harness_lines(),
-        )
+        self.assertIn(f"vtr-qor: latest: P {key12} retracted (its ch_intrinsics job reruns)",
+                      self.harness_lines())
         code, out, _ = self.cli("status")
         self.assertEqual(out, f"{K6} P latest - ok 0 failed 0 age -\n")  # wiped: no status
         (self.vtr / "term").unlink()
-        self.assertEqual(
-            self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun")[0], 0
-        )
+        self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                  "--rerun")[0], 0)
         self.assertEqual(self.latest("P").read_text(), f"{key12}\n")
 
     def test_timed_out_rerun_retracts_latest(self) -> None:
         """A --rerun of the latest key that times out (exit 3): no latest on the wiped key."""
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
         (self.vtr / "sleep").write_text("30")
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun", "--job-timeout", "1"
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics", "--rerun",
+                                "--job-timeout", "1")
         self.assertEqual(code, 3, err)
         self.assertFalse(self.latest("P").exists())
 
@@ -1008,15 +808,9 @@ class RunTest(CliTestBase):
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.latest("P").unlink()
         (job.parent / "planned.json").unlink()
-        req = qor_sched.PlanRequest(
-            legs=("P",),
-            designs=("ch_intrinsics",),
-            arch="k6",
-            out=self.out,
-            vtr_root=self.vtr,
-            odin3=self.odin3,
-            rerun=False,
-        )
+        req = qor_sched.PlanRequest(legs=("P",), designs=("ch_intrinsics",), arch="k6",
+                                    out=self.out, vtr_root=self.vtr, odin3=self.odin3,
+                                    rerun=False)
         self.assertEqual(vtr_qor.update_latest(req, SETS, drift=False), [])
         self.assertFalse(self.latest("P").exists())
 
@@ -1030,17 +824,8 @@ class RunTest(CliTestBase):
         self.assertTrue((self.latest("P").parent).is_dir())
 
     def test_stage_and_job_timeout(self) -> None:
-        code, _, err = self.cli(
-            "run",
-            "--leg",
-            "P",
-            "--designs",
-            "ch_intrinsics",
-            "--stage-timeout",
-            "77",
-            "--job-timeout",
-            "99",
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--stage-timeout", "77", "--job-timeout", "99")
         self.assertEqual(code, 0, err)
         (job,) = self.job_dirs("P", "ch_intrinsics")
         argv = self.load(job / "job.json")["commands"][0]["argv"]
@@ -1050,35 +835,28 @@ class RunTest(CliTestBase):
         """--job-timeout reaches the runner: a 1 s limit on a 300 s VTR is a timeout (exit 3)."""
         (self.vtr / "sleep").write_text("300")
         start = time.monotonic()
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--job-timeout", "1"
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--job-timeout", "1")
         self.assertEqual(code, 3, err)
         self.assertLess(time.monotonic() - start, 120)  # far below the fake VTR's 300 s
-        self.assertRegex(
-            err,
-            r"vtr-qor: P ch_intrinsics: timeout after 1 s in \S+ "
-            r"\(elapsed \d+ s\)",
-        )
+        self.assertRegex(err, r"vtr-qor: P ch_intrinsics: timeout after 1 s in \S+ "
+                              r"\(elapsed \d+ s\)")
         (job,) = self.job_dirs("P", "ch_intrinsics")
         self.assertEqual((job / "status").read_text(), "timeout\n")
 
     def test_job_timeout_zero_is_accepted(self) -> None:
         """--job-timeout 0 means no cap; a negative value is a usage error."""
-        code, _, err = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--job-timeout", "0"
-        )
+        code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                                "--job-timeout", "0")
         self.assertEqual(code, 0, err)
-        code, _, _ = self.cli(
-            "run", "--leg", "P", "--designs", "ch_intrinsics", "--job-timeout", "-1"
-        )
+        code, _, _ = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics",
+                              "--job-timeout", "-1")
         self.assertEqual(code, 2)
 
     def test_keep_netlists(self) -> None:
         """--keep-netlists keeps O's <J>/<d>.blif and pre-VPR netlist (point (n))."""
-        code, _, err = self.cli(
-            "run", "--leg", "O", "--designs", "ch_intrinsics", "--keep-netlists"
-        )
+        code, _, err = self.cli("run", "--leg", "O", "--designs", "ch_intrinsics",
+                                "--keep-netlists")
         self.assertEqual(code, 0, err)
         (job,) = self.job_dirs("O", "ch_intrinsics")
         self.assertTrue((job / "ch_intrinsics.blif").is_file())
@@ -1102,15 +880,10 @@ class RunTest(CliTestBase):
         os.utime(incomplete, (now - 5000, now - 5000))
         code, _, err = self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")
         self.assertEqual(code, 0, err)
-        (job,) = [
-            j
-            for j in self.job_dirs("P", "ch_intrinsics")
-            if j.parent.name not in ("bbbbbbbbbbbb", "cccccccccccc")
-        ]
-        self.assertEqual(
-            sorted(p.name for p in leg.iterdir() if p.is_dir()),
-            sorted(["bbbbbbbbbbbb", "cccccccccccc", job.parent.name]),
-        )
+        (job,) = [j for j in self.job_dirs("P", "ch_intrinsics")
+                  if j.parent.name not in ("bbbbbbbbbbbb", "cccccccccccc")]
+        self.assertEqual(sorted(p.name for p in leg.iterdir() if p.is_dir()),
+                         sorted(["bbbbbbbbbbbb", "cccccccccccc", job.parent.name]))
 
     def test_oprime_metrics(self) -> None:
         """O': VTR's abc_depth (no exchange), and the front-end cost adds VTR's ABC stage to
@@ -1119,13 +892,10 @@ class RunTest(CliTestBase):
         self.assertEqual(code, 0, err)
         (job,) = self.job_dirs("Oprime", "ch_intrinsics")
         metrics = self.load(job / "metrics.json")
-        self.assertEqual(
-            (metrics["netlist"]["abc_depth"], metrics["netlist"]["abc_exchange"]), (3, None)
-        )
-        self.assertEqual(
-            (metrics["cost"]["frontend_wall_s"], metrics["cost"]["frontend_peak_rss_mib"]),
-            (1.0, 20),
-        )
+        self.assertEqual((metrics["netlist"]["abc_depth"], metrics["netlist"]["abc_exchange"]),
+                         (3, None))
+        self.assertEqual((metrics["cost"]["frontend_wall_s"],
+                          metrics["cost"]["frontend_peak_rss_mib"]), (1.0, 20))
         self.assertEqual(self.calls(), ["ch_intrinsics abc"])
 
     def test_odin3_commit(self) -> None:
@@ -1140,22 +910,9 @@ class RunTest(CliTestBase):
         inside.write_bytes(self.odin3.read_bytes())
         inside.chmod(0o755)
         (inside.parent / "help.txt").write_text((self.bin / "help.txt").read_text())
-        code, _, err = run_main(
-            vtr_qor.main,
-            [
-                "run",
-                "--leg",
-                "P,O",
-                "--designs",
-                "ch_intrinsics",
-                "--vtr-root",
-                str(self.vtr),
-                "--odin3",
-                str(inside),
-                "--out",
-                str(self.out),
-            ],
-        )
+        code, _, err = run_main(vtr_qor.main, [
+            "run", "--leg", "P,O", "--designs", "ch_intrinsics", "--vtr-root", str(self.vtr),
+            "--odin3", str(inside), "--out", str(self.out)])
         self.assertEqual(code, 0, err)
         (p_job,) = self.job_dirs("P", "ch_intrinsics")
         (o_job,) = self.job_dirs("O", "ch_intrinsics")
@@ -1195,10 +952,10 @@ class ControlLegTest(CliTestBase):
         self.assertEqual(code, 1, err)
         missing = qor_legs.golden_blif(K6, "stereovision3")
         self.assertIn(f"stereovision3: Parmys golden {missing}: missing", err)
-        code, out, _ = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics", "--dry-run")
-        self.assertEqual(
-            (code, [line.split()[-1] for line in out.splitlines()]), (0, ["skipped", "skipped"])
-        )
+        code, out, _ = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--dry-run")
+        self.assertEqual((code, [line.split()[-1] for line in out.splitlines()]),
+                         (0, ["skipped", "skipped"]))
         self.golden_for("ch_intrinsics")
         code, _, err = self.cli("run", "--leg", "P'", "--designs", "ch_intrinsics")
         self.assertEqual(code, 0, err)
@@ -1208,21 +965,20 @@ class ControlLegTest(CliTestBase):
         """P' reads the golden, abc runs in odin3, VTR starts at vpr; R starts at abc and its
         script has no abc; both key on the golden's SHA-256."""
         golden = self.golden_for("ch_intrinsics")
-        code, _, err = self.cli(
-            "run", "--leg", "P',R", "--designs", "ch_intrinsics", "--keep-netlists"
-        )
+        code, _, err = self.cli("run", "--leg", "P',R", "--designs", "ch_intrinsics",
+                                "--keep-netlists")
         self.assertEqual(code, 0, err)
         self.assertEqual(sorted(self.calls()), ["ch_intrinsics abc", "ch_intrinsics vpr"])
         (pj,) = self.job_dirs("Pprime", "ch_intrinsics")
         (rj,) = self.job_dirs("R", "ch_intrinsics")
         p_front, p_vtr, *_ = self.odin3_commands(pj)
         r_front, r_vtr, *_ = self.odin3_commands(rj)
-        self.assertIn(f"read_blif {golden}; abc --lut 6; write_blif --vtr --lut-k 6", p_front[-1])
+        self.assertIn(f"read_blif {golden}; abc --lut 6; write_blif --vtr --lut-k 6",
+                      p_front[-1])
         self.assertIn(f"read_blif {golden}; write_blif --vtr --lut-k 6", r_front[-1])
         self.assertNotIn("abc --lut", r_front[-1])
-        self.assertEqual(
-            (p_vtr[p_vtr.index("-start") + 1], r_vtr[r_vtr.index("-start") + 1]), ("vpr", "abc")
-        )
+        self.assertEqual((p_vtr[p_vtr.index("-start") + 1], r_vtr[r_vtr.index("-start") + 1]),
+                         ("vpr", "abc"))
         sha = hashlib.sha256(golden.read_bytes()).hexdigest()
         for job in (pj, rj):
             self.assertEqual(self.load(job / "job.json")["key_inputs"]["source_sha256"], sha)
@@ -1238,9 +994,11 @@ class ControlLegTest(CliTestBase):
         netlist = self.load(job / "metrics.json")["netlist"]
         self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (5, "blif"))
         (self.bin / "abc_line.txt").write_text("")
-        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics", "--rerun")
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs", "ch_intrinsics",
+                                "--rerun")
         self.assertEqual(code, 0, err)
-        netlist = self.load(self.job_dirs("Pprime", "ch_intrinsics")[0] / "metrics.json")["netlist"]
+        netlist = self.load(self.job_dirs("Pprime", "ch_intrinsics")[0] / "metrics.json")[
+            "netlist"]
         self.assertEqual((netlist["abc_depth"], netlist["abc_exchange"]), (None, None))
 
     def test_pprime_parmys_part(self) -> None:
@@ -1249,9 +1007,8 @@ class ControlLegTest(CliTestBase):
         self.golden_for("ch_intrinsics")
         self.golden_for("stereovision3")
         self.assertEqual(self.cli("run", "--leg", "P", "--designs", "ch_intrinsics")[0], 0)
-        code, _, err = self.cli(
-            "run", "--leg", "Pprime", "--designs", "ch_intrinsics,stereovision3"
-        )
+        code, _, err = self.cli("run", "--leg", "Pprime", "--designs",
+                                "ch_intrinsics,stereovision3")
         self.assertEqual(code, 0, err)
         self.assertIn("vtr-qor: Pprime stereovision3: no P job for the Parmys stage cost", err)
         (with_p,) = self.job_dirs("Pprime", "ch_intrinsics")
@@ -1261,9 +1018,8 @@ class ControlLegTest(CliTestBase):
         self.assertEqual(self.load(with_p / "metrics.json")["cost"]["frontend_wall_s"], 0.5)
         job = self.load(without / "job.json")
         self.assertIsNone(job["parmys_stage_wall_s"])
-        self.assertEqual(
-            job["cost_warnings"], ["Pprime stereovision3: no P job for the Parmys stage cost"]
-        )
+        self.assertEqual(job["cost_warnings"],
+                         ["Pprime stereovision3: no P job for the Parmys stage cost"])
 
 
 class FcheckCliTest(CliTestBase):
@@ -1288,9 +1044,8 @@ class FcheckCliTest(CliTestBase):
         self.assertEqual(len(calls), 2)
         self.assertIn(f"--rtl {self.vtr}/vtr_flow/benchmarks/verilog/ch_intrinsics.v", calls[0])
         self.assertTrue(all(c.endswith("--vectors 50000 --seed 1 --verilator-j 2") for c in calls))
-        self.assertEqual(
-            (self.verdict("P", "sha"), self.verdict("P", "ch_intrinsics")), ("pass", "pass")
-        )
+        self.assertEqual((self.verdict("P", "sha"), self.verdict("P", "ch_intrinsics")),
+                         ("pass", "pass"))
         (job,) = self.job_dirs("P", "sha")
         self.assertFalse((job / "fcheck").exists())
         self.assertTrue((job / "fcheck.log").is_file())
@@ -1312,15 +1067,12 @@ class FcheckCliTest(CliTestBase):
         self.assertEqual((code, err), (2, "vtr-qor: run needs --set or --designs\n"))
 
     def test_run_with_fcheck(self) -> None:
-        code, _, err = self.cli(
-            "run", "--leg", "P,O", "--designs", "ch_intrinsics", "--fcheck", "--keep-netlists"
-        )
+        code, _, err = self.cli("run", "--leg", "P,O", "--designs", "ch_intrinsics", "--fcheck",
+                                "--keep-netlists")
         self.assertEqual(code, 0, err)
         self.assertEqual(len(self.fcheck_calls()), 2)
-        self.assertEqual(
-            (self.verdict("P", "ch_intrinsics"), self.verdict("O", "ch_intrinsics")),
-            ("pass", "pass"),
-        )
+        self.assertEqual((self.verdict("P", "ch_intrinsics"), self.verdict("O", "ch_intrinsics")),
+                         ("pass", "pass"))
         # O without --keep-netlists has nothing to check: error, and the run exits 1 (review M4).
         code, _, err = self.cli("run", "--leg", "O", "--designs", "sha", "--fcheck")
         self.assertEqual(code, 1, err)
@@ -1356,22 +1108,16 @@ class CommittedInputsTest(unittest.TestCase):
 
     def test_equiv_exceptions_file(self) -> None:
         rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "equiv-exceptions.tsv")
-        self.assertEqual(
-            [r[0] for r in rows],
-            ["stereovision3", "diffeq1", "diffeq2", "stereovision1", "stereovision2", "bgm"],
-        )
-        self.assertEqual(
-            rows[0][1:],
-            ("multiclock", "two clocks (tm3_clk_v0, tm3_clk_v2): the Verilator check stands in"),
-        )
-        counts = {"diffeq1": 5, "diffeq2": 5, "stereovision1": 152, "stereovision2": 468, "bgm": 11}
+        self.assertEqual([r[0] for r in rows], ["stereovision3", "diffeq1", "diffeq2",
+                                                "stereovision1", "stereovision2", "bgm"])
+        self.assertEqual(rows[0][1:], ("multiclock", "two clocks (tm3_clk_v0, tm3_clk_v2): the "
+                                                     "Verilator check stands in"))
+        counts = {"diffeq1": 5, "diffeq2": 5, "stereovision1": 152, "stereovision2": 468,
+                  "bgm": 11}
         for design, cls, text in rows[1:]:
             self.assertEqual(cls, "multiplier")
-            self.assertEqual(
-                text,
-                f"{counts[design]} multiply, inlined by equiv-check as "
-                "36x36 logic: the Verilator check stands in",
-            )
+            self.assertEqual(text, f"{counts[design]} multiply, inlined by equiv-check as "
+                                   "36x36 logic: the Verilator check stands in")
         for design, _, _ in rows:
             self.assertIn(design, (*SETS.gate, *SETS.offload))
         for absent in ("sha", "stereovision0", "blob_merge"):
@@ -1379,14 +1125,8 @@ class CommittedInputsTest(unittest.TestCase):
 
     def test_divergences_rows(self) -> None:
         rows = qor_table.load_tsv(REPO_ROOT / "tests" / "vtr" / "qor" / "divergences.tsv")
-        self.assertEqual(
-            rows[0],
-            (
-                "ch_intrinsics",
-                "mem-init-dropped",
-                "decision 6 step 5: hardmap drops RAM initial values (3C)",
-            ),
-        )
+        self.assertEqual(rows[0], ("ch_intrinsics", "mem-init-dropped",
+                                   "decision 6 step 5: hardmap drops RAM initial values (3C)"))
         classes = {"mem-init-dropped", "async-reset-made-sync", "baseline-fails", "dual-write-race"}
         for design, cls, text in rows:
             self.assertIn(design, SETS.designs)
@@ -1400,23 +1140,18 @@ class EquivCliTest(CliTestBase):
 
     def setUp(self) -> None:
         super().setUp()
-        self.tool = _script(
-            self.repo / "tools" / "equiv-check" / "equiv-check",
-            (
-                "import sys\nfrom pathlib import Path\nhere = Path(__file__).parent\n"
-                "(here / 'calls').open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
-                "mode = here / 'mode'\nsys.exit(int(mode.read_text()) if mode.exists() else 0)\n"
-            ),
-        )
+        self.tool = _script(self.repo / "tools" / "equiv-check" / "equiv-check", (
+            "import sys\nfrom pathlib import Path\nhere = Path(__file__).parent\n"
+            "(here / 'calls').open('a').write(' '.join(sys.argv[1:]) + '\\n')\n"
+            "mode = here / 'mode'\nsys.exit(int(mode.read_text()) if mode.exists() else 0)\n"))
 
     def verdict(self, design: str) -> str:
         (job,) = self.job_dirs("O", design)
         return str(self.load(job / "metrics.json")["verdicts"]["equiv"])
 
     def test_equiv_command_line(self) -> None:
-        code, _, err = self.cli(
-            "run", "--leg", "O,Oprime", "--designs", "ch_intrinsics,sha", "--keep-netlists"
-        )
+        code, _, err = self.cli("run", "--leg", "O,Oprime", "--designs", "ch_intrinsics,sha",
+                                "--keep-netlists")
         self.assertEqual(code, 0, err)
         code, _, err = self.cli("equiv", "--designs", "ch_intrinsics,sha")
         self.assertEqual(code, 0, err)
@@ -1425,9 +1160,8 @@ class EquivCliTest(CliTestBase):
         (o_job,) = self.job_dirs("O", "sha")
         (p_job,) = self.job_dirs("Oprime", "sha")
         self.assertEqual(calls[1], f"--timeout 600 {p_job}/sha.blif {o_job}/sha.blif")
-        self.assertEqual(
-            (self.verdict("sha"), self.verdict("ch_intrinsics")), ("equivalent", "equivalent")
-        )
+        self.assertEqual((self.verdict("sha"), self.verdict("ch_intrinsics")),
+                         ("equivalent", "equivalent"))
         self.assertIn("vtr-qor: equiv done: 2 equivalent", self.harness_lines()[-1])
         (self.tool.parent / "mode").write_text("1")
         code, _, err = self.cli("equiv", "--designs", "sha")
@@ -1485,7 +1219,6 @@ class StatusCleanTest(CliTestBase):
         """Review M1 (the reviewer's reproduction): job directories created and deleted while
         status reads them never crash it."""
         import threading
-
         leg = self.out / self.pin[:12] / K6 / "P"
         self.make("aaaaaaaaaaaa", "sha", "ok", time.time())
         stop = threading.Event()
@@ -1513,7 +1246,6 @@ class StatusCleanTest(CliTestBase):
 
     def test_os_error_is_a_message(self) -> None:
         """An OSError outside the runner's handling prints vtr-qor: <message>, exit 2."""
-
         def broken(args: object, argv: object) -> int:
             raise PermissionError(13, "Permission denied", "/x/status")
 
@@ -1556,27 +1288,9 @@ class DoctorTest(CliTestBase):
         code, lines = self.doctor()
         self.assertEqual(code, 0, "\n".join(lines))
         items = [line.split(":")[0] for line in lines]
-        self.assertEqual(
-            items,
-            [
-                f"ok  {item}"
-                for item in (
-                    "vtr",
-                    "vpr",
-                    "abc",
-                    "yosys",
-                    "verilator",
-                    "venv",
-                    "time",
-                    "heavy-run",
-                    "systemd-run",
-                    "disk",
-                    "memory",
-                    "lock",
-                    "legs",
-                )
-            ],
-        )
+        self.assertEqual(items, [f"ok  {item}" for item in (
+            "vtr", "vpr", "abc", "yosys", "verilator", "venv", "time", "heavy-run",
+            "systemd-run", "disk", "memory", "lock", "legs")])
         self.assertIn(f"ok  vtr: {self.vtr} at {self.pin[:12]} (the pin)", lines[0])
         self.assertIn("Yosys 0.55", lines[3])
         self.assertEqual(lines[-1], "ok  legs: P Pprime Oprime O R Oprov")
@@ -1594,36 +1308,25 @@ class DoctorTest(CliTestBase):
         (self.vtr / "README").write_text("edited\n")
         self.set_help(("read_techlib", "read_blif", "write_blif"))
         (self.vtr / "build" / "bin" / "yosys").write_text('#!/bin/sh\necho "Yosys 0.56"\n')
-        no_time = _shell(self.tmp / "no-time", 'exec "$@"\n')  # runs, reports nothing
-        with open(self.lock, "a") as holder, mock.patch.object(qor_legs, "TIME_BIN", str(no_time)):
+        no_time = _shell(self.tmp / "no-time", "exec \"$@\"\n")  # runs, reports nothing
+        with open(self.lock, "a") as holder, \
+                mock.patch.object(qor_legs, "TIME_BIN", str(no_time)):
             fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
             code, lines = self.doctor()
         self.assertEqual(code, 1)
         failed = {line.split(":")[0]: line for line in lines if line.startswith("FAIL")}
-        self.assertEqual(
-            set(failed),
-            {
-                f"FAIL  {item}"
-                for item in ("vtr", "yosys", "time", "heavy-run", "disk", "memory", "lock")
-            },
-        )
+        self.assertEqual(set(failed), {f"FAIL  {item}" for item in (
+            "vtr", "yosys", "time", "heavy-run", "disk", "memory", "lock")})
         self.assertIn("has 2 modified tracked files", failed["FAIL  vtr"])  # README, yosys
-        self.assertIn(
-            "does not pass -p OOMPolicy=continue (PR #58 not merged)", failed["FAIL  heavy-run"]
-        )
+        self.assertIn("does not pass -p OOMPolicy=continue (PR #58 not merged)",
+                      failed["FAIL  heavy-run"])
         self.assertEqual(failed["FAIL  disk"], "FAIL  disk: C: has 15 GiB free (< 20 GiB)")
         self.assertEqual(failed["FAIL  memory"], "FAIL  memory: MemAvailable 6.9 GiB (< 7)")
-        self.assertEqual(
-            failed["FAIL  lock"],
-            f"FAIL  lock: {self.lock} is busy (WRITE lock held "
-            f"by pid {os.getpid()}: another heavy run)",
-        )
+        self.assertEqual(failed["FAIL  lock"], f"FAIL  lock: {self.lock} is busy (WRITE lock held "
+                                               f"by pid {os.getpid()}: another heavy run)")
         self.assertIn("is Yosys 0.56, ORACLES.md pins Yosys 0.55", failed["FAIL  yosys"])
-        self.assertIn(
-            "ok  legs: P R; Pprime missing 'abc'; Oprime missing 'read_verilog'; "
-            "O missing 'read_verilog'; Oprov missing 'read_verilog'",
-            lines,
-        )
+        self.assertIn("ok  legs: P R; Pprime missing 'abc'; Oprime missing 'read_verilog'; "
+                      "O missing 'read_verilog'; Oprov missing 'read_verilog'", lines)
 
     def test_doctor_more_failures(self) -> None:
         """I2: every other item's FAIL: the systemd probe, verilator, an unexecutable vpr and
@@ -1635,22 +1338,17 @@ class DoctorTest(CliTestBase):
         empty.mkdir()
         (empty / "true").symlink_to(shutil.which("true") or "/bin/true")
         false = shutil.which("false") or "/bin/false"
-        with (
-            mock.patch.object(vtr_qor, "SYSTEMD_PROBE", (false,)),
-            mock.patch.dict(os.environ, {"PATH": str(empty)}),
-        ):
+        with mock.patch.object(vtr_qor, "SYSTEMD_PROBE", (false,)), \
+                mock.patch.dict(os.environ, {"PATH": str(empty)}):
             code, lines = self.doctor()
         self.assertEqual(code, 1)
         failed = {line.split(":")[0]: line for line in lines if line.startswith("FAIL")}
-        self.assertEqual(
-            set(failed),
-            {f"FAIL  {item}" for item in ("vtr", "vpr", "verilator", "heavy-run", "systemd-run")},
-        )  # vtr: vpr's mode bit
+        self.assertEqual(set(failed), {f"FAIL  {item}" for item in (
+            "vtr", "vpr", "verilator", "heavy-run", "systemd-run")})  # vtr: vpr's mode bit
         self.assertEqual(failed["FAIL  vpr"], f"FAIL  vpr: {self.vtr / 'vpr' / 'vpr'} missing")
         self.assertEqual(failed["FAIL  verilator"], "FAIL  verilator: verilator is not on PATH")
-        self.assertEqual(
-            failed["FAIL  heavy-run"], f"FAIL  heavy-run: {self.heavy_run} is not executable"
-        )
+        self.assertEqual(failed["FAIL  heavy-run"],
+                         f"FAIL  heavy-run: {self.heavy_run} is not executable")
         self.assertEqual(failed["FAIL  systemd-run"], f"FAIL  systemd-run: {false} failed (exit 1)")
 
     def test_doctor_lock_holders(self) -> None:
@@ -1665,10 +1363,9 @@ class DoctorTest(CliTestBase):
                 self.assertEqual(vtr_qor._lock_item()[0], False)
             fd9 = self.tmp / "fd9"
             with mock.patch.object(qor_heavy, "FD9", fd9):
-                self.assertEqual(
-                    vtr_qor._lock_item(),
-                    (True, f"{self.lock} held by this heavy run (odin3-heavy.slice)"),
-                )
+                self.assertEqual(vtr_qor._lock_item(),
+                                 (True, f"{self.lock} held by this heavy run "
+                                        "(odin3-heavy.slice)"))
                 outside = self.tmp / "outside-cgroup"
                 outside.write_text("0::/user.slice/app.slice/term.scope\n")
                 with mock.patch.object(qor_heavy, "SELF_CGROUP", outside):
@@ -1680,15 +1377,12 @@ class DoctorTest(CliTestBase):
         self.assertIn("shared by a build (READ lock", detail)
 
     def test_doctor_without_vtr(self) -> None:
-        code, out, _ = run_main(
-            vtr_qor.main,
-            ["doctor", "--vtr-root", str(self.tmp / "none"), "--odin3", str(self.odin3)],
-        )
+        code, out, _ = run_main(vtr_qor.main, ["doctor", "--vtr-root", str(self.tmp / "none"),
+                                               "--odin3", str(self.odin3)])
         self.assertEqual(code, 1)
         failed = [line.split(":")[0] for line in out.splitlines() if line.startswith("FAIL")]
-        self.assertEqual(
-            failed, [f"FAIL  {item}" for item in ("vtr", "vpr", "abc", "yosys", "venv")]
-        )
+        self.assertEqual(failed, [f"FAIL  {item}" for item in ("vtr", "vpr", "abc", "yosys",
+                                                               "venv")])
 
     def test_lock_probe_never_takes_the_lock(self) -> None:
         """The /proc/locks probe sees a holder, and leaves the lock free when nobody holds it
@@ -1698,6 +1392,7 @@ class DoctorTest(CliTestBase):
         with open(self.lock, "a") as holder:
             fcntl.flock(holder, fcntl.LOCK_SH)
             self.assertEqual(vtr_qor.lock_holders(self.lock), [("READ", str(os.getpid()))])
+
 
 
 class PinsTest(unittest.TestCase):
@@ -1713,10 +1408,8 @@ class PinsTest(unittest.TestCase):
 T8_DESIGNS = ("ch_intrinsics", "stereovision3", "diffeq2")
 
 
-@unittest.skipUnless(
-    os.environ.get("ODIN3_QOR_T8") == "1",
-    "manual: T8 checks a finished real run (set ODIN3_QOR_T8=1)",
-)
+@unittest.skipUnless(os.environ.get("ODIN3_QOR_T8") == "1",
+                     "manual: T8 checks a finished real run (set ODIN3_QOR_T8=1)")
 class T8Check(unittest.TestCase):
     """T8 (plan Task 6), after the controller's real run of
     ``vtr-qor run --leg P --designs ch_intrinsics,stereovision3,diffeq2`` through heavy-run:
@@ -1733,11 +1426,8 @@ class T8Check(unittest.TestCase):
                 jobs = sorted(leg_dir.glob(f"*/{design}/status"), key=lambda p: p.stat().st_mtime)
                 self.assertTrue(jobs, f"no P job for {design} under {leg_dir}")
                 self.check_job(jobs[-1].parent, design)
-        done = [
-            line
-            for line in (out / "harness.log").read_text().splitlines()
-            if line.startswith("vtr-qor: done:")
-        ]
+        done = [line for line in (out / "harness.log").read_text().splitlines()
+                if line.startswith("vtr-qor: done:")]
         self.assertTrue(done)
         print(f"\nT8 {done[-1]}", file=sys.stderr)
 
@@ -1755,11 +1445,8 @@ class T8Check(unittest.TestCase):
         names = {p.name for p in run.iterdir()}
         gz = f"{design}.pre-vpr.blif.gz"
         self.assertIn(gz, names)
-        stray = [
-            n
-            for n in names - {gz}
-            if not any(fnmatch.fnmatchcase(n, k) for k in qor_sched.KEEP_RUN_FILES)
-        ]
+        stray = [n for n in names - {gz}
+                 if not any(fnmatch.fnmatchcase(n, k) for k in qor_sched.KEEP_RUN_FILES)]
         self.assertEqual(stray, [])
 
 

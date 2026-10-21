@@ -24,7 +24,9 @@ import vtr_read_check as vrc
 from . import helpers
 
 SCRATCH = Path("/tmp/claude-1000")
-HEADER = "golden\ttool\twritten|refused\terror class\tvpr_W\tvpr_G\tchecker_W\tchecker_G\tverdict"
+HEADER = (
+    "golden\ttool\twritten|refused\terror class\tvpr_W\tvpr_G\tchecker_W\tchecker_G\tverdict"
+)
 SLICE = "odin3-heavy.slice"
 SCOPE = "odin3-heavy-4242-1760000000000000000.scope"
 
@@ -141,8 +143,7 @@ class ReadCheckBase(unittest.TestCase):
         self.inside = mock.patch.object(qor_heavy, "reexec_under_lock", return_value=self.scope)
         self.reexec = self.inside.start()
         self.kills = mock.patch.object(
-            qor_heavy, "oom_kills", side_effect=lambda _s: len(self.events.read_text())
-        )
+            qor_heavy, "oom_kills", side_effect=lambda _s: len(self.events.read_text()))
         self.kills.start()
 
     def tearDown(self) -> None:
@@ -160,21 +161,9 @@ class ReadCheckBase(unittest.TestCase):
         return path
 
     def args(self, *extra: str) -> list[str]:
-        return [
-            "--golden-root",
-            str(self.root),
-            "--arch",
-            str(self.arch),
-            "--odin3",
-            str(self.odin3),
-            "--vpr",
-            str(self.vpr),
-            "--checker",
-            str(self.checker),
-            "--work",
-            str(self.work),
-            *extra,
-        ]
+        return ["--golden-root", str(self.root), "--arch", str(self.arch), "--odin3",
+                str(self.odin3), "--vpr", str(self.vpr), "--checker", str(self.checker),
+                "--work", str(self.work), *extra]
 
     def run_main(self, *extra: str) -> tuple[int, str, str]:
         return helpers.run_main(vrc.main, self.args(*extra))
@@ -197,23 +186,15 @@ class PairingTest(unittest.TestCase):
 
     def test_e1b_pairs_with_the_subckt_message(self) -> None:
         """Point (e): an async flip-flop reaches a golden as a `.subckt`."""
-        message = (
-            "Subckt instantiates model '$_DFFSR_PPP_', but no such model exists in the "
-            "architecture file."
-        )
+        message = ("Subckt instantiates model '$_DFFSR_PPP_', but no such model exists in the "
+                   "architecture file.")
         self.assertTrue(vrc.pairing_ok("E1b", message))
         self.assertFalse(vrc.pairing_ok("E1b", "Only rising edge latches supported"))
         self.assertFalse(vrc.pairing_ok("E1b", ""))
 
     def test_e4_and_e9_pair_with_nothing(self) -> None:
-        messages = [
-            "",
-            "Only rising edge latches supported",
-            "Latch must have a clock",
-            "Subckt instantiates model 'x'",
-            "Assertion 'x' failed",
-            "tri-state",
-        ]
+        messages = ["", "Only rising edge latches supported", "Latch must have a clock",
+                    "Subckt instantiates model 'x'", "Assertion 'x' failed", "tri-state"]
         for refusal in ("E4", "E9"):
             for message in messages:
                 self.assertFalse(vrc.pairing_ok(refusal, message), (refusal, message))
@@ -284,41 +265,27 @@ class SweepTest(ReadCheckBase):
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         rows = self.rows()
-        self.assertEqual(
-            [r[0] for r in rows],
-            ["small/small.odin.blif", "mid/mid.parmys.blif", "big/big.parmys.blif"],
-        )
-        self.assertEqual(
-            rows[0],
-            ["small/small.odin.blif", "odin", "written", "-", "ok", "ok", "ok", "ok", "pass"],
-        )
+        self.assertEqual([r[0] for r in rows],
+                         ["small/small.odin.blif", "mid/mid.parmys.blif", "big/big.parmys.blif"])
+        self.assertEqual(rows[0], ["small/small.odin.blif", "odin", "written", "-", "ok", "ok",
+                                   "ok", "ok", "pass"])
         calls = self.calls()
         first = calls[:5]
         self.assertEqual(
-            [c.split(" ")[0] for c in first], ["odin3", "vpr", "checker", "vpr", "checker"], first
-        )
+            [c.split(" ")[0] for c in first], ["odin3", "vpr", "checker", "vpr", "checker"], first)
         golden = self.root / "small" / "small.odin.blif"
         self.assertIn(f'read_techlib "{vrc.TECHLIB}"; read_blif "{golden}"', first[0])
         self.assertIn('; write_blif --vtr "', first[0])
-        self.assertTrue(
-            first[1].endswith(
-                "small.odin.blif --circuit_format blif --exit_before_pack on (cwd vpr_g)"
-            ),
-            first[1],
-        )
+        self.assertTrue(first[1].endswith(
+            "small.odin.blif --circuit_format blif --exit_before_pack on (cwd vpr_g)"), first[1])
         self.assertTrue(first[2].endswith("small.odin.blif") and "--strict" not in first[2])
-        self.assertTrue(
-            first[3].endswith("W.blif --circuit_format blif --exit_before_pack on (cwd vpr_w)"),
-            first[3],
-        )
+        self.assertTrue(first[3].endswith("W.blif --circuit_format blif --exit_before_pack on "
+                                          "(cwd vpr_w)"), first[3])
         self.assertIn(f"vpr {self.arch} ", first[3])
         self.assertTrue(first[4].startswith("checker --strict --writer-log "), first[4])
         self.assertTrue(first[4].endswith("W.blif"), first[4])
-        order = [
-            c.split('read_blif "')[1].split('"')[0].rsplit("/", 1)[1]
-            for c in calls
-            if c.startswith("odin3")
-        ]
+        order = [c.split('read_blif "')[1].split('"')[0].rsplit("/", 1)[1]
+                 for c in calls if c.startswith("odin3")]
         self.assertEqual(order, ["small.odin.blif", "mid.parmys.blif", "big.parmys.blif"])
 
     def test_the_header_is_exact_and_passing_directories_are_removed(self) -> None:
@@ -359,30 +326,19 @@ class SweepTest(ReadCheckBase):
         self.assertEqual(self.run_main()[0], 1)
 
     def test_a_refusal_pairs_with_vpr_on_g(self) -> None:
-        self.add(
-            "fe/fe.parmys.blif",
-            netlist(
-                "# fake: refuse E1",
-                "# vpr-fake: reject Only rising edge latches supported",
-                "# chk-fake: reject",
-            ),
-        )
+        self.add("fe/fe.parmys.blif", netlist(
+            "# fake: refuse E1", "# vpr-fake: reject Only rising edge latches supported",
+            "# chk-fake: reject"))
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         row = self.rows()[0]
-        self.assertEqual(
-            row, ["fe/fe.parmys.blif", "parmys", "refused", "E1", "-", "fail", "-", "fail", "pass"]
-        )
+        self.assertEqual(row, ["fe/fe.parmys.blif", "parmys", "refused", "E1", "-", "fail", "-",
+                               "fail", "pass"])
 
     def test_a_refusal_that_does_not_pair_fails(self) -> None:
-        self.add(
-            "fe/fe.parmys.blif",
-            netlist(
-                "# fake: refuse E1",
-                "# vpr-fake: reject Latch must have a clock",
-                "# chk-fake: reject",
-            ),
-        )
+        self.add("fe/fe.parmys.blif", netlist(
+            "# fake: refuse E1", "# vpr-fake: reject Latch must have a clock",
+            "# chk-fake: reject"))
         code, out, _ = self.run_main()
         self.assertEqual(code, 1)
         self.assertIn("refusal E1 does not pair with VPR on G (Latch must have a clock)", out)
@@ -396,29 +352,23 @@ class SweepTest(ReadCheckBase):
         self.assertIn("  verdict listed: 1", out)
 
     def test_a_multi_driver_refusal_pairs_with_the_assertion(self) -> None:
-        self.add(
-            "m/m.odin.blif",
-            netlist("# fake: refuse E12", "# vpr-fake: assert", "# chk-fake: reject"),
-        )
+        self.add("m/m.odin.blif", netlist("# fake: refuse E12", "# vpr-fake: assert",
+                                          "# chk-fake: reject"))
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         self.assertEqual(self.rows()[0][3:6], ["E12", "-", "crash"])
 
     def test_a_read_refusal_of_a_listed_multi_driver_golden_is_e12_and_passes(self) -> None:
-        self.add(
-            "m/multi_assignment.odin.blif",
-            netlist("# fake: readrefuse", "# vpr-fake: assert", "# chk-fake: reject"),
-        )
+        self.add("m/multi_assignment.odin.blif", netlist("# fake: readrefuse", "# vpr-fake: assert",
+                                                         "# chk-fake: reject"))
         code, out, err = self.run_main()
         self.assertEqual(code, 0, out + err)
         row = self.rows()[0]
         self.assertEqual((row[2], row[3], row[8]), ("refused", "E12", "pass"))
 
     def test_a_read_refusal_of_any_other_golden_still_fails(self) -> None:
-        self.add(
-            "m/other.odin.blif",
-            netlist("# fake: readrefuse", "# vpr-fake: assert", "# chk-fake: reject"),
-        )
+        self.add("m/other.odin.blif", netlist("# fake: readrefuse", "# vpr-fake: assert",
+                                              "# chk-fake: reject"))
         code, out, _ = self.run_main()
         self.assertEqual(code, 1)
         row = self.rows()[0]
@@ -493,29 +443,19 @@ class BadCorpusTest(ReadCheckBase):
     def run_corpus(self, corpus: Path) -> tuple[int, str, str]:
         return helpers.run_main(
             vrc.main,
-            [
-                "--bad-corpus",
-                str(corpus),
-                "--arch",
-                str(self.arch),
-                "--vpr",
-                str(self.vpr),
-                "--checker",
-                str(self.checker),
-                "--work",
-                str(self.work),
-            ],
+            ["--bad-corpus", str(corpus), "--arch", str(self.arch), "--vpr", str(self.vpr),
+             "--checker", str(self.checker), "--work", str(self.work)],
         )
 
     def test_agreement_passes_and_needs_no_heavy_run(self) -> None:
         corpus = self.corpus(
             c1="# vpr: Only rising edge\n# vpr-fake: reject Only rising edge latches supported\n"
-            "# chk-fake: reject\n.model top\n.end\n",
+               "# chk-fake: reject\n.model top\n.end\n",
             c8="# vpr: Duplicate blocks named 'out:y' found in netlist.\n"
-            "# vpr-fake: reject Duplicate blocks named 'out:y' found in netlist. Block 3\n"
-            "# chk-fake: reject\n.model top\n.end\n",
+               "# vpr-fake: reject Duplicate blocks named 'out:y' found in netlist. Block 3\n"
+               "# chk-fake: reject\n.model top\n.end\n",
             c9="# vpr: Must be no existing net driver\n# vpr-fake: assert\n# chk-fake: reject\n"
-            ".model top\n.end\n",
+               ".model top\n.end\n",
         )
         (corpus / "strict").mkdir()
         strict = corpus / "strict" / "cs1.blif"
@@ -527,62 +467,44 @@ class BadCorpusTest(ReadCheckBase):
 
     def test_a_relative_corpus_path_works(self) -> None:
         """Every step runs in its own directory, so the paths must be made absolute."""
-        self.corpus(
-            c1="# vpr: Only rising\n# vpr-fake: reject Only rising edge\n"
-            "# chk-fake: reject\n.model top\n.end\n"
-        )
+        self.corpus(c1="# vpr: Only rising\n# vpr-fake: reject Only rising edge\n"
+                       "# chk-fake: reject\n.model top\n.end\n")
         here = Path.cwd()
         os.chdir(self.tmp)
         try:
             code, out, err = helpers.run_main(
                 vrc.main,
-                [
-                    "--bad-corpus",
-                    "blif-bad",
-                    "--arch",
-                    "arch.xml",
-                    "--vpr",
-                    "vpr",
-                    "--checker",
-                    "checker",
-                    "--work",
-                    str(self.work),
-                ],
+                ["--bad-corpus", "blif-bad", "--arch", "arch.xml", "--vpr", "vpr",
+                 "--checker", "checker", "--work", str(self.work)],
             )
         finally:
             os.chdir(here)
         self.assertEqual(code, 0, out + err)
 
     def test_vpr_accepts_but_the_checker_rejects(self) -> None:
-        corpus = self.corpus(
-            c4="# vpr: BLIF .names input size\n# chk-fake: reject\n.model top\n.end\n"
-        )
+        corpus = self.corpus(c4="# vpr: BLIF .names input size\n# chk-fake: reject\n.model top\n"
+                                ".end\n")
         code, out, _ = self.run_corpus(corpus)
         self.assertEqual(code, 1)
         self.assertIn("FAIL c4.blif: VPR accepts it, the checker fail", out)
 
     def test_the_checker_accepts_but_vpr_rejects(self) -> None:
-        corpus = self.corpus(
-            c4="# vpr: Latch\n# vpr-fake: reject Latch must have a clock\n.model top\n.end\n"
-        )
+        corpus = self.corpus(c4="# vpr: Latch\n# vpr-fake: reject Latch must have a clock\n"
+                                ".model top\n.end\n")
         code, out, _ = self.run_corpus(corpus)
         self.assertEqual(code, 1)
         self.assertIn("VPR rejects it, the checker ok", out)
 
     def test_the_message_must_occur_in_vpr_output(self) -> None:
-        corpus = self.corpus(
-            c4="# vpr: Latch must have a clock\n# vpr-fake: reject Other\n"
-            "# chk-fake: reject\n.model top\n.end\n"
-        )
+        corpus = self.corpus(c4="# vpr: Latch must have a clock\n# vpr-fake: reject Other\n"
+                                "# chk-fake: reject\n.model top\n.end\n")
         code, out, _ = self.run_corpus(corpus)
         self.assertEqual(code, 1)
         self.assertIn("VPR's message lacks 'Latch must have a clock'", out)
 
     def test_the_assertion_text_is_searched_on_stderr(self) -> None:
-        corpus = self.corpus(
-            c9="# vpr: Must be no existing net driver\n# vpr-fake: assert\n"
-            "# chk-fake: reject\n.model top\n.end\n"
-        )
+        corpus = self.corpus(c9="# vpr: Must be no existing net driver\n# vpr-fake: assert\n"
+                                "# chk-fake: reject\n.model top\n.end\n")
         self.assertEqual(self.run_corpus(corpus)[0], 0)
 
 
@@ -615,13 +537,11 @@ class HeavyGateTest(ReadCheckBase):
 
     def test_outside_with_the_variable_it_reruns_through_heavy_run(self) -> None:
         env = self.caller_env(ODIN3_HEAVY_OK="1")
-        with (
-            mock.patch.dict(os.environ, env, clear=True),
-            mock.patch.object(qor_heavy, "HEAVY_RUN", self.heavy_run),
-            mock.patch.object(qor_heavy, "HEAVY_LOCK", self.lock),
-            mock.patch.object(qor_heavy, "SELF_CGROUP", self.tmp / "no-cgroup"),
-            self.assertRaises(SystemExit) as ctx,
-        ):
+        with mock.patch.dict(os.environ, env, clear=True), \
+                mock.patch.object(qor_heavy, "HEAVY_RUN", self.heavy_run), \
+                mock.patch.object(qor_heavy, "HEAVY_LOCK", self.lock), \
+                mock.patch.object(qor_heavy, "SELF_CGROUP", self.tmp / "no-cgroup"), \
+                self.assertRaises(SystemExit) as ctx:
             vrc.main(self.args())
         self.assertEqual(ctx.exception.code, 0)
         seen = json.loads(self.record.read_text(encoding="utf-8"))
@@ -633,12 +553,10 @@ class HeavyGateTest(ReadCheckBase):
         self.assertEqual(self.calls(), [])  # nothing ran outside the scope
 
     def test_outside_without_the_variable_it_exits_2(self) -> None:
-        with (
-            mock.patch.dict(os.environ, self.caller_env(), clear=True),
-            mock.patch.object(qor_heavy, "HEAVY_RUN", self.heavy_run),
-            mock.patch.object(qor_heavy, "HEAVY_LOCK", self.lock),
-            mock.patch.object(qor_heavy, "SELF_CGROUP", self.tmp / "no-cgroup"),
-        ):
+        with mock.patch.dict(os.environ, self.caller_env(), clear=True), \
+                mock.patch.object(qor_heavy, "HEAVY_RUN", self.heavy_run), \
+                mock.patch.object(qor_heavy, "HEAVY_LOCK", self.lock), \
+                mock.patch.object(qor_heavy, "SELF_CGROUP", self.tmp / "no-cgroup"):
             code, _, err = helpers.run_main(vrc.main, self.args())
         self.assertEqual(code, 2)
         self.assertEqual(err, "vtr-qor: heavy runs are the controller's: set ODIN3_HEAVY_OK=1\n")
@@ -660,13 +578,9 @@ class HeavyGateTest(ReadCheckBase):
         env = self.caller_env(ODIN3_HEAVY_SLICE=SLICE)
         with contextlib.ExitStack() as stack:
             stack.enter_context(mock.patch.dict(os.environ, env, clear=True))
-            for name, value in (
-                ("CGROUP_ROOT", root),
-                ("SELF_CGROUP", self_cgroup),
-                ("FD9", fd9),
-                ("HEAVY_LOCK", self.lock),
-                ("HEAVY_RUN", self.heavy_run),
-            ):
+            for name, value in (("CGROUP_ROOT", root), ("SELF_CGROUP", self_cgroup),
+                                ("FD9", fd9), ("HEAVY_LOCK", self.lock),
+                                ("HEAVY_RUN", self.heavy_run)):
                 stack.enter_context(mock.patch.object(qor_heavy, name, value))
             return helpers.run_main(vrc.main, self.args())
 

@@ -50,11 +50,8 @@ class ScriptTest(unittest.TestCase):
     def test_miter_script_shape(self) -> None:
         s = fsm_equiv.miter_script("g.v", "g.v", "t", ("rst", 1), 12)
         self.assertIn("miter -equiv -flatten -make_assert gold gate m; async2sync", s)
-        self.assertIn(
-            "sat -verify -seq 12 -set-init-zero -set-at 1 in_rst 1 -set-at 2 in_rst 1 "
-            "-prove-asserts m",
-            s,
-        )
+        self.assertIn("sat -verify -seq 12 -set-init-zero -set-at 1 in_rst 1 -set-at 2 in_rst 1 "
+                      "-prove-asserts m", s)
         self.assertIn("proc; fsm; opt", s)
 
     def test_active_low_reset_and_no_reset(self) -> None:
@@ -96,8 +93,7 @@ class ScriptTest(unittest.TestCase):
             src = Path(tmp) / "t.v"
             src.write_text(RTL)
             code, _, err = helpers.run_main(
-                fsm_equiv.main, [str(src), "--top", "t", "--yosys", str(Path(tmp) / "nope")]
-            )
+                fsm_equiv.main, [str(src), "--top", "t", "--yosys", str(Path(tmp) / "nope")])
         self.assertEqual(code, fsm_equiv.EXIT_ERROR)
         self.assertIn("yosys", err)
 
@@ -123,21 +119,8 @@ class YosysTest(unittest.TestCase):
             gold_path, gate_path = Path(tmp) / "gold.v", Path(tmp) / "gate.v"
             gold_path.write_text(RTL)
             gate_path.write_text(gate)
-            argv = [
-                str(gold_path),
-                "--gate",
-                str(gate_path),
-                "--top",
-                "t",
-                "--depth",
-                "10",
-                "--gold-script",
-                "proc",
-                "--gate-script",
-                "proc",
-                "--yosys",
-                YOSYS,
-            ]
+            argv = [str(gold_path), "--gate", str(gate_path), "--top", "t", "--depth", "10",
+                    "--gold-script", "proc", "--gate-script", "proc", "--yosys", YOSYS]
             if rst is not None:
                 argv += ["--rst", rst]
             return helpers.run_main(fsm_equiv.main, argv)[0]
@@ -156,9 +139,8 @@ class YosysTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "t.v"
             src.write_text(RTL.replace("      default: st <= 2'd0;\n", ""))
-            code = helpers.run_main(
-                fsm_equiv.main, [str(src), "--top", "t", "--rst", "rst", "--yosys", YOSYS]
-            )[0]
+            code = helpers.run_main(fsm_equiv.main, [str(src), "--top", "t", "--rst", "rst",
+                                                     "--yosys", YOSYS])[0]
         self.assertEqual(code, fsm_equiv.EXIT_EQUIVALENT)
 
 

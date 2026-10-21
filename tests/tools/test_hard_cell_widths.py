@@ -63,11 +63,10 @@ class HardCellWidthsTest(unittest.TestCase):
         self.assertRegex(text, r"module \\single_port_ram\n[\s\S]*wire input \d+ \\data\n")
         self.assertIn("    parameter \\DATA_WIDTH 8\n", text)
         script = f"read_rtlil {il}; hierarchy -check -top t; select -module t; write_rtlil"
-        done = subprocess.run(
-            [YOSYS, "-q", "-p", script], capture_output=True, text=True, check=False
-        )
+        done = subprocess.run([YOSYS, "-q", "-p", script], capture_output=True, text=True,
+                              check=False)
         self.assertEqual(done.returncode, 0, done.stderr[-400:])
-        top = done.stdout[done.stdout.index("module \\t") :]
+        top = done.stdout[done.stdout.index("module \\t"):]
         self.assertRegex(top, r"wire width 8 input \d+ \\d\b")
         self.assertRegex(top, r"cell \\single_port_ram \\m[\s\S]*connect \\data \\d\n")
         self.assertRegex(top, r"connect \\out \\q\n")
@@ -78,25 +77,10 @@ class HardCellWidthsTest(unittest.TestCase):
         assert ODIN3 and YOSYS
         keep = self.dir / "keep"
         keep.mkdir()
-        code, out, err = helpers.run_main(
-            elab_equiv.main,
-            [
-                "--odin3",
-                ODIN3,
-                "--yosys",
-                YOSYS,
-                "--equiv-check",
-                str(EQUIV_CHECK),
-                "--techlib",
-                str(TECHLIB),
-                "--unmap-enables",
-                "--mem-cap",
-                str(3 * GIB),
-                "--keep",
-                str(keep),
-                str(self.src),
-            ],
-        )
+        code, out, err = helpers.run_main(elab_equiv.main, [
+            "--odin3", ODIN3, "--yosys", YOSYS, "--equiv-check", str(EQUIV_CHECK),
+            "--techlib", str(TECHLIB), "--unmap-enables", "--mem-cap", str(3 * GIB),
+            "--keep", str(keep), str(self.src)])
         self.assertEqual(code, 0, out + err)
         a_blif = (keep / "a.blif").read_text(encoding="utf-8")
         for bit in range(8):

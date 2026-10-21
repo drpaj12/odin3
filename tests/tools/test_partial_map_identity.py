@@ -76,10 +76,8 @@ class IdentityCase(unittest.TestCase):
 
 class ClassTests(IdentityCase):
     def test_identical_ignores_header_lines(self) -> None:
-        self.spec = {
-            "hardmap": {"vtr": "# a\n.model m\n.end\n"},
-            "partial_map": {"vtr": "# b\n.model m\n.end\n"},
-        }
+        self.spec = {"hardmap": {"vtr": "# a\n.model m\n.end\n"},
+                     "partial_map": {"vtr": "# b\n.model m\n.end\n"}}
         code, out, _ = self.run_tool("--tier", "1", str(self.design))
         self.assertEqual(code, 0, out)
         self.assertIn("identical", out)
@@ -115,25 +113,22 @@ class ClassTests(IdentityCase):
 
     def test_same_failure_outside_the_allow_list_is_different(self) -> None:
         self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1}}
-        code, out, _ = self.run_tool(
-            "--tier", "1", "--allow-same-failure", self.allow_file(), str(self.design)
-        )
+        code, out, _ = self.run_tool("--tier", "1", "--allow-same-failure", self.allow_file(),
+                                     str(self.design))
         self.assertEqual(code, 1, out)
         self.assertIn("DIFFERENT (both exit 1, not in the allow-list", out)
 
     def test_allowed_same_failure_runs_hardmap_only_and_does_not_count(self) -> None:
         self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1}}
         allow = self.allow_file(str(self.design))
-        code, out, err = self.run_tool(
-            "--allow-same-failure", allow, "--list", self.listing(), str(self.design)
-        )
+        code, out, err = self.run_tool("--allow-same-failure", allow, "--list",
+                                       self.listing(), str(self.design))
         self.assertEqual(code, 1, out)  # --min-ok 1 not met
         self.assertIn("same-failure (both exit 1", out)
         self.assertIn("hardmap-only identical", out)
         self.assertIn("--min-ok", err)
-        code, out, _ = self.run_tool(
-            "--allow-same-failure", allow, "--min-ok", "0", str(self.design)
-        )
+        code, out, _ = self.run_tool("--allow-same-failure", allow, "--min-ok", "0",
+                                     str(self.design))
         self.assertEqual(code, 0, out)
         self.assertEqual(len([ln for ln in self.log().splitlines() if "write_blif" not in ln]), 4)
 
@@ -144,21 +139,17 @@ class ClassTests(IdentityCase):
 
     def test_allowed_failure_with_a_different_hardmap_result(self) -> None:
         self.spec = {"hardmap": {"rc": 1}, "partial_map": {"rc": 1, "pre": {"il": "x\n"}}}
-        code, out, _ = self.run_tool(
-            "--allow-same-failure", self.allow_file(str(self.design)), str(self.design)
-        )
+        code, out, _ = self.run_tool("--allow-same-failure", self.allow_file(str(self.design)),
+                                     str(self.design))
         self.assertEqual(code, 1)
         self.assertIn("DIFFERENT (both exit 1", out)
         self.assertIn("hardmap-only write_rtlil", out)
 
     def test_allowed_failure_with_a_dead_hardmap_leg(self) -> None:
-        self.spec = {
-            "hardmap": {"rc": 1, "pre": {"rc": 1}},
-            "partial_map": {"rc": 1, "pre": {"rc": 1}},
-        }
-        code, out, _ = self.run_tool(
-            "--allow-same-failure", self.allow_file(str(self.design)), str(self.design)
-        )
+        self.spec = {"hardmap": {"rc": 1, "pre": {"rc": 1}},
+                     "partial_map": {"rc": 1, "pre": {"rc": 1}}}
+        code, out, _ = self.run_tool("--allow-same-failure", self.allow_file(str(self.design)),
+                                     str(self.design))
         self.assertEqual(code, 1)
         self.assertIn("hardmap-only run failed", out)
 
@@ -167,9 +158,8 @@ class ClassTests(IdentityCase):
         old = "error: hardmap: boom\nnoise\ninfo: pass hardmap: 0.3 ms\n"
         new = "error: partial_map: boom\nother\ninfo: pass partial_map: 0.5 ms\n"
         self.spec = {"hardmap": {"rc": 1, "err": old}, "partial_map": {"rc": 1, "err": new}}
-        code, out, _ = self.run_tool(
-            "--allow-same-failure", allow, "--min-ok", "0", str(self.design)
-        )
+        code, out, _ = self.run_tool("--allow-same-failure", allow, "--min-ok", "0",
+                                     str(self.design))
         self.assertEqual(code, 0, out)
         self.spec["partial_map"]["err"] = "error: partial_map: bang\n"
         code, out, _ = self.run_tool("--allow-same-failure", allow, str(self.design))
@@ -178,9 +168,8 @@ class ClassTests(IdentityCase):
 
     def test_crash_is_hard(self) -> None:
         self.spec = {}
-        self.odin.write_text(
-            "#!/usr/bin/env python3\nimport os, signal\nos.kill(os.getpid(), signal.SIGSEGV)\n"
-        )
+        self.odin.write_text("#!/usr/bin/env python3\nimport os, signal\n"
+                             "os.kill(os.getpid(), signal.SIGSEGV)\n")
         code, out, _ = self.run_tool("--tier", "1", str(self.design))
         self.assertEqual(code, 3, out)
         self.assertIn("HARD", out)
@@ -223,15 +212,8 @@ class ScriptTests(IdentityCase):
         other.write_text(FAKE_ODIN)
         other.chmod(0o755)
         (self.tmp / "fake.json").write_text("{}")
-        argv = [
-            "--tier",
-            "3",
-            "--baseline",
-            str(other),
-            "--candidate",
-            str(self.odin),
-            str(self.design),
-        ]
+        argv = ["--tier", "3", "--baseline", str(other), "--candidate", str(self.odin),
+                str(self.design)]
         code, out, _ = run_main(idt.main, argv)
         self.assertEqual(code, 0, out)
         self.assertIn("tier 3: 1 designs: 1 identical", out)
@@ -248,9 +230,8 @@ class InputTests(IdentityCase):
         listing.write_text(f"# c\n{self.design} top\n")
         vtr = self.tmp / "vtr.txt"
         vtr.write_text("# c\nd\n")
-        code, out, _ = self.run_tool(
-            "--list", str(listing), "--vtr-list", str(vtr), "--vtr-root", str(self.tmp)
-        )
+        code, out, _ = self.run_tool("--list", str(listing), "--vtr-list", str(vtr),
+                                     "--vtr-root", str(self.tmp))
         self.assertEqual(code, 0, out)
         self.assertIn("2 designs: 2 identical", out)
 
@@ -282,9 +263,8 @@ class InputTests(IdentityCase):
         golden = self.tmp / "golden"
         vtr = self.tmp / "vtr.txt"
         vtr.write_text("d\n")
-        with mock.patch.object(
-            exit_check, "golden_path", return_value=str(golden / "d.parmys.blif")
-        ):
+        with mock.patch.object(exit_check, "golden_path",
+                               return_value=str(golden / "d.parmys.blif")):
             golden.mkdir()
             (golden / "d.parmys.blif").write_text(".model top_x\n.end\n")
             designs = idt.read_vtr(vtr, self.tmp, golden)

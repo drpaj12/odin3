@@ -104,10 +104,8 @@ class ProcDiffTest(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.dir = Path(self._tmp.name).resolve()
         self.odin3 = _exe(self.dir / "odin3", FAKE_ODIN3.replace("{python}", sys.executable))
-        self.yosys = _exe(
-            self.dir / "yosys",
-            FAKE_YOSYS.replace("{python}", sys.executable).replace("{oracle}", ORACLE),
-        )
+        self.yosys = _exe(self.dir / "yosys", FAKE_YOSYS.replace("{python}", sys.executable)
+                          .replace("{oracle}", ORACLE))
         self.memcap = self.dir / "memcap.py"
         self.memcap.write_text(FAKE_MEMCAP, encoding="utf-8")
         self.blifs = self.dir / "blifs"
@@ -120,18 +118,13 @@ class ProcDiffTest(unittest.TestCase):
         self.keep = self.dir / "keep"
         self.log = self.dir / "argv.log"
         self.memlog = self.dir / "memcap.log"
-        env = {
-            "FAKE_LOG": str(self.log),
-            "FAKE_MEMCAP_LOG": str(self.memlog),
-            "FAKE_BLIF_DIR": str(self.blifs),
-        }
+        env = {"FAKE_LOG": str(self.log), "FAKE_MEMCAP_LOG": str(self.memlog),
+               "FAKE_BLIF_DIR": str(self.blifs)}
         env_patch = mock.patch.dict(os.environ, env)
         env_patch.start()
         self.addCleanup(env_patch.stop)
-        for name, value in (
-            ("MEMCAP_PY", self.memcap),
-            ("ELAB_SWEEP_PY", self.dir / "no_elab_sweep.py"),
-        ):
+        for name, value in (("MEMCAP_PY", self.memcap),
+                            ("ELAB_SWEEP_PY", self.dir / "no_elab_sweep.py")):
             patch = mock.patch.object(proc_diff, name, value)
             patch.start()
             self.addCleanup(patch.stop)
@@ -141,19 +134,10 @@ class ProcDiffTest(unittest.TestCase):
     def set_blif(self, stem: str, text: str) -> None:
         (self.blifs / f"{stem}.blif").write_text(text, encoding="utf-8")
 
-    def run_tool(
-        self, *args: str, inputs: tuple[str, ...] | None = None, env: dict[str, str] | None = None
-    ) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            str(self.odin3),
-            "--yosys",
-            str(self.yosys),
-            "--keep",
-            str(self.keep),
-            *args,
-            *(inputs if inputs is not None else (str(self.rows),)),
-        ]
+    def run_tool(self, *args: str, inputs: tuple[str, ...] | None = None,
+                 env: dict[str, str] | None = None) -> tuple[int, str, str]:
+        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--keep",
+                str(self.keep), *args, *(inputs if inputs is not None else (str(self.rows),))]
         with mock.patch.dict(os.environ, env or {}):
             return helpers.run_main(proc_diff.main, argv)
 
@@ -179,49 +163,18 @@ class ProcDiffTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         argvs = self.argvs()
         self.assertEqual(argvs[0], [str(self.yosys), "-V"])
-        self.assertEqual(
-            argvs[1],
-            [
-                str(self.odin3),
-                "-p",
-                self.sub(
-                    "read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
-                    "write_rtlil {W}/in.il; proc --noopt; write_rtlil {W}/a.il"
-                ),
-            ],
-        )
-        self.assertEqual(
-            argvs[2],
-            [
-                str(self.yosys),
-                "-p",
-                self.sub(
-                    "read_rtlil {W}/in.il; hierarchy -auto-top; proc -norom -noopt; opt_clean -purge; "
-                    "write_blif -blackbox -icells -param {W}/b.blif"
-                ),
-            ],
-        )
-        self.assertEqual(
-            argvs[3],
-            [
-                str(self.yosys),
-                "-p",
-                self.sub(
-                    "read_rtlil {W}/a.il; hierarchy -auto-top; opt_clean -purge; "
-                    "write_blif -blackbox -icells -param {W}/a.blif"
-                ),
-            ],
-        )
-        self.assertEqual(
-            argvs[4],
-            [
-                sys.executable,
-                str(proc_diff.NETLIST_COMPARE_PY),
-                "--implicit-models",
-                self.sub("{W}/a.norm.blif"),
-                self.sub("{W}/b.norm.blif"),
-            ],
-        )
+        self.assertEqual(argvs[1], [str(self.odin3), "-p", self.sub(
+            "read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
+            "write_rtlil {W}/in.il; proc --noopt; write_rtlil {W}/a.il")])
+        self.assertEqual(argvs[2], [str(self.yosys), "-p", self.sub(
+            "read_rtlil {W}/in.il; hierarchy -auto-top; proc -norom -noopt; opt_clean -purge; "
+            "write_blif -blackbox -icells -param {W}/b.blif")])
+        self.assertEqual(argvs[3], [str(self.yosys), "-p", self.sub(
+            "read_rtlil {W}/a.il; hierarchy -auto-top; opt_clean -purge; "
+            "write_blif -blackbox -icells -param {W}/a.blif")])
+        self.assertEqual(argvs[4], [sys.executable, str(proc_diff.NETLIST_COMPARE_PY),
+                                    "--implicit-models", self.sub("{W}/a.norm.blif"),
+                                    self.sub("{W}/b.norm.blif")])
         self.assertEqual(len(argvs), 5)
         self.assertIn("t.v: identical", out)
 
@@ -229,49 +182,26 @@ class ProcDiffTest(unittest.TestCase):
         code, _, _ = self.run_tool("--top", "top", "--no-trio", "--with-opt", "--nolatches")
         self.assertEqual(code, 0)
         argvs = self.argvs()
-        self.assertEqual(
-            argvs[1],
-            [
-                str(self.odin3),
-                "--top",
-                "top",
-                "-p",
-                self.sub(
-                    "read_verilog --nolatches {F}; write_rtlil {W}/in.il; proc; write_rtlil {W}/a.il"
-                ),
-            ],
-        )
-        self.assertEqual(
-            self.scripts()[1:],
-            [
-                self.sub(
-                    "read_rtlil {W}/in.il; hierarchy -top top; proc -norom; opt_clean -purge; "
-                    "write_blif -blackbox -icells -param {W}/b.blif"
-                ),
-                self.sub(
-                    "read_rtlil {W}/a.il; hierarchy -top top; opt_clean -purge; "
-                    "write_blif -blackbox -icells -param {W}/a.blif"
-                ),
-            ],
-        )
+        self.assertEqual(argvs[1], [str(self.odin3), "--top", "top", "-p", self.sub(
+            "read_verilog --nolatches {F}; write_rtlil {W}/in.il; proc; write_rtlil {W}/a.il")])
+        self.assertEqual(self.scripts()[1:], [
+            self.sub("read_rtlil {W}/in.il; hierarchy -top top; proc -norom; opt_clean -purge; "
+                     "write_blif -blackbox -icells -param {W}/b.blif"),
+            self.sub("read_rtlil {W}/a.il; hierarchy -top top; opt_clean -purge; "
+                     "write_blif -blackbox -icells -param {W}/a.blif"),
+        ])
 
     def test_each_option_alone(self) -> None:
         cases = {
-            "--top": (
-                "read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; write_rtlil "
-                "{W}/in.il; proc --noopt; write_rtlil {W}/a.il"
-            ),
+            "--top": ("read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; write_rtlil "
+                      "{W}/in.il; proc --noopt; write_rtlil {W}/a.il"),
             "--no-trio": "read_verilog {F}; write_rtlil {W}/in.il; proc --noopt; "
-            "write_rtlil {W}/a.il",
-            "--with-opt": (
-                "read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
-                "write_rtlil {W}/in.il; proc; write_rtlil {W}/a.il"
-            ),
-            "--nolatches": (
-                "read_verilog --nolatches {F}; opt_expr; opt_clean; "
-                "opt -nodffe -nosdff; write_rtlil {W}/in.il; proc --noopt; "
-                "write_rtlil {W}/a.il"
-            ),
+                         "write_rtlil {W}/a.il",
+            "--with-opt": ("read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
+                           "write_rtlil {W}/in.il; proc; write_rtlil {W}/a.il"),
+            "--nolatches": ("read_verilog --nolatches {F}; opt_expr; opt_clean; "
+                            "opt -nodffe -nosdff; write_rtlil {W}/in.il; proc --noopt; "
+                            "write_rtlil {W}/a.il"),
         }
         for option, script in cases.items():
             with self.subTest(option):
@@ -281,13 +211,9 @@ class ProcDiffTest(unittest.TestCase):
                 self.assertEqual(self.scripts()[0], self.sub(script))
                 b_proc = "proc -norom" if option == "--with-opt" else "proc -norom -noopt"
                 hier = "hierarchy -top m" if option == "--top" else "hierarchy -auto-top"
-                self.assertEqual(
-                    self.scripts()[1],
-                    self.sub(
-                        f"read_rtlil {{W}}/in.il; {hier}; {b_proc}; opt_clean -purge; "
-                        "write_blif -blackbox -icells -param {W}/b.blif"
-                    ),
-                )
+                self.assertEqual(self.scripts()[1], self.sub(
+                    f"read_rtlil {{W}}/in.il; {hier}; {b_proc}; opt_clean -purge; "
+                    "write_blif -blackbox -icells -param {W}/b.blif"))
 
     def test_mem_cap_reaches_every_child(self) -> None:
         self.assertEqual(self.run_tool("--mem-cap", "2G")[0], 0)
@@ -301,20 +227,14 @@ class ProcDiffTest(unittest.TestCase):
 
     def test_int_params_become_decimal(self) -> None:
         ints = proc_diff.load_int_params()
-        text = (
-            ".subckt $adff ARST=r CLK=c D=d Q=q\n"
-            ".param CLK_POLARITY 00000000000000000000000000000001\n"
-            ".param ARST_POLARITY 1\n.param ARST_VALUE 0101\n.param WIDTH 100\n"
-            ".param A_SIGNED 0\n.param WIDTH 1x\n.param WIDTH " + "0" * 32 + "1\n"
-        )
-        self.assertEqual(
-            proc_diff.normalise_text(text, ints),
-            (
-                ".subckt $adff ARST=r CLK=c D=d Q=q\n.param CLK_POLARITY 1\n"
-                ".param ARST_POLARITY 1\n.param ARST_VALUE 0101\n.param WIDTH 4\n"
-                ".param A_SIGNED 0\n.param WIDTH 1x\n.param WIDTH " + "0" * 32 + "1\n"
-            ),
-        )
+        text = (".subckt $adff ARST=r CLK=c D=d Q=q\n"
+                ".param CLK_POLARITY 00000000000000000000000000000001\n"
+                ".param ARST_POLARITY 1\n.param ARST_VALUE 0101\n.param WIDTH 100\n"
+                ".param A_SIGNED 0\n.param WIDTH 1x\n.param WIDTH " + "0" * 32 + "1\n")
+        self.assertEqual(proc_diff.normalise_text(text, ints), (
+            ".subckt $adff ARST=r CLK=c D=d Q=q\n.param CLK_POLARITY 1\n"
+            ".param ARST_POLARITY 1\n.param ARST_VALUE 0101\n.param WIDTH 4\n"
+            ".param A_SIGNED 0\n.param WIDTH 1x\n.param WIDTH " + "0" * 32 + "1\n"))
         self.assertIn("CLK_POLARITY", ints)
         self.assertNotIn("ARST_VALUE", ints)
 
@@ -334,15 +254,11 @@ class ProcDiffTest(unittest.TestCase):
         self.set_blif("a", head + ".names a y2\n1 1\n.names y2 y1\n1 1\n.end\n")
         code, out, err = self.run_tool()
         self.assertEqual(code, 0, out + err)
-        text = (
-            ".model top\n.names a b\n1 1\n.names b c\n1 1\n.names c d\n1 1\n.names x y\n"
-            "10 1\n.end\n"
-        )
-        self.assertEqual(
-            proc_diff.normalise_text(text, frozenset()),
-            ".model top\n.names a b\n1 1\n.names a c\n1 1\n.names a d\n1 1\n"
-            ".names x y\n10 1\n.end\n",
-        )
+        text = ".model top\n.names a b\n1 1\n.names b c\n1 1\n.names c d\n1 1\n.names x y\n" \
+               "10 1\n.end\n"
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()),
+                         ".model top\n.names a b\n1 1\n.names a c\n1 1\n.names a d\n1 1\n"
+                         ".names x y\n10 1\n.end\n")
 
     def test_reduce_or_input_order(self) -> None:
         """§20 #8: a hold's $reduce_or inputs in another order are not a difference."""
@@ -353,11 +269,9 @@ class ProcDiffTest(unittest.TestCase):
 
     # -- cell order (netlist-compare ties) ---------------------------------------------------
 
-    CELLS = (
-        ".model top\n.inputs a b\n.outputs y z\n.names n1\n1\n"
-        ".subckt $eq A[0]=a B[0]=b Y=y\n.param A_WIDTH 1\n.param B_WIDTH 1\n"
-        ".subckt $eq A[0]=a B[0]=b Y=z\n.param A_WIDTH 1\n.param B_WIDTH 1\n.end\n"
-    )
+    CELLS = (".model top\n.inputs a b\n.outputs y z\n.names n1\n1\n"
+             ".subckt $eq A[0]=a B[0]=b Y=y\n.param A_WIDTH 1\n.param B_WIDTH 1\n"
+             ".subckt $eq A[0]=a B[0]=b Y=z\n.param A_WIDTH 1\n.param B_WIDTH 1\n.end\n")
 
     def test_shuffle_keeps_every_cell_with_its_lines(self) -> None:
         for seed in range(1, 6):
@@ -366,9 +280,8 @@ class ProcDiffTest(unittest.TestCase):
             self.assertTrue(shuffled.startswith(".model top\n.inputs a b\n.outputs y z\n"))
             self.assertTrue(shuffled.endswith(".end\n"))
             self.assertEqual(shuffled, proc_diff.shuffle_cells(self.CELLS, seed))
-        self.assertTrue(
-            any(proc_diff.shuffle_cells(self.CELLS, s) != self.CELLS for s in range(1, 20))
-        )
+        self.assertTrue(any(proc_diff.shuffle_cells(self.CELLS, s) != self.CELLS
+                            for s in range(1, 20)))
         # a cover row stays under its .names, a .param under its .subckt
         for seed in range(1, 20):
             lines = proc_diff.shuffle_cells(self.CELLS, seed).splitlines()
@@ -396,9 +309,8 @@ class ProcDiffTest(unittest.TestCase):
         with mock.patch.object(runner, "run", side_effect=fake):
             child = proc_diff._compare(runner, argv, frozenset())
         self.assertEqual(child.code, 0)
-        self.assertEqual(
-            seen, ["a.norm.blif", "a.norm.shuf1.blif", "a.norm.shuf2.blif", "a.norm.shuf3.blif"]
-        )
+        self.assertEqual(seen, ["a.norm.blif", "a.norm.shuf1.blif", "a.norm.shuf2.blif",
+                                "a.norm.shuf3.blif"])
 
         def stable(argv: list[str]) -> proc_diff.Child:  # tells a side from the other, not itself
             same = Path(argv[-2]).name.split(".")[0] == Path(argv[-1]).name.split(".")[0]
@@ -413,16 +325,9 @@ class ProcDiffTest(unittest.TestCase):
         self.assertEqual((child.code, child.stdout), (proc_diff.EXIT_TIE, "d"))
 
     def test_a_missing_yosys_is_named(self) -> None:
-        code, _, err = helpers.run_main(
-            proc_diff.main,
-            [
-                "--odin3",
-                str(self.odin3),
-                "--yosys",
-                str(self.dir / "no-such-yosys"),
-                str(self.rows),
-            ],
-        )
+        code, _, err = helpers.run_main(proc_diff.main, [
+            "--odin3", str(self.odin3), "--yosys", str(self.dir / "no-such-yosys"),
+            str(self.rows)])
         self.assertEqual(code, 2)
         self.assertIn("cannot run", err)
 
@@ -476,19 +381,15 @@ class ProcDiffTest(unittest.TestCase):
 
     def no_a_blif(self, real: Callable[..., list[str]]) -> Callable[..., list[str]]:
         """Side A's Yosys run writes its BLIF elsewhere, so a.blif is never made."""
-
-        def build(
-            opts: proc_diff.Options, rtlil: Path, passes: list[str], blif_out: Path
-        ) -> list[str]:
+        def build(opts: proc_diff.Options, rtlil: Path, passes: list[str],
+                  blif_out: Path) -> list[str]:
             out = blif_out.with_name("other.blif") if blif_out.name == "a.blif" else blif_out
             return real(opts, rtlil, passes, out)
-
         return build
 
     def test_memcap_refusal_is_a_run_error(self) -> None:
-        self.memcap.write_text(
-            "def run(argv, cap):\n    raise ValueError('cap too high')\n", encoding="utf-8"
-        )
+        self.memcap.write_text("def run(argv, cap):\n    raise ValueError('cap too high')\n",
+                               encoding="utf-8")
         code, _, err = self.run_tool("--mem-cap", "999G")
         self.assertEqual(code, 2)
         self.assertIn("memcap refused", err)
@@ -534,11 +435,8 @@ class ProcDiffTest(unittest.TestCase):
         self.assertEqual((self.rows / "t.il").read_text(), "module \\top\nend\n")
         self.assertIn(f"wrote {self.rows / 't.il'}", out)
         self.assertEqual(self.run_tool("--write", "--nolatches")[0], 0)
-        self.assertTrue(
-            self.scripts()[-1].startswith(
-                f"read_verilog --nolatches {self.src}; proc --noopt; write_rtlil "
-            )
-        )
+        self.assertTrue(self.scripts()[-1].startswith(f"read_verilog --nolatches {self.src}; "
+                                                      "proc --noopt; write_rtlil "))
         self.assertTrue((self.rows / "t.nolatches.il").is_file())
 
     # -- --bisect --------------------------------------------------------------------------
@@ -550,25 +448,21 @@ class ProcDiffTest(unittest.TestCase):
         self.assertIn("t.v: differs: no phase differs", out)
         tails = {
             "clean": "proc_rmdead; proc_prune; proc_init; proc_arst; proc_mux; proc_dlatch; "
-            "proc_dff; proc_memwr; proc_clean",
+                     "proc_dff; proc_memwr; proc_clean",
             "rmdead": "proc_prune; proc_init; proc_arst; proc_mux; proc_dlatch; proc_dff; "
-            "proc_memwr; proc_clean",
+                      "proc_memwr; proc_clean",
             "prune": "proc_init; proc_arst; proc_mux; proc_dlatch; proc_dff; proc_memwr; "
-            "proc_clean",
+                     "proc_clean",
             "arst": "proc_mux; proc_dlatch; proc_dff; proc_memwr; proc_clean",
         }
         want: list[str] = []
         for phase, tail in tails.items():
             want += [
-                self.sub(
-                    "read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
-                    f"proc --stop-after {phase}; write_rtlil {{W}}/a_{phase}.il"
-                ),
-                self.sub(
-                    f"read_rtlil {{W}}/a_{phase}.il; hierarchy -top top; {tail}; "
-                    "opt_clean -purge; write_blif -blackbox -icells -param "
-                    f"{{W}}/a_{phase}.blif"
-                ),
+                self.sub("read_verilog {F}; opt_expr; opt_clean; opt -nodffe -nosdff; "
+                         f"proc --stop-after {phase}; write_rtlil {{W}}/a_{phase}.il"),
+                self.sub(f"read_rtlil {{W}}/a_{phase}.il; hierarchy -top top; {tail}; "
+                         "opt_clean -purge; write_blif -blackbox -icells -param "
+                         f"{{W}}/a_{phase}.blif"),
             ]
         self.assertEqual(self.scripts()[3:], want)
 
@@ -581,10 +475,9 @@ class ProcDiffTest(unittest.TestCase):
         self.assertEqual(len(self.scripts()), 3 + 4)  # stops after rmdead's pair
 
     def test_bisect_with_opt_ends_with_opt_expr(self) -> None:
-        self.assertEqual(
-            proc_diff.bisect_passes("arst", True),
-            ["proc_mux", "proc_dlatch", "proc_dff", "proc_memwr", "proc_clean", "opt_expr -keepdc"],
-        )
+        self.assertEqual(proc_diff.bisect_passes("arst", True),
+                         ["proc_mux", "proc_dlatch", "proc_dff", "proc_memwr", "proc_clean",
+                          "opt_expr -keepdc"])
 
     def test_identical_run_never_bisects(self) -> None:
         self.assertEqual(self.run_tool("--bisect")[0], 0)
@@ -595,26 +488,18 @@ class ProcDiffTest(unittest.TestCase):
     def test_two_directories_one_ascending_order(self) -> None:
         other = self.dir / "other"
         other.mkdir()
-        sizes = {
-            self.rows / "big.v": 900,
-            other / "small.v": 10,
-            self.rows / "mid.v": 400,
-            other / "sub" / "tiny.v": 1,
-        }
+        sizes = {self.rows / "big.v": 900, other / "small.v": 10, self.rows / "mid.v": 400,
+                 other / "sub" / "tiny.v": 1}
         (other / "sub").mkdir()
         for path, size in sizes.items():
             path.write_text("x" * size, encoding="utf-8")
         (other / "notes.txt").write_text("not verilog", encoding="utf-8")
         code, out, _ = self.run_tool(inputs=(str(self.rows), str(other)))
         self.assertEqual(code, 0)
-        order = [
-            s.split("read_verilog ")[1].split(";")[0]
-            for s in self.scripts()
-            if s.startswith("read_verilog")
-        ]
-        self.assertEqual(
-            [Path(p).name for p in order], ["tiny.v", "small.v", "t.v", "mid.v", "big.v"]
-        )
+        order = [s.split("read_verilog ")[1].split(";")[0] for s in self.scripts()
+                 if s.startswith("read_verilog")]
+        self.assertEqual([Path(p).name for p in order], ["tiny.v", "small.v", "t.v", "mid.v",
+                                                         "big.v"])
         self.assertIn("sub/tiny.v: identical", out)
         self.assertIn("proc-diff: 5 files, exit 0", out)
 
@@ -666,11 +551,9 @@ class ProcDiffTest(unittest.TestCase):
         self.assertEqual(self.run_tool("--expect-fail", str(self.dir / "none.txt"))[0], 2)
 
     def test_divergence_17_is_recognised(self) -> None:
-        env = {
-            "FAKE_YOSYS_FAIL": "in",
-            "FAKE_YOSYS_MSG": "ERROR: Assert `ctrl_sig.size() == 1' failed in "
-            "passes/proc/proc_mux.cc:264.",
-        }
+        env = {"FAKE_YOSYS_FAIL": "in",
+               "FAKE_YOSYS_MSG": "ERROR: Assert `ctrl_sig.size() == 1' failed in "
+                                 "passes/proc/proc_mux.cc:264."}
         code, out, _ = self.run_tool(env=env)
         self.assertEqual(code, 0, out)
         self.assertIn("t.v: expected difference (§20 #17: Yosys 0.55 asserts", out)
@@ -690,15 +573,13 @@ class ProcDiffTest(unittest.TestCase):
         self.assertIn("listed as §20 #18 (differ), but error", out)
         # #16 is Odin III's E3.
         cite16 = self.expect("t.v §20 #16 a 100-round chain\n")
-        e3 = {
-            "FAKE_ODIN3_RC": "1",
-            "FAKE_ODIN3_MSG": "t.v:3:5: error: asynchronous reset 'r' "
-            "does not settle the value of 'q' after 100 substitutions",
-        }
+        e3 = {"FAKE_ODIN3_RC": "1", "FAKE_ODIN3_MSG": "t.v:3:5: error: asynchronous reset 'r' "
+              "does not settle the value of 'q' after 100 substitutions"}
         self.assertEqual(self.run_tool("--expect-fail", cite16, env=e3)[0], 0)
         self.assertEqual(self.run_tool("--expect-fail", cite16)[0], 1)  # a difference instead
         # An uncited reason accepts any failure.
-        self.assertEqual(self.run_tool("--expect-fail", self.expect("t.v §20 #1 merged\n"))[0], 0)
+        self.assertEqual(self.run_tool("--expect-fail", self.expect("t.v §20 #1 merged\n"))[0],
+                         0)
 
     def test_cited(self) -> None:
         self.assertEqual(proc_diff.cited("a §20 #18 shape"), 18)
@@ -711,10 +592,8 @@ class ProcDiffTest(unittest.TestCase):
     def test_bisect_normalises_from_the_originals(self) -> None:
         """I1: a decimal 10 in a normalised file must not be re-read as binary (10 -> 2)."""
         ten = "0" * 28 + "1010"
-        body = (
-            ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n"
-            f".param A_WIDTH {ten}\n.end\n"
-        )
+        body = ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n" \
+               f".param A_WIDTH {ten}\n.end\n"
         for stem in ("in", "a_clean", "a_rmdead", "a_prune", "a_arst"):
             self.set_blif(stem, body)
         self.set_blif("a", body.replace("A[0]=a A[1]=b", "A[0]=a A[1]=a"))
@@ -734,18 +613,18 @@ class ProcDiffTest(unittest.TestCase):
         path.write_text(".param WIDTH " + "0" * 28 + "1010\n", encoding="utf-8")
         ints = proc_diff.load_int_params()
         for _ in range(3):
-            self.assertEqual(proc_diff.normalise_file(path, ints).read_text(), ".param WIDTH 10\n")
+            self.assertEqual(proc_diff.normalise_file(path, ints).read_text(),
+                             ".param WIDTH 10\n")
 
     def test_hard_block_model_is_compared(self) -> None:
         """I2: with -blackbox Yosys writes the hard block's interface, so it compares."""
-        text = (
-            ".model top\n.inputs a clk\n.outputs y\n"
-            ".subckt single_port_ram addr=a clk=clk out=y\n.end\n"
-            ".model single_port_ram\n.inputs addr clk\n.outputs out\n.blackbox\n.end\n"
-        )
+        text = (".model top\n.inputs a clk\n.outputs y\n"
+                ".subckt single_port_ram addr=a clk=clk out=y\n.end\n"
+                ".model single_port_ram\n.inputs addr clk\n.outputs out\n.blackbox\n.end\n")
         self.set_blif("default", text)
         self.assertEqual(self.run_tool()[0], 0)
-        self.assertTrue(all("write_blif -blackbox -icells -param" in s for s in self.scripts()[1:]))
+        self.assertTrue(all("write_blif -blackbox -icells -param" in s
+                            for s in self.scripts()[1:]))
 
     def test_constant_cover_is_not_a_buffer(self) -> None:
         """M1: `.names a y` with rows `1 1`, `0 1` is constant 1, not a buffer of a."""
@@ -754,27 +633,19 @@ class ProcDiffTest(unittest.TestCase):
 
     def test_buffer_roots_are_per_model(self) -> None:
         """M2: a net name reused in another model is another net."""
-        text = (
-            ".model top\n.names a b\n1 1\n.names b c\n1 1\n.end\n"
-            ".model sub\n.names x a\n1 1\n.names a c\n1 1\n.end\n"
-        )
-        self.assertEqual(
-            proc_diff.normalise_text(text, frozenset()),
-            (
-                ".model top\n.names a b\n1 1\n.names a c\n1 1\n.end\n"
-                ".model sub\n.names x a\n1 1\n.names x c\n1 1\n.end\n"
-            ),
-        )
+        text = (".model top\n.names a b\n1 1\n.names b c\n1 1\n.end\n"
+                ".model sub\n.names x a\n1 1\n.names a c\n1 1\n.end\n")
+        self.assertEqual(proc_diff.normalise_text(text, frozenset()), (
+            ".model top\n.names a b\n1 1\n.names a c\n1 1\n.end\n"
+            ".model sub\n.names x a\n1 1\n.names x c\n1 1\n.end\n"))
 
     def test_buffer_cycle_stays(self) -> None:
         """M4: a cycle of two buffers is not two self-loops."""
         text = ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n.end\n"
         self.assertEqual(proc_diff.normalise_text(text, frozenset()), text)
         # A tail of two buffers off the cycle stays as written too (pins the None of _root).
-        tail = (
-            ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n"
-            ".names z w\n1 1\n.end\n"
-        )
+        tail = ".model top\n.names y1 y2\n1 1\n.names y2 y1\n1 1\n.names y2 z\n1 1\n" \
+               ".names z w\n1 1\n.end\n"
         self.assertEqual(proc_diff.normalise_text(tail, frozenset()), tail)
         head = ".model top\n.inputs a\n.outputs y1 y2\n"
         self.set_blif("in", head + ".names y1 y2\n1 1\n.names y2 y1\n1 1\n.end\n")
@@ -789,9 +660,8 @@ class ProcDiffTest(unittest.TestCase):
         self.assertIn("t.v: error: yosys exited 1 (step A-BLIF)", out)
         cite16 = self.expect("t.v §20 #16 chain\n")
         e3 = "error: asynchronous reset 'r' does not settle the value of 'q' after 100"
-        code, out, _ = self.run_tool(
-            "--expect-fail", cite16, env={"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": e3}
-        )
+        code, out, _ = self.run_tool("--expect-fail", cite16,
+                                     env={"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": e3})
         self.assertEqual(code, 1)
         self.assertIn("listed as §20 #16 (odin3-e3), but error", out)
 
@@ -806,9 +676,8 @@ class ProcDiffTest(unittest.TestCase):
     def test_unexpected_exception_exits_2(self) -> None:
         """M5: a 2D module of another shape is an error, not a difference."""
         sweep = self.dir / "elab_sweep.py"
-        sweep.write_text(
-            "def collect(paths):\n    raise TypeError('other shape')\n", encoding="utf-8"
-        )
+        sweep.write_text("def collect(paths):\n    raise TypeError('other shape')\n",
+                         encoding="utf-8")
         with mock.patch.object(proc_diff, "ELAB_SWEEP_PY", sweep):
             code, _, err = self.run_tool()
         self.assertEqual(code, 2)
@@ -820,7 +689,8 @@ class ProcDiffTest(unittest.TestCase):
         other.mkdir()
         (other / "t.v").write_text("module top; endmodule // other\n", encoding="utf-8")
         listed = self.expect("nope.v typo\n")
-        code, _, err = self.run_tool("--expect-fail", listed, inputs=(str(self.rows), str(other)))
+        code, _, err = self.run_tool("--expect-fail", listed,
+                                     inputs=(str(self.rows), str(other)))
         self.assertEqual(code, 0)
         self.assertTrue((self.keep / "t").is_dir())
         self.assertTrue((self.keep / "t-2").is_dir())
@@ -831,11 +701,8 @@ class ProcDiffTest(unittest.TestCase):
         """M9: capture_output=True is passed when memcap.run takes it (the #17 test needs the
         output), and a memcap.run(argv, cap) that always captures is called with two."""
         self.memcap.write_text(
-            FAKE_MEMCAP.replace(", capture_output=False", "").replace(
-                "capture_output=capture_output", "capture_output=True"
-            ),
-            encoding="utf-8",
-        )
+            FAKE_MEMCAP.replace(", capture_output=False", "")
+            .replace("capture_output=capture_output", "capture_output=True"), encoding="utf-8")
         env = {"FAKE_YOSYS_FAIL": "in", "FAKE_YOSYS_MSG": "Assert `ctrl_sig.size() == 1'"}
         code, out, _ = self.run_tool(env=env)
         self.assertEqual(code, 0, out)
@@ -845,9 +712,8 @@ class ProcDiffTest(unittest.TestCase):
 
     def test_wrapper_help(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "proc-check" / "proc-diff"
-        result = subprocess.run(
-            [str(wrapper), "--help"], capture_output=True, text=True, check=False, timeout=60
-        )
+        result = subprocess.run([str(wrapper), "--help"], capture_output=True, text=True,
+                                check=False, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--expect-fail", result.stdout)
 

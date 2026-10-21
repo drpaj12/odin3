@@ -77,20 +77,13 @@ class CompareTest(unittest.TestCase):
 
     def respond(self, case_dir: Path, responses: list[dict[str, Any]]) -> None:
         full = [{"stdout": "", "stderr": "", "exit": 0, **r} for r in responses]
-        self.fake.write_text(
-            FAKE.format(
-                python=sys.executable,
-                case=str(case_dir),
-                responses=json.dumps(full),
-                log=str(self.log),
-            )
-        )
+        self.fake.write_text(FAKE.format(python=sys.executable, case=str(case_dir),
+                                         responses=json.dumps(full), log=str(self.log)))
         self.fake.chmod(0o755)
 
     def compare(self, *extra: str) -> tuple[int, str]:
-        code, out, err = helpers.run_main(
-            pf.main, ["compare", "--odin3", str(self.fake), "--root", str(self.root), *extra]
-        )
+        code, out, err = helpers.run_main(pf.main, ["compare", "--odin3", str(self.fake),
+                                                    "--root", str(self.root), *extra])
         return code, out + err
 
     def runs(self) -> list[dict[str, Any]]:
@@ -108,15 +101,8 @@ class CompareTest(unittest.TestCase):
         self.assertIn("ok   pos o3proj", out)
         [run] = self.runs()
         entry = os.path.abspath(d / "project.o3proj")
-        self.assertEqual(
-            run["argv"],
-            [
-                "--diag-paths",
-                "resolved",
-                "-p",
-                f"read_project --format o3proj {entry}; dump_project",
-            ],
-        )
+        self.assertEqual(run["argv"], ["--diag-paths", "resolved", "-p",
+                                       f"read_project --format o3proj {entry}; dump_project"])
         self.assertNotEqual(Path(run["cwd"]).resolve(), d.resolve())
         self.assertEqual(set(run["env"]) - {"LC_CTYPE"}, {"PATH", "V"})
         self.assertEqual(run["env"]["V"], "1")
@@ -131,13 +117,8 @@ class CompareTest(unittest.TestCase):
 
     def test_positive_needs_exit_zero_and_json(self) -> None:
         d = self.case("pos", {"formats": ["o3proj", "f"], "project": RECORD})
-        self.respond(
-            d,
-            [
-                {"match": "o3proj", "stdout": dump(RECORD), "exit": 1},
-                {"match": "--format f", "stdout": "not json"},
-            ],
-        )
+        self.respond(d, [{"match": "o3proj", "stdout": dump(RECORD), "exit": 1},
+                         {"match": "--format f", "stdout": "not json"}])
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("exit 1", out)
@@ -146,11 +127,8 @@ class CompareTest(unittest.TestCase):
     def test_key_order(self) -> None:
         d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
         rec = absolute(RECORD)
-        swapped = {
-            "libfiles": rec["libfiles"],
-            "files": rec["files"],
-            **{k: v for k, v in rec.items() if k not in ("files", "libfiles")},
-        }
+        swapped = {"libfiles": rec["libfiles"], "files": rec["files"],
+                   **{k: v for k, v in rec.items() if k not in ("files", "libfiles")}}
         self.respond(d, [{"match": "o3proj", "stdout": json.dumps(swapped)}])
         code, out = self.compare()
         self.assertEqual(code, 1)
@@ -166,22 +144,14 @@ class CompareTest(unittest.TestCase):
         self.assertIn("not absolute", out)
 
     def test_every_path_field_relativized(self) -> None:
-        rec = {
-            **RECORD,
-            "libfiles": [{"path": "lib/cells.v", "language": "verilog"}],
-            "libdirs": ["../shared"],
-            "arch": [
-                {"kind": "o3lib", "path": "arch/a.o3lib"},
-                {"kind": "device", "family": "/not/a/path", "device": "D"},
-            ],
-            "rules": [
-                {"rule": "patterns", "path": "arch/p.o3lib"},
-                {"rule": "limit", "cell": "multiply", "count": 4},
-            ],
-            "defines": [{"name": "P", "value": "/abs/value"}],
-            "flow": "flow/s.o3",
-            "output": {"path": "out/x.blif", "format": "blif"},
-        }
+        rec = {**RECORD, "libfiles": [{"path": "lib/cells.v", "language": "verilog"}],
+               "libdirs": ["../shared"],
+               "arch": [{"kind": "o3lib", "path": "arch/a.o3lib"},
+                        {"kind": "device", "family": "/not/a/path", "device": "D"}],
+               "rules": [{"rule": "patterns", "path": "arch/p.o3lib"},
+                         {"rule": "limit", "cell": "multiply", "count": 4}],
+               "defines": [{"name": "P", "value": "/abs/value"}],
+               "flow": "flow/s.o3", "output": {"path": "out/x.blif", "format": "blif"}}
         d = self.case("pos", {"formats": ["o3proj"], "project": rec})
         dumped = absolute(rec)
         dumped["arch"][0]["path"] = "{CASE}/arch/a.o3lib"
@@ -210,10 +180,8 @@ class CompareTest(unittest.TestCase):
         dumped = absolute(rec)
         dumped["duplicates"] = ["{CASE}/src/a.v", str(self.root / "zz" / "d.v")]
         entry = os.path.abspath(d / "files.f")
-        info = (
-            f"odin3: info: {entry}: listed more than once, read once: "
-            f"{d}/src/a.v, {self.root}/zz/d.v\n"
-        )
+        info = (f"odin3: info: {entry}: listed more than once, read once: "
+                f"{d}/src/a.v, {self.root}/zz/d.v\n")
         self.respond(d, [{"match": "files.f", "stdout": json.dumps(dumped), "stderr": info}])
         code, out = self.compare()
         self.assertEqual(code, 0, out)
@@ -223,17 +191,9 @@ class CompareTest(unittest.TestCase):
         d = self.case("pos", {"formats": ["o3proj", "f"], "project": rec})
         o3 = os.path.abspath(d / "project.o3proj")
         good = f"odin3: info: {o3}: ignored: LOCATION, SDC_FILE\n"
-        self.respond(
-            d,
-            [
-                {"match": "o3proj", "stdout": dump(rec), "stderr": good},
-                {
-                    "match": "files.f",
-                    "stdout": dump(rec),
-                    "stderr": "odin3: info: files.f: ignored: LOCATION\n",
-                },
-            ],
-        )
+        self.respond(d, [{"match": "o3proj", "stdout": dump(rec), "stderr": good},
+                         {"match": "files.f", "stdout": dump(rec),
+                          "stderr": "odin3: info: files.f: ignored: LOCATION\n"}])
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("ok   pos o3proj", out)
@@ -243,54 +203,31 @@ class CompareTest(unittest.TestCase):
     def test_info_line_absent_when_empty(self) -> None:
         d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
         o3 = os.path.abspath(d / "project.o3proj")
-        self.respond(
-            d,
-            [
-                {
-                    "match": "o3proj",
-                    "stdout": dump(RECORD),
-                    "stderr": f"odin3: info: {o3}: ignored: X\n",
-                }
-            ],
-        )
+        self.respond(d, [{"match": "o3proj", "stdout": dump(RECORD),
+                          "stderr": f"odin3: info: {o3}: ignored: X\n"}])
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("unexpected info line", out)
 
     def test_override_applied(self) -> None:
-        exp = {
-            "formats": ["o3proj", "qsf"],
-            "project": RECORD,
-            "format_overrides": {"qsf": {"top": "work.top", "libdirs": ["inc"]}},
-            "options": {"qsf": {"revision": "fast"}},
-        }
+        exp = {"formats": ["o3proj", "qsf"], "project": RECORD,
+               "format_overrides": {"qsf": {"top": "work.top", "libdirs": ["inc"]}},
+               "options": {"qsf": {"revision": "fast"}}}
         d = self.case("pos", exp)
         (d / "proj.qpf").write_text("")
         over = {**RECORD, "top": "work.top", "libdirs": ["inc"]}
-        self.respond(
-            d,
-            [
-                {"match": "o3proj", "stdout": dump(RECORD)},
-                {"match": "--format qsf", "stdout": dump(over)},
-            ],
-        )
+        self.respond(d, [{"match": "o3proj", "stdout": dump(RECORD)},
+                         {"match": "--format qsf", "stdout": dump(over)}])
         code, out = self.compare()
         self.assertEqual(code, 0, out)
         qsf = [r for r in self.runs() if "--format qsf" in r["argv"][-1]]
         qpf = os.path.abspath(d / "proj.qpf")
-        self.assertEqual(
-            qsf[0]["argv"][-1], f"read_project --format qsf --revision fast {qpf}; dump_project"
-        )
+        self.assertEqual(qsf[0]["argv"][-1],
+                         f"read_project --format qsf --revision fast {qpf}; dump_project")
 
     def test_format_skipped_until_its_phase_lands(self) -> None:
-        d = self.case(
-            "pos",
-            {
-                "formats": ["o3proj", "odin2"],
-                "project": RECORD,
-                "format_phase": {"odin2": "odin2-reader"},
-            },
-        )
+        d = self.case("pos", {"formats": ["o3proj", "odin2"], "project": RECORD,
+                              "format_phase": {"odin2": "odin2-reader"}})
         self.respond(d, [{"match": "o3proj", "stdout": dump(RECORD)}])
         with mock.patch.object(pf, "LANDED_FORMAT_PHASES", frozenset()):
             code, out = self.compare()
@@ -301,32 +238,20 @@ class CompareTest(unittest.TestCase):
 
     def test_odin2_runs_once_its_reader_lands(self) -> None:
         over = {**RECORD, "output": {"path": "out.blif", "format": "blif"}}
-        d = self.case(
-            "pos",
-            {
-                "formats": ["o3proj", "odin2"],
-                "project": RECORD,
-                "format_phase": {"odin2": "odin2-reader"},
-                "format_overrides": {"odin2": {"output": over["output"]}},
-            },
-        )
+        d = self.case("pos", {"formats": ["o3proj", "odin2"], "project": RECORD,
+                              "format_phase": {"odin2": "odin2-reader"},
+                              "format_overrides": {"odin2": {"output": over["output"]}}})
         got = absolute(over)
         got["output"]["path"] = "{CASE}/out.blif"
-        self.respond(
-            d,
-            [
-                {"match": "--format o3proj", "stdout": dump(RECORD)},
-                {"match": "--format odin2", "stdout": json.dumps(got, indent=2) + "\n"},
-            ],
-        )
+        self.respond(d, [{"match": "--format o3proj", "stdout": dump(RECORD)},
+                         {"match": "--format odin2", "stdout": json.dumps(got, indent=2) + "\n"}])
         code, out = self.compare()
         self.assertEqual(code, 0, out)
         self.assertIn("ok   pos odin2", out)
         self.assertIn("odin2 1 ok, 0 failed, 0 skipped", out)
         xml = os.path.abspath(d / "odin2.xml")
-        self.assertEqual(
-            self.runs()[-1]["argv"][-1], f"read_project --format odin2 {xml}; dump_project"
-        )
+        self.assertEqual(self.runs()[-1]["argv"][-1],
+                         f"read_project --format odin2 {xml}; dump_project")
 
     def test_format_filter_and_case_filter(self) -> None:
         d = self.case("pos", {"formats": ["o3proj", "f"], "project": RECORD})
@@ -346,24 +271,16 @@ class CompareTest(unittest.TestCase):
 
     # ---- negative cases --------------------------------------------------------------------
 
-    def neg(
-        self,
-        error: dict[str, Any],
-        stderr: str,
-        exit_code: int = 1,
-        formats: tuple[str, ...] = ("o3proj",),
-        **extra: Any,
-    ) -> tuple[int, str]:
+    def neg(self, error: dict[str, Any], stderr: str, exit_code: int = 1,
+            formats: tuple[str, ...] = ("o3proj",), **extra: Any) -> tuple[int, str]:
         d = self.case("neg", {"formats": list(formats), "error": error, **extra})
         self.respond(d, [{"match": "read_project", "stderr": stderr, "exit": exit_code}])
         return self.compare()
 
     MISSING = {"kind": "missing_file", "at": "project.o3proj:3", "names": ["src/missing.v"]}
-    MISSING_ERR = (
-        "odin3: error: {CASE}/project.o3proj:3:14: error: missing_file: file not "
-        "found: '{CASE}/src/missing.v'\n  included from {CASE}/x.f:1\n"
-        "odin3: error: pass read_project: failed: ODIN3_ERR_PARSE\n"
-    )
+    MISSING_ERR = ("odin3: error: {CASE}/project.o3proj:3:14: error: missing_file: file not "
+                   "found: '{CASE}/src/missing.v'\n  included from {CASE}/x.f:1\n"
+                   "odin3: error: pass read_project: failed: ODIN3_ERR_PARSE\n")
 
     def test_negative_match_relativizes_detail(self) -> None:
         code, out = self.neg(self.MISSING, self.MISSING_ERR)
@@ -407,41 +324,18 @@ class CompareTest(unittest.TestCase):
         self.assertIn("no '<kind>: <detail>' error", out)
 
     def test_at_per_format_file_level_and_unlocated(self) -> None:
-        err = {
-            "kind": "unknown_revision",
-            "at": {"o3proj": "project.o3proj:2", "qsf": None, "f": "top.qsf"},
-            "names": ["nope"],
-        }
-        d = self.case(
-            "neg",
-            {
-                "formats": ["o3proj", "f", "qsf"],
-                "error": err,
-                "entry": {"qsf": "top.qsf"},
-                "options": {"qsf": {"revision": "nope"}},
-            },
-        )
-        self.respond(
-            d,
-            [
-                {
-                    "match": "o3proj",
-                    "exit": 1,
-                    "stderr": "odin3: error: {CASE}/project.o3proj:2:1: "
-                    "error: unknown_revision: no such revision: 'nope'\n",
-                },
-                {
-                    "match": "--format qsf",
-                    "exit": 1,
-                    "stderr": "odin3: error: unknown_revision: no such revision: 'nope'\n",
-                },
-                {
-                    "match": "--format f",
-                    "exit": 1,
-                    "stderr": "odin3: error: {CASE}/top.qsf: error: unknown_revision: 'nope'\n",
-                },
-            ],
-        )
+        err = {"kind": "unknown_revision", "at": {"o3proj": "project.o3proj:2", "qsf": None,
+                                                  "f": "top.qsf"}, "names": ["nope"]}
+        d = self.case("neg", {"formats": ["o3proj", "f", "qsf"], "error": err,
+                              "entry": {"qsf": "top.qsf"},
+                              "options": {"qsf": {"revision": "nope"}}})
+        self.respond(d, [
+            {"match": "o3proj", "exit": 1, "stderr": "odin3: error: {CASE}/project.o3proj:2:1: "
+             "error: unknown_revision: no such revision: 'nope'\n"},
+            {"match": "--format qsf", "exit": 1,
+             "stderr": "odin3: error: unknown_revision: no such revision: 'nope'\n"},
+            {"match": "--format f", "exit": 1,
+             "stderr": "odin3: error: {CASE}/top.qsf: error: unknown_revision: 'nope'\n"}])
         code, out = self.compare()
         self.assertEqual(code, 0, out)
         qsf = [r for r in self.runs() if "--format qsf" in r["argv"][-1]][0]
@@ -449,17 +343,14 @@ class CompareTest(unittest.TestCase):
 
     def test_doubled_prefix_rejected(self) -> None:
         err = {"kind": "unknown_revision", "at": None, "names": ["nope"]}
-        code, out = self.neg(
-            err, "odin3: error: odin3: error: unknown_revision: no such revision: 'nope'\n"
-        )
+        code, out = self.neg(err, "odin3: error: odin3: error: unknown_revision: no such "
+                             "revision: 'nope'\n")
         self.assertEqual(code, 1)
         self.assertIn("doubled 'odin3: error: ' prefix", out)
 
     def test_unprefixed_line_is_not_a_diagnostic(self) -> None:
-        code, out = self.neg(
-            self.MISSING,
-            "{CASE}/project.o3proj:3:14: error: missing_file: '{CASE}/src/missing.v'\n",
-        )
+        code, out = self.neg(self.MISSING, "{CASE}/project.o3proj:3:14: error: missing_file: "
+                             "'{CASE}/src/missing.v'\n")
         self.assertEqual(code, 1)
         self.assertIn("no '<kind>: <detail>' error", out)
 
@@ -470,19 +361,15 @@ class CompareTest(unittest.TestCase):
 
     def test_include_kinds_run_preprocess(self) -> None:
         err = {"kind": "include_cycle", "at": "src/b.vh:2", "names": ["a.vh"]}
-        code, out = self.neg(
-            err,
-            "odin3: error: {CASE}/src/b.vh:2:1: error: include_cycle: "
-            "'a.vh'\n  included from {CASE}/src/a.vh:2\n",
-        )
+        code, out = self.neg(err, "odin3: error: {CASE}/src/b.vh:2:1: error: include_cycle: "
+                             "'a.vh'\n  included from {CASE}/src/a.vh:2\n")
         self.assertEqual(code, 0, out)
         self.assertTrue(self.runs()[0]["argv"][-1].endswith("; preprocess"))
 
     def test_frontend_case_skipped_without_flag(self) -> None:
         err = {"kind": "unresolved_module", "at": "src/top.v:6", "names": ["missing_cell"]}
-        code, out = self.neg(
-            err, "odin3: error: {CASE}/src/top.v:6:5: error: unresolved_module: 'missing_cell'\n"
-        )
+        code, out = self.neg(err, "odin3: error: {CASE}/src/top.v:6:5: error: "
+                             "unresolved_module: 'missing_cell'\n")
         self.assertIn("skip neg o3proj (needs the front end: --with-frontend)", out)
         self.assertEqual(self.runs(), [])
         self.assertEqual(code, 1)  # nothing was run
@@ -512,12 +399,8 @@ class CompareTest(unittest.TestCase):
 
     # ---- strictness --------------------------------------------------------------------------
 
-    UNNORMALIZED = (
-        "{CASE}/src/./top.v",
-        "{CASE}//src/top.v",
-        "{CASE}/src/../src/top.v",
-        "{CASE}/inc/",
-    )
+    UNNORMALIZED = ("{CASE}/src/./top.v", "{CASE}//src/top.v", "{CASE}/src/../src/top.v",
+                    "{CASE}/inc/")
 
     def test_unnormalized_record_path(self) -> None:
         d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
@@ -525,8 +408,7 @@ class CompareTest(unittest.TestCase):
             with self.subTest(bad=bad):
                 rec = absolute(RECORD)
                 rec["files" if "top.v" in bad else "incdirs"] = (
-                    [{**rec["files"][0], "path": bad}] if "top.v" in bad else [bad]
-                )
+                    [{**rec["files"][0], "path": bad}] if "top.v" in bad else [bad])
                 self.respond(d, [{"match": "o3proj", "stdout": json.dumps(rec)}])
                 code, out = self.compare()
                 self.assertEqual(code, 1)
@@ -536,9 +418,8 @@ class CompareTest(unittest.TestCase):
         d = self.case("neg", {"formats": ["o3proj"], "error": self.MISSING})
         for bad in ("{CASE}/./", "{CASE}//", "{CASE}/src/../"):
             for place, err in (
-                ("at", self.MISSING_ERR.replace("{CASE}/project", bad + "project")),
-                ("name", self.MISSING_ERR.replace("{CASE}/src/missing", bad + "src/missing")),
-            ):
+                    ("at", self.MISSING_ERR.replace("{CASE}/project", bad + "project")),
+                    ("name", self.MISSING_ERR.replace("{CASE}/src/missing", bad + "src/missing"))):
                 with self.subTest(bad=bad, place=place):
                     self.respond(d, [{"match": "read_project", "stderr": err, "exit": 1}])
                     code, out = self.compare()
@@ -551,20 +432,11 @@ class CompareTest(unittest.TestCase):
         entry = os.path.abspath(d / "files.f")
         for bad in ("{CASE}/./", "{CASE}//", "{CASE}/src/../"):
             for place, line in (
-                ("file", f"{bad}files.f: listed more than once, read once: {{CASE}}/src/top.v"),
-                ("item", f"{entry}: listed more than once, read once: {bad}src/top.v"),
-            ):
+                    ("file", f"{bad}files.f: listed more than once, read once: {{CASE}}/src/top.v"),
+                    ("item", f"{entry}: listed more than once, read once: {bad}src/top.v")):
                 with self.subTest(bad=bad, place=place):
-                    self.respond(
-                        d,
-                        [
-                            {
-                                "match": "files.f",
-                                "stdout": dump(rec),
-                                "stderr": f"odin3: info: {line}\n",
-                            }
-                        ],
-                    )
+                    self.respond(d, [{"match": "files.f", "stdout": dump(rec),
+                                      "stderr": f"odin3: info: {line}\n"}])
                     code, out = self.compare()
                     self.assertEqual(code, 1, line)
                     self.assertIn("is not normalized", out)
@@ -572,28 +444,16 @@ class CompareTest(unittest.TestCase):
     def test_info_line_entry_must_be_absolute(self) -> None:
         rec = {**RECORD, "ignored": ["LOCATION"]}
         d = self.case("pos", {"formats": ["f"], "project": rec})
-        self.respond(
-            d,
-            [
-                {
-                    "match": "files.f",
-                    "stdout": dump(rec),
-                    "stderr": "odin3: info: files.f: ignored: LOCATION\n",
-                }
-            ],
-        )
+        self.respond(d, [{"match": "files.f", "stdout": dump(rec),
+                          "stderr": "odin3: info: files.f: ignored: LOCATION\n"}])
         code, out = self.compare()
         self.assertEqual(code, 1)
         self.assertIn("ignored info line: path 'files.f' is not absolute", out)
 
     def test_record_equality_is_type_strict(self) -> None:
-        rec = {
-            **RECORD,
-            "rules": [
-                {"rule": "split", "subject": "$mem", "width": True, "depth": "max"},
-                {"rule": "limit", "cell": "multiply", "count": 4},
-            ],
-        }
+        rec = {**RECORD, "rules": [{"rule": "split", "subject": "$mem", "width": True,
+                                    "depth": "max"},
+                                   {"rule": "limit", "cell": "multiply", "count": 4}]}
         d = self.case("pos", {"formats": ["o3proj"], "project": rec})
         for field, value in (("width", 1), ("count", 4.0)):
             with self.subTest(field=field):
@@ -607,7 +467,8 @@ class CompareTest(unittest.TestCase):
     def test_nested_key_order(self) -> None:
         d = self.case("pos", {"formats": ["o3proj"], "project": RECORD})
         dumped = absolute(RECORD)
-        dumped["files"] = [{"language": "verilog", "path": "{CASE}/src/top.v", "library": "work"}]
+        dumped["files"] = [{"language": "verilog", "path": "{CASE}/src/top.v",
+                            "library": "work"}]
         self.respond(d, [{"match": "o3proj", "stdout": json.dumps(dumped)}])
         code, out = self.compare()
         self.assertEqual(code, 1)

@@ -252,7 +252,9 @@ class ScriptTests(unittest.TestCase):
 
 
 class MainTests(unittest.TestCase):
-    def run_with(self, rows: Sequence[jc.Row], extra: Sequence[str] = ()) -> tuple[int, str, str]:
+    def run_with(
+        self, rows: Sequence[jc.Row], extra: Sequence[str] = ()
+    ) -> tuple[int, str, str]:
         queue = list(rows)
 
         def run(cfg: jc.Config, level: str, design: Path, work: Path) -> jc.Row:

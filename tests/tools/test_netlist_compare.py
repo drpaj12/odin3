@@ -14,9 +14,8 @@ import netlist_compare
 
 from . import helpers
 
-ALL_FIXTURES = sorted(
-    str(p.relative_to(helpers.FIXTURES)) for p in helpers.FIXTURES.glob("**/*.blif")
-)
+ALL_FIXTURES = sorted(str(p.relative_to(helpers.FIXTURES))
+                      for p in helpers.FIXTURES.glob("**/*.blif"))
 CRITIC = helpers.FIXTURES / "critic"
 
 
@@ -96,9 +95,8 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(compare(helpers.fixture(name), copy)[0], 0)
 
     def test_renamed_shuffled_permuted(self) -> None:
-        code, out, _ = compare(
-            helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_renamed.blif")
-        )
+        code, out, _ = compare(helpers.fixture("comb_parmys.blif"),
+                               helpers.fixture("comb_renamed.blif"))
         self.assertEqual(code, 0, out)
 
     def test_random_scrambles(self) -> None:
@@ -133,35 +131,27 @@ class CompareTest(unittest.TestCase):
         """A latch self-loop vs a 2-cycle: colour refinement ties them, the trial
         individualization must still pick structurally."""
         text = Path(cx("wl_cycles.blif")).read_text(encoding="utf-8")
-        swapped = (
-            text.replace("q0", "QA")
-            .replace("q1", "Q0")
-            .replace("q2", "q0")
-            .replace("QA", "q2")
-            .replace("Q0", "q1")
-        )
+        swapped = (text.replace("q0", "QA").replace("q1", "Q0").replace("q2", "q0")
+                   .replace("QA", "q2").replace("Q0", "q1"))
         self.assertNotEqual(swapped, text)
         self.assertEqual(canon_text(swapped), canon_text(text))
 
     def test_flipped_cover_row(self) -> None:
-        code, out, _ = compare(
-            helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")
-        )
+        code, out, _ = compare(helpers.fixture("comb_parmys.blif"),
+                               helpers.fixture("comb_flipped.blif"))
         self.assertEqual(code, 1)
         self.assertIn("-10 1", out)
         self.assertIn("+11 1", out)
 
     def test_renamed_primary_output(self) -> None:
-        code, out, _ = compare(
-            helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_po_renamed.blif")
-        )
+        code, out, _ = compare(helpers.fixture("comb_parmys.blif"),
+                               helpers.fixture("comb_po_renamed.blif"))
         self.assertEqual(code, 1)
         self.assertIn("+.outputs zz", out)
 
     def test_quiet(self) -> None:
-        code, out, _ = compare(
-            "--quiet", helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")
-        )
+        code, out, _ = compare("--quiet", helpers.fixture("comb_parmys.blif"),
+                               helpers.fixture("comb_flipped.blif"))
         self.assertEqual((code, out), (1, ""))
 
     def test_malformed_is_error(self) -> None:
@@ -204,15 +194,12 @@ class CompareTest(unittest.TestCase):
         depth = 60
         forward = [f"s{i}" for i in range(depth)]
         backward = [f"t{depth - i}" for i in range(depth)]  # name order opposite to depth
-        self.assertEqual(
-            canon_text(shift_chain(depth, forward)), canon_text(shift_chain(depth, backward))
-        )
+        self.assertEqual(canon_text(shift_chain(depth, forward)),
+                         canon_text(shift_chain(depth, backward)))
 
     def test_attrs_dropped_by_default_params_kept(self) -> None:
-        base = (
-            ".model t\n.inputs a\n.outputs y\n.subckt s x=a z=y\n{extra}.end\n"
-            ".model s\n.inputs x\n.outputs z\n.blackbox\n.end\n"
-        )
+        base = ".model t\n.inputs a\n.outputs y\n.subckt s x=a z=y\n{extra}.end\n" \
+               ".model s\n.inputs x\n.outputs z\n.blackbox\n.end\n"
         plain = canon_text(base.format(extra=""))
         self.assertEqual(canon_text(base.format(extra=".cname u1\n.attr src a.v:1\n")), plain)
         self.assertNotEqual(canon_text(base.format(extra=".param WIDTH 4\n")), plain)
@@ -225,15 +212,15 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(compare("--keep-attrs", a, b)[0], 1)
 
     def test_primary_name_collision_with_canonical_prefix(self) -> None:
-        text = (
-            ".model t\n.inputs n0 n1\n.outputs n2\n.names n0 n1 w\n11 1\n.names w n2\n0 1\n.end\n"
-        )
+        text = ".model t\n.inputs n0 n1\n.outputs n2\n.names n0 n1 w\n11 1\n" \
+               ".names w n2\n0 1\n.end\n"
         canon = canon_text(text)
         self.assertIn(".names n0 n1 n_0", canon)
 
     def test_large_netlist_is_fast(self) -> None:
         n = 20000  # ~ 60k lines
-        lines = [".model big", ".inputs clk " + " ".join(f"i{k}" for k in range(8)), ".outputs o"]
+        lines = [".model big", ".inputs clk " + " ".join(f"i{k}" for k in range(8)),
+                 ".outputs o"]
         for k in range(n):
             a = f"i{k % 8}" if k < 8 else f"w{k - 8}"
             b = f"w{k // 2}" if k >= 16 else f"i{(k + 3) % 8}"
@@ -248,7 +235,8 @@ class CompareTest(unittest.TestCase):
 
     # -- --implicit-models (2E §18.3) ---------------------------------------------------------
 
-    DFF = ".model top\n.inputs c d\n.outputs q\n.subckt $dff CLK=c D=d Q=q\n.param WIDTH 1\n.end\n"
+    DFF = ".model top\n.inputs c d\n.outputs q\n.subckt $dff CLK=c D=d Q=q\n" \
+          ".param WIDTH 1\n.end\n"
 
     def test_implicit_models_dff(self) -> None:
         """An undefined $-model is a black box whose formals are those used (Q an output)."""
@@ -270,24 +258,19 @@ class CompareTest(unittest.TestCase):
         """Y, Q, X, CO and RD_DATA (any bit) are outputs: a second driver is an error."""
         for formal in ("Y", "Q", "X", "CO", "RD_DATA[3]"):
             with self.subTest(formal):
-                text = (
-                    ".model top\n.inputs a\n.outputs y\n"
-                    f".subckt $cell A=a {formal}=y\n.names a y\n1 1\n.end\n"
-                )
-                code, _, err = compare(
-                    "--implicit-models", self.write("t.blif", text), self.write("u.blif", text)
-                )
+                text = (".model top\n.inputs a\n.outputs y\n"
+                        f".subckt $cell A=a {formal}=y\n.names a y\n1 1\n.end\n")
+                code, _, err = compare("--implicit-models", self.write("t.blif", text),
+                                       self.write("u.blif", text))
                 self.assertEqual(code, 2)
                 self.assertIn("more than one driver", err)
 
     def test_inout_driven_internally_compares(self) -> None:
         """2H: Yosys lists an inout in .inputs and .outputs and a $tribuf drives it; that is
         one primary-input net plus one internal driver, not a clash (simple_inout.v)."""
-        text = (
-            ".model simple_op\n.inputs in in_out1 in_out2 en\n.outputs in_out1 in_out2 out\n"
-            ".subckt $tribuf A=in EN=en Y=in_out1\n.param WIDTH 1\n"
-            ".names in_out2 out\n1 1\n.end\n"
-        )
+        text = (".model simple_op\n.inputs in in_out1 in_out2 en\n.outputs in_out1 in_out2 out\n"
+                ".subckt $tribuf A=in EN=en Y=in_out1\n.param WIDTH 1\n"
+                ".names in_out2 out\n1 1\n.end\n")
         a, b = self.write("a.blif", text), self.write("b.blif", text)
         self.assertEqual(compare("--implicit-models", a, b)[0], 0)
         clash = self.write("c.blif", text.replace(".end\n", ".names en in_out1\n1 1\n.end\n"))
@@ -297,11 +280,9 @@ class CompareTest(unittest.TestCase):
 
     def test_implicit_models_per_model_outputs(self) -> None:
         """DATA is $memrd's output but $memwr's input; CTRL_OUT is $fsm's output."""
-        text = (
-            ".model top\n.inputs c a d\n.outputs y z\n"
-            ".subckt $memrd CLK=c ADDR=a DATA=y\n.subckt $memwr CLK=c ADDR=a DATA=d\n"
-            ".subckt $fsm CLK=c CTRL_IN=d CTRL_OUT=z\n.end\n"
-        )
+        text = (".model top\n.inputs c a d\n.outputs y z\n"
+                ".subckt $memrd CLK=c ADDR=a DATA=y\n.subckt $memwr CLK=c ADDR=a DATA=d\n"
+                ".subckt $fsm CLK=c CTRL_IN=d CTRL_OUT=z\n.end\n")
         code, out, _ = compare("--implicit-models", "--canon", self.write("a.blif", text))
         self.assertEqual(code, 0)
         self.assertIn(".model $memrd\n.inputs ADDR\n.inputs CLK\n.outputs DATA\n", out)
@@ -311,11 +292,9 @@ class CompareTest(unittest.TestCase):
     def test_implicit_models_scalar_blackbox_bit0(self) -> None:
         """I3: Yosys 0.55 writes `addr[0]=a[0]` for a black box whose model port `addr` is 1 bit
         at its defaults (parameter W = 1) but is connected wider; it reads as `addr`."""
-        text = (
-            ".model top\n.inputs clk a[0] a[1]\n.outputs o[0]\n"
-            ".subckt single_port_ram addr[0]=a[0] clk=clk out[0]=o[0]\n.end\n"
-            ".model single_port_ram\n.inputs clk addr\n.outputs out\n.blackbox\n.end\n"
-        )
+        text = (".model top\n.inputs clk a[0] a[1]\n.outputs o[0]\n"
+                ".subckt single_port_ram addr[0]=a[0] clk=clk out[0]=o[0]\n.end\n"
+                ".model single_port_ram\n.inputs clk addr\n.outputs out\n.blackbox\n.end\n")
         a = self.write("a.blif", text)
         self.assertEqual(compare(a, a)[0], 2)  # without the flag: no port addr[0]
         self.assertEqual(compare("--implicit-models", a, a)[0], 0)
@@ -323,14 +302,11 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(compare("--implicit-models", a, moved)[0], 1)
         # Not rewritten: the model has addr[0] itself, or the instance names two bits of addr.
         ports = text.replace(".inputs clk addr", ".inputs clk addr[0]")
-        self.assertIn(
-            " addr[0]=a[0] clk=clk out=o[0]\n", netlist_compare.scalar_blackbox_pins(ports)
-        )
+        self.assertIn(" addr[0]=a[0] clk=clk out=o[0]\n",
+                      netlist_compare.scalar_blackbox_pins(ports))
         two = text.replace("addr[0]=a[0]", "addr[0]=a[0] addr[1]=a[1]")
-        self.assertIn(
-            " addr[0]=a[0] addr[1]=a[1] clk=clk out=o[0]\n",
-            netlist_compare.scalar_blackbox_pins(two),
-        )
+        self.assertIn(" addr[0]=a[0] addr[1]=a[1] clk=clk out=o[0]\n",
+                      netlist_compare.scalar_blackbox_pins(two))
         not_box = text.replace(".blackbox\n", "")
         self.assertEqual(netlist_compare.scalar_blackbox_pins(not_box), not_box)
 
@@ -341,38 +317,34 @@ class CompareTest(unittest.TestCase):
 
     def test_implicit_models_defined_model_wins(self) -> None:
         """A $-model the file defines is used as written (no stub, no set inputs)."""
-        text = (
-            ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n"
-            ".end\n.model $reduce_or\n.inputs A[0] A[1]\n.outputs Y\n.blackbox\n.end\n"
-        )
+        text = (".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n"
+                ".end\n.model $reduce_or\n.inputs A[0] A[1]\n.outputs Y\n.blackbox\n.end\n")
         swapped = text.replace("A[0]=a A[1]=b", "A[0]=b A[1]=a")
-        code, _, _ = compare(
-            "--implicit-models", self.write("a.blif", text), self.write("b.blif", swapped)
-        )
+        code, _, _ = compare("--implicit-models", self.write("a.blif", text),
+                             self.write("b.blif", swapped))
         self.assertEqual(code, 1)
 
     def test_implicit_models_reduce_inputs_are_a_set(self) -> None:
         """§20 #8: the A bits of an implicit $reduce_* are a set (their order cannot change Y)."""
-        for model in ("$reduce_or", "$reduce_and", "$reduce_xor", "$reduce_xnor", "$reduce_bool"):
+        for model in ("$reduce_or", "$reduce_and", "$reduce_xor", "$reduce_xnor",
+                      "$reduce_bool"):
             with self.subTest(model):
-                text = (
-                    ".model top\n.inputs a b c\n.outputs y z\n"
-                    f".subckt {model} A[0]=a A[1]=n A[2]=c Y=y\n"
-                    ".names b n\n0 1\n.subckt $mux A=a B=b S=c Y=z\n.end\n"
-                )
+                text = (".model top\n.inputs a b c\n.outputs y z\n"
+                        f".subckt {model} A[0]=a A[1]=n A[2]=c Y=y\n"
+                        ".names b n\n0 1\n.subckt $mux A=a B=b S=c Y=z\n.end\n")
                 swapped = text.replace("A[0]=a A[1]=n A[2]=c", "A[0]=n A[1]=c A[2]=a")
                 a, b = self.write("a.blif", text), self.write("b.blif", swapped)
                 self.assertEqual(compare("--implicit-models", a, b)[0], 0)
                 # $mux is not commutative: swapping its A and B differs.
                 muxed = text.replace("A=a B=b S=c", "A=b B=a S=c")
-                self.assertEqual(compare("--implicit-models", a, self.write("c.blif", muxed))[0], 1)
+                self.assertEqual(compare("--implicit-models", a,
+                                         self.write("c.blif", muxed))[0], 1)
 
     def test_implicit_models_reduce_width_still_counts(self) -> None:
         text = ".model top\n.inputs a b\n.outputs y\n.subckt $reduce_or A[0]=a A[1]=b Y=y\n.end\n"
         narrow = text.replace(" A[1]=b", "")
-        code, _, _ = compare(
-            "--implicit-models", self.write("a.blif", text), self.write("b.blif", narrow)
-        )
+        code, _, _ = compare("--implicit-models", self.write("a.blif", text),
+                             self.write("b.blif", narrow))
         self.assertEqual(code, 1)
 
     # -- --vtr-normalize (3E §16.3, plan Task 10) ---------------------------------------------
@@ -383,13 +355,8 @@ class CompareTest(unittest.TestCase):
     def test_vtr_normalize_decodes_names(self) -> None:
         """Review Focus 3: `%fe` is the name fe, `%FE` the byte 0xFE; the decode is exact."""
         template = ".model top\n.inputs {n}\n.outputs y\n.names {n} y\n1 1\n.end\n"
-        for written, name in (
-            ("%fe", "fe"),
-            ("a%23b", "a%2523b"),
-            ("%2Eend", ".end"),
-            ("%252Eend", ".end"),
-            ("x%5Cy", "x%255Cy"),
-        ):
+        for written, name in (("%fe", "fe"), ("a%23b", "a%2523b"), ("%2Eend", ".end"),
+                              ("%252Eend", ".end"), ("x%5Cy", "x%255Cy")):
             with self.subTest(written):
                 same = template.format(n=written)
                 plain = template.format(n=name)
@@ -416,24 +383,20 @@ class CompareTest(unittest.TestCase):
         self.assertEqual(self.both(text.format(i="3"), text.format(i="2")), 1)
         self.assertEqual(self.both(text.format(i="1"), text.format(i="2"), "--vtr-normalize"), 1)
 
-    MULTIPLY = (
-        ".model top\n.inputs x y\n.outputs o\n{gen}.subckt multiply {pins} out[0]=o\n"
-        ".end\n"
-        ".model multiply\n.inputs a[0] a[1] a[2] b[0] b[1] b[2]\n.outputs out[0]\n"
-        ".blackbox\n.end\n"
-    )
+    MULTIPLY = (".model top\n.inputs x y\n.outputs o\n{gen}.subckt multiply {pins} out[0]=o\n"
+                ".end\n"
+                ".model multiply\n.inputs a[0] a[1] a[2] b[0] b[1] b[2]\n.outputs out[0]\n"
+                ".blackbox\n.end\n")
 
     def test_vtr_normalize_omitted_subckt_input_is_unconn(self) -> None:
         gen = ".names unconn\n"
         short = self.MULTIPLY.format(gen="", pins="a[0]=x b[0]=y")
         full = self.MULTIPLY.format(
-            gen=gen, pins="a[0]=x a[1]=unconn a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn"
-        )
+            gen=gen, pins="a[0]=x a[1]=unconn a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn")
         self.assertEqual(self.both(short, full, "--vtr-normalize"), 0)
         self.assertEqual(self.both(short, full), 1)
         wrong = self.MULTIPLY.format(
-            gen=gen, pins="a[0]=x a[1]=y a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn"
-        )
+            gen=gen, pins="a[0]=x a[1]=y a[2]=unconn b[0]=y b[1]=unconn b[2]=unconn")
         self.assertEqual(self.both(short, wrong, "--vtr-normalize"), 1)
 
     def test_vtr_normalize_clock_lines_dropped(self) -> None:
@@ -451,12 +414,8 @@ class CompareTest(unittest.TestCase):
         both_rows = template.format(rows="0 1\n1 1\n0 1\n")
         const1 = ".model top\n.inputs a\n.outputs y\n.names y\n1\n.end\n"
         self.assertEqual(self.both(both_rows, const1, "--vtr-normalize"), 0)
-        self.assertEqual(
-            self.both(
-                template.format(rows="1 1\n"), template.format(rows="0 1\n"), "--vtr-normalize"
-            ),
-            1,
-        )
+        self.assertEqual(self.both(template.format(rows="1 1\n"),
+                                   template.format(rows="0 1\n"), "--vtr-normalize"), 1)
 
     def test_vtr_normalize_constant_cover_is_a_generator(self) -> None:
         template = ".model top\n.inputs a b\n.outputs y\n{cell}.end\n"
@@ -465,38 +424,32 @@ class CompareTest(unittest.TestCase):
         for cell in (".names a b y\n-- 1\n", ".names a b y\n0- 1\n1- 1\n"):
             self.assertEqual(self.both(template.format(cell=cell), one, "--vtr-normalize"), 0)
             self.assertEqual(self.both(template.format(cell=cell), one), 1)
-        self.assertEqual(
-            self.both(template.format(cell=".names a b y\n"), zero, "--vtr-normalize"), 0
-        )
-        self.assertEqual(
-            self.both(template.format(cell=".names a b y\n-- 0\n"), one, "--vtr-normalize"), 1
-        )
+        self.assertEqual(self.both(template.format(cell=".names a b y\n"), zero,
+                                   "--vtr-normalize"), 0)
+        self.assertEqual(self.both(template.format(cell=".names a b y\n-- 0\n"), one,
+                                   "--vtr-normalize"), 1)
         nand = template.format(cell=".names a b y\n11 0\n")
         self.assertEqual(self.both(nand, nand, "--vtr-normalize"), 0)  # not constant: kept
 
     def test_vtr_normalize_undriven_nets_read_gnd_or_unconn(self) -> None:
         """§9.2: an undriven net is x: `gnd` on logic and outputs, `unconn` on a hard block."""
-        undriven = (
-            ".model top\n.inputs a\n.outputs y z o\n.names a u y\n11 1\n"
-            ".latch u z re a 2\n.subckt multiply a[0]=u b[0]=a out[0]=o\n.end\n"
-            ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
-        )
-        tied = (
-            ".model top\n.inputs a\n.outputs y z o\n.names gnd\n.names unconn\n"
-            ".names a gnd y\n11 1\n.latch gnd z re a 2\n"
-            ".subckt multiply a[0]=unconn b[0]=a out[0]=o\n.end\n"
-            ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
-        )
+        undriven = (".model top\n.inputs a\n.outputs y z o\n.names a u y\n11 1\n"
+                    ".latch u z re a 2\n.subckt multiply a[0]=u b[0]=a out[0]=o\n.end\n"
+                    ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
+        tied = (".model top\n.inputs a\n.outputs y z o\n.names gnd\n.names unconn\n"
+                ".names a gnd y\n11 1\n.latch gnd z re a 2\n"
+                ".subckt multiply a[0]=unconn b[0]=a out[0]=o\n.end\n"
+                ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n")
         self.assertEqual(self.both(undriven, tied, "--vtr-normalize"), 0)
         self.assertEqual(self.both(undriven, tied), 1)
-        out = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
+        out = (".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n")
         buffered = out.replace(".outputs y\n", ".outputs y q\n")
         gnd_q = buffered.replace(".end", ".names gnd\n.names gnd q\n1 1\n.end")
         self.assertEqual(self.both(buffered, gnd_q, "--vtr-normalize"), 0)
 
     def test_vtr_normalize_undriven_ties_have_negative_cases(self) -> None:
         """An undriven net is only x: a vcc, a wrong input or a real driver all differ."""
-        base = ".model top\n.inputs a b\n.outputs y\n.names a u y\n11 1\n{extra}.end\n"
+        base = (".model top\n.inputs a b\n.outputs y\n.names a u y\n11 1\n{extra}.end\n")
         undriven = base.format(extra="")
         vcc = base.format(extra=".names u\n1\n")
         wired = base.format(extra=".names b u\n1 1\n")
@@ -505,23 +458,16 @@ class CompareTest(unittest.TestCase):
             self.assertEqual(self.both(undriven, other, "--vtr-normalize"), 1)
         self.assertEqual(self.both(undriven, gnd, "--vtr-normalize"), 0)  # driven low = tied low
         out = ".model top\n.inputs a\n.outputs y q\n.names a y\n1 1\n{extra}.end\n"
-        self.assertEqual(
-            self.both(
-                out.format(extra=""), out.format(extra=".names a q\n1 1\n"), "--vtr-normalize"
-            ),
-            1,
-        )  # an output gaining a real driver
-        self.assertEqual(
-            self.both(out.format(extra=""), out.format(extra=".names q\n1\n"), "--vtr-normalize"), 1
-        )  # an output tied high
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names a q\n1 1\n"),
+                                   "--vtr-normalize"), 1)  # an output gaining a real driver
+        self.assertEqual(self.both(out.format(extra=""), out.format(extra=".names q\n1\n"),
+                                   "--vtr-normalize"), 1)  # an output tied high
 
     def test_vtr_normalize_tells_a_tied_low_net_from_an_open_pin(self) -> None:
         """A writer regression from `unconn` to `gnd` on a hard-block input is caught."""
         stub = ".model multiply\n.inputs a[0] b[0]\n.outputs out[0]\n.blackbox\n.end\n"
-        top = (
-            ".model top\n.inputs a\n.outputs o\n{gen}"
-            ".subckt multiply a[0]={pin} b[0]=a out[0]=o\n.end\n"
-        )
+        top = (".model top\n.inputs a\n.outputs o\n{gen}"
+               ".subckt multiply a[0]={pin} b[0]=a out[0]=o\n.end\n")
         golden = top.format(gen="", pin="u") + stub  # u undriven: written as unconn
         opened = top.format(gen=".names unconn\n", pin="unconn") + stub
         tied = top.format(gen=".names gnd\n", pin="gnd") + stub
@@ -534,18 +480,20 @@ class CompareTest(unittest.TestCase):
         top = ".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n"
         self.assertEqual(self.both(top + stub, top, "--vtr-normalize"), 0)
         self.assertEqual(self.both(top + stub, top), 1)
-        used = ".model top\n.inputs a\n.outputs y\n.subckt adder a[0]=a sumout[0]=y\n.end\n" + stub
-        self.assertEqual(
-            self.both(used, used + stub.replace("adder", "other"), "--vtr-normalize"), 0
-        )
+        used = (".model top\n.inputs a\n.outputs y\n.subckt adder a[0]=a sumout[0]=y\n.end\n"
+                + stub)
+        self.assertEqual(self.both(used, used + stub.replace("adder", "other"),
+                                   "--vtr-normalize"), 0)
         self.assertEqual(self.both(used, top + stub, "--vtr-normalize"), 1)
 
     def test_wrapper_script(self) -> None:
         wrapper = helpers.REPO_ROOT / "tools" / "netlist-compare" / "netlist-compare"
         a, b = helpers.fixture("comb_parmys.blif"), helpers.fixture("comb_flipped.blif")
-        result = subprocess.run([str(wrapper), a, b], capture_output=True, text=True, check=False)
+        result = subprocess.run([str(wrapper), a, b], capture_output=True, text=True,
+                                check=False)
         self.assertEqual(result.returncode, 1)
-        result = subprocess.run([str(wrapper), a, a], capture_output=True, text=True, check=False)
+        result = subprocess.run([str(wrapper), a, a], capture_output=True, text=True,
+                                check=False)
         self.assertEqual(result.returncode, 0)
 
 

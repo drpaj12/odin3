@@ -68,14 +68,16 @@ class CheckRulesTest(unittest.TestCase):
     def test_assert_in_abc_adapter_is_flagged(self) -> None:
         """3D §4.1: --wrap=__assert_fail would report the adapter's own asserts as ABC's."""
         found = self.check("adapters/abc/session.c", "void f(int x) {\n    assert(x);\n}\n")
-        expected = ["adapters/abc/session.c:2: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)"]
+        expected = [
+            "adapters/abc/session.c:2: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)"
+        ]
         self.assertEqual(found, expected)
         self.assertEqual(len(self.check("adapters/abc/guard.h", "#define A(x) assert (x)\n")), 1)
 
     def test_adapter_assert_macro_is_allowed(self) -> None:
         text = (
             "odin3_status f(int x) {\n    ODIN3_ADAPTER_ASSERT(x > 0);\n"
-            '    static_assert(1, "ok");\n    return ODIN3_OK;\n}\n'
+            "    static_assert(1, \"ok\");\n    return ODIN3_OK;\n}\n"
         )
         self.assertEqual(self.check("adapters/abc/session.c", text), [])
         # Outside adapters/abc/, assert() stays allowed (decision 2026-10-08, #6).

@@ -72,9 +72,8 @@ class GoldenBlackboxesTest(unittest.TestCase):
         text = (out / "adder.parmys.01.blif").read_text()
         self.assertIn("# 'adder' as A/d1/d1.parmys.blif declares it (1 golden files", text)
         self.assertIn(".subckt adder a=i_a b=i_b cin=i_cin cout=o_cout sumout=o_sumout\n", text)
-        self.assertTrue(
-            text.endswith(".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n")
-        )
+        self.assertTrue(text.endswith(".model adder\n.inputs a b cin\n.outputs cout sumout\n"
+                                      ".blackbox\n.end\n"))
 
     def test_missing_golden_is_an_input_error(self) -> None:
         code, _, stderr = helpers.run_main(golden_blackboxes.main, ["--golden", str(self.golden)])

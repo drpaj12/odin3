@@ -37,17 +37,8 @@ ABC = os.environ.get("ODIN3_ABC", "")
 YOSYS = _yosys()
 IVERILOG = shutil.which("iverilog") or ""
 VVP = shutil.which("vvp") or ""
-MISSING = [
-    n
-    for n, p in [
-        ("ODIN3_SIM_VECTORS", DRIVER),
-        ("ODIN3_ABC", ABC),
-        ("yosys", YOSYS),
-        ("iverilog", IVERILOG),
-        ("vvp", VVP),
-    ]
-    if not p
-]
+MISSING = [n for n, p in [("ODIN3_SIM_VECTORS", DRIVER), ("ODIN3_ABC", ABC), ("yosys", YOSYS),
+                          ("iverilog", IVERILOG), ("vvp", VVP)] if not p]
 REQUIRE = os.environ.get("ODIN3_REQUIRE_SIM_CHECK") == "1"
 needs_tools = unittest.skipIf(bool(MISSING) and not REQUIRE, f"missing {', '.join(MISSING)}")
 
@@ -75,9 +66,8 @@ PORTS_BLIF = """\
 
 
 def run(cmd: list[str | Path]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(c) for c in cmd], capture_output=True, text=True, check=False, timeout=600
-    )
+    return subprocess.run([str(c) for c in cmd], capture_output=True, text=True, check=False,
+                          timeout=600)
 
 
 def data_lines(text: str) -> list[str]:
@@ -94,9 +84,8 @@ class TbTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp)
 
-    def reference(
-        self, blif: Path, flavor: str, vectors: str, sop: bool = False, old_yosys: bool = False
-    ) -> list[str]:
+    def reference(self, blif: Path, flavor: str, vectors: str, sop: bool = False,
+                  old_yosys: bool = False) -> list[str]:
         """The reference lines; sop: Yosys keeps .names as $sop cells, run by models/sop.v;
         old_yosys: the dump spelled as Yosys 0.33 (CI's) spells an empty $sop TABLE."""
         vec = self.tmp / "vec.txt"
@@ -117,21 +106,8 @@ class TbTest(unittest.TestCase):
                 fix = run(["sed", "-i", "-f", HERE / "yosys-compat.sed", ref])
                 self.assertEqual(fix.returncode, 0, fix.stderr)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        tb = run(
-            [
-                TB,
-                "--flavor",
-                flavor,
-                "--blif",
-                blif,
-                "--vectors",
-                vec,
-                "--ref",
-                ref,
-                "--cycles",
-                str(len(data_lines(vectors))),
-            ]
-        )
+        tb = run([TB, "--flavor", flavor, "--blif", blif, "--vectors", vec, "--ref", ref,
+                  "--cycles", str(len(data_lines(vectors)))])
         self.assertEqual(tb.returncode, 0, tb.stderr)
         (self.tmp / "tb.v").write_text(tb.stdout)
         mem = self.tmp / "in.mem"
@@ -167,17 +143,10 @@ class TbTest(unittest.TestCase):
         # models/sop.v (Yosys < 0.45 cannot simplemap $sop): ON-set, OFF-set, empty, wide covers.
         ins = " ".join(f"i{k}" for k in range(14))
         blif = self.tmp / "sop.blif"
-        blif.write_text(
-            f".model w\n.inputs {ins}\n.outputs y n e b\n.names {ins} y\n"
-            + "1" * 14
-            + " 1\n"
-            + "0" * 13
-            + "- 1\n"
-            + "-1-0" * 3
-            + "-1 1\n"
-            ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
-            ".names i7 b\n0 1\n.end\n"
-        )
+        blif.write_text(f".model w\n.inputs {ins}\n.outputs y n e b\n.names {ins} y\n"
+                        + "1" * 14 + " 1\n" + "0" * 13 + "- 1\n" + "-1-0" * 3 + "-1 1\n"
+                        ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
+                        ".names i7 b\n0 1\n.end\n")
         vectors = self.ours(blif)
         self.assertEqual(self.reference(blif, "yosys", vectors, sop=True), data_lines(vectors))
 
@@ -185,13 +154,11 @@ class TbTest(unittest.TestCase):
         # CI regression (PR #29): Yosys 0.33 writes the empty TABLE of a DEPTH 0 $sop (a .names
         # with inputs and no rows) as {0{1'b0}}, which Icarus refuses; yosys-compat.sed fixes it.
         blif = self.tmp / "empty.blif"
-        blif.write_text(
-            ".model w\n.inputs i5 i6 i7\n.outputs e b\n.names i5 i6 e\n.names i7 b\n0 1\n.end\n"
-        )
+        blif.write_text(".model w\n.inputs i5 i6 i7\n.outputs e b\n.names i5 i6 e\n"
+                        ".names i7 b\n0 1\n.end\n")
         vectors = self.ours(blif)
-        self.assertEqual(
-            self.reference(blif, "yosys", vectors, sop=True, old_yosys=True), data_lines(vectors)
-        )
+        self.assertEqual(self.reference(blif, "yosys", vectors, sop=True, old_yosys=True),
+                         data_lines(vectors))
 
     def test_negedge_register_with_yosys(self) -> None:
         blif = self.tmp / "ports.blif"
@@ -213,21 +180,8 @@ class TbTest(unittest.TestCase):
         blif.write_text(".model k\n.inputs a b\n.outputs o\n.names a b o\n11 1\n.end\n")
         ref = self.tmp / "ref.v"
         ref.write_text("module k(a, b, o);\nendmodule\n")
-        res = run(
-            [
-                TB,
-                "--flavor",
-                "abc",
-                "--blif",
-                blif,
-                "--vectors",
-                vec,
-                "--ref",
-                ref,
-                "--cycles",
-                "32",
-            ]
-        )
+        res = run([TB, "--flavor", "abc", "--blif", blif, "--vectors", vec, "--ref", ref,
+                   "--cycles", "32"])
         self.assertEqual(res.returncode, 1)
         self.assertIn("ports", res.stderr)
 
@@ -237,20 +191,8 @@ class TbTest(unittest.TestCase):
         vec.write_text(self.ours(BLIF / "ff.odin.blif"))
         ref = self.tmp / "ref.v"
         ref.write_text("module dff(clock);\nendmodule\n")
-        args: list[str | Path] = [
-            TB,
-            "--flavor",
-            "abc",
-            "--blif",
-            BLIF / "ff.odin.blif",
-            "--vectors",
-            vec,
-            "--ref",
-            ref,
-            "--cycles",
-            "32",
-            "--clocks",
-        ]
+        args: list[str | Path] = [TB, "--flavor", "abc", "--blif", BLIF / "ff.odin.blif",
+                                  "--vectors", vec, "--ref", ref, "--cycles", "32", "--clocks"]
         self.assertEqual(run([*args, "dff^clk"]).returncode, 0)
         for wrong in ["dff^d", "", "dff^clk dff^d"]:
             with self.subTest(clocks=wrong):
@@ -279,27 +221,10 @@ class SimCheckTest(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp)
 
-    def check(
-        self, *args: str | Path, driver: str | Path = DRIVER
-    ) -> subprocess.CompletedProcess[str]:
-        return run(
-            [
-                SIM_CHECK,
-                "--driver",
-                driver,
-                "--abc",
-                ABC,
-                "--yosys",
-                YOSYS,
-                "--techlib",
-                VTR_LIB,
-                "-m",
-                "0",
-                "--out",
-                self.tmp / "out",
-                *args,
-            ]
-        )
+    def check(self, *args: str | Path,
+              driver: str | Path = DRIVER) -> subprocess.CompletedProcess[str]:
+        return run([SIM_CHECK, "--driver", driver, "--abc", ABC, "--yosys", YOSYS,
+                    "--techlib", VTR_LIB, "-m", "0", "--out", self.tmp / "out", *args])
 
     def table(self, stdout: str) -> dict[str, str]:
         """file basename -> status column."""
@@ -314,17 +239,14 @@ class SimCheckTest(unittest.TestCase):
         files = sorted(BLIF.glob("*.*.blif"))
         res = self.check("--fixtures", *files)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
-        self.assertEqual(
-            self.table(res.stdout),
-            {
-                "adder_hard_block.parmys.blif": "pass",
-                "ansiportlist_2.parmys.blif": "pass",
-                "dffsre.parmys.blif": "excluded",
-                "ff.odin.blif": "pass",
-                "ff.parmys.blif": "pass",
-                "pow.parmys.blif": "excluded",
-            },
-        )
+        self.assertEqual(self.table(res.stdout), {
+            "adder_hard_block.parmys.blif": "pass",
+            "ansiportlist_2.parmys.blif": "pass",
+            "dffsre.parmys.blif": "excluded",
+            "ff.odin.blif": "pass",
+            "ff.parmys.blif": "pass",
+            "pow.parmys.blif": "excluded",
+        })
         self.assertIn("pass 4, FAIL 0", res.stdout)
         self.assertIn("RESULT: PASS", res.stdout)
 
@@ -350,13 +272,11 @@ class SimCheckTest(unittest.TestCase):
         # A falling-edge toggle (x forever if the testbench's clock starts x: x -> 0 is a
         # negedge) and an Odin II-style .subckt split over continuation lines.
         blif = self.tmp / "toggle.blif"
-        blif.write_text(
-            ".model t\n.inputs clk a b\n.outputs q s\n"
-            ".latch nq q fe clk 2\n.names q nq\n0 1\n"
-            ".subckt adder a[0]=a b[0]=b cin[0]=q\\\n cout[0]=co\\\n sumout[0]=s\n"
-            ".end\n\n.model adder\n.inputs a[0] b[0] cin[0]\n"
-            ".outputs cout[0] sumout[0]\n.blackbox\n.end\n"
-        )
+        blif.write_text(".model t\n.inputs clk a b\n.outputs q s\n"
+                        ".latch nq q fe clk 2\n.names q nq\n0 1\n"
+                        ".subckt adder a[0]=a b[0]=b cin[0]=q\\\n cout[0]=co\\\n sumout[0]=s\n"
+                        ".end\n\n.model adder\n.inputs a[0] b[0] cin[0]\n"
+                        ".outputs cout[0] sumout[0]\n.blackbox\n.end\n")
         res = self.check("--fixtures", blif)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertRegex(res.stdout, r"pass\s+yosys\s.*toggle\.blif")
@@ -366,16 +286,11 @@ class SimCheckTest(unittest.TestCase):
         # Icarus runs from models/sop.v; an OFF-set cover and a DEPTH 0 cover too.
         ins = " ".join(f"i{k}" for k in range(14))
         blif = self.tmp / "wide.blif"
-        blif.write_text(
-            f".model w\n.inputs {ins} c\n.outputs y s n e\n.names {ins} y\n"
-            + "1" * 14
-            + " 1\n"
-            + "0" * 13
-            + "- 1\n"
-            ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
-            ".subckt adder a=i0 b=i1 cin=c sumout=s\n.end\n\n"
-            ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n"
-        )
+        blif.write_text(f".model w\n.inputs {ins} c\n.outputs y s n e\n.names {ins} y\n"
+                        + "1" * 14 + " 1\n" + "0" * 13 + "- 1\n"
+                        ".names i2 i3 i4 n\n1-0 0\n-11 0\n.names i5 i6 e\n"
+                        ".subckt adder a=i0 b=i1 cin=c sumout=s\n.end\n\n"
+                        ".model adder\n.inputs a b cin\n.outputs cout sumout\n.blackbox\n.end\n")
         res = self.check("--fixtures", blif)
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertRegex(res.stdout, r"pass\s+yosys\s.*wide\.blif")
@@ -403,7 +318,8 @@ class SimCheckTest(unittest.TestCase):
     def test_missing_cycle_lines_fail(self) -> None:
         # A driver that claims 0 cycles and prints no lines must not pass (both sides empty).
         header = f"'{DRIVER}' \"$@\" | grep '^#' | sed '1s/cycles [0-9]*$/cycles 0/'"
-        res = self.check("--fixtures", BLIF / "ff.parmys.blif", driver=self.fake_driver(header))
+        res = self.check("--fixtures", BLIF / "ff.parmys.blif",
+                         driver=self.fake_driver(header))
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
         self.assertIn("FAIL", res.stdout)
         self.assertIn("expected 64", res.stdout)
@@ -420,21 +336,19 @@ class SimCheckTest(unittest.TestCase):
     def test_identical_contents_run_once(self) -> None:
         for name in ["one", "two"]:
             shutil.copy(BLIF / "ff.parmys.blif", self.tmp / f"{name}.blif")
-        res = self.check(
-            "--largest-first", "--fixtures", self.tmp / "one.blif", self.tmp / "two.blif"
-        )
+        res = self.check("--largest-first", "--fixtures", self.tmp / "one.blif",
+                         self.tmp / "two.blif")
         self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
         self.assertIn("(dup)", res.stdout)
-        self.assertIn("files: 2 (simulated or classified once per distinct content: 1)", res.stdout)
+        self.assertIn("files: 2 (simulated or classified once per distinct content: 1)",
+                      res.stdout)
 
     def test_detects_a_wrong_output(self) -> None:
         liar = self.tmp / "liar"
         # Flips the first output bit of cycle 5.
         flip = '{ $3 = (substr($3, 1, 1) == "0" ? "1" : "0") substr($3, 2); print }'
-        liar.write_text(
-            f"#!/usr/bin/env bash\n'{DRIVER}' \"$@\" | "
-            f"awk '/^#/ || $1 != 5 {{ print; next }} {flip}'\n"
-        )
+        liar.write_text(f"#!/usr/bin/env bash\n'{DRIVER}' \"$@\" | "
+                        f"awk '/^#/ || $1 != 5 {{ print; next }} {flip}'\n")
         liar.chmod(0o755)
         res = self.check("--fixtures", BLIF / "ff.parmys.blif", driver=liar)
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
@@ -444,9 +358,8 @@ class SimCheckTest(unittest.TestCase):
 
     def test_simulator_error_is_a_failure(self) -> None:
         bad = self.tmp / "loop.blif"
-        bad.write_text(
-            ".model l\n.inputs a\n.outputs o\n.names a o x\n11 1\n.names x o\n1 1\n.end\n"
-        )
+        bad.write_text(".model l\n.inputs a\n.outputs o\n.names a o x\n11 1\n"
+                       ".names x o\n1 1\n.end\n")
         res = self.check("--fixtures", bad)
         self.assertEqual(res.returncode, 1, res.stdout + res.stderr)
         self.assertIn("sim-error", res.stdout)

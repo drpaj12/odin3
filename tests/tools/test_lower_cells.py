@@ -47,14 +47,8 @@ OTHER = BLIF.replace("11 1", "00 1")
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(
-        list(argv),
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=kwargs.get("cwd"),
-        env=kwargs.get("env"),
-    )
+    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
+                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
 
 
 class CellsTest(unittest.TestCase):
@@ -74,14 +68,8 @@ class CellsTest(unittest.TestCase):
         (self.root / "fake.json").write_text(json.dumps(spec))
 
     def run_tool(self, *extra: str) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            str(self.bin),
-            "--work",
-            str(self.root / "work"),
-            *extra,
-            str(self.cells),
-        ]
+        argv = ["--odin3", str(self.bin), "--work", str(self.root / "work"), *extra,
+                str(self.cells)]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(lcells.main, argv)
 
@@ -120,11 +108,8 @@ class CellsTest(unittest.TestCase):
 
     def test_the_script_does_not_run_opt(self) -> None:
         script = lcells.odin_script(Path("x.v"), Path("w"))
-        self.assertEqual(
-            script,
-            "read_verilog --nolatches x.v; hierarchy; proc; "
-            "write_rtlil w/in.il; lower; write_blif w/out.blif",
-        )
+        self.assertEqual(script, "read_verilog --nolatches x.v; hierarchy; proc; "
+                         "write_rtlil w/in.il; lower; write_blif w/out.blif")
 
     def test_files_are_taken_smallest_first(self) -> None:
         (self.cells / "big.v").write_text("module m; endmodule\n" * 50)

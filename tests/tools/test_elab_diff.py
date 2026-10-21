@@ -60,28 +60,14 @@ class ProfileTest(unittest.TestCase):
     def test_the_first_line_lists_the_features_used(self) -> None:
         for seed in range(1, 51):
             made = elab_profile.generate(seed)
-            self.assertEqual(made.text.splitlines()[0], "// features: " + ", ".join(made.features))
+            self.assertEqual(made.text.splitlines()[0],
+                             "// features: " + ", ".join(made.features))
             self.assertLessEqual(set(made.features), set(elab_profile.FEATURES))
 
     def test_text_shows_each_construct(self) -> None:
         text = "".join(elab_profile.generate(s).text for s in range(1, 51))
-        for needle in (
-            "===",
-            "!==",
-            "defparam",
-            "#(",
-            "genvar",
-            "generate",
-            "casez (",
-            "casex (",
-            "$signed",
-            "'sd",
-            "+:",
-            "-:",
-            " <= ",
-            "tk(",
-            "reg [3:0] mem [",
-        ):
+        for needle in ("===", "!==", "defparam", "#(", "genvar", "generate", "casez (",
+                       "casex (", "$signed", "'sd", "+:", "-:", " <= ", "tk(", "reg [3:0] mem ["):
             self.assertIn(needle, text, needle)
 
     def test_cli_writes_the_profile_and_no_ast(self) -> None:
@@ -94,9 +80,8 @@ class ProfileTest(unittest.TestCase):
 
     def test_elab_proc_and_mutate_are_exclusive(self) -> None:
         for flags in (["--elab", "--mutate"], ["--elab", "--proc"]):
-            code, _, _ = helpers.run_main(
-                verilog_gen.main, [*flags, "--seed", "1", "--out", "/dev/null"]
-            )
+            code, _, _ = helpers.run_main(verilog_gen.main,
+                                          [*flags, "--seed", "1", "--out", "/dev/null"])
             self.assertEqual(code, 2, flags)
 
     def test_parses_with_yosys_055(self) -> None:
@@ -107,12 +92,8 @@ class ProfileTest(unittest.TestCase):
             for seed in range(1, 51):
                 path = Path(tmp) / f"s{seed}.v"
                 path.write_text(elab_profile.generate(seed).text, encoding="utf-8")
-                done = subprocess.run(
-                    [yosys, "-q", "-p", f"read_verilog -sv {path}"],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
+                done = subprocess.run([yosys, "-q", "-p", f"read_verilog -sv {path}"],
+                                      capture_output=True, text=True, check=False)
                 self.assertEqual(done.returncode, 0, f"seed {seed}: {done.stderr[-300:]}")
 
 
@@ -124,9 +105,8 @@ class SeedScriptTest(unittest.TestCase):
             (src / "big.v").write_text("module big; endmodule // padding\n", encoding="utf-8")
             (src / "small.v").write_text("module s;endmodule\n", encoding="utf-8")
             out = Path(tmp) / "out"
-            code, _, _ = helpers.run_main(
-                elab_fuzz_seeds.main, [str(out), str(src), "--generated", "2"]
-            )
+            code, _, _ = helpers.run_main(elab_fuzz_seeds.main,
+                                           [str(out), str(src), "--generated", "2"])
             self.assertEqual(code, 0)
             seeds = [p.read_bytes() for p in sorted(out.glob("seed_*"))]
             self.assertEqual(len(seeds), 4)
@@ -157,17 +137,8 @@ class ElabDiffTest(unittest.TestCase):
         self.addCleanup(env_patch.stop)
 
     def run_tool(self, *args: str, env: dict[str, str] | None = None) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            str(self.odin3),
-            "--yosys",
-            str(self.yosys),
-            "--equiv-check",
-            str(self.equiv_check),
-            "--work",
-            str(self.work),
-            *args,
-        ]
+        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
+                str(self.equiv_check), "--work", str(self.work), *args]
         with mock.patch.dict(os.environ, env or {}):
             return helpers.run_main(elab_diff.main, argv)
 
@@ -194,11 +165,8 @@ class ElabDiffTest(unittest.TestCase):
     def test_a_range_runs_every_seed_in_order(self) -> None:
         code, out, _ = self.run_tool("--seeds", "3..6")
         self.assertEqual(code, 0)
-        order = [
-            int(line.split()[1].rstrip(":"))
-            for line in out.splitlines()
-            if line.startswith("seed ")
-        ]
+        order = [int(line.split()[1].rstrip(":")) for line in out.splitlines()
+                 if line.startswith("seed ")]
         self.assertEqual(order, [3, 4, 5, 6])
 
     def test_a_bad_range_is_a_usage_error(self) -> None:
@@ -221,9 +189,8 @@ class ElabDiffTest(unittest.TestCase):
         self.assertIn("seed 2: FAIL", out)
 
     def test_drift_between_055_and_069_is_classified_not_failed(self) -> None:
-        code, out, _ = self.run_tool(
-            "--seeds", "2..2", "--yosys-069", str(self.yosys069), env={"FAKE_EE_RC_069": "1"}
-        )
+        code, out, _ = self.run_tool("--seeds", "2..2", "--yosys-069", str(self.yosys069),
+                                     env={"FAKE_EE_RC_069": "1"})
         self.assertEqual(code, 0, out)
         self.assertIn("oracle drift", out)
         self.assertNotIn("FAIL", out)
@@ -234,13 +201,8 @@ class ElabDiffTest(unittest.TestCase):
         self.assertIn("1 oracle drift", out)
 
     def test_a_failure_at_055_is_a_failure_whatever_069_says(self) -> None:
-        code, out, _ = self.run_tool(
-            "--seeds",
-            "2..2",
-            "--yosys-069",
-            str(self.yosys069),
-            env={"FAKE_EE_RC": "1", "FAKE_EE_RC_069": "0"},
-        )
+        code, out, _ = self.run_tool("--seeds", "2..2", "--yosys-069", str(self.yosys069),
+                                     env={"FAKE_EE_RC": "1", "FAKE_EE_RC_069": "0"})
         self.assertEqual(code, 1)
         self.assertEqual(len(self.calls()), 1)
         self.assertIn("FAIL", out)
@@ -255,8 +217,7 @@ class ElabDiffTest(unittest.TestCase):
     def test_a_few_crashes_among_many_seeds_pass(self) -> None:
         script = FAKE_EQUIV.replace("{python}", sys.executable).replace(
             'code = int(os.environ.get("FAKE_EE_RC", "0"))',
-            'code = 3 if sys.argv[-1].endswith("seed5.v") else 0',
-        )
+            'code = 3 if sys.argv[-1].endswith("seed5.v") else 0')
         _exe(self.equiv, script)
         code, out, _ = self.run_tool("--seeds", "1..20")
         self.assertEqual(code, 0, out)
@@ -264,9 +225,8 @@ class ElabDiffTest(unittest.TestCase):
         self.assertIn("1 oracle crashes", out)
 
     def test_an_undecided_miter_is_unverified_not_failed(self) -> None:
-        code, out, _ = self.run_tool(
-            "--seeds", "2..2", env={"FAKE_EE_RC": "2", "FAKE_UNDECIDED": "1"}
-        )
+        code, out, _ = self.run_tool("--seeds", "2..2",
+                                     env={"FAKE_EE_RC": "2", "FAKE_UNDECIDED": "1"})
         self.assertIn("seed 2: undecided", out)
         self.assertNotIn("FAIL seed", out)
         self.assertNotIn("seed 2: FAIL", out)
@@ -275,16 +235,14 @@ class ElabDiffTest(unittest.TestCase):
     def test_expect_fail_turns_a_listed_failure_into_an_expected_one(self) -> None:
         listed = self.dir / "xfail.txt"
         listed.write_text("# known\n2: lost write  # why\n", encoding="utf-8")
-        code, out, _ = self.run_tool(
-            "--seeds", "2..3", "--expect-fail", str(listed), env={"FAKE_EE_RC": "1"}
-        )
+        code, out, _ = self.run_tool("--seeds", "2..3", "--expect-fail", str(listed),
+                                     env={"FAKE_EE_RC": "1"})
         self.assertIn("seed 2: expected failure: lost write", out)
         self.assertIn("seed 3: FAIL", out)
         self.assertIn("1 expected failures", out)
         self.assertEqual(code, 1)  # seed 3 is not listed
-        code, out, _ = self.run_tool(
-            "--seeds", "2..2", "--expect-fail", str(listed), env={"FAKE_EE_RC": "1"}
-        )
+        code, out, _ = self.run_tool("--seeds", "2..2", "--expect-fail", str(listed),
+                                     env={"FAKE_EE_RC": "1"})
         self.assertEqual(code, 0, out)
 
     def test_a_listed_seed_that_passes_is_a_failure(self) -> None:
@@ -315,12 +273,10 @@ class ConstDiffTest(unittest.TestCase):
         self.dir = Path(self._tmp.name).resolve()
 
     def run_tool(self, driver_rc: int, *args: str) -> tuple[int, str, str]:
-        replay = _exe(
-            self.dir / "const-replay",
-            f"#!/bin/sh\necho 'const-replay: 3 cases, {driver_rc} wrong'\n"
-            f"[ {driver_rc} -ne 0 ] && echo 'const_table: ADD 1 0 1 1 0  got 0'\n"
-            f"exit {driver_rc}\n",
-        )
+        replay = _exe(self.dir / "const-replay",
+                      f"#!/bin/sh\necho 'const-replay: 3 cases, {driver_rc} wrong'\n"
+                      f"[ {driver_rc} -ne 0 ] && echo 'const_table: ADD 1 0 1 1 0  got 0'\n"
+                      f"exit {driver_rc}\n")
         argv = ["--yosys", "/nonexistent", "--replay", str(replay), "--count", "10", *args]
         canned = mock.patch.object(gen_const_table, "generate", return_value="ADD 1 0 1 1 0\n")
         with canned:
@@ -342,13 +298,11 @@ class ConstDiffTest(unittest.TestCase):
         self.assertIn("const_table: ADD 1 0 1 1 0  got 0", out)
 
     def test_a_refused_yosys_is_a_usage_error(self) -> None:
-        refused = mock.patch.object(
-            gen_const_table, "generate", side_effect=gen_const_table.YosysRefused("not 0.55")
-        )
+        refused = mock.patch.object(gen_const_table, "generate",
+                                    side_effect=gen_const_table.YosysRefused("not 0.55"))
         with refused:
             code, _, err = helpers.run_main(
-                const_diff.main, ["--yosys", "y", "--replay", "r", "--count", "4"]
-            )
+                const_diff.main, ["--yosys", "y", "--replay", "r", "--count", "4"])
         self.assertEqual(code, 2)
         self.assertIn("not 0.55", err)
 
@@ -362,10 +316,8 @@ class ConstDiffTest(unittest.TestCase):
 
         replay = _exe(self.dir / "r", "#!/bin/sh\necho 'const-replay: 1 cases, 0 wrong'\n")
         with mock.patch.object(gen_const_table, "generate", fake_generate):
-            code, _, _ = helpers.run_main(
-                const_diff.main,
-                ["--yosys", "y", "--replay", str(replay), "--count", "4", "--seed", "9"],
-            )
+            code, _, _ = helpers.run_main(const_diff.main, [
+                "--yosys", "y", "--replay", str(replay), "--count", "4", "--seed", "9"])
         self.assertEqual(code, 0)
         self.assertEqual(seeds, [18, 19])
 
@@ -374,9 +326,8 @@ class ConstDiffTest(unittest.TestCase):
         replay = os.environ.get("ODIN3_CONST_REPLAY")
         if not yosys or not replay:
             self.skipTest("ODIN3_YOSYS055 / ODIN3_CONST_REPLAY are not set")
-        code, out, err = helpers.run_main(
-            const_diff.main, ["--yosys", yosys, "--replay", replay, "--count", "200", "--seed", "5"]
-        )
+        code, out, err = helpers.run_main(const_diff.main, [
+            "--yosys", yosys, "--replay", replay, "--count", "200", "--seed", "5"])
         self.assertEqual(code, 0, out + err)
 
 

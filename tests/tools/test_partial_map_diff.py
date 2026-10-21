@@ -57,9 +57,8 @@ class Wrapper(unittest.TestCase):
     def run_wrapper(self, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
         full = {k: v for k, v in os.environ.items() if k != "VTR_ROOT"}
         full.update(env)
-        return subprocess.run(
-            [str(WRAPPER), *args], capture_output=True, text=True, check=False, env=full
-        )
+        return subprocess.run([str(WRAPPER), *args], capture_output=True, text=True, check=False,
+                              env=full)
 
     def test_skips_without_vtr_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

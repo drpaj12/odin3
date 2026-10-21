@@ -25,15 +25,10 @@ class RunOffloadTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
     def run_script(self, *args: str) -> subprocess.CompletedProcess[str]:
-        env = {
-            **os.environ,
-            "OFFLOAD_OUT": str(self.tmp / "out"),
-            "ODIN3_QOR_DIR": str(self.tmp / "qor"),
-            "YOSYS": "/nonexistent",
-        }
-        return subprocess.run(
-            ["bash", str(SCRIPT), *args], env=env, text=True, capture_output=True, check=False
-        )
+        env = {**os.environ, "OFFLOAD_OUT": str(self.tmp / "out"),
+               "ODIN3_QOR_DIR": str(self.tmp / "qor"), "YOSYS": "/nonexistent"}
+        return subprocess.run(["bash", str(SCRIPT), *args], env=env, text=True,
+                              capture_output=True, check=False)
 
     def test_vtr_commands(self) -> None:
         done = self.run_script("--dry-run", "vtr")
@@ -65,9 +60,8 @@ class RunOffloadTest(unittest.TestCase):
         lines = [ln for ln in done.stdout.splitlines() if ln.startswith("+ env")]
         self.assertEqual(len(lines), 16)  # H1 (2), H2, H3, H4 (2), H5, H6 for two designs
         text = done.stdout
-        self.assertLess(
-            text.index("mcml/mcml.parmys.blif"), text.index("LU32PEEng/LU32PEEng.parmys.blif")
-        )
+        self.assertLess(text.index("mcml/mcml.parmys.blif"),
+                        text.index("LU32PEEng/LU32PEEng.parmys.blif"))
         for design in ("LU8PEEng", "bgm"):
             self.assertNotIn(f"{design}.parmys.blif", text)
 

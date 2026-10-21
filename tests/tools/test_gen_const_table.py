@@ -139,10 +139,8 @@ class GenConstTableTest(unittest.TestCase):
         self.assertEqual(runs[0], "-q -p read_verilog -sv b.v; write_rtlil b.il")
         for i, (case, line) in enumerate(zip(gct.make_cases(5, count), body, strict=True)):
             fields = line.split()
-            self.assertEqual(
-                fields[:5],
-                [case.op, str(case.width), "1" if case.signed else "0", case.a, case.b or "-"],
-            )
+            self.assertEqual(fields[:5], [case.op, str(case.width), "1" if case.signed else "0",
+                                          case.a, case.b or "-"])
             want = "x" * case.width if (i % gct.BATCH) % 5 == 0 else case.a
             self.assertEqual(fields[5], want, line)
 
@@ -173,11 +171,8 @@ class GenConstTableTest(unittest.TestCase):
         self.assertTrue(any(c.a.signed != c.b.signed for c in binary if c.b))
         self.assertTrue(any(c.a.unsized for c in cases))
         self.assertTrue(any(c.op in gct.A_SIGN and c.a.signed and not c.signed for c in cases))
-        tight_sshr = [
-            c
-            for c in cases
-            if c.op == "SSHR" and c.a.signed and not c.signed and c.width == len(c.a.bits)
-        ]
+        tight_sshr = [c for c in cases if c.op == "SSHR" and c.a.signed and not c.signed
+                      and c.width == len(c.a.bits)]
         self.assertTrue(tight_sshr)
         for case in cases:
             self.assertGreaterEqual(case.width, case.self_width)
@@ -192,13 +187,8 @@ class GenConstTableTest(unittest.TestCase):
         for case, line in zip(gct.make_mixed_cases(2026, 300), body, strict=True):
             fields = line.split()
             self.assertEqual(len(fields), 8, line)
-            want = [
-                case.op,
-                str(case.width),
-                "1" if case.signed else "0",
-                case.a.bits,
-                case.a.flags,
-            ]
+            want = [case.op, str(case.width), "1" if case.signed else "0", case.a.bits,
+                    case.a.flags]
             self.assertEqual(fields[:5], want)
             self.assertEqual(len(fields[7]), case.width)
 

@@ -36,9 +36,8 @@ class ParseTest(unittest.TestCase):
         self.assertTrue(netlist.models[1].blackbox)
         latches = [c for c in netlist.top.cells if isinstance(c, blif.Latch)]
         self.assertEqual(len(latches), 5)
-        self.assertEqual(
-            (latches[0].ltype, latches[0].control, latches[0].init), ("re", "blink^clk", "3")
-        )
+        self.assertEqual((latches[0].ltype, latches[0].control, latches[0].init),
+                         ("re", "blink^clk", "3"))
         subckts = [c for c in netlist.top.cells if isinstance(c, blif.Subckt)]
         self.assertIn(("cin[0]", "blink^ADD~2-0[0]"), subckts[0].conns)
 
@@ -56,10 +55,8 @@ class ParseTest(unittest.TestCase):
             "bad type": ".model t\n.inputs a c\n.outputs y\n.latch a y xx c 0\n.end\n",
             "two drivers": ".model t\n.inputs a\n.outputs y\n.names a y\n1 1\n.names y\n.end\n",
             "undefined model": ".model t\n.inputs a\n.outputs y\n.subckt foo x=a z=y\n.end\n",
-            "unknown port": (
-                ".model t\n.inputs a\n.outputs y\n.subckt s q=a\n.end\n"
-                ".model s\n.inputs x\n.blackbox\n.end\n"
-            ),
+            "unknown port": (".model t\n.inputs a\n.outputs y\n.subckt s q=a\n.end\n"
+                             ".model s\n.inputs x\n.blackbox\n.end\n"),
             "unknown directive": ".model t\n.inputs a\n.mystery and2 A=a\n.end\n",
             "gate not enabled": ".model t\n.inputs a\n.gate and2 A=a\n.end\n",
             "mixed cover": ".model t\n.inputs a b\n.outputs y\n.names a b y\n11 1\n00 0\n.end\n",
@@ -80,12 +77,10 @@ class ParseTest(unittest.TestCase):
 class GateTest(unittest.TestCase):
     """``.gate`` is Yosys's spelling of a cell instance; parsed like ``.subckt`` on request."""
 
-    TEXT = (
-        ".model t\n.inputs clk a b\n.outputs y\n"
-        ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=a\n"
-        ".cname ram0\n"
-        ".names q y\n1 1\n.end\n"
-    )
+    TEXT = (".model t\n.inputs clk a b\n.outputs y\n"
+            ".gate single_port_ram addr[0]=a clk=clk data[0]=b out[0]=q we=a\n"
+            ".cname ram0\n"
+            ".names q y\n1 1\n.end\n")
 
     def test_gate_is_off_by_default(self) -> None:
         with self.assertRaises(blif.BlifError) as ctx:
@@ -97,18 +92,14 @@ class GateTest(unittest.TestCase):
         assert isinstance(cell, blif.Subckt)
         self.assertTrue(cell.gate)
         self.assertEqual(cell.model, "single_port_ram")
-        self.assertEqual(
-            cell.conns,
-            [("addr[0]", "a"), ("clk", "clk"), ("data[0]", "b"), ("out[0]", "q"), ("we", "a")],
-        )
+        self.assertEqual(cell.conns, [("addr[0]", "a"), ("clk", "clk"), ("data[0]", "b"),
+                                      ("out[0]", "q"), ("we", "a")])
         self.assertEqual(cell.attrs, [(".cname", "ram0")])
         self.assertEqual(cell.line, 4)
 
     def test_subckt_is_not_a_gate(self) -> None:
-        text = (
-            ".model t\n.inputs a\n.outputs y\n.subckt s x=a z=y\n.end\n"
-            ".model s\n.inputs x\n.outputs z\n.blackbox\n.end\n"
-        )
+        text = (".model t\n.inputs a\n.outputs y\n.subckt s x=a z=y\n.end\n"
+                ".model s\n.inputs x\n.outputs z\n.blackbox\n.end\n")
         cell = blif.parse_text(text, gates=True).top.cells[0]
         assert isinstance(cell, blif.Subckt)
         self.assertFalse(cell.gate)
@@ -136,7 +127,8 @@ class GateTest(unittest.TestCase):
 
     # An inout port is in .inputs and .outputs (Yosys's write_blif, ours): the outside drives it and
     # the model may drive it too, once. Ordinary nets keep the one-driver rule (2H).
-    INOUT = ".model t\n.inputs a en io\n.outputs io\n.names a en io\n11 1\n.end\n"
+    INOUT = (".model t\n.inputs a en io\n.outputs io\n"
+             ".names a en io\n11 1\n.end\n")
 
     def test_inout_may_have_one_internal_driver(self) -> None:
         blif.parse_text(self.INOUT, "io.blif")
@@ -160,10 +152,8 @@ class GateTest(unittest.TestCase):
             blif.parse_text(text, "o.blif")
 
     def test_gate_drivers_are_checked(self) -> None:
-        text = (
-            ".model t\n.inputs a\n.outputs y\n"
-            ".gate single_port_ram clk=a out[0]=y\n.names a y\n1 1\n.end\n"
-        )
+        text = (".model t\n.inputs a\n.outputs y\n"
+                ".gate single_port_ram clk=a out[0]=y\n.names a y\n1 1\n.end\n")
         with self.assertRaises(blif.BlifError) as ctx:
             blif.parse_text(text, "g.blif", gates=True)
         self.assertIn("more than one driver", str(ctx.exception))

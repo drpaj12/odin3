@@ -28,27 +28,14 @@ PARSE_CHECK = os.environ.get("ODIN3_PARSE_CHECK")
 # --- an independent reader of the printed expressions ----------------------------------------
 
 # Table 5-4, highest first; every binary operator is left-associative, ?: right.
-LEVELS = [
-    ["**"],
-    ["*", "/", "%"],
-    ["+", "-"],
-    ["<<", ">>", "<<<", ">>>"],
-    ["<", "<=", ">", ">="],
-    ["==", "!=", "===", "!=="],
-    ["&"],
-    ["^", "~^", "^~"],
-    ["|"],
-    ["&&"],
-    ["||"],
-]
+LEVELS = [["**"], ["*", "/", "%"], ["+", "-"], ["<<", ">>", "<<<", ">>>"],
+          ["<", "<=", ">", ">="], ["==", "!=", "===", "!=="], ["&"], ["^", "~^", "^~"], ["|"],
+          ["&&"], ["||"]]
 BINDING = {op: len(LEVELS) - idx + 1 for idx, ops in enumerate(LEVELS) for op in ops}
 UNARY = {"+", "-", "!", "~", "&", "~&", "|", "~|", "^", "~^", "^~"}
-TOKEN = re.compile(
-    r"\s+|/\*.*?\*/|(\(\*.*?\*\))|(===|!==|<<<|>>>|\*\*|~\^|\^~|~&|~\||==|!=|"
-    r"<=|>=|<<|>>|&&|\|\||[-+*/%<>&|^~!?:()])|([A-Za-z_][A-Za-z0-9_]*|\d+)"
-    r"|\\(\S+)",
-    re.S,
-)
+TOKEN = re.compile(r"\s+|/\*.*?\*/|(\(\*.*?\*\))|(===|!==|<<<|>>>|\*\*|~\^|\^~|~&|~\||==|!=|"
+                   r"<=|>=|<<|>>|&&|\|\||[-+*/%<>&|^~!?:()])|([A-Za-z_][A-Za-z0-9_]*|\d+)"
+                   r"|\\(\S+)", re.S)
 
 
 def tokens(text: str) -> list[str]:
@@ -128,12 +115,8 @@ def random_expr(rng: random.Random, depth: int) -> vg.Node:
     if roll < 0.35:
         node = vg.Node("UNARY", random_expr(rng, depth - 1), sub=rng.choice(vg.UNARY_OPS))
     elif roll < 0.85:
-        node = vg.Node(
-            "BINARY",
-            random_expr(rng, depth - 1),
-            random_expr(rng, depth - 1),
-            sub=rng.choice(list(vg.BINARY_PREC)),
-        )
+        node = vg.Node("BINARY", random_expr(rng, depth - 1), random_expr(rng, depth - 1),
+                       sub=rng.choice(list(vg.BINARY_PREC)))
     else:
         node = vg.Node("TERNARY", *(random_expr(rng, depth - 1) for _ in range(3)))
     if node.sub == "~^" and rng.random() < 0.3:
@@ -164,9 +147,8 @@ def build(text: str) -> vg.Node:
         depth -= ch == ")"
         if depth == 0 and ch == " ":
             op_end = body.index(" ", idx + 1)
-            return vg.Node(
-                "BINARY", build(body[:idx]), build(body[op_end + 1 :]), sub=body[idx + 1 : op_end]
-            )
+            return vg.Node("BINARY", build(body[:idx]), build(body[op_end + 1:]),
+                           sub=body[idx + 1:op_end])
     raise AssertionError(text)
 
 
@@ -224,12 +206,8 @@ class GeneratorTest(unittest.TestCase):
             self.assertEqual(Reader(tokens(text)).expression(), full(node), text)
 
     def test_associativity_cases(self) -> None:
-        cases = {
-            "a - (b - c)": "a - (b - c)",
-            "(a - b) - c": "a - b - c",
-            "a ** (b ** c)": "a ** (b ** c)",
-            "(a ** b) ** c": "a ** b ** c",
-        }
+        cases = {"a - (b - c)": "a - (b - c)", "(a - b) - c": "a - b - c",
+                 "a ** (b ** c)": "a ** (b ** c)", "(a ** b) ** c": "a ** b ** c"}
         for source, expected in cases.items():
             self.assertEqual(printed(parse(source)), expected)
 
@@ -241,18 +219,9 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(printed(vg.Node("UNARY", power, sub="~")), "~(-a ** b)")
 
     def test_number_payloads(self) -> None:
-        cases = {
-            "8'hFF": "8'hff",
-            "'sd5": "5",
-            "4'b?z?Z": "4'b????",
-            "8 'h F_f": "8'hff",
-            "'h0_0000_0001": "'h000000001",
-            "8'dZ": "8'dz",
-            "16'd065_535": "16'd65535",
-            "8'SB1111_0000": "8'sb11110000",
-            "42": "42",
-            "'d9": "'d9",
-        }
+        cases = {"8'hFF": "8'hff", "'sd5": "5", "4'b?z?Z": "4'b????", "8 'h F_f": "8'hff",
+                 "'h0_0000_0001": "'h000000001", "8'dZ": "8'dz", "16'd065_535": "16'd65535",
+                 "8'SB1111_0000": "8'sb11110000", "42": "42", "'d9": "'d9"}
         for spelling, payload in cases.items():
             self.assertEqual(vg.number_node(spelling).payload, payload, spelling)
         self.assertEqual(vg.real_node("1e3").payload, "1000.0")
@@ -263,12 +232,9 @@ class GeneratorTest(unittest.TestCase):
         node.attrs.append(vg.attr("k", vg.string_node('"a\\tb"')))
         out: list[str] = []
         vg.dump(node, "f.v", out)
-        self.assertEqual(
-            "".join(out),
-            "(CASE_ITEM [DEFAULT] @f.v:0:0\n  (NULL_STMT @f.v:0:0)\n"
-            "  (NUMBER.dec [SIGNED] @f.v:0:0 1)\n  {(ATTR:k @f.v:0:0\n"
-            '     (STRING:"a\\tb" @f.v:0:0))})',
-        )
+        self.assertEqual("".join(out), '(CASE_ITEM [DEFAULT] @f.v:0:0\n  (NULL_STMT @f.v:0:0)\n'
+                         '  (NUMBER.dec [SIGNED] @f.v:0:0 1)\n  {(ATTR:k @f.v:0:0\n'
+                         '     (STRING:"a\\tb" @f.v:0:0))})')
 
     def test_mutation_changes_one_token(self) -> None:
         for seed in range(1, 500):  # seed 406 once swapped ')' with ')': a no-op
@@ -285,13 +251,8 @@ class GeneratorTest(unittest.TestCase):
                 path = Path(tmp) / f"gen_{seed}.v"
                 path.write_text(vg.render(seed, path.name).text, encoding="utf-8")
                 names.append(str(path))
-            result = subprocess.run(
-                [PARSE_CHECK, "--no-oracle", *names],
-                capture_output=True,
-                text=True,
-                timeout=600,
-                check=False,
-            )
+            result = subprocess.run([PARSE_CHECK, "--no-oracle", *names], capture_output=True,
+                                    text=True, timeout=600, check=False)
             self.assertEqual(result.returncode, 0, result.stderr[-4000:])
 
 
@@ -303,10 +264,8 @@ class ToolsTest(unittest.TestCase):
         self.assertIn(b'"s\\n"', spellings)
         self.assertIn(b"// synopsys full_case parallel_case\n", spellings)
         stream = fuzz_seeds.token_bytes(b"module m; wire x; endmodule // c\n", spellings)
-        self.assertEqual(
-            [spellings[b].strip() for b in stream],
-            [b"module", b"a", b";", b"wire", b"a", b";", b"endmodule", b"// c"],
-        )
+        self.assertEqual([spellings[b].strip() for b in stream],
+                         [b"module", b"a", b";", b"wire", b"a", b";", b"endmodule", b"// c"])
 
     def test_seeds_begin_with_a_bom_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -334,16 +293,12 @@ class ToolsTest(unittest.TestCase):
         self.assertTrue(compare.located("odin3: error: g.v:2:16: error: syntax: x", "g.v"))
         self.assertFalse(compare.located("odin3: error: g.v:0:0: error: x", "g.v"))
         self.assertFalse(compare.located("odin3: error: pass read_verilog: failed", "g.v"))
-        self.assertEqual(
-            compare.crashed(compare.Run(1, "", "==1== ERROR: AddressSanitizer")), "sanitizer report"
-        )
-        self.assertEqual(compare.fatal_status("odin3: error: pass x: failed: ODIN3_ERR_PARSE"), "")
-        self.assertEqual(
-            compare.fatal_status(
-                "g.v:1:1: error: x\nodin3: error: pass x: failed: ODIN3_ERR_INVALID_ARG"
-            ),
-            "ODIN3_ERR_INVALID_ARG",
-        )
+        self.assertEqual(compare.crashed(compare.Run(1, "", "==1== ERROR: AddressSanitizer")),
+                         "sanitizer report")
+        self.assertEqual(compare.fatal_status("odin3: error: pass x: failed: ODIN3_ERR_PARSE"),
+                         "")
+        self.assertEqual(compare.fatal_status("g.v:1:1: error: x\nodin3: error: pass x: failed: "
+                                              "ODIN3_ERR_INVALID_ARG"), "ODIN3_ERR_INVALID_ARG")
         self.assertEqual(compare.first_error("dump...\nFAIL g.v: x\n_)))", "g.v"), "FAIL g.v: x")
 
     def test_compare_resolves_relative_tools(self) -> None:

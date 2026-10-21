@@ -83,26 +83,19 @@ class ParseTest(unittest.TestCase):
         yos = yosys_log.parse_log(YOSYS)["moore_arst"].fsms[0]
         odi = odin_log.parse_log(ODIN)["moore_arst"].fsms[0]
         self.assertEqual(fsm_diff.shape(yos), fsm_diff.shape(odi))
-        self.assertEqual(
-            (odi.states, odi.bits_before, odi.bits_after, odi.encoding), (3, 2, 3, "one-hot")
-        )
+        self.assertEqual((odi.states, odi.bits_before, odi.bits_after, odi.encoding),
+                         (3, 2, 3, "one-hot"))
         self.assertEqual(odi.reset_index, 0)
         self.assertEqual(odi.codes, ("--1", "-1-", "1--"))
 
     def test_rejected_and_failed_lines(self) -> None:
-        text = (
-            "odin3: info: fsm: not marking 'm.a': connected to a module port\n"
-            "odin3: info: fsm: not marking 'm.a': users do not benefit from recoding\n"
-            "odin3: info: fsm: extraction of 'm.b' failed: at least two states are required\n"
-        )
+        text = ("odin3: info: fsm: not marking 'm.a': connected to a module port\n"
+                "odin3: info: fsm: not marking 'm.a': users do not benefit from recoding\n"
+                "odin3: info: fsm: extraction of 'm.b' failed: at least two states are required\n")
         facts = odin_log.parse_log(text)["m"]
-        self.assertEqual(
-            facts.rejected["a"],
-            [
-                "Register is connected to module port",
-                "Users of register don't seem to benefit from recoding",
-            ],
-        )
+        self.assertEqual(facts.rejected["a"],
+                         ["Register is connected to module port",
+                          "Users of register don't seem to benefit from recoding"])
         self.assertEqual(facts.failures, [("b", "at least two states are required")])
 
     def test_a_dotted_module_name_splits_at_the_last_dot(self) -> None:
@@ -119,10 +112,8 @@ class CompareTest(unittest.TestCase):
 
     def test_a_different_state_count_fails(self) -> None:
         text = ODIN.replace("(3 states, 3 bits, was 2)", "(4 states, 3 bits, was 2)")
-        text = text.replace(
-            "fsm:     2:      3'1--\n",
-            "fsm:     2:      3'1--\nodin3: info: fsm:     3:      3'1-1\n",
-        )
+        text = text.replace("fsm:     2:      3'1--\n",
+                            "fsm:     2:      3'1--\nodin3: info: fsm:     3:      3'1-1\n")
         diffs = self.mods(text)
         self.assertEqual([d.stage for d in diffs], ["facts"])
         self.assertIn("states Yosys 3 Odin III 4", diffs[0].text)
@@ -178,11 +169,9 @@ class ExpectTest(unittest.TestCase):
 
 
 class HistogramTest(unittest.TestCase):
-    TEXT = (
-        "module \\m\n  cell $eq \\a\n  end\n  cell $eq \\b\n  end\n"
-        "  cell $dff \\c\n  end\nend\n"
-        "module \\n\n  cell $and \\d\n  end\nend\n"
-    )
+    TEXT = ("module \\m\n  cell $eq \\a\n  end\n  cell $eq \\b\n  end\n"
+            "  cell $dff \\c\n  end\nend\n"
+            "module \\n\n  cell $and \\d\n  end\nend\n")
 
     def test_counts_per_module(self) -> None:
         hist = fsm_diff.histograms(self.TEXT)

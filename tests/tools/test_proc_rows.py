@@ -21,13 +21,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 PROC = REPO_ROOT / "tests" / "proc"
 ROWS = PROC / "rows"
 
-ERROR_ROWS = {
-    "err_two_clocks",
-    "err_second_root_if",
-    "err_reset_untested",
-    "err_dual_edge",
-    "err_nonconst_reset",
-}
+ERROR_ROWS = {"err_two_clocks", "err_second_root_if", "err_reset_untested", "err_dual_edge",
+              "err_nonconst_reset"}
 ROW_COUNT = 49
 YOSYS_V_RE = re.compile(r"^// yosys -V: Yosys 0\.55 \(")
 
@@ -102,7 +97,7 @@ class RowsShapeTest(unittest.TestCase):
             self.assertIsNotNone(match, slug)
             assert match is not None
             line, col = int(match[1]), int(match[2])
-            self.assertTrue(source[line - 1][col - 1 :].startswith("always"), slug)
+            self.assertTrue(source[line - 1][col - 1:].startswith("always"), slug)
 
     def test_diff_expect_has_only_the_17_row(self) -> None:
         lines = (PROC / "diff_expect.txt").read_text(encoding="utf-8").splitlines()
@@ -113,12 +108,12 @@ class RowsShapeTest(unittest.TestCase):
     def test_case_default_golden_has_one_pmux_of_width_8(self) -> None:
         text = (ROWS / "case_default.il").read_text(encoding="utf-8")
         self.assertEqual(proc_rows.pmux_widths(text), [8])
-        self.assertIn("output reg [7:0] y", (ROWS / "case_default.v").read_text(encoding="utf-8"))
+        self.assertIn("output reg [7:0] y",
+                      (ROWS / "case_default.v").read_text(encoding="utf-8"))
 
     def test_bridge_expect_names_only_rows_and_has_all_three_fields(self) -> None:
         expect = proc_rows.parse_bridge_expect(
-            (PROC / "bridge_expect.txt").read_text(encoding="utf-8")
-        )
+            (PROC / "bridge_expect.txt").read_text(encoding="utf-8"))
         self.assertLessEqual(set(expect), {r.slug for r in _rows() if not r.err})
         self.assertTrue(expect)
 
@@ -127,30 +122,24 @@ class HelperTest(unittest.TestCase):
     def test_parse_rows_rejects_a_bad_line(self) -> None:
         with self.assertRaises(proc_rows.RowsError):
             proc_rows.parse_rows("a comb=2 err=0\n")
-        self.assertEqual(
-            proc_rows.parse_rows("a comb=1 err=0\n"), [proc_rows.Row("a", True, False)]
-        )
+        self.assertEqual(proc_rows.parse_rows("a comb=1 err=0\n"),
+                         [proc_rows.Row("a", True, False)])
 
     def test_error_lines_keep_located_errors_only(self) -> None:
-        stderr = (
-            "odin3: info: x\n"
-            "odin3: error: e.v:5:3: error: 'q' is clocked by both 'a' and 'b'\n"
-            "odin3: warning: e.v:1:1: warning: w\n"
-            "odin3: error: pass proc: failed: ODIN3_ERR_PARSE\n"
-            "odin3: error: e.v:6:3: error: second\n"
-        )
-        self.assertEqual(
-            proc_rows.error_lines(stderr),
-            "e.v:5:3: error: 'q' is clocked by both 'a' and 'b'\ne.v:6:3: error: second\n",
-        )
+        stderr = ("odin3: info: x\n"
+                  "odin3: error: e.v:5:3: error: 'q' is clocked by both 'a' and 'b'\n"
+                  "odin3: warning: e.v:1:1: warning: w\n"
+                  "odin3: error: pass proc: failed: ODIN3_ERR_PARSE\n"
+                  "odin3: error: e.v:6:3: error: second\n")
+        self.assertEqual(proc_rows.error_lines(stderr),
+                         "e.v:5:3: error: 'q' is clocked by both 'a' and 'b'\n"
+                         "e.v:6:3: error: second\n")
         self.assertEqual(proc_rows.error_lines("odin3: info: only\n"), "")
 
     def test_pmux_widths(self) -> None:
-        text = (
-            "  cell $pmux $c1\n    parameter \\WIDTH 8\n    parameter \\S_WIDTH 3\n  end\n"
-            "  cell $mux $c2\n    parameter \\WIDTH 4\n  end\n"
-            "  cell $pmux $c3\n    parameter \\WIDTH 2\n  end\n"
-        )
+        text = ("  cell $pmux $c1\n    parameter \\WIDTH 8\n    parameter \\S_WIDTH 3\n  end\n"
+                "  cell $mux $c2\n    parameter \\WIDTH 4\n  end\n"
+                "  cell $pmux $c3\n    parameter \\WIDTH 2\n  end\n")
         self.assertEqual(proc_rows.pmux_widths(text), [8, 2])
         self.assertEqual(proc_rows.pmux_widths("cell $mux $c\n parameter \\WIDTH 8\n end\n"), [])
 
@@ -165,9 +154,8 @@ class HelperTest(unittest.TestCase):
     def test_rows_load_smallest_file_first(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "rows.txt").write_text(
-                "big comb=0 err=0\nsmall comb=0 err=0\n", encoding="utf-8"
-            )
+            (root / "rows.txt").write_text("big comb=0 err=0\nsmall comb=0 err=0\n",
+                                           encoding="utf-8")
             (root / "big.v").write_text("x" * 100, encoding="utf-8")
             (root / "small.v").write_text("x", encoding="utf-8")
             self.assertEqual([r.slug for r in proc_rows.load_rows(root)], ["small", "big"])
@@ -185,9 +173,7 @@ class HelperTest(unittest.TestCase):
                 "    sys.stderr.write('odin3: error: bad.v:5:3: error: boom\\n'\n"
                 "                     'odin3: error: pass proc: failed: ODIN3_ERR_PARSE\\n')\n"
                 "    sys.exit(1)\n"
-                "sys.stdout.write('module x\\n')\n",
-                encoding="utf-8",
-            )
+                "sys.stdout.write('module x\\n')\n", encoding="utf-8")
             fake.chmod(0o755)
             (root / "ok.v").write_text("m", encoding="utf-8")
             (root / "bad.v").write_text("m", encoding="utf-8")

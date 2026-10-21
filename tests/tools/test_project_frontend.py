@@ -97,17 +97,9 @@ class FrontendBridgeTest(unittest.TestCase):
         (self.case_dir / "src" / "top.v").write_text("module top; endmodule\n")
         (self.case_dir / "ref.blif").write_text("REF")
         (self.case_dir / "ref.cmd").write_text(
-            'mkdir -p out\n"$YOSYS" -q -p "read_verilog src/top.v; write_blif out/ref.blif"\n'
-        )
-        exp = {
-            "description": "pos",
-            "features": ["verilog"],
-            "phase": 2,
-            "formats": ["o3proj"],
-            "project": RECORD,
-            "resolved": {"top": "work.top"},
-            "oracle": "yosys",
-        }
+            'mkdir -p out\n"$YOSYS" -q -p "read_verilog src/top.v; write_blif out/ref.blif"\n')
+        exp = {"description": "pos", "features": ["verilog"], "phase": 2, "formats": ["o3proj"],
+               "project": RECORD, "resolved": {"top": "work.top"}, "oracle": "yosys"}
         (self.case_dir / "expected.json").write_text(json.dumps(exp))
         record = json.loads(json.dumps(RECORD))
         record["files"][0]["path"] = str(self.case_dir / "src" / "top.v")
@@ -124,19 +116,8 @@ class FrontendBridgeTest(unittest.TestCase):
         self.addCleanup(stack.close)
 
     def compare(self, *extra: str, env: dict[str, str] | None = None) -> tuple[int, str]:
-        argv = [
-            "compare",
-            "--odin3",
-            str(self.odin3),
-            "--root",
-            str(self.root),
-            "--with-frontend",
-            "--yosys",
-            str(self.yosys),
-            "--equiv-check",
-            str(self.equiv),
-            *extra,
-        ]
+        argv = ["compare", "--odin3", str(self.odin3), "--root", str(self.root), "--with-frontend",
+                "--yosys", str(self.yosys), "--equiv-check", str(self.equiv), *extra]
         with mock.patch.dict(os.environ, env or {}):
             code, out, err = helpers.run_main(pf.main, argv)
         return code, out + err
@@ -190,17 +171,9 @@ class FrontendBridgeTest(unittest.TestCase):
     def test_a_front_end_negative_of_a_later_phase_is_skipped(self) -> None:
         neg = self.root / "neg_cycle"
         neg.mkdir()
-        (neg / "expected.json").write_text(
-            json.dumps(
-                {
-                    "description": "x",
-                    "features": [],
-                    "phase": 5,
-                    "formats": ["o3proj"],
-                    "error": {"kind": "dependency_cycle", "at": None, "names": ["a"]},
-                }
-            )
-        )
+        (neg / "expected.json").write_text(json.dumps({
+            "description": "x", "features": [], "phase": 5, "formats": ["o3proj"],
+            "error": {"kind": "dependency_cycle", "at": None, "names": ["a"]}}))
         code, out = self.compare("--case", "neg_cycle")
         self.assertIn("skip neg_cycle o3proj (needs the phase 5 front end)", out)
         self.assertEqual(code, 1)  # nothing else was run: the harness says so
@@ -212,10 +185,8 @@ class FrontendBridgeTest(unittest.TestCase):
         self.assertIn("odin3 exit 1: odin3: error: boom", out)
 
     def test_without_yosys_the_bridge_is_not_run(self) -> None:
-        code, out, err = helpers.run_main(
-            pf.main,
-            ["compare", "--odin3", str(self.odin3), "--root", str(self.root), "--with-frontend"],
-        )
+        code, out, err = helpers.run_main(pf.main, [
+            "compare", "--odin3", str(self.odin3), "--root", str(self.root), "--with-frontend"])
         self.assertEqual(code, 0, out + err)
         self.assertNotIn("(bridge)", out)
         self.assertIn("not run: --yosys and --equiv-check not given", out)

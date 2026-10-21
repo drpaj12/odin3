@@ -21,7 +21,9 @@ class FlattenProfileTest(unittest.TestCase):
     def test_deterministic_per_seed(self) -> None:
         for seed in (1, 7, 49):
             self.assertEqual(flatten_profile.generate(seed), flatten_profile.generate(seed))
-        self.assertNotEqual(flatten_profile.generate(1).text, flatten_profile.generate(2).text)
+        self.assertNotEqual(
+            flatten_profile.generate(1).text, flatten_profile.generate(2).text
+        )
 
     def test_every_feature_appears_in_seeds_1_to_200(self) -> None:
         seen: set[str] = set()
@@ -49,19 +51,9 @@ class FlattenProfileTest(unittest.TestCase):
 
     def test_text_shows_each_construct(self) -> None:
         text = "".join(flatten_profile.generate(s).text for s in SEEDS)
-        for needle in (
-            "#(.W(2))",
-            "genvar gi",
-            "begin : g",
-            "assign z = a;",
-            "{W{1'b1}}",
-            ".z()",
-            "inout io",
-            "1'bz",
-            "(* keep_hierarchy *) module",
-            "(* keep_hierarchy *) m",
-            "posedge clk",
-        ):
+        for needle in ("#(.W(2))", "genvar gi", "begin : g", "assign z = a;", "{W{1'b1}}", ".z()",
+                       "inout io", "1'bz", "(* keep_hierarchy *) module", "(* keep_hierarchy *) m",
+                       "posedge clk"):
             self.assertIn(needle, text, needle)
 
     def test_top_is_always_top_and_every_module_is_defined_before_use(self) -> None:

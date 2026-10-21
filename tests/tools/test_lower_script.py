@@ -18,18 +18,11 @@ HAND = ROOT / "tests" / "lower" / "hand"
 SCRIPT = "{read}; hierarchy; proc; opt; {pre}lower; opt -fast; compact; check; stats{write}"
 
 
-def run(
-    script: str, cwd: Path, env: dict[str, str] | None = None, prefix: tuple[str, ...] = ()
-) -> str:
-    done = subprocess.run(
-        [*prefix, ODIN3, "--check", "-p", script],
-        capture_output=True,
-        text=True,
-        cwd=cwd,
-        check=False,
-        timeout=300,
-        env=None if env is None else {**os.environ, **env},
-    )
+def run(script: str, cwd: Path, env: dict[str, str] | None = None,
+        prefix: tuple[str, ...] = ()) -> str:
+    done = subprocess.run([*prefix, ODIN3, "--check", "-p", script], capture_output=True,
+                          text=True, cwd=cwd, check=False, timeout=300,
+                          env=None if env is None else {**os.environ, **env})
     text = done.stdout + done.stderr
     if done.returncode != 0:
         raise AssertionError(f"odin3 exit {done.returncode}: {text[-400:]}")
@@ -59,12 +52,10 @@ class DeterminismTest(unittest.TestCase):
         (1F), so a design with flip-flops or memories is compared by its BLIF alone."""
         work = helpers.scratch(self, "test-lower-det-")
         storage = any(key in source.name for key in ("dff", "mem", "dlatch", "hard"))
-        read = (
-            f"read_techlib {TECHLIB}; " if techlib else ""
-        ) + f"read_verilog --nolatches {source}"
-        write = (
-            "" if storage else f"; write_rtlil {work / 'o.il'}"
-        ) + f"; write_blif {work / 'o.blif'}"
+        read = (f"read_techlib {TECHLIB}; " if techlib else "") + \
+            f"read_verilog --nolatches {source}"
+        write = ("" if storage else f"; write_rtlil {work / 'o.il'}") + \
+            f"; write_blif {work / 'o.blif'}"
         run(SCRIPT.format(read=read, pre="", write=write), work)
         rtlil = b"" if storage else (work / "o.il").read_bytes()
         return rtlil, (work / "o.blif").read_bytes()
@@ -79,33 +70,15 @@ class DeterminismTest(unittest.TestCase):
 
     def test_the_cell_fixtures_of_every_family_are_byte_identical(self) -> None:
         cells = ROOT / "tests" / "lower" / "cells"
-        names = sorted(
-            {
-                found[0].name
-                for prefix in (
-                    "add_w5",
-                    "shl_w5",
-                    "shiftx_w4",
-                    "mul_w3",
-                    "div_w3",
-                    "mod_w3",
-                    "sdffe_w4",
-                    "adffe_w4",
-                    "dffsre_w4",
-                    "mem_w4_d4_r2",
-                    "dlatch_w4",
-                    "pmux",
-                    "lt_w5",
-                )
-                if (found := sorted(cells.glob(f"{prefix}*.v")))
-            }
-        )
+        names = sorted({found[0].name for prefix in (
+            "add_w5", "shl_w5", "shiftx_w4", "mul_w3", "div_w3", "mod_w3", "sdffe_w4", "adffe_w4",
+            "dffsre_w4", "mem_w4_d4_r2", "dlatch_w4", "pmux", "lt_w5")
+            if (found := sorted(cells.glob(f"{prefix}*.v")))})
         self.assertGreaterEqual(len(names), 8)
         for name in names:
             with self.subTest(design=name):
-                self.assertEqual(
-                    self.outputs(cells / name, False), self.outputs(cells / name, False)
-                )
+                self.assertEqual(self.outputs(cells / name, False),
+                                 self.outputs(cells / name, False))
 
 
 @unittest.skipUnless(ODIN3 and Path(ODIN3).exists(), "odin3 (ODIN3_CLI) is needed")
@@ -117,23 +90,16 @@ class MixedDesignDeterminismTest(unittest.TestCase):
 
     SOURCE = HAND / "mixed_modules.v"
     VARIANTS: tuple[tuple[dict[str, str], tuple[str, ...]], ...] = (
-        ({}, ()),
-        ({"MALLOC_PERTURB_": "165"}, ()),
-        ({}, ("setarch", "-R")),
-    )
+        ({}, ()), ({"MALLOC_PERTURB_": "165"}, ()), ({}, ("setarch", "-R")))
 
     def one(self, env: dict[str, str], prefix: tuple[str, ...]) -> dict[str, bytes]:
         work = helpers.scratch(self, "test-lower-mixed-")
-        script = (
-            f"read_verilog --nolatches {self.SOURCE}; hierarchy; proc; opt; "
-            f"lower --lower-snapshot {work}; opt -fast; compact; check; "
-            f"write_blif {work / 'o.blif'}"
-        )
+        script = (f"read_verilog --nolatches {self.SOURCE}; hierarchy; proc; opt; "
+                  f"lower --lower-snapshot {work}; opt -fast; compact; check; "
+                  f"write_blif {work / 'o.blif'}")
         run(script, work, env, prefix)
-        return {
-            name: (work / name).read_bytes()
-            for name in ("o.blif", "lower-before.il", "lower-after.blif")
-        }
+        return {name: (work / name).read_bytes()
+                for name in ("o.blif", "lower-before.il", "lower-after.blif")}
 
     def test_every_variant_gives_identical_outputs_and_snapshots(self) -> None:
         baseline = self.one(*self.VARIANTS[0])
@@ -151,16 +117,10 @@ class SnapshotTest(unittest.TestCase):
 
     def result(self, name: str, techlib: bool, snap: str | None) -> tuple[bytes, Path]:
         work = helpers.scratch(self, "test-lower-snap-")
-        read = (
-            f"read_techlib {TECHLIB}; " if techlib else ""
-        ) + f"read_verilog --nolatches {HAND / name}"
-        option = (
-            f" --lower-snapshot {work / 'snap'}"
-            if snap == "yes"
-            else f" --lower-snapshot {snap}"
-            if snap
-            else ""
-        )
+        read = (f"read_techlib {TECHLIB}; " if techlib else "") + \
+            f"read_verilog --nolatches {HAND / name}"
+        option = f" --lower-snapshot {work / 'snap'}" if snap == "yes" else \
+            f" --lower-snapshot {snap}" if snap else ""
         if snap == "yes":
             (work / "snap").mkdir()
         script = SCRIPT.format(read=read, pre="", write=f"; write_blif {work / 'o.blif'}")
@@ -184,8 +144,7 @@ class SnapshotTest(unittest.TestCase):
         work = helpers.scratch(self, "test-lower-snap-")
         read = f"read_verilog --nolatches {HAND / 'and_mux.v'}"
         script = SCRIPT.format(read=read, pre="", write="").replace(
-            "lower;", f"lower --lower-snapshot {missing};"
-        )
+            "lower;", f"lower --lower-snapshot {missing};")
         text = run(script, work)
         self.assertIn("warning", text.lower())
         self.assertFalse(missing.exists())

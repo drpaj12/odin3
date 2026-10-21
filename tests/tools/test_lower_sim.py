@@ -59,14 +59,8 @@ BLIF = ".model m\n.inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n"
 
 def fake_run(argv: Sequence[str], cap: int, **kwargs: Any) -> subprocess.CompletedProcess[str]:
     del cap
-    return subprocess.run(
-        list(argv),
-        capture_output=True,
-        text=True,
-        check=False,
-        cwd=kwargs.get("cwd"),
-        env=kwargs.get("env"),
-    )
+    return subprocess.run(list(argv), capture_output=True, text=True, check=False,
+                          cwd=kwargs.get("cwd"), env=kwargs.get("env"))
 
 
 class Tree:
@@ -81,25 +75,15 @@ class Tree:
         self.set_spec()
 
     def set_spec(self, **changes: Any) -> None:
-        spec: dict[str, Any] = {
-            "before_il": AND_IL,
-            "before_vec": VEC,
-            "after_vec": VEC,
-            "mutated_vec": VEC.replace("out 1", "out 0"),
-            "lowered_blif": BLIF,
-        }
+        spec: dict[str, Any] = {"before_il": AND_IL, "before_vec": VEC, "after_vec": VEC,
+                                "mutated_vec": VEC.replace("out 1", "out 0"),
+                                "lowered_blif": BLIF}
         spec.update(changes)
         (self.bin / "fake.json").write_text(json.dumps(spec))
 
     def run(self, *extra: str) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            str(self.bin / "odin3"),
-            "--work",
-            str(self.root / "work"),
-            *extra,
-            str(self.root / "hand" / "and_mux.v"),
-        ]
+        argv = ["--odin3", str(self.bin / "odin3"), "--work", str(self.root / "work"), *extra,
+                str(self.root / "hand" / "and_mux.v")]
         with mock.patch.object(memcap, "run", fake_run):
             return helpers.run_main(ls.main, argv)
 
@@ -113,18 +97,15 @@ class PureTest(unittest.TestCase):
         self.assertEqual(
             ls.odin_script(["a.v"], args, Path("w"), False, Path("w/b.vec")),
             "read_verilog --nolatches a.v; hierarchy -auto; proc; opt; write_rtlil w/before.il; "
-            "sim 8 3 w/b.vec",
-        )
+            "sim 8 3 w/b.vec")
         self.assertEqual(
             ls.odin_script(["a.v"], args, Path("w"), True, Path("w/a.vec")),
-            "read_verilog --nolatches a.v; hierarchy -auto; proc; opt; lower; sim 8 3 w/a.vec",
-        )
+            "read_verilog --nolatches a.v; hierarchy -auto; proc; opt; lower; sim 8 3 w/a.vec")
 
     def test_mutation_inverts_the_first_cover_only(self) -> None:
         blif = ".model m\n.names a b y\n11 1\n.names y z\n1 1\n.end\n"
-        self.assertEqual(
-            ls.mutate(blif, "invert-first"), ".model m\n.names a b y\n11 0\n.names y z\n1 1\n.end\n"
-        )
+        self.assertEqual(ls.mutate(blif, "invert-first"),
+                         ".model m\n.names a b y\n11 0\n.names y z\n1 1\n.end\n")
         with self.assertRaises(lc.ToolError):
             ls.mutate(".model m\n.end\n", "invert-first")
         with self.assertRaises(lc.ToolError):
@@ -135,23 +116,8 @@ class PureTest(unittest.TestCase):
         self.assertIn("2 and 3 lines", ls.first_difference("a\nb\n", "a\nb\nc\n"))
 
     def test_the_skip_table_covers_the_types_without_a_hook(self) -> None:
-        for name in (
-            "$shl",
-            "$shr",
-            "$sshr",
-            "$shiftx",
-            "$div",
-            "$mod",
-            "$pow",
-            "$tribuf",
-            "$mem",
-            "$dff",
-            "$adffe",
-            "$dlatch",
-            "$sr",
-            "\\single_port_ram",
-            "\\dual_port_ram",
-        ):
+        for name in ("$shl", "$shr", "$sshr", "$shiftx", "$div", "$mod", "$pow", "$tribuf", "$mem",
+                     "$dff", "$adffe", "$dlatch", "$sr", "\\single_port_ram", "\\dual_port_ram"):
             self.assertIn(name, ls.SKIP_REASONS)  # (the two RAMs: "cannot simulate ... no hook")
         for name in ("$and", "$mux", "$pmux", "$add", "$mul", "$eq", "$reduce_or"):
             self.assertNotIn(name, ls.SKIP_REASONS)
@@ -166,19 +132,16 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         self.assertIn("lower-sim: and_mux.v: $and: pass", out)
         self.assertIn("lower-sim: and_mux.v: $mux: pass", out)
-        self.assertIn(
-            "sample points: outputs after each cycle's active edge has settled (64 cycles, seed 1)",
-            out,
-        )
+        self.assertIn("sample points: outputs after each cycle's active edge has settled "
+                      "(64 cycles, seed 1)", out)
         self.assertEqual(len(self.tree.log()), 2)
 
     def test_different_vectors_are_exit_1_with_the_first_line(self) -> None:
         self.tree.set_spec(after_vec=VEC.replace("out 1", "out 0"))
         code, out, _ = self.tree.run()
         self.assertEqual(code, 1)
-        self.assertIn(
-            "DIFFERS: line 2: before 'cycle 1 in 11 out 1', after 'cycle 1 in 11 out 0'", out
-        )
+        self.assertIn("DIFFERS: line 2: before 'cycle 1 in 11 out 1', after 'cycle 1 in 11 out 0'",
+                      out)
         self.assertNotIn(": pass", out)
 
     def test_an_injected_mutant_of_the_lowered_netlist_is_exit_1(self) -> None:
@@ -195,9 +158,8 @@ class RunTest(unittest.TestCase):
         self.tree.set_spec(before_il="module \\m\nend\n")
         code, out, err = self.tree.run()
         self.assertEqual(code, 1, out + err)
-        self.assertIn(
-            "lower-sim: and_mux.v: NOTHING TO COMPARE: no word cell left after 'proc; opt'", out
-        )
+        self.assertIn("lower-sim: and_mux.v: NOTHING TO COMPARE: no word cell left after "
+                      "'proc; opt'", out)
         self.assertNotIn("pass", out)
         self.assertEqual(len(self.tree.log()), 1)  # the lowered run never happens
 
@@ -226,7 +188,8 @@ class RunTest(unittest.TestCase):
     def test_a_hard_block_design_is_skipped_not_a_tool_error(self) -> None:
         """lower_sim_micro (2026-10-18): spram.v, dpram.v, LargeRam.v ... ended as `odin3 (before)
         exit 1: cannot simulate `single_port_ram`: the cell type has no simulate hook`."""
-        self.tree.set_spec(before_il=SHIFTX_IL.replace("$shiftx", "\\single_port_ram"), before_rc=1)
+        self.tree.set_spec(before_il=SHIFTX_IL.replace("$shiftx", "\\single_port_ram"),
+                           before_rc=1)
         code, out, err = self.tree.run("--allow-skipped")
         self.assertEqual(code, 0, out + err)
         self.assertIn("\\single_port_ram: skipped (no simulate hook (a hard block)", out)
@@ -265,16 +228,10 @@ class RunTest(unittest.TestCase):
             self.assertIn("sim 5 9 ", line)
 
     def test_a_timeout_is_hard_with_no_traceback(self) -> None:
-        argv = [
-            "--odin3",
-            str(self.tree.bin / "odin3"),
-            "--work",
-            str(self.tree.root / "work"),
-            str(self.tree.root / "hand" / "and_mux.v"),
-        ]
-        with mock.patch.object(
-            memcap, "run", side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)
-        ):
+        argv = ["--odin3", str(self.tree.bin / "odin3"), "--work", str(self.tree.root / "work"),
+                str(self.tree.root / "hand" / "and_mux.v")]
+        with mock.patch.object(memcap, "run",
+                               side_effect=subprocess.TimeoutExpired(["odin3"], 1.0)):
             code, _, err = helpers.run_main(ls.main, argv)
         self.assertEqual(code, 3, err)
         self.assertNotIn("Traceback", err)

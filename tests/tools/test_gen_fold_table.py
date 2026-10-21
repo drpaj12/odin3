@@ -167,10 +167,8 @@ class GenFoldTableTest(unittest.TestCase):
         self.assertEqual(runs[0], "-q -p read_rtlil b.il; opt_expr; write_rtlil o.il")
         for i, (case, line) in enumerate(zip(gft.make_cases(5, count), body, strict=True)):
             fields = line.split()
-            self.assertEqual(
-                fields[:4],
-                [case.type, str(int(case.a_signed)), str(int(case.b_signed)), str(case.y_width)],
-            )
+            self.assertEqual(fields[:4], [case.type, str(int(case.a_signed)),
+                                          str(int(case.b_signed)), str(case.y_width)])
             self.assertEqual(fields[4:7], [case.a, case.b or "-", case.s or "-"])
             want = "x" * case.y_width if (i % gft.BATCH) % 5 == 0 else "0" * case.y_width
             self.assertEqual(fields[7], want, line)
@@ -180,15 +178,9 @@ class GenFoldTableTest(unittest.TestCase):
         clear = gft.Case("$add", False, False, 3, "011", "101", None)
         shift = gft.Case("$sshr", True, False, 3, "011", "1", None)
         text = gft.table_text([], [mixed, shift, clear], ["110", "011", "110"])
-        self.assertEqual(
-            text.splitlines(),
-            [
-                "$add 1 0 3 011 101 - 110",
-                "$add 0 0 3 011 101 - 110",
-                "$sshr 1 0 3 011 1 - 011",
-                "$add 0 0 3 011 101 - 110",
-            ],
-        )
+        self.assertEqual(text.splitlines(), [
+            "$add 1 0 3 011 101 - 110", "$add 0 0 3 011 101 - 110",
+            "$sshr 1 0 3 011 1 - 011", "$add 0 0 3 011 101 - 110"])
         self.assertTrue(gft.is_mixed(mixed))
         self.assertFalse(gft.is_mixed(shift))
         self.assertFalse(gft.is_mixed(clear))

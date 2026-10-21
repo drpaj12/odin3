@@ -25,16 +25,14 @@ def fixture(name: str) -> str:
 
 def write_golden(arch_dir: Path, design: str, text: str, **prov: str) -> Path:
     """A verified Parmys golden under ``arch_dir``/vtr/<d>/ (3H spec §3.4): the BLIF and a
-     ``.prov`` that passes ``qor_legs.verify_golden``. ``prov`` overrides or adds fields; a value
-    ."""
+    ``.prov`` that passes ``qor_legs.verify_golden``. ``prov`` overrides or adds fields; a value
+   ."""
     blif_path = arch_dir / "vtr" / design / f"{design}.parmys.blif"
     blif_path.parent.mkdir(parents=True, exist_ok=True)
     blif_path.write_text(text)
     fields = {
-        "vtr_commit": qor_legs.VTR_PIN,
-        "arch": f"vtr_flow/arch/timing/{arch_dir.name}.xml",
-        "tool": "parmys",
-        "status": "ok",
+        "vtr_commit": qor_legs.VTR_PIN, "arch": f"vtr_flow/arch/timing/{arch_dir.name}.xml",
+        "tool": "parmys", "status": "ok",
         "blif_sha256": hashlib.sha256(text.encode()).hexdigest(),
     }
     fields.update(prov)
@@ -81,11 +79,8 @@ def dump(netlist: blif.Netlist) -> str:
     out: list[str] = []
     for model in netlist.models:
         out.append(f".model {model.name}")
-        for directive, ports in (
-            (".inputs", model.inputs),
-            (".outputs", model.outputs),
-            (".clock", model.clocks),
-        ):
+        for directive, ports in ((".inputs", model.inputs), (".outputs", model.outputs),
+                                 (".clock", model.clocks)):
             if ports:
                 out.append(" ".join([directive, *ports]))
         if model.blackbox:
@@ -106,22 +101,12 @@ def _scramble_cell(cell: blif.Cell, rn: dict[str, str], rng: random.Random) -> b
         rng.shuffle(perm)
         rows = [("".join(p[i] for i in perm), o) for p, o in cell.rows]
         rng.shuffle(rows)
-        return blif.Names(
-            inputs=[_rename(cell.inputs[i], rn) for i in perm],
-            output=_rename(cell.output, rn),
-            rows=rows,
-            attrs=list(cell.attrs),
-        )
+        return blif.Names(inputs=[_rename(cell.inputs[i], rn) for i in perm],
+                          output=_rename(cell.output, rn), rows=rows, attrs=list(cell.attrs))
     if isinstance(cell, blif.Latch):
         ctrl = None if cell.control is None else _rename(cell.control, rn)
-        return blif.Latch(
-            input=_rename(cell.input, rn),
-            output=_rename(cell.output, rn),
-            ltype=cell.ltype,
-            control=ctrl,
-            init=cell.init,
-            attrs=list(cell.attrs),
-        )
+        return blif.Latch(input=_rename(cell.input, rn), output=_rename(cell.output, rn),
+                          ltype=cell.ltype, control=ctrl, init=cell.init, attrs=list(cell.attrs))
     conns = [(f, _rename(a, rn)) for f, a in cell.conns]
     rng.shuffle(conns)
     return blif.Subckt(model=cell.model, conns=conns, attrs=list(cell.attrs))
@@ -143,16 +128,9 @@ def scramble(netlist: blif.Netlist, seed: int) -> blif.Netlist:
         rn = dict(zip(nets, names, strict=True))
         cells = [_scramble_cell(c, rn, rng) for c in model.cells]
         rng.shuffle(cells)
-        models.append(
-            blif.Model(
-                name=model.name,
-                inputs=list(model.inputs),
-                outputs=list(model.outputs),
-                clocks=list(model.clocks),
-                cells=cells,
-                blackbox=model.blackbox,
-            )
-        )
+        models.append(blif.Model(name=model.name, inputs=list(model.inputs),
+                                 outputs=list(model.outputs), clocks=list(model.clocks),
+                                 cells=cells, blackbox=model.blackbox))
     rest = models[1:]
     rng.shuffle(rest)
     return blif.Netlist(path=netlist.path, models=models[:1] + rest)

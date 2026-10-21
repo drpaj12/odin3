@@ -115,9 +115,8 @@ os.execv(argv[1], argv[1:])
 
 
 def _exe(path: Path, text: str) -> Path:
-    path.write_text(
-        text.replace("{python}", sys.executable).replace("{oracle}", ORACLE), encoding="utf-8"
-    )
+    path.write_text(text.replace("{python}", sys.executable).replace("{oracle}", ORACLE),
+                    encoding="utf-8")
     path.chmod(path.stat().st_mode | stat.S_IXUSR)
     return path
 
@@ -147,18 +146,8 @@ class BridgeTest(unittest.TestCase):
         self.addCleanup(stack.close)
 
     def run_tool(self, *args: str, extra: dict[str, str] | None = None) -> tuple[int, str, str]:
-        argv = [
-            "--odin3",
-            str(self.odin3),
-            "--yosys",
-            str(self.yosys),
-            "--equiv-check",
-            str(self.equiv),
-            "--keep",
-            str(self.keep),
-            *args,
-            str(self.src),
-        ]
+        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
+                str(self.equiv), "--keep", str(self.keep), *args, str(self.src)]
         with mock.patch.dict(os.environ, extra or {}):
             return helpers.run_main(elab_equiv.main, argv)
 
@@ -172,40 +161,24 @@ class BridgeTest(unittest.TestCase):
 
     # -- the command strings ---------------------------------------------------------------
 
-    BACK = (
-        "proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; "
-        "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; "
-        "delete =A:blackbox; write_blif -gates -undef + unconn "
-    )
+    BACK = ("proc; flatten; opt; memory -nomap; opt; memory_map; opt -full; techmap; opt -fast; "
+            "abc -g AND,NAND,OR,NOR,XOR,XNOR,MUX; opt_clean; "
+            "delete =A:blackbox; write_blif -gates -undef + unconn ")
 
     def test_commands_exactly_with_top(self) -> None:
         code, out, err = self.run_tool("--top", "t")
         self.assertEqual(code, 0, out + err)
         work = str(self.keep.resolve())
         f = str(self.src)
-        self.assertEqual(
-            self.calls(),
-            [
-                ["yosys", "-V", work],
-                [
-                    "odin3",
-                    "--top",
-                    "t",
-                    "-p",
-                    f"read_verilog --nolatches {f}; write_rtlil a.il",
-                    work,
-                ],
-                ["yosys", "-p", "read_rtlil a.il; hierarchy -top t; " + self.BACK + "a.blif", work],
-                [
-                    "yosys",
-                    "-p",
-                    f"read_verilog -sv -nolatches {f}; hierarchy -top t; " + self.BACK + "b.blif",
-                    work,
-                ],
-                ["yosys", "-p", "read_rtlil a.il; write_rtlil b.il", work],
-                ["equiv-check", "a.blif", "b.blif", work],
-            ],
-        )
+        self.assertEqual(self.calls(), [
+            ["yosys", "-V", work],
+            ["odin3", "--top", "t", "-p", f"read_verilog --nolatches {f}; write_rtlil a.il", work],
+            ["yosys", "-p", "read_rtlil a.il; hierarchy -top t; " + self.BACK + "a.blif", work],
+            ["yosys", "-p", f"read_verilog -sv -nolatches {f}; hierarchy -top t; " + self.BACK
+             + "b.blif", work],
+            ["yosys", "-p", "read_rtlil a.il; write_rtlil b.il", work],
+            ["equiv-check", "a.blif", "b.blif", work],
+        ])
         self.assertIn("t.v: equivalent", out)
 
     def test_commands_without_top(self) -> None:
@@ -216,13 +189,10 @@ class BridgeTest(unittest.TestCase):
         calls = self.calls()
         script = f"read_verilog --nolatches {f}; write_rtlil a.il"
         self.assertEqual(calls[1], ["odin3", "-p", script, work])
-        self.assertEqual(
-            calls[2][2], "read_rtlil a.il; hierarchy -auto-top; " + self.BACK + "a.blif"
-        )
-        self.assertEqual(
-            calls[3][2],
-            f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; " + self.BACK + "b.blif",
-        )
+        self.assertEqual(calls[2][2], "read_rtlil a.il; hierarchy -auto-top; " + self.BACK
+                         + "a.blif")
+        self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
+                         + self.BACK + "b.blif")
 
     def test_techlib_reaches_side_a_only(self) -> None:
         lib = self.dir / "t.o3lib"
@@ -230,9 +200,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         f = str(self.src)
         calls = self.calls()
-        self.assertEqual(
-            calls[1][2], f"read_techlib {lib}; read_verilog --nolatches {f}; write_rtlil a.il"
-        )
+        self.assertEqual(calls[1][2], f"read_techlib {lib}; read_verilog --nolatches {f}; "
+                         "write_rtlil a.il")
         self.assertNotIn("techlib", calls[3][2])  # side B (Yosys) is unchanged
 
     def test_lib_reaches_both_sides(self) -> None:
@@ -242,16 +211,11 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         f, p = str(self.src), str(lib.resolve())
         calls = self.calls()
-        self.assertEqual(
-            calls[1][2],
-            f"read_verilog --lib --nomem2reg --nolatches {p}; "
-            f"read_verilog --nolatches {f}; write_rtlil a.il",
-        )
-        self.assertEqual(
-            calls[3][2],
-            f"read_verilog -sv -nolatches -nomem2reg {p}; "
-            f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; " + self.BACK + "b.blif",
-        )
+        self.assertEqual(calls[1][2], f"read_verilog --lib --nomem2reg --nolatches {p}; "
+                         f"read_verilog --nolatches {f}; write_rtlil a.il")
+        self.assertEqual(calls[3][2], f"read_verilog -sv -nolatches -nomem2reg {p}; "
+                         f"read_verilog -sv -nolatches {f}; hierarchy -auto-top; "
+                         + self.BACK + "b.blif")
 
     # -- --pass proc (2E spec 18.5, point (r)) ----------------------------------------------
 
@@ -262,37 +226,23 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         work = str(self.keep.resolve())
         f = str(self.src)
-        self.assertEqual(
-            self.calls(),
-            [
-                ["yosys", "-V", work],
-                [
-                    "odin3",
-                    "--top",
-                    "t",
-                    "-p",
-                    f"read_verilog --nolatches {f}; " + self.TRIO + "proc; write_rtlil a.il",
-                    work,
-                ],
-                ["yosys", "-p", "read_rtlil a.il; hierarchy -top t; " + self.BACK + "a.blif", work],
-                [
-                    "yosys",
-                    "-p",
-                    f"read_verilog -sv -nolatches {f}; hierarchy -top t; " + self.BACK + "b.blif",
-                    work,
-                ],
-                ["yosys", "-p", "read_rtlil a.il; write_rtlil b.il", work],
-                ["equiv-check", "a.blif", "b.blif", work],
-            ],
-        )
+        self.assertEqual(self.calls(), [
+            ["yosys", "-V", work],
+            ["odin3", "--top", "t", "-p",
+             f"read_verilog --nolatches {f}; " + self.TRIO + "proc; write_rtlil a.il", work],
+            ["yosys", "-p", "read_rtlil a.il; hierarchy -top t; " + self.BACK + "a.blif", work],
+            ["yosys", "-p", f"read_verilog -sv -nolatches {f}; hierarchy -top t; " + self.BACK
+             + "b.blif", work],
+            ["yosys", "-p", "read_rtlil a.il; write_rtlil b.il", work],
+            ["equiv-check", "a.blif", "b.blif", work],
+        ])
 
     def test_pass_proc_no_trio_drops_the_three_passes(self) -> None:
         code, out, err = self.run_tool("--pass", "proc", "--no-trio")
         self.assertEqual(code, 0, out + err)
         f = str(self.src)
-        self.assertEqual(
-            self.calls()[1][2], f"read_verilog --nolatches {f}; proc; write_rtlil a.il"
-        )
+        self.assertEqual(self.calls()[1][2],
+                         f"read_verilog --nolatches {f}; proc; write_rtlil a.il")
 
     def test_pass_elab_is_the_default_and_ignores_the_trio(self) -> None:
         self.run_tool("--no-trio")
@@ -305,13 +255,10 @@ class BridgeTest(unittest.TestCase):
         self.run_tool("--pass", "proc", "--unmap-enables", "--top", "t")
         f = str(self.src)
         calls = self.calls()
-        self.assertEqual(
-            calls[3][2],
-            elab_equiv.yosys_script(f"read_verilog -sv -nolatches {f}", "t", "b.blif", unmap=True),
-        )
-        self.assertEqual(
-            calls[2][2], elab_equiv.yosys_script("read_rtlil a.il", "t", "a.blif", unmap=True)
-        )
+        self.assertEqual(calls[3][2], elab_equiv.yosys_script(
+            f"read_verilog -sv -nolatches {f}", "t", "b.blif", unmap=True))
+        self.assertEqual(calls[2][2], elab_equiv.yosys_script(
+            "read_rtlil a.il", "t", "a.blif", unmap=True))
 
     def test_pass_other_than_elab_or_proc_is_a_usage_error(self) -> None:
         code, _, err = self.run_tool("--pass", "opt")
@@ -330,9 +277,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 0, out + err)
         f = str(self.src)
         calls = self.calls()
-        self.assertEqual(
-            calls[1][2], f"read_verilog --nolatches --vtr-compat {f}; write_rtlil a.il"
-        )
+        self.assertEqual(calls[1][2], f"read_verilog --nolatches --vtr-compat {f}; "
+                         "write_rtlil a.il")
         self.assertNotIn("vtr-compat", calls[3][2])  # side B (Yosys) is unchanged
 
     def test_files_are_kept(self) -> None:
@@ -341,15 +287,8 @@ class BridgeTest(unittest.TestCase):
             self.assertTrue((self.keep / name).is_file(), name)
 
     def test_without_keep_the_directory_is_removed(self) -> None:
-        argv = [
-            "--odin3",
-            str(self.odin3),
-            "--yosys",
-            str(self.yosys),
-            "--equiv-check",
-            str(self.equiv),
-            str(self.src),
-        ]
+        argv = ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
+                str(self.equiv), str(self.src)]
         code, _, _ = helpers.run_main(elab_equiv.main, argv)
         self.assertEqual(code, 0)
         work = Path(self.calls()[0][-1])
@@ -386,11 +325,8 @@ class BridgeTest(unittest.TestCase):
         """A wrong --equiv-check/--odin3/--yosys path exits 2 before any child runs (review I5)."""
         for flag in ("--odin3", "--yosys", "--equiv-check"):
             self.log.unlink(missing_ok=True)
-            argv = {
-                "--odin3": str(self.odin3),
-                "--yosys": str(self.yosys),
-                "--equiv-check": str(self.equiv),
-            }
+            argv = {"--odin3": str(self.odin3), "--yosys": str(self.yosys),
+                    "--equiv-check": str(self.equiv)}
             argv[flag] = str(self.dir / "nonexistent")
             args = [x for pair in argv.items() for x in pair]
             code, out, err = helpers.run_main(elab_equiv.main, [*args, str(self.src)])
@@ -401,19 +337,8 @@ class BridgeTest(unittest.TestCase):
     def test_a_only_does_not_need_equiv_check(self) -> None:
         code, _, err = helpers.run_main(
             elab_equiv.main,
-            [
-                "--odin3",
-                str(self.odin3),
-                "--yosys",
-                str(self.yosys),
-                "--equiv-check",
-                str(self.dir / "nonexistent"),
-                "--keep",
-                str(self.keep),
-                "--a-only",
-                str(self.src),
-            ],
-        )
+            ["--odin3", str(self.odin3), "--yosys", str(self.yosys), "--equiv-check",
+             str(self.dir / "nonexistent"), "--keep", str(self.keep), "--a-only", str(self.src)])
         self.assertEqual(code, 0, err)
 
     def test_odin3_failure_is_an_error(self) -> None:
@@ -437,8 +362,7 @@ class BridgeTest(unittest.TestCase):
         self.assertIn("Yosys side B crashed", out)
         # a crash while Yosys reads odin3's own output is not the oracle's
         code, _, err = self.run_tool(
-            extra={"FAKE_YOSYS_SIGNAL": "11", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"}
-        )
+            extra={"FAKE_YOSYS_SIGNAL": "11", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
         self.assertEqual(code, 2)
         self.assertIn("Yosys side A failed (exit -11)", err)
         # odin3 rejects and Yosys accepts: still a 2D rejection
@@ -446,11 +370,9 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 2)
 
     def test_a_child_killed_by_its_cap_is_out_of_memory(self) -> None:
-        code, _, err = self.run_tool(
-            "--mem-cap",
-            str(4 * GIB),
-            extra={"FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"},
-        )
+        code, _, err = self.run_tool("--mem-cap", str(4 * GIB),
+                                     extra={"FAKE_YOSYS_SIGNAL": "9",
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
         self.assertEqual(code, 2)
         self.assertIn("out of memory (cap 4G)", err)
         self.assertEqual(elab_equiv.format_cap(512 << 20), "512M")
@@ -459,23 +381,16 @@ class BridgeTest(unittest.TestCase):
         """2H: side B is the oracle reading the source; its size limit is exit 4 (unproven), spelt
         so that the sweep's `out of memory` mark (a hard failure) is not in it. Only side B: a
         side A kill (odin3's own netlist) stays an exit 2 error, above."""
-        code, out, err = self.run_tool(
-            "--mem-cap",
-            str(4 * GIB),
-            extra={"FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"},
-        )
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB),
+                                       extra={"FAKE_YOSYS_SIGNAL": "9",
+                                              "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
         self.assertEqual(code, 4, err)
         self.assertIn("elab-equiv: unproven: Yosys side B exceeded its memory cap (4G)", out)
         self.assertNotIn("out of memory", out + err)
         self.assertNotIn("equiv-check", self.names())
         # odin3 rejects the file and side B is killed: the rejection stands (exit 2)
-        code, _, err = self.run_tool(
-            extra={
-                "FAKE_ODIN3_RC": "1",
-                "FAKE_YOSYS_SIGNAL": "9",
-                "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv",
-            }
-        )
+        code, _, err = self.run_tool(extra={"FAKE_ODIN3_RC": "1", "FAKE_YOSYS_SIGNAL": "9",
+                                            "FAKE_YOSYS_SIGNAL_ON": "read_verilog -sv"})
         self.assertEqual(code, 2, err)
         self.assertIn("odin3 (side A) failed", err)
 
@@ -485,11 +400,8 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(code, 4, err)
         self.assertIn("elab-equiv: unproven: equiv-check exceeded its memory cap (4G)", out)
         self.assertNotIn("out of memory", out + err)
-        code, out, err = self.run_tool(
-            "--mem-cap",
-            str(4 * GIB),
-            extra={"FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"},
-        )
+        code, out, err = self.run_tool("--mem-cap", str(4 * GIB), extra={
+            "FAKE_YOSYS_SIGNAL": "9", "FAKE_YOSYS_SIGNAL_ON": "read_rtlil a.il; hierarchy"})
         self.assertEqual(code, 2, err)
         self.assertIn("out of memory (cap 4G)", err)
         code, _, err = self.run_tool("--mem-cap", str(4 * GIB), extra={"FAKE_ODIN3_SIGNAL": "9"})
@@ -518,29 +430,16 @@ class BridgeTest(unittest.TestCase):
 
     def test_the_budget_never_applies_to_odin3(self) -> None:
         """odin3 (side A) is not bounded by it: a slow odin3 is the tool's own failure."""
-        bridge = elab_equiv.Bridge(
-            elab_equiv.Options(
-                odin3="/x/odin3",
-                yosys="y",
-                equiv_check="e",
-                source=self.src,
-                top=None,
-                cap=GIB,
-                keep=None,
-                allow_version=None,
-                a_only=False,
-                budget=0.5,
-            )
-        )
+        bridge = elab_equiv.Bridge(elab_equiv.Options(
+            odin3="/x/odin3", yosys="y", equiv_check="e", source=self.src, top=None,
+            cap=GIB, keep=None, allow_version=None, a_only=False, budget=0.5))
         self.assertIsNone(bridge.remaining(["/x/odin3", "-p", "x"], "odin3 (side A)"))
         self.assertLessEqual(bridge.remaining(["y", "-p", "x"], "Yosys side A") or 0, 0.5)
 
     def test_yosys_failures_are_errors(self) -> None:
-        for fail, what in (
-            ("read_rtlil a.il; hierarchy", "Yosys side A"),
-            ("read_verilog -sv", "Yosys side B"),
-            ("write_rtlil b.il", "Yosys's read_rtlil of a.il"),
-        ):
+        for fail, what in (("read_rtlil a.il; hierarchy", "Yosys side A"),
+                           ("read_verilog -sv", "Yosys side B"),
+                           ("write_rtlil b.il", "Yosys's read_rtlil of a.il")):
             self.log.unlink(missing_ok=True)
             code, _, err = self.run_tool(extra={"FAKE_YOSYS_FAIL": fail})
             self.assertEqual(code, 2, fail)
@@ -572,15 +471,13 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.names(), ["yosys"])
 
     def test_other_version_allowed_by_name(self) -> None:
-        code, out, err = self.run_tool(
-            "--allow-version", "0.69", extra={"FAKE_YOSYS_VERSION": "Yosys 0.69 (git sha1 abc)"}
-        )
+        code, out, err = self.run_tool("--allow-version", "0.69",
+                                       extra={"FAKE_YOSYS_VERSION": "Yosys 0.69 (git sha1 abc)"})
         self.assertEqual(code, 0, out + err)
 
     def test_allow_version_does_not_admit_others(self) -> None:
-        code, _, _ = self.run_tool(
-            "--allow-version", "0.69", extra={"FAKE_YOSYS_VERSION": "Yosys 0.70 (git sha1 abc)"}
-        )
+        code, _, _ = self.run_tool("--allow-version", "0.69",
+                                   extra={"FAKE_YOSYS_VERSION": "Yosys 0.70 (git sha1 abc)"})
         self.assertEqual(code, 2)
 
     def test_version_oracle_matches_055_not_0550(self) -> None:
@@ -625,9 +522,8 @@ class BridgeTest(unittest.TestCase):
         self.assertNotIn("async2sync", plain)
         self.assertIn("memory_map; opt -full; async2sync; techmap", a2s)
         self.assertEqual(plain, a2s.replace("async2sync; ", ""))
-        both = elab_equiv.yosys_script(
-            "read_verilog a.v", "t", "x.blif", unmap=True, async2sync=True
-        )
+        both = elab_equiv.yosys_script("read_verilog a.v", "t", "x.blif", unmap=True,
+                                       async2sync=True)
         self.assertIn("async2sync; dffunmap; techmap", both)
 
     def test_async2sync_flag_reaches_both_sides(self) -> None:
@@ -706,31 +602,16 @@ class MemcapTest(unittest.TestCase):
         done = memcap.run(self.talk, 4 * GIB, capture_output=True)
         self.assertEqual(done.returncode, 0)
         self.assertEqual(done.stdout, "hello\n")
-        self.assertEqual(
-            self.logged(),
-            [
-                [
-                    "systemd-run",
-                    "--user",
-                    "--scope",
-                    "-q",
-                    "-p",
-                    f"MemoryMax={4 * GIB}",
-                    "-p",
-                    "MemorySwapMax=0",
-                    *self.talk,
-                ]
-            ],
-        )
+        self.assertEqual(self.logged(), [["systemd-run", "--user", "--scope", "-q", "-p",
+                                          f"MemoryMax={4 * GIB}", "-p", "MemorySwapMax=0",
+                                          *self.talk]])
 
     def test_heavy_slice_is_used(self) -> None:
         _exe(self.bin / "systemd-run", FAKE_SYSTEMD_RUN)
         with mock.patch.dict(os.environ, {"ODIN3_HEAVY_SLICE": "odin3-heavy.slice"}):
             memcap.run(self.child, GIB)
-        self.assertEqual(
-            self.logged()[0][:6],
-            ["systemd-run", "--user", "--scope", "-q", "--slice=odin3-heavy.slice", "-p"],
-        )
+        self.assertEqual(self.logged()[0][:6], ["systemd-run", "--user", "--scope", "-q",
+                                                "--slice=odin3-heavy.slice", "-p"])
 
     def test_output_is_not_captured_unless_asked(self) -> None:
         _exe(self.bin / "systemd-run", FAKE_SYSTEMD_RUN)
@@ -756,12 +637,10 @@ class MemcapTest(unittest.TestCase):
     def test_a_timeout_kills_the_whole_process_group(self) -> None:
         """Review M2: the child's own children (ABC under equiv-check) die with it."""
         pid_file = self.dir / "grandchild.pid"
-        code = (
-            "import subprocess, sys, time\n"
-            "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
-            f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
-            "time.sleep(60)\n"
-        )
+        code = ("import subprocess, sys, time\n"
+                "g = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+                f"open({str(pid_file)!r}, 'w').write(str(g.pid))\n"
+                "time.sleep(60)\n")
         with self.assertRaises(subprocess.TimeoutExpired):
             memcap.run([sys.executable, "-c", code], 4 * GIB, capture_output=True, timeout=2)
         grandchild = int(pid_file.read_text())
@@ -776,12 +655,8 @@ class MemcapTest(unittest.TestCase):
             self.fail("the grandchild survived the timeout")
 
     def test_timeout_run_returns_output_and_code(self) -> None:
-        done = memcap.run(
-            [sys.executable, "-c", "import sys; print('x'); sys.exit(3)"],
-            GIB,
-            capture_output=True,
-            timeout=30,
-        )
+        done = memcap.run([sys.executable, "-c", "import sys; print('x'); sys.exit(3)"], GIB,
+                          capture_output=True, timeout=30)
         self.assertEqual((done.returncode, done.stdout), (3, "x\n"))
 
     def test_asan_child_without_systemd_run(self) -> None:

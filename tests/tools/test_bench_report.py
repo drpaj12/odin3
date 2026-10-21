@@ -53,33 +53,11 @@ class ParseTest(unittest.TestCase):
 
     def test_the_columns_are_the_brief_s_list(self) -> None:
         names = set(bench_report.ELAB_COLUMNS)
-        for needed in (
-            "bytes",
-            "parse_ms",
-            "stage1_ms",
-            "bind_ms",
-            "stage2_ms",
-            "parsed_nodes",
-            "parsed_bytes",
-            "elab_nodes",
-            "elab_bytes",
-            "modules",
-            "specs",
-            "cells",
-            "procs",
-            "mems",
-            "nets",
-            "wires",
-            "pins",
-            "est_pins_B",
-            "est_nets_B",
-            "est_nodes_B",
-            "est_wires_B",
-            "est_bodies_B",
-            "est_elab_B",
-            "est_total_B",
-            "rss_kib",
-        ):
+        for needed in ("bytes", "parse_ms", "stage1_ms", "bind_ms", "stage2_ms", "parsed_nodes",
+                       "parsed_bytes", "elab_nodes", "elab_bytes", "modules", "specs", "cells",
+                       "procs", "mems", "nets", "wires", "pins", "est_pins_B", "est_nets_B",
+                       "est_nodes_B", "est_wires_B", "est_bodies_B", "est_elab_B", "est_total_B",
+                       "rss_kib"):
             self.assertIn(needed, names)
 
 
@@ -115,7 +93,7 @@ class TargetTest(unittest.TestCase):
 
     def test_koios_files_do_not_count_among_the_31(self) -> None:
         rows = rows_31(1.0)
-        rows["koios/big.v"] = row(elab_ms=10**6)
+        rows["koios/big.v"] = row(elab_ms=10 ** 6)
         got = self.verdicts(rows)
         self.assertEqual(got["31 verilog/*.v files, total elaboration"], "ok")
 
@@ -174,10 +152,8 @@ class SmokeTest(unittest.TestCase):
 
     def fake(self, line: str) -> Path:
         path = self.dir / "bench_elab"
-        path.write_text(
-            FAKE_OK.replace("{python}", sys.executable).replace("{line!r}", repr(line)),
-            encoding="utf-8",
-        )
+        path.write_text(FAKE_OK.replace("{python}", sys.executable).replace("{line!r}", repr(line)),
+                        encoding="utf-8")
         path.chmod(path.stat().st_mode | stat.S_IXUSR)
         return path
 
@@ -186,8 +162,7 @@ class SmokeTest(unittest.TestCase):
         src = self.dir / "a.v"
         src.write_text("module m; endmodule\n", encoding="utf-8")
         code, out, err = helpers.run_main(
-            bench_report.main, ["smoke", "--bench", str(bench), str(src), str(src)]
-        )
+            bench_report.main, ["smoke", "--bench", str(bench), str(src), str(src)])
         self.assertEqual(code, 0, err)
         self.assertIn("2 files", out)
 
@@ -196,8 +171,7 @@ class SmokeTest(unittest.TestCase):
         src = self.dir / "a.v"
         src.write_text("module m; endmodule\n", encoding="utf-8")
         code, _, err = helpers.run_main(
-            bench_report.main, ["smoke", "--bench", str(bench), str(src)]
-        )
+            bench_report.main, ["smoke", "--bench", str(bench), str(src)])
         self.assertEqual(code, 1)
         self.assertIn("est_total_B", err)
 
@@ -206,15 +180,12 @@ class SmokeTest(unittest.TestCase):
         bench.write_text(
             f"#!{sys.executable}\nimport sys\n"
             "assert sys.argv[1] == '--one' and sys.argv[3:] == ['--techlib', 'T.o3lib'], sys.argv\n"
-            f"print({FULL!r})\n",
-            encoding="utf-8",
-        )
+            f"print({FULL!r})\n", encoding="utf-8")
         bench.chmod(bench.stat().st_mode | stat.S_IXUSR)
         src = self.dir / "a.v"
         src.write_text("x", encoding="utf-8")
         code, _, err = helpers.run_main(
-            bench_report.main, ["smoke", "--bench", str(bench), "--techlib", "T.o3lib", str(src)]
-        )
+            bench_report.main, ["smoke", "--bench", str(bench), "--techlib", "T.o3lib", str(src)])
         self.assertEqual(code, 0, err)
 
     def test_smoke_fails_when_the_bench_fails(self) -> None:
@@ -224,8 +195,7 @@ class SmokeTest(unittest.TestCase):
         src = self.dir / "a.v"
         src.write_text("x", encoding="utf-8")
         code, _, err = helpers.run_main(
-            bench_report.main, ["smoke", "--bench", str(bench), str(src)]
-        )
+            bench_report.main, ["smoke", "--bench", str(bench), str(src)])
         self.assertEqual(code, 1)
         self.assertIn("exit 1", err)
 

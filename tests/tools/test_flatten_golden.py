@@ -44,11 +44,9 @@ class FormatTests(unittest.TestCase):
 
 class CheckOneTests(unittest.TestCase):
     def _check(self, runs: list[dict[str, str] | str], expected: str | None) -> list[str] | str:
-        with (
-            tempfile.TemporaryDirectory() as tmp,
-            mock.patch.object(fg, "ROOT", Path(tmp)),
-            mock.patch.object(fg, "run_script", side_effect=runs),
-        ):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            fg, "ROOT", Path(tmp)
+        ), mock.patch.object(fg, "run_script", side_effect=runs):
             (Path(tmp) / "tests/flatten").mkdir(parents=True)
             (Path(tmp) / "tests/flatten/x.blif").write_text("# no tag\n")
             exp = Path(tmp) / fg.EXPECTED
