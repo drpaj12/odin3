@@ -42,14 +42,12 @@ Build status is coded by fill and by border, so it survives greyscale printing:
 | specified | white fill, dashed blue border | approved specification and plan |
 | planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
 
-The status shown is as of 2026-10-20 (v1.0 phases: ADR D11):
+The status shown is as of the v1.0.0 release, 2026-10-21 (v1.0 phases: ADR D11):
 
-- **Built:** Phases 0-2; Phase 3's code (`wreduce`, `flatten`, `lower`, `partial_map`/`hardmap`,
-  linked ABC, `write_blif --vtr`, `vtr-qor`); Phase 4's 4.1, 4.2 (PRs A to C), 4.7 and 4.8; Phase 5's
-  5.1 and 5.2.
-- **In progress:** the Phase 3 exit runs on the 15-design local gate; `partial_map` PR D and 4.3 to 4.5.
-- **Specified:** 5.3 and 5.4. **Planned:** 4.13, Phase 6 and Phase 7.
-- **After v1.0:** SystemVerilog (slang), VHDL (GHDL) and the research plugins.
+- **Built:** Phases 0 to 7, all closed (see `docs/RELEASE-NOTES-1.0.md`). FF feature matching (4.6)
+  and the CIRCT, EDIF and VQM writers were dropped from v1.0.
+- **Planned (white, dotted):** the `slang` front end and the executable hooks.
+- **After v1.0:** SystemVerilog (slang), VHDL (GHDL), Wyrd-I and Loki, in their own repositories.
 
 When the status changes, update the `built`/`inprog`/`spec`/`planned` keys in the figures, the
 features table and the phases table together.
