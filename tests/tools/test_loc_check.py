@@ -157,6 +157,15 @@ class CompareTests(unittest.TestCase):
         named = lc.compare("json", dump(("wire", "x", A), ("net", "n", "")), dump(("net", "n", A)))
         self.assertEqual((named["net"].inherited, named["net"].gained), (1, 0))
 
+    def test_module_location_is_modgained(self) -> None:
+        # a constant driver the reader makes takes the module's location (X-9, reported)
+        before = dump(("module", "m", A), ("node", "$c1", ""), ("node", "$c2", ""))
+        after = dump(("module", "m", A), ("node", "$c1", A), ("node", "$c2", B))
+        t = lc.compare("verilog", before, after)["node"]
+        self.assertEqual((t.modgained, t.gained), (1, 1))
+        problems = lc.check_tallies("verilog", {"node": lc.Tally(had=1, modgained=1)})
+        self.assertEqual(problems, [])
+
     def test_new_objects_are_not_gained(self) -> None:
         before = dump(("wire", "x", A))
         after = dump(("wire", "x", A), ("wire", "$n7", B))
@@ -195,13 +204,18 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(any("gained" in p for p in problems), problems)
 
     def test_line_where_lossless_fails(self) -> None:
+        before = dump(("wire", "x", A))
+        after = dump(("wire", "x", "a.v:3"))
+        for fmt in ("json", "verilog", "plain"):
+            problems = lc.check_tallies(fmt, lc.compare(fmt, before, after))
+            self.assertTrue(any("line-only" in p for p in problems), (fmt, problems))
+
+    def test_pool_pairs_by_line_only_where_the_format_does(self) -> None:
         before = dump(("node", "$c1", A))
         after = dump(("node", "$c1", "a.v:3"))
-        problems = lc.check_tallies("json", lc.compare("json", before, after))
-        self.assertTrue(any("line" in p for p in problems), problems)
-        self.assertTrue(
-            any("line" in p for p in lc.check_tallies("plain", lc.compare("plain", before, after)))
-        )
+        self.assertEqual(lc.compare("verilog", before, after)["node"].line, 1)
+        t = lc.compare("json", before, after)["node"]
+        self.assertEqual((t.line, t.unclassified), (0, 1))
 
     def test_clean_pair(self) -> None:
         rows = dump(("module", "m", A), ("wire", "x", A), ("node", "$c1", B))

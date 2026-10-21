@@ -21,7 +21,10 @@ generated names, so no other pairing exists. Columns:
 ``inherited`` BLIF VTR cells with a location after (the dialect writes none for a cell: D-5);
 ``lost``     had objects with none after, each assigned to a class X-1 to X-8 by RULES (spec
              section 5: the object has no carrier in that format), else ``unclassified``;
-``gained``   an object with none before that has one after (a pool counts the surplus);
+``gained``   an object with none before that has one after (a pool counts the surplus); a net
+             with a declared wire's location is `inherited` (D-2, D-3), an object with its
+             module's own location is `modgained` (a constant driver the reader makes, X-9:
+             reported, not a failure);
 ``spec``     median and p90 of the distinct (file, line) pairs per had object, before and after
              (after: the had objects that kept a location).
 
@@ -45,6 +48,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -94,6 +98,7 @@ RULES: dict[tuple[str, str, bool], str] = {
 # reader gives that net the cell's comment); and a BLIF VTR net name `hier/short@file:line`
 # carries the line only (W-3: names and the Verilog comment take the first location, line only).
 LINE_OK = {("verilog", "node"): "X-2", ("verilog", "net"): "X-2", ("blif", "net"): "name"}
+LINE_POOL = {*LINE_OK, ("blif", "node")}  # the pools that may pair by file and line
 GENERATED = re.compile(r"^\$[cnwm]\d+$")
 LOC_RE = re.compile(r"^(.*):(\d+)(?:\.\d+(?:-\d+\.\d+)?)?$")
 TOP_RE = re.compile(r"read_verilog: elaborated top '([^']+)'")
@@ -210,12 +215,22 @@ class Tally:
     lost: dict[str, int] = field(default_factory=dict)
     unclassified: int = 0
     gained: int = 0
+    modgained: int = 0
     capped: int = 0
     lines_before: list[int] = field(default_factory=list)
     lines_after: list[int] = field(default_factory=list)
 
     def add(self, other: Tally) -> None:
-        for name in ("objects", "had", "same", "line", "inherited", "unclassified", "gained"):
+        for name in (
+            "objects",
+            "had",
+            "same",
+            "line",
+            "inherited",
+            "unclassified",
+            "gained",
+            "modgained",
+        ):
             setattr(self, name, getattr(self, name) + getattr(other, name))
         self.capped += other.capped
         for cls, count in other.lost.items():
@@ -263,13 +278,17 @@ class Scope:
     wire_srcs: frozenset[str]
     written: CellSet | None
     present: bool = True
+    module_src: str = ""
 
 
-def from_wire(scope: Scope, after: Obj) -> bool:
-    """A net that has the location of a declared wire of its module after read-back: the readers
-    give a net the location of its netname or declaration (D-2, D-3), so the net is `inherited`
-    from the wire, not `gained`."""
-    return scope.kind == "net" and after.src in scope.wire_srcs
+def gain_kind(scope: Scope, after: Obj) -> str:
+    """How an object with no location before has one after: "wire" for a net with the location
+    of a declared wire of its module (the readers give a net its netname's or declaration's
+    location, D-2 and D-3: `inherited`); "module" for an object with its module's own location
+    (a constant driver the reader makes: X-9, counted as `modgained`); else "" (`gained`)."""
+    if scope.module_src and after.src == scope.module_src:
+        return "module"
+    return "wire" if scope.kind == "net" and after.src in scope.wire_srcs else ""
 
 
 def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> None:
@@ -279,8 +298,10 @@ def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> No
     inherits = fmt == "blif" and kind == "node"  # counted as `inherited`, not as same or line
     if not mine:
         if after is not None and after.src and not inherits:
-            tally.inherited += from_wire(scope, after)
-            tally.gained += not from_wire(scope, after)
+            kind_of = gain_kind(scope, after)
+            tally.inherited += kind_of == "wire"
+            tally.modgained += kind_of == "module"
+            tally.gained += kind_of == ""
         return
     theirs = parse_locs(after.src) if after is not None else []
     if not theirs:
@@ -296,9 +317,10 @@ def judge_pair(scope: Scope, before: Obj, after: Obj | None, tally: Tally) -> No
 
 
 def pool_pairs(
-    group_b: list[Obj], group_a: list[Obj]
+    group_b: list[Obj], group_a: list[Obj], by_line: bool
 ) -> tuple[list[tuple[Obj, Obj | None]], list[Obj]]:
-    """Pairs the objects with no name partner: exact location list, then first file and line.
+    """Pairs the objects with no name partner: exact location list, then (by_line, for the formats
+    that keep a line only) first file and line.
     Returns (before object, after object or None) for every had object, and the after objects
     with a location that nobody took."""
     pairs: list[tuple[Obj, Obj | None]] = []
@@ -312,16 +334,16 @@ def pool_pairs(
             pairs.append((obj, free[obj.src].pop()))
         else:
             rest.append(obj)
-    by_line: dict[tuple[str, int], list[Obj]] = {}
-    for objs in free.values():
+    lines: dict[tuple[str, int], list[Obj]] = {}
+    for objs in free.values() if by_line else []:
         for obj in objs:
             first = parse_locs(obj.src)
             if first:
-                by_line.setdefault((first[0].file, first[0].line), []).append(obj)
+                lines.setdefault((first[0].file, first[0].line), []).append(obj)
     for obj in rest:
         first = parse_locs(obj.src)
         key = (first[0].file, first[0].line) if first else ("", 0)
-        pairs.append((obj, by_line[key].pop() if by_line.get(key) else None))
+        pairs.append((obj, lines[key].pop() if lines.get(key) else None))
     taken = {id(a) for _, a in pairs if a is not None}
     return pairs, [obj for objs in free.values() for obj in objs if id(obj) not in taken]
 
@@ -343,14 +365,19 @@ def compare_group(scope: Scope, before: list[Obj], after: list[Obj], tally: Tall
     left_a = [o for o in after if o.name not in taken or is_generated(o.name) or pool_all]
     if scope.written is not None:  # a cell with no carrier takes what is left (stable sort)
         left_b.sort(key=lambda o: o.name not in (scope.written.names if scope.written else ()))
-    pairs, surplus = pool_pairs(left_b, left_a)
+    pairs, surplus = pool_pairs(left_b, left_a, (fmt, kind) in LINE_POOL)
     for obj, partner in pairs:
         judge_pair(scope, obj, partner, tally)
     nolocs = sum(1 for o in left_b if not o.src)
     if not pool_all:
-        wired = min(sum(1 for o in surplus if from_wire(scope, o)), nolocs)
-        tally.inherited += wired
-        tally.gained += min(len(surplus) - wired, nolocs - wired)
+        kinds = Counter(gain_kind(scope, o) for o in surplus)
+        room = nolocs
+        for kind_of in ("module", "wire", ""):
+            take = min(kinds[kind_of], room)
+            room -= take
+            tally.modgained += take if kind_of == "module" else 0
+            tally.inherited += take if kind_of == "wire" else 0
+            tally.gained += take if kind_of == "" else 0
     else:
         tally.inherited += sum(1 for o in after if o.src)
 
@@ -381,7 +408,8 @@ def compare(
                 tally.capped += len(locs) >= CAP
         wires = frozenset(o.src for o in groups_b.get((key[0], "wire"), []) if o.src)
         cells = written.get(key[0]) if written else None
-        scope = Scope(fmt, kind, wires, cells, key[0] in modules_after)
+        mods = [o.src for o in groups_b.get((key[0], "module"), [])]
+        scope = Scope(fmt, kind, wires, cells, key[0] in modules_after, mods[0] if mods else "")
         compare_group(scope, group_b, groups_a.get(key, []), tally)
     return out
 
@@ -592,8 +620,8 @@ def row_text(kind: str, t: Tally) -> str:
     sb, sa = specificity(t.lines_before), specificity(t.lines_after)
     return (
         f"{kind:6s} objects {t.objects:6d} had {t.had:6d} same {t.same:6d} line {t.line:5d} "
-        f"inherited {t.inherited:5d} lost {lost} gained {t.gained} capped {t.capped} "
-        f"spec {sb[0]:g}/{sb[1]:g} -> {sa[0]:g}/{sa[1]:g}"
+        f"inherited {t.inherited:5d} lost {lost} gained {t.gained} modgained {t.modgained} "
+        f"capped {t.capped} spec {sb[0]:g}/{sb[1]:g} -> {sa[0]:g}/{sa[1]:g}"
     )
 
 
