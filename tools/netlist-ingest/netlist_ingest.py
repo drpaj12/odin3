@@ -255,7 +255,8 @@ def check_names(args: argparse.Namespace) -> int:
 
 
 def check_prov(args: argparse.Namespace) -> int:
-    """G-6: Verilog objects (module, wires, instances) carry a netlist location, BLIF objects none (IMPORTED)."""
+    """G-6: Verilog objects (module, wires, instances) carry a netlist location, BLIF objects
+    none (IMPORTED)."""
     micro = micro_dir(args.micro)
     top = top_of(micro / "mapped.v")
     netlist_file = str(micro / "mapped.v")
@@ -309,7 +310,8 @@ def check_src(args: argparse.Namespace) -> int:
     print(f"netlist_src {args.micro}: {len(restored)} of {expected} src attributes with an "
           f"{rtl} location restored")
     if expected == 0:
-        print(f"FAIL {micro / 'mapped_src.v'} has no rtl.v src attribute (the check would be vacuous)")
+        print(f"FAIL {micro / 'mapped_src.v'} has no rtl.v src attribute "
+              f"(the check would be vacuous)")
         return EXIT_FAIL
     if len(restored) != expected:
         print(f"FAIL {len(restored)} objects have an {rtl} location, "

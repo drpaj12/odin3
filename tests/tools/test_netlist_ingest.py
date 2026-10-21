@@ -10,7 +10,7 @@ import io
 import os
 import shutil
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -99,7 +99,8 @@ class PlantedTests(unittest.TestCase):
                     code = check(self.args(**extra))
         return code, out.getvalue()
 
-    def edit_dump(self, keep: Callable[[str, Rows], Rows]) -> mock._patch:
+    @contextlib.contextmanager
+    def edit_dump(self, keep: Callable[[str, Rows], Rows]) -> Iterator[None]:
         """Patch dump_lines: ``keep(read script, rows)`` gives the rows the check sees."""
         real = ni.dump_lines
 
@@ -107,7 +108,8 @@ class PlantedTests(unittest.TestCase):
             rows, why = real(binary, read)
             return keep(read, rows), why
 
-        return mock.patch.object(ni, "dump_lines", planted)
+        with mock.patch.object(ni, "dump_lines", planted):
+            yield
 
     def plant_equiv(self, name: str, old: str, new: str, form: str) -> tuple[int, str]:
         if not os.environ.get("ODIN3_ABC"):
@@ -199,7 +201,7 @@ class PlantedTests(unittest.TestCase):
         self.assertIn("vacuously", text)
 
     def test_src_unrestored_object_fails(self) -> None:
-        dropped = []
+        dropped: Rows = []
 
         def lose_one(_: str, rows: Rows) -> Rows:
             for row in rows:

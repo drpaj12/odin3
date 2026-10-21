@@ -2102,6 +2102,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
+        # The 18 legs take about 5 s in total in a release build (13 s debug, ctest -j1). With no
+        # memory cap available the driver prints `SKIP netlist-ingest equiv <micro>: <reason>` and
+        # exits 77, which CTest reports as Skipped.
         foreach(_ni_micro IN LISTS ODIN3_NETLIST_MICROS)
             foreach(_ni_form IN ITEMS verilog blif)
                 add_test(NAME netlist_ingest_${_ni_micro}_${_ni_form}
