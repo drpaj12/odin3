@@ -21,9 +21,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import vpr_leg
 from loc_check import level_script, parse_techlibs
 
+import vpr_leg
 from prov_cover import (
     GENERATOR_NETS,
     ROOT_DIR,

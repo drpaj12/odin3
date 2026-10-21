@@ -362,11 +362,15 @@ $n9\t2\t2\t0\t0\t#4
 gnd\t3\t1\t0\t0\t#5
 """
     NET = """<block name="x.net" instance="FPGA_packed_netlist[0]">
-<block name="in[0]" instance="io[0]" mode="inpad"><block name="in[0]" instance="inpad[0]"/></block>
-<block name="out:o" instance="io[1]" mode="outpad"><block name="out:o" instance="outpad[0]"/></block>
-<block name="q" instance="clb[0]"><block name="fle" instance="fle[0]"><block name="q" instance="ff[0]"/>
-<block name="open" instance="lut[0]"/><block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block></block>
-<block name="top/n1@/d/a.v:7" instance="clb[1]"><block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block>
+<block name="in[0]" instance="io[0]" mode="inpad">
+<block name="in[0]" instance="inpad[0]"/></block>
+<block name="out:o" instance="io[1]" mode="outpad">
+<block name="out:o" instance="outpad[0]"/></block>
+<block name="q" instance="clb[0]"><block name="fle" instance="fle[0]">
+<block name="q" instance="ff[0]"/><block name="open" instance="lut[0]"/>
+<block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block></block>
+<block name="top/n1@/d/a.v:7" instance="clb[1]">
+<block name="top/n1@/d/a.v:7" instance="lut6[0]"/></block>
 <block name="$n9" instance="memory[0]"><block name="$n9" instance="mem[0]"/></block>
 <block name="gnd" instance="io[2]"><block name="gnd" instance="inpad[0]"/></block>
 </block>

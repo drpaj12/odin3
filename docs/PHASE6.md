@@ -51,12 +51,50 @@ the Phase 3 design set and the Phase 5 LPM micros.
   Baseline for the read-back cases: `docs/specs/2026-10-20-5.4-hdl-locations-design.md` section 14
   (`tools/loc-check`, 5.4e): per format and object kind, what survives a write and read, the lost
   objects by class X-1 to X-9, and the specificity before and after.
+  - [x] 6.5a `dump_locs --types`; 6.5b `tools/prov-cover` legs a, b and c (PRs merged).
+  - [x] 6.5c leg d (VPR placed blocks, `tools/prov-cover/vpr_leg.py`, CTest `prov_cover_sweep_place`):
+    built, every placed name maps to a netlist name (0 unmapped, 0 unplaced on the 14 designs).
+  - [ ] Gate green: leg b and d lose the location of the driver of an output port bit (D1/D3) in 13
+    of 14 designs and, until PR 207 merges, the 8 `single_port_ram` of ch_intrinsics (D2). Decision
+    for Peter pending: a counted `port-driver` class, or locations on port bits.
 
 ## Dependencies
 
 - 6.3 depends on Phase 5's `read_json` (5.3); 6.5's read-back cases depend on 5.4.
 - 6.1, 6.2 and 6.4 depend only on what is merged and can start at any time.
 - 6.5's VPR part uses `tools/vtr-qor` (heavy-run lock: run when lanes are idle).
+
+## Numbers (6.5, 2026-10-21, debug build, VTR 12 `vpr`, k6_frac arch)
+
+Per design and leg on the 14 small VTR designs (the Phase 3 set that is tested for equivalence).
+Cells are resolved/objects and coverage (after the approved `inherited` and `pad` classes; leg d
+objects are placed blocks plus the atoms inside them, pads and the `gnd`/`vcc` generators excluded);
+`def` is the defect count; the last column is leg a specificity (median / p90 distinct HDL lines).
+
+| design | leg a | leg b | leg d | a median / p90 |
+|---|---|---|---|---|
+| single_wire | 0/0 n/a | 0/1 n/a (def 0) | 0/0 n/a (def 0, pad 2) | 0 / 0 |
+| single_ff | 1/1 100.0% | 0/1 0.0% (def 1) | 0/2 0.0% (def 1, pad 3) | 1 / 1 |
+| and_latch | 2/2 100.0% | 1/2 50.0% (def 1) | 2/3 66.7% (def 1, pad 4) | 1 / 1 |
+| multiclock_separate_and_latch | 6/6 100.0% | 2/4 50.0% (def 2) | 4/6 66.7% (def 2, pad 8) | 2 / 2 |
+| multiclock_output_and_latch | 11/11 100.0% | 8/11 88.9% (def 1) | 9/10 90.0% (def 1, pad 7) | 1 / 2 |
+| multiclock_reader_writer | 32/32 100.0% | 31/34 96.9% (def 1) | 31/32 96.9% (def 1, pad 4) | 2 / 8 |
+| diffeq1 | 628/628 100.0% | 532/631 84.7% (def 96) | 563/659 85.4% (def 96, pad 258) | 4 / 4 |
+| diffeq2 | 435/435 100.0% | 339/438 77.9% (def 96) | 360/456 78.9% (def 96, pad 162) | 3 / 3 |
+| ch_intrinsics | 225/225 100.0% | 144/285 77.8% (def 73) | 154/196 78.6% (def 41, pad 229) | 8 / 8 |
+| ch_intrinsics_nolatches | 312/312 100.0% | 157/289 70.4% (def 106) | 163/232 70.3% (def 66, pad 229) | 8 / 8 |
+| stereovision3 | 320/320 100.0% | 292/324 91.2% (def 28) | 304/332 91.6% (def 28, pad 41) | 2 / 8 |
+| sha | 2503/2503 100.0% | 2467/2506 98.6% (def 36) | 2598/2634 98.6% (def 36, pad 74) | 3 / 3 |
+| mkPktMerge | 1394/1394 100.0% | 701/860 99.6% (def 3) | 706/709 99.6% (def 3, pad 467) | 2 / 4 |
+| blob_merge | 10542/10542 100.0% | 10305/10408 99.4% (def 61) | 10496/10557 99.4% (def 61, pad 136) | 1 / 8 |
+
+Leg c (LPM micros, `tests/lpm`, 8 files): 100% resolved in memory and after read-back for all of
+them; `altsyncram_soft` has 3 objects in memory and 0 after the `-netlist` read-back (it is lowered
+to logic; nothing to count). Leg a is 100% everywhere; every leg-b and leg-d defect is the loss of
+the location of a driver of an output port bit (D1/D3; ch_intrinsics also D2). Leg d records no
+specificity (the placed names carry no location list; the leg-b figure applies).
+Source: `prov-cover --legs a,b|c|d --smallest-first` reports (`tests/prov/expect_vtr14.txt` and
+`expect_vtr14_d.txt` list the known defects).
 
 ## Decisions log
 
@@ -96,3 +134,17 @@ the Phase 3 design set and the Phase 5 LPM micros.
    Two settled outputs on one net are reported in the WARNING naming both ports. `read_json
    --auto-blackbox` follows the same rule, with the same text, when no cell gives
    `port_directions`.
+6. **Leg d starts VPR itself** (agent default, 2026-10-21; spec P-6 said through `tools/vtr-qor`):
+   `tools/vtr-qor` runs with `-delete_result_files`, so a run keeps no `.net` or `.place`. The leg
+   runs `vpr --pack --place` (channel width 100, seed 1, k6_frac arch) on leg b's provenance-named
+   BLIF, in `tools/heavy-run`'s slice like every heavy job. Routing is not needed for a placement.
+7. **Block name to netlist name** (agent default, 2026-10-21): a placed block or atom name is the
+   BLIF net name verbatim (VPR names a primitive after its output net, a cluster after one of its
+   atoms; evidence in the `vpr_leg.py` docstring). A provenance name is decoded as `read_blif
+   --hdl-locs` does (5.4 L-5), then the net must exist in the read-back and its driver must
+   have a location (inherited, D-5). The check includes the atoms inside each cluster from the
+   `.net` file, so the gate covers "the atoms of every placed block".
+8. **Pad rule for leg d** (agent default, 2026-10-21): a pad is an input pad (the port bit name) or
+   `out:` plus an output port bit. A plain output port bit name is the logic atom that drives it
+   and must resolve, so the D1/D3 losses show in leg d. `gnd`, `vcc`, `unconn` count as
+   `const-table`.
