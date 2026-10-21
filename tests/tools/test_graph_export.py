@@ -249,7 +249,8 @@ def run_cli(script: str) -> str:
     """Run an odin3 script (-p) and return its stdout."""
     assert CLI is not None
     done = subprocess.run(
-        [CLI, "-p", script], capture_output=True,
+        [CLI, "-p", script],
+        capture_output=True,
         text=True,
         check=False,
         cwd=REPO_ROOT,
@@ -420,10 +421,9 @@ class PackagesTest(unittest.TestCase):
 _PROV = re.compile(r',\n\s*"odin3_prov": \{[^}]*\}')
 _LEVEL = re.compile(r',\n\s*"odin3_level": -?[0-9]+')
 _VERSION = '  "odin3_version": 1,\n'
-# Micros whose own default `write_json` output `read_json` already refuses (check rule 4: a net
-# with sinks and no driver; hand_ports has no such cell either). That is independent of --odin3.
-UNREADABLE = ("dffsre.parmys", "ansiportlist_2.parmys", "hand_ports")
-READABLE = tuple(micro for micro in MICROS if micro not in UNREADABLE)
+# Every micro reads back: hand_ports lacked the top attribute, dffsre had an implicit black box
+# without a module, ansiportlist_2 a parametric hard block at the wrong width (all fixed).
+READABLE = MICROS
 
 
 def strip_odin3(text: str) -> str:
@@ -475,7 +475,7 @@ class RoundTripTest(unittest.TestCase):
 
     def test_levels_survive(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
-            for micro in (m for m in READABLE if m in LEVELIZABLE):
+            for micro in (m for m in READABLE if m in LEVELIZABLE and m not in CELLLESS):
                 with self.subTest(micro=micro):
                     a, b = (Path(tmp) / f"{micro}.{n}.json" for n in "ab")
                     run_cli(f"{read_micro(micro)}; levelize; write_json {a} --odin3")
@@ -483,24 +483,6 @@ class RoundTripTest(unittest.TestCase):
                     levels = cell_levels(a)
                     self.assertTrue(levels)
                     self.assertEqual(levels, cell_levels(b))
-
-    def test_unreadable_micros_stay_unreadable_by_default(self) -> None:
-        """If the reader starts to accept one of them, move it to READABLE."""
-        assert CLI is not None
-        with tempfile.TemporaryDirectory() as tmp:
-            for micro in UNREADABLE:
-                with self.subTest(micro=micro):
-                    out = Path(tmp) / f"{micro}.json"
-                    run_cli(f"{read_micro(micro)}; write_json {out}")
-                    done = subprocess.run(
-                        [CLI, "-p", f"read_json {out}"],
-                        capture_output=True,
-                        text=True,
-                        check=False,
-                        cwd=REPO_ROOT,
-                        env=cli_env(),
-                    )
-                    self.assertNotEqual(done.returncode, 0, micro)
 
 
 if __name__ == "__main__":

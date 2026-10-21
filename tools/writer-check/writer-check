@@ -288,9 +288,12 @@ json_gate() {
         echo "ref-$(fail_word "$rc" "$w.yr.log" excluded)"
         return
     fi
+    # The JSON names the design's top module (`top` attribute), which Yosys write_blif lists
+    # last; the reference has no top. Unset it so both list the models in the same order
+    # (hand_ports and hand_body are the fixtures).
     rc=0
     capped "$w.yj.log" "$w.yj.rss" "$WC_YOSYS" -q -p \
-        "read_json $json; $jnorm; write_blif $w.yj.blif" || rc=$?
+        "read_json $json; setattr -mod -unset top; $jnorm; write_blif $w.yj.blif" || rc=$?
     note_rss "$w.yj.rss"
     if [ "$rc" -ne 0 ]; then
         fail_word "$rc" "$w.yj.log" yosys-error

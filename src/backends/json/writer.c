@@ -357,6 +357,10 @@ static void write_module_body(jw *out, jw_list *entry) {
     jw_key(out, entry, "attributes");
     jw_open(out, &attrs);
     odin3_wattr_seen_clear(&out->seen);
+    if (odin3_module_id_of(out->module).v == odin3_design_top(out->design).v &&
+        jw_claim(out, ODIN3_WATTR_ATTRIBUTE, "top")) {
+        jw_param_int(out, &attrs, "top", 1); /* the reader's unique-root rule cannot see it */
+    }
     jw_user_attrs(out, &attrs, (odin3_objref){ODIN3_OBJ_MODULE, odin3_module_id_of(out->module).v},
                   ODIN3_WATTR_ATTRIBUTE);
     jw_src(out, &attrs, odin3_module_prov(out->module));
@@ -411,6 +415,48 @@ static const char *dir_text(odin3_dir dir) {
     return dir == ODIN3_DIR_OUT ? "output" : "inout";
 }
 
+/* A walk over the live nodes of every module, in module then node order. */
+typedef struct node_cursor {
+    odin3_module *mod;
+    uint32_t mod_idx;
+    uint32_t node_idx;
+} node_cursor;
+
+static bool cursor_next(const jw *out, node_cursor *cur) {
+    for (;;) {
+        while (cur->mod != NULL && cur->node_idx + 1 < odin3_module_node_end(cur->mod)) {
+            cur->node_idx++;
+            if (odin3_node_live(cur->mod, (odin3_node_id){cur->node_idx})) {
+                return true;
+            }
+        }
+        cur->mod_idx++;
+        if (cur->mod_idx >= odin3_design_module_end(out->design)) {
+            return false;
+        }
+        cur->mod = odin3_module_get(out->design, (odin3_module_id){cur->mod_idx});
+        cur->node_idx = 0;
+    }
+}
+
+/* The parameter values of the first live instance of type in the design, over params (defaults):
+ * the module in the file gets that instance's port widths, so its connections fit (the instances
+ * of a type with differing widths are not representable by one module). */
+static void use_first_instance(const jw *out, odin3_celltype_id type, odin3_value *params) {
+    node_cursor cur = {NULL, 0, 0};
+    while (cursor_next(out, &cur)) {
+        odin3_node_id node = {cur.node_idx};
+        if (odin3_node_type(cur.mod, node).v == type.v) {
+            const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+            for (uint32_t i = 0; i < def->n_params; i++) {
+                const odin3_value *val = odin3_node_param(cur.mod, node, i);
+                params[i] = val != NULL ? *val : params[i];
+            }
+            return;
+        }
+    }
+}
+
 /* A port's width; a width parameter or function is evaluated at the type's defaults. */
 static uint32_t blackbox_port_width(jw *out, odin3_celltype_id type, uint32_t port) {
     const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
@@ -426,6 +472,7 @@ static uint32_t blackbox_port_width(jw *out, odin3_celltype_id type, uint32_t po
     for (uint32_t i = 0; i < def->n_params; i++) {
         params[i] = def->params[i].dflt;
     }
+    use_first_instance(out, type, params);
     uint32_t width = odin3_celltype_port_width(out->design, type, params, port);
     odin3_util_free(params);
     return width;
@@ -479,7 +526,8 @@ static void write_blackbox(jw *out, jw_list *modules, odin3_celltype_id type) {
     jw_close(out, &entry);
 }
 
-/* Declared models once each, in declaration order; `$` names are Yosys internal cells. */
+/* Declared models once each, in declaration order (a `$` name declared here is an implicit black
+ * box read back from a file; the registered Yosys internal cells are no black boxes). */
 static void write_blackboxes(jw *out, jw_list *modules) {
     const uint32_t count = odin3_design_declared_model_count(out->design);
     for (uint32_t i = 0; i < count && out->status == ODIN3_OK; i++) {
@@ -489,11 +537,71 @@ static void write_blackboxes(jw *out, jw_list *modules) {
         for (uint32_t j = 0; j < i; j++) {
             first = first && odin3_design_declared_model(out->design, j).v != type.v;
         }
-        if (first && def != NULL && def->name[0] != '$' &&
+        if (first && def != NULL &&
             (def->gran == ODIN3_GRAN_BLACKBOX || def->gran == ODIN3_GRAN_HARD)) {
             write_blackbox(out, modules, type);
         }
     }
+}
+
+/* True when type is a declared model (write_blackboxes wrote it). */
+static bool is_declared_model(const jw *out, odin3_celltype_id type) {
+    const uint32_t count = odin3_design_declared_model_count(out->design);
+    for (uint32_t i = 0; i < count; i++) {
+        if (odin3_design_declared_model(out->design, i).v == type.v) {
+            return true;
+        }
+    }
+    return false;
+}
+
+enum { TYPE_LIST_FIRST = 8 };
+
+/* The black-box types written so far. */
+typedef struct type_list {
+    uint32_t *ids;
+    uint32_t count;
+    uint32_t cap;
+} type_list;
+
+/* Adds type; false when it was already there, or (with *status set) on out of memory. */
+static bool type_list_add(type_list *list, odin3_celltype_id type, odin3_status *status) {
+    for (uint32_t i = 0; i < list->count; i++) {
+        if (list->ids[i] == type.v) {
+            return false;
+        }
+    }
+    if (list->count == list->cap) {
+        uint32_t cap = list->cap > 0 ? list->cap * 2 : TYPE_LIST_FIRST;
+        uint32_t *grown = odin3_util_realloc(list->ids, cap * sizeof(uint32_t));
+        if (grown == NULL) {
+            *status = ODIN3_ERR_NO_MEMORY;
+            return false;
+        }
+        list->ids = grown;
+        list->cap = cap;
+    }
+    list->ids[list->count++] = type.v;
+    return true;
+}
+
+/* An implicit black box (BLIF .subckt of a type nothing defines, e.g. Yosys' `$_DFFSR_PPP_`) is a
+ * design-local type that is no declared model: written from its instances, or the file would
+ * not read back without --auto-blackbox. Each type once, in first-use order. */
+static odin3_status write_implicit_blackboxes(jw *out, jw_list *modules) {
+    type_list done = {NULL, 0, 0};
+    odin3_status status = ODIN3_OK;
+    node_cursor cur = {NULL, 0, 0};
+    while (status == ODIN3_OK && cursor_next(out, &cur)) {
+        odin3_celltype_id type = odin3_node_type(cur.mod, (odin3_node_id){cur.node_idx});
+        const odin3_celltype_def *def = odin3_celltype_get(out->design, type);
+        if (def != NULL && def->gran == ODIN3_GRAN_BLACKBOX && !is_declared_model(out, type) &&
+            type_list_add(&done, type, &status)) {
+            write_blackbox(out, modules, type);
+        }
+    }
+    odin3_util_free(done.ids);
+    return status;
 }
 
 static odin3_status write_design(jw *out) {
@@ -516,6 +624,7 @@ static odin3_status write_design(jw *out) {
     }
     if (status == ODIN3_OK) {
         write_blackboxes(out, &modules);
+        status = write_implicit_blackboxes(out, &modules);
     }
     jw_close(out, &modules);
     jw_close(out, &top);
