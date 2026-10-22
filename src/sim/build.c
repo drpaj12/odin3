@@ -395,6 +395,21 @@ static odin3_status allocate(odin3_sim_builder *bld, odin3_sim *sim) {
     return ODIN3_OK;
 }
 
+/*
+ * Hands the frames and the net map to the simulator, the net map in final slots. Called when the
+ * build can no longer fail, so the error messages above could still name nets from the builder.
+ */
+static void keep_names(odin3_sim_builder *bld, odin3_sim *sim) {
+    const uint32_t *uf = bld->uf.data;
+    uint32_t *map = bld->netmap.data;
+    for (size_t i = 0; i < bld->netmap.len; i++) {
+        map[i] = map[i] == ODIN3_SIM_UNSET ? ODIN3_SIM_UNSET : uf[map[i]];
+    }
+    sim->n_netmap = bld->netmap.len;
+    sim->netmap = take(&bld->netmap, NULL);
+    sim->frames = take(&bld->frames, &sim->n_frames);
+}
+
 static void point_views(odin3_sim *sim) {
     for (uint32_t i = 0; i < sim->n_cells; i++) {
         odin3_sim_flat *flat = &sim->cells[i];
@@ -526,6 +541,7 @@ static odin3_status run(odin3_sim_builder *bld, odin3_module_id top, odin3_sim *
         odin3_sim_err_loop(bld, loop_slot);
     }
     if (st == ODIN3_OK) {
+        keep_names(bld, sim);
         odin3_sim_start(sim);
     }
     return st;
@@ -608,5 +624,7 @@ void odin3_sim_destroy(odin3_sim *sim) {
     odin3_util_free(sim->in_bits);
     odin3_util_free(sim->in_clock);
     odin3_util_free(sim->out_bits);
+    odin3_util_free(sim->frames);
+    odin3_util_free(sim->netmap);
     odin3_util_free(sim);
 }

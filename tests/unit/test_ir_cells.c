@@ -780,7 +780,8 @@ static void test_ffcell_no_sim(void) {
     TEST_ASSERT_NULL(sim);
     char want[LOG_TEXT];
     (void)snprintf(want, sizeof want,
-                   "cannot simulate `$dlatch` (node `#%u`): the cell type has no simulate hook",
+                   "cannot simulate `$dlatch` (node `#%u`): the cell type has no simulate hook; "
+                   "run `lower` first",
                    node.v);
     TEST_ASSERT_EQUAL_STRING(want, last_error);
 }

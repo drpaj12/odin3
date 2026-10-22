@@ -417,6 +417,7 @@ add_library(odin3_core OBJECT
     src/sim/prng.c
     src/sim/vectors.c
     src/sim/word.c
+    src/sim/signals.c
     src/sim/gate_truth.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
@@ -1669,6 +1670,9 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_sim_word)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_sim_signals)
+    target_compile_definitions(test_sim_signals PRIVATE
+        ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_hdl_loc)
     odin3_add_unit_test(test_hash_name)
