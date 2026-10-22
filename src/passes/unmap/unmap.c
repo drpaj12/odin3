@@ -11,6 +11,9 @@
 #include "passes/unmap/mul_group.h"
 #include "passes/unmap/ram.h"
 
+#include "util/log.h"
+
+#include <inttypes.h>
 #include <string.h>
 
 odin3_status um_module(um_ctx *uc) {
@@ -30,6 +33,19 @@ odin3_status um_module(um_ctx *uc) {
     return st;
 }
 
+/* P-4: one INFO line per run, when at least one hard cell was seen. */
+static void log_summary(const um_stats *stats) {
+    if (stats->adder_cells + stats->multiply + stats->ram_cells == 0) {
+        return;
+    }
+    odin3_log(ODIN3_LOG_INFO,
+              "unmap: %" PRIu64 " adder cells to %" PRIu64 " $add + %" PRIu64 " $sub, %" PRIu64
+              " multiply to %" PRIu64 " $mul (%" PRIu64 " regrouped), %" PRIu64
+              " RAM cells to %" PRIu64 " $mem, %" PRIu64 " groups left (see unmap_note)",
+              stats->adder_cells, stats->add, stats->sub, stats->multiply, stats->mul,
+              stats->regrouped_mul, stats->ram_cells, stats->mem, stats->declined);
+}
+
 odin3_status um_run(odin3_pass_ctx *ctx, odin3_design *design, const um_opts *opts,
                     um_stats *stats) {
     um_ctx uc;
@@ -43,6 +59,9 @@ odin3_status um_run(odin3_pass_ctx *ctx, odin3_design *design, const um_opts *op
         uc.module = odin3_module_get(design, (odin3_module_id){mid});
         memset(uc.konst, 0, sizeof uc.konst);
         st = um_module(&uc);
+    }
+    if (st == ODIN3_OK) {
+        log_summary(&uc.stats);
     }
     if (stats != NULL) {
         *stats = uc.stats;

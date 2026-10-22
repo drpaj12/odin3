@@ -1093,8 +1093,116 @@ static void test_unmap_ram_no_regroup(void) {
     TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("$mem", NULL, 0));
 }
 
-int main(void) {
-    UNITY_BEGIN();
+/* --- Task 11: log line, idempotence, robustness -------------------------------------------- */
+
+enum { RTLIL_CAP = 262144 };
+
+/* The text of the file `name` in the test directory. */
+static char *slurp(const char *name) {
+    char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    char *text = calloc(RTLIL_CAP, 1);
+    TEST_ASSERT_NOT_NULL(text);
+    size_t got = fread(text, 1, RTLIL_CAP - 1, file);
+    TEST_ASSERT_TRUE(got > 0 && got < RTLIL_CAP - 1);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    return text;
+}
+
+static void write_rtlil_to(const char *name) {
+    char text[PATH_BUF];
+    (void)snprintf(text, sizeof text, "write_rtlil %s/%s", dir, name);
+    run_script(text);
+}
+
+static void test_unmap_info_line(void) {
+    flow(MOD_ADD);
+    run_script("unmap");
+    TEST_ASSERT_NOT_NULL(strstr(log_text,
+                                "unmap: 10 adder cells to 1 $add + 0 $sub, 0 multiply to 0 "
+                                "$mul (0 regrouped), 0 RAM cells to 0 $mem, 0 groups left "
+                                "(see unmap_note)"));
+}
+
+static void test_unmap_info_line_regroup(void) {
+    flow(
+        "module t(input [39:0] a, input [39:0] b, output [79:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap");
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "4 multiply to 1 $mul (3 regrouped)"));
+}
+
+static void test_unmap_idempotent(void) {
+    flow(
+        "module t(input [39:0] a, input [39:0] b, output [79:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    write_rtlil_to("first.il");
+    log_text[0] = '\0';
+    run_script("unmap");
+    write_rtlil_to("second.il");
+    TEST_ASSERT_NULL(strstr(log_text, "adder cells to"));
+    char *first = slurp("first.il");
+    char *second = slurp("second.il");
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
+static void test_unmap_no_lib(void) {
+    write_text("t.v", odin3_bytes_cstr(MOD_ADD));
+    char text[PATH_BUF];
+    (void)snprintf(text, sizeof text, "read_verilog %s/t.v\nproc\nopt\nunmap", dir);
+    run_script(text);
+    TEST_ASSERT_NULL(strstr(log_text, "adder cells to"));
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", NULL, 0));
+}
+
+static uint32_t count_in_all(const char *type_name) {
+    odin3_celltype_id type = type_named(type_name);
+    uint32_t count = 0;
+    for (uint32_t mid = 1; mid < odin3_design_module_end(design); mid++) {
+        odin3_module *mod = odin3_module_get(design, (odin3_module_id){mid});
+        for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+            odin3_node_id node = {nid};
+            count += odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v ? 1 : 0;
+        }
+    }
+    return count;
+}
+
+#define MODEL_CHAIN(name)                                                                          \
+    ".model " name "\n.inputs x y\n.outputs s\n.names gnd\n.names vcc\n1\n"                        \
+    ".subckt adder a=vcc b=gnd cin=gnd cout=c0\n"                                                  \
+    ".subckt adder a=x b=y cin=c0 cout=c1 sumout=s\n.end\n"
+
+static void test_unmap_two_modules(void) {
+    load_lib();
+    read_blif(MODEL_CHAIN("one") MODEL_CHAIN("two"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, count_in_all("$add"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_in_all("adder"));
+    check_clean();
+}
+
+static void test_unmap_determinism(void) {
+    for (int round = 0; round < 2; round++) {
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+        TEST_ASSERT_NOT_NULL(design);
+        flow("module t(input [39:0] a, input [7:0] b, output [47:0] p); assign p = a * b; "
+             "endmodule\n");
+        run_script("unmap\nopt_clean");
+        write_rtlil_to(round == 0 ? "one.il" : "two.il");
+    }
+    char *one = slurp("one.il");
+    char *two = slurp("two.il");
+    TEST_ASSERT_EQUAL_STRING(one, two);
+    free(one);
+    free(two);
+}
+
+static void run_kit_tests(void) {
     RUN_TEST(test_unmap_options);
     RUN_TEST(test_net_class);
     RUN_TEST(test_net_class_x);
@@ -1106,6 +1214,9 @@ int main(void) {
     RUN_TEST(test_replace_provenance_and_attrs);
     RUN_TEST(test_replace_no_prov);
     RUN_TEST(test_replace_failure_keeps_group);
+}
+
+static void run_chain_tests(void) {
     RUN_TEST(test_walks_simple);
     RUN_TEST(test_walks_order_independent);
     RUN_TEST(test_walks_branch);
@@ -1122,6 +1233,9 @@ int main(void) {
     RUN_TEST(test_unmap_parmys_blif);
     RUN_TEST(test_unmap_declines);
     RUN_TEST(test_trim_and_run);
+}
+
+static void run_mul_tests(void) {
     RUN_TEST(test_unmap_mul_8x7);
     RUN_TEST(test_unmap_mul_signed);
     RUN_TEST(test_unmap_mul_trunc);
@@ -1137,6 +1251,9 @@ int main(void) {
     RUN_TEST(test_unmap_mul_split_80x40);
     RUN_TEST(test_unmap_mul_low_only);
     RUN_TEST(test_unmap_mul_shared_product);
+}
+
+static void run_ram_tests(void) {
     RUN_TEST(test_unmap_spram);
     RUN_TEST(test_unmap_dpram);
     RUN_TEST(test_unmap_rom);
@@ -1147,5 +1264,23 @@ int main(void) {
     RUN_TEST(test_unmap_ram_replicas);
     RUN_TEST(test_unmap_ram_blif_candidates);
     RUN_TEST(test_unmap_ram_no_regroup);
+}
+
+static void run_misc_tests(void) {
+    RUN_TEST(test_unmap_info_line);
+    RUN_TEST(test_unmap_info_line_regroup);
+    RUN_TEST(test_unmap_idempotent);
+    RUN_TEST(test_unmap_no_lib);
+    RUN_TEST(test_unmap_two_modules);
+    RUN_TEST(test_unmap_determinism);
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    run_kit_tests();
+    run_chain_tests();
+    run_mul_tests();
+    run_ram_tests();
+    run_misc_tests();
     return UNITY_END();
 }
