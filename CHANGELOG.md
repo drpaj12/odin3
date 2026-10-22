@@ -6,6 +6,17 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Added
+
+- Gate mapping (v1.0.2, `docs/V1.0.2.md`): `abc --gates L` maps soft logic onto the gate cells of
+  an `.o3lib` library read with `read_techlib`, `dfflibmap L` maps bit flip-flops and latches onto
+  its state cells, and `write_blif --gates-as-names` writes gate cells as `.names` and library
+  state cells as `.latch` so `tools/equiv-check` compares the result with the RTL.
+- `lib/cmos6.o3lib` (BUF, INV, NAND2, NOR2, DFF, DFFSR with the areas of Yosys's `cmos_cells.lib`)
+  and the default gate script `lib/abc/gates.abc`.
+- `tools/gatemap-check/gatemap-run` and the sweeps `gatemap_micro_generic` and
+  `gatemap_micro_cmos6`: every micro through the gate flow, equivalent to the RTL, with a re-map leg.
+
 ### Changed
 
 - ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.

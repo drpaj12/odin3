@@ -43,8 +43,9 @@ For each cell of the named library with kind `gate`, exactly one 1-bit output wi
   `Kit_TruthIsop`, computed in the adapter), printed in genlib syntax (`*`, `+`, `!`, `CONST0`,
   `CONST1`).
 - **Area:** the cell's `area` text as a number (a non-numeric or missing area is an error naming the
-  cell); **delay:** the `delay` text when numeric, else 1, the same for every pin (`PIN * UNKNOWN 1 999
-  <delay> 0 <delay> 0`).
+  cell); **delay:** the `delay` text when numeric, else 1, the same for every pin (one explicit line
+  `PIN <port> UNKNOWN 1 999 <delay> 0 <delay> 0` per input, in the cell's port order; `PIN *` would
+  renumber and drop pins, GM-2).
 - Cells that do not qualify are skipped with one NOTE each; a library with no usable gate, or without
   a gate set ABC can map an AIG to (ABC needs at least an inverter and a 2-input function from which
   AND can be built), is an error before ABC starts.
