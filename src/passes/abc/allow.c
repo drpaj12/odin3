@@ -67,6 +67,22 @@
  *   &nf -A 0        abc.c:47124 nRoundsEla: Nf_MatchDeref_rec asserts pM->fBest (giaNf.c:1769)
  *                               (script.c: -A at least 1)
  *
+ * Gate mapping's limits (gatemap PR 3 review, fix round 1):
+ *  - Values above the audit's 1000 are not allowed for &nf -R, -E, -Q and map -M, -F (script.c's
+ *    ranges, 0 to 1000): &nf computes MapDelayTarget = MapDelay * (100 + nRelaxRatio) / 100 and
+ *    Required * (100 + nRelaxRatio) / 100 in int (giaNf.c:1480, 1497), and Required +
+ *    nReqTimeFlex * InvDelayI (giaNf.c:1270), which can overflow for large values
+ *    (undefined behaviour; not run); -E is nAreaTuner, -M of map nGatesMin, -F of map LogFan
+ * (atof).
+ *  - After a gate mapper only print_stats (network space) or &ps (& space) may follow, so the
+ *    mapper is the last command that changes a network and every other command after it is
+ *    unaudited. Each was run once after the mapping on cmos6 (BUF, INV, NAND2, NOR2 genlib) on
+ *    ff.odin.blif and dup_fanin.blif, with the Debug and the Release odin3-abc: `strash; map -a;
+ *    print_stats` (twice), `strash; map; print_stats`, and `&get -n; &st; &nf; &ps` (twice):
+ *    8 runs per binary, clean.
+ *  - `&get -m` after a gate mapping is refused: its result on a cell-mapped network was not
+ * audited.
+ *
  * Task 11's first audit (every pair of each allowed command's other options, valued ones at 2,
  * and each valued option alone at 0, 1, 64, -1, 3 and 1000, on the same two designs, with the
  * Release abc) found these, each backtraced in the Debug abc; a value-dependent crash refuses the

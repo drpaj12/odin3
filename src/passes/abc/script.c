@@ -44,6 +44,10 @@
  *  - value ranges a letter list cannot express (k_abc_ranges): -E at least 1, refactor -N at least
  *    2, each letter alone as `-X <n>` (a valued letter eats the next word, read as 0);
  *  - mfs and print_xcut need a network some command rebuilt, not the BLIF one (dangling nodes).
+ *
+ * Gate mapping (gatemap PR 3): after map or &nf only print_stats (network space) or &ps (& space)
+ * may follow; &get -m after a gate mapping is refused; &nf -R, -E, -Q and map -M, -F take 0 to
+ * the audited 1000 (allow.c).
  */
 #include "passes/abc/script.h"
 
@@ -109,6 +113,7 @@ typedef struct abc_parse {
     bool uses_k;
     bool gates;          /* abc --gates: the script must end ABC_CELLMAPPED */
     uint8_t ntk, gia;    /* ABC_EMPTY, ABC_AIG, ABC_MAPPED, ABC_LOGIC or ABC_CELLMAPPED */
+    bool cell_done;      /* a gate mapper ran: only the matching print command may follow */
     uint8_t cur;         /* odin3_abc_space: the space of the last command that changed a network */
     bool ntk_choices;    /* the network holds choices */
     uint8_t gia_choices; /* the & space's ABC_CHOICES_* */
@@ -807,6 +812,12 @@ static odin3_status check_positional(const abc_parse *ps, const abc_item *item,
 static const char k_abc_why_lut[] = "linked ABC maps LUTs of at most 12 inputs ('&st' and "
                                     "'&synch2' crash on wider ones at the pin)";
 static const char k_abc_why_crash[] = "a smaller value crashes ABC at the pin (a3001b72)";
+static const char k_abc_why_audit[] =
+    "larger values overflow in &nf's timing arithmetic (giaNf.c:1270, 1480, 1497) and were not "
+    "audited";
+
+/* The largest value of an option the gate-mapping audit ran (allow.c: 0, 1, 64, 3 and 1000). */
+enum { ABC_AUDIT_MAX = 1000 };
 
 /* An option whose value must lie in [min, max] (final review C1 and I1). ABC's getopt lets a
  * valued letter eat the next word, and atoi or atof of an option word is 0, so the letter must
@@ -827,7 +838,12 @@ static const abc_range k_abc_ranges[] = {
     {"refactor", 'N', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
     {"&nf", 'C', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
     {"&nf", 'F', false, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
-    {"&nf", 'A', false, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash}};
+    {"&nf", 'A', false, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"&nf", 'R', false, 0, ABC_AUDIT_MAX, k_abc_why_audit},
+    {"&nf", 'E', false, 0, ABC_AUDIT_MAX, k_abc_why_audit},
+    {"&nf", 'Q', false, 0, ABC_AUDIT_MAX, k_abc_why_audit},
+    {"map", 'M', false, 0, ABC_AUDIT_MAX, k_abc_why_audit},
+    {"map", 'F', true, 0, ABC_AUDIT_MAX, k_abc_why_audit}};
 
 /* Whether words[at] is `-<letter>` alone, followed by a number word in the range. */
 static bool range_holds(const abc_item *item, uint32_t at, const abc_range *rule) {
@@ -839,9 +855,13 @@ static bool range_holds(const abc_item *item, uint32_t at, const abc_range *rule
     if (!is_number(value) || !number_in_cap(value)) {
         return false;
     }
-    /* min and max are integers, so value >= min exactly when floor(value) >= min; every atof
-     * rule's max is the number cap, which number_in_cap already holds exactly */
+    /* min and max are integers, so value >= min exactly when floor(value) >= min. An atof rule
+     * whose max is below the number cap takes max only as plain digits (1000, not 1000.5). */
     long read = rule->atof_reads ? atof_floor(value) : atoi_value(value);
+    bool plain = strspn(value, "0123456789") == strlen(value);
+    if (rule->atof_reads && rule->max < ODIN3_ABC_MAX_NUMBER && read == rule->max && !plain) {
+        return false;
+    }
     return read >= rule->min && read <= rule->max;
 }
 
@@ -924,7 +944,7 @@ static uint8_t mapper_state(const abc_item *item, const odin3_abc_command_info *
 }
 
 /* &get: the & space keeps the network's mapping (ABC_MAPPED, or the BLIF start's ABC_LOGIC)
- * only with -m and without -c. */
+ * only with -m and without -c. A gate mapping is never kept (&get -m after one is refused). */
 static uint8_t get_state(const abc_parse *ps, const abc_item *item) {
     bool has_mapping = ps->ntk == ABC_MAPPED || ps->ntk == ABC_LOGIC;
     bool keeps = has_mapping && letter_on(item, 'm') && !letter_on(item, 'c');
@@ -944,10 +964,12 @@ static void apply_effect(abc_parse *ps, const abc_item *item, const odin3_abc_co
         break;
     case ODIN3_ABC_FX_NTK_CELLMAPPED:
         ps->ntk = ABC_CELLMAPPED;
+        ps->cell_done = true;
         ps->cur = ODIN3_ABC_SPACE_NTK;
         break;
     case ODIN3_ABC_FX_GIA_CELLMAPPED:
         ps->gia = ABC_CELLMAPPED;
+        ps->cell_done = true;
         ps->cur = ODIN3_ABC_SPACE_GIA;
         break;
     case ODIN3_ABC_FX_NTK_PUT:
@@ -1083,11 +1105,28 @@ static odin3_status check_ntk_rules(const abc_parse *ps, const abc_item *item,
     return ODIN3_OK;
 }
 
-/* The commands that work on LUT networks: a gate-mapped network is not one (gatemap spec 5). */
-static const char *const k_abc_lut_ntk[] = {"mfs", "mfs2", "lutpack"};
+/* After a gate mapper only the print command of the mapped space may run: the mapper is the last
+ * command that changes a network, and print_stats and &ps are the two audited after it. */
+static odin3_status check_after_cell(const abc_parse *ps, const abc_item *item,
+                                     const odin3_abc_command_info *row) {
+    abc_from from = from_alias(item);
+    bool ntk = ps->cur == ODIN3_ABC_SPACE_NTK;
+    if (row->effect == ODIN3_ABC_FX_GIA_GET && ps->ntk == ABC_CELLMAPPED && letter_on(item, 'm')) {
+        return abc_fail(ps, item->line, "'&get -m'%s%s%s after a gate mapping is not supported",
+                        from.pre, from.name, from.post);
+    }
+    if (ps->cell_done && strcmp(row->name, ntk ? "print_stats" : "&ps") != 0) {
+        return abc_fail(ps, item->line,
+                        "'%s'%s%s%s cannot follow a gate mapping: the gate mapper must be the "
+                        "last command that changes a network, and only '%s' may follow it",
+                        row->name, from.pre, from.name, from.post, ntk ? "print_stats" : "&ps");
+    }
+    return ODIN3_OK;
+}
 
 /* Gate mapping's rules: map and &nf need abc --gates (a library is loaded there) and map needs a
- * strashed network; the LUT-network commands refuse a gate-mapped one (gatemap plan Task 5). */
+ * strashed network; after a gate mapper only a print command may follow (gatemap plan Task 5; the
+ * LUT-network commands mfs, mfs2, lutpack and &mfs are refused by that, too). */
 static odin3_status check_gate_rules(const abc_parse *ps, const abc_item *item,
                                      const odin3_abc_command_info *row) {
     abc_from from = from_alias(item);
@@ -1098,20 +1137,13 @@ static odin3_status check_gate_rules(const abc_parse *ps, const abc_item *item,
                         "'%s'%s%s%s maps to a gate library, which only abc --gates loads",
                         row->name, from.pre, from.name, from.post);
     }
+    odin3_status st = check_after_cell(ps, item, row);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     if (row->effect == ODIN3_ABC_FX_NTK_CELLMAPPED && ps->ntk != ABC_AIG) {
         return abc_fail(ps, item->line, "'%s'%s%s%s needs a strashed network; add 'strash'",
                         row->name, from.pre, from.name, from.post);
-    }
-    bool lut_ntk = false;
-    for (size_t i = 0; i < sizeof k_abc_lut_ntk / sizeof(char *); i++) {
-        lut_ntk = lut_ntk || strcmp(row->name, k_abc_lut_ntk[i]) == 0;
-    }
-    bool lut_gia = strcmp(row->name, "&mfs") == 0;
-    if ((lut_ntk && ps->ntk == ABC_CELLMAPPED) || (lut_gia && ps->gia == ABC_CELLMAPPED)) {
-        return abc_fail(ps, item->line,
-                        "'%s'%s%s%s works on LUT networks, not on the gate-mapped network here; "
-                        "add '%s'",
-                        row->name, from.pre, from.name, from.post, lut_gia ? "&st" : "strash");
     }
     return ODIN3_OK;
 }

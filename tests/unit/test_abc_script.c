@@ -15,6 +15,7 @@
 #include "util/sha256.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -739,6 +740,15 @@ static void test_k_linked_cap(void) {
     odin3_abc_script_free(&script);
 }
 
+/* Writes a formatted message into buf, which must hold it. */
+static void fmt_to(char *buf, size_t cap, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int wrote = vsnprintf(buf, cap, format, args);
+    va_end(args);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < cap);
+}
+
 /* The expected range refusal: the command, its option letter and the text after them. */
 typedef struct range_msg {
     const char *cmd;
@@ -768,6 +778,18 @@ static const char k_range_f_nf[] = "must stand alone as '-F <n>' with <n> from 1
                                    "smaller value crashes ABC at the pin (a3001b72)";
 static const char k_range_a_nf[] = "must stand alone as '-A <n>' with <n> from 1 to 1000000: a "
                                    "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_audit[] =
+    "larger values overflow in &nf's timing arithmetic (giaNf.c:1270, 1480, 1497) and were not "
+    "audited";
+
+/* The range rule text of an audit-capped letter (0 to 1000). */
+static void refuse_audit_range(const char *text, const char *cmd, char letter) {
+    char rule[384];
+    fmt_to(rule, sizeof rule, "must stand alone as '-%c <n>' with <n> from 0 to 1000: %s", letter,
+           k_range_audit);
+    refuse_range(text, (range_msg){cmd, letter, rule});
+}
+
 static const char k_range_n[] =
     "must stand alone as '-N <n>' with <n> from 2 to 1000000: a smaller "
     "value crashes ABC at the pin (a3001b72)";
@@ -1055,19 +1077,43 @@ static void test_gates_end_nf(void) {
     odin3_abc_script_free(&script);
 }
 
-static void test_gates_end_nf_put(void) {
+static const char k_after_ntk[] = "cannot follow a gate mapping: the gate mapper must be the last "
+                                  "command that changes a network, and only 'print_stats' may "
+                                  "follow it";
+static const char k_after_gia[] = "cannot follow a gate mapping: the gate mapper must be the last "
+                                  "command that changes a network, and only '&ps' may follow it";
+
+/* After a gate mapper only print_stats (network space) or &ps (& space) is allowed (review 3). */
+static void test_gates_only_print_after_mapping(void) {
     g_gates = true;
     odin3_abc_script script;
-    accept("&st\n&nf\n&put\n", k_mem, &script);
+    accept("strash\nmap -a\nprint_stats\n", k_mem, &script);
     TEST_ASSERT_EQUAL_UINT8(NTK, script.final_space);
     odin3_abc_script_free(&script);
+    accept("&st\n&nf\n&ps\n", k_mem, &script);
+    TEST_ASSERT_EQUAL_UINT8(GIA, script.final_space);
+    odin3_abc_script_free(&script);
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: '&put' %s", k_after_gia);
+    refuse("&st\n&nf\n&put\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: 'print_io' %s", k_after_ntk);
+    refuse("strash\nmap\nprint_io\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: '&st' %s", k_after_gia);
+    refuse("&st\n&nf\n&st\n", k_mem, want);
+    /* the print command of the other space does not fit either */
+    fmt_to(want, sizeof want, "t.abc:3: 'print_stats' %s", k_after_gia);
+    refuse("&st\n&nf\nprint_stats\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: '&ps' %s", k_after_ntk);
+    refuse("strash\nmap\n&ps\n", k_mem, want);
 }
 
 static void test_gates_refuses_lut_ending(void) {
     g_gates = true;
     refuse("strash\nif -K 4\n", k_mem, k_not_gate_end);
     refuse("&st\n&if -K 4\n", k_mem, k_not_gate_end);
-    refuse("strash\nmap\nstrash\n", k_mem, k_not_gate_end);
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: 'strash' %s", k_after_ntk);
+    refuse("strash\nmap\nstrash\n", k_mem, want);
 }
 
 static void test_map_needs_strashed(void) {
@@ -1079,38 +1125,85 @@ static void test_map_needs_strashed(void) {
 
 static void test_nf_needs_unmapped_gia(void) {
     g_gates = true;
-    const char *const want = "t.abc:3: '&nf' needs an unmapped network in the & space, which is "
-                             "mapped here; add '&st'";
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: '&nf' %s", k_after_gia);
     refuse("&st\n&nf\n&nf\n", k_mem, want);
     refuse("&st\n&if -K 4\n&nf\n", k_mem,
            "t.abc:3: '&nf' needs an unmapped network in the & space, which is mapped here; "
            "add '&st'");
-    refuse("&st\n&nf\n&if -K 4\n", k_mem,
-           "t.abc:3: '&if' needs an unmapped network in the & space, which is mapped here; "
-           "add '&st'");
+    fmt_to(want, sizeof want, "t.abc:3: '&if' %s", k_after_gia);
+    refuse("&st\n&nf\n&if -K 4\n", k_mem, want);
 }
 
-static void test_mfs_refuses_cellmapped(void) {
+/* Every command after a gate mapping but the print command is refused, the LUT-network ones too;
+ * &get -m has its own message (a gate mapping is not one &get can keep). */
+static void test_after_mapping_refusals(void) {
     g_gates = true;
-    refuse("strash\nmap\nmfs\n", k_mem,
-           "t.abc:3: 'mfs' works on LUT networks, not on the gate-mapped network here; add "
-           "'strash'");
-    refuse("strash\nmap\nmfs2\n", k_mem,
-           "t.abc:3: 'mfs2' works on LUT networks, not on the gate-mapped network here; add "
-           "'strash'");
-    refuse("strash\nmap\nlutpack\n", k_mem,
-           "t.abc:3: 'lutpack' works on LUT networks, not on the gate-mapped network here; add "
-           "'strash'");
-    refuse("&st\n&nf\n&mfs\n", k_mem,
-           "t.abc:3: '&mfs' works on LUT networks, not on the gate-mapped network here; add "
-           "'&st'");
-    /* &get drops a gate mapping, &put keeps it */
+    char want[320];
+    static const char *const ntk[] = {"mfs", "mfs2", "lutpack", "&get", "sweep", "map"};
+    for (size_t i = 0; i < sizeof ntk / sizeof ntk[0]; i++) {
+        char text[64];
+        fmt_to(text, sizeof text, "strash\nmap\n%s\n", ntk[i]);
+        fmt_to(want, sizeof want, "t.abc:3: '%s' %s", ntk[i], k_after_ntk);
+        refuse(text, k_mem, want);
+    }
+    fmt_to(want, sizeof want, "t.abc:3: '&mfs' %s", k_after_gia);
+    refuse("&st\n&nf\n&mfs\n", k_mem, want);
+}
+
+static void test_get_m_after_cellmapped(void) {
+    g_gates = true;
+    static const char k_get_m[] = "'&get -m' after a gate mapping is not supported";
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: %s", k_get_m);
+    refuse("strash\nmap\n&get -m\n", k_mem, want);
+    refuse("strash\nmap\n&get -m\n&nf\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:4: %s", k_get_m);
+    refuse("strash\nmap\nprint_stats\n&get -m\n&nf\n", k_mem, want);
+    /* before the gate mapping, &get -m of a LUT mapping is the usual one */
     odin3_abc_script script;
-    accept("strash\nmap\n&get\n&nf\n", k_mem, &script);
+    accept("strash\nif -K 4\n&get -m\n&st\n&nf\n", k_mem, &script);
     odin3_abc_script_free(&script);
-    refuse("strash\nmap\n&get -m\n&nf\nmfs\n", k_mem,
-           "t.abc:5: 'mfs' works on LUT networks, "
-           "not on the gate-mapped network here; add 'strash'");
+}
+
+/* Review finding 4: the choices a plain &get copies make &nf refuse, as they do &if. */
+static void test_nf_refuses_copied_choices(void) {
+    g_gates = true;
+    refuse("strash\ndch -f\n&get\n&nf\n", k_mem,
+           "t.abc:4: '&nf' needs a network in the & space without the choices that '&get' "
+           "copied; add '&st'");
+    odin3_abc_script script;
+    accept("strash\ndch -f\n&get -s\n&nf\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+    accept("strash\ndch -f\n&get\n&st\n&nf\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+/* Review finding 2: &nf -R, -E, -Q and map -M, -F take 0 to the audited 1000. */
+static void test_audit_caps(void) {
+    g_gates = true;
+    static const char *const nf[] = {"R", "E", "Q"};
+    static const char *const map[] = {"M", "F"};
+    odin3_abc_script script;
+    char text[64];
+    for (size_t i = 0; i < sizeof nf / sizeof nf[0]; i++) {
+        fmt_to(text, sizeof text, "&st\n&nf -%s 1000\n", nf[i]);
+        accept(text, k_mem, &script);
+        odin3_abc_script_free(&script);
+        fmt_to(text, sizeof text, "&nf -%s 1001", nf[i]);
+        refuse_audit_range(text, "&nf", nf[i][0]);
+    }
+    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
+        fmt_to(text, sizeof text, "strash\nmap -%s 1000\n", map[i]);
+        accept(text, k_mem, &script);
+        odin3_abc_script_free(&script);
+        fmt_to(text, sizeof text, "map -%s 1001", map[i]);
+        refuse_audit_range(text, "map", map[i][0]);
+    }
+    /* map -F is read by atof: 1000.5 is past the cap, 999.5 is not */
+    refuse_audit_range("map -F 1000.5", "map", 'F');
+    accept("strash\nmap -F 999.5\n", k_mem, &script);
+    odin3_abc_script_free(&script);
 }
 
 static void test_unmapped_end_message_names_both(void) {
@@ -1187,11 +1280,14 @@ static void test_gate_mapping_checks(void) {
     test_nf_needs_gates();
     test_gates_end_map();
     test_gates_end_nf();
-    test_gates_end_nf_put();
+    test_gates_only_print_after_mapping();
     test_gates_refuses_lut_ending();
     test_map_needs_strashed();
     test_nf_needs_unmapped_gia();
-    test_mfs_refuses_cellmapped();
+    test_after_mapping_refusals();
+    test_get_m_after_cellmapped();
+    test_nf_refuses_copied_choices();
+    test_audit_caps();
     test_unmapped_end_message_names_both();
     test_nf_file_letters();
     test_gates_script_checks();
