@@ -608,6 +608,19 @@ static void test_preflight_report_and_k(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_vtr_preflight(tc.design, &opts, NULL));
 }
 
+/* A direct caller of the preflight with gates_as_names set is refused, as write_with does. */
+static void test_preflight_refuses_gates_as_names(void) {
+    read_ok(TWO_MODELS, false);
+    odin3_blif_write_opts opts = {.dialect = ODIN3_BLIF_DIALECT_VTR, .gates_as_names = true};
+    odin3_blif_vtr_report report = {0};
+    odin3_strbuf_clear(&tc.log);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_blif_vtr_preflight(tc.design, &opts, &report));
+    TEST_ASSERT_EQUAL_STRING(
+        "error: odin3_blif_vtr_preflight: gates_as_names applies to the PLAIN dialect only\n",
+        tc.log.data);
+}
+
 /* --- VB-10 names (3E Task 2) ----------------------------------------------------------------- */
 
 /* odin3_blif_vtr_legal_name(in) appended to a buffer holding "<": the result after the "<". */
@@ -3673,6 +3686,7 @@ static void run_tasks_1_2(void) {
     RUN_TEST(test_e13_no_top);
     RUN_TEST(test_e13_keeps_old_file);
     RUN_TEST(test_preflight_report_and_k);
+    RUN_TEST(test_preflight_refuses_gates_as_names);
     RUN_TEST(test_legal_name_table);
     RUN_TEST(test_legal_name_injective_fe);
     RUN_TEST(test_reserved_names);

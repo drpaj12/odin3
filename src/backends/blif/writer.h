@@ -160,7 +160,11 @@ odin3_status odin3_blif_write(const odin3_design *design, const char *path);
  * a dialect or name style out of its enum ("odin3_blif_write_with: unknown dialect" / "unknown
  * name_style"); PLAIN with a non-zero lut_k or PROVENANCE ("odin3_blif_write_with: lut_k and
  * name_style apply to the VTR dialect only"); a non-zero lut_k outside 2..16
- * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); then the preflight's refusals.
+ * ("odin3_blif_write_with: lut_k <k> is outside 2..16"); then the preflight's refusals. The
+ * PLAIN-only options are refused at the point of the dialect rule: for VTR, src_attr first, then
+ * gates_as_names ("odin3_blif_write_with: src_attr applies to the PLAIN dialect only" /
+ * "gates_as_names applies to the PLAIN dialect only"), after the dialect, name style and (for
+ * PLAIN) lut_k checks and before the lut_k range check; with both set, the src_attr message wins.
  *
  * VTR names (spec 3E VB-10): every net, port bit and generated name is written in its
  * odin3_blif_vtr_legal_name form, and a net used as a `.latch` control or a hard cell's clock
