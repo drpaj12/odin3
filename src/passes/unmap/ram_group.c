@@ -19,7 +19,7 @@
 
 /* --- a stable merge sort of indices with a context comparator ------------------------------ */
 
-enum { UM_CAND_CAP = 64 };
+enum { UM_CAND_CAP = 64, UM_DECIMAL = 10 };
 
 /* A half-open range of positions. */
 typedef struct um_range {
@@ -269,7 +269,7 @@ static bool role_bit(const um_ctx *uc, odin3_node_id node, uint32_t *bit) {
         return false;
     }
     char *end = NULL;
-    unsigned long value = strtoul(colon + 2, &end, 10);
+    unsigned long value = strtoul(colon + 2, &end, UM_DECIMAL);
     *bit = (uint32_t)value;
     return value <= UINT32_MAX;
 }

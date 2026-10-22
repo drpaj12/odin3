@@ -749,13 +749,18 @@ static void test_unmap_second_run_ram_pair(void) {
 }
 
 /* One adder cell the pass declines: the note on the cell, the same after a second run. */
-static void expect_adder_note(const char *blif, const char *note) {
+typedef struct adder_case {
+    const char *blif;
+    const char *note;
+} adder_case;
+
+static void expect_adder_note(adder_case test) {
     load_lib();
-    read_blif(blif);
+    read_blif(test.blif);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     odin3_node_id cell[1];
     TEST_ASSERT_EQUAL_UINT32(1, nodes_of("adder", cell, 1));
-    TEST_ASSERT_EQUAL_UINT32(intern(note), attr_of(cell[0], "unmap_note")->str);
+    TEST_ASSERT_EQUAL_UINT32(intern(test.note), attr_of(cell[0], "unmap_note")->str);
     char *first = census();
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     char *second = census();
@@ -769,16 +774,16 @@ static void expect_adder_note(const char *blif, const char *note) {
 
 /* C-4: a subtraction whose last carry-out is read. */
 static void test_unmap_decline_cout_sub(void) {
-    expect_adder_note(CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n"
-                                 ".names c1 t\n1 1\n.end\n" ADDER_MODEL,
-                      "adder:cout_sub");
+    expect_adder_note((adder_case){CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n"
+                                              ".names c1 t\n1 1\n.end\n" ADDER_MODEL,
+                                   "adder:cout_sub"});
 }
 
 /* C-5: a subtraction whose b is not an inverted operand. */
 static void test_unmap_decline_carry_in_one(void) {
-    expect_adder_note(CHAIN_HEAD
-                      ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n.end\n" ADDER_MODEL,
-                      "adder:carry_in_one");
+    expect_adder_note((adder_case){
+        CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n.end\n" ADDER_MODEL,
+        "adder:carry_in_one"});
 }
 
 /* A multiply cell with WIDTH 0 has no operand bits: kept as it is, with the note. */
@@ -1150,12 +1155,16 @@ static void put_p2_mul(odin3_strbuf *buf, const char *const *pins, int out_len, 
 }
 
 /* An adder chain of `stages` stages: sum bit i is `<sum>i`; the operands are name arrays. */
-static void put_p2_chain(odin3_strbuf *buf, const char *const *a, const char *const *b, int stages,
-                         const char *sum) {
+typedef struct p2_operands {
+    const char *const *op_a;
+    const char *const *op_b;
+} p2_operands;
+
+static void put_p2_chain(odin3_strbuf *buf, p2_operands ops, int stages, const char *sum) {
     ok(odin3_strbuf_appendf(buf, ".subckt adder a=vcc b=gnd cin=gnd cout=%sc0\n", sum));
     for (int i = 0; i < stages; i++) {
         ok(odin3_strbuf_appendf(buf, ".subckt adder a=%s b=%s cin=%sc%d cout=%sc%d sumout=%s%d\n",
-                                a[i], b[i], sum, i, sum, i + 1, sum, i));
+                                ops.op_a[i], ops.op_b[i], sum, i, sum, i + 1, sum, i));
     }
 }
 
@@ -1182,8 +1191,8 @@ static void read_p2_blif(int cross_read) {
     put_p2_mul(&buf, m11, 4, "u");
     put_p2_mul(&buf, c1, cross_read, "c");
     put_p2_mul(&buf, c2, 5, "d");
-    put_p2_chain(&buf, cross_read == 5 ? r0a : r0a_cut, r0b, 6, "z");
-    put_p2_chain(&buf, r1a, r1b, 7, "s");
+    put_p2_chain(&buf, (p2_operands){cross_read == 5 ? r0a : r0a_cut, r0b}, 6, "z");
+    put_p2_chain(&buf, (p2_operands){r1a, r1b}, 7, "s");
     for (int i = 0; i < 3; i++) {
         ok(odin3_strbuf_appendf(&buf, ".names l%d p%d\n1 1\n", i, i));
     }
@@ -1623,13 +1632,20 @@ static void check_tree_nets(const um_write_tree *tree) {
     TEST_ASSERT_TRUE(reads_not(nets[0]) && reads_not(nets[1]));
 }
 
+/* R-8 step 1 on the leaves: whether the structure matched (the status is always OK here). */
+static bool write_tree_matches(const um_ctx *uc, const odin3_vec *leaves, um_write_tree *tree) {
+    bool matched = true;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_depth_write_tree(uc, leaves, DEEP_LEVELS, tree, &matched));
+    return matched;
+}
+
 static void test_depth_write_tree(void) {
     odin3_vec leaves;
     deep_leaves(&leaves);
     um_opts opts = {true};
     um_ctx uc = make_ctx(&opts);
     um_write_tree tree;
-    TEST_ASSERT_TRUE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    TEST_ASSERT_TRUE(write_tree_matches(&uc, &leaves, &tree));
     check_tree(&tree);
     check_tree_nets(&tree);
     um_write_tree_free(&tree);
@@ -1654,7 +1670,7 @@ static void test_depth_write_mismatch(void) {
     um_opts opts = {true};
     um_ctx uc = make_ctx(&opts);
     um_write_tree tree;
-    TEST_ASSERT_FALSE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    TEST_ASSERT_FALSE(write_tree_matches(&uc, &leaves, &tree));
     um_write_tree_free(&tree);
     odin3_vec_free(&leaves);
 }
@@ -1671,7 +1687,7 @@ static void test_depth_write_duplicate_path(void) {
     um_opts opts = {true};
     um_ctx uc = make_ctx(&opts);
     um_write_tree tree;
-    TEST_ASSERT_FALSE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    TEST_ASSERT_FALSE(write_tree_matches(&uc, &leaves, &tree));
     um_write_tree_free(&tree);
     odin3_vec_free(&leaves);
 }
@@ -1846,7 +1862,13 @@ static void test_unmap_depth_bit_enables_differ(void) {
 
 /* The registered select of a leaf level is replaced by a `$dff` with the given polarity and
  * width; the select net stays bit `at` of its Q. */
-static void replace_select_dff(int64_t polarity, uint32_t width, uint32_t at) {
+typedef struct select_dff {
+    int64_t polarity;
+    uint32_t width;
+    uint32_t at;
+} select_dff;
+
+static void replace_select_dff(select_dff want) {
     odin3_node_id dffs[8];
     uint32_t count = nodes_of("$dff", dffs, 8);
     odin3_node_id old = {0};
@@ -1858,15 +1880,15 @@ static void replace_select_dff(int64_t polarity, uint32_t width, uint32_t at) {
     odin3_net_id in = um_port_net(top(), old, (um_pos){1, 0});
     odin3_net_id out = um_port_net(top(), old, (um_pos){2, 0});
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(top(), old));
-    odin3_net_id d[2] = {in, in};
-    odin3_net_id q[2] = {{0}, {0}};
-    for (uint32_t i = 0; i < width; i++) {
+    odin3_net_id data_in[2] = {in, in};
+    odin3_net_id data_out[2] = {{0}, {0}};
+    for (uint32_t i = 0; i < want.width; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_net_create(top(), 0, odin3_module_prov(top()), &q[i]));
+                              odin3_net_create(top(), 0, odin3_module_prov(top()), &data_out[i]));
     }
-    q[at] = out;
-    odin3_netvec ports[3] = {{&clk, 1}, {d, width}, {q, width}};
-    odin3_value params[2] = {odin3_value_int(width), odin3_value_int(polarity)};
+    data_out[want.at] = out;
+    odin3_netvec ports[3] = {{&clk, 1}, {data_in, want.width}, {data_out, want.width}};
+    odin3_value params[2] = {odin3_value_int(want.width), odin3_value_int(want.polarity)};
     odin3_node_spec spec = {type_named("$dff"), 0, odin3_module_prov(top()), params, 2};
     odin3_node_id made = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &made));
@@ -1881,26 +1903,26 @@ static void expect_depth_refused(void) {
 
 static void test_unmap_depth_select_dff_ok(void) {
     flow_deep();
-    replace_select_dff(1, 1, 0);
+    replace_select_dff((select_dff){1, 1, 0});
     run_script("unmap");
     first_mem(1);
 }
 
 static void test_unmap_depth_select_negedge(void) {
     flow_deep();
-    replace_select_dff(0, 1, 0);
+    replace_select_dff((select_dff){0, 1, 0});
     expect_depth_refused();
 }
 
 static void test_unmap_depth_select_wide_dff(void) {
     flow_deep();
-    replace_select_dff(1, 2, 0);
+    replace_select_dff((select_dff){1, 2, 0});
     expect_depth_refused();
 }
 
 static void test_unmap_depth_select_on_upper_bit(void) {
     flow_deep();
-    replace_select_dff(1, 2, 1);
+    replace_select_dff((select_dff){1, 2, 1});
     expect_depth_refused();
 }
 

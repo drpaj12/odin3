@@ -28,12 +28,14 @@ void um_write_tree_free(um_write_tree *tree);
  * write enable of each leaf is the output of a chain of `levels` `$and` cells, the last one fed by
  * the leaf's level levels-1 literal and the first by the common write enable `we0` and the level 0
  * literal. A literal is an address net `ad[L]` (path bit 1) or the output of a 1-bit `$not` of it
- * (path bit 0). Fills `out` (free it with um_write_tree_free whatever the result); false when the
- * structure does not match: a leaf whose enable is not such a chain, leaves that disagree on `we0`
- * or on an address net, or paths that are not 2^levels different ones.
+ * (path bit 0). Fills `out` (free it with um_write_tree_free whatever the result). `*matched` is
+ * false when the structure does not match: a leaf whose enable is not such a chain, whose data bits
+ * have different enables, leaves that disagree on `we0` or on an address net, or paths that are
+ * not 2^levels different ones. Returns ODIN3_ERR_NO_MEMORY (and `*matched` false) when a vector
+ * cannot grow; a mismatch is ODIN3_OK.
  */
-bool um_depth_write_tree(const um_ctx *uc, const odin3_vec *leaves, uint32_t levels,
-                         um_write_tree *out);
+odin3_status um_depth_write_tree(const um_ctx *uc, const odin3_vec *leaves, uint32_t levels,
+                                 um_write_tree *out, bool *matched);
 
 /* Phase F: depth recovery on the `$mem` cells phase D made. */
 odin3_status um_ram_depth_phase(um_ctx *uc);

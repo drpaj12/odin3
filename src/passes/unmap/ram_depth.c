@@ -46,6 +46,25 @@ enum {
     UM_NOT_Y = 1
 };
 
+/* The result of a structure check: the status (an out-of-memory error stops the pass) and whether
+ * the structure is the one R-8 reads. A mismatch is not an error. */
+typedef struct um_match {
+    odin3_status st;
+    bool yes;
+} um_match;
+
+static um_match match_yes(void) {
+    return (um_match){ODIN3_OK, true};
+}
+
+static um_match match_no(void) {
+    return (um_match){ODIN3_OK, false};
+}
+
+static um_match match_status(odin3_status st) {
+    return (um_match){st, st == ODIN3_OK};
+}
+
 /* A live `$and` or `$not` driver of `net` with the given type and 1-bit ports; none otherwise. */
 static odin3_node_id driver_of(const um_ctx *uc, odin3_net_id net, odin3_celltype_id type) {
     odin3_pin_id driver = odin3_net_driver(uc->module, net);
@@ -58,6 +77,33 @@ static odin3_node_id driver_of(const um_ctx *uc, odin3_net_id net, odin3_celltyp
         return (odin3_node_id){0};
     }
     return node;
+}
+
+static odin3_status push_flag(odin3_vec *vec) {
+    uint8_t *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = 0;
+    return ODIN3_OK;
+}
+
+static odin3_status push_node(odin3_vec *vec, odin3_node_id node) {
+    odin3_node_id *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = node;
+    return ODIN3_OK;
+}
+
+static odin3_status push_net_to(odin3_vec *vec, odin3_net_id net) {
+    odin3_net_id *slot = odin3_vec_push(vec);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = net;
+    return ODIN3_OK;
 }
 
 /* One literal of the chain: the address net and the path bit it stands for. */
@@ -76,13 +122,13 @@ static um_literal literal_of(const um_ctx *uc, odin3_net_id net) {
     return (um_literal){net, 1, {0}};
 }
 
-static bool add_glue(um_write_tree *tree, odin3_node_id node) {
+static odin3_status add_glue(um_write_tree *tree, odin3_node_id node) {
     odin3_node_id *slot = odin3_vec_push(&tree->glue);
     if (slot == NULL) {
-        return false;
+        return ODIN3_ERR_NO_MEMORY;
     }
     *slot = node;
-    return true;
+    return ODIN3_OK;
 }
 
 /* The chain of one leaf: from the last `$and` up, `levels` literals (the top level first) and the
@@ -92,58 +138,57 @@ typedef struct um_chain_end {
     odin3_net_id we0;
 } um_chain_end;
 
-static bool walk_leaf(const um_ctx *uc, odin3_net_id enable, uint32_t levels, um_write_tree *tree,
-                      um_chain_end *end) {
+static um_match walk_leaf(const um_ctx *uc, odin3_net_id enable, uint32_t levels,
+                          um_write_tree *tree, um_chain_end *end) {
     odin3_net_id net = enable;
     end->path = 0;
     for (uint32_t step = 0; step < levels; step++) {
         odin3_node_id gate = driver_of(uc, net, uc->types.and_);
         if (gate.v == 0) {
-            return false;
+            return match_no();
         }
         uint32_t level = levels - 1 - step;
         um_literal lit = literal_of(uc, um_port_net(uc->module, gate, (um_pos){UM_AND_B, 0}));
         odin3_net_id *known = odin3_vec_at(&tree->ad, level);
         if (!odin3_net_valid(lit.net) || (odin3_net_valid(*known) && known->v != lit.net.v)) {
-            return false;
+            return match_no();
         }
         *known = lit.net;
-        if (!add_glue(tree, gate) || (lit.inverter.v != 0 && !add_glue(tree, lit.inverter))) {
-            return false;
+        odin3_status st = add_glue(tree, gate);
+        st = st == ODIN3_OK && lit.inverter.v != 0 ? add_glue(tree, lit.inverter) : st;
+        if (st != ODIN3_OK) {
+            return match_status(st);
         }
         end->path |= lit.bit << level;
         net = um_port_net(uc->module, gate, (um_pos){UM_AND_A, 0});
     }
     end->we0 = net;
-    return true;
+    return match_yes();
 }
 
 /* The paths seen are all 2^levels different ones. */
-static bool all_distinct(const odin3_vec *paths, uint32_t levels) {
+static um_match all_distinct(const odin3_vec *paths, uint32_t levels) {
     uint32_t leaves = (uint32_t)1 << levels;
     if (paths->len != leaves) {
-        return false;
+        return match_no();
     }
     odin3_vec seen;
     odin3_vec_init(&seen, sizeof(uint8_t));
-    bool ok = odin3_vec_reserve(&seen, leaves) == ODIN3_OK;
-    for (uint32_t i = 0; ok && i < leaves; i++) {
-        uint8_t *slot = odin3_vec_push(&seen);
-        ok = slot != NULL;
-        if (ok) {
-            *slot = 0;
-        }
+    odin3_status st = odin3_vec_reserve(&seen, leaves);
+    for (uint32_t i = 0; st == ODIN3_OK && i < leaves; i++) {
+        st = push_flag(&seen);
     }
+    bool distinct = st == ODIN3_OK;
     const uint32_t *items = paths->data;
-    for (uint32_t i = 0; ok && i < leaves; i++) {
-        uint8_t *mark = ok && items[i] < leaves ? odin3_vec_at(&seen, items[i]) : NULL;
-        ok = mark != NULL && *mark == 0;
+    for (uint32_t i = 0; distinct && i < leaves; i++) {
+        uint8_t *mark = items[i] < leaves ? odin3_vec_at(&seen, items[i]) : NULL;
+        distinct = mark != NULL && *mark == 0;
         if (mark != NULL) {
             *mark = 1;
         }
     }
     odin3_vec_free(&seen);
-    return ok;
+    return st == ODIN3_OK ? (um_match){ODIN3_OK, distinct} : match_status(st);
 }
 
 void um_write_tree_free(um_write_tree *tree) {
@@ -152,20 +197,17 @@ void um_write_tree_free(um_write_tree *tree) {
     odin3_vec_free(&tree->glue);
 }
 
-static bool tree_init(um_write_tree *tree, size_t leaves, uint32_t levels) {
+/* The empty tree; the address nets get a slot per level when the leaves are 2^levels of them. */
+static odin3_status tree_init(um_write_tree *tree, bool shaped, uint32_t levels) {
     odin3_vec_init(&tree->paths, sizeof(uint32_t));
     odin3_vec_init(&tree->ad, sizeof(odin3_net_id));
     odin3_vec_init(&tree->glue, sizeof(odin3_node_id));
     tree->we0 = (odin3_net_id){0};
-    bool ok = levels >= 1 && leaves == ((size_t)1 << levels);
-    for (uint32_t level = 0; ok && level < levels; level++) {
-        odin3_net_id *slot = odin3_vec_push(&tree->ad);
-        ok = slot != NULL;
-        if (ok) {
-            *slot = (odin3_net_id){0};
-        }
+    odin3_status st = ODIN3_OK;
+    for (uint32_t level = 0; shaped && st == ODIN3_OK && level < levels; level++) {
+        st = push_net_to(&tree->ad, (odin3_net_id){0});
     }
-    return ok;
+    return st;
 }
 
 /* Every data bit of the leaf has the same write enable (R-8): WR_EN[j] is WR_EN[0]. */
@@ -181,32 +223,43 @@ static bool same_enable(const um_ctx *uc, odin3_node_id leaf) {
 }
 
 /* One leaf: its chain, the agreement on we0, its path. */
-static bool add_leaf(const um_ctx *uc, odin3_net_id enable, uint32_t levels, um_write_tree *tree) {
+static um_match add_leaf(const um_ctx *uc, odin3_node_id leaf, uint32_t levels,
+                         um_write_tree *tree) {
     um_chain_end end = {0, {0}};
-    if (!walk_leaf(uc, enable, levels, tree, &end)) {
-        return false;
+    odin3_net_id enable = um_port_net(uc->module, leaf, (um_pos){UM_WR_EN_PORT, 0});
+    if (!same_enable(uc, leaf)) {
+        return match_no();
+    }
+    um_match walked = walk_leaf(uc, enable, levels, tree, &end);
+    if (walked.st != ODIN3_OK || !walked.yes) {
+        return walked;
     }
     if (odin3_net_valid(tree->we0) && tree->we0.v != end.we0.v) {
-        return false;
+        return match_no();
     }
     tree->we0 = end.we0;
     uint32_t *slot = odin3_vec_push(&tree->paths);
     if (slot == NULL) {
-        return false;
+        return match_status(ODIN3_ERR_NO_MEMORY);
     }
     *slot = end.path;
-    return true;
+    return match_yes();
 }
 
-bool um_depth_write_tree(const um_ctx *uc, const odin3_vec *leaves, uint32_t levels,
-                         um_write_tree *out) {
-    bool ok = tree_init(out, leaves->len, levels);
+odin3_status um_depth_write_tree(const um_ctx *uc, const odin3_vec *leaves, uint32_t levels,
+                                 um_write_tree *out, bool *matched) {
+    bool shaped = levels >= 1 && levels < UM_MAX_LEVELS + 1 && leaves->len == ((size_t)1 << levels);
+    odin3_status st = tree_init(out, shaped, levels);
     const odin3_node_id *nodes = leaves->data;
-    for (size_t i = 0; ok && i < leaves->len; i++) {
-        odin3_net_id enable = um_port_net(uc->module, nodes[i], (um_pos){UM_WR_EN_PORT, 0});
-        ok = same_enable(uc, nodes[i]) && add_leaf(uc, enable, levels, out);
+    um_match verdict = {st, shaped && st == ODIN3_OK};
+    for (size_t i = 0; verdict.st == ODIN3_OK && verdict.yes && i < leaves->len; i++) {
+        verdict = add_leaf(uc, nodes[i], levels, out);
     }
-    return ok && all_distinct(&out->paths, levels);
+    if (verdict.st == ODIN3_OK && verdict.yes) {
+        verdict = all_distinct(&out->paths, levels);
+    }
+    *matched = verdict.st == ODIN3_OK && verdict.yes;
+    return verdict.st;
 }
 
 /* --- the read side (R-8 step 2) ------------------------------------------------------------- */
@@ -224,33 +277,6 @@ typedef struct um_depth {
     odin3_vec rd_addr; /* odin3_net_id: reads * levels, the address net of each level per port */
     odin3_vec roots; /* odin3_net_id: reads * width, the root net of each data bit; none: a dummy */
 } um_depth;
-
-static bool push_flag(odin3_vec *vec) {
-    uint8_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return false;
-    }
-    *slot = 0;
-    return true;
-}
-
-static bool push_node(odin3_vec *vec, odin3_node_id node) {
-    odin3_node_id *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return false;
-    }
-    *slot = node;
-    return true;
-}
-
-static bool push_net_to(odin3_vec *vec, odin3_net_id net) {
-    odin3_net_id *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return false;
-    }
-    *slot = net;
-    return true;
-}
 
 /* The `$mux` whose A input is the only reader of `a_net` and whose B input is the only reader of
  * `b_net`; none when there is no such cell. */
@@ -281,7 +307,7 @@ static bool is_select_dff(const um_ctx *uc, odin3_node_id dff, odin3_pin_id driv
 
 /* The select of a mux of level `level` for read port `port`: a `$dff` clocked by the read clock;
  * the first one seen sets the port's address net of the level, later ones must agree. */
-static bool check_select(um_depth *dep, odin3_node_id mux, um_pos which) {
+static um_match check_select(um_depth *dep, odin3_node_id mux, um_pos which) {
     const um_ctx *uc = dep->uc;
     odin3_net_id select = um_port_net(uc->module, mux, (um_pos){UM_MUX_S, 0});
     odin3_pin_id driver = odin3_net_driver(uc->module, select);
@@ -291,55 +317,74 @@ static bool check_select(um_depth *dep, odin3_node_id mux, um_pos which) {
     odin3_net_id clock = um_port_net(uc->module, leaves[0], (um_pos){UM_MEM_RD_CLK, which.port});
     if (dff.v == 0 || !is_select_dff(uc, dff, driver) ||
         um_port_net(uc->module, dff, (um_pos){UM_DFF_CLK, 0}).v != clock.v) {
-        return false;
+        return match_no();
     }
     odin3_net_id *known = odin3_vec_at(&dep->rd_addr, which.port * dep->levels + which.index);
     odin3_net_id input = um_port_net(uc->module, dff, (um_pos){UM_DFF_D, 0});
     if (!odin3_net_valid(input) || (odin3_net_valid(*known) && known->v != input.v)) {
-        return false;
+        return match_no();
     }
     *known = input;
-    return push_node(&dep->glue, dff);
+    return match_status(push_node(&dep->glue, dff));
 }
 
 /* One level of the mux tree of one data bit: entries low and low + half of `cur` meet in a mux. */
-static bool climb_level(um_depth *dep, odin3_vec *cur, um_pos which) {
+static um_match climb_level(um_depth *dep, odin3_vec *cur, um_pos which) {
     uint32_t half = (uint32_t)1 << which.index;
     for (uint32_t low = 0; low < half; low++) {
         odin3_net_id *left = odin3_vec_at(cur, low);
         odin3_net_id right = *(const odin3_net_id *)odin3_vec_cat(cur, low + half);
         odin3_node_id mux = find_mux(dep->uc, *left, right);
-        if (mux.v == 0 || !check_select(dep, mux, which) || !push_node(&dep->muxes, mux)) {
-            return false;
+        if (mux.v == 0) {
+            return match_no();
+        }
+        um_match verdict = check_select(dep, mux, which);
+        if (verdict.st != ODIN3_OK || !verdict.yes) {
+            return verdict;
+        }
+        odin3_status st = push_node(&dep->muxes, mux);
+        if (st != ODIN3_OK) {
+            return match_status(st);
         }
         *left = um_port_net(dep->uc->module, mux, (um_pos){UM_MUX_Y, 0});
     }
-    return true;
+    return match_yes();
+}
+
+/* The leaf outputs of data bit `bit` of read port `port` in path order, in `cur`. */
+static um_match leaf_outputs(const um_depth *dep, odin3_vec *cur, um_pos which) {
+    const odin3_node_id *leaves = dep->leaves->data;
+    const uint32_t *paths = dep->wtree.paths.data;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dep->leaves->len; i++) {
+        st = push_net_to(cur, (odin3_net_id){0});
+    }
+    for (uint32_t i = 0; st == ODIN3_OK && i < dep->leaves->len; i++) {
+        um_pos pin = {UM_MEM_RD_DATA, which.port * dep->width + which.index};
+        odin3_net_id *slot = odin3_vec_at(cur, paths[i]);
+        *slot = um_port_net(dep->uc->module, leaves[i], pin);
+        if (!odin3_net_valid(*slot)) {
+            return match_no();
+        }
+    }
+    return match_status(st);
 }
 
 /* The tree of data bit `bit` of read port `port`: the leaf outputs in path order, up to the root.
  */
-static bool climb_bit(um_depth *dep, uint32_t port, uint32_t bit) {
+static um_match climb_bit(um_depth *dep, uint32_t port, uint32_t bit) {
     odin3_vec cur;
     odin3_vec_init(&cur, sizeof(odin3_net_id));
-    const odin3_node_id *leaves = dep->leaves->data;
-    const uint32_t *paths = dep->wtree.paths.data;
-    bool ok = true;
-    for (uint32_t i = 0; ok && i < dep->leaves->len; i++) {
-        ok = push_net_to(&cur, (odin3_net_id){0});
+    um_match verdict = leaf_outputs(dep, &cur, (um_pos){port, bit});
+    for (uint32_t level = dep->levels; verdict.st == ODIN3_OK && verdict.yes && level > 0;
+         level--) {
+        verdict = climb_level(dep, &cur, (um_pos){port, level - 1});
     }
-    for (uint32_t i = 0; ok && i < dep->leaves->len; i++) {
-        um_pos pin = {UM_MEM_RD_DATA, port * dep->width + bit};
-        odin3_net_id *slot = odin3_vec_at(&cur, paths[i]);
-        *slot = um_port_net(dep->uc->module, leaves[i], pin);
-        ok = odin3_net_valid(*slot);
+    if (verdict.st == ODIN3_OK && verdict.yes) {
+        verdict = match_status(push_net_to(&dep->roots, *(odin3_net_id *)odin3_vec_at(&cur, 0)));
     }
-    for (uint32_t level = dep->levels; ok && level > 0; level--) {
-        ok = climb_level(dep, &cur, (um_pos){port, level - 1});
-    }
-    ok = ok && push_net_to(&dep->roots, *(odin3_net_id *)odin3_vec_at(&cur, 0));
     odin3_vec_free(&cur);
-    return ok;
+    return verdict;
 }
 
 /* True when read port `port` of the first leaf has no output at all: the unconnected port of a
@@ -355,18 +400,20 @@ static bool dummy_read(const um_depth *dep, uint32_t port) {
     return true;
 }
 
-static bool read_side(um_depth *dep) {
-    bool ok = true;
-    for (uint32_t i = 0; ok && i < dep->reads * dep->levels; i++) {
-        ok = push_net_to(&dep->rd_addr, (odin3_net_id){0});
+static um_match read_side(um_depth *dep) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dep->reads * dep->levels; i++) {
+        st = push_net_to(&dep->rd_addr, (odin3_net_id){0});
     }
-    for (uint32_t port = 0; ok && port < dep->reads; port++) {
+    um_match verdict = match_status(st);
+    for (uint32_t port = 0; verdict.st == ODIN3_OK && verdict.yes && port < dep->reads; port++) {
         bool dummy = dummy_read(dep, port);
-        for (uint32_t bit = 0; ok && bit < dep->width; bit++) {
-            ok = dummy ? push_net_to(&dep->roots, (odin3_net_id){0}) : climb_bit(dep, port, bit);
+        for (uint32_t bit = 0; verdict.st == ODIN3_OK && verdict.yes && bit < dep->width; bit++) {
+            verdict = dummy ? match_status(push_net_to(&dep->roots, (odin3_net_id){0}))
+                            : climb_bit(dep, port, bit);
         }
     }
-    return ok;
+    return verdict;
 }
 
 /* --- absorbing the glue (R-8 step 3) -------------------------------------------------------- */
@@ -421,7 +468,7 @@ static odin3_status init_marks(um_absorb *ab) {
     odin3_vec_init(&ab->marks, sizeof(uint8_t));
     odin3_status st = odin3_vec_reserve(&ab->marks, count);
     for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
-        st = push_flag(&ab->marks) ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        st = push_flag(&ab->marks);
     }
     return st;
 }
@@ -482,14 +529,31 @@ static void ports_free(um_ports *ports) {
 }
 
 /* Copies `count` nets of port `port` of `leaf`, from pin `first`, to the end of `out`. */
-static bool copy_pins(const um_ctx *uc, odin3_node_id leaf, um_pos from, odin3_vec *out,
-                      uint32_t count) {
-    for (uint32_t i = 0; i < count; i++) {
-        if (!push_net_to(out, um_port_net(uc->module, leaf, (um_pos){from.port, from.index + i}))) {
-            return false;
-        }
+static odin3_status copy_pins(const um_ctx *uc, odin3_node_id leaf, um_pos from, odin3_vec *out,
+                              uint32_t count) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+        st = push_net_to(out, um_port_net(uc->module, leaf, (um_pos){from.port, from.index + i}));
     }
-    return true;
+    return st;
+}
+
+/* The address pins of read port `port`: the level nets (ground for a dummy port), then the leaf's
+ * own. */
+static odin3_status read_address(const um_depth *dep, um_ports *ports, uint32_t port,
+                                 odin3_net_id gnd) {
+    odin3_node_id leaf = *(const odin3_node_id *)dep->leaves->data;
+    bool dummy = dummy_read(dep, port);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t level = 0; st == ODIN3_OK && level < dep->levels; level++) {
+        odin3_net_id net =
+            dummy ? gnd
+                  : *(const odin3_net_id *)odin3_vec_cat(&dep->rd_addr, port * dep->levels + level);
+        st = push_net_to(&ports->port[UM_MEM_RD_ADDR], net);
+    }
+    return st == ODIN3_OK ? copy_pins(dep->uc, leaf, (um_pos){UM_MEM_RD_ADDR, port * dep->abits},
+                                      &ports->port[UM_MEM_RD_ADDR], dep->abits)
+                          : st;
 }
 
 /* The read side ports: clock and enable of the leaf, the address (level nets, then the leaf's) and
@@ -499,28 +563,20 @@ static odin3_status build_read_ports(const um_depth *dep, um_ports *ports) {
     odin3_node_id leaf = *(const odin3_node_id *)dep->leaves->data;
     odin3_net_id gnd = {0};
     odin3_status st = um_const_net(dep->uc, false, &gnd);
-    bool ok = st == ODIN3_OK &&
-              copy_pins(uc, leaf, (um_pos){UM_MEM_RD_CLK, 0}, &ports->port[0], dep->reads) &&
-              copy_pins(uc, leaf, (um_pos){UM_MEM_RD_EN, 0}, &ports->port[1], dep->reads);
-    for (uint32_t port = 0; ok && port < dep->reads; port++) {
-        bool dummy = dummy_read(dep, port);
-        for (uint32_t level = 0; ok && level < dep->levels; level++) {
-            odin3_net_id net = dummy ? gnd
-                                     : *(const odin3_net_id *)odin3_vec_cat(
-                                           &dep->rd_addr, port * dep->levels + level);
-            ok = push_net_to(&ports->port[UM_MEM_RD_ADDR], net);
-        }
-        ok = ok && copy_pins(uc, leaf, (um_pos){UM_MEM_RD_ADDR, port * dep->abits},
-                             &ports->port[UM_MEM_RD_ADDR], dep->abits);
+    st = st == ODIN3_OK
+             ? copy_pins(uc, leaf, (um_pos){UM_MEM_RD_CLK, 0}, &ports->port[0], dep->reads)
+             : st;
+    st = st == ODIN3_OK
+             ? copy_pins(uc, leaf, (um_pos){UM_MEM_RD_EN, 0}, &ports->port[1], dep->reads)
+             : st;
+    for (uint32_t port = 0; st == ODIN3_OK && port < dep->reads; port++) {
+        st = read_address(dep, ports, port, gnd);
     }
     const odin3_net_id *roots = dep->roots.data;
-    for (size_t i = 0; ok && i < dep->roots.len; i++) {
-        ok = push_net_to(&ports->port[UM_MEM_RD_DATA], roots[i]);
+    for (size_t i = 0; st == ODIN3_OK && i < dep->roots.len; i++) {
+        st = push_net_to(&ports->port[UM_MEM_RD_DATA], roots[i]);
     }
-    if (st != ODIN3_OK) {
-        return st;
-    }
-    return ok ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    return st;
 }
 
 /* The write side: clock and data of the leaf, the enable `we0` for every bit, the address (the
@@ -528,19 +584,21 @@ static odin3_status build_read_ports(const um_depth *dep, um_ports *ports) {
 static odin3_status build_write_ports(const um_depth *dep, um_ports *ports) {
     const um_ctx *uc = dep->uc;
     odin3_node_id leaf = *(const odin3_node_id *)dep->leaves->data;
-    bool ok =
-        copy_pins(uc, leaf, (um_pos){UM_MEM_WR_CLK, 0}, &ports->port[UM_MEM_WR_CLK], 1) &&
-        copy_pins(uc, leaf, (um_pos){UM_MEM_WR_DATA, 0}, &ports->port[UM_MEM_WR_DATA], dep->width);
-    for (uint32_t i = 0; ok && i < dep->width; i++) {
-        ok = push_net_to(&ports->port[UM_WR_EN_PORT], dep->wtree.we0);
+    odin3_status st =
+        copy_pins(uc, leaf, (um_pos){UM_MEM_WR_CLK, 0}, &ports->port[UM_MEM_WR_CLK], 1);
+    st = st == ODIN3_OK ? copy_pins(uc, leaf, (um_pos){UM_MEM_WR_DATA, 0},
+                                    &ports->port[UM_MEM_WR_DATA], dep->width)
+                        : st;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dep->width; i++) {
+        st = push_net_to(&ports->port[UM_WR_EN_PORT], dep->wtree.we0);
     }
     const odin3_net_id *ad = dep->wtree.ad.data;
-    for (uint32_t i = 0; ok && i < dep->levels; i++) {
-        ok = push_net_to(&ports->port[UM_MEM_WR_ADDR], ad[i]);
+    for (uint32_t i = 0; st == ODIN3_OK && i < dep->levels; i++) {
+        st = push_net_to(&ports->port[UM_MEM_WR_ADDR], ad[i]);
     }
-    ok = ok &&
-         copy_pins(uc, leaf, (um_pos){UM_MEM_WR_ADDR, 0}, &ports->port[UM_MEM_WR_ADDR], dep->abits);
-    return ok ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    return st == ODIN3_OK ? copy_pins(uc, leaf, (um_pos){UM_MEM_WR_ADDR, 0},
+                                      &ports->port[UM_MEM_WR_ADDR], dep->abits)
+                          : st;
 }
 
 /* The `$mem` that replaces the leaves: the leaf's parameters with MEMID, SIZE and ABITS of the
@@ -611,11 +669,16 @@ static odin3_status merge_set(um_ctx *uc, const odin3_vec *leaves, uint32_t leve
     odin3_vec_init(&dep.glue, sizeof(odin3_node_id));
     odin3_vec_init(&dep.rd_addr, sizeof(odin3_net_id));
     odin3_vec_init(&dep.roots, sizeof(odin3_net_id));
-    odin3_status st = ODIN3_OK;
-    bool matched = um_depth_write_tree(uc, leaves, levels, &dep.wtree) && read_side(&dep);
-    if (!matched) {
+    bool matched = false;
+    odin3_status st = um_depth_write_tree(uc, leaves, levels, &dep.wtree, &matched);
+    if (st == ODIN3_OK && matched) {
+        um_match verdict = read_side(&dep);
+        st = verdict.st;
+        matched = verdict.yes;
+    }
+    if (st == ODIN3_OK && !matched) {
         st = refuse_set(uc, leaves);
-    } else {
+    } else if (st == ODIN3_OK) {
         um_group group;
         um_group_init(&group);
         st = absorb(&dep, &group);
@@ -744,12 +807,12 @@ typedef struct um_runset {
  * flags are set. */
 static odin3_status gather_set(um_runset *rs, size_t first, odin3_vec *leaves) {
     odin3_vec_init(leaves, sizeof(odin3_node_id));
-    odin3_status st = push_node(leaves, rs->base[first].node) ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = push_node(leaves, rs->base[first].node);
     for (size_t other = first + 1; st == ODIN3_OK && other < rs->count; other++) {
         uint8_t *flag = odin3_vec_at(&rs->used, other);
         if (*flag == 0 && same_leaf(rs->uc, rs->base[first].node, rs->base[other].node)) {
             *flag = 1;
-            st = push_node(leaves, rs->base[other].node) ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+            st = push_node(leaves, rs->base[other].node);
         }
     }
     return st;
@@ -761,7 +824,7 @@ static odin3_status run_sets(um_ctx *uc, const um_cand *cands, um_range_t run) {
     odin3_vec_init(&rs.used, sizeof(uint8_t));
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < rs.count; i++) {
-        st = push_flag(&rs.used) ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        st = push_flag(&rs.used);
     }
     for (size_t i = 0; st == ODIN3_OK && i < rs.count; i++) {
         if (*(const uint8_t *)odin3_vec_cat(&rs.used, i) != 0) {
