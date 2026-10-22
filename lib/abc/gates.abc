@@ -1,0 +1,9 @@
+# lib/abc/gates.abc: the default script of abc --gates (gatemap spec G-5): the optimisation
+# steps of lib/abc/vtr.abc, then area-oriented mapping to the library abc --gates loaded.
+strash
+ifraig -v
+scorr -v
+dc2 -v
+dch -f
+map -a
+print_stats
