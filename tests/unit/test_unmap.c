@@ -863,6 +863,58 @@ static void test_unmap_mul_split_other_w(void) {
     check_clean();
 }
 
+/* --- Task 8: multiplier regroup, pattern P2 and nesting ------------------------------------ */
+
+static void test_unmap_mul_split_ab(void) {
+    flow(
+        "module t(input [39:0] a, input [39:0] b, output [79:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    odin3_node_id mul = only_mul();
+    expect_params(mul, (const int64_t[5]){0, 0, 40, 40, 80});
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(intern("mul.p2"), attr_of(mul, "unmap")->str);
+    check_clean();
+}
+
+static void test_unmap_mul_split_nested(void) {
+    flow("module t(input [79:0] a, input [79:0] b, output [159:0] p); assign p = a * b; "
+         "endmodule\n");
+    run_script("unmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 80, 80, 160});
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    check_clean();
+}
+
+static void test_unmap_mul_split_80x40(void) {
+    flow("module t(input [79:0] a, input [39:0] b, output [119:0] p); assign p = a * b; "
+         "endmodule\n");
+    run_script("unmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 80, 40, 120});
+    check_clean();
+}
+
+/* M-7: the pieces above the low product are dead (the result has 32 bits), and opt_clean removes
+ * them before unmap sees them: what is left is one W x W multiplier. (A dead piece still reads
+ * its inputs, so unmap on the uncleaned design cannot tell: it keeps them as they are.) */
+static void test_unmap_mul_low_only(void) {
+    flow(
+        "module t(input [39:0] a, input [39:0] b, output [31:0] p); assign p = a * b; endmodule\n");
+    run_script("opt_clean\nunmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 36, 36, 32});
+    check_clean();
+}
+
+static void test_unmap_mul_shared_product(void) {
+    load_lib();
+    read_p1_blif(&(p1_shape){8, 8, 3, 4, true});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$mul", NULL, 0));
+    odin3_node_id add[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 1));
+    TEST_ASSERT_EQUAL_UINT32(intern("mul:shared"), attr_of(add[0], "unmap_note")->str);
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -902,5 +954,10 @@ int main(void) {
     RUN_TEST(test_unmap_mul_no_regroup);
     RUN_TEST(test_unmap_mul_blif_p1);
     RUN_TEST(test_unmap_mul_split_other_w);
+    RUN_TEST(test_unmap_mul_split_ab);
+    RUN_TEST(test_unmap_mul_split_nested);
+    RUN_TEST(test_unmap_mul_split_80x40);
+    RUN_TEST(test_unmap_mul_low_only);
+    RUN_TEST(test_unmap_mul_shared_product);
     return UNITY_END();
 }
