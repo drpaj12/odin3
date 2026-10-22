@@ -10,6 +10,7 @@
 #include "util/str.h"
 
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { UM_MAX_PORTS = 16 };
@@ -198,4 +199,166 @@ odin3_status um_const_net(um_ctx *uc, bool one, odin3_net_id *out) {
     *cache = net;
     *out = net;
     return ODIN3_OK;
+}
+
+/* --- groups and the replacement transaction (S-5, P-1, P-2) -------------------------------- */
+
+void um_group_init(um_group *group) {
+    odin3_vec_init(&group->nodes, sizeof(odin3_node_id));
+}
+
+void um_group_free(um_group *group) {
+    odin3_vec_free(&group->nodes);
+}
+
+odin3_status um_group_add(um_group *group, odin3_node_id node) {
+    odin3_node_id *slot = odin3_vec_push(&group->nodes);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = node;
+    return ODIN3_OK;
+}
+
+static int cmp_node(const void *lhs, const void *rhs) {
+    uint32_t left = ((const odin3_node_id *)lhs)->v;
+    uint32_t right = ((const odin3_node_id *)rhs)->v;
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
+}
+
+/* The group's node IDs in ascending order (a sorted copy; the caller frees it). */
+static odin3_status sorted_nodes(const um_group *group, odin3_vec *out) {
+    odin3_vec_init(out, sizeof(odin3_node_id));
+    odin3_status st = odin3_vec_copy(out, &group->nodes);
+    if (st == ODIN3_OK && out->len > 1) {
+        qsort(out->data, out->len, sizeof(odin3_node_id), cmp_node);
+    }
+    return st;
+}
+
+/* S-5 step 1: one DERIVED record over the records of the old nodes (node-ID order, a repeated
+ * record once); 0 when no old node has one. */
+static odin3_status make_prov(um_ctx *uc, const odin3_vec *sorted, odin3_prov_id *out) {
+    odin3_vec parents;
+    odin3_vec_init(&parents, sizeof(odin3_prov_id));
+    const odin3_node_id *nodes = sorted->data;
+    odin3_status st = ODIN3_OK;
+    *out = (odin3_prov_id){0};
+    for (size_t i = 0; st == ODIN3_OK && i < sorted->len; i++) {
+        odin3_prov_id prov = odin3_node_prov(uc->module, nodes[i]);
+        odin3_prov_id *slot = prov.v != 0 ? odin3_vec_push(&parents) : NULL;
+        if (prov.v != 0 && slot == NULL) {
+            st = ODIN3_ERR_NO_MEMORY;
+        } else if (slot != NULL) {
+            *slot = prov;
+        }
+    }
+    if (st == ODIN3_OK && parents.len > 0) {
+        odin3_prov_begin_op(uc->pass);
+        st = odin3_prov_derive(uc->pass, (odin3_prov_list){parents.data, (uint32_t)parents.len},
+                               out);
+    }
+    odin3_vec_free(&parents);
+    return st;
+}
+
+static odin3_status set_attr(um_ctx *uc, odin3_node_id node, const char *key,
+                             const odin3_value *value) {
+    uint32_t key_str = 0;
+    odin3_status st = odin3_design_intern(uc->design, odin3_bytes_cstr(key), &key_str);
+    return st == ODIN3_OK
+               ? odin3_attr_set(uc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key_str, value)
+               : st;
+}
+
+/* A string value for set_attr. */
+static odin3_status str_value(um_ctx *uc, const char *text, odin3_value *out) {
+    uint32_t str = 0;
+    odin3_status st = odin3_design_intern(uc->design, odin3_bytes_cstr(text), &str);
+    *out = (odin3_value){ODIN3_VAL_STRING, 0, NULL, 0, str, 0};
+    return st;
+}
+
+odin3_status um_set_note(um_ctx *uc, odin3_node_id node, const char *text) {
+    odin3_value value;
+    odin3_status st = str_value(uc, text, &value);
+    return st == ODIN3_OK ? set_attr(uc, node, "unmap_note", &value) : st;
+}
+
+odin3_status um_set_cand(um_ctx *uc, odin3_node_id node, const char *text) {
+    odin3_value value;
+    odin3_status st = str_value(uc, text, &value);
+    return st == ODIN3_OK ? set_attr(uc, node, "unmap_cand", &value) : st;
+}
+
+static odin3_status set_int(um_ctx *uc, odin3_node_id node, const char *key, int64_t num) {
+    odin3_value value = odin3_value_int(num);
+    return set_attr(uc, node, key, &value);
+}
+
+static odin3_status drop_attr(um_ctx *uc, odin3_node_id node, const char *key) {
+    uint32_t key_str = 0;
+    odin3_status st = odin3_design_intern(uc->design, odin3_bytes_cstr(key), &key_str);
+    return st == ODIN3_OK
+               ? odin3_attr_remove(uc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key_str)
+               : st;
+}
+
+/* S-5 step 3 and P-2: the namesake's attributes, without `hardmap` and the nocarry marker, then
+ * the unmap attributes. */
+static odin3_status set_attrs(um_ctx *uc, const um_group *group, const um_new *req,
+                              odin3_node_id node) {
+    odin3_status st = odin3_kit_copy_attrs(uc->module, req->namesake, node);
+    st = st == ODIN3_OK ? drop_attr(uc, node, "hardmap") : st;
+    st = st == ODIN3_OK ? drop_attr(uc, node, "partial_map_nocarry") : st;
+    odin3_value rule;
+    st = st == ODIN3_OK ? str_value(uc, req->rule, &rule) : st;
+    st = st == ODIN3_OK ? set_attr(uc, node, "unmap", &rule) : st;
+    st = st == ODIN3_OK ? set_int(uc, node, "unmap_pieces", (int64_t)group->nodes.len) : st;
+    st = st == ODIN3_OK && req->origin != 0 ? set_int(uc, node, "unmap_origin", req->origin) : st;
+    return st == ODIN3_OK && req->w != 0 ? set_int(uc, node, "unmap_w", req->w) : st;
+}
+
+/* S-5 step 4: deletes the group; *done counts the nodes gone when it fails. */
+static odin3_status delete_group(um_ctx *uc, const odin3_vec *sorted, size_t *done) {
+    const odin3_node_id *nodes = sorted->data;
+    for (*done = 0; *done < sorted->len; (*done)++) {
+        odin3_status st = odin3_node_delete(uc->module, nodes[*done]);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status um_replace(um_ctx *uc, const um_group *group, const um_new *req, odin3_node_id *out) {
+    odin3_vec sorted;
+    odin3_prov_id prov = {0};
+    odin3_node_id node = {0};
+    odin3_status st = sorted_nodes(group, &sorted);
+    st = st == ODIN3_OK ? make_prov(uc, &sorted, &prov) : st;
+    odin3_node_spec spec = {req->type, 0, prov, req->params, req->n_params};
+    st = st == ODIN3_OK ? odin3_node_create_connected(uc->module, &spec, req->ports, &node) : st;
+    if (st != ODIN3_OK) {
+        odin3_vec_free(&sorted);
+        return st;
+    }
+    uint32_t name = odin3_node_name(uc->module, req->namesake);
+    st = set_attrs(uc, group, req, node);
+    size_t done = 0;
+    st = st == ODIN3_OK ? delete_group(uc, &sorted, &done) : st;
+    if (st != ODIN3_OK && done == 0) {
+        /* nothing of the group is gone: take the new cell back so it never double-drives */
+        (void)odin3_node_delete(uc->module, node);
+    } else if (st != ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "unmap: replacing a group failed (%d): the module is partly changed", (int)st);
+    }
+    st = st == ODIN3_OK && name != 0 ? odin3_node_rename(uc->module, node, name) : st;
+    odin3_vec_free(&sorted);
+    *out = node;
+    return st;
 }

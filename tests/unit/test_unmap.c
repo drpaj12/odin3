@@ -249,6 +249,117 @@ static void test_const_net(void) {
     check_clean();
 }
 
+/* --- Task 3: the replacement transaction -------------------------------------------------- */
+
+#define TWO_ADDERS                                                                                 \
+    ".model m\n.inputs a b c d\n.outputs s1 s2\n"                                                  \
+    ".subckt adder a=a b=b cin=c cout=k1 sumout=s1\n"                                              \
+    ".subckt adder a=c b=d cin=a cout=k2 sumout=s2\n.end\n"
+
+static const odin3_value k_add1[5] = {{ODIN3_VAL_INT, 0, NULL, 0, 0, 0},
+                                      {ODIN3_VAL_INT, 0, NULL, 0, 0, 0},
+                                      {ODIN3_VAL_INT, 1, NULL, 0, 0, 0},
+                                      {ODIN3_VAL_INT, 1, NULL, 0, 0, 0},
+                                      {ODIN3_VAL_INT, 1, NULL, 0, 0, 0}};
+
+static void begin_run(um_ctx *uc, odin3_pass_ctx *pctx) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("unmap"), pctx));
+    uc->pass = pctx;
+}
+
+static void set_str_attr(odin3_node_id node, const char *key, const char *val) {
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern(val), 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v},
+                                                   intern(key), &value));
+}
+
+static const odin3_value *attr_of(odin3_node_id node, const char *key) {
+    return odin3_attr_get(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v}, intern(key));
+}
+
+/* A $add on the nets a, b (inputs) and s1 (output); the group is the two adders. */
+static odin3_node_id replace_two(odin3_node_id adders[2]) {
+    odin3_net_id nets[3] = {net_named("a"), net_named("b"), net_named("s1")};
+    odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {&nets[2], 1}};
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_pass_ctx pctx;
+    begin_run(&uc, &pctx);
+    um_group group;
+    um_group_init(&group);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_group_add(&group, adders[1]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_group_add(&group, adders[0]));
+    um_new req = {uc.types.add, k_add1, 5, ports, adders[0], "chain", 0, 0};
+    odin3_node_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_replace(&uc, &group, &req, &out));
+    um_group_free(&group);
+    return out;
+}
+
+static void test_replace_provenance_and_attrs(void) {
+    load_lib();
+    read_blif(TWO_ADDERS);
+    odin3_node_id adders[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", adders, 2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_rename(top(), adders[0], intern("addr0")));
+    set_str_attr(adders[0], "foo", "bar");
+    set_str_attr(adders[0], "hardmap", "adder:head");
+    odin3_prov_id p0 = odin3_node_prov(top(), adders[0]);
+    odin3_prov_id p1 = odin3_node_prov(top(), adders[1]);
+    odin3_node_id add = replace_two(adders);
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("adder", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(add.v, odin3_module_find_node(top(), intern("addr0")).v);
+    TEST_ASSERT_NOT_NULL(attr_of(add, "foo"));
+    TEST_ASSERT_NULL(attr_of(add, "hardmap"));
+    TEST_ASSERT_EQUAL_UINT32(intern("chain"), attr_of(add, "unmap")->str);
+    TEST_ASSERT_EQUAL_INT64(2, attr_of(add, "unmap_pieces")->i);
+    odin3_prov_id prov = odin3_node_prov(top(), add);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, odin3_prov_get(design, prov)->kind);
+    odin3_prov_list parents = odin3_prov_parents(design, prov);
+    TEST_ASSERT_EQUAL_UINT32(2, parents.count);
+    TEST_ASSERT_TRUE(p0.v != p1.v && parents.ids[0].v == p0.v && parents.ids[1].v == p1.v);
+    check_clean();
+}
+
+static void test_replace_no_prov(void) {
+    load_lib();
+    read_blif(".model m\n.inputs a b\n.outputs s1\n.names a b s1\n11 1\n.end\n");
+    odin3_node_id adders[2];
+    odin3_net_id open_pin = {0};
+    odin3_netvec ports[5] = {
+        {&open_pin, 1}, {&open_pin, 1}, {&open_pin, 1}, {&open_pin, 1}, {&open_pin, 1}};
+    odin3_node_spec spec = {type_named("adder"), 0, {0}, NULL, 0};
+    for (size_t i = 0; i < 2; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_node_create_connected(top(), &spec, ports, &adders[i]));
+    }
+    odin3_node_id add = replace_two(adders);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_node_prov(top(), add).v);
+}
+
+static void test_replace_failure_keeps_group(void) {
+    load_lib();
+    read_blif(TWO_ADDERS);
+    odin3_node_id adders[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", adders, 2));
+    odin3_net_id nets[2] = {net_named("a"), net_named("b")};
+    odin3_netvec ports[3] = {{&nets[0], 1}, {&nets[1], 1}, {nets, 2}}; /* Y has 1 bit */
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_pass_ctx pctx;
+    begin_run(&uc, &pctx);
+    um_group group;
+    um_group_init(&group);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_group_add(&group, adders[0]));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_group_add(&group, adders[1]));
+    um_new req = {uc.types.add, k_add1, 5, ports, adders[0], "chain", 0, 0};
+    odin3_node_id out = {0};
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, um_replace(&uc, &group, &req, &out));
+    um_group_free(&group);
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", NULL, 0));
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -259,5 +370,8 @@ int main(void) {
     RUN_TEST(test_types_find_no_lib);
     RUN_TEST(test_types_find_wrong_shape);
     RUN_TEST(test_const_net);
+    RUN_TEST(test_replace_provenance_and_attrs);
+    RUN_TEST(test_replace_no_prov);
+    RUN_TEST(test_replace_failure_keeps_group);
     return UNITY_END();
 }

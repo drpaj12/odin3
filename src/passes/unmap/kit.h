@@ -79,7 +79,9 @@ typedef struct um_new {
 /* S-5 steps 1 to 5. *out is the new node. On failure the group is intact. */
 odin3_status um_replace(um_ctx *uc, const um_group *group, const um_new *req, odin3_node_id *out);
 
-/* P-3: sets the string attribute `key` (`unmap_note` or `unmap_cand`) of node to `text`. */
-odin3_status um_set_str(um_ctx *uc, odin3_node_id node, const char *key, const char *text);
+/* P-3: sets the string attribute `unmap_note` (a declined group) or `unmap_cand` (a candidate set)
+ * of node to `text`. */
+odin3_status um_set_note(um_ctx *uc, odin3_node_id node, const char *text);
+odin3_status um_set_cand(um_ctx *uc, odin3_node_id node, const char *text);
 
 #endif
