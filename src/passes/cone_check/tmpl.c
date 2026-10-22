@@ -15,19 +15,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { LABEL_BYTES = 64, WHY_BYTES = 256, DECIMAL = 10 };
+enum { LABEL_BYTES = 64, WHY_BYTES = 256, DECIMAL = 10, CONST_MAX_BITS = 64 };
 
 void cc_tmpl_init(cc_tmpl *tmpl) {
     *tmpl = (cc_tmpl){0};
     odin3_vec_init(&tmpl->params, sizeof(odin3_value));
     odin3_vec_init(&tmpl->first, sizeof(uint32_t));
     odin3_vec_init(&tmpl->ord, sizeof(uint32_t));
+    odin3_vec_init(&tmpl->cbit, sizeof(uint8_t));
 }
 
 void cc_tmpl_free(cc_tmpl *tmpl) {
     odin3_vec_free(&tmpl->params);
     odin3_vec_free(&tmpl->first);
     odin3_vec_free(&tmpl->ord);
+    odin3_vec_free(&tmpl->cbit);
     odin3_arena_destroy(tmpl->arena);
     tmpl->arena = NULL;
 }
@@ -176,6 +178,133 @@ static odin3_status layout_port(cc_tmpl *tmpl, uint32_t port, uint32_t *total) {
     return st;
 }
 
+/* --- the constants ------------------------------------------------------------------------- */
+
+typedef enum const_err { CONST_OK = 0, CONST_SYNTAX, CONST_WIDTH } const_err;
+
+/* `0b` binary text into bits (LSB first, zero-extended); a one above the width is CONST_WIDTH. */
+static const_err decode_binary(const char *digits, uint32_t width, uint8_t *bits) {
+    size_t len = strlen(digits);
+    if (len == 0) {
+        return CONST_SYNTAX;
+    }
+    for (size_t i = 0; i < len; i++) {
+        if (digits[i] != '0' && digits[i] != '1') {
+            return CONST_SYNTAX;
+        }
+    }
+    for (size_t i = 0; i < len; i++) {
+        uint8_t bit = (uint8_t)(digits[len - 1 - i] - '0');
+        if (i < width) {
+            bits[i] = bit;
+        } else if (bit != 0) {
+            return CONST_WIDTH;
+        }
+    }
+    return CONST_OK;
+}
+
+static const_err decode_decimal(const char *text, uint32_t width, uint8_t *bits) {
+    char *end = NULL;
+    if (text[0] < '0' || text[0] > '9') {
+        return CONST_SYNTAX;
+    }
+    errno = 0;
+    unsigned long long value = strtoull(text, &end, DECIMAL);
+    if (*end != '\0' || errno != 0) {
+        return CONST_SYNTAX;
+    }
+    for (uint32_t i = 0; i < width && i < CONST_MAX_BITS; i++) {
+        bits[i] = (uint8_t)((value >> i) & 1U);
+    }
+    return width < CONST_MAX_BITS && (value >> width) != 0 ? CONST_WIDTH : CONST_OK;
+}
+
+static const_err decode_const(const char *text, uint32_t width, uint8_t *bits) {
+    memset(bits, 0, width);
+    if (text[0] == '0' && text[1] == 'b') {
+        return decode_binary(text + 2, width, bits);
+    }
+    return decode_decimal(text, width, bits);
+}
+
+odin3_status cc_const_bits(const char *text, uint32_t width, uint8_t *bits) {
+    const_err err = decode_const(text, width, bits);
+    if (err == CONST_SYNTAX) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "cone_check: '%s' is not a constant (decimal up to 2^64-1 or 0b binary)", text);
+    } else if (err == CONST_WIDTH) {
+        odin3_log(ODIN3_LOG_ERROR, "cone_check: constant '%s' does not fit %u bits", text,
+                  (unsigned)width);
+    }
+    return err == CONST_OK ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
+}
+
+static odin3_status set_const_bits(cc_tmpl *tmpl, uint32_t port, const cc_const *given) {
+    const uint32_t *first = tmpl->first.data;
+    uint32_t width = first[port + 1] - first[port];
+    uint8_t *bits = odin3_arena_alloc(tmpl->arena, width);
+    uint8_t *cbit = tmpl->cbit.data;
+    if (bits == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    const_err err = decode_const(given->value, width, bits);
+    if (err == CONST_SYNTAX) {
+        return TMPL_ERR(tmpl,
+                        "cone_check: -const %s=%s: '%s' is not a constant (decimal up to "
+                        "2^64-1 or 0b binary)",
+                        given->port, given->value, given->value);
+    }
+    if (err == CONST_WIDTH) {
+        return TMPL_ERR(tmpl, "cone_check: -const %s=%s: value does not fit port '%s' (%u bits)",
+                        given->port, given->value, given->port, (unsigned)width);
+    }
+    for (uint32_t bit = 0; bit < width; bit++) {
+        cbit[first[port] + bit] = bits[bit] != 0 ? CC_BIT_CONST1 : CC_BIT_CONST0;
+    }
+    return ODIN3_OK;
+}
+
+/* One `-const`: finds its port (an input, given once) and sets its bits. */
+static odin3_status apply_const(cc_tmpl *tmpl, const cc_const *given, const cc_const *earlier,
+                                size_t n_earlier) {
+    uint32_t port = 0;
+    while (port < tmpl->def->n_ports && strcmp(tmpl->def->ports[port].name, given->port) != 0) {
+        port++;
+    }
+    if (port == tmpl->def->n_ports) {
+        return TMPL_ERR(tmpl, "cone_check: -const: cell type '%s' has no port '%s'",
+                        tmpl->def->name, given->port);
+    }
+    if (tmpl->def->ports[port].dir != ODIN3_DIR_IN) {
+        return TMPL_ERR(tmpl, "cone_check: -const: port '%s' is not an input", given->port);
+    }
+    for (size_t i = 0; i < n_earlier; i++) {
+        if (strcmp(earlier[i].port, given->port) == 0) {
+            return TMPL_ERR(tmpl, "cone_check: -const: port '%s' is given twice", given->port);
+        }
+    }
+    return set_const_bits(tmpl, port, given);
+}
+
+static odin3_status apply_consts(cc_tmpl *tmpl, const cc_opts *opts, uint32_t total) {
+    for (uint32_t bit = 0; bit < total; bit++) {
+        uint8_t *slot = odin3_vec_push(&tmpl->cbit);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = CC_BIT_NET;
+    }
+    const cc_const *given = opts->consts.data;
+    for (size_t i = 0; i < opts->consts.len; i++) {
+        odin3_status st = apply_const(tmpl, &given[i], given, i);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
 odin3_status cc_tmpl_build(cc_tmpl *tmpl, odin3_design *design, const cc_opts *opts) {
     tmpl->design = design;
     tmpl->arena = odin3_arena_create(0);
@@ -186,7 +315,8 @@ odin3_status cc_tmpl_build(cc_tmpl *tmpl, odin3_design *design, const cc_opts *o
     for (uint32_t port = 0; st == ODIN3_OK && port < tmpl->def->n_ports; port++) {
         st = layout_port(tmpl, port, &total);
     }
-    return st == ODIN3_OK ? push_u32(&tmpl->first, total) : st;
+    st = st == ODIN3_OK ? push_u32(&tmpl->first, total) : st;
+    return st == ODIN3_OK ? apply_consts(tmpl, opts, total) : st;
 }
 
 /* The port of flat bit `bit`. */
@@ -274,6 +404,12 @@ static odin3_status bind_net(const cc_tmpl *tmpl, const cc_group *group, cc_bnet
                         want == ODIN3_DIR_IN ? "an output" : "an input",
                         want == ODIN3_DIR_IN ? "input" : "output");
     }
+    if (((const uint8_t *)tmpl->cbit.data)[flat] != CC_BIT_NET) {
+        return cc_error(group->design, prov,
+                        "cone_check: net '%s': binding '%s': port '%s' is constant (-const)",
+                        cc_net_label(group, net, label, sizeof label), text,
+                        tmpl->def->ports[port_of(tmpl, flat)].name);
+    }
     uint32_t *owner = odin3_vec_at(&state->owner, flat);
     if (*owner != 0) {
         return cc_error(group->design, prov,
@@ -307,7 +443,7 @@ odin3_status cc_tmpl_bind(const cc_tmpl *tmpl, cc_group *group) {
         odin3_node_prov(group->module, (odin3_node_id){*(const uint32_t *)group->nodes.data});
     for (uint32_t bit = 0; st == ODIN3_OK && bit < bits; bit++) {
         char name[LABEL_BYTES];
-        if (owner[bit] == 0) {
+        if (owner[bit] == 0 && ((const uint8_t *)tmpl->cbit.data)[bit] == CC_BIT_NET) {
             worst = cc_error(group->design, first, "cone_check: template bit %s is not bound",
                              cc_tmpl_name(tmpl, bit, name, sizeof name));
         }
@@ -326,6 +462,29 @@ static void sort_in(cc_param *items, size_t at) {
         at--;
     }
     items[at] = item;
+}
+
+/* ` -const PORT=V` per constant, sorted by port (the same insertion as the parameters). */
+static odin3_status append_consts(const cc_opts *opts, odin3_strbuf *out) {
+    odin3_vec sorted;
+    odin3_vec_init(&sorted, sizeof(cc_param));
+    const cc_const *given = opts->consts.data;
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < opts->consts.len; i++) {
+        cc_param *slot = odin3_vec_push(&sorted);
+        if (slot == NULL) {
+            st = ODIN3_ERR_NO_MEMORY;
+        } else {
+            *slot = (cc_param){given[i].port, given[i].value};
+            sort_in(sorted.data, i);
+        }
+    }
+    const cc_param *items = sorted.data;
+    for (size_t i = 0; st == ODIN3_OK && i < sorted.len; i++) {
+        st = odin3_strbuf_appendf(out, " -const %s=%s", items[i].name, items[i].value);
+    }
+    odin3_vec_free(&sorted);
+    return st;
 }
 
 odin3_status cc_cell_text(const cc_opts *opts, odin3_strbuf *out) {
@@ -347,5 +506,5 @@ odin3_status cc_cell_text(const cc_opts *opts, odin3_strbuf *out) {
         st = odin3_strbuf_appendf(out, " %s=%s", items[i].name, items[i].value);
     }
     odin3_vec_free(&sorted);
-    return st;
+    return st == ODIN3_OK ? append_consts(opts, out) : st;
 }

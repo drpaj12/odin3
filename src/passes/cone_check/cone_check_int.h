@@ -63,6 +63,15 @@ typedef struct cc_param {
     const char *value;
 } cc_param;
 
+/* One `-const PORT=V`: a template input port tied to the constant V (decimal or 0b binary). */
+typedef struct cc_const {
+    const char *port;
+    const char *value;
+} cc_const;
+
+/* What a flat template bit is: bound to a group net, or tied to a constant (`-const`). */
+enum { CC_BIT_NET = 0, CC_BIT_CONST0 = 1, CC_BIT_CONST1 = 2 };
+
 /* The parsed options; the texts live in arena. */
 typedef struct cc_opts {
     odin3_arena *arena;
@@ -70,6 +79,7 @@ typedef struct cc_opts {
     const char *value;
     const char *cell;
     odin3_vec params; /* cc_param */
+    odin3_vec consts; /* cc_const, in option order */
     uint32_t timeout;
     const char *who;   /* the pass name in messages: cone_check or raise */
     const char *usage; /* its usage line */
@@ -85,6 +95,7 @@ typedef struct cc_tmpl {
     odin3_vec params; /* odin3_value, one per parameter of def */
     odin3_vec first;  /* uint32_t: first flat bit of each port, then the bit count */
     odin3_vec ord;    /* uint32_t per flat bit: its index among the bits of its direction */
+    odin3_vec cbit;   /* uint8_t per flat bit: CC_BIT_* */
     uint32_t n_in, n_out;
 } cc_tmpl;
 
@@ -155,6 +166,13 @@ void cc_tmpl_free(cc_tmpl *tmpl);
 
 /* Looks the cell and its parameters up in design (the temporary one); errors are logged. */
 odin3_status cc_tmpl_build(cc_tmpl *tmpl, odin3_design *design, const cc_opts *opts);
+
+/*
+ * Parses a `-const` value (decimal up to 2^64 - 1, or `0b` binary) into `width` bits, LSB first
+ * (0 or 1 each), zero-extended; a value that does not fit is refused, never truncated. Logged,
+ * ODIN3_ERR_INVALID_ARG on a parse or width error (spec K-2).
+ */
+odin3_status cc_const_bits(const char *text, uint32_t width, uint8_t *bits);
 
 /* Checks every boundary net's binding against the template (spec 3.3 C-2) and sets bit. */
 odin3_status cc_tmpl_bind(const cc_tmpl *tmpl, cc_group *group);
