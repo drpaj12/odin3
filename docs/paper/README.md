@@ -71,6 +71,18 @@ features table and the phases table together.
 | `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
 | `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
 
+## Two reference lists (multibib)
+
+Part I ends with a reference list of the works Part I cites (`\cite`). The document ends with a
+second list, "References (Parts I and II)", of every work cited in either part. The `multibib`
+package makes it: Part II cites with `\citeall{...}`, and `\nociteall{...}` right after
+`\begin{document}` adds the Part I keys in Part I citation order, so a work has the same number in
+both lists. multibib writes a second aux file, `all.aux`, so BibTeX runs twice: on `odin3.aux` and on
+`all.aux`. Overleaf runs both automatically (it uses latexmk), and so does `make` with Tectonic or
+`LATEX=latexmk`. With a plain `pdflatex` loop, run `bibtex odin3` and `bibtex all` between passes. When
+Part I gains or loses a citation, regenerate the `\nociteall` list from the order of `\bibitem`
+keys in the Part I `.bbl`.
+
 ## Build on Overleaf (primary)
 
 1. Make the upload zip from this directory with `make zip`, or `make zip ZIP=/some/path.zip`.
@@ -85,8 +97,8 @@ features table and the phases table together.
 3. Under *Menu → Compiler*, choose **pdfLaTeX**. The main document is `odin3.tex`.
 
 No shell-escape is needed. The paper uses only packages that Overleaf ships: IEEEtran, cite,
-amsmath, graphicx, booktabs, array, url, listings and tikz. It uses relative paths only, and Overleaf
-runs BibTeX itself. pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
+multibib, amsmath, graphicx, booktabs, array, url, listings and tikz. It uses relative paths only, and Overleaf
+runs BibTeX itself (see below). pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
 
 ## Build locally (optional)
 
