@@ -1027,6 +1027,12 @@ pm_mem_arch)
     pm_run "$arch/ram_d11.xml" mem_regread ""
     [[ $(grep -c "^\.subckt [a-z]*_port_ram" "$work/mem_regread.blif") -eq 8 ]] || fail "default is not 8 one-bit blocks"
     ;;
+write_blif_gates_vtr_refused)
+    # cli_write_blif_gates_vtr_refused: --gates-as-names is for the plain dialect (gatemap G-8).
+    expect_fail "write_blif: --gates-as-names is for the plain dialect" \
+        -p "read_blif $fixture; write_blif --vtr --gates-as-names $work/out.blif"
+    [[ ! -e $work/out.blif ]] || fail "a file was written"
+    ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2
     exit 2
