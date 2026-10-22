@@ -16,9 +16,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* A net-map entry not yet given a slot, and "no frame" (the top's parent). */
-#define ODIN3_SIM_UNSET UINT32_MAX
-
 /* Appends val to vec (of uint32_t); ODIN3_ERR_NO_MEMORY on out of memory. */
 static inline odin3_status odin3_sim_push_u32(odin3_vec *vec, uint32_t val) {
     uint32_t *slot = odin3_vec_push(vec);
@@ -28,18 +25,6 @@ static inline odin3_status odin3_sim_push_u32(odin3_vec *vec, uint32_t val) {
     *slot = val;
     return ODIN3_OK;
 }
-
-/*
- * One expanded module instance: its module, its parent frame and instance node there (the top
- * frame has parent ODIN3_SIM_UNSET), and the offset of its net map in the builder's netmap (one
- * provisional slot per net ID of the module).
- */
-typedef struct odin3_sim_frame {
-    odin3_module_id module;
-    uint32_t parent;
-    odin3_node_id inst;
-    size_t map;
-} odin3_sim_frame;
 
 /*
  * Build state. Slots are provisional while instances are expanded: an instance's port can join
