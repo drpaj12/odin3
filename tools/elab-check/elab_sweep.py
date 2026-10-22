@@ -4,6 +4,7 @@ Usage::
 
     elab-sweep --odin3 O [--equiv --yosys Y --equiv-check E [--pass proc] | --proc-diff --yosys Y
                | --opt-equiv --yosys Y | --opt-diff --yosys Y [--opt-arg ARG]... | --opt-run
+               | --gatemap-run [--opt-arg=--lib=NAME=FILE --opt-arg=--equiv-check=E]
                | --bench B [--bench-report P]] [--trio auto|on|off] [--also-no-trio] [--nolatches]
                [--vtr-compat]
                [--expect-fail F]...
@@ -44,6 +45,10 @@ runs it alone). A child killed by its cap is reported ``out of memory (cap 4G)``
   until then, with a notice; ``--trio on`` requires it, ``--trio off`` never uses it;
   ``--also-no-trio`` runs each file a second time without it. A ``proc-diff`` exit 3 is a ``tie``
   (netlist-compare cannot order tied cells): a failure here, listable like any other.
+
+- ``--gatemap-run`` (v1.0.2 gate mapping; needs no Yosys): ``gatemap-run`` on the file, with
+  ``--opt-arg=--lib=NAME=FILE`` and ``--opt-arg=--equiv-check=E``; its ``compared N of 1 designs``
+  line counts for ``--min-compared-total`` like the lower tools'.
 
 - ``--opt-equiv`` / ``--opt-diff`` (need ``--yosys``; 2F Task 17): ``opt-equiv`` or ``opt-diff`` on
   the file (``--top`` as in the default mode; each ``--opt-arg=ARG`` goes to the child, e.g.
@@ -114,17 +119,20 @@ OPT_TOOLS = {"opt-equiv": Path(__file__).resolve().parents[1] / "opt-check" / "o
              "opt-run": Path(__file__).resolve().parents[1] / "opt-check" / "opt_run.py",
              "lower-equiv": Path(__file__).resolve().parents[1] / "lower-check" / "lower_equiv.py",
              "lower-sim": Path(__file__).resolve().parents[1] / "lower-check" / "lower_sim.py",
-             "lower-run": Path(__file__).resolve().parents[1] / "lower-check" / "lower_run.py"}
+             "lower-run": Path(__file__).resolve().parents[1] / "lower-check" / "lower_run.py",
+             "gatemap-run": Path(__file__).resolve().parents[1] / "gatemap-check"
+             / "gatemap_run.py"}
 # The 3B lower tools: they import opt-check's and lower-check's modules; only lower-equiv wants
 # Yosys. Their exit 5 (lower-run: a cap of `lower`) is a failure an expect-fail list may name.
-LOWER_TOOLS = ("lower-equiv", "lower-sim", "lower-run")
-NO_YOSYS_TOOLS = ("opt-run", "lower-sim", "lower-run")
+LOWER_TOOLS = ("lower-equiv", "lower-sim", "lower-run", "gatemap-run")
+NO_YOSYS_TOOLS = ("opt-run", "lower-sim", "lower-run", "gatemap-run")
 TRIO_PROBE = "opt -nodffe -nosdff"  # the trio's own flags; fails until `opt` exists (2F-5)
 # opt-equiv's summary line; the sweeps sum it (``--min-changed-total``)
 OPT_CHANGED_CALLS = re.compile(r"^opt-equiv: (\d+) calls changed something", re.M)
 # the lower tools' summary line (``lower-sim: compared 3 of 4 designs ...``); the sweeps sum it
 # (``--min-compared-total``): a design a tool skipped or found empty is not compared
-LOWER_COMPARED = re.compile(r"^lower-(?:sim|equiv|run): compared (\d+) of \d+ designs", re.M)
+LOWER_COMPARED = re.compile(
+    r"^(?:lower-(?:sim|equiv|run)|gatemap-run): compared (\d+) of \d+ designs", re.M)
 # Exit 2 of an opt tool that is our own check failing, not the design: never an expected failure
 OPT_TOOL_ABORT = ("yosys-refine exit", "netlist-compare cannot compare")
 OPT_RUN_ITERATIONS = re.compile(r"iterations max=(\d+)")
@@ -551,7 +559,8 @@ def run_opt_tool(cfg: Config, item: Item, cap: int) -> Outcome:
     paths = [here, os.environ.get("PYTHONPATH", "")]
     if cfg.opt_tool in LOWER_TOOLS:
         tools = Path(here).parent
-        paths = [str(tools / "lower-check"), str(tools / "opt-check"), *paths]
+        paths = [str(tools / "lower-check"), str(tools / "opt-check"),
+                 str(tools / "gatemap-check"), *paths]
     env = {**os.environ, "PYTHONPATH": os.pathsep.join(paths)}
     try:  # the tool caps each of its own children
         done = subprocess.run(argv, capture_output=True, text=True, errors="replace",
@@ -793,14 +802,17 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     help="run lower-sim (the simulator before and after lower) per file")
     ap.add_argument("--lower-run", action="store_true", dest="lower_run",
                     help="run lower-run (the Phase 3 script up to compact, ODIN3_OK, check)")
+    ap.add_argument("--gatemap-run", action="store_true", dest="gatemap_run",
+                    help="run gatemap-run (abc --gates and dfflibmap, equiv-check; needs --opt-arg "
+                         "--lib=NAME=FILE and --opt-arg --equiv-check=E)")
     ap.add_argument("--opt-arg", action="append", default=[], metavar="ARG",
                     help="--opt-equiv/--opt-diff: an argument for the child (use --opt-arg=ARG)")
     ap.add_argument("--min-changed-total", type=int, default=0, metavar="N",
                     help="--opt-equiv: fail (exit 1) unless at least N calls changed something "
                          "over the whole sweep (a do-nothing odin3 passes every file)")
     ap.add_argument("--min-compared-total", type=int, default=0, metavar="N",
-                    help="--lower-equiv/--lower-sim/--lower-run: fail (exit 1) unless the tools "
-                         "really compared at least N designs over the whole sweep")
+                    help="--lower-equiv/--lower-sim/--lower-run/--gatemap-run: fail (exit 1) "
+                         "unless the tools really compared at least N designs over the sweep")
     ap.add_argument("--pass", choices=("elab", "proc"), default="elab", dest="stop_pass",
                     help="--equiv: side A stops after elaboration (default) or after proc")
     ap.add_argument("--trio", choices=("auto", "on", "off"), default="auto",
@@ -845,8 +857,10 @@ def check_floors(args: argparse.Namespace) -> None:
     """The floor options belong to their modes."""
     if args.min_changed_total and not args.opt_equiv:
         raise UsageError("--min-changed-total needs --opt-equiv")
-    if args.min_compared_total and not (args.lower_equiv or args.lower_sim or args.lower_run):
-        raise UsageError("--min-compared-total needs --lower-equiv, --lower-sim or --lower-run")
+    lower = args.lower_equiv or args.lower_sim or args.lower_run or args.gatemap_run
+    if args.min_compared_total and not lower:
+        raise UsageError("--min-compared-total needs --lower-equiv, --lower-sim, --lower-run or "
+                         "--gatemap-run")
 
 
 def parse_timeouts(args: argparse.Namespace) -> dict[str, float]:
@@ -869,10 +883,11 @@ def parse_timeouts(args: argparse.Namespace) -> dict[str, float]:
 
 def build_config(args: argparse.Namespace) -> Config:
     modes = [args.equiv, args.bench, args.proc_diff, args.opt_equiv, args.opt_diff, args.opt_run,
-             args.lower_equiv, args.lower_sim, args.lower_run]
+             args.lower_equiv, args.lower_sim, args.lower_run, args.gatemap_run]
     if sum(bool(m) for m in modes) > 1:
         raise UsageError("--equiv, --bench, --proc-diff, --opt-equiv, --opt-diff, --opt-run, "
-                         "--lower-equiv, --lower-sim and --lower-run cannot be combined")
+                         "--lower-equiv, --lower-sim, --lower-run and --gatemap-run cannot be "
+                         "combined")
     check_floors(args)
     if (args.opt_equiv or args.opt_diff or args.lower_equiv) and not args.yosys:
         raise UsageError("--opt-equiv, --opt-diff and --lower-equiv need --yosys")
@@ -917,7 +932,8 @@ def build_config(args: argparse.Namespace) -> Config:
         proc_diff=bool(args.proc_diff),
         opt_tool="opt-equiv" if args.opt_equiv else "opt-diff" if args.opt_diff
         else "opt-run" if args.opt_run else "lower-equiv" if args.lower_equiv
-        else "lower-sim" if args.lower_sim else "lower-run" if args.lower_run else "",
+        else "lower-sim" if args.lower_sim else "lower-run" if args.lower_run
+        else "gatemap-run" if args.gatemap_run else "",
         opt_args=tuple(args.opt_arg), pass_proc=args.stop_pass == "proc",
         no_trio=args.trio == "off", also_no_trio=bool(args.also_no_trio),
         nolatches=bool(args.nolatches), vtr_compat=bool(args.vtr_compat),

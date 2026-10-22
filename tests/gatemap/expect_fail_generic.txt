@@ -1,0 +1,10 @@
+# Micros the generic_gates gate flow (gatemap-run: abc --gates, dfflibmap, write_blif --gates-as-names
+# against the RTL's, equiv-check) cannot decide. Format: `<path> [needle] <reason>`; the needle must
+# occur in gatemap-run's output. Reasons: multiclock (equiv-check handles one clock domain and
+# one edge per file), unproven (no verdict within equiv-check's limit), level-latch (equiv-check
+# rejects level-sensitive latches), init-lost (an INIT 1 register under dfflibmap's warning).
+# Evidence: ctest gatemap_micro_generic, release build, 2026-10-22; commands in docs/V1.0.2.md.
+common/register.v [more than one clock domain] multiclock: a falling and a rising register on one clock
+syntax/multi_edge_reader_writer.v [more than one clock domain] multiclock: a falling and a rising register on one clock
+syntax/multi_clock_reader_writer.v [more than one clock domain] multiclock: two clocks
+full/iir1.v [more than one clock domain] multiclock: two clocks
