@@ -67,6 +67,7 @@ sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and O
 sub("the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.", "the original creation of Odin and Odin~II, which humans verified at high cost.")
 sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
 sub("Yggdrasil~III, the world tree (Fig.", "Yggdrasil~III (Fig.")
+sub("Verilog Synthesis for FPGAs - again\\\\", "Verilog Synthesis for FPGAs\\\\")
 sub("Our latest paper applies", "Later work applies")
 for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):
     for m in re.finditer(bad, src):
