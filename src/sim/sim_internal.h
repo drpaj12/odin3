@@ -12,6 +12,7 @@
 #include "sim/sim.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*
@@ -38,6 +39,21 @@ typedef struct odin3_sim_flat {
     uint32_t state_first;
 } odin3_sim_flat;
 
+/* A net-map entry not yet given a slot, and "no frame" (the top's parent). */
+#define ODIN3_SIM_UNSET UINT32_MAX
+
+/*
+ * One expanded module instance: its module, its parent frame and instance node there (the top
+ * frame has parent ODIN3_SIM_UNSET), and the offset of its net map (one entry per net ID of the
+ * module) in the builder's netmap, and in the simulator's once the build is final.
+ */
+typedef struct odin3_sim_frame {
+    odin3_module_id module;
+    uint32_t parent;
+    odin3_node_id inst;
+    size_t map;
+} odin3_sim_frame;
+
 /* A port of the top module: its name (strtab ID) and its bits in in_bits / out_bits. */
 typedef struct odin3_sim_port {
     uint32_t name;
@@ -54,7 +70,10 @@ typedef struct odin3_sim_port {
  * order; in_clock[k] is 1 when input bit k drives the clock pin of an edge-triggered cell (the
  * engine toggles it instead of driving it at random). n_edge: the number of edge-triggered cells,
  * which are order[0 .. n_edge). n_hook_calls counts every simulate hook call (a deterministic
- * work measure for tests).
+ * work measure for tests). frames / n_frames: one frame per expanded instance, in expansion order
+ * (frame 0 is the top); netmap[frames[f].map + net] is the final slot of net `net` of frame f, or
+ * ODIN3_SIM_UNSET for a net with none (n_netmap entries in all). They give the signal table
+ * (signals.c) its names.
  */
 struct odin3_sim {
     odin3_design *design;
@@ -80,6 +99,10 @@ struct odin3_sim {
     uint32_t n_out_bits;
     uint32_t n_edge;
     uint64_t n_hook_calls;
+    odin3_sim_frame *frames;
+    uint32_t n_frames;
+    uint32_t *netmap;
+    size_t n_netmap;
 };
 
 /* True when the cell type is edge-triggered storage (cuts the combinational graph). */

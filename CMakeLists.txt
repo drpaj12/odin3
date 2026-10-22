@@ -415,6 +415,7 @@ add_library(odin3_core OBJECT
     src/sim/prng.c
     src/sim/vectors.c
     src/sim/word.c
+    src/sim/signals.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
