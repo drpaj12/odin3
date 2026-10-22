@@ -211,8 +211,11 @@ static const_err decode_decimal(const char *text, uint32_t width, uint8_t *bits)
     }
     errno = 0;
     unsigned long long value = strtoull(text, &end, DECIMAL);
-    if (*end != '\0' || errno != 0) {
+    if (*end != '\0') {
         return CONST_SYNTAX;
+    }
+    if (errno == ERANGE) {
+        return CONST_WIDTH; /* a digit string beyond 2^64-1 fits no port */
     }
     for (uint32_t i = 0; i < width && i < CONST_MAX_BITS; i++) {
         bits[i] = (uint8_t)((value >> i) & 1U);

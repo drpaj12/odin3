@@ -436,6 +436,8 @@ static void test_cone_check_const_errors(void) {
     log_text[0] = '\0';
     FAILS_WITH(EQ4 " -const B=16", "does not fit port 'B' (4 bits)");
     log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=18446744073709551616", "does not fit port 'B' (4 bits)");
+    log_text[0] = '\0';
     FAILS_WITH(EQ4 " -const B=1x", "not a constant");
     log_text[0] = '\0';
     FAILS_WITH(EQ4 " -const B=", "needs NAME=VALUE");

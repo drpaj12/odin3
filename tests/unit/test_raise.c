@@ -582,11 +582,24 @@ static void test_raise_const_all_or_nothing(void) {
     TEST_ASSERT_EQUAL_UINT32(0, count_type_in(2, "$_CONST0_"));
 }
 
-/* y = a == 13, read through a group-internal constant: .names one / 1 is a $sop in the group. */
-static void test_raise_const_ignores_group_constant(void) {
+/* A real $_CONST1_ node named by net `one`, added to the top module (driving that net). */
+static void add_const1_on(const char *net_name) {
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_CONST1_"), &type));
+    odin3_net_id net = odin3_module_find_net(top(), intern(net_name));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_net_valid(net), net_name);
+    odin3_node_id made = {0};
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    odin3_netvec ports = {&net, 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, &ports, &made));
+}
+
+/* y = a == 13, read through a group-internal $_CONST1_ node (net one) read by the group's $sop. */
+static void load_eq13_with_group_const(void) {
     use_real_abc();
-    read_blif(".model m\n.inputs a0 a1 a2 a3\n.outputs y\n.names one\n1\n"
+    read_blif(".model m\n.inputs a0 a1 a2 a3\n.outputs y\n"
               ".names a0 a1 a2 a3 one y\n10111 1\n.end\n");
+    add_const1_on("one");
     mark_all();
     for (int i = 0; i < 4; i++) {
         char pair[PAIR_BYTES];
@@ -594,15 +607,44 @@ static void test_raise_const_ignores_group_constant(void) {
         bind(pair);
     }
     bind("y=Y[0]");
+}
+
+static void test_raise_const_ignores_group_constant(void) {
+    load_eq13_with_group_const();
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ_ARGS " -const B=13"), log_text);
     TEST_ASSERT_EQUAL_STRING("equivalent", text_attr("odin3:cone_check"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_raise(EQ_ARGS " -const B=13"), log_text);
+    /* the group's $_CONST1_ went with the group; the $eq reads its own new constants */
     TEST_ASSERT_EQUAL_UINT32(0, count_type("$sop"));
     odin3_node_id eq = find_type("$eq");
     const odin3_const want[4] = {ODIN3_CONST_1, ODIN3_CONST_0, ODIN3_CONST_1, ODIN3_CONST_1};
     for (uint32_t bit = 0; bit < 4; bit++) {
         TEST_ASSERT_EQUAL_INT(want[bit], b_bit_const(eq, bit));
     }
+    check_clean();
+}
+
+/* A second group (grp=other) holds a $_CONST1_ too: the raise of grp=add4 never reuses it. */
+static void test_raise_const_ignores_other_group_constant(void) {
+    load_eq13_with_group_const();
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_CONST1_"), &type));
+    odin3_net_id spare = {0};
+    odin3_node_id other = {0};
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top(), 0, (odin3_prov_id){0}, &spare));
+    odin3_netvec ports = {&spare, 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, &ports, &other));
+    set_str((odin3_objref){ODIN3_OBJ_NODE, other.v}, "grp", "other");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ_ARGS " -const B=13"), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_raise(EQ_ARGS " -const B=13"), log_text);
+    odin3_node_id eq = find_type("$eq");
+    odin3_pinslice slice = odin3_node_port(top(), eq, 1);
+    for (uint32_t bit = 0; bit < slice.count; bit++) {
+        odin3_net_id net = odin3_pin_net(top(), (odin3_pin_id){slice.first.v + bit});
+        TEST_ASSERT_TRUE(net.v != spare.v);
+    }
+    TEST_ASSERT_TRUE(odin3_node_live(top(), other));
     check_clean();
 }
 
@@ -624,5 +666,6 @@ int main(void) {
     RUN_TEST(test_raise_const_refuses_other_constant);
     RUN_TEST(test_raise_const_all_or_nothing);
     RUN_TEST(test_raise_const_ignores_group_constant);
+    RUN_TEST(test_raise_const_ignores_other_group_constant);
     return UNITY_END();
 }

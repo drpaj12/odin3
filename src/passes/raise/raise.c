@@ -219,14 +219,26 @@ static odin3_status create_cell(rs_job *job, odin3_prov_id prov, odin3_node_id *
 
 /* --- the constants (-const, spec K-6) -------------------------------------------------------- */
 
-/* The net of the lowest-ID live node of constant type `type` outside the group, else {0}. */
+/* True when node carries the group attribute (any value): it is in this run's group or in another
+ * group, which a later run may delete, so its net is never reused. */
+static bool in_any_group(const rs_job *job, odin3_node_id node, uint32_t key_str) {
+    const uint8_t *inside = job->group.inside.data;
+    return (node.v < job->group.inside.len && inside[node.v] != 0) ||
+           (key_str != 0 &&
+            odin3_attr_get(job->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key_str) != NULL);
+}
+
+/* The net of the lowest-ID live node of constant type `type` outside every marked group, else
+ * {0}. */
 static odin3_net_id find_const_net(const rs_job *job, odin3_celltype_id type) {
     const odin3_module *mod = job->module;
-    const uint8_t *inside = job->group.inside.data;
+    uint32_t key_str = 0;
+    (void)odin3_strtab_find(odin3_design_strtab(job->group.design),
+                            odin3_bytes_cstr(job->opts->key), &key_str);
     for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
         odin3_node_id node = {nid};
-        bool in_group = nid < job->group.inside.len && inside[nid] != 0;
-        if (!in_group && odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v) {
+        if (odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v &&
+            !in_any_group(job, node, key_str)) {
             return odin3_pin_net(mod, odin3_node_pins(mod, node).first);
         }
     }
