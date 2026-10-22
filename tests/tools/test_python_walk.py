@@ -281,7 +281,7 @@ class PythonWalkTest(unittest.TestCase):
         self.assertIn("odin3_abc_engine_register", cdef_from_header())
         self.assertEqual(int(odin3.lib.ODIN3_ERR_ENGINE), 8)
         self.assertEqual(int(odin3.lib.ODIN3_STATUS_COUNT), 9)
-        self.assertEqual(int(odin3.lib.ODIN3_ABC_ENGINE_VERSION), 1)
+        self.assertEqual(int(odin3.lib.ODIN3_ABC_ENGINE_VERSION), 2)
         self.assertEqual(odin3.ffi.sizeof("odin3_abc_fail"), 264)
         self.assertEqual(odin3.status_string(int(odin3.lib.ODIN3_ERR_ENGINE)), "ODIN3_ERR_ENGINE")
         with odin3.capture_log() as log:  # NULL is refused and registers nothing

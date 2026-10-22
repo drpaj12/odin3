@@ -50,6 +50,63 @@ The exchange calls (AB-16, spec §4.4 steps 3, 5 and 6):
   `Abc_FrameReadMiniLutNameMapping`.
 - What `get_luts` and `name_map` return stays valid until the next such call or `close`.
 
+The gate-mapping calls (ABI 5, `docs/specs/2026-10-21-gatemap-design.md` 4.2 and 4.3):
+
+- **`load_genlib`** reads only the canonical genlib that Odin III's own writer
+  (`src/passes/abc/genlib.c`) emits, and refuses everything else before ABC sees it, because ABC's
+  reader is not total (it dereferences missing words, runs past a comment on the last line, joins
+  lines at a `\`, and reads a `PIN *` formula past its fixed name table). The subset:
+  - printable ASCII, single spaces and `\n` only: no `#` comment, tab, `\r`, `\`, other control
+    character or byte outside ASCII, and no empty line;
+  - `GATE <name> <area> <out>=<formula>;` lines, each followed by zero or more
+    `PIN <name> UNKNOWN|INV|NONINV <n> <n> <n> <n> <n> <n>` lines (no `LATCH`, `.end` or other
+    statement);
+  - a name is `[A-Za-z_$][A-Za-z0-9_$]*` (so it never starts with `0` or `1`, which ABC reads as a
+    constant), a number `[-+]?` digits with an optional fraction and exponent; each at most 128
+    bytes;
+  - at most 6 `PIN`s per gate (the core's `ODIN3_ABC_GATE_MAX_INPUTS`), all distinct and explicit
+    (`PIN *` is refused); the formula names each of them and no other name; a gate without `PIN`s
+    has the formula `CONST0` or `CONST1`;
+  - no two gates share a name (ABC would pair them into a two-output gate).
+
+  A text outside it is `RESULT` `ABC cannot read the gate library (line N: reason)` (or `(no
+  gates)`). Then, inside the guarded call, every gate's formula is parsed over its pins: a grammar
+  check, then `Mio_ParseFormula`. ABC's `Mio_GateParseFormula` hands the `NULL` that
+  `Mio_ParseFormula` returns for a formula it cannot parse to `Mio_LibDeriveSop`
+  (`mioFunc.c:264`), a segmentation fault the guard cannot catch, and `Mio_ParseFormulaOper`
+  asserts on some `!!` and on an operator with no operand. So an unclosed or extra parenthesis
+  (`Y=(A;`), a leading or dangling operator (`Y=*A;`, `Y=A+;`) and `!!` are `RESULT` `ABC cannot
+  read the gate library (gate "name")`, and the engine stays usable. A library that passes both
+  checks and still breaks an ABC assumption would be caught by the guard (escape, engine
+  disabled). A copy of the text with a `\n` appended then goes to `Mio_LibraryReadBuffer`, not
+  `Mio_LibraryRead`, which dereferences the library it failed to read (`mioRead.c:96`); a `NULL`
+  library is the plain `RESULT`. The library is named `odin3.genlib` (no file is read) and made the
+  frame's with `Mio_UpdateGenlib`, which frees the previous one. So load the library before the
+  mapping script: once any `exec` has run in the session (even one that failed), `load_genlib` is
+  `RESULT` `load the gate library before the mapping script`, because a mapped network, the backup
+  network a later command keeps of it (`mainFrame.c:469`), an `&save` copy or an undo would point
+  into the freed library. A new session can load another. Other texts: `no gate library (text is
+  NULL)`.
+- **`get_cells`** reads the network space's mapped network (`Abc_NtkIsMappedLogic`, after `map`)
+  or converts the `&` space's cell mapping (`Gia_ManHasCellMapping`, after `&nf`) with
+  `Abc_NtkFromCellMappedGia`, deleted again before the call returns. Objects follow MiniLUT's
+  layout: the constants 0 and 1 (a constant node is one of them, by its gate's truth), the PIs and
+  register outputs, the gates in `Abc_NtkDfsIter` order (fanins in pin order, the 64-bit
+  `Mio_GateReadTruth` as two words when a gate has 6 inputs), the POs and register inputs; `gate`
+  and `names` give each gate object's library gate (names point into the library). `RESULT` texts:
+  `no gate-mapped network in the network space`, `no cell mapping in the & space`, `a box that is
+  not a latch`, `a node without a library gate`, `a gate with N inputs (at most 6)`, `a fanin that
+  is not a gate, an input or a constant`, `no network space N` (a space that is neither), and
+  `nowhere to put the cells (cells is NULL)`.
+- What `get_cells` returns stays valid until the next `get_cells`, `load_genlib` or `close`.
+- Bounded leaks. Memory the adapter allocated and ABC's own error paths leave behind are not
+  freed after an escape (the engine is disabled, so nothing more is allocated): `load_genlib`'s
+  text copies (the genlib copy and the formula check's) and `get_cells`' object map
+  (`build.obj_of`) and order vector (`build.order`). What `get_cells` returned is freed at close.
+  A `Mio_ParseFormula` that returns `NULL` also leaves its parser stacks and expressions (tens of bytes
+  per refused gate, more for a long formula; `lsan.supp` names `Mio_ParseFormula` and, for stacks
+  the unwinder cuts at the inlined builder, `Exp_And`). Each is bounded by one call.
+
 ## Start-up and licence
 
 `odin3` links the adapter and calls `odin3_abc_adapter_init()` before any `--plugin`. A failure is
@@ -140,6 +197,9 @@ bump that brings one in fails.
     `&get -m -n` and `get_luts`; every malformed AIG and aligned network refused with its text;
     `get_luts` without a mapping; the name map; and each of the adapter's own allocations
     failed in turn (`NO_MEMORY`, the engine still usable);
+  - gate mapping on the cmos6 genlib: `map` and `&nf` results through `get_cells` (names, truths,
+    a register's `ci_from`, a constant output), every refused genlib text, `get_cells` without a
+    mapped network, and each allocation of the gate flow failed in turn;
   - on a 40-AND network: no thread started by the default script (the test link counts
     `pthread_create`), and two runs in one process byte-identical for the default script and for
     `strash; fraig; if -K 6`;

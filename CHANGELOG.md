@@ -6,6 +6,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Changed
+
+- ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.
+  No API stability promise (docs/PHASE7.md decision 4).
+
 ### Fixed
 
 - `odin3_flow` retries the VPR route at fixed wider channel widths when the final route at 1.3 x

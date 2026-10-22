@@ -80,6 +80,22 @@ static odin3_status fake_name_map(void *self, const odin3_abc_luts *aligned, con
     return ODIN3_OK;
 }
 
+static odin3_status fake_load_genlib(void *self, const char *text, odin3_abc_fail *fail) {
+    (void)self;
+    (void)text;
+    (void)fail;
+    return ODIN3_OK;
+}
+
+static odin3_status fake_get_cells(void *self, uint32_t space, odin3_abc_cells *cells,
+                                   odin3_abc_fail *fail) {
+    (void)self;
+    (void)space;
+    (void)cells;
+    (void)fail;
+    return ODIN3_OK;
+}
+
 static void fake_close(void *self) {
     (void)self;
 }
@@ -96,6 +112,8 @@ static odin3_abc_engine valid_engine(const char *name) {
         .exec = fake_exec,
         .get_luts = fake_get_luts,
         .name_map = fake_name_map,
+        .load_genlib = fake_load_genlib,
+        .get_cells = fake_get_cells,
         .close = fake_close,
         .reserved = {NULL, NULL, NULL, NULL},
     };
@@ -119,8 +137,8 @@ static void test_null_engine(void) {
 
 static void test_other_version(void) {
     odin3_abc_engine engine = valid_engine("fake");
-    engine.version = 2;
-    expect_refused(&engine, "odin3_abc_engine_register: engine version 2, expected 1");
+    engine.version = 1;
+    expect_refused(&engine, "odin3_abc_engine_register: engine version 1, expected 2");
 }
 
 /* Agent default: a NULL name is refused as a NULL engine (the later texts name the engine). */
@@ -129,9 +147,9 @@ static void test_null_name(void) {
     expect_refused(&engine, "odin3_abc_engine_register: invalid argument engine");
 }
 
-enum { FUNCTION_COUNT = 6, RESERVED_COUNT = 4 };
+enum { FUNCTION_COUNT = 8, RESERVED_COUNT = 4 };
 
-/* A valid table named "fake" with function fn (0 .. 5, table order) NULL. */
+/* A valid table named "fake" with function fn (0 .. 7, table order) NULL. */
 static odin3_abc_engine without_function(size_t fn) {
     odin3_abc_engine engine = valid_engine("fake");
     switch (fn) {
@@ -150,6 +168,12 @@ static odin3_abc_engine without_function(size_t fn) {
     case 4:
         engine.name_map = NULL;
         break;
+    case 5:
+        engine.load_genlib = NULL;
+        break;
+    case 6:
+        engine.get_cells = NULL;
+        break;
     default:
         engine.close = NULL;
         break;
@@ -167,8 +191,8 @@ static void test_null_exec(void) {
 }
 
 static void test_each_null_function(void) {
-    static const char *const names[FUNCTION_COUNT] = {"open",     "load_aig", "exec",
-                                                      "get_luts", "name_map", "close"};
+    static const char *const names[FUNCTION_COUNT] = {
+        "open", "load_aig", "exec", "get_luts", "name_map", "load_genlib", "get_cells", "close"};
     for (size_t fn = 0; fn < FUNCTION_COUNT; fn++) {
         char want[LINE_CAP];
         int len =
@@ -178,6 +202,24 @@ static void test_each_null_function(void) {
         odin3_abc_engine engine = without_function(fn);
         expect_refused(&engine, want);
     }
+}
+
+/* ABI 5 (gatemap spec 4): the two gate-mapping calls are required like the others. */
+static void test_register_refuses_missing_load_genlib(void) {
+    odin3_abc_engine engine = valid_engine("fake");
+    engine.load_genlib = NULL;
+    expect_refused(&engine,
+                   "odin3_abc_engine_register: engine 'fake' has no 'load_genlib' function");
+}
+
+static void test_register_refuses_missing_get_cells(void) {
+    odin3_abc_engine engine = valid_engine("fake");
+    engine.get_cells = NULL;
+    expect_refused(&engine, "odin3_abc_engine_register: engine 'fake' has no 'get_cells' function");
+}
+
+static void test_engine_version_is_2(void) {
+    TEST_ASSERT_EQUAL_UINT32(2, ODIN3_ABC_ENGINE_VERSION);
 }
 
 static void test_reserved_set(void) {
@@ -215,9 +257,9 @@ static void test_group_order(void) {
     expect_refused(&engine, "odin3_abc_engine_register: engine 'fake': abc_commit 'BAD' is not 40 "
                             "lower-case hex digits");
     /* The version comes before everything, the name before the functions. */
-    engine.version = 2;
+    engine.version = 1;
     engine.exec = NULL;
-    expect_refused(&engine, "odin3_abc_engine_register: engine version 2, expected 1");
+    expect_refused(&engine, "odin3_abc_engine_register: engine version 1, expected 2");
     engine.version = ODIN3_ABC_ENGINE_VERSION;
     engine.name = NULL;
     expect_refused(&engine, "odin3_abc_engine_register: invalid argument engine");
@@ -282,6 +324,9 @@ int main(void) {
     RUN_TEST(test_null_name);
     RUN_TEST(test_null_exec);
     RUN_TEST(test_each_null_function);
+    RUN_TEST(test_register_refuses_missing_load_genlib);
+    RUN_TEST(test_register_refuses_missing_get_cells);
+    RUN_TEST(test_engine_version_is_2);
     RUN_TEST(test_reserved_set);
     RUN_TEST(test_each_reserved_set);
     RUN_TEST(test_bad_commit);

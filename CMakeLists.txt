@@ -2202,10 +2202,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(abc_adapter_exports_refuses_libodin3 PROPERTIES LABELS unit)
     endif()
 
-    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4): their additions are additive.
+    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4); gate mapping makes it v5.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 4\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 5\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)

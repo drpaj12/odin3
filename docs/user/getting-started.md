@@ -24,7 +24,7 @@ odin3 --version
 ```
 
 ```text
-odin3 1.0.0 (ABI 4)
+odin3 1.0.0 (ABI 5)
 linked ABC a3001b72edc5de22442e942165487fddf150e3d0 (adapters/abc/NOTICE)
 ```
 

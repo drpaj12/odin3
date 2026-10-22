@@ -19,6 +19,8 @@
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  * ABI v4 (cont., 7.4b): odin3_design_copy.
+ * ABI v5 (v1.0.2 gate mapping): ABC engine load_genlib and get_cells, odin3_abc_cells,
+ *   ODIN3_ABC_ENGINE_VERSION 2.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -49,7 +51,7 @@ extern "C" {
 /* ODIN3_CDEF_BEGIN */
 
 /* Incremented on every incompatible change to this header. */
-enum { ODIN3_ABI_VERSION = 4 };
+enum { ODIN3_ABI_VERSION = 5 };
 
 /* Result of every fallible Odin III function. ODIN3_OK is always 0. */
 typedef enum odin3_status {
@@ -1718,7 +1720,7 @@ odin3_status odin3_srcman_get_spelling(const odin3_srcman *sm, uint32_t loc, uin
 odin3_status odin3_srcman_get_format(odin3_srcman *sm, uint32_t loc, const char **text);
 
 /* --- the ABC engine (3D) -------------------------------------------------------------------- */
-enum { ODIN3_ABC_ENGINE_VERSION = 1, ODIN3_ABC_FAIL_TEXT_BYTES = 256 };
+enum { ODIN3_ABC_ENGINE_VERSION = 2, ODIN3_ABC_FAIL_TEXT_BYTES = 256 };
 
 typedef enum odin3_abc_fail_kind {
     ODIN3_ABC_FAIL_NONE = 0,
@@ -1768,6 +1770,27 @@ typedef struct odin3_abc_luts {
     uint32_t lut_size;
 } odin3_abc_luts;
 
+/* The network space get_cells reads (ABI 5): the network space's mapped network (ABC's map), or
+ * the & space's cell mapping (&nf) converted with ABC's own conversion. */
+typedef enum odin3_abc_cells_space {
+    ODIN3_ABC_CELLS_NTK = 0,
+    ODIN3_ABC_CELLS_GIA = 1
+} odin3_abc_cells_space;
+
+/* A gate-mapped network (ABI 5): net in odin3_abc_luts' layout with lut_size the widest gate
+ * (at least 2): objects 0 and 1 the constants (a constant node of ABC's network is object 0
+ * or 1), the PIs (real inputs, then register outputs), the gates in topological order, the
+ * POs (real outputs, then register inputs); net.truths holds each gate's function over its
+ * fanins in pin order, net.ci_from as for get_luts. gate has net.n_objs entries: the index
+ * into names of a gate object's library gate, -1 for every other object. names holds n_names
+ * NUL-terminated gate names, each once. */
+typedef struct odin3_abc_cells {
+    odin3_abc_luts net;
+    const int32_t *gate;
+    const char *const *names;
+    uint32_t n_names;
+} odin3_abc_cells;
+
 /*
  * An ABC engine; one session per ABC run (§4.4). All but close return ODIN3_OK, ODIN3_ERR_ENGINE
  * (*fail filled; any call may fail EXIT, ABORT or ASSERT) or ODIN3_ERR_NO_MEMORY.
@@ -1780,6 +1803,22 @@ typedef struct odin3_abc_luts {
  *   call. RESULT.
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
  *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
+ * load_genlib: text (a NUL-terminated genlib, copied) becomes the session's gate library (ABC's
+ *   Mio_LibraryReadBuffer, named, then Mio_UpdateGenlib). Only the canonical form the core's genlib
+ *   writer emits is read: "GATE name area out=formula;" lines, each followed by its explicit
+ *   "PIN name phase" lines with six numbers (at most 6 PINs, each named by the formula, no generic
+ *   pin), printable ASCII with single spaces and '\n' only (no comments, tabs, '\r', '\\' or
+ *   LATCH).
+ *   Anything else is RESULT "ABC cannot read the gate library (line N: reason)"; a formula ABC
+ *   cannot parse is RESULT "ABC cannot read the gate library (gate \"name\")". Load it before the
+ *   mapping script: once any exec has run in the session, load_genlib is RESULT "load the gate
+ *   library before the mapping script" (a mapped network, its backup, an &save copy or an undo
+ *   would point into the library it frees). RESULT "no gate library (text is NULL)".
+ * get_cells: the gate-mapped network of space (an odin3_abc_cells_space), owned by the session
+ *   until close or the next call. RESULT "no gate-mapped network in the network space", "no cell
+ *   mapping in the & space", "a node without a library gate", "a box that is not a latch", "a gate
+ *   with N inputs (at most 6)", "no network space N", "nowhere to put the cells (cells is NULL)",
+ *   "a fanin that is not a gate, an input or a constant".
  * close: frees all the session returned; after an escape, leaks ABC's state and disables.
  * Every call of a session must come from the thread that opened it; the linked engine treats a
  * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
@@ -1795,6 +1834,9 @@ typedef struct odin3_abc_engine {
     odin3_status (*get_luts)(void *self, odin3_abc_luts *luts, odin3_abc_fail *fail);
     odin3_status (*name_map)(void *self, const odin3_abc_luts *aligned, const int32_t **lits,
                              odin3_abc_fail *fail);
+    odin3_status (*load_genlib)(void *self, const char *text, odin3_abc_fail *fail);
+    odin3_status (*get_cells)(void *self, uint32_t space, odin3_abc_cells *cells,
+                              odin3_abc_fail *fail);
     void (*close)(void *self);
     void *reserved[4]; /* NULL */
 } odin3_abc_engine;
