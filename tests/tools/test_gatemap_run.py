@@ -176,6 +176,21 @@ class RunTest(unittest.TestCase):
         code, out, err = self.run_fake(self.odin("locs_ok.txt"), equiv)
         self.assertEqual(code, 0, out + err)
 
+    def test_undriven_in_the_right_file_is_not_retried(self) -> None:
+        equiv = ("case \"$*\" in *--allow-undriven*) exit 0;; esac\n"
+                 "echo \"equiv-check: error: $PWD/gates.eq.blif: undriven net a reaches "
+                 "primary output y; pass --allow-undriven to tie it to 0\"\nexit 2\n")
+        code, out, _ = self.run_fake(self.odin("locs_ok.txt"), equiv)
+        self.assertEqual(code, 1)
+        self.assertIn("gatemap-run: error ", out)
+
+    def test_undriven_in_the_left_file_is_retried_in_the_real_form(self) -> None:
+        equiv = ("case \"$*\" in *--allow-undriven*) exit 0;; esac\n"
+                 "echo \"equiv-check: error: $PWD/rtl.eq.blif: undriven net a reaches "
+                 "primary output y; pass --allow-undriven to tie it to 0\"\nexit 2\n")
+        code, out, err = self.run_fake(self.odin("locs_ok.txt"), equiv)
+        self.assertEqual(code, 0, out + err)
+
     def test_equiv_is_run_with_the_hard_block_models(self) -> None:
         equiv = "echo \"$@\" > \"$(dirname \"$0\")/args\"\nexit 0\n"
         code, out, err = self.run_fake(self.odin("locs_ok.txt"), equiv)

@@ -251,11 +251,11 @@ def gate_copy(path: Path) -> Path:
 def compare(args: argparse.Namespace, left: Path, right: Path, work: Path,
             limit: Sequence[str] = ()) -> tuple[str, str]:
     """run_equiv on the two BLIF files (hard blocks as ``.gate``), run again with
-    ``--allow-undriven`` when the RTL itself has an undriven net that reaches an output (both
-    netlists then read it as 0)."""
+    ``--allow-undriven`` when the LEFT file itself has an undriven net that reaches an output
+    (both netlists then read it as 0). An undriven net in the right file stays an error."""
     left, right = gate_copy(left), gate_copy(right)
     outcome, detail = run_equiv(args, left, right, work, limit)
-    if outcome == "error" and UNDRIVEN in detail:
+    if outcome == "error" and f"{left.name.replace('.eq.blif', '.blif')}: {UNDRIVEN}" in detail:
         outcome, detail = run_equiv(args, left, right, work, (*limit, "--allow-undriven"))
     return outcome, detail
 
