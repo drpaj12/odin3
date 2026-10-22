@@ -16,6 +16,8 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   and the default gate script `lib/abc/gates.abc`.
 - `tools/gatemap-check/gatemap-run` and the sweeps `gatemap_micro_generic` and
   `gatemap_micro_cmos6`: every micro through the gate flow, equivalent to the RTL, with a re-map leg.
+- `cone_check` and `raise` take `-const PORT=V` (a template input port tied to a constant;
+  v1.0.5, `docs/V1.0.5.md`).
 
 ### Changed
 

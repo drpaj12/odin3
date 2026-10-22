@@ -58,11 +58,52 @@ static odin3_status make_module(cc_job *job) {
     return st;
 }
 
-static odin3_status make_ports(cc_job *job) {
-    odin3_status st = ODIN3_OK;
-    for (uint32_t k = 0; st == ODIN3_OK && k < job->tmpl.n_in; k++) {
-        st = add_port(job, &(cc_port_req){"i", k, ODIN3_DIR_IN, &job->in_ids});
+/* A constant template input bit: a `$_CONST0_`/`$_CONST1_` node on a fresh net, in place of a
+ * port, so cc_port_net still finds the net through the node's one pin (spec K-3). */
+static odin3_status add_const(cc_job *job, uint8_t kind) {
+    uint32_t name = 0;
+    odin3_celltype_id type = {0};
+    odin3_status st = odin3_design_intern(
+        job->tmp, odin3_bytes_cstr(kind == CC_BIT_CONST1 ? "$_CONST1_" : "$_CONST0_"), &name);
+    if (st == ODIN3_OK && !odin3_celltype_find(job->tmp, name, &type)) {
+        return cc_error(job->group.design, (odin3_prov_id){0},
+                        "cone_check: constant cell types are not available for the proof");
     }
+    odin3_net_id net = {0};
+    st = st == ODIN3_OK ? odin3_net_create(job->mod, 0, (odin3_prov_id){0}, &net) : st;
+    odin3_node_spec spec = {type, 0, {0}, NULL, 0};
+    odin3_netvec ports = {&net, 1};
+    odin3_node_id node = {0};
+    st = st == ODIN3_OK ? odin3_node_create_connected(job->mod, &spec, &ports, &node) : st;
+    odin3_node_id *slot = st == ODIN3_OK ? odin3_vec_push(&job->in_ids) : NULL;
+    if (st == ODIN3_OK && slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (slot != NULL) {
+        *slot = node;
+    }
+    return st;
+}
+
+/* One entry of in_ids per template input bit, in input order: a port, or a constant node. */
+static odin3_status make_inputs(cc_job *job) {
+    const uint8_t *cbit = job->tmpl.cbit.data;
+    uint32_t total = ((const uint32_t *)job->tmpl.first.data)[job->tmpl.first.len - 1];
+    odin3_status st = ODIN3_OK;
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < total; bit++) {
+        if (cc_tmpl_dir(&job->tmpl, bit) != ODIN3_DIR_IN) {
+            continue;
+        }
+        uint32_t k = ((const uint32_t *)job->tmpl.ord.data)[bit];
+        st = cbit[bit] == CC_BIT_NET
+                 ? add_port(job, &(cc_port_req){"i", k, ODIN3_DIR_IN, &job->in_ids})
+                 : add_const(job, cbit[bit]);
+    }
+    return st;
+}
+
+static odin3_status make_ports(cc_job *job) {
+    odin3_status st = make_inputs(job);
     for (uint32_t k = 0; st == ODIN3_OK && k < job->tmpl.n_out; k++) {
         st = add_port(job, &(cc_port_req){"t", k, ODIN3_DIR_OUT, &job->t_ids});
     }
