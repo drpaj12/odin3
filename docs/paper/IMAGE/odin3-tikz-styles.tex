@@ -5,12 +5,7 @@
 %
 % Palette: the greens and browns of a tree and its greenery, with black for Odin's raven as the
 % strong ink. Green = ColorBrewer "Greens", brown = a warm earth ramp. Text is dark on the light
-% fills and white only on the dark browns and the black. Build status is coded twice, by fill and
-% by border, so it survives a black-and-white print:
-%   built        mid-green fill,  solid dark-green border
-%   in progress  pale-green fill, solid green border
-%   specified    white fill,      dashed green border
-%   planned      white fill,      dotted brown border
+% fills and white only on the dark browns and the black.
 
 % ---- colours ------------------------------------------------------------------------------
 \definecolor{o3ink}{HTML}{111111}      % text and arrows: the raven's black
@@ -65,12 +60,6 @@
   store/.style={draw, cylinder, shape border rotate=90, aspect=0.16, align=center,
                 line width=0.55pt, inner xsep=2pt, inner ysep=1pt, minimum height=8mm},
   plain/.style={align=center, inner sep=1pt},
-  % build status (combine with a shape: [box, built])
-  built/.style={fill=o3grn4, draw=o3grn8, solid},
-  inprog/.style={fill=o3grn2, draw=o3grn7, solid},
-  spec/.style={fill=white, draw=o3grn7, dash pattern=on 2.4pt off 1.4pt},
-  planned/.style={fill=white, draw=o3brn5, dash pattern=on 0.6pt off 1.3pt,
-                  line width=0.75pt},
   % neutral fills for structure figures
   neutral/.style={fill=o3brn2, draw=o3brn6, solid},
   light/.style={fill=o3grn1, draw=o3grn7, solid},
@@ -84,7 +73,6 @@
   regionlabel/.style={font=\scriptsize\bfseries, color=o3brn7, inner sep=1.5pt},
   % arrows
   flow/.style={->, line width=0.55pt, draw=o3ink},
-  flowplanned/.style={->, line width=0.6pt, draw=o3brn6, dash pattern=on 0.6pt off 1.3pt},
   ref/.style={->, line width=0.5pt, draw=o3grn8, dash pattern=on 2.4pt off 1.4pt},
   edgelabel/.style={font=\scriptsize, color=o3sub, inner sep=1pt, fill=white},
   % records: a header row and field rows, built with \matrix (see fig_ir_model.tex)
@@ -93,21 +81,7 @@
                  font=\scriptsize, anchor=center, align=left, inner xsep=2.5pt,
                  inner ysep=1.2pt, minimum height=4.4mm}},
   rechead/.style={fill=o3grn3, font=\scriptsize\bfseries, align=center},
-  % legend keys
-  legendkey/.style={box, minimum width=4.2mm, minimum height=2.6mm, inner sep=0pt},
-  legendtext/.style={font=\scriptsize, inner sep=1pt, text height=1.5ex, text depth=0.3ex},
 }
-
-% \odinlegend{<node options, e.g. anchor=north east, at={(x,y)}>}
-% The build-status key, one row, as a single node so figures can place it like any node.
-\newcommand{\odinlegend}[1]{%
-  \matrix[ampersand replacement=\&, column sep=1.2pt, inner sep=2pt, draw=o3brn4,
-          rounded corners=2pt, fill=white, line width=0.4pt, #1]{%
-    \node[legendkey, built]{};   \& \node[legendtext]{built};       \& \node{\hspace{3pt}}; \&
-    \node[legendkey, inprog]{};  \& \node[legendtext]{in progress}; \& \node{\hspace{3pt}}; \&
-    \node[legendkey, spec]{};    \& \node[legendtext]{specified};   \& \node{\hspace{3pt}}; \&
-    \node[legendkey, planned]{}; \& \node[legendtext]{planned};     \\
-  };}
 
 % \odinrecord{<name>}{<matrix options: position, nodes={text width=...}>}{<header>}{<rows>}
 % A record (struct) as a one-column matrix: a header cell, then one cell per field, rows

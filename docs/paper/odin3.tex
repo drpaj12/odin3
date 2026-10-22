@@ -244,8 +244,7 @@ this background in full.
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_flow}}
 \caption{The flow of a Verilog design through Odin III, in the order of the production script.
-Each box is a stage; the text under it says what it does. The dotted box marks a stage that does
-nothing. Every stage from
+Each box is a stage; the text under it says what it does. Every stage from
 \code{proc} to \code{write\_blif} is a registered pass.}
 \label{fig:flow}
 \end{figure*}
@@ -762,16 +761,14 @@ LUT mapping & enumerate cuts of the AIG and choose a cover of $K$-input LUTs \\
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_pipeline}}
-\caption{The Odin III pipeline and its status at v1.0 (2026-10-21). Built: released in v1.0.
-Every step inside the core is a pass registered with the pass manager, which runs
+\caption{The Odin III pipeline. Every step inside the core is a pass registered with the pass manager, which runs
 \code{check} before and after each pass in Debug builds. The elaborated AST is the seam between
 the language-specific half of elaboration and the shared half. \code{partial\_map} (script name
-\code{hardmap}) is Phase~3's fixed binding generalised in Phase~4. The in-memory ABC exchange is
-built; BLIF text remains the default exchange at v1.0 (PHASE3 \#48).}
+\code{hardmap}) is Phase~3's fixed binding generalised in Phase~4. BLIF text remains the default exchange with ABC; the in-memory exchange is optional (PHASE3 \#48).}
 \label{fig:pipeline}
 \end{figure*}
 
-Figure~\ref{fig:pipeline} shows the whole system and its status (DESIGN \S3, \S6), and
+Figure~\ref{fig:pipeline} shows the whole system (DESIGN \S3, \S6), and
 Fig.~\ref{fig:flow} (Sec.~\ref{sec:arch}) the path of a Verilog design through the stages. The
 production script of Sec.~\ref{sec:arch} is the O leg of the \code{vtr-qor} harness
 (Sec.~\ref{sec:harness}); \code{hardmap} is the script name of \code{partial\_map}. A test harness,
@@ -810,7 +807,7 @@ optimises the soft logic and maps it to $K$-input LUTs, with VTR's own script as
 \emph{Outputs.} BLIF with \code{--vtr} goes to VPR. Verilog, Yosys-schema JSON and LPM Verilog for
 Quartus, Graphviz \code{dot} and RTLIL go to other tools. Sections~\ref{sec:backend} to
 \ref{sec:harness} describe the Phase~3 stages, and Sec.~\ref{sec:features} lists every feature
-with its phase and status.
+with its phase.
 
 \subsection{One IR, two granularities, passes everywhere}
 
@@ -940,8 +937,8 @@ CTest).
 \caption{The \code{proc} pass (2E spec \S2): Yosys~0.55's \code{proc -norom} sub-passes, as
 Parmys runs them, as phases of one pass in Yosys's order. Each box shows 2E's phase, the
 Yosys sub-pass it mirrors, and what it does. Step~A changes nothing; a module is lowered only if
-none of its processes has an error, so it is lowered completely or not at all. 2E is built
-(2E-1 to 2E-3); the trailing \code{opt\_expr} is 2F's, also built.}
+none of its processes has an error, so it is lowered completely or not at all. 2E covers
+2E-1 to 2E-3; the trailing \code{opt\_expr} is 2F's.}
 \label{fig:proc}
 \end{figure}
 
@@ -1141,112 +1138,106 @@ functional check of Sec.~\ref{sec:verify}.
 \label{sec:features}
 
 Tables~\ref{tab:features} and~\ref{tab:features2} list the features, the pass or tool that provides each, the phase and
-sub-phase that delivered it, and the status at the v1.0.0 release on 2026-10-21. ``Done''
-means released in v1.0 with its exit test. The figures use the build-status key of Fig.~\ref{fig:pipeline}.
+sub-phase that delivered it.
 
 \begin{table*}[t]
-\caption{Odin III features that are built, status at v1.0 (the plan is ADR D11)}
+\caption{Odin III features}
 \label{tab:features}
 \centering
 \footnotesize
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.16\textwidth}%
-  >{\raggedright\arraybackslash}p{0.35\textwidth}%
-  >{\raggedright\arraybackslash}p{0.17\textwidth}p{0.08\textwidth}p{0.13\textwidth}@{}}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.20\textwidth}%
+  >{\raggedright\arraybackslash}p{0.42\textwidth}%
+  >{\raggedright\arraybackslash}p{0.22\textwidth}p{0.10\textwidth}@{}}
 \toprule
-Feature & What it does & Pass or tool & Phase & Status \\
+Feature & What it does & Pass or tool & Phase \\
 \midrule
 Core containers & arena, vec, pagevec, u64map, idindex, strtab/strbuf, log; OOM injection hook
-  & \code{src/util} & 1A & done \\
+  & \code{src/util} & 1A \\
 IR and \code{check} & ID-based paged netlist; ports as nodes; constants as cells; wires as names
   with aliases; structural \code{check}; \code{compact} with tombstones
-  & \code{check}, \code{compact} & 1B & done \\
+  & \code{check}, \code{compact} & 1B \\
 Op registry & word, bit, hard and black-box cell types with Yosys names; verify, const, simulate
-  and writer hooks; plugin registration & registry & 1B, 1E, 2D-1, 2E-1, 3D-1 & done \\
+  and writer hooks; plugin registration & registry & 1B, 1E, 2D-1, 2E-1, 3D-1 \\
 Provenance (D9) & lineage DAG on every node, net and wire; backward walk; forward index by
-  \code{file:line}; provenance names in output & IR & 1B & done \\
+  \code{file:line}; provenance names in output & IR & 1B \\
 Tech library & \code{.o3lib} gates and hard cells, parametric widths, functions as expressions
-  & \code{read\_techlib} & 1G & done \\
+  & \code{read\_techlib} & 1G \\
 Netlist I/O & BLIF reader and writer, VTR dialect, black boxes, \code{\$lut} as an irredundant
-  cover & \code{read\_blif}, \code{write\_blif} & 1C, 3E-3, 3E-5 & done \\
+  cover & \code{read\_blif}, \code{write\_blif} & 1C, 3E-3, 3E-5 \\
 Writers & Yosys-schema JSON, structural Verilog, Graphviz with focus and node budget, RTLIL to
   Yosys~0.55 & \code{write\_json}, \code{write\_verilog}, \code{write\_dot}, \code{write\_rtlil}
-  & 1F, 2D-1 & done \\
+  & 1F, 2D-1 \\
 Simulator & cycle-based, event-free, 2-state; hard cells through library functions & \code{sim}
-  & 1E & done \\
+  & 1E \\
 C ABI, plugins & \code{odin3.h} ABI v4; \code{.so} plugins; Python through cffi; pass manager and
-  script CLI & \code{libodin3} & 1D & done \\
+  script CLI & \code{libodin3} & 1D \\
 Source manager, AST & Clang-style locations; 24-byte node record; symbol table; printer
-  & \code{write\_verilog\_ast} & 2A & done \\
+  & \code{write\_verilog\_ast} & 2A \\
 Project input & \code{.o3proj}, \code{-f}/\code{-F} lists, Quartus \code{.qpf/.qsf/.qip},
-  Odin~II XML; \code{abc\_script} & \code{read\_project}, \code{dump\_project} & 2B, 3D-6 & done \\
+  Odin~II XML; \code{abc\_script} & \code{read\_project}, \code{dump\_project} & 2B, 3D-6 \\
 Preprocessor and parser & Verilog-2005 macros, includes; segment map; LALR(1) grammar with 0
-  conflicts & \code{preprocess}, \code{read\_verilog --parse-only} & 2B, 2C & done \\
+  conflicts & \code{preprocess}, \code{read\_verilog --parse-only} & 2B, 2C \\
 Elaboration & two stages, Yosys~0.55 semantics, \code{\$proc} cells, \code{--lib}, \code{--vtr-compat}
-  & \code{read\_verilog} & 2D & done \\
+  & \code{read\_verilog} & 2D \\
 \code{proc} & Yosys~0.55 \code{proc -norom} phases; mux trees, latches, flip-flop cells
-  & \code{proc} & 2E & done \\
+  & \code{proc} & 2E \\
 \code{opt} family & folding, merging, mux-tree and reduce cleanup, sharing, flip-flop
   optimisation, dead-object removal (Yosys~0.55) & \code{opt}, \code{opt\_expr}, \code{opt\_merge},
   \code{opt\_muxtree}, \code{opt\_reduce}, \code{opt\_share}, \code{opt\_dff}, \code{opt\_clean}
-  & 2F & done \\
+  & 2F \\
 Width reduction & narrows word cells to the widths needed (Yosys~0.55 \code{wreduce}) &
-  \code{wreduce} & 3G & done \\
-FSM recoding & finds state machines and recodes them (Yosys~0.55 \code{fsm}) & \code{fsm} & 4.8 &
-  done \\
-Flatten & one flat top; dotted instance paths; path kept in provenance & \code{flatten} & 3A
-  & done \\
+  \code{wreduce} & 3G \\
+FSM recoding & finds state machines and recodes them (Yosys~0.55 \code{fsm}) & \code{fsm} & 4.8 \\
+Flatten & one flat top; dotted instance paths; path kept in provenance & \code{flatten} & 3A \\
 Lowering & word cells to bit cells; flip-flops to \code{\$\_DFF\_P\_}; \code{\$mem} to flip-flops
-  and muxes; bit nodes named after the word cell & \code{lower} & 3B & done \\
+  and muxes; bit nodes named after the word cell & \code{lower} & 3B \\
 Partial mapping & Parmys-default binding of adders, multipliers and RAM; generic hard blocks from
   the arch record; \code{memory\_merge}; RAMs with read enables mapped hard, the enable emulated in
   logic (4.4); carry chains from the arch model (4.5); multiplier splitting (4.3) & \code{partial\_map} (\code{hardmap}) & 3C,
-  4.2, 4.3, 4.4, 4.5, 4.7 & done \\
+  4.2, 4.3, 4.4, 4.5, 4.7 \\
 VPR-XML import & \code{read\_arch} fills a tech library and the arch record from a VPR architecture
-  & \code{read\_arch} & 4.1 & done \\
+  & \code{read\_arch} & 4.1 \\
 Yosys JSON reader & reads the schema that \code{write\_json} writes, and Yosys's own JSON;
-  round-trip checker & \code{read\_json} & 5.3 & done \\
+  round-trip checker & \code{read\_json} & 5.3 \\
 Altera LPM path & LPM library (\code{lpm\_add\_sub}, \code{lpm\_mult}, \code{lpm\_compare},
   \code{altsyncram}); fixed mapping; LPM Verilog written and read back with LPM instances as hard
-  cells & \code{lpmmap}, \code{.o3lib} & 5.1 & done \\
+  cells & \code{lpmmap}, \code{.o3lib} & 5.1 \\
 Verilog read-back & instances of Odin III's own cell types read as those cells &
-  \code{read\_verilog -icells} & 5.2 & done \\
+  \code{read\_verilog -icells} & 5.2 \\
 Linked ABC & \code{\$lut}; run records; script checker; adapter with escape guard; BLIF and in-memory
-  exchanges & \code{abc} & 3D-0 to 3D-8 & done; BLIF text still the default \\
-VPR BLIF & preflight; \code{blif-vtr-check}; provenance names & \code{write\_blif --vtr} & 3E &
-  done \\
+  exchanges & \code{abc} & 3D-0 to 3D-8 \\
+VPR BLIF & preflight; \code{blif-vtr-check}; provenance names & \code{write\_blif --vtr} & 3E \\
 QoR harness & legs P, P$'$, O, O$'$, R, Oprov; heavy-run scheduling; table and gate; \code{fcheck}
-  & \code{vtr-qor} & 3H & done; Phase~3 closed on the M2/M3 runs \\
+  & \code{vtr-qor} & 3H \\
 Equivalence tools & \code{opt-equiv}, \code{lower-equiv}, \code{hardmap-diff}, \code{equiv-check},
-  \code{abc-diff}, generators & \code{tools/*-check} & 2F, 3B, 3C, 3D & done \\
+  \code{abc-diff}, generators & \code{tools/*-check} & 2F, 3B, 3C, 3D \\
 \bottomrule
 \end{tabular}
 \end{table*}
 
 \begin{table*}[t]
-\caption{Odin III features, continued: the architecture sweep, analysis flow, reverse-engineering support and release (status at v1.0)}
+\caption{Odin III features, continued: the architecture sweep, analysis flow, reverse-engineering support and release}
 \label{tab:features2}
 \centering
 \footnotesize
-\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.16\textwidth}%
-  >{\raggedright\arraybackslash}p{0.35\textwidth}%
-  >{\raggedright\arraybackslash}p{0.17\textwidth}p{0.08\textwidth}p{0.13\textwidth}@{}}
+\begin{tabular}{@{}>{\raggedright\arraybackslash}p{0.20\textwidth}%
+  >{\raggedright\arraybackslash}p{0.42\textwidth}%
+  >{\raggedright\arraybackslash}p{0.22\textwidth}p{0.10\textwidth}@{}}
 \toprule
-Feature & What it does & Pass or tool & Phase & Status \\
+Feature & What it does & Pass or tool & Phase \\
 \midrule
 Architecture sweep & the VTR designs on several VTR architectures route and pass \code{fcheck}
-  (Table~\ref{tab:sweep}) & \code{vtr-qor} & 4.13 & done \\
+  (Table~\ref{tab:sweep}) & \code{vtr-qor} & 4.13 \\
 HDL locations through write and read & locations survive write and read in BLIF, Verilog and JSON
-  & writers, readers & 5.4 & done \\
+  & writers, readers & 5.4 \\
 Analysis flow & gate-level ingest, \code{write\_dot --color-by}, graph export, \code{levelize},
-  provenance coverage gate & several & 6.1 to 6.5 & done \\
+  provenance coverage gate & several & 6.1 to 6.5 \\
 Reverse-engineering support & \code{submod}, \code{Design.copy}, \code{cone\_check}, \code{raise},
-  \code{re\_round.py} (Sec.~\ref{sec:re}) & several & 7.4 & done \\
+  \code{re\_round.py} (Sec.~\ref{sec:re}) & several & 7.4 \\
 Flow command and manual & \code{odin3-flow} (targets \code{vtr} and \code{lpm}, \code{--analysis});
-  user manual in Sphinx and MyST & \code{odin3-flow} & 7 & done \\
+  user manual in Sphinx and MyST & \code{odin3-flow} & 7 \\
 Release & source tarball with submodules, \code{cmake --install}, pip wheel, clean-machine test
-  & \code{tools/release} & 7.6 & released 2026-10-21 \\
-FF feature matching & matching flip-flop features to the architecture & --- & 4.6 & dropped from v1.0 \\
-CIRCT, EDIF and VQM writers & --- & --- & --- & dropped (ADR D12, D10) \\
+  & \code{tools/release} & 7.6 \\
 \bottomrule
 \end{tabular}
 \end{table*}
@@ -1584,7 +1575,7 @@ loaded.
 \odinfit{\textwidth}{\input{IMAGE/fig_flow_prov}}
 \caption{The flow of Fig.~\ref{fig:flow}, annotated with the provenance records that each stage
 makes or reads. SOURCE, DERIVED and IMPORTED are the three record kinds. Phase~5.4 is
-shown where it applies; it is built and closed for v1.0.}
+shown where it applies.}
 \label{fig:flow-prov}
 \end{figure*}
 
@@ -1764,7 +1755,7 @@ ABI can hand them out safely and the IR serialises trivially.
 
 \begin{table}[t]
 \caption{Selected resource caps (named constants, each a located error with a test). The
-loop caps belong to elaboration (2D); all are built.}
+loop caps belong to elaboration (2D).}
 \label{tab:caps}
 \centering
 \footnotesize
@@ -1832,8 +1823,7 @@ built from plain gates) is the part that needs graph methods (Sec.~\ref{sec:re-g
 \begin{figure}[t]
 \centering
 \odinfit{\columnwidth}{\input{IMAGE/fig_re}}
-\caption{The reverse-engineering and analysis flow. Solid-blue boxes are built in v1.0; the dotted
-box is the research plugins that follow v1.0. Dashed arrows are provenance links back to the AST and source lines.}
+\caption{The reverse-engineering and analysis flow. Dashed arrows are provenance links back to the AST and source lines.}
 \label{fig:re}
 \end{figure}
 
@@ -1842,10 +1832,10 @@ box is the research plugins that follow v1.0. Dashed arrows are provenance links
 Provenance, identity and hierarchy were built for the forward flow, and they are the parts of
 reverse engineering that cannot be retrofitted. Phases~6 and~7 then added the analysis flow and
 the operations that move a design up a level. Table~\ref{tab:re-support} lists them; all are
-built in v1.0.
+in v1.0.
 
 \begin{table}[t]
-\caption{Built features that a reverse-engineering flow uses}
+\caption{Features that a reverse-engineering flow uses}
 \label{tab:re-support}
 \centering
 \footnotesize
@@ -2210,41 +2200,37 @@ from the main-session transcripts: approvals, design answers, corrections and ne
 \section{v1.0 Phases and After v1.0}
 \label{sec:status}
 \begin{table*}[t]
-\caption{Development phases (ADR D11, 2026-10-19) and status at the v1.0.0 release, 2026-10-21}
+\caption{Development phases (ADR D11, 2026-10-19)}
 \label{tab:phases}
 \centering
 \footnotesize
-\begin{tabular}{@{}p{0.03\textwidth}>{\raggedright\arraybackslash}p{0.28\textwidth}%
-  >{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.32\textwidth}@{}}
+\begin{tabular}{@{}p{0.04\textwidth}>{\raggedright\arraybackslash}p{0.42\textwidth}%
+  >{\raggedright\arraybackslash}p{0.46\textwidth}@{}}
 \toprule
-Ph. & Deliverable & Exit test & Status at v1.0 \\
+Ph. & Deliverable & Exit test \\
 \midrule
 0 & environment, oracle builds, golden BLIFs, \code{netlist-compare}, \code{equiv-check}, lint
-  gate, CI & oracles green on all goldens & closed \\
+  gate, CI & oracles green on all goldens \\
 1 & \code{util}, IR, op registry, pass manager, \code{check}, provenance, C ABI, BLIF I/O,
   writers, simulator, tech library & BLIF$\to$IR$\to$BLIF identical; simulation matches ABC; a
-  Python plugin walks the IR & closed \\
+  Python plugin walks the IR \\
 2 & Verilog-2005 front end, preprocessor, elaboration, project input, \code{proc}, \code{opt} &
-  micros equivalent to Parmys; project fixtures elaborate from each format & closed 2026-10-18
-  (PHASE2 \#30) \\
+  micros equivalent to Parmys; project fixtures elaborate from each format \\
 3 & VTR flow: \code{wreduce}, \code{flatten}, \code{lower}, \code{hardmap}, linked ABC,
   \code{write\_blif --vtr}, QoR harness & the VTR~7.0 benchmarks through place and route with
   Odin III alone; QoR table against Parmys; the local gate is the 15 smaller designs (PHASE3
-  decision 54) & closed 2026-10-20 on the M2 and M3 runs (PHASE3 decision 58); \code{mcml},
-  \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng} shipped out as too big for
-  this machine \\
+  decision 54) \\
 4 & VTR architectures and FSM: partial mapping (4.1 to 4.8), architecture sweep (4.13) & VTR
   designs route on several architectures and pass \code{fcheck}; FSM micros equivalent; QoR
-  parity is not a gate & closed 2026-10-21 (PHASE4 decision 18; Table~\ref{tab:sweep}); FF
-  feature matching (4.6) dropped from v1.0 \\
+  parity is not a gate \\
 5 & outputs and read-back: LPM (5.1), Verilog read-back (5.2), JSON reader (5.3), HDL locations
   through write and read (5.4) & every write and read round trip is equivalent and keeps the HDL
-  locations & closed 2026-10-21 (PHASE5 decision 12) \\
+  locations \\
 6 & analysis flow and provenance: gate-level ingest, \code{write\_dot --color-by}, graph export,
   \code{levelize}, coverage gate (6.1 to 6.5) & the 6.5 gate passes on the Phase~3 designs and
-  the LPM micros & closed 2026-10-21 (PHASE6 decision 10) \\
+  the LPM micros \\
 7 & the \code{odin3-flow} command, the user manual, reverse-engineering support (7.4), packaging
-  and the v1.0 tag & release & released: tag \code{v1.0.0}, 2026-10-21 \\
+  and the v1.0 tag & release \\
 \bottomrule
 \end{tabular}
 \end{table*}

@@ -19,7 +19,7 @@
         \ \ fn\ \ out = a * b\\
         end};
   % ---- reader and cell type ------------------------------------------------------------------
-  \node[box, built, text width=36.5mm, anchor=north east] (rd) at (8.75, 0)
+  \node[box, light, text width=36.5mm, anchor=north east] (rd) at (8.75, 0)
        {\odintt{read\_techlib}\\\odinsub{errors are located \odintt{file:line}}};
   \node[fld, fill=o3grn3, font=\scriptsize\bfseries, align=center, anchor=north]
        (h) at ($(rd.south)+(0,-0.42)$) {local cell type};
@@ -30,11 +30,11 @@
   \node[fld, anchor=north] (c5) at ($(c4.south)+(0,\pgflinewidth)$) {\odintt{fn} / \odintt{seq} / \odintt{memory} as ASTs};
   \node[fit=(h)(c5), inner sep=0pt, draw=o3grn8, line width=0.7pt] (ct) {};
   % ---- users ---------------------------------------------------------------------------------
-  \node[use, built, anchor=north west] (blif) at (0, -4.25)
+  \node[use, light, anchor=north west] (blif) at (0, -4.25)
        {BLIF reader\\\odinsub{\odintt{.blackbox}: ports matched by name, params inferred}};
-  \node[use, built, anchor=north] (sim) at (4.375, -4.25)
+  \node[use, light, anchor=north] (sim) at (4.375, -4.25)
        {simulator\\\odinsub{hooks interpret the \odintt{fn} expressions}};
-  \node[use, planned, anchor=north east] (pat) at (8.75, -4.25)
+  \node[use, light, anchor=north east] (pat) at (8.75, -4.25)
        {matcher\\\odinsub{\odintt{fn} compiled to IR patterns; not in v1.0}};
   % ---- edges ---------------------------------------------------------------------------------
   \draw[flow] (src.east |- rd) -- (rd.west);
@@ -44,5 +44,5 @@
   \draw[line width=0.55pt, draw=o3ink] (rail -| blif) -- (rail -| pat);
   \draw[flow] (rail -| blif) -- (blif.north);
   \draw[flow] (rail -| sim) -- (sim.north);
-  \draw[flowplanned] (rail -| pat) -- (pat.north);
+  \draw[flow] (rail -| pat) -- (pat.north);
 \end{tikzpicture}

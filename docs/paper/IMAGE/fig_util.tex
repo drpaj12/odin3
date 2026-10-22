@@ -2,8 +2,8 @@
 % allocation wrapper whose test hook fails the n-th allocation. Arrows point from a container to
 % what it uses. Single column: \columnwidth.
 \begin{tikzpicture}[odin,
-  c/.style={box, built, text width=12.3mm, minimum height=10mm, inner xsep=1.2pt},
-  wide/.style={box, built, minimum height=7mm}]
+  c/.style={box, light, text width=12.3mm, minimum height=10mm, inner xsep=1.2pt},
+  wide/.style={box, light, minimum height=7mm}]
   % ---- containers (tier 1) -----------------------------------------------------------------
   \node[c] (arena) at (0.667, 0) {\odintt{arena}\\\odinsub{bump allocator}};
   \node[c] (vec)   at (2.097, 0) {\odintt{vec}\\\odinsub{growable array}};
