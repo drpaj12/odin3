@@ -11,6 +11,7 @@
 #include "passes/manager.h"
 #include "passes/unmap/chain.h"
 #include "passes/unmap/kit.h"
+#include "passes/unmap/operand.h"
 #include "passes/unmap/unmap.h"
 #include "unity.h"
 #include "util/log.h"
@@ -479,6 +480,195 @@ static void test_walks_two_chains(void) {
     um_walks_free(&walks);
 }
 
+/* --- Task 5: chains to $add and $sub ------------------------------------------------------ */
+
+static void run_script(const char *text) {
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        odin3_pass_run_script(design, odin3_bytes_cstr(text),
+                              (odin3_script_src){"-p", ODIN3_SCRIPT_BY_COMMAND}),
+        log_text);
+}
+
+/* Reads Verilog `src` with the VTR library and runs proc, opt and hardmap. */
+static void flow(const char *src) {
+    char text[PATH_BUF * 2];
+    write_text("t.v", odin3_bytes_cstr(src));
+    (void)snprintf(text, sizeof text,
+                   "read_techlib %s\nread_verilog --vtr-compat %s/t.v\nproc\nopt\nhardmap\n",
+                   ODIN3_UM_LIB, dir);
+    run_script(text);
+}
+
+static void expect_params(odin3_node_id node, const int64_t want[5]) {
+    int64_t got[5];
+    for (uint32_t i = 0; i < 5; i++) {
+        got[i] = odin3_node_param(top(), node, i)->i;
+    }
+    TEST_ASSERT_EQUAL_INT64_ARRAY(want, got, 5);
+}
+
+static int64_t attr_int(odin3_node_id node, const char *key) {
+    const odin3_value *value = attr_of(node, key);
+    TEST_ASSERT_NOT_NULL_MESSAGE(value, key);
+    return value->i;
+}
+
+#define MOD_ADD                                                                                    \
+    "module t(input [7:0] a, input [5:0] b, output [8:0] y); assign y = a + b; endmodule\n"
+
+static void test_unmap_add_roundtrip(void) {
+    flow(MOD_ADD);
+    run_script("unmap\nopt_clean");
+    odin3_node_id add[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("adder", NULL, 0));
+    expect_params(add[0], (const int64_t[5]){0, 0, 8, 6, 9});
+    TEST_ASSERT_NULL(attr_of(add[0], "hardmap"));
+    TEST_ASSERT_EQUAL_UINT32(intern("chain"), attr_of(add[0], "unmap")->str);
+    TEST_ASSERT_EQUAL_INT64(10, attr_int(add[0], "unmap_pieces"));
+    check_clean();
+}
+
+static void test_unmap_sub_roundtrip(void) {
+    flow("module t(input [7:0] a, input [5:0] b, output [8:0] y); assign y = a - b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    odin3_node_id sub[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$sub", sub, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$not", NULL, 0));
+    expect_params(sub[0], (const int64_t[5]){0, 0, 8, 6, 9});
+    check_clean();
+}
+
+static void test_unmap_add_signed(void) {
+    flow("module t(input signed [7:0] a, input signed [3:0] b, output signed [8:0] y);\n"
+         "assign y = a + b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    odin3_node_id add[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 2));
+    expect_params(add[0], (const int64_t[5]){1, 1, 8, 4, 9});
+    check_clean();
+}
+
+/* Replaces the $sop that drives net `out` by a 1-bit $not of net `in`. */
+static void make_not(const char *in, const char *out) {
+    odin3_net_id out_net = net_named(out);
+    odin3_node_id sop = odin3_pin_node(top(), odin3_net_driver(top(), out_net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(top(), sop));
+    odin3_net_id in_net = net_named(in);
+    odin3_netvec ports[2] = {{&in_net, 1}, {&out_net, 1}};
+    odin3_value params[3] = {odin3_value_int(0), odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec spec = {type_named("$not"), 0, odin3_module_prov(top()), params, 3};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &node));
+}
+
+#define SUB_HEAD                                                                                   \
+    ".model m\n.inputs x0 x1 y0 y1\n.outputs s0 s1 t\n.names gnd\n.names vcc\n1\n"                 \
+    ".names unconn\n.names y0 n0\n0 1\n.names y1 n1\n0 1\n"                                        \
+    ".subckt adder a=vcc b=vcc cin=unconn cout=c0\n"                                               \
+    ".subckt adder a=x0 b=n0 cin=c0 cout=c1 sumout=s0\n"                                           \
+    ".subckt adder a=x1 b=n1 cin=c1 cout=c2 sumout=s1\n"
+
+static void test_unmap_not_shared(void) {
+    load_lib();
+    read_blif(SUB_HEAD ".names n0 t\n1 1\n.end\n");
+    make_not("y0", "n0");
+    make_not("y1", "n1");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id sub[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$sub", sub, 1));
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$not", NULL, 0)); /* n0 also feeds a LUT: it stays */
+    check_clean();
+}
+
+static void test_unmap_sub_absorbs_not(void) {
+    load_lib();
+    read_blif(SUB_HEAD ".end\n");
+    make_not("y0", "n0");
+    make_not("y1", "n1");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$sub", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$not", NULL, 0));
+    check_clean();
+}
+
+static void test_unmap_cout_tap_end(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0 STAGE1 STAGE2 ".names c3 t\n1 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id add[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 2));
+    expect_params(add[0], (const int64_t[5]){0, 0, 3, 3, 4});
+    odin3_pinslice ypins = odin3_node_port(top(), add[0], 2);
+    TEST_ASSERT_EQUAL_UINT32(4, ypins.count);
+    TEST_ASSERT_EQUAL_UINT32(net_named("c3").v,
+                             odin3_pin_net(top(), (odin3_pin_id){ypins.first.v + 3}).v);
+    check_clean();
+}
+
+static void test_unmap_cout_tap_middle(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0 STAGE1 STAGE2 ".names c1 t\n1 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id add[2];
+    odin3_node_id rest[3];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 2));
+    expect_params(add[0], (const int64_t[5]){0, 0, 1, 1, 2});
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", rest, 3));
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_carry"), attr_of(rest[0], "unmap_note")->str);
+    check_clean();
+}
+
+static void test_unmap_parmys_blif(void) {
+    load_lib();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        odin3_pass_run(design, "read_blif",
+                       odin3_bytes_cstr("tests/golden/blif-vtr/adder_hard_block.parmys.vtr.blif")),
+        log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id add[3];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$add", add, 3));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("adder", NULL, 0));
+    expect_params(add[0], (const int64_t[5]){0, 0, 3, 1, 3});
+    expect_params(add[1], (const int64_t[5]){0, 0, 2, 2, 3});
+    check_clean();
+}
+
+static void test_unmap_declines(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD ".names unconn\n.subckt adder a=x0 b=y0 cin=z cout=c1 sumout=s0\n"
+                         ".subckt adder a=vcc b=gnd cin=gnd cout=c9\n"
+                         ".subckt adder a=x1 b=y1 cin=unconn cout=c2 sumout=s1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id cells[3];
+    TEST_ASSERT_EQUAL_UINT32(3, nodes_of("adder", cells, 3));
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_signal"), attr_of(cells[0], "unmap_note")->str);
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:lone_head"), attr_of(cells[1], "unmap_note")->str);
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_x"), attr_of(cells[2], "unmap_note")->str);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "adder at"));
+    check_clean();
+}
+
+static void test_trim_and_run(void) {
+    load_lib();
+    read_blif(CLASS_BLIF);
+    odin3_net_id nets[4] = {net_named("x"), net_named("x"), net_named("gnd"), net_named("unconn")};
+    um_vec vec = {nets, 4};
+    TEST_ASSERT_EQUAL_UINT32(2, um_trim_tail(top(), &vec, false));
+    TEST_ASSERT_EQUAL_UINT32(2, vec.len);
+    TEST_ASSERT_EQUAL_UINT32(1, um_top_run(top(), &vec)); /* both bits are net x */
+    vec.len = 1;
+    TEST_ASSERT_EQUAL_UINT32(1, um_top_run(top(), &vec));
+    TEST_ASSERT_EQUAL_UINT32(0, um_trim_tail(top(), &vec, true));
+    nets[0] = net_named("gnd");
+    vec.len = 3;
+    TEST_ASSERT_EQUAL_UINT32(1, um_trim_tail(top(), &vec, true));
+    TEST_ASSERT_EQUAL_UINT32(2, vec.len);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -498,5 +688,15 @@ int main(void) {
     RUN_TEST(test_walks_tap);
     RUN_TEST(test_walks_cycle);
     RUN_TEST(test_walks_two_chains);
+    RUN_TEST(test_unmap_add_roundtrip);
+    RUN_TEST(test_unmap_sub_roundtrip);
+    RUN_TEST(test_unmap_add_signed);
+    RUN_TEST(test_unmap_not_shared);
+    RUN_TEST(test_unmap_sub_absorbs_not);
+    RUN_TEST(test_unmap_cout_tap_end);
+    RUN_TEST(test_unmap_cout_tap_middle);
+    RUN_TEST(test_unmap_parmys_blif);
+    RUN_TEST(test_unmap_declines);
+    RUN_TEST(test_trim_and_run);
     return UNITY_END();
 }

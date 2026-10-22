@@ -3,17 +3,20 @@
  */
 #include "passes/unmap/kit.h"
 
+#include "ast/srcman.h"
 #include "ir/prov.h"
 #include "passes/opt/kit.h"
 #include "passes/unmap/unmap.h"
 #include "util/log.h"
 #include "util/str.h"
 
+#include <inttypes.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-enum { UM_MAX_PORTS = 16 };
+enum { UM_MAX_PORTS = 16, UM_TEXT_CAP = 256, UM_MSG_CAP = 1024 };
 
 /* --- net classes (N-1, N-2) ---------------------------------------------------------------- */
 
@@ -361,4 +364,73 @@ odin3_status um_replace(um_ctx *uc, const um_group *group, const um_new *req, od
     odin3_vec_free(&sorted);
     *out = node;
     return st;
+}
+
+/* --- declined groups (P-3) ----------------------------------------------------------------- */
+
+static void first_leaf(void *user, odin3_prov_id leaf) {
+    odin3_prov_id *slot = user;
+    if (slot->v == 0) {
+        *slot = leaf;
+    }
+}
+
+static const char *level_word(odin3_log_level level) {
+    switch (level) {
+    case ODIN3_LOG_ERROR:
+        return "error";
+    case ODIN3_LOG_WARN:
+        return "warning";
+    case ODIN3_LOG_INFO:
+        return "info";
+    default:
+        return "debug";
+    }
+}
+
+static const char *str_text(const um_ctx *uc, uint32_t str) {
+    return odin3_strtab_get(odin3_design_strtab(uc->design), str);
+}
+
+/* A diagnostic located at the first source leaf of the node's provenance, else bare text. */
+static void diag_at(const um_ctx *uc, odin3_log_level level, odin3_node_id node, const char *msg) {
+    odin3_prov_id leaf = {0};
+    odin3_prov_id prov = odin3_node_prov(uc->module, node);
+    if (prov.v != 0) {
+        (void)odin3_prov_sources(uc->design, prov, first_leaf, &leaf);
+    }
+    const odin3_prov_record *rec = leaf.v != 0 ? odin3_prov_get(uc->design, leaf) : NULL;
+    if (rec != NULL && rec->n_locs > 0 && rec->locs[0].loc != 0) {
+        odin3_diag(uc->design, level, (odin3_loc){rec->locs[0].loc}, "%s", msg);
+    } else if (rec != NULL && rec->n_locs > 0 && rec->locs[0].file != 0) {
+        odin3_log(level, "%s:%" PRIu32 ":%" PRIu32 ": %s: %s", str_text(uc, rec->locs[0].file),
+                  rec->locs[0].line, rec->locs[0].col, level_word(level), msg);
+    } else {
+        odin3_log(level, "%s", msg);
+    }
+}
+
+odin3_status um_decline(um_ctx *uc, const odin3_node_id *cells, size_t count, um_why why) {
+    char note[UM_TEXT_CAP];
+    (void)snprintf(note, sizeof note, "%s:%s", why.kind, why.reason);
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < count; i++) {
+        st = um_set_note(uc, cells[i], note);
+    }
+    if (st != ODIN3_OK || count == 0) {
+        return st;
+    }
+    char label[UM_TEXT_CAP];
+    uint32_t name = odin3_node_name(uc->module, cells[0]);
+    if (name != 0) {
+        (void)snprintf(label, sizeof label, "%s", str_text(uc, name));
+    } else {
+        (void)snprintf(label, sizeof label, "$c%" PRIu32, cells[0].v);
+    }
+    char msg[UM_MSG_CAP];
+    (void)snprintf(msg, sizeof msg, "unmap: module '%s': %s at '%s' not recovered: %s",
+                   str_text(uc, odin3_module_name(uc->module)), why.kind, label, why.reason);
+    diag_at(uc, ODIN3_LOG_WARN, cells[0], msg);
+    uc->stats.declined++;
+    return ODIN3_OK;
 }

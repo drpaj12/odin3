@@ -84,4 +84,17 @@ odin3_status um_replace(um_ctx *uc, const um_group *group, const um_new *req, od
 odin3_status um_set_note(um_ctx *uc, odin3_node_id node, const char *text);
 odin3_status um_set_cand(um_ctx *uc, odin3_node_id node, const char *text);
 
+/* A declined group (P-3): what it is and why. */
+typedef struct um_why {
+    const char *kind; /* adder, mul, ram */
+    const char *reason;
+} um_why;
+
+/*
+ * P-3: every cell of the group gets the string attribute `unmap_note` = `<kind>:<reason>`, one
+ * WARNING (located at the first cell's source when it has one) is logged, and `stats.declined`
+ * counts one group.
+ */
+odin3_status um_decline(um_ctx *uc, const odin3_node_id *cells, size_t count, um_why why);
+
 #endif
