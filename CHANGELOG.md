@@ -6,6 +6,10 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Added
+
+- `submod -bus BUSKEY`: vector ports from `NAME[BIT]` net attributes (v1.0.5, `docs/V1.0.5.md`).
+
 ### Changed
 
 - ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.

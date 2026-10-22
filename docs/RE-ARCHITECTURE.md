@@ -81,6 +81,8 @@ Fixed in 7.4e:
 
 - The Python binding did not register the linked ABC, so `cone_check` and `abc` failed with
   `ENGINE` outside the CLI. Fix made: `Odin3.load_abc()` (loads `libodin3_abc.so` as a plugin).
+- `submod` made one scalar port per boundary net, so a tool could not commit a bus as one vector
+  port. Closed in v1.0.5: `submod -bus BUSKEY` (nets tagged `NAME[BIT]`).
 
 Open:
 

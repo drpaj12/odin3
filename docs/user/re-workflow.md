@@ -57,4 +57,7 @@ an unproved group.
 - Node and net IDs are module-local and stay the same in a copy. After `submod` the nodes live in
   a new module with new IDs; keep a map by provenance (`Node.sources()`).
 - `cone_check` keeps one result per module: read `odin3:cone_check` after each call.
+- `submod -bus BUSKEY` (v1.0.5) makes vector ports: set the string attribute `BUSKEY` of each
+  boundary net to `NAME[BIT]` (`h12[0]`, `h12[1]`, ...) before the call; a complete set of one
+  direction becomes one port `NAME`, an incomplete one stays scalar with a warning.
 - Gaps found while writing the example are listed in `docs/RE-ARCHITECTURE.md` section 5.
