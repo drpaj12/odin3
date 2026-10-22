@@ -6,6 +6,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Added
+
+- `unmap` pass (v1.0.4, `docs/specs/2026-10-21-unmap-design.md`): the inverse of `partial_map`; turns the
+  VTR hard cells `adder`, `multiply`, `single_port_ram` and `dual_port_ram` back into `$add`/`$sub`,
+  `$mul` and `$mem` with provenance, regrouping carry chains, split multipliers and sliced RAMs;
+  `tools/unmap-check/unmap-vtr` is its VTR sweep.
+
 ### Changed
 
 - ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.

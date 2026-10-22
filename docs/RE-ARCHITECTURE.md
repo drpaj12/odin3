@@ -2,6 +2,8 @@
 
 Status: design note (Peter and the controller, 2026-10-21, Phase 7 brainstorm). Not built in
 v1.0 except the core support of Phase 7 item 7.4 (`submod`, design copy, `cone_check`, `raise`).
+The `unmap` pass (v1.0.4) gives the floor of F1 (VTR hard cells in a netlist) its word-level cells
+with exact provenance, so the first hypotheses on adders, multipliers and RAMs have probability 1.
 
 ## 1. The problem
 
