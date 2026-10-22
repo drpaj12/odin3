@@ -4050,6 +4050,48 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_micro_dir})
         set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro
                              PROPERTIES LABELS "sweep;lower")
+        # v1.0.2 gate mapping (gatemap plan Task 14, spec 9): every micro through read_techlib L;
+        # read_verilog --nolatches; proc; opt; lower; abc --gates L; dfflibmap L, equivalent to
+        # write_blif --gates-as-names after lower (equiv-check), only library cells, constants and
+        # ports left, every library cell with a SRC (tools/gatemap-check/gatemap-run). The
+        # smoke tests run four micros with --remap (the gate netlist read back and mapped again).
+        # The expect-fail lists hold what the flow cannot decide, each with a reason (tests/gatemap).
+        # No Yosys is needed; the lists are shared with the lower sweeps and need the oracle block.
+        if(ODIN3_WITH_ABC)
+            set(_gatemap_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                --odin3 $<TARGET_FILE:odin3> --jobs 2 --mem-cap 2G --gatemap-run
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                --opt-arg=--equiv-check=${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+            # Floors: the measured count of compared micros less 5 percent (release build,
+            # 2026-10-22, 539 micros each): generic_gates 439, cmos6 437.
+            foreach(_gm_lib IN ITEMS generic cmos6)
+                if(_gm_lib STREQUAL "generic")
+                    set(_gm_name generic_gates)
+                    set(_gm_floor 417)
+                else()
+                    set(_gm_name cmos6)
+                    set(_gm_floor 415)
+                endif()
+                set(_gm_arg --opt-arg=--lib=${_gm_name}=${PROJECT_SOURCE_DIR}/lib/${_gm_name}.o3lib)
+                add_test(NAME gatemap_smoke_${_gm_lib}
+                    COMMAND ${_gatemap_sweep} --jobs 1 ${_gm_arg} --opt-arg=--remap
+                            --root ${_micro_dir}
+                            ${_micro_dir}/micro/bm_DL_logic_w_Dff.v
+                            ${_micro_dir}/micro/bm_DL_2_1_mux.v
+                            ${_micro_dir}/micro/bm_DL_4_bit_comparator.v
+                            ${_micro_dir}/micro/bm_DL_4_bit_shift_register.v)
+                set_tests_properties(gatemap_smoke_${_gm_lib} PROPERTIES LABELS "tools;gatemap"
+                                     SKIP_RETURN_CODE 77 TIMEOUT 1800)
+                odin3_add_sweep_test(gatemap_micro_${_gm_lib} LABEL sweep
+                    COMMAND ${_gatemap_sweep} ${_gm_arg} --opt-arg=--remap
+                            --min-compared-total ${_gm_floor} ${_lower_micro_expect}
+                            --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/run_micro_expect_fail.txt
+                            --expect-fail
+                            ${PROJECT_SOURCE_DIR}/tests/gatemap/expect_fail_${_gm_lib}.txt
+                            ${_micro_dir})
+                set_tests_properties(gatemap_micro_${_gm_lib} PROPERTIES LABELS "sweep;gatemap")
+            endforeach()
+        endif()
         # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
         # unless tests/opt/diff_expect.txt lists it with a reason.
         odin3_add_sweep_test(opt_diff_micro LABEL sweep

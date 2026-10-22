@@ -1,0 +1,3 @@
+top|module|top|a.v:1
+top|node:NAND2|g1|a.v:2
+top|node:$lut|l1|a.v:3

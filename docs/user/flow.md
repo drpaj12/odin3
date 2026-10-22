@@ -114,6 +114,40 @@ flowchart LR
   A["bit-level logic"] --> C[abc --lut K] --> B["$lut cells"]
 ```
 
+### Gate mapping
+
+`abc --gates L` ends in the gate cells of a library instead of LUTs. `L` is the name of an `.o3lib`
+library already read with `read_techlib`; `lib/generic_gates.o3lib` (buffer, inverter, 2 to 4
+input gates, multiplexers, constant cells, flip-flops and latches) and `lib/cmos6.o3lib` (BUF, INV,
+NAND2, NOR2, DFF and the black-box DFFSR) ship with Odin III. Odin III derives ABC's gate library
+from the cells that have a combinational function (1 to 6 inputs, every input used), loads it into
+the linked ABC and runs `lib/abc/gates.abc` (the optimisation steps of the LUT script, then `map
+-a`). A `--script` of your own must end in `map` or `&nf`. The mapped gates come back as instances
+of the library cells, each with provenance to the HDL text of its cone.
+
+`dfflibmap L` then maps the bit flip-flops and latches (`$_DFF_P_`, `$_DFF_N_`, `$_DLATCH_P_`,
+`$_DLATCH_N_`) onto the library's state cells: the smallest compatible cell by area, with a clock
+inverter for a falling-edge flip-flop when the library has no falling-edge cell. A flip-flop with
+INIT 0 or 1 mapped onto a cell whose initial value is unknown loses it; the pass warns with the count.
+
+```bash
+odin3 -p "read_techlib lib/cmos6.o3lib; read_verilog --nolatches design.v; hierarchy -auto;
+          proc; opt; lower; abc --gates cmos6; dfflibmap cmos6; write_verilog gates.v"
+```
+
+`write_verilog` writes structural Verilog of library cells; constants use the library's tie cells
+or, without them, `1'b0` and `1'b1`. To prove the result, `write_blif --gates-as-names` writes every
+gate as a `.names` cover and every library state cell as a `.latch`: write it right after `lower`
+and again at the end, and compare the two files with `tools/equiv-check/equiv-check`. A gate
+netlist can be written as BLIF, read back with the same library and mapped again; the result stays
+equivalent. Reading the written Verilog back with `read_verilog -netlist` does not work for gate
+cells, because only hard and black-box cell types resolve outside a module.
+
+Limits: libraries are `.o3lib` only; `read_genlib`, `read_lib` and `amap` are not accepted;
+asynchronous set and reset cells (DFFSR) are never chosen; the equivalence checker cannot read a
+flip-flop clocked by an internal net, so a falling-edge flip-flop behind a clock inverter is not
+checked. The decisions are in `docs/V1.0.2.md`.
+
 ## 10. write
 
 `write_blif --vtr` writes the top module in the dialect VPR reads. `write_verilog` writes

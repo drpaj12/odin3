@@ -152,6 +152,11 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
                   (int)opts->name_style);
         return ODIN3_ERR_INVALID_ARG;
     }
+    if (opts->gates_as_names) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_blif_vtr_preflight: gates_as_names applies to the PLAIN dialect only");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     return ODIN3_OK;
 }
 

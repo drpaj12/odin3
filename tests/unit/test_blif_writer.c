@@ -1615,6 +1615,23 @@ static void test_gates_as_names_tie(void) {
     TEST_ASSERT_NOT_NULL(strstr(text, ".names y\n1\n.names z\n"));
 }
 
+/* A 6-input gate whose function ignores its last input: the cover has the don't care column. */
+static void test_gates_as_names_six_inputs_one_unused(void) {
+    odin3_techlib_text lib = {
+        "inline.o3lib",
+        odin3_bytes_cstr("library t\ncell G6 gate\n  in A 1 ; in B 1 ; in C 1 ; in D 1 ; in E 1 ; "
+                         "in F 1 ; out Y 1\n  fn Y = A & B & C & D & E\nend\n")};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read_text(design, &lib), last_error);
+    write_input(".model top\n.inputs a b c d e f\n.outputs y\n"
+                ".subckt G6 A=a B=b C=c D=d E=e F=f Y=y\n.end\n");
+    read_into(design, IN_PATH);
+    odin3_blif_write_opts opts = {.gates_as_names = true};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write_with(design, OUT_PATH, &opts),
+                                  last_error);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_NOT_NULL(strstr(slurp(OUT_PATH, text), ".names a b c d e f y\n11111- 1\n"));
+}
+
 static void test_gates_as_names_off_keeps_subckt(void) {
     load_lib("generic_gates.o3lib");
     const char *text = write_gates(".inputs a b\n.outputs y\n.subckt NAND2 A=a B=b Y=y\n", false);
@@ -1646,6 +1663,7 @@ static void run_gates_as_names_tests(void) {
     RUN_TEST(test_gates_as_names_state_triggers);
     RUN_TEST(test_gates_as_names_state_init);
     RUN_TEST(test_gates_as_names_tie);
+    RUN_TEST(test_gates_as_names_six_inputs_one_unused);
     RUN_TEST(test_gates_as_names_off_keeps_subckt);
     RUN_TEST(test_gates_as_names_blackbox_stays_subckt);
     RUN_TEST(test_gates_as_names_vtr_refused);
