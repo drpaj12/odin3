@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
+    src/passes/submod/busattr.c
     src/passes/submod/register.c
     src/passes/cone_check/cone_check.c
     src/passes/cone_check/bind.c

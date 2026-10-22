@@ -11,6 +11,7 @@
 #include "ir/prov.h"
 #include "passes/manager.h"
 #include "passes/submod/submod.h"
+#include "passes/submod/submod_int.h"
 #include "unity.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -369,6 +370,8 @@ static void test_submod_options(void) {
     read_blif(FOUR_GATES);
     mark_str(top(), driver_of(top(), "n2"), "grp", "g1");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("-bogus"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("-bus"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "-bus needs a value"), log_text);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-attr grp -name renamed"), log_text);
     TEST_ASSERT_NOT_NULL(module_named("renamed"));
     TEST_ASSERT_NULL(module_named("g1"));
@@ -603,6 +606,379 @@ static void test_submod_same_name_in_two_modules_refused_up_front(void) {
     check_clean();
 }
 
+/* --- v1.0.5 plan Task 5: the NAME[BIT] attribute table --------------------------------------- */
+
+#define ANDS4                                                                                      \
+    ".model m\n.inputs a0 a1 a2 a3 b0 b1 b2 b3\n.outputs y0 y1 y2 y3\n"                            \
+    ".names a0 b0 y0\n11 1\n.names a1 b1 y1\n11 1\n.names a2 b2 y2\n11 1\n"                        \
+    ".names a3 b3 y3\n11 1\n.end\n"
+
+enum { BUS_BITS = 4 };
+
+static void test_submod_busattr_parse(void) {
+    size_t len = 0;
+    uint32_t bit = 0;
+    TEST_ASSERT_TRUE(odin3_submod_bus_parse("h12[3]", &len, &bit));
+    TEST_ASSERT_EQUAL_size_t(3, len);
+    TEST_ASSERT_EQUAL_UINT32(3, bit);
+    TEST_ASSERT_TRUE(odin3_submod_bus_parse("a[0]", &len, &bit));
+    TEST_ASSERT_TRUE(odin3_submod_bus_parse("a[2147483647]", &len, &bit));
+}
+
+static void test_submod_busattr_parse_refused(void) {
+    size_t len = 0;
+    uint32_t bit = 0;
+    const char *bad[] = {"h12",   "h12[]",         "[3]",     "$x[1]", "h[3]x",
+                         "h[-1]", "h[2147483648]", "a[b][1]", "h[3",   "h[3]]"};
+    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
+        TEST_ASSERT_FALSE_MESSAGE(odin3_submod_bus_parse(bad[i], &len, &bit), bad[i]);
+    }
+}
+
+/* Net `net` gets attribute loki_bus = text. */
+typedef struct net_tag {
+    const char *net;
+    const char *text;
+} net_tag;
+
+static void tag_net(net_tag tag) {
+    odin3_net_id id = net_named(top(), tag.net);
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern(tag.text), 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NET, id.v},
+                                                   intern("loki_bus"), &value));
+}
+
+/* The four ANDs, the state of their nets by hand and y<i> tagged `y4[<i>]`. */
+static void load_ands(odin3_vec *state) {
+    read_blif(ANDS4);
+    odin3_vec_init(state, sizeof(uint8_t));
+    for (uint32_t nid = 0; nid < odin3_module_net_end(top()); nid++) {
+        uint8_t *slot = odin3_vec_push(state);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = SM_NONE;
+    }
+    for (int i = 0; i < BUS_BITS; i++) {
+        char name[PATH_BUF];
+        char text[PATH_BUF];
+        (void)snprintf(name, sizeof name, "y%d", i);
+        *(uint8_t *)odin3_vec_at(state, net_named(top(), name).v) = SM_OUT;
+        (void)snprintf(text, sizeof text, "y4[%d]", i);
+        tag_net((net_tag){name, text});
+        (void)snprintf(name, sizeof name, "a%d", i);
+        *(uint8_t *)odin3_vec_at(state, net_named(top(), name).v) = SM_IN;
+        (void)snprintf(name, sizeof name, "b%d", i);
+        *(uint8_t *)odin3_vec_at(state, net_named(top(), name).v) = SM_IN;
+    }
+}
+
+static void test_submod_busset_groups(void) {
+    odin3_vec state;
+    odin3_submod_busset set;
+    load_ands(&state);
+    odin3_submod_busset_init(&set);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_submod_busset_build(top(), &state, "loki_bus", "sub", &set), log_text);
+    TEST_ASSERT_EQUAL_size_t(1, set.buses.len);
+    const odin3_submod_bus *bus = set.buses.data;
+    TEST_ASSERT_TRUE(bus->ok);
+    TEST_ASSERT_EQUAL_UINT32(BUS_BITS, bus->width);
+    TEST_ASSERT_EQUAL_UINT8(SM_OUT, bus->dir);
+    const odin3_net_id *nets = set.nets.data;
+    for (uint32_t i = 0; i < BUS_BITS; i++) {
+        char name[PATH_BUF];
+        (void)snprintf(name, sizeof name, "y%u", (unsigned)i);
+        TEST_ASSERT_EQUAL_UINT32(net_named(top(), name).v, nets[bus->first + i].v);
+        TEST_ASSERT_EQUAL_UINT32(1, *(uint32_t *)odin3_vec_at(&set.of_net, nets[bus->first + i].v));
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, *(uint32_t *)odin3_vec_at(&set.of_net, net_named(top(), "a0").v));
+    odin3_submod_busset_free(&set);
+    odin3_vec_free(&state);
+}
+
+/* Two bits of the four inputs per bus: P, Q (from a), R, S (from b), all the same direction and
+ * interned one after the other, so consecutive name IDs (one pair is 2m, 2m+1). */
+static const char *const MULTI_TAGS[] = {"a0", "busP[0]", "a1", "busP[1]", "a2", "busQ[0]",
+                                         "a3", "busQ[1]", "b0", "busR[0]", "b1", "busR[1]",
+                                         "b2", "busS[0]", "b3", "busS[1]"};
+enum { MULTI_PER_BUS = 4 };
+
+static void retag_multi(void) {
+    for (uint32_t i = 0; i < BUS_BITS; i++) {
+        char name[PATH_BUF];
+        (void)snprintf(name, sizeof name, "y%u", (unsigned)i);
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK,
+            odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NET, net_named(top(), name).v},
+                              intern("loki_bus")));
+    }
+    for (size_t i = 0; i < sizeof MULTI_TAGS / sizeof MULTI_TAGS[0]; i += 2) {
+        tag_net((net_tag){MULTI_TAGS[i], MULTI_TAGS[i + 1]});
+    }
+}
+
+static void expect_multi_bus(const odin3_submod_busset *set, size_t idx) {
+    const odin3_submod_bus *bus = (const odin3_submod_bus *)set->buses.data + idx;
+    const odin3_net_id *nets = set->nets.data;
+    TEST_ASSERT_TRUE(bus->ok);
+    TEST_ASSERT_EQUAL_UINT32(2, bus->width);
+    TEST_ASSERT_EQUAL_UINT8(SM_IN, bus->dir);
+    TEST_ASSERT_TRUE(idx == 0 || bus[-1].name < bus->name);
+    for (size_t k = 0; k < 2; k++) {
+        const char *want = MULTI_TAGS[(idx * MULTI_PER_BUS) + (k * 2)];
+        TEST_ASSERT_EQUAL_UINT32(net_named(top(), want).v, nets[bus->first + k].v);
+    }
+}
+
+static void test_submod_busset_multi_bus(void) {
+    odin3_vec state;
+    odin3_submod_busset set;
+    load_ands(&state);
+    retag_multi();
+    odin3_submod_busset_init(&set);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_submod_busset_build(top(), &state, "loki_bus", "sub", &set), log_text);
+    TEST_ASSERT_EQUAL_size_t(BUS_BITS, set.buses.len);
+    for (size_t i = 0; i < set.buses.len; i++) {
+        expect_multi_bus(&set, i);
+    }
+    odin3_submod_busset_free(&set);
+    odin3_vec_free(&state);
+}
+
+/* A net attribute wins over the attribute of its one-bit wire. */
+static void test_submod_busset_net_beats_wire(void) {
+    odin3_vec state;
+    odin3_submod_busset set;
+    load_ands(&state);
+    odin3_net_id y0 = net_named(top(), "y0");
+    odin3_wire_id wire = odin3_net_primary(top(), y0).wire;
+    TEST_ASSERT_TRUE(odin3_wire_valid(wire));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_wire_width(top(), wire));
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern("other[0]"), 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_WIRE, wire.v},
+                                                   intern("loki_bus"), &value));
+    odin3_submod_busset_init(&set);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_submod_busset_build(top(), &state, "loki_bus", "sub", &set), log_text);
+    TEST_ASSERT_EQUAL_size_t(1, set.buses.len);
+    TEST_ASSERT_TRUE(((const odin3_submod_bus *)set.buses.data)->ok);
+    TEST_ASSERT_EQUAL_UINT32(BUS_BITS, ((const odin3_submod_bus *)set.buses.data)->width);
+    odin3_submod_busset_free(&set);
+    odin3_vec_free(&state);
+}
+
+/* The one bus of the table with y2 untagged (or retagged): not ok, the warning names the cause. */
+static void expect_fallback(bool untag) {
+    odin3_vec state;
+    odin3_submod_busset set;
+    load_ands(&state);
+    const char *why = untag ? "has no bit 2" : "bit 1 twice";
+    if (untag) {
+        odin3_net_id y2 = net_named(top(), "y2");
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK,
+            odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NET, y2.v}, intern("loki_bus")));
+    } else {
+        tag_net((net_tag){"y2", "y4[1]"});
+    }
+    odin3_submod_busset_init(&set);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_submod_busset_build(top(), &state, "loki_bus", "sub", &set), log_text);
+    TEST_ASSERT_EQUAL_size_t(1, set.buses.len);
+    TEST_ASSERT_FALSE(((const odin3_submod_bus *)set.buses.data)->ok);
+    TEST_ASSERT_EQUAL_UINT32(0, *(uint32_t *)odin3_vec_at(&set.of_net, net_named(top(), "y0").v));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, why), log_text);
+    odin3_submod_busset_free(&set);
+    odin3_vec_free(&state);
+}
+
+static void test_submod_busset_gap(void) {
+    expect_fallback(true);
+}
+
+static void test_submod_busset_duplicate(void) {
+    expect_fallback(false);
+}
+
+static void test_submod_busset_malformed(void) {
+    odin3_vec state;
+    odin3_submod_busset set;
+    load_ands(&state);
+    tag_net((net_tag){"y0", "y4"});
+    odin3_submod_busset_init(&set);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_submod_busset_build(top(), &state, "loki_bus", "sub", &set));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "is not NAME[BIT]"), log_text);
+    odin3_submod_busset_free(&set);
+    odin3_vec_free(&state);
+}
+
+/* --- v1.0.5 plan Task 6: submod -bus BUSKEY --------------------------------------------------- */
+
+/* The four ANDs with every driver of y<i> in group `sub`, y<i> tagged `y4[<i>]` and, with
+ * tag_a, a<i> tagged `a4[<i>]`. */
+static void load_ands_group(bool tag_a) {
+    read_blif(ANDS4);
+    for (int i = 0; i < BUS_BITS; i++) {
+        char name[PATH_BUF];
+        char text[PATH_BUF];
+        (void)snprintf(name, sizeof name, "y%d", i);
+        mark_driver(name, "sub");
+        (void)snprintf(text, sizeof text, "y4[%d]", i);
+        tag_net((net_tag){name, text});
+        if (tag_a) {
+            (void)snprintf(name, sizeof name, "a%d", i);
+            (void)snprintf(text, sizeof text, "a4[%d]", i);
+            tag_net((net_tag){name, text});
+        }
+    }
+}
+
+/* The live instance of `sub` in the top module. */
+static odin3_node_id instance_of(const odin3_module *sub) {
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top()); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(top(), node) &&
+            odin3_node_type(top(), node).v == odin3_module_celltype(sub).v) {
+            return node;
+        }
+    }
+    TEST_FAIL_MESSAGE("no instance");
+    return (odin3_node_id){0};
+}
+
+/* The net on bit `bit` of port `port` of the one instance of `sub` in the top module. */
+static odin3_net_id instance_net(const odin3_module *sub, const char *port, uint32_t bit) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, odin3_module_celltype(sub));
+    odin3_node_id node = instance_of(sub);
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, port) == 0) {
+            odin3_pinslice slice = odin3_node_port(top(), node, i);
+            TEST_ASSERT_TRUE(bit < slice.count);
+            return odin3_pin_net(top(), (odin3_pin_id){slice.first.v + bit});
+        }
+    }
+    TEST_FAIL_MESSAGE(port);
+    return (odin3_net_id){0};
+}
+
+static void test_submod_busattr_vector_in_and_out(void) {
+    load_ands_group(true);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-bus loki_bus"), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(6, port_count(sub));
+    TEST_ASSERT_EQUAL_UINT32(BUS_BITS, port_width(sub, "a4"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_IN, port_dir(sub, "a4"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "b0"));
+    TEST_ASSERT_EQUAL_UINT32(BUS_BITS, port_width(sub, "y4"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_OUT, port_dir(sub, "y4"));
+    for (uint32_t i = 0; i < BUS_BITS; i++) {
+        char name[PATH_BUF];
+        (void)snprintf(name, sizeof name, "y%u", (unsigned)i);
+        TEST_ASSERT_EQUAL_UINT32(net_named(top(), name).v, instance_net(sub, "y4", i).v);
+        (void)snprintf(name, sizeof name, "a%u", (unsigned)i);
+        TEST_ASSERT_EQUAL_UINT32(net_named(top(), name).v, instance_net(sub, "a4", i).v);
+    }
+    check_clean();
+}
+
+static void test_submod_busattr_off_by_default(void) {
+    load_ands_group(true);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(""), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(12, port_count(sub));
+    TEST_ASSERT_EQUAL_UINT32(0, port_width(sub, "y4"));
+    check_clean();
+}
+
+static void test_submod_busattr_gap_stays_scalar(void) {
+    load_ands_group(false);
+    odin3_net_id y2 = net_named(top(), "y2");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NET, y2.v},
+                                                      intern("loki_bus")));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-bus loki_bus"), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(0, port_width(sub, "y4"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "y0"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "y1"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "y3"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "bus 'y4' has no bit 2"), log_text);
+    check_clean();
+}
+
+static void test_submod_busattr_mixed_dir_stays_scalar(void) {
+    load_ands_group(false);
+    tag_net((net_tag){"a0", "y4[4]"}); /* an input with the output bus's name */
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-bus loki_bus"), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(12, port_count(sub));
+    TEST_ASSERT_EQUAL_UINT32(0, port_width(sub, "y4"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "bus 'y4' is on both"), log_text);
+    check_clean();
+}
+
+static void test_submod_busattr_malformed_refused(void) {
+    load_ands_group(false);
+    tag_net((net_tag){"y0", "y4"});
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("-bus loki_bus"));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "is not NAME[BIT]"), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, odin3_design_module_end(design));
+    TEST_ASSERT_NULL(module_named("sub"));
+    check_clean();
+}
+
+static void test_submod_busattr_beats_wire_bus(void) {
+    read_json(BUS_JSON("4", "[2, 3, 4, 5]", "[10, 11, 12, 13]", SUB_ATTR, ""));
+    odin3_wire_id wire = odin3_module_find_wire(top(), intern("a"));
+    TEST_ASSERT_TRUE(odin3_wire_valid(wire));
+    for (uint32_t bit = 0; bit < BUS_BITS; bit++) {
+        char text[PATH_BUF];
+        (void)snprintf(text, sizeof text, "q[%u]", (unsigned)(3U - bit)); /* reversed */
+        odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern(text), 0};
+        odin3_net_id net = odin3_wire_net(top(), wire, bit);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NET, net.v},
+                                                       intern("loki_bus"), &value));
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-bus loki_bus"), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(BUS_BITS, port_width(sub, "q"));
+    TEST_ASSERT_EQUAL_UINT32(0, port_width(sub, "a"));
+    TEST_ASSERT_EQUAL_UINT32(odin3_wire_net(top(), wire, 3).v, instance_net(sub, "q", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(odin3_wire_net(top(), wire, 0).v, instance_net(sub, "q", 3).v);
+    check_clean();
+}
+
+static void test_submod_busattr_name_unique(void) {
+    read_blif(".model m\n.inputs a0 a1 c0 c1 y4\n.outputs z\n.names a0 a1 n1\n11 1\n"
+              ".names n1 c0 c1 y4 z\n1111 1\n.end\n");
+    mark_driver("n1", "sub");
+    mark_driver("z", "sub");
+    tag_net((net_tag){"a0", "y4[0]"});
+    tag_net((net_tag){"a1", "y4[1]"});
+    tag_net((net_tag){"c0", "n1[0]"});
+    tag_net((net_tag){"c1", "n1[1]"});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("-bus loki_bus"), log_text);
+    odin3_module *sub = module_named("sub");
+    TEST_ASSERT_NOT_NULL(sub);
+    TEST_ASSERT_EQUAL_UINT32(2, port_width(sub, "y4"));
+    TEST_ASSERT_EQUAL_UINT32(1, port_width(sub, "y4_1")); /* the scalar net named y4 */
+    TEST_ASSERT_EQUAL_UINT32(2, port_width(sub, "n1"));
+    bool renamed = false;
+    for (uint32_t nid = 1; nid < odin3_module_net_end(sub); nid++) {
+        uint32_t name = odin3_net_name(sub, (odin3_net_id){nid});
+        renamed =
+            renamed || (name != 0 && strncmp(odin3_strtab_get(odin3_design_strtab(design), name),
+                                             "$submod$", strlen("$submod$")) == 0);
+    }
+    TEST_ASSERT_TRUE(renamed);
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_submod_two_gates);
@@ -622,5 +998,20 @@ int main(void) {
     RUN_TEST(test_submod_port_name_does_not_shadow_internal_net);
     RUN_TEST(test_submod_refusal_leaves_everything_unchanged);
     RUN_TEST(test_submod_same_name_in_two_modules_refused_up_front);
+    RUN_TEST(test_submod_busattr_parse);
+    RUN_TEST(test_submod_busattr_parse_refused);
+    RUN_TEST(test_submod_busset_groups);
+    RUN_TEST(test_submod_busset_multi_bus);
+    RUN_TEST(test_submod_busset_net_beats_wire);
+    RUN_TEST(test_submod_busset_gap);
+    RUN_TEST(test_submod_busset_duplicate);
+    RUN_TEST(test_submod_busset_malformed);
+    RUN_TEST(test_submod_busattr_vector_in_and_out);
+    RUN_TEST(test_submod_busattr_off_by_default);
+    RUN_TEST(test_submod_busattr_gap_stays_scalar);
+    RUN_TEST(test_submod_busattr_mixed_dir_stays_scalar);
+    RUN_TEST(test_submod_busattr_malformed_refused);
+    RUN_TEST(test_submod_busattr_beats_wire_bus);
+    RUN_TEST(test_submod_busattr_name_unique);
     return UNITY_END();
 }
