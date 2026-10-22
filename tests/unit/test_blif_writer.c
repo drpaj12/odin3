@@ -11,6 +11,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/value.h"
+#include "techlib/reader.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -1525,6 +1526,131 @@ static void test_out_of_memory_sweep_lut(void) {
     oom_sweep();
 }
 
+/* --- --gates-as-names (gatemap spec 7, G-8) ------------------------------------------------ */
+
+/* Loads the library file lib/<name> into design. */
+static void load_lib(const char *name) {
+    char path[MSG_MAX];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_LIB_DIR, name);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read(design, path), last_error);
+}
+
+/* Reads the BLIF body (a model `top` wrapped around it) with lib loaded, writes it with or without
+ * gates_as_names and returns the written text. */
+static const char *write_gates(const char *body, bool gates_as_names) {
+    static char text[TEXT_MAX];
+    char input[TEXT_MAX / 4];
+    (void)snprintf(input, sizeof input, ".model top\n%s.end\n", body);
+    write_input(input);
+    read_into(design, IN_PATH);
+    odin3_blif_write_opts opts = {.gates_as_names = gates_as_names};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write_with(design, OUT_PATH, &opts),
+                                  last_error);
+    return slurp(OUT_PATH, text);
+}
+
+static void test_gates_as_names_library_gate(void) {
+    load_lib("generic_gates.o3lib");
+    const char *text = write_gates(".inputs a b\n.outputs y\n.subckt NAND2 A=a B=b Y=y\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".names a b y\n11 0\n"));
+    TEST_ASSERT_NULL(strstr(text, ".subckt"));
+}
+
+static void test_gates_as_names_library_gate_order(void) {
+    /* MUX2 is Y = S ? B : A, inputs in port order A B S: the cover columns follow it. */
+    load_lib("generic_gates.o3lib");
+    const char *text =
+        write_gates(".inputs a b s\n.outputs y\n.subckt MUX2 A=a B=b S=s Y=y\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".names a b s y\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "1-0 1\n"));
+    TEST_ASSERT_NOT_NULL(strstr(text, "-11 1\n"));
+}
+
+static void test_gates_as_names_builtin_gate(void) {
+    load_lib("generic_gates.o3lib");
+    const char *text = write_gates(".inputs a b\n.outputs y\n.subckt $_AND_ A=a B=b Y=y\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".names a b y\n11 1\n"));
+    TEST_ASSERT_NULL(strstr(text, ".subckt"));
+}
+
+static void test_gates_as_names_state_cell(void) {
+    load_lib("generic_gates.o3lib");
+    const char *text = write_gates(".inputs d c\n.outputs q\n.subckt DFFP D=d C=c Q=q\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".latch d q re c 2\n"));
+}
+
+static void test_gates_as_names_state_triggers(void) {
+    static const char *const BODY[] = {".inputs d c\n.outputs q\n.subckt DFFN D=d C=c Q=q\n",
+                                       ".inputs d e\n.outputs q\n.subckt DLATCHP D=d E=e Q=q\n",
+                                       ".inputs d e\n.outputs q\n.subckt DLATCHN D=d E=e Q=q\n"};
+    static const char *const WANT[] = {".latch d q fe c 2\n", ".latch d q ah e 2\n",
+                                       ".latch d q al e 2\n"};
+    for (size_t i = 0; i < sizeof BODY / sizeof BODY[0]; i++) {
+        if (i > 0) {
+            tearDown();
+            setUp();
+        }
+        load_lib("generic_gates.o3lib");
+        TEST_ASSERT_NOT_NULL(strstr(write_gates(BODY[i], true), WANT[i]));
+    }
+}
+
+static void test_gates_as_names_state_init(void) {
+    odin3_techlib_text lib = {
+        "inline.o3lib", odin3_bytes_cstr("library t\ncell FF1 gate\n  in C 1 clock ; in D 1 "
+                                         "; out Q 1\n  seq Q <= D @ posedge C init 1\nend\n")};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_techlib_read_text(design, &lib), last_error);
+    write_input(".model top\n.inputs d c\n.outputs q\n.subckt FF1 D=d C=c Q=q\n.end\n");
+    read_into(design, IN_PATH);
+    odin3_blif_write_opts opts = {.gates_as_names = true};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_blif_write_with(design, OUT_PATH, &opts),
+                                  last_error);
+    static char text[TEXT_MAX];
+    TEST_ASSERT_NOT_NULL(strstr(slurp(OUT_PATH, text), ".latch d q re c 1\n"));
+}
+
+static void test_gates_as_names_tie(void) {
+    load_lib("generic_gates.o3lib");
+    const char *text = write_gates(".outputs y z\n.subckt TIE1 Y=y\n.subckt TIE0 Y=z\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".names y\n1\n.names z\n"));
+}
+
+static void test_gates_as_names_off_keeps_subckt(void) {
+    load_lib("generic_gates.o3lib");
+    const char *text = write_gates(".inputs a b\n.outputs y\n.subckt NAND2 A=a B=b Y=y\n", false);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".subckt NAND2 A=a B=b Y=y\n"));
+    TEST_ASSERT_NULL(strstr(text, ".names"));
+}
+
+static void test_gates_as_names_blackbox_stays_subckt(void) {
+    load_lib("cmos6.o3lib");
+    const char *text =
+        write_gates(".inputs c d s r\n.outputs q\n.subckt DFFSR C=c D=d S=s R=r Q=q\n", true);
+    TEST_ASSERT_NOT_NULL(strstr(text, ".subckt DFFSR"));
+}
+
+static void test_gates_as_names_vtr_refused(void) {
+    write_input(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.end\n");
+    read_into(design, IN_PATH);
+    odin3_blif_write_opts opts = {.dialect = ODIN3_BLIF_DIALECT_VTR, .gates_as_names = true};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write_with(design, OUT_PATH, &opts));
+    TEST_ASSERT_NOT_NULL(strstr(last_error, "gates_as_names applies to the PLAIN dialect only"));
+}
+
+/* The --gates-as-names tests, grouped to keep main small. */
+static void run_gates_as_names_tests(void) {
+    RUN_TEST(test_gates_as_names_library_gate);
+    RUN_TEST(test_gates_as_names_library_gate_order);
+    RUN_TEST(test_gates_as_names_builtin_gate);
+    RUN_TEST(test_gates_as_names_state_cell);
+    RUN_TEST(test_gates_as_names_state_triggers);
+    RUN_TEST(test_gates_as_names_state_init);
+    RUN_TEST(test_gates_as_names_tie);
+    RUN_TEST(test_gates_as_names_off_keeps_subckt);
+    RUN_TEST(test_gates_as_names_blackbox_stays_subckt);
+    RUN_TEST(test_gates_as_names_vtr_refused);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_round_trip_every_fixture);
@@ -1576,5 +1702,6 @@ int main(void) {
     RUN_TEST(test_lut_plain_unconnected_pin);
     RUN_TEST(test_out_of_memory_sweep_lut);
     RUN_TEST(test_out_of_memory_sweep_constants);
+    run_gates_as_names_tests();
     return UNITY_END();
 }
