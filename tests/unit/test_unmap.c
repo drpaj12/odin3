@@ -12,6 +12,7 @@
 #include "passes/unmap/chain.h"
 #include "passes/unmap/kit.h"
 #include "passes/unmap/operand.h"
+#include "passes/unmap/ram_depth.h"
 #include "passes/unmap/unmap.h"
 #include "unity.h"
 #include "util/log.h"
@@ -1214,6 +1215,111 @@ static void test_unmap_determinism(void) {
     free(two);
 }
 
+/* --- Task 15: depth recovery, the write enable tree ---------------------------------------- */
+
+enum { DEEP_LEAVES = 4, DEEP_LEVELS = 2 };
+
+/* The four leaves of ram_deep.v after unmap --no-regroup, as a vec of node IDs. */
+static void deep_leaves(odin3_vec *leaves) {
+    flow_file(src_path("tests/unmap/ram_deep.v"));
+    run_script("unmap --no-regroup");
+    odin3_node_id nodes[DEEP_LEAVES];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", nodes, DEEP_LEAVES));
+    odin3_vec_init(leaves, sizeof(odin3_node_id));
+    for (uint32_t i = 0; i < DEEP_LEAVES; i++) {
+        odin3_node_id *slot = odin3_vec_push(leaves);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = nodes[i];
+    }
+}
+
+static odin3_net_id port_bit(const char *wire_name, uint32_t bit) {
+    odin3_wire_id wire = odin3_module_find_wire(top(), intern(wire_name));
+    TEST_ASSERT_TRUE(odin3_wire_valid(wire));
+    return odin3_wire_net(top(), wire, bit);
+}
+
+/* Some live `$not` reads the net. */
+static bool reads_not(odin3_net_id net) {
+    odin3_pinlist sinks = odin3_net_sinks(top(), net);
+    for (uint32_t i = 0; i < sinks.count; i++) {
+        odin3_node_id node = odin3_pin_node(top(), sinks.pins[i]);
+        if (odin3_node_type(top(), node).v == type_named("$not").v) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void check_tree(const um_write_tree *tree) {
+    const uint32_t *got = tree->paths.data;
+    uint32_t seen = 0;
+    for (size_t i = 0; i < tree->paths.len; i++) {
+        seen |= 1U << got[i];
+    }
+    TEST_ASSERT_EQUAL_UINT32(0xF, seen); /* the four paths 0..3, one per leaf */
+}
+
+static void check_tree_nets(const um_write_tree *tree) {
+    const odin3_net_id *nets = tree->ad.data;
+    TEST_ASSERT_TRUE(odin3_net_valid(nets[0]) && odin3_net_valid(nets[1]));
+    TEST_ASSERT_TRUE(nets[0].v != nets[1].v && nets[0].v != tree->we0.v);
+    TEST_ASSERT_TRUE(reads_not(nets[0]) && reads_not(nets[1]));
+}
+
+static void test_depth_write_tree(void) {
+    odin3_vec leaves;
+    deep_leaves(&leaves);
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    um_write_tree tree;
+    TEST_ASSERT_TRUE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    check_tree(&tree);
+    check_tree_nets(&tree);
+    um_write_tree_free(&tree);
+    odin3_vec_free(&leaves);
+}
+
+/* Moves the input `port` of the `$and` that is the first link of the leaf's enable chain onto
+ * `net`. */
+static void rewire_leaf_and(odin3_node_id leaf, uint32_t port, odin3_net_id net) {
+    odin3_net_id enable = um_port_net(top(), leaf, (um_pos){5, 0});
+    odin3_node_id gate = odin3_pin_node(top(), odin3_net_driver(top(), enable));
+    odin3_pinslice pins = odin3_node_port(top(), gate, port);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top(), pins.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top(), pins.first, net));
+}
+
+static void test_depth_write_mismatch(void) {
+    odin3_vec leaves;
+    deep_leaves(&leaves);
+    const odin3_node_id *nodes = leaves.data;
+    rewire_leaf_and(nodes[0], 1, port_bit("addr", 5)); /* another address net at a level */
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    um_write_tree tree;
+    TEST_ASSERT_FALSE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    um_write_tree_free(&tree);
+    odin3_vec_free(&leaves);
+}
+
+static void test_depth_write_duplicate_path(void) {
+    odin3_vec leaves;
+    deep_leaves(&leaves);
+    const odin3_node_id *nodes = leaves.data;
+    /* leaf 1 gets leaf 0's write enable: two leaves have one path */
+    odin3_net_id enable = um_port_net(top(), nodes[0], (um_pos){5, 0});
+    odin3_pinslice pins = odin3_node_port(top(), nodes[1], 5);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top(), pins.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top(), pins.first, enable));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    um_write_tree tree;
+    TEST_ASSERT_FALSE(um_depth_write_tree(&uc, &leaves, DEEP_LEVELS, &tree));
+    um_write_tree_free(&tree);
+    odin3_vec_free(&leaves);
+}
+
 static void run_kit_tests(void) {
     RUN_TEST(test_unmap_options);
     RUN_TEST(test_net_class);
@@ -1279,6 +1385,9 @@ static void run_ram_tests(void) {
 }
 
 static void run_misc_tests(void) {
+    RUN_TEST(test_depth_write_tree);
+    RUN_TEST(test_depth_write_mismatch);
+    RUN_TEST(test_depth_write_duplicate_path);
     RUN_TEST(test_unmap_info_line);
     RUN_TEST(test_unmap_info_line_regroup);
     RUN_TEST(test_unmap_idempotent);

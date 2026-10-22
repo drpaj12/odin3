@@ -10,6 +10,7 @@
 #include "passes/unmap/mul.h"
 #include "passes/unmap/mul_group.h"
 #include "passes/unmap/ram.h"
+#include "passes/unmap/ram_depth.h"
 
 #include "util/log.h"
 
@@ -29,6 +30,9 @@ odin3_status um_module(um_ctx *uc) {
     }
     if (st == ODIN3_OK && (uc->types.sp_ram.v != 0 || uc->types.dp_ram.v != 0)) {
         st = um_ram_phase(uc);
+    }
+    if (st == ODIN3_OK && uc->opts->regroup && uc->types.mem.v != 0) {
+        st = um_ram_depth_phase(uc);
     }
     return st;
 }

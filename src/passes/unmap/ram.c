@@ -40,7 +40,14 @@ enum {
     P_INIT
 };
 
-enum { UM_CLK = 0, UM_MEM_PARAMS = 13, UM_MEM_PORTS = 8, UM_MAX_ABITS = 31, UM_MEMID_CAP = 256 };
+enum {
+    UM_CLK = 0,
+    UM_MEM_PARAMS = 13,
+    UM_MEM_PORTS = 8,
+    UM_MAX_ABITS = 31,
+    UM_MAX_AND_DEPTH = 64,
+    UM_MEMID_CAP = 256
+};
 
 static const um_layout *layout_of(bool dual) {
     return dual ? &k_dual : &k_single;
@@ -71,6 +78,29 @@ static uint32_t highest_observed(const um_ctx *uc, odin3_node_id node, uint32_t 
     return 0;
 }
 
+/* True when the write enable is constant 0 (or open, or pad), also through the `$and` chain of a
+ * depth split: an `$and` with a constant 0 input is 0. A loop up the first input, no recursion. */
+static bool never_writes(const um_ctx *uc, odin3_net_id net) {
+    for (uint32_t depth = 0; depth < UM_MAX_AND_DEPTH; depth++) {
+        um_cls cls = um_net_class(uc->module, net);
+        if (cls == UM_GND || cls == UM_NONE || cls == UM_PAD) {
+            return true;
+        }
+        odin3_pin_id driver = odin3_net_driver(uc->module, net);
+        odin3_node_id gate =
+            odin3_pin_valid(driver) ? odin3_pin_node(uc->module, driver) : (odin3_node_id){0};
+        if (gate.v == 0 || odin3_node_type(uc->module, gate).v != uc->types.and_.v ||
+            odin3_node_port(uc->module, gate, 0).count != 1) {
+            return false;
+        }
+        if (um_net_class(uc->module, um_port_net(uc->module, gate, (um_pos){1, 0})) == UM_GND) {
+            return true;
+        }
+        net = um_port_net(uc->module, gate, (um_pos){0, 0});
+    }
+    return false;
+}
+
 static uint32_t max_of(uint32_t left, uint32_t right) {
     return left > right ? left : right;
 }
@@ -83,9 +113,8 @@ odin3_status um_ram_summary(const um_ctx *uc, odin3_node_id node, um_ram *out) {
     uint32_t abits = 1;
     uint32_t width = 1;
     for (uint32_t port = 0; port < lay->n_ports; port++) {
-        um_cls we =
-            um_net_class(uc->module, um_port_net(uc->module, node, (um_pos){lay->we[port], 0}));
-        out->write[port] = we != UM_GND && we != UM_NONE && we != UM_PAD;
+        out->write[port] =
+            !never_writes(uc, um_port_net(uc->module, node, (um_pos){lay->we[port], 0}));
         uint32_t seen = highest_observed(uc, node, lay->out[port]);
         out->read[port] = seen > 0;
         if (out->write[port] || out->read[port]) {

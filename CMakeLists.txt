@@ -128,6 +128,7 @@ add_library(odin3_core OBJECT
     src/passes/unmap/mul_group.c
     src/passes/unmap/ram.c
     src/passes/unmap/ram_group.c
+    src/passes/unmap/ram_depth.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
