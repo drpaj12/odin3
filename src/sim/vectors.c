@@ -82,10 +82,7 @@ static odin3_status append_outputs(const odin3_sim *sim, odin3_strbuf *buf) {
     return st == ODIN3_OK && !any ? odin3_strbuf_append(buf, odin3_bytes_cstr("-")) : st;
 }
 
-odin3_status odin3_sim_vectors_step(odin3_sim *sim, odin3_prng *prng, uint32_t cycle,
-                                    odin3_strbuf *buf) {
-    odin3_sim_drive_random(sim, prng);
-    odin3_sim_cycle(sim);
+odin3_status odin3_sim_vectors_line(const odin3_sim *sim, uint32_t cycle, odin3_strbuf *buf) {
     odin3_status st = odin3_strbuf_appendf(buf, "%u ", cycle);
     if (st == ODIN3_OK) {
         st = append_inputs(sim, buf);
@@ -97,4 +94,11 @@ odin3_status odin3_sim_vectors_step(odin3_sim *sim, odin3_prng *prng, uint32_t c
         st = append_outputs(sim, buf);
     }
     return st == ODIN3_OK ? odin3_strbuf_append(buf, odin3_bytes_cstr("\n")) : st;
+}
+
+odin3_status odin3_sim_vectors_step(odin3_sim *sim, odin3_prng *prng, uint32_t cycle,
+                                    odin3_strbuf *buf) {
+    odin3_sim_drive_random(sim, prng);
+    odin3_sim_cycle(sim);
+    return odin3_sim_vectors_line(sim, cycle, buf);
 }
