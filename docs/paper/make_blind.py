@@ -49,8 +49,8 @@ sub("""\\author{\\IEEEauthorblockN{Peter Jamieson}
 \\todo{jamiespa@miamioh.edu}}}""",
 """\\author{\\IEEEauthorblockN{Anonymous Author(s)}
 \\IEEEauthorblockA{Affiliation withheld for double-blind review}}""")
-sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a compiler front end properly:""",
-"""started from nothing. It used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end cost a year of work to learn the basics of Verilog synthesis. Odin~II~\\cite{jamieson2011odin2} followed and wrote a compiler front end properly:""")
+sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a proper compiler front end:""",
+"""started from nothing. It used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end cost a year of work to learn the basics of Verilog synthesis. Odin~II~\\cite{jamieson2011odin2} followed and wrote a proper compiler front end:""")
 sub("Odin~III is public at \\url{https://github.com/drpaj12/odin3}.", "Odin~III is public (URL withheld for review).")
 sub("All the code is available at \\url{https://github.com/drpaj12/YggdrasilIII}.", "All the code is public (URL withheld for review).")
 sub("as a package \\url{https://github.com/drpaj12/YggdrasilIII}.", "as a package (URL withheld for review).")
@@ -61,7 +61,7 @@ sub("our earlier verilogTown \\cite{verilogTown}", "an earlier Verilog teaching 
 sub("a port of my verilogTown Verilog teaching game", "a port of an earlier Verilog teaching game")
 sub("continues the netlist-to-RTL work of Faruque et al.~", "continues earlier netlist-to-RTL work~")
 sub("the placement experiment of Gharibian et al.~", "an earlier placement experiment~")
-sub("Gharibian et al.\\ met it in placement", "Earlier work met it in placement")
+sub("Gharibian et al.\\ addressed it in placement", "Earlier work addressed it in placement")
 sub("Midgard~III (verilogTown~\\cite{verilogtown2017})", "Midgard~III (a Verilog teaching game~\\cite{verilogtown2017})")
 sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and Odin~II in 2010.")
 sub("the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.", "the original creation of Odin and Odin~II, which humans verified at high cost.")
@@ -86,9 +86,9 @@ for f in figs:
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
-# Odin and Odin II stay cited, so the tree is scaled to 90% to keep 8 pages.
+# Odin and Odin II stay cited, so the tree is scaled to 88% to keep 8 pages.
 sub("\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}",
-    "\\scalebox{0.9}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
+    "\\scalebox{0.88}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
 body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
 for f in figs:
     body += "\n".join(ln for ln in open("IMAGE/blind/%s.tex" % f).read().splitlines() if not ln.lstrip().startswith("%"))
