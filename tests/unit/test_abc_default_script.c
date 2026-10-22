@@ -95,6 +95,55 @@ static void test_commands_k6(void) {
     check_commands_k6(ODIN3_ABC_EXCHANGE_BLIF);
 }
 
+/* Reads lib/abc/<name> into buf (NUL-terminated); returns its length. */
+static size_t read_lib(const char *path, char *buf, size_t cap) {
+    FILE *file = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(file);
+    size_t len = fread(buf, 1, cap - 1, file);
+    TEST_ASSERT_EQUAL_INT(0, fclose(file));
+    TEST_ASSERT_TRUE(len > 0 && len < cap - 1);
+    buf[len] = '\0';
+    return len;
+}
+
+/* The start of text up to the line that begins with stop, comment lines left out. */
+static size_t logic_prefix(const char *text, char *out, size_t cap, const char *stop) {
+    size_t used = 0;
+    for (const char *line = text; *line != '\0';) {
+        const char *end = strchr(line, '\n');
+        size_t len = end != NULL ? (size_t)(end - line) + 1 : strlen(line);
+        if (strncmp(line, stop, strlen(stop)) == 0) {
+            break;
+        }
+        if (line[0] != '#') {
+            TEST_ASSERT_TRUE(used + len < cap);
+            memcpy(out + used, line, len);
+            used += len;
+        }
+        line += len;
+    }
+    out[used] = '\0';
+    return used;
+}
+
+/* The embedded gates script equals lib/abc/gates.abc, and its optimisation lines (before `map -a`)
+ * equal vtr.abc's (before `if -K`): the two flows differ only in the mapper (gatemap spec G-5). */
+static void test_gates_script(void) {
+    static char gates[FILE_CAP];
+    static char vtr[FILE_CAP];
+    static char gates_opt[FILE_CAP];
+    static char vtr_opt[FILE_CAP];
+    size_t len = read_lib(ODIN3_SOURCE_DIR "/lib/abc/gates.abc", gates, sizeof gates);
+    TEST_ASSERT_EQUAL_UINT32(len, odin3_abc_gates_script_len);
+    TEST_ASSERT_EQUAL_MEMORY(gates, odin3_abc_gates_script, len);
+    (void)read_lib(ODIN3_SOURCE_DIR "/lib/abc/vtr.abc", vtr, sizeof vtr);
+    size_t n_gates = logic_prefix(gates, gates_opt, sizeof gates_opt, "map -a");
+    size_t n_vtr = logic_prefix(vtr, vtr_opt, sizeof vtr_opt, "if -K");
+    TEST_ASSERT_TRUE(n_gates > 0);
+    TEST_ASSERT_EQUAL_size_t(n_vtr, n_gates);
+    TEST_ASSERT_EQUAL_STRING(vtr_opt, gates_opt);
+}
+
 static void test_no_lut(void) {
     odin3_abc_script script = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, parse_default(0, ODIN3_ABC_EXCHANGE_BLIF, &script));
@@ -120,6 +169,7 @@ static void test_k_above_linked_cap(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_bytes_equal_file);
+    RUN_TEST(test_gates_script);
     RUN_TEST(test_commands_k6);
     RUN_TEST(test_no_lut);
     RUN_TEST(test_k_above_linked_cap);

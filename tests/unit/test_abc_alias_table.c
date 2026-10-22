@@ -24,10 +24,10 @@ enum {
     REAL_MAX_DEPTH = 3,     /* &resyn2rs -> resyn2rs -> b -> balance */
     ABC_RC_ALIASES = 112,   /* `alias` lines of abc.rc at a3001b72 */
     PRINT_STAR_ROWS =
-        29, /* the allowed print_* commands (§7.5, print_box erratum, Task 11 C1/I1) */
-    ALLOWED_ROWS =
-        59, /* §7.5's allowed commands (Task 11 fix round 1: 61 less print_cone, print_npn) */
-    FILES_ROWS = 92 /* rows of class FILES */
+        29,            /* the allowed print_* commands (§7.5, print_box erratum, Task 11 C1/I1) */
+    ALLOWED_ROWS = 61, /* §7.5's allowed commands (Task 11 fix round 1: 61 less print_cone,
+                          print_npn) plus the gate mappers map and &nf (gatemap plan Task 5) */
+    FILES_ROWS = 92    /* rows of class FILES */
 };
 
 typedef struct pair {
@@ -153,6 +153,7 @@ static const odin3_abc_command_info k_allowed[] = {
     {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tMp"},
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "o"},
+    {"map", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_CELLMAPPED, "", "AB"},
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
     {"&st", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "M"},
@@ -160,6 +161,7 @@ static const odin3_abc_command_info k_allowed[] = {
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
     {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swYjbi"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
+    {"&nf", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_CELLMAPPED, "MZ", "fk"},
     {"print_auto", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", "O"},
     {"print_buf", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
     {"print_cell", ODIN3_ABC_CLASS_PRINT, ODIN3_ABC_FX_NONE, "", ""},
@@ -677,7 +679,8 @@ static uint32_t allowed_rows(void) {
     return allowed;
 }
 
-/* §7.5 exactly: the 61 allowed rows, each as listed, and no other row allowed (review I1). */
+/* §7.5 exactly: the 61 allowed rows (59 + map and &nf), each as listed, and no other row allowed
+ * (review I1). */
 static void test_allowed_set_is_closed(void) {
     TEST_ASSERT_EQUAL_UINT32(ALLOWED_ROWS, COUNT_OF(k_allowed));
     for (uint32_t i = 0; i < COUNT_OF(k_allowed); i++) {
@@ -751,9 +754,11 @@ static bool effect_fits(const odin3_abc_command_info *row) {
     case ODIN3_ABC_CLASS_OPT:
         return row->effect == ODIN3_ABC_FX_NTK_AIG || row->effect == ODIN3_ABC_FX_NTK_KEEP;
     case ODIN3_ABC_CLASS_MAP:
-        return row->effect == ODIN3_ABC_FX_NTK_MAPPED || row->effect == ODIN3_ABC_FX_NTK_KEEP;
+        return row->effect == ODIN3_ABC_FX_NTK_MAPPED || row->effect == ODIN3_ABC_FX_NTK_KEEP ||
+               row->effect == ODIN3_ABC_FX_NTK_CELLMAPPED;
     case ODIN3_ABC_CLASS_GIA:
-        return row->effect >= ODIN3_ABC_FX_GIA_GET && row->effect <= ODIN3_ABC_FX_GIA_KEEP;
+        return (row->effect >= ODIN3_ABC_FX_GIA_GET && row->effect <= ODIN3_ABC_FX_GIA_KEEP) ||
+               row->effect == ODIN3_ABC_FX_GIA_CELLMAPPED;
     default:
         return row->effect == ODIN3_ABC_FX_NONE;
     }

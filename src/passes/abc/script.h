@@ -50,15 +50,17 @@ typedef enum odin3_abc_class {
 
 /* A command's effect on the spaces (§7.5's "Effect" column, in row order; §7.3 step 11). */
 typedef enum odin3_abc_effect {
-    ODIN3_ABC_FX_NONE = 0,   /* printing, and every refused row */
-    ODIN3_ABC_FX_NTK_AIG,    /* ntk := aig */
-    ODIN3_ABC_FX_NTK_KEEP,   /* ntk keeps its state */
-    ODIN3_ABC_FX_NTK_MAPPED, /* ntk := mapped */
-    ODIN3_ABC_FX_GIA_GET,    /* &get: gia := ntk's state with -m, else aig */
-    ODIN3_ABC_FX_NTK_PUT,    /* &put: ntk := gia's state */
-    ODIN3_ABC_FX_GIA_AIG,    /* gia := aig */
-    ODIN3_ABC_FX_GIA_MAPPED, /* gia := mapped */
-    ODIN3_ABC_FX_GIA_KEEP    /* gia keeps its state */
+    ODIN3_ABC_FX_NONE = 0,       /* printing, and every refused row */
+    ODIN3_ABC_FX_NTK_AIG,        /* ntk := aig */
+    ODIN3_ABC_FX_NTK_KEEP,       /* ntk keeps its state */
+    ODIN3_ABC_FX_NTK_MAPPED,     /* ntk := mapped */
+    ODIN3_ABC_FX_GIA_GET,        /* &get: gia := ntk's state with -m, else aig */
+    ODIN3_ABC_FX_NTK_PUT,        /* &put: ntk := gia's state */
+    ODIN3_ABC_FX_GIA_AIG,        /* gia := aig */
+    ODIN3_ABC_FX_GIA_MAPPED,     /* gia := mapped */
+    ODIN3_ABC_FX_GIA_KEEP,       /* gia keeps its state */
+    ODIN3_ABC_FX_NTK_CELLMAPPED, /* ntk := cell-mapped (map: a gate library mapping) */
+    ODIN3_ABC_FX_GIA_CELLMAPPED  /* gia := cell-mapped (&nf) */
 } odin3_abc_effect;
 
 /*
@@ -147,6 +149,21 @@ typedef struct odin3_abc_script {
 odin3_status odin3_abc_script_parse(const odin3_abc_script_src *src, uint32_t lut_k,
                                     uint32_t exchange, odin3_abc_script *out);
 
+/*
+ * How a script is checked (gatemap spec 5): lut_k and exchange as for odin3_abc_script_parse, and
+ * gates, true for abc --gates. With gates the script must end cell-mapped (`map` or `&nf`) and a
+ * LUT ending is refused; without it `map` and `&nf` are refused (no gate library is loaded).
+ */
+typedef struct odin3_abc_script_mode {
+    uint32_t lut_k;
+    uint32_t exchange;
+    bool gates;
+} odin3_abc_script_mode;
+
+/* odin3_abc_script_parse with a mode; the other function is this one with gates false. */
+odin3_status odin3_abc_script_parse_mode(const odin3_abc_script_src *src,
+                                         const odin3_abc_script_mode *mode, odin3_abc_script *out);
+
 /* Frees what odin3_abc_script_parse filled and zeroes *script. NULL and a zeroed script are
  * no-ops. */
 void odin3_abc_script_free(odin3_abc_script *script);
@@ -163,6 +180,12 @@ const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32
  * number (no NUL is counted or relied on). */
 extern const unsigned char odin3_abc_default_script[];
 extern const uint32_t odin3_abc_default_script_len;
+
+/* The name messages and the run information give lib/abc/gates.abc, the default script of
+ * abc --gates (gatemap spec G-5), embedded the same way (generated/abc/gates_script.c). */
+#define ODIN3_ABC_GATES_SCRIPT_NAME "builtin:lib/abc/gates.abc"
+extern const unsigned char odin3_abc_gates_script[];
+extern const uint32_t odin3_abc_gates_script_len;
 
 /* The SHA-256 of the embedded default script's bytes (the route's identity, §7.9). Never fails. */
 void odin3_abc_default_sha256(uint8_t digest[ODIN3_SHA256_DIGEST_BYTES]);

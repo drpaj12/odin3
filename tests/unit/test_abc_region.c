@@ -179,6 +179,24 @@ static void test_every_registry_type(void) {
     }
 }
 
+/* A tech-library gate (fnsim's simulate hook, which needs its type data and scratch) has its
+ * table like a built-in gate (gatemap plan Task 3: the gate truth helper). */
+static void test_library_gate_table(void) {
+    char lib[AFX_PATH];
+    (void)snprintf(lib, sizeof lib, "%s/generic_gates.o3lib", ODIN3_LIB_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
+    new_module("m");
+    start();
+    uint64_t table = 0;
+    uint32_t n_inputs = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_abc_gate_table(run, afx_type(design, "MUX2"), &table, &n_inputs));
+    TEST_ASSERT_EQUAL_HEX64(0xCA, table);
+    TEST_ASSERT_EQUAL_UINT32(3, n_inputs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_abc_gate_table(run, afx_type(design, "TIE1"), &table, &n_inputs));
+}
+
 /* Rule edges: a parameterised bit type, a 7-input gate, a keep cell, a bus driver. */
 static void test_rule_edges(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_register_global(&k_param_gate));
@@ -576,6 +594,7 @@ static void test_region_oom_sweep(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_every_registry_type);
+    RUN_TEST(test_library_gate_table);
     RUN_TEST(test_rule_edges);
     RUN_TEST(test_constants_per_pin);
     RUN_TEST(test_bypass_unconn_hard_pin);
