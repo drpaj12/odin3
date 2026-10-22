@@ -21,6 +21,13 @@ The AST a read kept (ABI v4; read-side helpers only):
         for child in unit.children():
             print(child.kind, child.name, child.loc)  # e.g. MODULE top f.v:1:1
 
+A Simulation steps the top module one cycle at a time (ABI v5; run `proc; opt; lower` first):
+
+    with design.simulate() as sim:
+        sim["rst"] = 1
+        sim.step()
+        print(sim["light_ns"], sim.cycle)
+
 Objects (Module, Node, Pin, Net, Wire; AstNode) are small value types naming an IR object (an
 AST node) by ID through the design that owns it; they compare equal when they name the same
 object. Every string is copied out of the library at once, so it outlives later mutations. IDs
@@ -33,6 +40,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -273,6 +281,20 @@ def _quote(path: str | Path) -> str:
     return f'"{text}"'
 
 
+def _design_destructor(lib: Any, open_sims: dict[int, Any]) -> Any:
+    """The gc destructor of a design: close the simulations still open, then destroy the design.
+    Closing here, not only in the simulations' own destructors, keeps the order right when the
+    garbage collector finalises a design and its simulations in one cycle in any order (SP-4)."""
+
+    def destroy(ptr: Any) -> None:
+        for raw in list(open_sims.values()):
+            lib.odin3_simulation_close(raw)
+        open_sims.clear()
+        lib.odin3_design_destroy(ptr)
+
+    return destroy
+
+
 class Design:
     """An odin3_design: create it empty, run passes on it, walk its modules."""
 
@@ -290,7 +312,10 @@ class Design:
             raise ValueError("Design: the adopted handle is NULL")
         else:
             ptr = handle
-        self.ptr: Any = self.odin3.ffi.gc(ptr, self.odin3.lib.odin3_design_destroy)
+        # Raw handles of the open simulations, by address; shared with the destructors (below).
+        self._open: dict[int, Any] = {}
+        self.ptr: Any = self.odin3.ffi.gc(ptr, _design_destructor(self.odin3.lib, self._open))
+        self._sims: weakref.WeakSet[Simulation] = weakref.WeakSet()
 
     @classmethod
     def read_blif(
@@ -313,7 +338,10 @@ class Design:
         return Design(self.odin3, handle=ptr)
 
     def close(self) -> None:
-        """Destroy the design now (else when it is garbage-collected)."""
+        """Destroy the design now (else when it is garbage-collected). Its open simulations are
+        closed first."""
+        for sim in list(self._sims):
+            sim.close()
         if self.ptr is not None:
             self.odin3.ffi.release(self.ptr)
             self.ptr = None
@@ -351,6 +379,10 @@ class Design:
         keep = self.odin3.ffi.new("char[]", origin.encode())  # alive during the call
         src = (keep, self.odin3.lib.ODIN3_SCRIPT_BY_COMMAND)
         self.call("odin3_design_run_script", text.encode(), src)
+
+    def simulate(self, top: str | None = None) -> Simulation:
+        """Open a Simulation of module `top` (default: the design's top); see Simulation."""
+        return Simulation(self, top)
 
     def modules(self) -> Iterator[Module]:
         """Every module, in creation order."""
@@ -398,6 +430,210 @@ class Design:
         elif ident:
             obj = Wire(self, module, ident)
         return Found(module, name, obj, live)
+
+
+def _sim_destructor(lib: Any, open_sims: dict[int, Any], addr: int) -> Any:
+    """The gc destructor of a simulation: close it unless its design's destructor already did."""
+
+    def close(_ptr: Any) -> None:
+        raw = open_sims.pop(addr, None)
+        if raw is not None:
+            lib.odin3_simulation_close(raw)
+
+    return close
+
+
+class SignalInfo(NamedTuple):
+    """A simulated signal (SP-1). kind: "input", "clock", "output" or "internal"; obj: the wire
+    or net as (module ID, odin3_objkind, ID); first_bit: position of bit 0 within obj."""
+
+    id: int
+    name: str
+    leaf: str
+    width: int
+    kind: str
+    msb: int
+    lsb: int
+    scope: int
+    obj: tuple[int, int, int]
+    first_bit: int
+
+
+class ScopeInfo(NamedTuple):
+    """An expanded module instance (SP-1); scope 0 is the top. inst: (module ID, node ID). The
+    index field of SP-1 is named `scope` (`index` would shadow tuple.index; mypy --strict)."""
+
+    scope: int
+    name: str
+    leaf: str
+    parent: int
+    module: int
+    inst: tuple[int, int]
+
+
+_MAX_STEPS = 2**32 - 1
+_MAX_SCALAR_WIDTH = 64
+_CLOSED = "simulation is closed"
+_NOT_FOUND = (
+    "{}: not in the simulated netlist (a pass may have removed it: mark it (* keep *) in the "
+    "HDL, or see Simulation.signals())"
+)
+
+
+class Simulation:
+    """Per-cycle stepping of a design's top module (ABI odin3_simulation_*; spec SP-1 to SP-5).
+
+    The design must be simulable first (`read_verilog; proc; opt; lower`). Values are unsigned
+    Python ints, bit i of the int being bit i of the signal. Names use "." between instances.
+    While a simulation is open every pass on its design is refused. Use it as a context manager
+    or call close(); Design.close() closes its simulations first.
+    """
+
+    def __init__(self, design: Design, top: str | None = None) -> None:
+        """Open a simulation of module `top` (default: the design's top). ValueError for an
+        unknown module name; Odin3Error when the library refuses (it logged why)."""
+        if design.ptr is None:
+            raise RuntimeError("design is closed")
+        module = 0
+        if top is not None:
+            found = design.module(top)
+            if found is None:
+                raise ValueError(f"{top}: no such module")
+            module = found.id
+        self.design = design
+        self.odin3 = design.odin3
+        raw = design.get("odin3_simulation_open", "odin3_simulation *", module)
+        addr = int(self.odin3.ffi.cast("uintptr_t", raw))
+        design._open[addr] = raw
+        self.ptr: Any = self.odin3.ffi.gc(
+            raw, _sim_destructor(self.odin3.lib, design._open, addr)
+        )
+        self._cache: dict[str, SignalInfo] = {}
+        self._u64 = self.odin3.ffi.new("uint64_t *")
+        design._sims.add(self)
+
+    def close(self) -> None:
+        """Close the simulation now (else when it is garbage-collected); idempotent."""
+        if self.ptr is not None:
+            self.odin3.ffi.release(self.ptr)
+            self.ptr = None
+            self._cache.clear()
+
+    def __enter__(self) -> Simulation:
+        return self
+
+    def __exit__(
+        self, kind: type[BaseException] | None, exc: BaseException | None, tb: TracebackType | None
+    ) -> None:
+        self.close()
+
+    def _live(self) -> Any:
+        if self.ptr is None:
+            raise RuntimeError(_CLOSED)
+        return self.ptr
+
+    def _call(self, function: str, *args: Any) -> None:
+        self.odin3.call(function, self._live(), *args)
+
+    def _count(self, function: str) -> int:
+        return int(self.odin3.get(function, "uint32_t", self._live()))
+
+    def _info(self, ident: int) -> SignalInfo:
+        raw = self.odin3.ffi.new("odin3_simulation_signal *")
+        self._call("odin3_simulation_get_signal", ident, raw)
+        text = self.odin3.text
+        return SignalInfo(
+            ident, text(raw.name), text(raw.leaf), int(raw.width),
+            self.odin3.enum_name("odin3_simulation_kind", raw.kind),
+            int(raw.msb), int(raw.lsb), int(raw.scope),
+            (int(raw.obj.module), int(raw.obj.kind), int(raw.obj.id)), int(raw.first_bit),
+        )
+
+    def signals(self) -> list[SignalInfo]:
+        """The listed signals (spec SA-4), IDs 1.. in order; signals found by name later are not
+        in the list."""
+        count = self._count("odin3_simulation_get_signal_count")
+        return [self._info(i) for i in range(1, count + 1)]
+
+    def scopes(self) -> list[ScopeInfo]:
+        """One scope per expanded instance, scope 0 (the top) first."""
+        raw = self.odin3.ffi.new("odin3_simulation_scope *")
+        out = []
+        for i in range(self._count("odin3_simulation_get_scope_count")):
+            self._call("odin3_simulation_get_scope", i, raw)
+            out.append(ScopeInfo(
+                i, self.odin3.text(raw.name), self.odin3.text(raw.leaf), int(raw.parent),
+                int(raw.module), (int(raw.inst.module), int(raw.inst.id)),
+            ))
+        return out
+
+    def signal(self, name: str) -> SignalInfo | None:
+        """The signal named `name` (cached), or None when the simulated netlist has no such name."""
+        found = self._cache.get(name)
+        if found is None:
+            ident = int(self.odin3.get("odin3_simulation_find_signal", "uint32_t",
+                                       self._live(), name.encode()))
+            if ident == 0:
+                return None
+            found = self._cache[name] = self._info(ident)
+        return found
+
+    def _resolve(self, sig: str | SignalInfo) -> SignalInfo:
+        self._live()
+        if isinstance(sig, SignalInfo):
+            return sig
+        found = self.signal(sig)
+        if found is None:
+            raise KeyError(_NOT_FOUND.format(sig))
+        return found
+
+    def get(self, sig: str | SignalInfo) -> int:
+        """The value of a signal as of the last settle (open, reset, settle or step)."""
+        info = self._resolve(sig)
+        if info.width <= _MAX_SCALAR_WIDTH:
+            self._call("odin3_simulation_get", info.id, self._u64)
+            return int(self._u64[0])
+        buf = self.odin3.ffi.new("uint8_t[]", info.width)
+        self._call("odin3_simulation_get_bits", info.id, buf, info.width)
+        return sum(int(buf[i]) << i for i in range(info.width))
+
+    def set(self, sig: str | SignalInfo, value: int) -> None:
+        """Set an input signal; it keeps the value until set again. ValueError for a negative
+        value or one of 2**width or more; Odin3Error for a signal that is not an input."""
+        info = self._resolve(sig)
+        if value < 0 or value >> info.width:
+            raise ValueError(f"{info.name}: value {value} does not fit in {info.width} bit(s)")
+        if info.width <= _MAX_SCALAR_WIDTH:
+            self._call("odin3_simulation_set", info.id, value)
+            return
+        buf = self.odin3.ffi.new("uint8_t[]", [(value >> i) & 1 for i in range(info.width)])
+        self._call("odin3_simulation_set_bits", info.id, buf, info.width)
+
+    def __getitem__(self, name: str | SignalInfo) -> int:
+        return self.get(name)
+
+    def __setitem__(self, name: str | SignalInfo, value: int) -> None:
+        self.set(name, value)
+
+    def settle(self) -> None:
+        """Show the combinational effect of inputs just set; no state advances."""
+        self._call("odin3_simulation_settle")
+
+    def step(self, cycles: int = 1) -> None:
+        """Run `cycles` clock cycles (SC-2). ValueError outside 0 .. 2**32-1."""
+        if cycles < 0 or cycles > _MAX_STEPS:
+            raise ValueError(f"step: cycles {cycles} out of range 0 .. {_MAX_STEPS}")
+        self._call("odin3_simulation_step", cycles)
+
+    def reset(self) -> None:
+        """Power-on reset: every value and state bit 0 (INIT applied), cycle counter 0."""
+        self._call("odin3_simulation_reset")
+
+    @property
+    def cycle(self) -> int:
+        """Cycles stepped since open or the last reset."""
+        self._call("odin3_simulation_get_cycle", self._u64)
+        return int(self._u64[0])
 
 
 class _Named:

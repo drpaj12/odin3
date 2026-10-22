@@ -3032,6 +3032,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
+    add_test(NAME python_sim
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_sim
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_sim PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 9 (spec 3.5): plugins/python/re_round.py, one round of the RE loop, through
     # the CLI and equiv-check (needs the linked ABC for cone_check and equiv-check).
     if(ODIN3_WITH_ABC)
