@@ -934,6 +934,85 @@ static void test_unmap_mul_shared_product(void) {
     check_clean();
 }
 
+/* A P2 shape: W = 3, a 2 x 2 high product, cross products 3 x 2 and 2 x 3. */
+static void put_p2_mul(odin3_strbuf *buf, const char *const *pins, int out_len, const char *out) {
+    enum { P2_WIDTH = 3 };
+    ok(odin3_strbuf_appendf(buf, ".subckt multiply"));
+    for (int i = 0; i < P2_WIDTH; i++) {
+        ok(odin3_strbuf_appendf(buf, " a[%d]=%s b[%d]=%s", i, pins[i], i, pins[P2_WIDTH + i]));
+    }
+    for (int i = 0; i < out_len; i++) {
+        ok(odin3_strbuf_appendf(buf, " out[%d]=%s%d", i, out, i));
+    }
+    ok(odin3_strbuf_appendf(buf, "\n"));
+}
+
+/* An adder chain of `stages` stages: sum bit i is `<sum>i`; the operands are name arrays. */
+static void put_p2_chain(odin3_strbuf *buf, const char *const *a, const char *const *b,
+                         int stages, const char *sum) {
+    ok(odin3_strbuf_appendf(buf, ".subckt adder a=vcc b=gnd cin=gnd cout=%sc0\n", sum));
+    for (int i = 0; i < stages; i++) {
+        ok(odin3_strbuf_appendf(buf, ".subckt adder a=%s b=%s cin=%sc%d cout=%sc%d sumout=%s%d\n",
+                                a[i], b[i], sum, i, sum, i + 1, sum, i));
+    }
+}
+
+/* cross_read: how many of the 5 bits of the first cross product the adder R0 reads (4: the top
+ * bit of its operand is tied to ground and the product pin is not read). */
+static void read_p2_blif(int cross_read) {
+    static const char *const m00[] = {"x0", "x1", "x2", "y0", "y1", "y2"};
+    static const char *const m11[] = {"x3", "x4", "unconn", "y3", "y4", "unconn"};
+    static const char *const c1[] = {"x0", "x1", "x2", "y3", "y4", "unconn"};
+    static const char *const c2[] = {"x3", "x4", "unconn", "y0", "y1", "y2"};
+    static const char *const r0a[] = {"c0", "c1", "c2", "c3", "c4", "gnd"};
+    static const char *const r0a_cut[] = {"c0", "c1", "c2", "c3", "gnd", "gnd"};
+    static const char *const r0b[] = {"d0", "d1", "d2", "d3", "d4", "gnd"};
+    static const char *const r1a[] = {"z0", "z1", "z2", "z3", "z4", "z5", "gnd"};
+    static const char *const r1b[] = {"l3", "l4", "l5", "u0", "u1", "u2", "u3"};
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    ok(odin3_strbuf_appendf(&buf, ".model m\n.inputs x0 x1 x2 x3 x4 y0 y1 y2 y3 y4\n.outputs"));
+    for (int i = 0; i < 10; i++) {
+        ok(odin3_strbuf_appendf(&buf, " p%d", i));
+    }
+    ok(odin3_strbuf_appendf(&buf, "\n.names gnd\n.names vcc\n1\n.names unconn\n"));
+    put_p2_mul(&buf, m00, 6, "l");
+    put_p2_mul(&buf, m11, 4, "u");
+    put_p2_mul(&buf, c1, cross_read, "c");
+    put_p2_mul(&buf, c2, 5, "d");
+    put_p2_chain(&buf, cross_read == 5 ? r0a : r0a_cut, r0b, 6, "z");
+    put_p2_chain(&buf, r1a, r1b, 7, "s");
+    for (int i = 0; i < 3; i++) {
+        ok(odin3_strbuf_appendf(&buf, ".names l%d p%d\n1 1\n", i, i));
+    }
+    for (int i = 0; i < 7; i++) {
+        ok(odin3_strbuf_appendf(&buf, ".names s%d p%d\n1 1\n", i, 3 + i));
+    }
+    ok(odin3_strbuf_appendf(&buf, ".end\n"));
+    read_blif(buf.data);
+    odin3_strbuf_free(&buf);
+}
+
+/* The generator makes a real P2 shape: all six cells merge into one 5 x 5 multiplier. */
+static void test_unmap_mul_p2_blif(void) {
+    load_lib();
+    read_p2_blif(5);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 5, 5, 10});
+    check_clean();
+}
+
+/* An upper bit of a cross product that the adder does not read: not the full product, no merge. */
+static void test_unmap_mul_p2_cross_narrow(void) {
+    load_lib();
+    read_p2_blif(4);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(4, nodes_of("$mul", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$add", NULL, 0));
+    check_clean();
+}
+
 /* --- Task 9: RAM cells to $mem ------------------------------------------------------------- */
 
 enum {
@@ -1461,6 +1540,8 @@ static void run_mul_tests(void) {
     RUN_TEST(test_unmap_mul_split_80x40);
     RUN_TEST(test_unmap_mul_low_only);
     RUN_TEST(test_unmap_mul_shared_product);
+    RUN_TEST(test_unmap_mul_p2_blif);
+    RUN_TEST(test_unmap_mul_p2_cross_narrow);
 }
 
 static void run_ram_tests(void) {

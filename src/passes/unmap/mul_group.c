@@ -379,11 +379,24 @@ static bool p2_cross(const um_p2 *p2) {
 
 /* The operand `port` of `adder` is the first `want` bits of the Y of `cell`, and the cell shows
  * nothing more. */
-static bool feeds_prefix(const um_ctx *uc, um_ref operand, um_ref product, uint32_t k_width) {
+static bool feeds_prefix(const um_ctx *uc, um_ref operand, odin3_node_id cell, uint32_t k_width) {
+    um_ref product = p2_ref(cell, UM_PIECE_Y);
     uint32_t len_y = ref_len(uc, product);
-    uint32_t want = k_width < len_y ? k_width : len_y;
+    uint32_t full = ref_len(uc, p2_ref(cell, UM_PIECE_A)) + ref_len(uc, p2_ref(cell, UM_PIECE_B));
+    uint32_t want = k_width < full ? k_width : full;
+    /* The cross product shows its whole width (up to the adder's), so no upper bit is unread. */
     return ref_len(uc, operand) == want && len_y == want &&
            same_run(uc, (um_span){operand, 0}, (um_span){product, 0}, want);
+}
+
+/* The adder R0 is wide enough for both cross products plus the carry that R1 reads. */
+static bool p2_k0_ok(const um_p2 *p2) {
+    const um_ctx *uc = p2->uc;
+    uint32_t a1 = ref_len(uc, p2_ref(p2->m11, UM_PIECE_A));
+    uint32_t b1 = ref_len(uc, p2_ref(p2->m11, UM_PIECE_B));
+    uint32_t wide = p2->cell_w + b1 > a1 + p2->cell_w ? p2->cell_w + b1 : a1 + p2->cell_w;
+    uint32_t need = wide + 1 < p2->k1 ? wide + 1 : p2->k1;
+    return p2->k0 >= need;
 }
 
 /* Step 3. */
@@ -395,7 +408,7 @@ static bool p2_operands(const um_p2 *p2) {
     uint32_t total = p2->cell_w + a1 + b1;
     um_ref r1b = p2_ref(p2->r1, UM_PIECE_B);
     um_ref high_y = p2_ref(p2->m11, UM_PIECE_Y);
-    return len_b == (p2->k1 < total ? p2->k1 : total) &&
+    return p2_k0_ok(p2) && len_b == (p2->k1 < total ? p2->k1 : total) &&
            same_run(uc, (um_span){r1b, 0}, (um_span){p2_ref(p2->m00, UM_PIECE_Y), p2->cell_w},
                     p2->cell_w) &&
            same_run(uc, (um_span){r1b, p2->cell_w}, (um_span){high_y, 0}, len_b - p2->cell_w) &&
@@ -404,8 +417,8 @@ static bool p2_operands(const um_p2 *p2) {
            same_run(uc, (um_span){p2_ref(p2->r1, UM_PIECE_A), 0},
                     (um_span){p2_ref(p2->r0, UM_PIECE_Y), 0},
                     ref_len(uc, p2_ref(p2->r0, UM_PIECE_Y))) &&
-           feeds_prefix(uc, p2_ref(p2->r0, UM_PIECE_A), p2_ref(p2->cross_a, UM_PIECE_Y), p2->k0) &&
-           feeds_prefix(uc, p2_ref(p2->r0, UM_PIECE_B), p2_ref(p2->cross_b, UM_PIECE_Y), p2->k0);
+           feeds_prefix(uc, p2_ref(p2->r0, UM_PIECE_A), p2->cross_a, p2->k0) &&
+           feeds_prefix(uc, p2_ref(p2->r0, UM_PIECE_B), p2->cross_b, p2->k0);
 }
 
 /* Step 4: the intermediate nets have no other reader. */
