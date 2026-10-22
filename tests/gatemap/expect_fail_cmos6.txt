@@ -7,6 +7,9 @@
 # and equiv-check cannot read a flip-flop clocked by an internal net), unproven (no verdict
 # within equiv-check's limit or at the 2G child cap), no-latch-cell (cmos6 has no latch cell,
 # GM-9). No micro needed init-lost (GM-8).
+# Every unproven entry but the 2G-cap ones has the needle `gatemap-run: unproven`: a design near the
+# 600 s limit gives either `timed out after 600 seconds` or `UNDECIDED` depending on load. Such an
+# entry can XPASS on a faster machine (docs/V1.0.2.md); that is a list update, not a bug.
 # Evidence: ctest gatemap_micro_cmos6, release build, 2026-10-22; counts in docs/V1.0.2.md.
 common/register.v [more than one clock domain] multiclock: a falling and a rising register on one clock
 syntax/multi_edge_reader_writer.v [more than one clock domain] multiclock: a falling and a rising register on one clock
@@ -17,14 +20,14 @@ keywords/begin_end/negedge.v [clocked by internal net] negedge-inverter: DFF beh
 syntax/bm_jk_rtl.v [clocked by internal net] negedge-inverter: DFF behind dfflibmap's clock INV
 full/stereovision3.v [more than one clock domain] multiclock: two clocks (tm3_clk_v0, tm3_clk_v2)
 large/sv_chip3_hierarchy_no_mem.v [more than one clock domain] multiclock: two clocks (tm3_clk_v0, tm3_clk_v2)
-full/stereovision2.v [timed out after 600 seconds] unproven: ABC dsec timed out
-large/sv_chip2_hierarchy_no_mem.v [timed out after 600 seconds] unproven: ABC dsec timed out
-FIR/ex4LS16_fir.v [timed out after 600 seconds] unproven: ABC dsec timed out
-full/LU8PEEng.v [timed out after 600 seconds] unproven: ABC dsec timed out
-large/LU32PEEng.v [timed out after 600 seconds] unproven: ABC dsec timed out
-syntax/cf_fft_1024_16.v [timed out after 600 seconds] unproven: ABC dsec timed out
-large/bgm.v [UNDECIDED] unproven: ABC dsec leaves the miter undecided (465 s, conflict limit)
-large/raygentop.v [UNDECIDED] unproven: ABC dsec leaves the miter undecided (104 s)
+full/stereovision2.v [gatemap-run: unproven] unproven: ABC dsec timed out
+large/sv_chip2_hierarchy_no_mem.v [gatemap-run: unproven] unproven: ABC dsec timed out
+FIR/ex4LS16_fir.v [gatemap-run: unproven] unproven: ABC dsec timed out
+full/LU8PEEng.v [gatemap-run: unproven] unproven: ABC dsec timed out
+large/LU32PEEng.v [gatemap-run: unproven] unproven: ABC dsec timed out
+syntax/cf_fft_1024_16.v [gatemap-run: unproven] unproven: ABC dsec timed out
+large/bgm.v [gatemap-run: unproven] unproven: ABC dsec leaves the miter undecided (465 s, conflict limit)
+large/raygentop.v [gatemap-run: unproven] unproven: ABC dsec leaves the miter undecided (104 s)
 large/paj_raygentop_hierarchy_no_mem.v [no cell of library 'cmos6' implements $_DLATCH_P_] no-latch-cell: the RAM model spram21x4 holds a level-sensitive latch and cmos6 has no latch cell (GM-9)
 large/LU64PEEng.v [killed by the memory cap] unproven: equiv-check is killed at the 2G child cap
 large/arm_core.v [killed by the memory cap] unproven: equiv-check is killed at the 2G child cap

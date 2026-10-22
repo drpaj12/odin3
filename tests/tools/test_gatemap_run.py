@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
+import elab_sweep
 import gatemap_run as gr
 import memcap
 
@@ -114,6 +115,18 @@ class RunTest(unittest.TestCase):
         code, out, _ = self.run_fake(self.odin("locs_ok.txt"), "exit 4\n")
         self.assertEqual(code, 4)
         self.assertIn("gatemap-run: unproven ", out)
+
+    def test_the_listed_unproven_needle_matches_both_unproven_forms(self) -> None:
+        listing = DATA.parents[2] / "gatemap"
+        for lib in ("generic", "cmos6"):
+            entries = elab_sweep.read_expect(listing / f"expect_fail_{lib}.txt")
+            for rel, entry in entries.items():
+                if entry.reason.startswith("unproven: ABC dsec"):
+                    self.assertEqual(entry.needle, "gatemap-run: unproven", f"{lib} {rel}")
+        for form in ("timed out after 600 seconds", "UNDECIDED"):
+            equiv = f"echo 'equiv-check: {form}'\nexit 4\n"
+            _, out, _ = self.run_fake(self.odin("locs_ok.txt"), equiv)
+            self.assertIn("gatemap-run: unproven", out)
 
     def test_equiv_killed_is_unproven(self) -> None:
         code, out, _ = self.run_fake(self.odin("locs_ok.txt"), "kill -KILL $$\n")
