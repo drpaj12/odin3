@@ -195,7 +195,7 @@ static void test_sim_arguments_and_refusals(void) {
     for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
         TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_INVALID_ARG, run("sim", bad[i]), bad[i]);
     }
-    TEST_ASSERT_TRUE(log_has("sim: expects <cycles> <seed> [<file>]"));
+    TEST_ASSERT_TRUE(log_has("sim: expects <cycles> <seed> [<file>|-]"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO, run("sim", "4 1 /nonexistent/dir/a.vec"));
 }
 
