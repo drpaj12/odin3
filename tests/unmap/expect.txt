@@ -1,0 +1,11 @@
+# What the unmap round trip (tests/unmap/run.sh rtl) may report other than equivalent and equal
+# counts. Syntax: `<path> <kind> <reason>`; kind is `unproven` (equiv-check exit 4), `counts` (the
+# `$add $sub $mul $mem` counts before hardmap and after unmap differ) or `equiv-skip` (equiv-check
+# is not run). A line that does not occur is stale and fails: the list shrinks.
+
+# An explicit single_port_ram or dual_port_ram instance is a black box in the reference (no
+# hardmap), so the two netlists cannot be paired by equiv-check; the round trip checks counts.
+tests/micro/verilog/common/spram.v equiv-skip explicit RAM instance: the reference keeps the black box
+tests/micro/verilog/common/dpram.v equiv-skip explicit RAM instance: the reference keeps the black box
+tests/micro/verilog/common/spram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
+tests/micro/verilog/common/dpram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap

@@ -1,0 +1,26 @@
+# The micros of the unmap round trip (cli_unmap_rtl, plan Task 12, spec T-2).
+# Syntax: `<path relative to the repo> <comb|seq>`. `comb` micros also compare sim vectors before
+# hardmap and after unmap (the sim pass has no word-level flip-flops, so `seq` ones are not run).
+tests/hardmap/add_8x6.v comb
+tests/hardmap/sub_pad_s.v comb
+tests/hardmap/mul_8x7.v comb
+tests/unmap/add_signed.v comb
+tests/unmap/sub_signed.v comb
+tests/unmap/mul_signed.v comb
+tests/unmap/mul_40x40.v comb
+tests/unmap/mul_40x8.v comb
+tests/unmap/mul_8x40.v comb
+tests/unmap/mul_80x80.v comb
+tests/micro/verilog/common/sub.v comb
+tests/micro/verilog/common/mult.v comb
+tests/micro/verilog/common/mult_const.v comb
+tests/micro/verilog/common/mem.v seq
+tests/micro/verilog/common/rom.v seq
+tests/micro/verilog/common/spram.v seq
+tests/micro/verilog/common/dpram.v seq
+tests/micro/verilog/common/bram.v seq
+tests/micro/verilog/common/1r2w.v seq
+tests/micro/verilog/common/2r1w.v seq
+tests/unmap/ram_w8.v seq
+tests/unmap/ram_2r1w.v seq
+tests/hardmap/adder_use.v comb

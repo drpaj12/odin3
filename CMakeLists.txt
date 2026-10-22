@@ -1038,6 +1038,15 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hardmap_add PROPERTIES LABELS unit)
+    # v1.0.4 unmap (tests/unmap/run.sh): the RTL round trip on the micros and the RTLIL goldens.
+    add_test(NAME cli_unmap_rtl
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh rtl $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_rtl PROPERTIES LABELS unit TIMEOUT 900)
+    add_test(NAME cli_unmap_golden
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh golden $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_golden PROPERTIES LABELS unit)
     add_test(NAME cli_pm_alias
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_alias $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
