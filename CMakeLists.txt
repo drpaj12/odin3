@@ -234,6 +234,7 @@ add_library(odin3_core OBJECT
     src/passes/lpmmap/mult.c
     src/passes/lpmmap/compare.c
     src/passes/lpmmap/mem.c
+    src/passes/dfflibmap/choose.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -1657,6 +1658,8 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_libcells)
     target_compile_definitions(test_libcells PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_dfflibmap)
+    target_compile_definitions(test_dfflibmap PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_abc_genlib)
     target_compile_definitions(test_abc_genlib PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
