@@ -102,15 +102,34 @@ odin3_status odin3_abc_session_name_map(void *self, const odin3_abc_luts *aligne
                                         const int32_t **lits, odin3_abc_fail *fail);
 
 /*
+ * The engine's load_genlib (gatemap spec 4.2, ABI 5): text (a NUL-terminated genlib, copied)
+ * becomes the session's gate library (Mio_LibraryReadBuffer, then Mio_UpdateGenlib; bridge.h).
+ * ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library" or "no gate library (text
+ * is NULL)", EXIT/ABORT/ASSERT or DISABLED; ODIN3_ERR_NO_MEMORY when the copy cannot be made.
+ */
+odin3_status odin3_abc_session_load_genlib(void *self, const char *text, odin3_abc_fail *fail);
+
+/*
+ * The engine's get_cells (gatemap spec 4.3, ABI 5): the gate-mapped network of space
+ * (odin3_abc_cells_space) in odin3_abc_cells' layout, owned by the session until the next
+ * get_cells, load_genlib or close. ODIN3_ERR_ENGINE with fail RESULT ("nowhere to put the cells
+ * (cells is NULL)", "no network space N", or one of odin3_bridge_get_cells' texts),
+ * EXIT/ABORT/ASSERT or DISABLED; ODIN3_ERR_NO_MEMORY when an array cannot be made.
+ */
+odin3_status odin3_abc_session_get_cells(void *self, uint32_t space, odin3_abc_cells *cells,
+                                         odin3_abc_fail *fail);
+
+/*
  * The engine's close: leaves the frame, destroys it unless an escape happened (its state is then
- * leaked, and the engine stays disabled), frees what get_luts and name_map returned, closes the
- * capture file and ends the session.
+ * leaked, and the engine stays disabled), frees what get_luts, name_map and get_cells returned,
+ * closes the capture file and ends the session.
  */
 void odin3_abc_session_close(void *self);
 
 /*
- * The adapter's own allocations: the copies load_aig and name_map check, and get_luts' ci_from
- * (malloc; the caller frees). NULL when out of memory, or when the test hook says so.
+ * The adapter's own allocations: the copies load_aig, name_map and load_genlib make, get_luts'
+ * ci_from and get_cells' arrays (malloc; the caller frees). NULL when out of memory, or when the
+ * test hook says so.
  */
 void *odin3_abc_alloc(size_t bytes);
 

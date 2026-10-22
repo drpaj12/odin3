@@ -906,6 +906,314 @@ static void test_adapter_oom(void) {
     TEST_ASSERT_EQUAL_UINT32(6, injected); /* tmpfile, AIG copy, ci_from, 2 aligned copies, marks */
 }
 
+/* --- gate mapping: load_genlib and get_cells (ABI 5, gatemap spec 4.2, 4.3) ------------------ */
+
+/* Task 4's cmos6 golden (tests/unit/data/genlib/cmos6.genlib on feat/gatemap-lib). */
+static const char k_cmos6_genlib[] = "GATE BUF 6 Y=A;\n"
+                                     "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                     "GATE INV 3 Y=!A;\n"
+                                     "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                     "GATE NAND2 4 Y=!B+!A;\n"
+                                     "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                     "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                     "GATE NOR2 4 Y=!A*!B;\n"
+                                     "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                     "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                     "GATE $odin3_const0 0 Y=CONST0;\n"
+                                     "GATE $odin3_const1 0 Y=CONST1;\n";
+
+/* y = a & b: PIs a (1) and b (2), the AND (3), the PO (4). */
+static const int32_t AND2[] = {AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL,
+                               AIG_NULL, 2,        4,        6,        AIG_NULL};
+static const odin3_abc_aig AND2_AIG = {.objs = AND2, .n_objs = 5, .n_regs = 0};
+
+/* y = 1 beside an unused PI a. */
+static const int32_t CONST1[] = {AIG_NULL, AIG_NULL, AIG_NULL, AIG_NULL, 1, AIG_NULL};
+static const odin3_abc_aig CONST1_AIG = {.objs = CONST1, .n_objs = 3, .n_regs = 0};
+
+enum { CELL_NAMES = 8, CELL_NAME_CAP = 32 };
+
+/* get_cells' result copied out of the session. */
+typedef struct cells_copy {
+    lut_copy net;
+    int32_t *gate;
+    char names[CELL_NAMES][CELL_NAME_CAP];
+    uint32_t n_names;
+} cells_copy;
+
+static void cells_copy_take(cells_copy *out, const odin3_abc_cells *cells) {
+    lut_copy_take(&out->net, &cells->net);
+    out->gate = malloc(sizeof *out->gate * cells->net.n_objs);
+    TEST_ASSERT_NOT_NULL(out->gate);
+    memcpy(out->gate, cells->gate, sizeof *out->gate * cells->net.n_objs);
+    TEST_ASSERT_TRUE(cells->n_names <= CELL_NAMES);
+    out->n_names = cells->n_names;
+    for (uint32_t i = 0; i < cells->n_names; i++) {
+        TEST_ASSERT_TRUE(strlen(cells->names[i]) < CELL_NAME_CAP);
+        strcpy(out->names[i], cells->names[i]);
+    }
+}
+
+static void cells_copy_free(cells_copy *copy) {
+    lut_copy_free(&copy->net);
+    free(copy->gate);
+    copy->gate = NULL;
+}
+
+/* load_genlib(cmos6), load_aig, the commands, get_cells(space), all in the open session. */
+static odin3_status gates_in_session(const odin3_abc_aig *aig, const script *run, uint32_t space,
+                                     cells_copy *out, odin3_abc_fail *fail) {
+    odin3_status st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, fail);
+    st = st == ODIN3_OK ? odin3_abc_session_load_aig(self(), aig, fail) : st;
+    for (size_t i = 0; st == ODIN3_OK && i < run->count; i++) {
+        st = odin3_abc_session_exec(self(), run->commands[i], fail);
+    }
+    odin3_abc_cells cells;
+    st = st == ODIN3_OK ? odin3_abc_session_get_cells(self(), space, &cells, fail) : st;
+    if (st == ODIN3_OK) {
+        cells_copy_take(out, &cells);
+    }
+    return st;
+}
+
+static void run_gates(const odin3_abc_aig *aig, const script *run, uint32_t space,
+                      cells_copy *out) {
+    static lines got;
+    odin3_abc_fail fail;
+    got.count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st = gates_in_session(aig, run, space, out, &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+}
+
+static const char *const PUT_MAP[] = {"&put", "strash", "map"};
+static const script GATES_MAP = {.commands = PUT_MAP, .count = 3, .get = NULL};
+static const char *const ST_NF[] = {"&st", "&nf"};
+static const script GATES_NF = {.commands = ST_NF, .count = 2, .get = NULL};
+
+static bool is_cmos6_gate(const char *name) {
+    static const char *const known[] = {"BUF", "INV", "NAND2", "NOR2"};
+    for (size_t k = 0; k < sizeof known / sizeof known[0]; k++) {
+        if (strcmp(name, known[k]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Every name is one of cmos6's four gates, each once; every gate object names one of them. */
+static uint32_t name_count(const cells_copy *cells, const char *name) {
+    uint32_t count = 0;
+    for (uint32_t j = 0; j < cells->n_names; j++) {
+        count += strcmp(cells->names[j], name) == 0 ? 1U : 0U;
+    }
+    return count;
+}
+
+static void expect_cmos6_names(const cells_copy *cells) {
+    for (uint32_t i = 0; i < cells->n_names; i++) {
+        TEST_ASSERT_TRUE_MESSAGE(is_cmos6_gate(cells->names[i]), cells->names[i]);
+        TEST_ASSERT_EQUAL_UINT32(1, name_count(cells, cells->names[i]));
+    }
+    for (uint32_t obj = 0; obj < cells->net.luts.n_objs; obj++) {
+        TEST_ASSERT_TRUE(cells->gate[obj] >= -1 && cells->gate[obj] < (int32_t)cells->n_names);
+    }
+}
+
+/* Every gate object's truth (bits 0 .. 2^k - 1 of word 0) is its cmos6 gate's function over
+ * its fanins in pin order: NAND2 0x7, NOR2 0x1, INV 0x1 (one input), BUF 0x2. */
+static void expect_cmos6_truths(const cells_copy *cells) {
+    static const struct {
+        const char *name;
+        uint32_t mask, truth;
+    } funcs[] = {{"NAND2", 0xF, 0x7}, {"NOR2", 0xF, 0x1}, {"INV", 0x3, 0x1}, {"BUF", 0x3, 0x2}};
+    size_t words = truth_words(cells->net.luts.lut_size);
+    uint32_t gates = 0;
+    for (uint32_t obj = 0; obj < cells->net.luts.n_objs; obj++) {
+        if (cells->gate[obj] < 0) {
+            continue;
+        }
+        const char *name = cells->names[cells->gate[obj]];
+        for (size_t k = 0; k < sizeof funcs / sizeof funcs[0]; k++) {
+            if (strcmp(name, funcs[k].name) == 0) {
+                TEST_ASSERT_EQUAL_HEX32_MESSAGE(
+                    funcs[k].truth, cells->net.truths[words * obj] & funcs[k].mask, name);
+            }
+        }
+        gates++;
+    }
+    TEST_ASSERT_TRUE(gates > 0);
+}
+
+/* The driver of the last PO. */
+static int32_t last_po_driver(const cells_copy *cells) {
+    uint32_t last = cells->net.luts.n_objs - 1;
+    TEST_ASSERT_TRUE(is_po(&cells->net.luts, last));
+    return fanin_of(&cells->net.luts, last, 0);
+}
+
+static void test_load_genlib_and_map(void) {
+    cells_copy out = {0};
+    run_gates(&AND2_AIG, &GATES_MAP, ODIN3_ABC_CELLS_NTK, &out);
+    TEST_ASSERT_EQUAL_UINT32(0, out.net.luts.n_regs);
+    expect_topological(&out.net.luts);
+    expect_cmos6_names(&out);
+    TEST_ASSERT_TRUE(out.gate[last_po_driver(&out)] >= 0);
+    expect_cmos6_truths(&out);
+    TEST_ASSERT_NOT_NULL(out.net.ci_from);
+    TEST_ASSERT_EQUAL_INT32(0, out.net.ci_from[0]);
+    TEST_ASSERT_EQUAL_INT32(1, out.net.ci_from[1]);
+    cells_copy_free(&out);
+}
+
+static void test_get_cells_gia(void) {
+    cells_copy out = {0};
+    run_gates(&AND2_AIG, &GATES_NF, ODIN3_ABC_CELLS_GIA, &out);
+    TEST_ASSERT_EQUAL_UINT32(0, out.net.luts.n_regs);
+    expect_topological(&out.net.luts);
+    expect_cmos6_names(&out);
+    expect_cmos6_truths(&out);
+    TEST_ASSERT_TRUE(out.gate[last_po_driver(&out)] >= 0);
+    cells_copy_free(&out);
+}
+
+static void test_get_cells_registers(void) {
+    cells_copy out = {0};
+    run_gates(&TOGGLE_AIG, &GATES_MAP, ODIN3_ABC_CELLS_NTK, &out);
+    TEST_ASSERT_EQUAL_UINT32(1, out.net.luts.n_regs);
+    TEST_ASSERT_EQUAL_UINT32(TOGGLE_PIS, out.net.pis);
+    expect_topological(&out.net.luts);
+    expect_cmos6_names(&out);
+    expect_cmos6_truths(&out);
+    TEST_ASSERT_NOT_NULL(out.net.ci_from);
+    TEST_ASSERT_EQUAL_INT32(2, out.net.ci_from[2]); /* the register output, CI 2 when loaded */
+    cells_copy_free(&out);
+}
+
+static void test_get_cells_constant(void) {
+    cells_copy out = {0};
+    run_gates(&CONST1_AIG, &GATES_MAP, ODIN3_ABC_CELLS_NTK, &out);
+    TEST_ASSERT_EQUAL_INT32(1, last_po_driver(&out));
+    TEST_ASSERT_EQUAL_INT32(-1, out.gate[1]);
+    cells_copy_free(&out);
+}
+
+/* Texts the adapter refuses before ABC reads them (ABC's genlib reader would crash on them:
+ * atof or strcmp of a missing token), and texts ABC itself cannot read. */
+static const char *const BAD_GENLIBS[] = {
+    "GATE",                                        /* no name, area or formula */
+    "GATE X 1",                                    /* no formula */
+    "GATE X 1 Y",                                  /* no '=' */
+    "GATE X 1 Y=A",                                /* no ';' */
+    "GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1",    /* a PIN short of a field */
+    "GATE X 1 Y=A;\nPIN A SIDEWAYS 1 999 1 0 1 0", /* a phase Mio does not know */
+    "LATCH L 1 Q=D;",                              /* a latch statement */
+    "# a comment\nGATE X 1 Y=A;",                  /* comments are not accepted */
+    "PIN A UNKNOWN 1 999 1 0 1 0",                 /* ABC: no gate */
+};
+
+static void test_load_genlib_rejects(void) {
+    static lines got;
+    enum { BAD_COUNT = sizeof BAD_GENLIBS / sizeof BAD_GENLIBS[0] };
+    odin3_abc_fail fail[BAD_COUNT];
+    odin3_status st[BAD_COUNT];
+    odin3_abc_fail null_fail;
+    odin3_abc_fail open_fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &open_fail));
+    for (size_t i = 0; i < BAD_COUNT; i++) {
+        st[i] = odin3_abc_session_load_genlib(self(), BAD_GENLIBS[i], &fail[i]);
+    }
+    odin3_status null_st = odin3_abc_session_load_genlib(self(), NULL, &null_fail);
+    odin3_abc_session_close(self());
+    for (size_t i = 0; i < BAD_COUNT; i++) {
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, st[i], BAD_GENLIBS[i]);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(ODIN3_ABC_FAIL_RESULT, fail[i].kind, BAD_GENLIBS[i]);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE("ABC cannot read the gate library", fail[i].text,
+                                         BAD_GENLIBS[i]);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, null_st);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, null_fail.kind);
+    TEST_ASSERT_EQUAL_STRING("no gate library (text is NULL)", null_fail.text);
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+}
+
+typedef struct unmapped_result {
+    odin3_status st;
+    odin3_abc_fail fail;
+} unmapped_result;
+
+static void test_get_cells_unmapped(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    odin3_abc_cells cells;
+    unmapped_result ntk;
+    unmapped_result gia;
+    unmapped_result nowhere;
+    unmapped_result space;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, &fail);
+    st = st == ODIN3_OK ? odin3_abc_session_load_aig(self(), &AND2_AIG, &fail) : st;
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), "&put", &fail) : st;
+    st = st == ODIN3_OK ? odin3_abc_session_exec(self(), "strash", &fail) : st;
+    ntk.st = odin3_abc_session_get_cells(self(), ODIN3_ABC_CELLS_NTK, &cells, &ntk.fail);
+    gia.st = odin3_abc_session_get_cells(self(), ODIN3_ABC_CELLS_GIA, &cells, &gia.fail);
+    nowhere.st = odin3_abc_session_get_cells(self(), ODIN3_ABC_CELLS_NTK, NULL, &nowhere.fail);
+    space.st = odin3_abc_session_get_cells(self(), 2, &cells, &space.fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, ntk.st);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, ntk.fail.kind);
+    TEST_ASSERT_EQUAL_STRING("no gate-mapped network in the network space", ntk.fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, gia.st);
+    TEST_ASSERT_EQUAL_STRING("no cell mapping in the & space", gia.fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, nowhere.st);
+    TEST_ASSERT_EQUAL_STRING("nowhere to put the cells (cells is NULL)", nowhere.fail.text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, space.st);
+    TEST_ASSERT_EQUAL_STRING("no network space 2", space.fail.text);
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+}
+
+/* The gate flow under allocation failures: the genlib copy, the AIG copy and get_cells' arrays
+ * (network space, then the & space's conversion) each give ODIN3_ERR_NO_MEMORY, the engine stays
+ * enabled, a converted network is freed at close (ASan/LSan), and the whole flow then runs. */
+static odin3_status oom_cells_flow(odin3_abc_fail *fail) {
+    odin3_status st = odin3_abc_session_open(self(), NULL, NULL, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    cells_copy ntk = {0};
+    st = gates_in_session(&AND2_AIG, &GATES_MAP, ODIN3_ABC_CELLS_NTK, &ntk, fail);
+    for (size_t i = 0; st == ODIN3_OK && i < GATES_NF.count; i++) {
+        st = odin3_abc_session_exec(self(), GATES_NF.commands[i], fail);
+    }
+    odin3_abc_cells cells;
+    st = st == ODIN3_OK ? odin3_abc_session_get_cells(self(), ODIN3_ABC_CELLS_GIA, &cells, fail)
+                        : st;
+    odin3_abc_session_close(self());
+    cells_copy_free(&ntk);
+    return st;
+}
+
+static void test_adapter_oom_cells(void) {
+    odin3_abc_fail fail;
+    uint32_t injected = 0;
+    for (uint32_t after = 0;; after++) {
+        odin3_abc_test_fail_alloc_after(after);
+        odin3_status st = oom_cells_flow(&fail);
+        if (st == ODIN3_OK) {
+            break;
+        }
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_NO_MEMORY, st, fail.text);
+        TEST_ASSERT_FALSE(odin3_guard_disabled());
+        injected++;
+    }
+    odin3_abc_test_fail_alloc_after(UINT32_MAX);
+    /* tmpfile, genlib copy, AIG copy; get_cells(NTK): object map, fanins, truths, gate, names,
+     * ci_from; get_cells(GIA): the same six */
+    TEST_ASSERT_EQUAL_UINT32(15, injected);
+}
+
 /* --- determinism and threads on a 40-AND network (§9, Review Focus 5) ------------------------ */
 
 enum { NET_PIS = 8, NET_REGS = 4, NET_ANDS = 40, NET_OUTS = 4, NET_SEED = 0x3D2 };
@@ -1488,6 +1796,13 @@ int main(int argc, char **argv) {
     RUN_TEST(test_name_map_aligned);
     RUN_TEST(test_name_map_rejects);
     RUN_TEST(test_adapter_oom);
+    RUN_TEST(test_load_genlib_and_map);
+    RUN_TEST(test_get_cells_gia);
+    RUN_TEST(test_get_cells_registers);
+    RUN_TEST(test_get_cells_constant);
+    RUN_TEST(test_load_genlib_rejects);
+    RUN_TEST(test_get_cells_unmapped);
+    RUN_TEST(test_adapter_oom_cells);
     build_net40();
     RUN_TEST(test_no_threads_default_script);
     RUN_TEST(test_determinism_one_process);

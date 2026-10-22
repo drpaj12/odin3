@@ -50,6 +50,26 @@ The exchange calls (AB-16, spec §4.4 steps 3, 5 and 6):
   `Abc_FrameReadMiniLutNameMapping`.
 - What `get_luts` and `name_map` return stays valid until the next such call or `close`.
 
+The gate-mapping calls (ABI 5, `docs/specs/2026-10-21-gatemap-design.md` 4.2 and 4.3):
+
+- **`load_genlib`** checks the text first: only `GATE name area out=formula;` statements with
+  their `PIN name phase` and six numbers, then nothing, `.end` or a word ABC stops at; a short
+  statement, a `LATCH`, `#` or `\` is `RESULT` `ABC cannot read the gate library`, because ABC's
+  reader dereferences missing words and runs past a comment on the last line. A copy then goes to
+  `Mio_LibraryReadBuffer`, not `Mio_LibraryRead`, which dereferences the library it failed to read
+  (`mioRead.c:96`); a `NULL` library is the same `RESULT`. The library is named `odin3.genlib` (no
+  file is read) and made the frame's with `Mio_UpdateGenlib`. A formula ABC cannot parse is not
+  checked: ABC may then escape (Odin III's own genlib comes from an ISOP and always parses).
+- **`get_cells`** reads the network space's mapped network (`Abc_NtkIsMappedLogic`, after `map`)
+  or converts the `&` space's cell mapping (`Gia_ManHasCellMapping`, after `&nf`) with
+  `Abc_NtkFromCellMappedGia`, deleted again before the call returns. Objects follow MiniLUT's
+  layout: the constants 0 and 1 (a constant node is one of them, by its gate's truth), the PIs and
+  register outputs, the gates in `Abc_NtkDfsIter` order (fanins in pin order, the 64-bit
+  `Mio_GateReadTruth` as two words when a gate has 6 inputs), the POs and register inputs; `gate`
+  and `names` give each gate object's library gate (names point into the library). `RESULT` for
+  no such network, a box that is not a latch, a node without a gate or a gate wider than 6.
+- What `get_cells` returns stays valid until the next `get_cells`, `load_genlib` or `close`.
+
 ## Start-up and licence
 
 `odin3` links the adapter and calls `odin3_abc_adapter_init()` before any `--plugin`. A failure is
@@ -140,6 +160,9 @@ bump that brings one in fails.
     `&get -m -n` and `get_luts`; every malformed AIG and aligned network refused with its text;
     `get_luts` without a mapping; the name map; and each of the adapter's own allocations
     failed in turn (`NO_MEMORY`, the engine still usable);
+  - gate mapping on the cmos6 genlib: `map` and `&nf` results through `get_cells` (names, truths,
+    a register's `ci_from`, a constant output), every refused genlib text, `get_cells` without a
+    mapped network, and each allocation of the gate flow failed in turn;
   - on a 40-AND network: no thread started by the default script (the test link counts
     `pthread_create`), and two runs in one process byte-identical for the default script and for
     `strash; fraig; if -K 6`;

@@ -1,9 +1,10 @@
 /*
- * session.c — the linked engine's one static session: open, load_aig, exec, get_luts, name_map
- * and close (session.h; 3D spec §4.4, AB-8, AB-16). Every ABC call goes through odin3_guard_run;
- * every engine entry point ends with odin3_guard_finish, so an adapter assertion anywhere below it
- * reaches the caller's fail. The exchange arrays are checked on the adapter's own copies before
- * ABC sees them: ABC asserts (or, without assertions, crashes) on a malformed MiniAIG or MiniLUT.
+ * session.c — the linked engine's one static session: open, load_aig, exec, get_luts, name_map,
+ * load_genlib, get_cells and close (session.h; 3D spec §4.4, AB-8, AB-16). Every ABC call goes
+ * through odin3_guard_run; every engine entry point ends with odin3_guard_finish, so an adapter
+ * assertion anywhere below it reaches the caller's fail. The exchange arrays are checked on the
+ * adapter's own copies before ABC sees them: ABC asserts (or, without assertions, crashes) on a
+ * malformed MiniAIG or MiniLUT.
  */
 #include "session.h"
 
@@ -482,6 +483,164 @@ odin3_status odin3_abc_session_name_map(void *self, const odin3_abc_luts *aligne
                                         const int32_t **lits, odin3_abc_fail *fail) {
     odin3_abc_fail_reset(fail, ODIN3_ABC_FAIL_NONE);
     return odin3_guard_finish(adp_name_map(self, aligned, lits, fail), fail);
+}
+
+/* --- gate mapping: load_genlib and get_cells (ABI 5) ------------------------------------------ */
+
+/* A token of Abc_UtilStrtok (abc_global.h), found without writing: at and len, and whether a
+ * separator ends it (closed) rather than the end of the text. */
+typedef struct adp_token {
+    const char *at;
+    size_t len;
+    bool closed;
+} adp_token;
+
+#define ADP_GENLIB_BLANKS " \t\r\n" /* mioRead.c's separators between words */
+
+enum {
+    ADP_PIN_FIELDS = 8,      /* a PIN's name, phase and six numbers */
+    ADP_PIN_PHASE_FIELD = 1, /* the phase */
+    ADP_GATE_WORDS = 2       /* a GATE's name and area, before its formula */
+};
+
+/* The next token of *at as Abc_UtilStrtok(NULL, seps) finds it; false at the end. */
+static bool adp_next_token(const char **at, const char *seps, adp_token *tok) {
+    const char *from = *at + strspn(*at, seps);
+    if (*from == '\0') {
+        *at = from;
+        return false;
+    }
+    tok->at = from;
+    tok->len = strcspn(from, seps);
+    tok->closed = from[tok->len] != '\0';
+    *at = from + tok->len + (tok->closed ? 1U : 0U);
+    return true;
+}
+
+static bool adp_token_is(const adp_token *tok, const char *word) {
+    return tok->len == strlen(word) && memcmp(tok->at, word, tok->len) == 0;
+}
+
+/* One PIN after its keyword: a name, a phase mioRead.c knows, six more words. */
+static bool adp_genlib_pin(const char **at) {
+    adp_token tok = {.at = NULL, .len = 0, .closed = false};
+    for (uint32_t field = 0; field < ADP_PIN_FIELDS; field++) {
+        if (!adp_next_token(at, ADP_GENLIB_BLANKS, &tok)) {
+            return false;
+        }
+        if (field == ADP_PIN_PHASE_FIELD && !adp_token_is(&tok, "UNKNOWN") &&
+            !adp_token_is(&tok, "INV") && !adp_token_is(&tok, "NONINV")) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* One GATE after its keyword (name, area, "out=", "formula;") and its PINs; *more and *tok get
+ * the token after them. */
+static bool adp_genlib_gate(const char **at, adp_token *tok, bool *more) {
+    for (uint32_t word = 0; word < ADP_GATE_WORDS; word++) { /* the name and the area */
+        if (!adp_next_token(at, ADP_GENLIB_BLANKS, tok)) {
+            return false;
+        }
+    }
+    if (!adp_next_token(at, "=", tok) || !tok->closed || !adp_next_token(at, ";", tok) ||
+        !tok->closed) {
+        return false;
+    }
+    while ((*more = adp_next_token(at, ADP_GENLIB_BLANKS, tok)) && adp_token_is(tok, "PIN")) {
+        if (!adp_genlib_pin(at)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/*
+ * The genlib subset the adapter hands to ABC: GATE statements, each "GATE name area out=formula;"
+ * and its "PIN name phase n n n n n n" lines, then nothing, ".end" or a word ABC stops at. ABC's
+ * reader dereferences missing words (atof, strcmp, chomp of NULL) and runs past the end of a
+ * comment on the last line, so a text outside the subset (a short statement, a LATCH, '#' or
+ * '\\') is refused here, before ABC sees it, with the same RESULT as a text ABC cannot read.
+ */
+static odin3_status adp_check_genlib(const char *text, odin3_abc_fail *fail) {
+    const char *at = text;
+    adp_token tok = {.at = NULL, .len = 0, .closed = false};
+    bool ok = strpbrk(text, "#\\") == NULL;
+    bool more = ok && adp_next_token(&at, ADP_GENLIB_BLANKS, &tok);
+    while (ok && more && adp_token_is(&tok, "GATE")) {
+        ok = adp_genlib_gate(&at, &tok, &more);
+    }
+    if (!ok || (more && adp_token_is(&tok, "LATCH"))) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "ABC cannot read the gate library");
+    }
+    return ODIN3_OK;
+}
+
+typedef struct adp_genlib_arg {
+    const char *text;
+    odin3_abc_fail *fail;
+} adp_genlib_arg;
+
+static odin3_status adp_genlib_fn(void *arg) {
+    const adp_genlib_arg *load = arg;
+    return odin3_bridge_load_genlib(load->text, load->fail);
+}
+
+static odin3_status adp_load_genlib(adp_session *session, const char *text, odin3_abc_fail *fail) {
+    odin3_status st = adp_ready(session, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (text == NULL) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "no gate library (text is NULL)");
+    }
+    st = adp_check_genlib(text, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    adp_genlib_arg load = {.text = text, .fail = fail};
+    return odin3_guard_run(adp_genlib_fn, &load, fail);
+}
+
+odin3_status odin3_abc_session_load_genlib(void *self, const char *text, odin3_abc_fail *fail) {
+    odin3_abc_fail_reset(fail, ODIN3_ABC_FAIL_NONE);
+    return odin3_guard_finish(adp_load_genlib(self, text, fail), fail);
+}
+
+typedef struct adp_cells_arg {
+    uint32_t space;
+    odin3_abc_cells *cells;
+    odin3_abc_fail *fail;
+} adp_cells_arg;
+
+static odin3_status adp_cells_fn(void *arg) {
+    const adp_cells_arg *get = arg;
+    return odin3_bridge_get_cells(get->space, get->cells, get->fail);
+}
+
+static odin3_status adp_get_cells(adp_session *session, uint32_t space, odin3_abc_cells *cells,
+                                  odin3_abc_fail *fail) {
+    odin3_status st = adp_ready(session, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (cells == NULL) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                  "nowhere to put the cells (cells is NULL)");
+    }
+    if (space != ODIN3_ABC_CELLS_NTK && space != ODIN3_ABC_CELLS_GIA) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "no network space %u",
+                                  (unsigned)space);
+    }
+    adp_cells_arg get = {.space = space, .cells = cells, .fail = fail};
+    return odin3_guard_run(adp_cells_fn, &get, fail);
+}
+
+odin3_status odin3_abc_session_get_cells(void *self, uint32_t space, odin3_abc_cells *cells,
+                                         odin3_abc_fail *fail) {
+    odin3_abc_fail_reset(fail, ODIN3_ABC_FAIL_NONE);
+    return odin3_guard_finish(adp_get_cells(self, space, cells, fail), fail);
 }
 
 static odin3_status adp_close(adp_session *session) {
