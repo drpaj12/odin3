@@ -108,10 +108,17 @@ class VcdTest(unittest.TestCase):
         for cyc in range(CYCLES):
             when = PERIOD * cyc + PERIOD
             for name in ("light_ns", "light_ew"):
-                # Icarus drops the leading zeros of a vector value; ours has all its digits
-                theirs = value_at(ref_changes, ref[name], when).rjust(2, "0")
+                # Icarus drops the leading zeros of a vector value; ours has all its digits.
+                # An empty value (never dumped) is padded to nothing and fails the comparison.
+                theirs = value_at(ref_changes, ref[name], when)
+                theirs = theirs.rjust(2, "0") if theirs else theirs
                 self.assertEqual(value_at(ours_changes, ours[name], when), theirs,
                                  f"{name}, cycle {cyc}")
+            if "clk" in ref:
+                for off in (2, 5, PERIOD):
+                    self.assertEqual(value_at(ours_changes, ours["clk"], PERIOD * cyc + off),
+                                     value_at(ref_changes, ref["clk"], PERIOD * cyc + off),
+                                     f"clk, cycle {cyc} +{off}")
 
 
 if __name__ == "__main__":

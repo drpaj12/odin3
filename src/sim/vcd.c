@@ -12,15 +12,21 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { CODE_BASE = 94 };
+enum { CODE_BASE = 94, CODE_DIGITS_32 = 5 };
 #define NONE UINT32_MAX
+
+/* Five base-94 digits cover every uint32 index, and the code buffer holds at least that many. */
+_Static_assert((uint64_t)CODE_BASE *CODE_BASE *CODE_BASE *CODE_BASE *CODE_BASE > UINT32_MAX,
+               "five base-94 digits must cover a uint32 index");
+_Static_assert(ODIN3_SIM_VCD_CODE_MAX - 1 >= CODE_DIGITS_32,
+               "the code buffer must hold the digits of a uint32 index");
 
 void odin3_sim_vcd_code(uint32_t index, char code[ODIN3_SIM_VCD_CODE_MAX]) {
     size_t len = 0;
     do {
         code[len++] = (char)('!' + (index % CODE_BASE));
         index /= CODE_BASE;
-    } while (index != 0 && len < ODIN3_SIM_VCD_CODE_MAX - 1);
+    } while (index != 0);
     code[len] = '\0';
 }
 
@@ -156,13 +162,17 @@ static void put_value(const odin3_sim_vcd *vcd, uint32_t id, const uint8_t *cur,
 }
 
 /* Reads the current values of every listed signal into the scratch half of last. */
-static void read_all(const odin3_sim_vcd *vcd) {
+static odin3_status read_all(const odin3_sim_vcd *vcd) {
     uint8_t *cur = vcd->last + vcd->n_last;
     for (uint32_t id = 1; id <= odin3_sim_signals_listed(vcd->sig); id++) {
         uint32_t width = odin3_sim_signals_at(vcd->sig, id)->width;
-        (void)odin3_sim_signals_read(vcd->sig, id, cur, width);
+        odin3_status st = odin3_sim_signals_read(vcd->sig, id, cur, width);
+        if (st != ODIN3_OK) {
+            return st;
+        }
         cur += width;
     }
+    return ODIN3_OK;
 }
 
 static uint32_t total_bits(const odin3_sim_signals *sig) {
@@ -192,7 +202,9 @@ odin3_status odin3_sim_vcd_begin(odin3_sim_vcd *vcd, const odin3_sim_signals *si
     vcd->n_last = bits;
     odin3_status st = write_header(vcd);
     if (st == ODIN3_OK) {
-        read_all(vcd);
+        st = read_all(vcd);
+    }
+    if (st == ODIN3_OK) {
         (void)fputs("#0\n$dumpvars\n", out);
         const uint8_t *cur = vcd->last + bits;
         for (uint32_t id = 1; id <= odin3_sim_signals_listed(sig); id++) {
@@ -211,7 +223,10 @@ odin3_status odin3_sim_vcd_begin(odin3_sim_vcd *vcd, const odin3_sim_signals *si
 }
 
 odin3_status odin3_sim_vcd_sample(odin3_sim_vcd *vcd, uint64_t time) {
-    read_all(vcd);
+    odin3_status read = read_all(vcd);
+    if (read != ODIN3_OK) {
+        return read;
+    }
     bool stamped = false;
     uint8_t *last = vcd->last;
     const uint8_t *cur = vcd->last + vcd->n_last;
