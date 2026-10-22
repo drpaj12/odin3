@@ -1,9 +1,9 @@
 % Yggdrasil III drawn as a tree. Roots (dark brown) at the bottom: what Odin III reads and writes, and the
 % tools it links to. The trunk (brown) is Odin III, its steps running DOWN from parse to the roots. A small
 % forest of mini trees on the right holds the oracles, to compare against. The canopy (green oval) is the
-% tree-top: Wyrd III, Bifrost III (the arrow to Midgard III) and Midgard III (verilogTown). Loki III, Leman
-% Russ III and The Norns III are side branches off the trunk, tools and experiments. No status; the GitHub
-% links are in the caption.
+% tree-top: Wyrd III, Bifrost III (the arrow to Midgard III) and Midgard III (verilogTown). Loki III,
+% Leman Russ III, The Norns III and Verdandi III are side branches off the trunk, tools and experiments.
+% No status; the GitHub links are in the caption.
 \begin{tikzpicture}[odin, node distance=3mm,
   leaf/.style={ellipse, draw=o3grn8, fill=o3grn1, align=center, line width=0.6pt, inner xsep=1pt,
                inner ysep=1pt, minimum width=15mm, minimum height=8.5mm, font=\scriptsize},
@@ -11,7 +11,6 @@
               inner ysep=1pt, minimum height=7mm, font=\scriptsize},
   limb/.style={line width=8pt, draw=o3brn5, line cap=round},
   limbin/.style={line width=5.8pt, draw=o3brn4, line cap=round},
-  twig/.style={line width=2.4pt, draw=o3brn5, line cap=round},
   rootl/.style={line width=3.4pt, draw=o3brn9, line cap=round},
   rootin/.style={line width=1.6pt, draw=o3brn7, line cap=round},
   stp/.style={font=\scriptsize\bfseries, text=white, inner sep=0pt, align=center},
@@ -46,7 +45,7 @@
   \draw[limb]   (0.2,7.2) .. controls (0.2,7.9) and (0.3,8.3) .. (0.4,8.8);
   \draw[limbin] (0.2,7.2) .. controls (0.2,7.9) and (0.3,8.3) .. (0.4,8.8);
   % ---- side branches off the trunk: tools and experiments ---------------------------------------
-  \foreach \y in {6.0, 4.1, 2.2}{
+  \foreach \y in {6.4, 4.7, 3.0, 1.3}{
     \draw[limb]   (-1.8,\y) .. controls (-2.6,\y) and (-3.2,\y+0.1) .. (-4.1,\y);
     \draw[limbin] (-1.8,\y) .. controls (-2.6,\y) and (-3.2,\y+0.1) .. (-4.1,\y);
   }
@@ -70,7 +69,8 @@
   \draw[->, line width=1.6pt, draw=o3grn8] (wyrd.east) -- (mid.west)
     node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{Bifrost~III}\\\odinsub{simulation bridge}};
   % ---- tools and experiments on side branches ---------------------------------------------------------
-  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.0) {\textbf{Loki~III}\\\odinsub{Tool \& Experiment: reverse engineering}};
-  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.1) {\textbf{Leman~Russ~III}\\\odinsub{Tool \& Experiment: HT detection tools}};
-  \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,2.2) {\textbf{The Norns~III}\\\odinsub{Tool \& Experiment: Placement with Provenance}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.4) {\textbf{Loki~III}\\\odinsub{Tool \& Experiment: reverse engineering}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.7) {\textbf{Leman~Russ~III}\\\odinsub{Tool \& Experiment: HT detection tools}};
+  \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,3.0) {\textbf{The Norns~III}\\\odinsub{Tool \& Experiment: Placement with Provenance}};
+  \node[leaf, text width=40mm, minimum height=11mm] (ver) at (-6.3,1.3) {\textbf{Verdandi~III}\\\odinsub{Tool \& Experiment: the Micro through the Macro}};
 \end{tikzpicture}
