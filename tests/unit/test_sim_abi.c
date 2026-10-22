@@ -105,8 +105,9 @@ static uint64_t cycle_of(const odin3_simulation *sim) {
 
 static odin3_simulation_signal info_of(const odin3_simulation *sim, uint32_t id) {
     odin3_simulation_signal info;
-    memset(&info, 0, sizeof info);
+    memset(&info, 0xFF, sizeof info); /* the call must overwrite every field, reserved included */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_signal(sim, id, &info));
+    TEST_ASSERT_EQUAL_UINT32(0, info.reserved);
     return info;
 }
 
@@ -365,6 +366,8 @@ static void test_scopes_and_signal_info(void) {
     TEST_ASSERT_EQUAL_UINT32(0, scope.parent);
     TEST_ASSERT_EQUAL_UINT32(stage, scope.module);
     TEST_ASSERT_NOT_EQUAL_UINT32(0, scope.inst.id);
+    TEST_ASSERT_EQUAL_UINT64(56, sizeof(odin3_simulation_signal));
+    TEST_ASSERT_EQUAL_UINT64(32, sizeof(odin3_simulation_scope));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_simulation_get_scope(g_a, 3, &scope));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "unknown scope"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_signal_count(g_a, &count));
@@ -424,6 +427,15 @@ static void test_passes_refused_while_open(void) {
     TEST_ASSERT_NOT_NULL(strstr(log_text, "pass stats: the design has 1 open simulation(s)"));
     odin3_script_src src = {"-p", ODIN3_SCRIPT_BY_COMMAND};
     TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, odin3_design_run_script(design, "stats", src));
+    /* a refused call changes nothing: not even the keep level a wants_ast pass would raise */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(design, ODIN3_KEEP_AST_NONE));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_run_pass(design, "write_verilog_ast", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_run_script(design, "write_verilog_ast", src));
+    odin3_keep_ast keep = ODIN3_KEEP_AST_ALL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_keep_ast(design, &keep));
+    TEST_ASSERT_EQUAL_INT(ODIN3_KEEP_AST_NONE, keep);
     g_b = open_top();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(design, "stats", ""));
     TEST_ASSERT_NOT_NULL(strstr(log_text, "has 2 open simulation(s)"));

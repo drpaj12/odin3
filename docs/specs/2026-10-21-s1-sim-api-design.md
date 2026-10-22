@@ -258,13 +258,23 @@ attribute writes and `odin3_design_set_top_module` stay allowed (they move no mo
 copy (`odin3_design_copy`) starts with no open simulation. Several simulations of one design may
 be open at once (different tops, or one top several times, such as one per Verilog Town
 intersection); each has its own state. A design and all its simulations are used by one thread at
-a time (IR-17).
+a time (IR-17). A refused call changes nothing (the keep level a `wants_ast` pass would raise
+included). `odin3_design_destroy` needs every simulation closed first (a debug build asserts).
+
+`odin3_ast_elaborate` and `odin3_design_new_ast` stay allowed while a simulation is open.
+`odin3_design_new_ast` only adds an AST store, kept apart from module storage. `odin3_ast_elaborate`
+(stage 2) only appends new modules (a taken name gets a `$2` suffix) and may set the design's top;
+it never edits an existing module. An open simulation addresses modules by ID and reads strings
+that never move (string table), so neither call moves anything it points to. A new top does not
+change an open simulation: `odin3_simulation_open` fixed its module.
 
 **SA-12 ABI version.** The change adds types and functions and changes no existing declaration,
-so `ODIN3_ABI_VERSION` stays 4, following the `(cont., 2D)`, `(cont., 3D)` and `(cont., 7.4b)`
-precedents; the header's history comment gains "ABI v4 (cont., S1): simulations
-(odin3_simulation_*): open a top, find signals, set inputs, step, read values, reset, close; passes
-are refused while a simulation is open." The refusal of SA-11 only affects programs that open a
+so `ODIN3_ABI_VERSION` stays 5 (the gate-mapping ABI v5 already in this tree), following the
+`(cont., 2D)`, `(cont., 3D)` and `(cont., 7.4b)` precedents; the header's history comment gains
+"ABI v5 (cont., v1.0.3 S1): simulations (odin3_simulation_*): open a top, find signals, set inputs,
+step, read values, reset, close; passes are refused while a simulation is open." The struct
+`odin3_simulation_signal` ends in a zero-filled `reserved` word (size 56, no tail padding) and
+`odin3_simulation_scope` is 32 bytes with no padding, so neither has a reserved slot. The refusal of SA-11 only affects programs that open a
 simulation. The `abi_exports` test keeps the exported symbols equal to the cdef functions.
 
 ## 4. Python (decision 1)

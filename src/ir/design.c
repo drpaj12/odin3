@@ -93,6 +93,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     if (design == NULL) {
         return;
     }
+    assert(design->sim_holds == 0 && "odin3_design_destroy: close every simulation first");
     for (size_t i = 0; i < design->asts.len; i++) {
         odin3_ast_destroy(*(odin3_ast **)odin3_vec_at(&design->asts, i));
     }

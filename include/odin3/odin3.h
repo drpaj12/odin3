@@ -203,7 +203,11 @@ typedef enum odin3_value_kind {
  */
 odin3_design *odin3_design_create(void);
 
-/* Frees the design and everything it owns (every string it handed out). NULL is a no-op. */
+/*
+ * Frees the design and everything it owns (every string it handed out). NULL is a no-op. Close
+ * every simulation of the design first (odin3_simulation_close): a simulation still open when the
+ * design is destroyed is a caller error (a debug build asserts).
+ */
 void odin3_design_destroy(odin3_design *design);
 
 /*
@@ -237,6 +241,9 @@ odin3_status odin3_design_copy(const odin3_design *src, odin3_design **out);
  * Mutates the IR (see Strings above). Nothing is returned for the caller to free. After a pass
  * fails, the design stays valid but may no longer compute what its input did (a pass can stop in
  * the middle of a rewrite), so the caller must discard it (odin3_design_destroy).
+ * While any simulation of the design is open (odin3_simulation_open) every pass is refused with
+ * ODIN3_ERR_INVALID_ARG (logged "pass <name>: the design has <n> open simulation(s); close them
+ * first (odin3_simulation_close)"); a refused call leaves the design untouched.
  */
 odin3_status odin3_design_run_pass(odin3_design *design, const char *name, const char *args);
 
@@ -370,7 +377,10 @@ typedef struct odin3_script_src {
  * (logged) for a NULL design, text or src.origin; ODIN3_ERR_NO_MEMORY. Mutates the IR. After a
  * failed pass the design must be discarded, as for odin3_design_run_pass. A design whose
  * `read_verilog` failed holds valid but incomplete modules and is fit only for destruction (2D:
- * the IR has no module-delete primitive, and the top is not set).
+ * the IR has no module-delete primitive, and the top is not set). While any simulation of the
+ * design is open (odin3_simulation_open) a script with a command is refused before it runs
+ * anything, with ODIN3_ERR_INVALID_ARG (logged as for odin3_design_run_pass); a refused call
+ * leaves the design untouched.
  */
 odin3_status odin3_design_run_script(odin3_design *design, const char *text, odin3_script_src src);
 
@@ -1883,6 +1893,7 @@ typedef struct odin3_simulation_signal {
     uint32_t scope;     /* the scope it belongs to (0 = the top) */
     odin3_obj obj;      /* the wire (ODIN3_OBJ_WIRE) or net (ODIN3_OBJ_NET) in the scope's module */
     uint32_t first_bit; /* vector position in obj of the signal's bit 0 (0 but for a bit select) */
+    uint32_t reserved;  /* reserved, zero: fills the tail padding (size 56) for later use */
 } odin3_simulation_signal;
 
 /* An expanded module instance (odin3_simulation_get_scope). Strings as for signals (SA-10). */
@@ -1892,7 +1903,7 @@ typedef struct odin3_simulation_scope {
     uint32_t parent;  /* parent scope; 0 for scope 0 */
     uint32_t module;  /* the module this scope is an instance of */
     odin3_ref inst;   /* the instance node in the parent scope's module; {0, 0} for scope 0 */
-} odin3_simulation_scope;
+} odin3_simulation_scope; /* 32 bytes, no padding: no reserved slot */
 
 /*
  * SA-1. Builds the simulation of `module` (0: the design's top). *out gets a handle the caller owns

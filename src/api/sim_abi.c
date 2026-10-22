@@ -20,6 +20,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+/* The ABI sizes of the two info structs (ABI v5): a change is an ABI break. */
+enum { SIM_ABI_SIGNAL_BYTES = 56, SIM_ABI_SCOPE_BYTES = 32 };
+_Static_assert(sizeof(odin3_simulation_signal) == SIM_ABI_SIGNAL_BYTES, "signal ABI size");
+_Static_assert(sizeof(odin3_simulation_scope) == SIM_ABI_SCOPE_BYTES, "scope ABI size");
 _Static_assert((uint32_t)ODIN3_SIMULATION_INPUT == (uint32_t)ODIN3_SIM_KIND_INPUT, "kind INPUT");
 _Static_assert((uint32_t)ODIN3_SIMULATION_CLOCK == (uint32_t)ODIN3_SIM_KIND_CLOCK, "kind CLOCK");
 _Static_assert((uint32_t)ODIN3_SIMULATION_OUTPUT == (uint32_t)ODIN3_SIM_KIND_OUTPUT, "kind OUTPUT");
@@ -168,6 +172,7 @@ ODIN3_EXPORT odin3_status odin3_simulation_get_signal(const odin3_simulation *si
     info->scope = item->scope;
     info->obj = (odin3_obj){sim->sim->frames[item->scope].module.v, item->obj_kind, item->obj_id};
     info->first_bit = item->first_bit;
+    info->reserved = 0;
     return ODIN3_OK;
 }
 
