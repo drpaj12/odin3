@@ -21,7 +21,7 @@ typedef struct um_walk {
  * C-1: the walks of the module, in node-ID order of their first cell. `walks` becomes an
  * odin3_vec of um_walk; free it with um_walks_free. Linear, no recursion.
  */
-odin3_status um_chain_walks(um_ctx *uc, odin3_vec *walks);
+odin3_status um_chain_walks(const um_ctx *uc, odin3_vec *walks);
 void um_walks_free(odin3_vec *walks);
 
 /* Phase A: walks, then the conversion of each recoverable walk. */

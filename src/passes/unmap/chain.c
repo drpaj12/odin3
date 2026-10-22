@@ -16,7 +16,7 @@
 typedef struct um_links {
     odin3_vec succ;    /* uint32_t per node ID: the next adder of the chain, 0 none */
     odin3_vec pred;    /* the previous one */
-    odin3_vec visited; /* uint8_t per node ID */
+    odin3_vec visited; /* uint32_t per node ID */
 } um_links;
 
 static bool is_adder(const um_ctx *uc, odin3_node_id node) {
@@ -30,15 +30,15 @@ static void links_free(um_links *links) {
     odin3_vec_free(&links->visited);
 }
 
-static odin3_status vec_zero(odin3_vec *vec, size_t elem, size_t count) {
-    odin3_vec_init(vec, elem);
+static odin3_status vec_zero(odin3_vec *vec, size_t count) {
+    odin3_vec_init(vec, sizeof(uint32_t));
     odin3_status st = odin3_vec_reserve(vec, count);
     for (size_t i = 0; st == ODIN3_OK && i < count; i++) {
         void *slot = odin3_vec_push(vec);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        memset(slot, 0, elem);
+        memset(slot, 0, sizeof(uint32_t));
     }
     return st;
 }
@@ -72,9 +72,9 @@ static uint32_t next_adder(const um_ctx *uc, odin3_node_id node) {
 
 static odin3_status make_links(const um_ctx *uc, um_links *links) {
     size_t end = odin3_module_node_end(uc->module);
-    odin3_status st = vec_zero(&links->succ, sizeof(uint32_t), end);
-    st = st == ODIN3_OK ? vec_zero(&links->pred, sizeof(uint32_t), end) : st;
-    st = st == ODIN3_OK ? vec_zero(&links->visited, sizeof(uint8_t), end) : st;
+    odin3_status st = vec_zero(&links->succ, end);
+    st = st == ODIN3_OK ? vec_zero(&links->pred, end) : st;
+    st = st == ODIN3_OK ? vec_zero(&links->visited, end) : st;
     for (uint32_t nid = 1; st == ODIN3_OK && nid < end; nid++) {
         if (!is_adder(uc, (odin3_node_id){nid})) {
             continue;
@@ -108,8 +108,8 @@ static odin3_status walk_from(um_links *links, uint32_t start, odin3_vec *walks)
     odin3_vec_init(&walk->cells, sizeof(odin3_node_id));
     odin3_status st = ODIN3_OK;
     uint32_t node = start;
-    while (st == ODIN3_OK && node != 0 && *(uint8_t *)odin3_vec_at(&links->visited, node) == 0) {
-        *(uint8_t *)odin3_vec_at(&links->visited, node) = 1;
+    while (st == ODIN3_OK && node != 0 && *u32_at(&links->visited, node) == 0) {
+        *u32_at(&links->visited, node) = 1;
         st = add_cell(walk, node);
         node = *u32_at(&links->succ, node);
     }
@@ -119,7 +119,7 @@ static odin3_status walk_from(um_links *links, uint32_t start, odin3_vec *walks)
     return st;
 }
 
-odin3_status um_chain_walks(um_ctx *uc, odin3_vec *walks) {
+odin3_status um_chain_walks(const um_ctx *uc, odin3_vec *walks) {
     um_links links;
     odin3_vec_init(walks, sizeof(um_walk));
     odin3_status st = make_links(uc, &links);
@@ -131,8 +131,7 @@ odin3_status um_chain_walks(um_ctx *uc, odin3_vec *walks) {
     }
     /* cells never visited lie on a cycle */
     for (uint32_t nid = 1; st == ODIN3_OK && nid < end; nid++) {
-        if (is_adder(uc, (odin3_node_id){nid}) &&
-            *(uint8_t *)odin3_vec_at(&links.visited, nid) == 0) {
+        if (is_adder(uc, (odin3_node_id){nid}) && *u32_at(&links.visited, nid) == 0) {
             st = walk_from(&links, nid, walks);
         }
     }
