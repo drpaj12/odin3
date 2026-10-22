@@ -1,0 +1,8 @@
+# dfflibmap inverter-path golden input: two falling-edge flip-flops on one clock, one rising-edge.
+.model top
+.inputs clk d0 d1 d2
+.outputs q0 q1 q2
+.latch d0 q0 re clk 3
+.latch d1 q1 fe clk 0
+.latch d2 q2 fe clk 2
+.end

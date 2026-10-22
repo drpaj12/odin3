@@ -14,8 +14,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The INIT values (BLIF .latch) that take any library init: don't care and unknown. */
-enum { INIT_DONT_CARE = 2, INIT_UNKNOWN = 3 };
+/* The INIT (BLIF .latch) that, with INIT_UNKNOWN, takes any library init: don't care. */
+enum { INIT_DONT_CARE = 2 };
 
 /* The library init of a cell whose init is x (odin3_libstate.init). */
 enum { LIB_INIT_X = -1 };

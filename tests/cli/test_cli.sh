@@ -43,7 +43,7 @@
 # pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
 # pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning).
 # pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
-# dfflibmap (gatemap Task 9: dfflibmap generic_gates maps one .latch of each kind onto DFFP, DFFN, DLATCHP and DLATCHN; netlist-compare equal to tests/golden/dfflibmap/expected.blif; cmos6 has no latch: a named error).
+# dfflibmap (gatemap Task 9: dfflibmap generic_gates maps one .latch of each kind onto DFFP, DFFN, DLATCHP and DLATCHN; netlist-compare equal to tests/golden/dfflibmap/expected.blif; cmos6 has no latch: a named error; cmos6 on input_neg.blif shares one INV between two falling-edge flip-flops, equal to expected_neg.blif).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
 # relative.
 set -euo pipefail
@@ -1011,6 +1011,14 @@ dfflibmap)
     expect_fail "no cell of library 'cmos6' implements \$_DLATCH_P_ '" \
         -p "read_techlib $lib/cmos6.o3lib; read_blif $fixtures/input.blif; dfflibmap cmos6"
     grep -qF "(high, INIT 2)" "$work/err" || fail "the no-match error lacks the trigger and INIT"
+    # The inverter path: cmos6 has no negedge cell, so both $_DFF_N_ share one INV on the clock.
+    "$odin3" -p "read_techlib $lib/cmos6.o3lib; read_blif $fixtures/input_neg.blif; dfflibmap cmos6; write_blif $work/neg.blif" \
+        >"$work/out" 2>"$work/err" || fail "odin3 dfflibmap cmos6 script failed"
+    grep -qF "dfflibmap: library 'cmos6': 3 cells mapped (DFF x3), 1 clock inverters" "$work/err" ||
+        fail "no dfflibmap INFO line for the inverter path"
+    cat "$work/neg.blif" "$fixtures/models_neg.blif" >"$work/neg_models.blif"
+    cat "$fixtures/expected_neg.blif" "$fixtures/models_neg.blif" >"$work/expected_neg_models.blif"
+    "$compare" "$work/neg_models.blif" "$work/expected_neg_models.blif" || fail "netlist-compare: inverter path differs"
     ;;
 *)
     echo "test_cli.sh: unknown case $case_name" >&2

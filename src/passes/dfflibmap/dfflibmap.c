@@ -3,9 +3,10 @@
  * $_DFF_P_, $_DFF_N_, $_DLATCH_P_ and $_DLATCH_N_ onto the state cell odin3_dlm_choose picks from
  * the library. Every module is planned (module-ID order, node-ID order) before any change, so a
  * cell with no match, or a flip-flop or latch of another type, fails the pass with the IR
- * untouched. Then each cell is replaced: the new cell takes the old one's nets, provenance and
- * name (attributes are not copied); a $_DFF_N_ on a posedge cell gets the library inverter on its
- * clock, one per clock net per module.
+ * untouched. Then each cell is replaced: the new cell takes the old one's nets, provenance, name
+ * and attributes (provenance-to-HDL and graph goals; GM-14); a $_DFF_N_ on a posedge cell gets the
+ * library inverter on its clock, one per clock net per module, with the union of the provenance
+ * of every flip-flop that uses it.
  */
 #include "passes/dfflibmap/dfflibmap.h"
 
@@ -13,6 +14,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
@@ -32,11 +34,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* Ports of the four source types (C or E, D, Q) and their INIT parameter. */
-enum { SRC_CLOCK, SRC_DATA, SRC_Q, SRC_INIT = 0 };
+/* Ports of the four source types: C or E, D, Q. */
+enum { SRC_CLOCK, SRC_DATA, SRC_Q };
 
-/* INIT when the parameter is unreadable: unknown (BLIF 3). */
-enum { INIT_UNKNOWN = 3 };
+/* Their INIT parameter. */
+enum { SRC_INIT = 0 };
 
 /* A library cell dfflibmap creates has at most this many ports (a state cell three, INV two). */
 enum { DLM_MAX_PORTS = 3 };
@@ -62,18 +64,42 @@ typedef struct dlm_item {
     odin3_dlm_choice choice;
 } dlm_item;
 
+/* A flip-flop that needs the inverted clock net of its module: the (module, clock) key and its
+ * provenance. */
+typedef struct dlm_user {
+    uint64_t key;
+    odin3_prov_id prov;
+} dlm_user;
+
+typedef struct attr_copy {
+    odin3_module *mod;
+    odin3_node_id src, dst;
+} attr_copy;
+
 typedef struct dlm_ctx {
+    odin3_pass_ctx *pass;
     odin3_design *design;
     const char *library;
     odin3_libcells cells;
     odin3_celltype_id kinds[ODIN3_DLM_KINDS]; /* {0} when the design lacks the type */
     odin3_vec items;                          /* dlm_item, module then node order */
+    odin3_vec users;                          /* dlm_user, in item order */
     odin3_u64map *clocks; /* apply: (module ID << 32 | clock net) -> its inverted net */
     uint64_t init_lost;
     uint64_t inverters;
 } dlm_ctx;
 
 /* --- planning ------------------------------------------------------------------------------ */
+
+static odin3_net_id pin_net(const odin3_module *mod, odin3_node_id node, uint32_t port) {
+    odin3_pinslice pins = odin3_node_port(mod, node, port);
+    return pins.count == 1 ? odin3_pin_net(mod, pins.first) : (odin3_net_id){0};
+}
+
+/* The key of clock net clock in mod. */
+static uint64_t clock_key(const odin3_module *mod, odin3_net_id clock) {
+    return ((uint64_t)odin3_module_id_of(mod).v << KEY_SHIFT) | clock.v;
+}
 
 static const char *str_of(const odin3_design *design, uint32_t str) {
     const char *text = odin3_strtab_get(odin3_design_strtab(design), str);
@@ -162,6 +188,14 @@ static odin3_status plan_node(dlm_ctx *dc, const odin3_module *mod, odin3_node_i
         return ODIN3_ERR_NO_MEMORY;
     }
     *item = (dlm_item){odin3_module_id_of(mod).v, node.v, choice};
+    odin3_net_id clock = pin_net(mod, node, SRC_CLOCK);
+    if (choice.invert_clock && odin3_net_valid(clock)) {
+        dlm_user *user = odin3_vec_push(&dc->users);
+        if (user == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *user = (dlm_user){clock_key(mod, clock), odin3_node_prov(mod, node)};
+    }
     const odin3_libstate *state = odin3_vec_cat(&dc->cells.states, choice.state);
     dc->init_lost += (init == 0 || init == 1) && state->init < 0 ? 1U : 0U;
     return ODIN3_OK;
@@ -181,11 +215,6 @@ static odin3_status plan(dlm_ctx *dc) {
 }
 
 /* --- applying ------------------------------------------------------------------------------ */
-
-static odin3_net_id pin_net(const odin3_module *mod, odin3_node_id node, uint32_t port) {
-    odin3_pinslice pins = odin3_node_port(mod, node, port);
-    return pins.count == 1 ? odin3_pin_net(mod, pins.first) : (odin3_net_id){0};
-}
 
 /* Creates a library cell of type (no parameters, 1-bit ports) with nets[p] on port p. */
 static odin3_status create_cell(odin3_module *mod, odin3_celltype_id type, odin3_prov_id prov,
@@ -237,16 +266,46 @@ static odin3_status make_inverter(dlm_ctx *dc, odin3_module *mod, odin3_net_id c
     return ODIN3_OK;
 }
 
+/* The provenance of the inverter of clock key: the one flip-flop's, or a DERIVED record (one
+ * operation) with the provenance of every flip-flop that uses it as parents. */
+static odin3_status inverter_prov(dlm_ctx *dc, uint64_t key, odin3_prov_id *out) {
+    odin3_vec parents;
+    odin3_vec_init(&parents, sizeof(odin3_prov_id));
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < dc->users.len; i++) {
+        const dlm_user *user = odin3_vec_cat(&dc->users, i);
+        if (user->key != key) {
+            continue;
+        }
+        odin3_prov_id *slot = odin3_vec_push(&parents);
+        st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        if (slot != NULL) {
+            *slot = user->prov;
+        }
+    }
+    if (st == ODIN3_OK && parents.len == 1) {
+        *out = *(const odin3_prov_id *)odin3_vec_cat(&parents, 0);
+    } else if (st == ODIN3_OK) {
+        odin3_prov_begin_op(dc->pass);
+        st = odin3_prov_derive(dc->pass, (odin3_prov_list){parents.data, (uint32_t)parents.len},
+                               out);
+    }
+    odin3_vec_free(&parents);
+    return st;
+}
+
 /* The inverted clock net of clock in mod: the one made before, else a new inverter's. */
 static odin3_status inverted_clock(dlm_ctx *dc, odin3_module *mod, odin3_net_id clock,
-                                   odin3_prov_id prov, odin3_net_id *out) {
-    uint64_t key = ((uint64_t)odin3_module_id_of(mod).v << KEY_SHIFT) | clock.v;
+                                   odin3_net_id *out) {
+    uint64_t key = clock_key(mod, clock);
     uint64_t have = 0;
     if (odin3_u64map_get(dc->clocks, key, &have)) {
         *out = (odin3_net_id){(uint32_t)have};
         return ODIN3_OK;
     }
-    odin3_status st = make_inverter(dc, mod, clock, prov, out);
+    odin3_prov_id prov = {0};
+    odin3_status st = inverter_prov(dc, key, &prov);
+    st = st == ODIN3_OK ? make_inverter(dc, mod, clock, prov, out) : st;
     return st == ODIN3_OK ? odin3_u64map_put(dc->clocks, (odin3_kv){key, out->v}) : st;
 }
 
@@ -265,20 +324,36 @@ static odin3_status make_state(odin3_module *mod, odin3_node_id old, const odin3
     return create_cell(mod, state->type, odin3_node_prov(mod, old), nets, out);
 }
 
-/* Replaces one planned cell: create the new one, delete the old, give the new its name. */
+/* Copies every attribute of node old to node made (same module), as flatten's copy.c does. */
+static odin3_status copy_one_attr(void *user, uint32_t key, const odin3_value *value) {
+    attr_copy *job = user;
+    return odin3_attr_set(job->mod, (odin3_objref){ODIN3_OBJ_NODE, job->dst.v}, key, value);
+}
+
+static odin3_status copy_attrs(attr_copy job) {
+    return odin3_attr_foreach(job.mod, (odin3_objref){ODIN3_OBJ_NODE, job.src.v}, copy_one_attr,
+                              &job);
+}
+
+/* Replaces one planned cell: create the new one, copy the attributes, delete the old, give the
+ * new its name. */
 static odin3_status apply_item(dlm_ctx *dc, const dlm_item *item) {
     odin3_module *mod = odin3_module_get(dc->design, (odin3_module_id){item->module});
     odin3_node_id old = {item->node};
     const odin3_libstate *state = odin3_vec_cat(&dc->cells.states, item->choice.state);
-    odin3_prov_id prov = odin3_node_prov(mod, old);
     odin3_net_id clock = pin_net(mod, old, SRC_CLOCK);
     odin3_status st = ODIN3_OK;
     if (item->choice.invert_clock && odin3_net_valid(clock)) {
-        st = inverted_clock(dc, mod, clock, prov, &clock);
+        st = inverted_clock(dc, mod, clock, &clock);
     }
     odin3_node_id made = {0};
     st = st == ODIN3_OK ? make_state(mod, old, state, clock, &made) : st;
     if (st != ODIN3_OK) {
+        return st;
+    }
+    st = copy_attrs((attr_copy){mod, old, made});
+    if (st != ODIN3_OK) {
+        (void)odin3_node_delete(mod, made);
         return st;
     }
     uint32_t name = odin3_node_name(mod, old);
@@ -358,9 +433,10 @@ static void find_kinds(dlm_ctx *dc) {
     }
 }
 
-static odin3_status run_library(odin3_design *design, const char *library) {
-    dlm_ctx dc = {.design = design, .library = library};
+static odin3_status run_library(odin3_pass_ctx *ctx, odin3_design *design, const char *library) {
+    dlm_ctx dc = {.pass = ctx, .design = design, .library = library};
     odin3_vec_init(&dc.items, sizeof(dlm_item));
+    odin3_vec_init(&dc.users, sizeof(dlm_user));
     odin3_status st = odin3_libcells_collect(design, library, &dc.cells);
     if (st == ODIN3_OK && dc.cells.n_cells == 0) {
         odin3_log(ODIN3_LOG_ERROR,
@@ -375,13 +451,13 @@ static odin3_status run_library(odin3_design *design, const char *library) {
     st = st == ODIN3_OK ? apply(&dc) : st;
     st = st == ODIN3_OK ? log_result(&dc) : st;
     odin3_vec_free(&dc.items);
+    odin3_vec_free(&dc.users);
     odin3_libcells_free(&dc.cells);
     return st;
 }
 
 static odin3_status dlm_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                  void *user) {
-    (void)ctx;
     (void)user;
     odin3_bytes rest = args;
     odin3_bytes word = odin3_pass_arg_next(&rest);
@@ -395,7 +471,7 @@ static odin3_status dlm_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin
     }
     memcpy(library, word.ptr, word.len);
     library[word.len] = '\0';
-    odin3_status st = run_library(design, library);
+    odin3_status st = run_library(ctx, design, library);
     odin3_util_free(library);
     return st;
 }

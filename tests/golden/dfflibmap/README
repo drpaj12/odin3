@@ -13,3 +13,13 @@ model for a library gate cell, so models.blif holds hand-written black-box stubs
 (ports in library order). tests/cli/test_cli.sh case dfflibmap appends models.blif to out.blif and
 to expected.blif, compares the two (tools/netlist-compare, exit 0), checks the INFO and WARNING
 lines, and checks that cmos6 (no latch) refuses the same input with the named error.
+
+Inverter path: input_neg.blif has two falling-edge flip-flops and one rising-edge flip-flop on one
+clock. The script
+
+  read_techlib lib/cmos6.o3lib; read_blif input_neg.blif; dfflibmap cmos6; write_blif neg.blif
+
+maps all three onto DFF (cmos6 has no NEGEDGE cell); the two falling-edge ones share one INV on
+the clock (one inverter per clock net per module). expected_neg.blif was written by hand from that
+rule and models_neg.blif holds the DFF and INV black-box stubs; the CTest case compares them as for
+the first design.

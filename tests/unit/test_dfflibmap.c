@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "passes/builtin.h"
 #include "passes/dfflibmap/dfflibmap.h"
 #include "proc_build.h"
@@ -298,7 +299,6 @@ static void test_pass_shares_clock_inverter(void) {
                     "    connect \\D \\e\n    connect \\Q \\r\n  end\nend\n",
           LIB_CMOS6);
     odin3_net_id clk = port_net(node_named("a"), "C");
-    odin3_prov_id prov = odin3_node_prov(g_res.module, node_named("a"));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("cmos6"), g_msg);
     TEST_ASSERT_EQUAL_UINT32(1, count_type("INV"));
     TEST_ASSERT_EQUAL_UINT32(2, count_type("DFF"));
@@ -307,8 +307,6 @@ static void test_pass_shares_clock_inverter(void) {
     odin3_net_id inverted = port_net(inv, "Y");
     TEST_ASSERT_EQUAL_UINT32(inverted.v, port_net(node_named("a"), "C").v);
     TEST_ASSERT_EQUAL_UINT32(inverted.v, port_net(node_named("b"), "C").v);
-    TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_node_prov(g_res.module, inv).v);
-    TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_net_prov(g_res.module, inverted).v);
     TEST_ASSERT_EQUAL_STRING("dfflibmap: library 'cmos6': 2 cells mapped (DFF x2), 1 clock "
                              "inverters",
                              g_info);
@@ -389,6 +387,143 @@ static void test_pass_args(void) {
         "dfflibmap: library 'generic_gates': 0 cells mapped, 0 clock inverters", g_info);
 }
 
+/* The strtab ID of text, which must exist. */
+static uint32_t str_id(const char *text) {
+    uint32_t str = 0;
+    TEST_ASSERT_TRUE_MESSAGE(
+        odin3_strtab_find(odin3_design_strtab(g_res.design), odin3_bytes_cstr(text), &str), text);
+    return str;
+}
+
+static void test_pass_copies_attributes(void) {
+    build(TOP_PORTS "  attribute \\keep 1\n  attribute \\hdlname \"top q_reg\"\n"
+                    "  attribute \\src \"a.v:3.1-3.9\"\n"
+                    "  cell $_DFF_P_ \\q_reg\n    parameter \\INIT 3\n    connect \\C \\clk\n"
+                    "    connect \\D \\d\n    connect \\Q \\q\n  end\nend\n",
+          LIB_GENERIC);
+    uint32_t keep = str_id("keep");
+    uint32_t hdl = str_id("hdlname");
+    odin3_node_id old = node_named("q_reg");
+    TEST_ASSERT_NOT_NULL(odin3_attr_get(g_res.module, (odin3_objref){ODIN3_OBJ_NODE, old.v}, keep));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("generic_gates"), g_msg);
+    odin3_objref made = {ODIN3_OBJ_NODE, node_named("q_reg").v};
+    const odin3_value *kept = odin3_attr_get(g_res.module, made, keep);
+    TEST_ASSERT_NOT_NULL(kept);
+    TEST_ASSERT_EQUAL_INT64(1, kept->i);
+    const odin3_value *name = odin3_attr_get(g_res.module, made, hdl);
+    TEST_ASSERT_NOT_NULL(name);
+    TEST_ASSERT_EQUAL_STRING("top q_reg",
+                             odin3_strtab_get(odin3_design_strtab(g_res.design), name->str));
+}
+
+/* The inverter record of the clock net: DERIVED with exactly the parents a and b. */
+static void test_pass_inverter_provenance_union(void) {
+    build(TOP_PORTS "  attribute \\src \"a.v:1.1-1.5\"\n"
+                    "  cell $_DFF_N_ \\a\n    parameter \\INIT 3\n    connect \\C \\clk\n"
+                    "    connect \\D \\d\n    connect \\Q \\q\n  end\n"
+                    "  attribute \\src \"b.v:2.1-2.5\"\n"
+                    "  cell $_DFF_N_ \\b\n    parameter \\INIT 2\n    connect \\C \\clk\n"
+                    "    connect \\D \\e\n    connect \\Q \\r\n  end\nend\n",
+          LIB_CMOS6);
+    odin3_prov_id pa = odin3_node_prov(g_res.module, node_named("a"));
+    odin3_prov_id pb = odin3_node_prov(g_res.module, node_named("b"));
+    TEST_ASSERT_NOT_EQUAL_UINT32(pa.v, pb.v);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("cmos6"), g_msg);
+    odin3_node_id inv = nth_of("INV", 0);
+    odin3_prov_id prov = odin3_node_prov(g_res.module, inv);
+    odin3_prov_list parents = odin3_prov_parents(g_res.design, prov);
+    TEST_ASSERT_EQUAL_UINT32(2, parents.count);
+    TEST_ASSERT_EQUAL_UINT32(pa.v, parents.ids[0].v);
+    TEST_ASSERT_EQUAL_UINT32(pb.v, parents.ids[1].v);
+    TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_net_prov(g_res.module, port_net(inv, "Y")).v);
+    /* The flip-flops keep their own records. */
+    TEST_ASSERT_EQUAL_UINT32(pa.v, odin3_node_prov(g_res.module, node_named("a")).v);
+    TEST_ASSERT_EQUAL_UINT32(pb.v, odin3_node_prov(g_res.module, node_named("b")).v);
+}
+
+static void test_pass_inverter_per_clock_net(void) {
+    build("module \\top\n  wire input 1 \\clk\n  wire input 2 \\clk2\n  wire input 3 \\d\n"
+          "  wire output 4 \\q\n  wire output 5 \\r\n  wire output 6 \\s\n"
+          "  cell $_DFF_N_ \\a\n    parameter \\INIT 3\n    connect \\C \\clk\n"
+          "    connect \\D \\d\n    connect \\Q \\q\n  end\n"
+          "  cell $_DFF_N_ \\b\n    parameter \\INIT 3\n    connect \\C \\clk2\n"
+          "    connect \\D \\d\n    connect \\Q \\r\n  end\n"
+          "  cell $_DFF_N_ \\c\n    parameter \\INIT 3\n    connect \\C \\clk2\n"
+          "    connect \\D \\d\n    connect \\Q \\s\n  end\nend\n",
+          LIB_CMOS6);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("cmos6"), g_msg);
+    TEST_ASSERT_EQUAL_UINT32(2, count_type("INV"));
+    TEST_ASSERT_EQUAL_UINT32(3, count_type("DFF"));
+    TEST_ASSERT_NOT_EQUAL_UINT32(port_net(node_named("a"), "C").v,
+                                 port_net(node_named("b"), "C").v);
+    TEST_ASSERT_EQUAL_UINT32(port_net(node_named("b"), "C").v, port_net(node_named("c"), "C").v);
+    TEST_ASSERT_EQUAL_STRING("dfflibmap: library 'cmos6': 3 cells mapped (DFF x3), 2 clock "
+                             "inverters",
+                             g_info);
+}
+
+/* The live nodes of type in mod. */
+static uint32_t count_in(const odin3_module *mod, const char *type) {
+    uint32_t found = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        odin3_node_id node = {id};
+        bool hit =
+            odin3_node_live(mod, node) &&
+            strcmp(odin3_celltype_get(g_res.design, odin3_node_type(mod, node))->name, type) == 0;
+        found += hit ? 1U : 0U;
+    }
+    return found;
+}
+
+static void test_pass_inverter_per_module(void) {
+    build("module \\m1\n  wire input 1 \\clk\n  wire input 2 \\d\n  wire output 3 \\q\n"
+          "  cell $_DFF_N_ \\a\n    parameter \\INIT 3\n    connect \\C \\clk\n"
+          "    connect \\D \\d\n    connect \\Q \\q\n  end\nend\n"
+          "module \\m2\n  wire input 1 \\clk\n  wire input 2 \\d\n  wire output 3 \\q\n"
+          "  cell $_DFF_N_ \\a\n    parameter \\INIT 3\n    connect \\C \\clk\n"
+          "    connect \\D \\d\n    connect \\Q \\q\n  end\nend\n",
+          LIB_CMOS6);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("cmos6"), g_msg);
+    TEST_ASSERT_EQUAL_UINT32(1, count_in(pb_module(&g_res, "m1"), "INV"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_in(pb_module(&g_res, "m2"), "INV"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_in(pb_module(&g_res, "m1"), "DFF"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_in(pb_module(&g_res, "m2"), "DFF"));
+    TEST_ASSERT_EQUAL_STRING("dfflibmap: library 'cmos6': 2 cells mapped (DFF x2), 2 clock "
+                             "inverters",
+                             g_info);
+}
+
+static void test_pass_refuses_enable_and_reset_ffs(void) {
+    build(TOP_PORTS "  cell $_DFFE_PP_ \\en\n    connect \\C \\clk\n    connect \\D \\d\n"
+                    "    connect \\E \\e\n    connect \\Q \\q\n  end\nend\n",
+          LIB_GENERIC);
+    uint32_t live = count_live();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_pass("generic_gates"));
+    TEST_ASSERT_EQUAL_UINT32(live, count_live());
+    TEST_ASSERT_NOT_NULL(strstr(g_msg, "cell 'en' of type $_DFFE_PP_ is a flip-flop or latch"));
+    pb_free(&g_res);
+    build(TOP_PORTS "  cell $_DFF_PP0_ \\rs\n    connect \\C \\clk\n    connect \\D \\d\n"
+                    "    connect \\R \\e\n    connect \\Q \\q\n  end\nend\n",
+          LIB_GENERIC);
+    live = count_live();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_pass("generic_gates"));
+    TEST_ASSERT_EQUAL_UINT32(live, count_live());
+    TEST_ASSERT_NOT_NULL(strstr(g_msg, "cell 'rs' of type $_DFF_PP0_ is a flip-flop or latch"));
+}
+
+static void test_pass_open_clock_inverter_path(void) {
+    build(TOP_PORTS "  cell $_DFF_N_ \\o\n    parameter \\INIT 3\n"
+                    "    connect \\D \\d\n    connect \\Q \\q\n  end\nend\n",
+          LIB_CMOS6);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_pass("cmos6"), g_msg);
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("INV"));
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("DFF"));
+    TEST_ASSERT_FALSE(odin3_net_valid(port_net(node_named("o"), "C")));
+    TEST_ASSERT_EQUAL_STRING("dfflibmap: library 'cmos6': 1 cells mapped (DFF x1), 0 clock "
+                             "inverters",
+                             g_info);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_choose_posedge_generic);
@@ -405,5 +540,11 @@ int main(void) {
     RUN_TEST(test_pass_library_not_loaded);
     RUN_TEST(test_pass_init_lost_warns);
     RUN_TEST(test_pass_args);
+    RUN_TEST(test_pass_copies_attributes);
+    RUN_TEST(test_pass_inverter_provenance_union);
+    RUN_TEST(test_pass_inverter_per_clock_net);
+    RUN_TEST(test_pass_inverter_per_module);
+    RUN_TEST(test_pass_refuses_enable_and_reset_ffs);
+    RUN_TEST(test_pass_open_clock_inverter_path);
     return UNITY_END();
 }

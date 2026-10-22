@@ -13,6 +13,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* INIT (BLIF .latch) when unknown: the default, and the value of an unreadable parameter. */
+enum { INIT_UNKNOWN = 3 };
+
 /* The bit flip-flop and latch types dfflibmap maps: $_DFF_P_, $_DFF_N_, $_DLATCH_P_, $_DLATCH_N_.
  */
 typedef enum odin3_dlm_kind {
