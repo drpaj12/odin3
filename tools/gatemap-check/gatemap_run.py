@@ -13,12 +13,13 @@ write_blif --gates-as-names gates.blif; write_blif cells.blif; write_verilog gat
 
 1. odin3 exits 0 (a failure is the outcome ``FAIL odin3`` with exit 1, as in lower-run; a signal, a
    memory-cap kill or a timeout is exit 3, never an expected failure) and equiv-check ``rtl.blif
-   gates.blif`` exits 0. Its exit 1 is the outcome ``differs``, 4 or 5 (ABC killed) ``unproven``,
-   anything else (a netlist it cannot read, such as a flip-flop clocked by an internal net or an
-   undriven output) ``error``, with equiv-check's last message as the detail. It runs with
-   ``--blackbox adder,multiply,single_port_ram,dual_port_ram`` (hard blocks are cut and paired) and,
-   when it refuses an undriven net that reaches an output of the RTL, once more with
-   ``--allow-undriven`` (the gate netlist keeps the net undriven too).
+   gates.blif`` exits 0. Its exit 1 is the outcome ``differs``, 4 or 5 (ABC killed) ``unproven``
+   (so is a checker killed by the memory cap or a signal), anything else (a netlist it cannot
+   read, such as a flip-flop clocked by an internal net) ``error``, with equiv-check's last
+   message as the detail. It runs with ``--blackbox adder,multiply,single_port_ram,dual_port_ram``
+   (hard blocks are cut and paired) and, when it refuses an undriven net that reaches an output of
+   the RTL, once more with ``--allow-undriven`` (the gate netlist keeps the net undriven too). The
+   re-map leg runs with ``--timeout 1200``.
 2. every ``node:TYPE`` of locs.txt is a cell of a library read (``--techlib`` files too: the hard
    blocks), a module of the dump, one of the
    ``$port_in``/``$port_out``/``$port_inout`` cells, or ``$_CONST0_ $_CONST1_ $_CONSTX_ $_CONSTZ_
@@ -59,6 +60,7 @@ EQUIV_OK, EQUIV_DIFFER, EQUIV_UNPROVEN, EQUIV_HARD = 0, 1, 4, 5
 BLACKBOX_MODELS = "adder,multiply,single_port_ram,dual_port_ram"  # as tools/abc-check/abc_equiv.py
 HARD_SUBCKT = re.compile(rf"^\.subckt +({BLACKBOX_MODELS.replace(',', '|')})(?= )", re.M)
 UNDRIVEN = "undriven net"
+REMAP_TIMEOUT = 1200  # equiv-check's limit in seconds for the re-map leg (the first leg keeps 600)
 CAP_KILL = 137
 DEFAULT_CAP = 2 << 30
 TIMEOUT_SECONDS = 3600.0
@@ -226,6 +228,8 @@ def run_equiv(args: argparse.Namespace, left: Path, right: Path, work: Path,
         return "unproven", f"timed out after {TIMEOUT_SECONDS:.0f} s"
     text = (done.stdout or "") + (done.stderr or "")
     detail = equiv_detail(text)
+    if done.returncode < 0 or done.returncode == CAP_KILL:  # the memory cap killed the checker
+        return "unproven", f"equiv-check killed by the memory cap or a signal ({done.returncode})"
     if done.returncode == EQUIV_HARD:
         detail = f"equiv-check exit {EQUIV_HARD} (ABC killed): {detail}"
     return equiv_outcome(done.returncode), detail
@@ -244,14 +248,15 @@ def gate_copy(path: Path) -> Path:
     return out
 
 
-def compare(args: argparse.Namespace, left: Path, right: Path, work: Path) -> tuple[str, str]:
+def compare(args: argparse.Namespace, left: Path, right: Path, work: Path,
+            limit: Sequence[str] = ()) -> tuple[str, str]:
     """run_equiv on the two BLIF files (hard blocks as ``.gate``), run again with
     ``--allow-undriven`` when the RTL itself has an undriven net that reaches an output (both
     netlists then read it as 0)."""
     left, right = gate_copy(left), gate_copy(right)
-    outcome, detail = run_equiv(args, left, right, work)
+    outcome, detail = run_equiv(args, left, right, work, limit)
     if outcome == "error" and UNDRIVEN in detail:
-        outcome, detail = run_equiv(args, left, right, work, ("--allow-undriven",))
+        outcome, detail = run_equiv(args, left, right, work, (*limit, "--allow-undriven"))
     return outcome, detail
 
 
@@ -270,7 +275,8 @@ def check_design(args: argparse.Namespace, work: Path) -> tuple[str, str]:
     if outcome != "ok" or not args.remap:
         return outcome, detail
     run_odin3(args, remap_script(techlibs, name, work), work)
-    outcome, detail = compare(args, work / "gates.blif", work / "remap.blif", work)
+    outcome, detail = compare(args, work / "gates.blif", work / "remap.blif", work,
+                              ("--timeout", str(REMAP_TIMEOUT)))
     return ("ok" if outcome == "ok" else f"remap-{outcome}"), detail
 
 

@@ -115,6 +115,12 @@ class RunTest(unittest.TestCase):
         self.assertEqual(code, 4)
         self.assertIn("gatemap-run: unproven ", out)
 
+    def test_equiv_killed_is_unproven(self) -> None:
+        code, out, _ = self.run_fake(self.odin("locs_ok.txt"), "kill -KILL $$\n")
+        self.assertEqual(code, 4)
+        self.assertIn("gatemap-run: unproven ", out)
+        self.assertIn("killed by the memory cap", out)
+
     def test_equiv_error_is_exit_1(self) -> None:
         code, out, _ = self.run_fake(self.odin("locs_ok.txt"),
                                      "echo 'equiv-check: error: clocked by internal net'\nexit 2\n")
