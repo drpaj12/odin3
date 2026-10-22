@@ -124,6 +124,7 @@ add_library(odin3_core OBJECT
     src/passes/unmap/kit.c
     src/passes/unmap/chain.c
     src/passes/unmap/operand.c
+    src/passes/unmap/mul.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c

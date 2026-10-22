@@ -7,6 +7,7 @@
 #include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/unmap/chain.h"
+#include "passes/unmap/mul.h"
 
 #include <string.h>
 
@@ -14,6 +15,9 @@ odin3_status um_module(um_ctx *uc) {
     odin3_status st = ODIN3_OK;
     if (uc->types.adder.v != 0) {
         st = um_adder_phase(uc);
+    }
+    if (st == ODIN3_OK && uc->types.multiply.v != 0) {
+        st = um_mul_phase(uc);
     }
     return st;
 }

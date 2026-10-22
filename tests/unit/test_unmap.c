@@ -669,6 +669,61 @@ static void test_trim_and_run(void) {
     TEST_ASSERT_EQUAL_UINT32(2, vec.len);
 }
 
+/* --- Task 6: multiply to $mul ------------------------------------------------------------- */
+
+static odin3_node_id only_mul(void) {
+    odin3_node_id mul[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$mul", mul, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("multiply", NULL, 0));
+    return mul[0];
+}
+
+static void test_unmap_mul_8x7(void) {
+    flow("module t(input [7:0] a, input [6:0] b, output [14:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    odin3_node_id mul = only_mul();
+    expect_params(mul, (const int64_t[5]){0, 0, 8, 7, 15});
+    TEST_ASSERT_EQUAL_INT64(36, attr_int(mul, "unmap_w"));
+    TEST_ASSERT_EQUAL_UINT32(intern("mul"), attr_of(mul, "unmap")->str);
+    check_clean();
+}
+
+static void test_unmap_mul_signed(void) {
+    flow("module t(input signed [7:0] a, input signed [7:0] b, output signed [15:0] p);\n"
+         "assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){1, 1, 8, 8, 16});
+    check_clean();
+}
+
+static void test_unmap_mul_trunc(void) {
+    flow("module t(input [7:0] a, input [7:0] b, output [7:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 8, 8, 8});
+    check_clean();
+}
+
+static void test_unmap_mul_dead(void) {
+    load_lib();
+    read_blif(".model m\n.inputs x\n.outputs y\n.names unconn\n.names x y\n1 1\n"
+              ".subckt multiply a[0]=unconn b[0]=unconn\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 1, 1, 2});
+    check_clean();
+}
+
+static void test_unmap_mul_blif(void) {
+    load_lib();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK,
+        odin3_pass_run(design, "read_blif",
+                       odin3_bytes_cstr("tests/golden/blif-vtr/multiply_narrow.vtr.blif")),
+        log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 8, 8, 16});
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -698,5 +753,10 @@ int main(void) {
     RUN_TEST(test_unmap_parmys_blif);
     RUN_TEST(test_unmap_declines);
     RUN_TEST(test_trim_and_run);
+    RUN_TEST(test_unmap_mul_8x7);
+    RUN_TEST(test_unmap_mul_signed);
+    RUN_TEST(test_unmap_mul_trunc);
+    RUN_TEST(test_unmap_mul_dead);
+    RUN_TEST(test_unmap_mul_blif);
     return UNITY_END();
 }
