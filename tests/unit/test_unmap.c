@@ -670,6 +670,24 @@ static void test_unmap_declines(void) {
     check_clean();
 }
 
+/* S-7: a multiply output on a carry-in is a signal, not a recovered carry: the note is the same on
+ * the second run, when the multiply is a `$mul` that carries `unmap`. */
+static void test_unmap_cin_from_multiply_twice(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD
+              ".subckt multiply a[0]=x2 b[0]=y2 out[0]=m0 out[1]=m1\n"
+              ".subckt adder a=x0 b=y0 cin=m0 cout=c1 sumout=s0\n"
+              ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+              ".names m1 s2\n1 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id cells[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", cells, 2));
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_signal"), attr_of(cells[0], "unmap_note")->str);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", cells, 2));
+    TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_signal"), attr_of(cells[0], "unmap_note")->str);
+}
+
 static void test_trim_and_run(void) {
     load_lib();
     read_blif(CLASS_BLIF);
@@ -1137,8 +1155,8 @@ static void test_unmap_ram_width_merge(void) {
     }
     check_clean();
 }
-/* partial_map's role numbers agree with node-ID order; the tests below run unmap on it. */
- * place a test reads `hardmap`). */
+
+/* partial_map's role numbers agree with node-ID order (the tests below run unmap on it). */
 static void test_unmap_ram_bit_order(void) {
     flow_file(src_path("tests/unmap/ram_w8.v"));
     odin3_node_id slices[RAM_BITS];
@@ -1733,6 +1751,7 @@ static void run_chain_tests(void) {
     RUN_TEST(test_unmap_parmys_blif);
     RUN_TEST(test_unmap_declines);
     RUN_TEST(test_trim_and_run);
+    RUN_TEST(test_unmap_cin_from_multiply_twice);
 }
 
 static void run_mul_tests(void) {

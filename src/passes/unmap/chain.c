@@ -203,14 +203,23 @@ static bool is_const(um_cls cls) {
     return cls == UM_GND || cls == UM_VCC;
 }
 
-/* True when the pin is the carry-out of an adder, or the output of a cell this pass made from a
- * chain (a part of the carry chain already recovered: its last carry-out is its top Y bit). */
-static bool carry_source(const um_ctx *uc, odin3_node_id node, uint32_t port) {
+enum { UM_ADD_Y = 2 };
+
+/* True when the pin is the carry-out of an adder, or the top Y bit of a `$add` this pass made from
+ * a chain (a part of the carry chain already recovered: its last carry-out). Any other output,
+ * a multiply's included, is a signal. */
+static bool carry_source(const um_ctx *uc, odin3_pin_id pin) {
+    odin3_node_id node = odin3_pin_node(uc->module, pin);
+    uint32_t port = odin3_pin_port(uc->module, pin);
     if (is_adder(uc, node)) {
         return port == UM_ADDER_COUT;
     }
     uint32_t key = 0;
-    return odin3_design_intern(uc->design, odin3_bytes_cstr("unmap"), &key) == ODIN3_OK &&
+    return odin3_node_live(uc->module, node) &&
+           odin3_node_type(uc->module, node).v == uc->types.add.v && port == UM_ADD_Y &&
+           odin3_pin_bit(uc->module, pin) + 1 ==
+               odin3_node_port(uc->module, node, UM_ADD_Y).count &&
+           odin3_design_intern(uc->design, odin3_bytes_cstr("unmap"), &key) == ODIN3_OK &&
            odin3_attr_get(uc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key) != NULL;
 }
 
@@ -224,9 +233,7 @@ static const char *cin_reason(const um_ctx *uc, odin3_node_id cell, um_cls cls) 
     }
     odin3_net_id net = um_port_net(uc->module, cell, (um_pos){UM_ADDER_CIN, 0});
     odin3_pin_id driver = odin3_net_driver(uc->module, net);
-    bool from_adder =
-        odin3_pin_valid(driver) &&
-        carry_source(uc, odin3_pin_node(uc->module, driver), odin3_pin_port(uc->module, driver));
+    bool from_adder = odin3_pin_valid(driver) && carry_source(uc, driver);
     return from_adder ? "cin_carry" : "cin_signal";
 }
 
