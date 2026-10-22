@@ -151,25 +151,28 @@ the companies, I would suggest moving to a cloud service model as soon as possib
 is narrower: to run experiments that I could not do with Yosys, and with Odin~III I now can.
 
 I call the suite that grows from Odin~III Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}).
-Odin~III is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for
-VTR out), and every path passes through its one provenance IR, which is why I see it as the final
-frontier of the Odin line. The oracles (Yosys, Parmys, Odin~II, VTR's golden results and ABC) stand
-as a small forest beside the trunk, to compare against. In the canopy are Wyrd~III (the experiment
-runner and GUI); Loki~III (reverse engineering), which continues the netlist-to-RTL work of Faruque
-et al.~\cite{faruque2025gatebreaker}; Bifrost~III (the simulation bridge); Midgard~III, a port of my
-verilogTown Verilog teaching game~\cite{verilogtown2017}, which Wyrd~III connects to; and The
-Norns~III, the placement experiment of Gharibian et
-al.~\cite{gharibian2010finding,gharibian2013analyzing}, redone with provenance
-(Sec.~\ref{sec:provenance-problem}). The code is at \url{https://github.com/drpaj12/odin3},
+Odin~III is the trunk: its steps run down from parsing to the roots (Verilog, BLIF, Yosys JSON and gate
+Verilog in; BLIF for VPR and Verilog out; ABC and VTR linked), and every path passes through its one
+provenance IR, which is why I see it as the final frontier of the Odin line. The oracles (Yosys, Parmys,
+Odin~II, VTR's golden results and ABC) stand as a small forest beside the trunk, to compare against. In
+the canopy are Wyrd~III (the experiment runner and GUI), Bifrost~III (the simulation bridge) and
+Midgard~III, a port of my verilogTown Verilog teaching game~\cite{verilogtown2017}, which Wyrd~III
+connects to. Three tools and experiments grow as side branches off the trunk: Loki~III (reverse
+engineering), which continues the netlist-to-RTL work of Faruque et al.~\cite{faruque2025gatebreaker};
+Leman~Russ~III (hardware Trojan detection tools); and The Norns~III (placement with provenance), the
+placement experiment of Gharibian et al.~\cite{gharibian2010finding,gharibian2013analyzing}, redone
+with provenance (Sec.~\ref{sec:provenance-problem}). The code is at \url{https://github.com/drpaj12/odin3},
 \url{https://github.com/drpaj12/wyrd} and \url{https://github.com/drpaj12/loki}.
 
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil}}
-\caption{Yggdrasil~III drawn as a tree. The roots are the inputs and the tools Odin~III links to. The
-trunk is Odin~III, with its steps from the roots to the crown. The oracles are the small forest beside
-it. The canopy holds Wyrd~III, Loki~III, Bifrost~III, Midgard~III (verilogTown~\cite{verilogtown2017})
-and The Norns~III (placement~\cite{gharibian2013analyzing}).}
+\caption{Yggdrasil~III drawn as a tree. The roots are what Odin~III reads and writes and the tools it links
+to. The trunk is Odin~III, with its steps running down from parsing to the roots. The oracles are the
+small forest beside it. The canopy holds Wyrd~III, Bifrost~III and Midgard~III (verilogTown~\cite{verilogtown2017}).
+Loki~III (\protect\url{https://github.com/drpaj12/loki}), Leman~Russ~III and The Norns~III
+(placement~\cite{gharibian2013analyzing}) are tools and experiments on side branches. Code:
+\protect\url{https://github.com/drpaj12/odin3} and \protect\url{https://github.com/drpaj12/wyrd}.}
 \label{fig:yggdrasil}
 \end{figure*}
 
