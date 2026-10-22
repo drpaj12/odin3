@@ -334,8 +334,8 @@ static void test_pass_table_entry(void) {
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PASS_PROCESSES_REFUSE, def->processes);
     TEST_ASSERT_EQUAL_STRING(
         "abc [--script FILE] [--lut K] [--gates LIB] [--via-blif DIR] [--log FILE] [--prov "
-        "fine|cone]: map each module's soft logic to K-input LUTs with linked ABC (one run per "
-        "clock domain)",
+        "fine|cone]: map each module's soft logic to K-input LUTs (--lut) or to library LIB's "
+        "gates (--gates) with linked ABC (one run per clock domain)",
         def->help);
 }
 

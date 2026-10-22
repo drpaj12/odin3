@@ -707,7 +707,8 @@ odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3
 const odin3_pass_def odin3_pass_abc = {
     "abc",
     "abc [--script FILE] [--lut K] [--gates LIB] [--via-blif DIR] [--log FILE] [--prov fine|cone]: "
-    "map each module's soft logic to K-input LUTs with linked ABC (one run per clock domain)",
+    "map each module's soft logic to K-input LUTs (--lut) or to library LIB's gates (--gates) "
+    "with linked ABC (one run per clock domain)",
     odin3_abc_pass_run,
     NULL,
     false,

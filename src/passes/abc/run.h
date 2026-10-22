@@ -35,14 +35,15 @@ enum {
     ODIN3_ABC_TK_GATE,      /* a parameterless bit type with a simulate hook (§5.1) */
     ODIN3_ABC_TK_DFF_P,     /* $_DFF_P_ */
     ODIN3_ABC_TK_DFF_N,     /* $_DFF_N_ */
-    ODIN3_ABC_TK_FF         /* $_FF_ */
+    ODIN3_ABC_TK_FF,        /* $_FF_ */
+    ODIN3_ABC_TK_TIE        /* a library cell whose fn is a constant (TIE0/TIE1); table: 0 or 1 */
 };
 
 typedef struct odin3_abc_gate {
     uint32_t type;     /* cell-type ID */
     uint8_t kind;      /* an ODIN3_ABC_TK_* value */
     uint32_t n_inputs; /* GATE: input bits */
-    uint64_t table;    /* GATE: 2^n_inputs bits */
+    uint64_t table;    /* GATE: 2^n_inputs bits; TIE: the constant */
 } odin3_abc_gate;
 
 /* The phase times and counts of the run in progress (abc_test.h's odin3_abc_run_report). */

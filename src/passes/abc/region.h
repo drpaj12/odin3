@@ -25,7 +25,7 @@ typedef enum odin3_abc_role {
         0, /* never changed: its outputs are CIs, its inputs COs when soft drives them */
     ODIN3_ABC_ROLE_SOFT, /* logic ABC maps: $sop, $lut, parameterless gates */
     ODIN3_ABC_ROLE_REG,  /* a flip-flop of the run's domain */
-    ODIN3_ABC_ROLE_CONST /* a constant generator (const_value 0, 1, x or z) */
+    ODIN3_ABC_ROLE_CONST /* a constant generator (const_value 0, 1, x or z; a library TIE cell) */
 } odin3_abc_role;
 
 /* A clock domain (§5.3). */
@@ -122,7 +122,8 @@ odin3_status odin3_abc_region_build(odin3_abc_run *run, const odin3_abc_domain *
 
 /*
  * The literal a constant net gives a reader pin (C2): 1 for value 1; 0 for 0, x, z and an
- * undefined net; -1 for a net that is not a constant (including no net).
+ * undefined net; a library TIE cell's value when one drives the net alone (its type classified
+ * by odin3_abc_region_build); -1 for a net that is not a constant (including no net).
  */
 int odin3_abc_pin_literal(const odin3_abc_run *run, odin3_net_id net);
 

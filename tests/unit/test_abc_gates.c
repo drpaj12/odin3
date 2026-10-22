@@ -20,6 +20,7 @@
 #include "passes/manager.h"
 #include "util/alloc.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 #ifndef ODIN3_LIB_DIR
@@ -487,6 +488,225 @@ static void test_gates_prov_every_gate(void) {
     TEST_ASSERT_TRUE(seen > 0);
 }
 
+/* --- review fixes: pass-level --gates cases ------------------------------------------------ */
+
+/* The net of port index of mod (declaration order: the BLIF's inputs, then its outputs). */
+static odin3_net_id port_net(uint32_t index) {
+    odin3_node_id port = odin3_module_port(mod, index);
+    return odin3_pin_net(mod, odin3_node_pins(mod, port).first);
+}
+
+/* The type name of the one driver of net ("" when it has none or several). */
+static const char *driver_type(odin3_net_id net) {
+    if (!odin3_net_valid(net) || odin3_net_driver_count(mod, net) != 1) {
+        return "";
+    }
+    odin3_node_id node = odin3_pin_node(mod, odin3_net_driver(mod, net));
+    return odin3_celltype_get(design, odin3_node_type(mod, node))->name;
+}
+
+/* The one driver of net. */
+static odin3_node_id driver_node(odin3_net_id net) {
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_net_driver_count(mod, net));
+    return odin3_pin_node(mod, odin3_net_driver(mod, net));
+}
+
+/* The type names of the drivers of the input pins of node, in pin order, joined by blanks. */
+static const char *input_drivers(odin3_node_id node) {
+    static char text[128];
+    text[0] = '\0';
+    odin3_pinslice pins = odin3_node_pins(mod, node);
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_pin_id pin = {pins.first.v + i};
+        if (odin3_pin_reads(mod, pin)) {
+            size_t used = strlen(text);
+            (void)snprintf(text + used, sizeof text - used, "%s%s", used > 0 ? " " : "",
+                           driver_type(odin3_pin_net(mod, pin)));
+        }
+    }
+    return text;
+}
+
+/* y = a & ~a: the AIG makes y the constant 0, so ABC's PO reads object 0. */
+static const char k_const_output[] = ".model m\n.inputs a\n.outputs y\n"
+                                     ".names a n\n0 1\n.names a n y\n11 1\n.end\n";
+
+static void read_cmos6(void) {
+    char lib[AFX_PATH];
+    (void)snprintf(lib, sizeof lib, "%s/cmos6.o3lib", ODIN3_LIB_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
+}
+
+static void test_gates_const_output_tie(void) {
+    read_generic();
+    read_blif_text(k_const_output);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    TEST_ASSERT_EQUAL_STRING("TIE0", driver_type(port_net(1)));
+    TEST_ASSERT_EQUAL_UINT32(1, count_cells());
+    afx_check(design);
+}
+
+/* cmos6 has no TIE cell: the constant is a $_CONST0_ cell (written as a literal). */
+static void test_gates_const_output_cmos6(void) {
+    read_cmos6();
+    read_blif_text(k_const_output);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("cmos6"), afx_errors());
+    TEST_ASSERT_EQUAL_STRING("$_CONST0_", driver_type(port_net(1)));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_node_prov(mod, driver_node(port_net(1))).v);
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_net_prov(mod, port_net(1)).v);
+    TEST_ASSERT_EQUAL_UINT32(1, count_cells());
+    afx_check(design);
+}
+
+/* y = a: ABC's PO reads the PI; y carries a through the library's BUF. */
+static void test_gates_input_to_output(void) {
+    read_generic();
+    read_blif_text(".model m\n.inputs a b\n.outputs y z\n"
+                   ".names a y\n1 1\n.names a b z\n11 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    odin3_net_id out_y = port_net(2);
+    if (out_y.v != port_net(0).v) {
+        TEST_ASSERT_EQUAL_STRING("BUF", driver_type(out_y));
+        TEST_ASSERT_EQUAL_STRING("$port_in", input_drivers(driver_node(out_y)));
+    }
+    TEST_ASSERT_EQUAL_STRING("AND2", driver_type(port_net(3)));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sop"));
+    afx_check(design);
+}
+
+/* y = q & a with q a register ABC keeps: the AND2 reads the new flip-flop's Q. */
+static void test_gates_reads_register(void) {
+    read_generic();
+    read_blif_text(".model m\n.inputs a b clk\n.outputs y\n"
+                   ".names a b d\n11 1\n.latch d q re clk 0\n.names q a y\n11 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$_DFF_P_"));
+    TEST_ASSERT_EQUAL_STRING("AND2", driver_type(port_net(3)));
+    const char *ins = input_drivers(driver_node(port_net(3)));
+    TEST_ASSERT_TRUE_MESSAGE(strstr(ins, "$_DFF_P_") != NULL, ins);
+    afx_check(design);
+}
+
+/* A register with D = 0 and INIT 0 is the constant 0 after scorr, so ABC's AND2 for y = q & a
+ * reads object 0: the splice gives it the TIE0 net (uses_constant over the gate fanins). */
+static void test_gates_gate_reads_constant(void) {
+    read_generic();
+    read_blif_text(".model m\n.inputs a clk\n.outputs y\n"
+                   ".names zero\n.latch zero q re clk 0\n.names q a y\n11 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$_DFF_P_"));
+    TEST_ASSERT_EQUAL_STRING("AND2", driver_type(port_net(2)));
+    const char *ins = input_drivers(driver_node(port_net(2)));
+    TEST_ASSERT_TRUE_MESSAGE(strstr(ins, "TIE0") != NULL, ins);
+    afx_check(design);
+}
+
+/* ABC names a gate the library does not have: a malformed network, the IR as it was. */
+static void test_gates_malformed_leaves_ir(void) {
+    read_generic();
+    read_blif_text(k_two_outputs);
+    char *before = afx_blif_text(design);
+    odin3_abc_fake_gate_names((odin3_abc_fake_gates){"NOPE2", NULL});
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, run_gates("generic_gates"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1, afx_count(ODIN3_LOG_ERROR, "abc: ABC returned a malformed network: "), afx_errors());
+    char *after = afx_blif_text(design);
+    TEST_ASSERT_EQUAL_STRING(before, after);
+    free(before);
+    free(after);
+    afx_check(design);
+}
+
+/* The depth counts library gates: the fake maps y = (a & b) | c to AND2, INV, AND2, INV (4 levels,
+ * the OR as an AND of inverted inputs). */
+static void test_gates_depth_counts_gates(void) {
+    read_generic();
+    read_blif_text(k_two_outputs);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    TEST_ASSERT_TRUE_MESSAGE(afx_has(ODIN3_LOG_INFO, "abc: final: depth 4"),
+                             afx_only(ODIN3_LOG_INFO, "abc: final: depth"));
+    const char *info = odin3_strtab_get(
+        odin3_design_strtab(design),
+        odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U}));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(info, " depth=4"), info);
+}
+
+/* A library TIE cell is a constant, not a cut point: y = a & t with t from TIE1 is y = a. */
+static void test_gates_tie_cell_is_constant(void) {
+    read_generic();
+    read_blif_text(".model m\n.inputs a\n.outputs y\n"
+                   ".subckt TIE1 Y=t\n.names a t y\n11 1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_gates("generic_gates"), afx_errors());
+    TEST_ASSERT_EQUAL_UINT32(0, afx_count(ODIN3_LOG_INFO, "abc: module 'm': cut points:"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("AND2"));
+    TEST_ASSERT_EQUAL_UINT32(0, count_type("$sop"));
+    afx_check(design);
+}
+
+/* Live nets and nodes of mod. */
+static uint32_t live_objects(void) {
+    uint32_t count = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(mod); id++) {
+        count += odin3_node_live(mod, (odin3_node_id){id}) ? 1U : 0U;
+    }
+    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
+        count += odin3_net_live(mod, (odin3_net_id){id}) ? 1U : 0U;
+    }
+    return count;
+}
+
+/* sp_canon(1) out of memory at every allocation after the coarse record (made first, so the
+ * sweep reaches the new net, node and log): the rollback leaves nothing behind. Ends with one cell
+ * of type made. */
+static void canon_out_of_memory(const char *made) {
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (int limit = 0; st == ODIN3_ERR_NO_MEMORY && limit < 64; limit++) {
+        splice sp;
+        canon_splice(&sp);
+        odin3_prov_id coarse = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, sp_coarse(&sp, &coarse));
+        uint32_t before = live_objects();
+        odin3_net_id net = {0};
+        odin3_util_set_alloc_fail_after(limit);
+        st = sp_canon(&sp, 1, &net);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            sp_rollback(&sp);
+            TEST_ASSERT_EQUAL_UINT32(before, live_objects());
+        }
+        odin3_vec_free(&sp.created);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_EQUAL_UINT32(1, count_type(made));
+}
+
+/* make_tie (the library's TIE1). */
+static void test_gates_make_tie_out_of_memory(void) {
+    read_generic();
+    read_blif_text(k_two_outputs);
+    start_region_of(mod);
+    canon_out_of_memory("TIE1");
+}
+
+/* No TIE1 in the library: the $_CONST1_ cell, with the coarse record. */
+static void test_gates_const_cell_out_of_memory(void) {
+    read_generic();
+    read_blif_text(k_two_outputs);
+    start_region_of(mod);
+    run->lib.tie1 = (odin3_celltype_id){0};
+    canon_out_of_memory("$_CONST1_");
+    odin3_node_id node = {0};
+    for (uint32_t id = 1; id < odin3_module_node_end(mod) && node.v == 0; id++) {
+        bool is_const =
+            odin3_node_live(mod, (odin3_node_id){id}) &&
+            strcmp(odin3_celltype_get(design, odin3_node_type(mod, (odin3_node_id){id}))->name,
+                   "$_CONST1_") == 0;
+        node.v = is_const ? id : 0;
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_node_prov(mod, node).v);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_from_cells_tags_gates);
@@ -502,5 +722,15 @@ int main(void) {
     RUN_TEST(test_gates_const_uses_tie);
     RUN_TEST(test_gates_init1_flop_is_cut);
     RUN_TEST(test_gates_prov_every_gate);
+    RUN_TEST(test_gates_const_output_tie);
+    RUN_TEST(test_gates_const_output_cmos6);
+    RUN_TEST(test_gates_input_to_output);
+    RUN_TEST(test_gates_reads_register);
+    RUN_TEST(test_gates_gate_reads_constant);
+    RUN_TEST(test_gates_malformed_leaves_ir);
+    RUN_TEST(test_gates_depth_counts_gates);
+    RUN_TEST(test_gates_tie_cell_is_constant);
+    RUN_TEST(test_gates_make_tie_out_of_memory);
+    RUN_TEST(test_gates_const_cell_out_of_memory);
     return UNITY_END();
 }

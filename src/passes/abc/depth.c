@@ -1,12 +1,15 @@
 /*
  * depth.c — the LUT depth of the top module (3D spec §8.1, AB-25; plan Task 18): the number of
  * $lut levels on the longest path between the top module's CIs and COs (ports, flip-flops and cut
- * cells bound a path), by Kahn's order with an explicit worklist.
+ * cells bound a path), by Kahn's order with an explicit worklist. After abc --gates the levels are
+ * the library gate cells (gatemap review: a library cell that is gate-like by the gate_truth rule
+ * counts as a $lut does), so the depth agrees with the pass report.
  */
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "passes/abc/prov.h"
+#include "sim/gate_truth.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -24,8 +27,19 @@ static uint32_t *at(odin3_vec *vec, uint32_t idx) {
     return (uint32_t *)vec->data + idx;
 }
 
+/* A level: a $lut, or a library cell that is gate-like by the gate_truth rule. */
 static bool is_lut(const dp *dpt, odin3_node_id node) {
-    return odin3_node_live(dpt->mod, node) && odin3_node_type(dpt->mod, node).v == dpt->lut_type;
+    if (!odin3_node_live(dpt->mod, node)) {
+        return false;
+    }
+    odin3_celltype_id type = odin3_node_type(dpt->mod, node);
+    if (type.v == dpt->lut_type) {
+        return true;
+    }
+    const odin3_design *design = odin3_module_design(dpt->mod);
+    const odin3_celltype_def *def = odin3_celltype_get(design, type);
+    return def != NULL && odin3_celltype_lib(design, type) != NULL &&
+           odin3_gate_truth_eligible(def);
 }
 
 /* The $lut node driving net, or 0. */

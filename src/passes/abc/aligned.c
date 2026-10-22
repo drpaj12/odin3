@@ -5,6 +5,7 @@
 #include "passes/abc/aligned.h"
 #include "odin3/odin3.h"
 #include "passes/abc/region.h"
+#include "passes/abc/result.h"
 #include "passes/abc/run.h"
 #include "util/arena.h"
 
@@ -23,8 +24,6 @@ enum {
 
 #define NONE UINT32_MAX /* a k that no result register is named after */
 
-enum { KIND_PI = 0, KIND_PO, KIND_LUT };
-
 /* One alignment. */
 typedef struct align {
     const odin3_abc_luts *src;
@@ -38,12 +37,8 @@ typedef struct align {
     uint32_t words; /* 32-bit truth words per object */
 } align;
 
-static uint32_t kind_of(const align *al, uint32_t obj) {
-    const int32_t *fan = al->src->fanins + (size_t)al->src->lut_size * obj;
-    if (fan[0] == MINI_NULL) {
-        return KIND_PI;
-    }
-    return fan[1] == MINI_NULL2 ? KIND_PO : KIND_LUT;
+static odin3_abc_mini_kind kind_of(const align *al, uint32_t obj) {
+    return odin3_abc_mini_kind_of(al->src, obj);
 }
 
 static int32_t *dst_fanins(const align *al, uint32_t obj) {
@@ -54,10 +49,10 @@ static int32_t *dst_fanins(const align *al, uint32_t obj) {
 static void count_kinds(align *al) {
     uint32_t pis = 0;
     for (uint32_t obj = FIRST_OBJ; obj < al->src->n_objs; obj++) {
-        uint32_t kind = kind_of(al, obj);
-        pis += kind == KIND_PI ? 1U : 0U;
-        al->luts += kind == KIND_LUT ? 1U : 0U;
-        if (kind == KIND_PO) {
+        odin3_abc_mini_kind kind = kind_of(al, obj);
+        pis += kind == ODIN3_ABC_MINI_PI ? 1U : 0U;
+        al->luts += kind == ODIN3_ABC_MINI_LUT ? 1U : 0U;
+        if (kind == ODIN3_ABC_MINI_PO) {
             al->pos[al->n_pos++] = obj;
         }
     }
@@ -96,10 +91,10 @@ static odin3_status number_objects(align *al) {
     al->map[0] = 0;
     al->map[1] = 1;
     for (uint32_t obj = FIRST_OBJ; obj < al->src->n_objs; obj++) {
-        uint32_t kind = kind_of(al, obj);
-        if (kind == KIND_LUT) {
+        odin3_abc_mini_kind kind = kind_of(al, obj);
+        if (kind == ODIN3_ABC_MINI_LUT) {
             al->map[obj] = FIRST_OBJ + al->real + al->regs_in + num.lut++;
-        } else if (kind == KIND_PI) {
+        } else if (kind == ODIN3_ABC_MINI_PI) {
             odin3_status st = number_pi(al, obj, &num);
             if (st != ODIN3_OK) {
                 return st;
@@ -181,7 +176,7 @@ static bool shape_ok(const align *al, const odin3_abc_run *run) {
 
 static void copy_luts(const align *al) {
     for (uint32_t obj = FIRST_OBJ; obj < al->src->n_objs; obj++) {
-        if (kind_of(al, obj) == KIND_LUT) {
+        if (kind_of(al, obj) == ODIN3_ABC_MINI_LUT) {
             copy_lut(al, obj);
         }
     }

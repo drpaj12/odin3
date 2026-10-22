@@ -83,8 +83,8 @@ uint32_t sp_out_port(const odin3_design *design, odin3_celltype_id type) {
 }
 
 /* Creates `$_CONST<value>_` and its net; *node_out and *net_out get them (both or neither). */
-static odin3_status make_const(odin3_abc_run *run, int value, odin3_node_id *node_out,
-                               odin3_net_id *net_out) {
+static odin3_status make_const(odin3_abc_run *run, int value, odin3_prov_id prov,
+                               odin3_node_id *node_out, odin3_net_id *net_out) {
     odin3_module *mod = run->module;
     const odin3_design *design = run->design;
     odin3_celltype_id type = {0};
@@ -93,11 +93,11 @@ static odin3_status make_const(odin3_abc_run *run, int value, odin3_node_id *nod
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_net_id net = {0};
-    odin3_status st = odin3_net_create(mod, 0, (odin3_prov_id){0}, &net);
+    odin3_status st = odin3_net_create(mod, 0, prov, &net);
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_node_spec spec = {type, 0, (odin3_prov_id){0}, NULL, 0};
+    odin3_node_spec spec = {type, 0, prov, NULL, 0};
     odin3_netvec port = {&net, 1};
     st = odin3_node_create_connected(mod, &spec, &port, node_out);
     if (st != ODIN3_OK) {
@@ -119,7 +119,7 @@ odin3_status odin3_abc_canonical_const(odin3_abc_run *run, int value, odin3_net_
         return ODIN3_OK;
     }
     odin3_node_id node = {0};
-    return make_const(run, value, &node, out);
+    return make_const(run, value, (odin3_prov_id){0}, &node, out);
 }
 
 /* --- abc --gates: TIE cells (G-7) ---------------------------------------------------------- */
@@ -153,6 +153,9 @@ static odin3_status make_tie(splice *sp, odin3_celltype_id tie, odin3_net_id *ne
     st = st == ODIN3_OK ? odin3_net_create(sp->mod, 0, prov, &net) : st;
     st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
     if (st != ODIN3_OK) {
+        if (odin3_net_live(sp->mod, net)) {
+            (void)odin3_net_delete(sp->mod, net); /* made but not logged: the rollback misses it */
+        }
         return st;
     }
     static const odin3_net_id k_none = {0};
@@ -185,6 +188,33 @@ static odin3_status gates_canon(splice *sp, int value, odin3_net_id *out, bool *
     return odin3_net_valid(*out) ? ODIN3_OK : make_tie(sp, tie, out);
 }
 
+/* The $_CONST0_/$_CONST1_ net of value: found, else made with the run's coarse record (as
+ * make_tie's) and logged for the rollback; what is made but not logged is removed again. */
+static odin3_status const_canon(splice *sp, int value, odin3_net_id *out) {
+    odin3_net_id net = find_const(sp->mod, value);
+    if (odin3_net_valid(net)) {
+        *out = net;
+        return ODIN3_OK;
+    }
+    odin3_node_id node = {0};
+    odin3_prov_id prov = {0};
+    odin3_status st = sp_coarse(sp, &prov);
+    st = st == ODIN3_OK ? make_const(sp->run, value, prov, &node, &net) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node.v}) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
+    if (st != ODIN3_OK) {
+        if (odin3_node_live(sp->mod, node)) {
+            (void)odin3_node_delete(sp->mod, node);
+        }
+        if (odin3_net_live(sp->mod, net)) {
+            (void)odin3_net_delete(sp->mod, net);
+        }
+        return st;
+    }
+    *out = net;
+    return ODIN3_OK;
+}
+
 /* The canonical net of value for the splice: found, else made and logged for the rollback. */
 odin3_status sp_canon(splice *sp, int value, odin3_net_id *out) {
     odin3_net_id *cached = &sp->canon[value != 0 ? 1 : 0];
@@ -193,31 +223,14 @@ odin3_status sp_canon(splice *sp, int value, odin3_net_id *out) {
         return ODIN3_OK;
     }
     bool done = false;
-    odin3_net_id tie_net = {0};
-    odin3_status tie_st = gates_canon(sp, value, &tie_net, &done);
-    if (done) {
-        if (tie_st == ODIN3_OK) {
-            *cached = tie_net;
-            *out = tie_net;
-        }
-        return tie_st;
+    odin3_net_id net = {0};
+    odin3_status st = gates_canon(sp, value, &net, &done);
+    st = done ? st : const_canon(sp, value, &net);
+    if (st == ODIN3_OK) {
+        *cached = net;
+        *out = net;
     }
-    odin3_net_id net = find_const(sp->mod, value);
-    if (!odin3_net_valid(net)) {
-        odin3_node_id node = {0};
-        odin3_status st = make_const(sp->run, value, &node, &net);
-        st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node.v}) : st;
-        st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
-        if (st != ODIN3_OK) {
-            if (odin3_node_live(sp->mod, node)) {
-                (void)odin3_node_delete(sp->mod, node);
-            }
-            return st;
-        }
-    }
-    *cached = net;
-    *out = net;
-    return ODIN3_OK;
+    return st;
 }
 
 odin3_status sp_coarse(splice *sp, odin3_prov_id *out) {

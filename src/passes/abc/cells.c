@@ -7,6 +7,7 @@
 
 #include "ir/celltype.h"
 #include "ir/design.h"
+#include "passes/abc/result.h"
 #include "techlib/libcells.h"
 #include "util/log.h"
 #include "util/vec.h"
@@ -18,8 +19,6 @@
 
 enum {
     FIRST_OBJ = 2, /* objects 0 and 1 are the constants */
-    MINI_NULL = 0x7FFFFFFF,
-    MINI_NULL2 = 0x7FFFFFFE,
     WHY_BYTES = 320,
     TABLE_BITS = 64
 };
@@ -106,11 +105,6 @@ static odin3_status tag_gate(cread *cr, uint32_t obj) {
     return ODIN3_OK;
 }
 
-static bool is_gate_object(const odin3_abc_luts *net, uint32_t obj) {
-    const int32_t *fan = net->fanins + (size_t)net->lut_size * obj;
-    return fan[0] != MINI_NULL && fan[1] != MINI_NULL2;
-}
-
 odin3_status odin3_abc_result_from_cells(const odin3_abc_run *run, const odin3_abc_cells *cells,
                                          odin3_arena *arena, odin3_abc_result *out) {
     const odin3_abc_region *region = run->region;
@@ -127,7 +121,7 @@ odin3_status odin3_abc_result_from_cells(const odin3_abc_run *run, const odin3_a
     st = index != NULL ? odin3_vec_reserve(&out->gate, out->n_luts) : ODIN3_ERR_NO_MEMORY;
     cread cr = {run, cells, index, out, 0};
     for (uint32_t obj = FIRST_OBJ; st == ODIN3_OK && obj < cells->net.n_objs; obj++) {
-        if (is_gate_object(&cells->net, obj)) {
+        if (odin3_abc_mini_kind_of(&cells->net, obj) == ODIN3_ABC_MINI_LUT) {
             st = tag_gate(&cr, obj);
         }
     }

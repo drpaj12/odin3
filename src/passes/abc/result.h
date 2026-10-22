@@ -60,6 +60,18 @@ uint32_t odin3_abc_result_first_lut(const odin3_abc_result *res);
 odin3_status odin3_abc_result_check(const odin3_abc_result *res,
                                     const odin3_abc_result_expect *expect, odin3_abc_fail *fail);
 
+/* The kind of a MiniLUT object (§4.3's layout): a PI (fanin 0 is the null marker 0x7FFFFFFF), a PO
+ * (fanin 1 is the second marker 0x7FFFFFFE) or a LUT (under abc --gates, a gate). */
+typedef enum odin3_abc_mini_kind {
+    ODIN3_ABC_MINI_PI = 0,
+    ODIN3_ABC_MINI_PO,
+    ODIN3_ABC_MINI_LUT
+} odin3_abc_mini_kind;
+
+/* The kind of object obj (below luts->n_objs; objects 0 and 1, the constants, read as PIs). The one
+ * rule the result reader, the aligned MiniLUT and the gate reader (cells.c) share. */
+odin3_abc_mini_kind odin3_abc_mini_kind_of(const odin3_abc_luts *luts, uint32_t obj);
+
 /*
  * The in-memory exchange's result (§6.1, AB-16): the engine's MiniLUT (odin3_abc_luts, §4.3's
  * layout) as an abc_result, *out initialised here (unusable on failure: free it). Objects are
