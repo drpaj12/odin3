@@ -66,7 +66,7 @@ G-1 to G-9). Executors read both. Where this plan deviates from the spec it says
    name (pin order drift): `abc: ABC returned a malformed network: ...`, IR unchanged (Task 11
    `test_from_cells_wrong_function`, `test_from_cells_wrong_arity`).
 
-## Spec gaps and agent defaults (decided here; logged as GM-1..GM-13 in Task 15)
+## Spec gaps and agent defaults (decided here; logged as GM-1..GM-14 in Task 15)
 
 | # | Gap found in the code | Decision |
 |---|---|---|
@@ -83,6 +83,7 @@ G-1 to G-9). Executors read both. Where this plan deviates from the spec it says
 | GM-11 | AB-20's script precedence would pick a project's or `--abc-script`'s LUT script for `--gates`. | With `--gates` only `--script` overrides; otherwise `builtin:lib/abc/gates.abc`. An INFO line says a project or CLI script was not used. |
 | GM-12 | The log has no NOTE level. | Spec "NOTE" lines are INFO lines whose text starts `abc: note:`. |
 | GM-13 | Spec 8 gave every cmos6 gate area 1. | cmos6 areas follow Yosys cmos_cells.lib (review finding) so `map -a` matches Gate-Breaker's flow: BUF 6, INV 3, NAND2 4, NOR2 4, DFF 18, DFFSR 18. |
+| GM-14 | Spec 6 says the new cell takes the old cell's records; it is silent on node attributes. | dfflibmap keeps the state cell's attributes (provenance-to-HDL and graph goals); review finding. Every attribute (`keep`, `hdlname`, graph and FSM tags, ...) is copied to the library cell, as flatten's copy.c copies them. The shared clock inverter takes a DERIVED record whose parents are the records of every flip-flop that uses it. |
 
 ## PRs, order and parallelism
 
@@ -520,10 +521,12 @@ Modify `src/passes/builtin.{c,h}` (register `odin3_pass_dfflibmap` after `odin3_
   `<cell>` is the node name or `$c<ID>`.
 - Apply per node: ports of the old cell C(0), D(1), Q(2) (INIT parameter 0); when
   `invert_clock`, one inverter per clock net per module (a `u64map` clock net -> new net; the
-  INV instance and its net take the first flip-flop's provenance); `odin3_node_create_connected`
+  INV instance and its net take the provenance of the one flip-flop that uses the net, or one DERIVED
+  record whose parents are the records of all that use it); `odin3_node_create_connected`
   with the library cell's ports (clock_port, data_port, q_port), name 0, prov = the old node's;
-  then `odin3_node_delete(old)`; then `odin3_node_rename(new, old name)`. A failed create leaves
-  the old node; a failed delete deletes the new node. Attributes are not copied.
+  then every attribute of the old node is copied to the new (GM-14); then `odin3_node_delete(old)`;
+  then `odin3_node_rename(new, old name)`. A failed create or copy leaves the old node; a failed
+  delete deletes the new node.
 - Logs: INFO `dfflibmap: library '<L>': <n> cells mapped (<cell> x<k>, ... in library order), <i> clock inverters`;
   WARNING when any INIT 0 or 1 went to an init-x cell: `dfflibmap: <n> flip-flops or latches with INIT 0 or 1 became cells whose init is x; their initial value is lost`.
 
@@ -740,7 +743,7 @@ write_blif --gates-as-names rtl.blif; abc --gates <L>; dfflibmap <L>; write_blif
 flow and the `dfflibmap` step), `CHANGELOG.md` (`## [Unreleased]` / `### Added`: `abc --gates`,
 `dfflibmap`, `write_blif --gates-as-names`, `lib/cmos6.o3lib`, `lib/abc/gates.abc`),
 `docs/V1.0.2.md` (create it: title `Odin III v1.0.2: gate mapping`; decisions log from `1.`, one per
-GM-1..GM-13 as "(Agent default, gatemap)", plus the sweep counts and floors under "Exit evidence").
+GM-1..GM-14 as "(Agent default, gatemap)", plus the sweep counts and floors under "Exit evidence").
 
 - [ ] **Step 1:** write the docs; `ctest --preset debug -R docs` (the Sphinx build, if present) and lint.
 - [ ] **Step 2: Commit** `docs: gate mapping (flow, CHANGELOG, V1.0.2 decisions GM-1..13)`; push; PR 7.

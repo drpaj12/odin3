@@ -235,6 +235,8 @@ add_library(odin3_core OBJECT
     src/passes/lpmmap/mult.c
     src/passes/lpmmap/compare.c
     src/passes/lpmmap/mem.c
+    src/passes/dfflibmap/choose.c
+    src/passes/dfflibmap/dfflibmap.c
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
@@ -1032,6 +1034,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
+    add_test(NAME cli_dfflibmap_golden
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh dfflibmap $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/dfflibmap)
+    set_tests_properties(cli_dfflibmap_golden PROPERTIES LABELS unit)
     add_test(NAME cli_memory_merge
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh memory_merge $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1668,6 +1675,9 @@ if(BUILD_TESTING)
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_libcells)
     target_compile_definitions(test_libcells PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_dfflibmap)
+    target_compile_definitions(test_dfflibmap PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    target_sources(test_dfflibmap PRIVATE tests/unit/proc_build.c)
     odin3_add_unit_test(test_abc_genlib)
     target_compile_definitions(test_abc_genlib PRIVATE
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"

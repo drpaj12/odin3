@@ -1,0 +1,9 @@
+# dfflibmap golden input: one .latch of each kind dfflibmap maps (re, fe, ah, al).
+.model top
+.inputs clk d0 d1 d2 d3
+.outputs q0 q1 q2 q3
+.latch d0 q0 re clk 3
+.latch d1 q1 fe clk 0
+.latch d2 q2 ah clk 2
+.latch d3 q3 al clk 3
+.end
