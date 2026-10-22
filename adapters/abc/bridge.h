@@ -23,9 +23,9 @@
 odin3_status odin3_bridge_frame_open(void);
 
 /*
- * Frees what get_luts and name_map returned, leaves the frame (back to the frame entered before
- * it) and, when destroy is true, destroys it; after an escape the caller passes false and the
- * frame's state is leaked. No frame: only the frees. ODIN3_OK, or ODIN3_ERR_ENGINE outside a
+ * Frees what get_luts, name_map and get_cells returned, leaves the frame (back to the frame entered
+ * before it) and, when destroy is true, destroys it; after an escape the caller passes false and
+ * the frame's state is leaked. No frame: only the frees. ODIN3_OK, or ODIN3_ERR_ENGINE outside a
  * guarded call.
  */
 odin3_status odin3_bridge_frame_close(bool destroy);
@@ -66,6 +66,35 @@ typedef struct odin3_bridge_luts {
  */
 odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32_t **lits,
                                    odin3_abc_fail *fail);
+
+/*
+ * Gate mapping (ABI 5): a copy of text (NUL-terminated genlib; ABC's reader edits its buffer) read
+ * with Mio_LibraryReadBuffer, named "odin3.genlib" (no file of that name is opened), then made the
+ * frame's gate library with Mio_UpdateGenlib, which frees the previous one (and with it the names
+ * an earlier get_cells returned). text is in session.c's canonical subset (checked before this
+ * call), and the session refuses the call once an exec has run. Before ABC reads it, every GATE's
+ * formula is parsed over its pin names (Mio_ParseFormula after a grammar check): mioFunc.c:264
+ * dereferences the NULL it returns for a formula it cannot parse, and Mio_ParseFormulaOper asserts
+ * on a '!' after '!' or an operator with no operand. ABC reads the copy with a '\n' appended.
+ * ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library" (with ` (gate "name")` when
+ * a formula did not parse); ODIN3_ERR_NO_MEMORY when a copy cannot be made.
+ */
+odin3_status odin3_bridge_load_genlib(const char *text, odin3_abc_fail *fail);
+
+/*
+ * The gate-mapped network of space (odin3_abc_cells_space) into *cells, in odin3_abc_cells'
+ * layout: the network space's mapped network, or the & space's cell mapping converted with
+ * Abc_NtkFromCellMappedGia (deleted again before the call returns). Objects in Abc_NtkDfsIter
+ * order; a constant node (no fanins) is object 0 or 1 by its gate's truth; names point into the
+ * gate library. ci_from: the network's CI names (network space) or the GIA's (& space), parsed as
+ * for get_luts. The arrays stay valid until the next get_cells or frame_close. ODIN3_ERR_ENGINE
+ * with fail RESULT "no gate-mapped network in the network space", "no cell mapping in the &
+ * space", "a box that is not a latch", "a node without a library gate", "a gate with N inputs (at
+ * most 6)", "a fanin that is not a gate, an input or a constant" (session.c adds "no network space
+ * N" and "nowhere to put the cells (cells is NULL)" before the call); ODIN3_ERR_NO_MEMORY when an
+ * array cannot be made.
+ */
+odin3_status odin3_bridge_get_cells(uint32_t space, odin3_abc_cells *cells, odin3_abc_fail *fail);
 
 #ifdef ODIN3_ABC_TEST_HOOKS
 /* Test builds only: the body of a test command, with ABC's argc/argv (argv[0] is its name). */

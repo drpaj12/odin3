@@ -55,4 +55,22 @@ enum { ODIN3_FAKE_MAP_RESULT = 0, ODIN3_FAKE_MAP_COMMAND, ODIN3_FAKE_MAP_LITS };
  */
 void odin3_abc_fake_name_map(int mode);
 
+/* The last text load_genlib got ("" when none; odin3_abc_fake_reset clears it). */
+const char *odin3_abc_fake_genlib(void);
+
+/* The fake's two gate names (a struct, so the two strings cannot be swapped by mistake). */
+typedef struct odin3_abc_fake_gates {
+    const char *and2;
+    const char *inv;
+} odin3_abc_fake_gates;
+
+/*
+ * Names the fake's two gates (default "AND2" and "INV"; NULL restores a default, and so does
+ * odin3_abc_fake_reset). get_cells (in-memory mode only, any space): each AND of the loaded AIG
+ * in a PO's or kept register's cone becomes a gate object named and2 with truth 0x8; each source
+ * read complemented (by an AND or a PO) gets one inv object (truth 0x1); constants are objects 0
+ * and 1; ci_from as get_luts. Without a loaded AIG: RESULT "the fake engine has no cells".
+ */
+void odin3_abc_fake_gate_names(odin3_abc_fake_gates names);
+
 #endif

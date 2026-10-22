@@ -20,8 +20,10 @@
 
 /* ABC (SYSTEM headers). main.h brings abc_global.h, then abcapis.h, cmd.h and gia.h, in the
  * order ABC needs; aig.h declares Aig_ManRandom and Aig_ManRandom64; miniaig.h and minilut.h are
- * the exchange layouts odin3.h's odin3_abc_aig and odin3_abc_luts equal (§4.3). */
+ * the exchange layouts odin3.h's odin3_abc_aig and odin3_abc_luts equal (§4.3); mio.h is the
+ * genlib library (gate mapping, ABI 5). */
 #include "base/main/main.h"
+#include "map/mio/mio.h"
 
 #include "aig/aig/aig.h"
 #include "aig/miniaig/miniaig.h"
@@ -37,6 +39,13 @@ extern word Random_Word(int fReset);
 /* The name map (aig/gia/giaMini.c), which abcapis.h does not declare (3D-0 spike finding). */
 extern int *Abc_FrameReadMiniLutNameMapping(Abc_Frame_t *pAbc);
 
+/* Gate mapping (ABI 5), which ABC's headers do not declare: the genlib reader of a buffer
+ * (map/mio/mioRead.c; map/mio/mio.c declares it the same way) and the & space's cell mapping as
+ * a mapped network (base/abci/abcDar.c:1152). */
+extern Mio_Library_t *Mio_LibraryReadBuffer(char *pBuffer, int fExtendedFormat,
+                                            st__table *tExcludeGate, int nFaninLimit, int fVerbose);
+extern Abc_Ntk_t *Abc_NtkFromCellMappedGia(Gia_Man_t *pGia, int fUseBuffs);
+
 /* The exchange arrays are handed to ABC as they are: its int and unsigned are 32 bits here. */
 _Static_assert(sizeof(int) == sizeof(int32_t), "MiniAIG and MiniLUT literals are int32_t");
 _Static_assert(sizeof(unsigned) == sizeof(uint32_t), "MiniLUT truth words are uint32_t");
@@ -48,8 +57,21 @@ enum {
     ADP_LUT_MAX_INPUTS = 16, /* MiniLUT's widest LUT (Mini_LutStart) */
     ADP_CI_NAME_BYTES = 16,  /* "c" and a CI index, with its NUL */
     ADP_DECIMAL = 10,
-    ADP_NO_CI = -1 /* a ci_from entry whose name is not c<n> */
+    ADP_NO_CI = -1,              /* a ci_from entry whose name is not c<n> */
+    ADP_MINI_NULL = 0x7FFFFFFF,  /* MiniLUT's empty fanin slot */
+    ADP_MINI_NULL2 = 0x7FFFFFFE, /* MiniLUT's slot 1 of a PO */
+    ADP_GATE_MAX_INPUTS = 6,     /* Mio_GateReadTruth's 64 bits */
+    ADP_CELLS_MIN_WIDTH = 2,     /* get_cells' lut_size is at least 2, as MiniLUT's */
+    ADP_TRUTH_LOG_BITS = 5,      /* 32-bit truth words */
+    ADP_WORD_BITS = 32,
+    ADP_CONST1_OBJ = 1,       /* MiniLUT object 1, constant 1 (object 0 is constant 0) */
+    ADP_FIRST_OBJ = 2,        /* the first object after the constants */
+    ADP_FROM_GIA_NO_BUFS = 0, /* Abc_NtkFromCellMappedGia's fUseBuffs */
+    ADP_GENLIB_PLAIN = 0      /* Mio_LibraryReadBuffer's fExtendedFormat */
 };
+
+/* The name the gate library gets (ABC prints it; no file of that name is read or written). */
+#define ADP_GENLIB_NAME "odin3.genlib"
 
 static Abc_Frame_t *adp_frame; /* the session's frame, NULL when none is open */
 static Abc_Frame_t *adp_prev;  /* the frame entered before it */
@@ -57,6 +79,16 @@ static bool adp_entered;       /* adp_frame is the thread's current frame */
 static Mini_Lut_t *adp_luts;   /* the last get_luts' MiniLUT, or NULL */
 static int32_t *adp_ci_from;   /* its ci_from (odin3_abc_alloc), or NULL */
 static int *adp_lits;          /* the last name map (ABC's malloc), or NULL */
+
+/* The last get_cells' arrays (odin3_abc_alloc), and the network it converted from the & space. */
+static struct {
+    int32_t *fanins;
+    uint32_t *truths;
+    int32_t *gate;
+    const char **names;
+    int32_t *ci_from;
+} adp_cells;
+static Abc_Ntk_t *adp_cells_ntk; /* Abc_NtkFromCellMappedGia's network, or NULL */
 
 /*
  * Every AB-4 generator back to its start, and libc's rand() seeded with seed. The seed is a
@@ -107,10 +139,35 @@ static void adp_free_luts(void) {
     adp_ci_from = NULL;
 }
 
+/* Deletes the network get_cells converted from the & space, if one is left. */
+static void adp_delete_cells_ntk(void) {
+    if (adp_cells_ntk != NULL) {
+        Abc_NtkDelete(adp_cells_ntk);
+        adp_cells_ntk = NULL;
+    }
+}
+
+/* Frees what get_cells returned; with delete_ntk also a converted network left by an escape
+ * (ABC's state; without it, the network leaks with the frame). */
+static void adp_free_cells(bool delete_ntk) {
+    free(adp_cells.fanins);
+    free(adp_cells.truths);
+    free(adp_cells.gate);
+    free((void *)adp_cells.names);
+    free(adp_cells.ci_from);
+    memset(&adp_cells, 0, sizeof adp_cells);
+    if (delete_ntk) {
+        adp_delete_cells_ntk();
+    }
+    adp_cells_ntk = NULL;
+}
+
 odin3_status odin3_bridge_frame_close(bool destroy) {
     ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
-    /* The session's own results go even after an escape: they are plain malloc'd arrays. */
+    /* The session's own results go even after an escape: they are plain malloc'd arrays. A
+     * converted network is ABC's state: after an escape it leaks with the frame. */
     adp_free_luts();
+    adp_free_cells(destroy);
     free(adp_lits);
     adp_lits = NULL;
     if (adp_entered) {
@@ -255,6 +312,443 @@ odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32
         return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "ABC made no name map");
     }
     *lits = adp_lits;
+    return ODIN3_OK;
+}
+
+/* --- gate mapping (ABI 5) ------------------------------------------------------------------- */
+
+enum {
+    ADP_PIN_TAIL = 7 /* a PIN's words after its name */
+};
+
+#define ADP_WORD_BLANKS " \t\r\n"
+#define ADP_FORMULA_SYMBOLS                                                                        \
+    "*&+|^!'()" /* mioFunc.c's MIO_SYMB_*, which ABC blanks to find names                          \
+                 */
+
+/* Where a formula is in its grammar: what the last symbol allows next. */
+typedef enum adp_formula_state {
+    ADP_FORM_WANT, /* an operand: the start, an opening parenthesis or an operator */
+    ADP_FORM_NEG,  /* an operand, after a '!' (a second one asserts in Mio_ParseFormulaOper) */
+    ADP_FORM_HAVE  /* an operand is complete: a name, a closing parenthesis or a quote */
+} adp_formula_state;
+
+/* A formula's name, which ends at a blank or any of ADP_FORMULA_SYMBOLS; its length. A name that
+ * starts with '0' or '1' is a constant to Mio_ParseFormula, so it counts as no name here. */
+static size_t adp_formula_name_len(const char *at) {
+    size_t len = strcspn(at, ADP_WORD_BLANKS ADP_FORMULA_SYMBOLS);
+    return (at[0] == '0' || at[0] == '1') ? 0 : len;
+}
+
+/* One symbol or name of a formula at *at, moving *state and *depth; false when the grammar
+ * (term := '!'* (name | '(' expr ')') '\''*, expr := term (op term)*, a juxtaposed term an AND)
+ * does not allow it. */
+static bool adp_formula_step(const char **at, adp_formula_state *state, int *depth) {
+    char sym = **at;
+    bool operand = *state != ADP_FORM_HAVE;
+    (*at)++;
+    switch (sym) {
+    case '*':
+    case '&':
+    case '+':
+    case '|':
+    case '^':
+        *state = ADP_FORM_WANT;
+        return !operand;
+    case '\'':
+        return !operand;
+    case ')':
+        (*depth)--;
+        return !operand && *depth >= 0;
+    case '(':
+        (*depth)++;
+        *state = ADP_FORM_WANT;
+        return true;
+    case '!':
+        operand = *state == ADP_FORM_NEG;
+        *state = ADP_FORM_NEG;
+        return !operand;
+    default:
+        (*at)--;
+        size_t len = adp_formula_name_len(*at);
+        *at += len;
+        *state = ADP_FORM_HAVE;
+        return len > 0;
+    }
+}
+
+/* Whether formula is one Mio_ParseFormula meets without an assertion: it asserts (Vec_IntPop of
+ * an empty stack) on an operator with no operand, and returns NULL for the other errors. */
+static bool adp_formula_syntax(const char *formula) {
+    adp_formula_state state = ADP_FORM_WANT;
+    int depth = 0;
+    const char *at = formula;
+    bool ok = true;
+    while (ok && *at != '\0') {
+        if (strchr(ADP_WORD_BLANKS, *at) != NULL) {
+            at++;
+        } else {
+            ok = adp_formula_step(&at, &state, &depth);
+        }
+    }
+    return ok && state == ADP_FORM_HAVE && depth == 0;
+}
+
+static bool adp_formula_parses(char *formula, char **names, int count) {
+    Vec_Int_t *expr = adp_formula_syntax(formula) ? Mio_ParseFormula(formula, names, count) : NULL;
+    if (expr == NULL) {
+        return false;
+    }
+    Vec_IntFree(expr);
+    return true;
+}
+
+/* One PIN after its keyword: its name, then ADP_PIN_TAIL more words; NULL when one is missing. */
+static char *adp_pin_name(char **save) {
+    char *name = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    for (int k = 0; k < ADP_PIN_TAIL; k++) {
+        if (Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save) == NULL) {
+            return NULL;
+        }
+    }
+    return name;
+}
+
+/* A GATE's PIN lines after its formula: their names into pins, their number in *count, the
+ * token after them in *next. False for a short PIN or more than ADP_GATE_MAX_INPUTS. */
+static bool adp_gate_pins(char **pins, int *count, char **next, char **save) {
+    *count = 0;
+    *next = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    while (*next != NULL && strcmp(*next, "PIN") == 0) {
+        char *name = adp_pin_name(save);
+        if (name == NULL || *count == ADP_GATE_MAX_INPUTS) {
+            return false;
+        }
+        pins[(*count)++] = name;
+        *next = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    }
+    return true;
+}
+
+/* ODIN3_OK when formula parses over its pin names (session.c's check has made them exactly the
+ * formula's names), or has no pins (CONST0 or CONST1, which ABC reads without parsing);
+ * ODIN3_ERR_ENGINE when it does not parse. */
+static odin3_status adp_formula_ok(const char *formula, char **pins, int n_pins) {
+    if (n_pins == 0) {
+        return ODIN3_OK;
+    }
+    return adp_formula_parses((char *)formula, pins, n_pins) ? ODIN3_OK : ODIN3_ERR_ENGINE;
+}
+
+/* One GATE after its keyword, as Mio_GateParseFormula meets it (adp_formula_ok's statuses). *gate
+ * gets the name; *next the token after the gate. */
+static odin3_status adp_gate_formula(char **gate, char **next, char **save) {
+    *gate = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    const char *area = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    const char *out = Abc_UtilStrtok(NULL, "=", save);
+    const char *formula = Abc_UtilStrtok(NULL, ";", save);
+    char *pins[ADP_GATE_MAX_INPUTS];
+    int n_pins = 0;
+    if (*gate == NULL || area == NULL || out == NULL || formula == NULL ||
+        !adp_gate_pins(pins, &n_pins, next, save)) {
+        return ODIN3_ERR_ENGINE;
+    }
+    return adp_formula_ok(formula, pins, n_pins);
+}
+
+/* RESULT unless every GATE's formula of text parses (the check works on a copy). */
+static odin3_status adp_genlib_formulas(const char *text, odin3_abc_fail *fail) {
+    size_t bytes = strlen(text) + 1;
+    char *scan = odin3_abc_alloc(bytes);
+    if (scan == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    memcpy(scan, text, bytes);
+    char *save = NULL;
+    char *gate = NULL;
+    char *tok = Abc_UtilStrtok(scan, ADP_WORD_BLANKS, &save);
+    odin3_status st = ODIN3_OK;
+    while (st == ODIN3_OK && tok != NULL && strcmp(tok, "GATE") == 0) {
+        st = adp_gate_formula(&gate, &tok, &save);
+    }
+    if (st == ODIN3_ERR_ENGINE) {
+        st = odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                "ABC cannot read the gate library (gate \"%s\")",
+                                gate != NULL ? gate : "?");
+    }
+    free(scan);
+    return st;
+}
+
+odin3_status odin3_bridge_load_genlib(const char *text, odin3_abc_fail *fail) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
+    ODIN3_ADAPTER_ASSERT(adp_frame != NULL && text != NULL);
+    /* ABC dereferences the NULL that Mio_ParseFormula returns for a formula it cannot parse
+     * (mioFunc.c:264), a crash the guard cannot catch: every formula is parsed here first. */
+    odin3_status st = adp_genlib_formulas(text, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    size_t len = strlen(text);
+    char *copy = odin3_abc_alloc(len + 2); /* the reader edits its buffer */
+    if (copy == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    /* A last '\n', so Io_ReadFileRemoveComments' scan for the end of a comment (mioRead.c:755)
+     * stops inside the buffer even if a '#' got past session.c's check. */
+    memcpy(copy, text, len);
+    copy[len] = '\n';
+    copy[len + 1] = '\0';
+    /* Not Mio_LibraryRead: with a buffer it dereferences the library it failed to read
+     * (mioRead.c:96). The buffer reader returns NULL instead, and the name is set as mio.c does. */
+    Mio_Library_t *lib = Mio_LibraryReadBuffer(copy, ADP_GENLIB_PLAIN, NULL, 0, 0);
+    free(copy);
+    if (lib == NULL) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "ABC cannot read the gate library");
+    }
+    Mio_LibrarySetName(lib, Abc_UtilStrsav(ADP_GENLIB_NAME));
+    Mio_UpdateGenlib(lib);
+    return ODIN3_OK;
+}
+
+/* One get_cells in progress. */
+typedef struct adp_cells_build {
+    Abc_Ntk_t *ntk;
+    Vec_Ptr_t *order; /* Abc_NtkDfsIter's nodes (constants and gates), topological */
+    int32_t *obj_of;  /* Abc_ObjId -> object, -1 none (odin3_abc_alloc) */
+    uint32_t n_gates; /* nodes with fanins */
+    uint32_t width;   /* lut_size */
+    uint32_t words;   /* truth words per object */
+    uint32_t n_objs;  /* the objects so far, then all of them */
+    uint32_t n_names; /* the distinct gate names so far */
+    odin3_abc_fail *fail;
+} adp_cells_build;
+
+/* The network of space: the network space's own, or the & space's cell mapping converted. */
+static odin3_status adp_cells_network(uint32_t space, Abc_Ntk_t **ntk, odin3_abc_fail *fail) {
+    if (space == ODIN3_ABC_CELLS_NTK) {
+        *ntk = Abc_FrameReadNtk(adp_frame);
+        if (*ntk == NULL || !Abc_NtkIsMappedLogic(*ntk)) {
+            return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                      "no gate-mapped network in the network space");
+        }
+        return ODIN3_OK;
+    }
+    Gia_Man_t *gia = Abc_FrameReadGia(adp_frame);
+    if (gia == NULL || !Gia_ManHasCellMapping(gia)) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "no cell mapping in the & space");
+    }
+    adp_cells_ntk = Abc_NtkFromCellMappedGia(gia, ADP_FROM_GIA_NO_BUFS);
+    ODIN3_ADAPTER_ASSERT(adp_cells_ntk != NULL);
+    *ntk = adp_cells_ntk;
+    return ODIN3_OK;
+}
+
+/* Checks every node of the order (each has a library gate, at most 6 inputs) and maps the
+ * constants to objects 0 and 1; counts the gates and the widest. */
+static odin3_status adp_cells_scan(adp_cells_build *build) {
+    uint32_t widest = ADP_CELLS_MIN_WIDTH;
+    for (int i = 0; i < Vec_PtrSize(build->order); i++) {
+        Abc_Obj_t *node = (Abc_Obj_t *)Vec_PtrEntry(build->order, i);
+        Mio_Gate_t *gate = (Mio_Gate_t *)node->pData;
+        int fanins = Abc_ObjFaninNum(node);
+        if (gate == NULL) {
+            return odin3_abc_fail_set(build->fail, ODIN3_ABC_FAIL_RESULT,
+                                      "a node without a library gate");
+        }
+        if (fanins > ADP_GATE_MAX_INPUTS) {
+            return odin3_abc_fail_set(build->fail, ODIN3_ABC_FAIL_RESULT,
+                                      "a gate with %d inputs (at most %d)", fanins,
+                                      ADP_GATE_MAX_INPUTS);
+        }
+        if (fanins == 0) {
+            build->obj_of[Abc_ObjId(node)] = Mio_GateReadTruth(gate) == 0 ? 0 : ADP_CONST1_OBJ;
+            continue;
+        }
+        build->n_gates++;
+        widest = (uint32_t)fanins > widest ? (uint32_t)fanins : widest;
+    }
+    build->width = widest;
+    build->words = widest > ADP_TRUTH_LOG_BITS ? 1U << (widest - ADP_TRUTH_LOG_BITS) : 1U;
+    return ODIN3_OK;
+}
+
+/* The object map, then the result arrays sized for the network. */
+static odin3_status adp_cells_alloc(adp_cells_build *build) {
+    Abc_Ntk_t *ntk = build->ntk;
+    uint32_t cis = (uint32_t)(Abc_NtkPiNum(ntk) + Abc_NtkLatchNum(ntk));
+    uint32_t cos = (uint32_t)(Abc_NtkPoNum(ntk) + Abc_NtkLatchNum(ntk));
+    build->n_objs = ADP_FIRST_OBJ + cis + build->n_gates + cos;
+    size_t objs = build->n_objs;
+    adp_cells.fanins = odin3_abc_alloc(sizeof(int32_t) * objs * build->width);
+    adp_cells.truths =
+        adp_cells.fanins == NULL ? NULL : odin3_abc_alloc(sizeof(uint32_t) * objs * build->words);
+    adp_cells.gate = adp_cells.truths == NULL ? NULL : odin3_abc_alloc(sizeof(int32_t) * objs);
+    adp_cells.names = adp_cells.gate == NULL
+                          ? NULL
+                          : (const char **)odin3_abc_alloc(sizeof(char *) * (build->n_gates + 1U));
+    if (adp_cells.names == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < objs * build->width; i++) {
+        adp_cells.fanins[i] = ADP_MINI_NULL;
+    }
+    memset(adp_cells.truths, 0, sizeof(uint32_t) * objs * build->words);
+    for (size_t i = 0; i < objs; i++) {
+        adp_cells.gate[i] = -1;
+    }
+    adp_cells.truths[(size_t)ADP_CONST1_OBJ * build->words] = UINT32_MAX;
+    build->n_objs = ADP_FIRST_OBJ;
+    return ODIN3_OK;
+}
+
+/* The next object stands for ABC's object obj (NULL: none, as for a PO). */
+static uint32_t adp_cells_push(adp_cells_build *build, Abc_Obj_t *obj) {
+    uint32_t at = build->n_objs++;
+    if (obj != NULL) {
+        build->obj_of[Abc_ObjId(obj)] = (int32_t)at;
+    }
+    return at;
+}
+
+/* The PIs, then the register outputs; ci_from from their names (network space). */
+static odin3_status adp_cells_inputs(adp_cells_build *build, bool names_from_ntk) {
+    Abc_Ntk_t *ntk = build->ntk;
+    int pis = Abc_NtkPiNum(ntk);
+    int regs = Abc_NtkLatchNum(ntk);
+    if (names_from_ntk) {
+        adp_cells.ci_from = odin3_abc_alloc(sizeof(int32_t) * (size_t)(pis + regs + 1));
+        if (adp_cells.ci_from == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    for (int i = 0; i < pis + regs; i++) {
+        Abc_Obj_t *ci = i < pis ? Abc_NtkPi(ntk, i) : Abc_ObjFanout0(Abc_NtkBox(ntk, i - pis));
+        (void)adp_cells_push(build, ci);
+        if (names_from_ntk) {
+            adp_cells.ci_from[i] = adp_ci_index(Abc_ObjName(ci));
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* The index into names of gate's name, added on its first use. */
+static int32_t adp_cells_name(adp_cells_build *build, Mio_Gate_t *gate) {
+    const char *name = Mio_GateReadName(gate);
+    for (uint32_t i = 0; i < build->n_names; i++) {
+        if (strcmp(adp_cells.names[i], name) == 0) {
+            return (int32_t)i;
+        }
+    }
+    adp_cells.names[build->n_names] = name;
+    return (int32_t)build->n_names++;
+}
+
+/* Object at's fanin slot k becomes ABC's fanin; RESULT when it is not an object yet. */
+static odin3_status adp_cells_wire(adp_cells_build *build, uint32_t at, uint32_t slot,
+                                   Abc_Obj_t *fanin) {
+    int32_t from = build->obj_of[Abc_ObjId(fanin)];
+    if (from < 0) {
+        return odin3_abc_fail_set(build->fail, ODIN3_ABC_FAIL_RESULT,
+                                  "a fanin that is not a gate, an input or a constant");
+    }
+    adp_cells.fanins[((size_t)at * build->width) + slot] = from;
+    return ODIN3_OK;
+}
+
+/* The gates in topological order: fanins in pin order, truth words, gate name. */
+static odin3_status adp_cells_gates(adp_cells_build *build) {
+    for (int i = 0; i < Vec_PtrSize(build->order); i++) {
+        Abc_Obj_t *node = (Abc_Obj_t *)Vec_PtrEntry(build->order, i);
+        if (Abc_ObjFaninNum(node) == 0) {
+            continue; /* a constant, already object 0 or 1 */
+        }
+        Mio_Gate_t *gate = (Mio_Gate_t *)node->pData;
+        uint32_t at = adp_cells_push(build, node);
+        for (int k = 0; k < Abc_ObjFaninNum(node); k++) {
+            odin3_status st = adp_cells_wire(build, at, (uint32_t)k, Abc_ObjFanin(node, k));
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+        word truth = Mio_GateReadTruth(gate);
+        for (uint32_t word_at = 0; word_at < build->words; word_at++) {
+            adp_cells.truths[((size_t)at * build->words) + word_at] =
+                (uint32_t)(truth >> (ADP_WORD_BITS * word_at));
+        }
+        adp_cells.gate[at] = adp_cells_name(build, gate);
+    }
+    return ODIN3_OK;
+}
+
+/* The POs, then the register inputs: driver in slot 0, MiniLUT's PO mark in slot 1. */
+static odin3_status adp_cells_outputs(adp_cells_build *build) {
+    Abc_Ntk_t *ntk = build->ntk;
+    int pos = Abc_NtkPoNum(ntk);
+    int regs = Abc_NtkLatchNum(ntk);
+    for (int i = 0; i < pos + regs; i++) {
+        Abc_Obj_t *co = i < pos ? Abc_NtkPo(ntk, i) : Abc_ObjFanin0(Abc_NtkBox(ntk, i - pos));
+        uint32_t at = adp_cells_push(build, NULL);
+        odin3_status st = adp_cells_wire(build, at, 0, Abc_ObjFanin0(co));
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        adp_cells.fanins[((size_t)at * build->width) + 1U] = ADP_MINI_NULL2;
+    }
+    return ODIN3_OK;
+}
+
+/* Fills adp_cells from build->ntk (the order already made). */
+static odin3_status adp_cells_fill(adp_cells_build *build, uint32_t space) {
+    size_t ids = (size_t)Abc_NtkObjNumMax(build->ntk);
+    build->obj_of = odin3_abc_alloc(sizeof(int32_t) * (ids + 1U));
+    if (build->obj_of == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i <= ids; i++) {
+        build->obj_of[i] = -1;
+    }
+    odin3_status st = adp_cells_scan(build);
+    st = st == ODIN3_OK ? adp_cells_alloc(build) : st;
+    if (st == ODIN3_OK && space == ODIN3_ABC_CELLS_GIA) {
+        st = adp_ci_from_names(Abc_FrameReadGia(adp_frame), &adp_cells.ci_from);
+    }
+    st = st == ODIN3_OK ? adp_cells_inputs(build, space == ODIN3_ABC_CELLS_NTK) : st;
+    st = st == ODIN3_OK ? adp_cells_gates(build) : st;
+    return st == ODIN3_OK ? adp_cells_outputs(build) : st;
+}
+
+odin3_status odin3_bridge_get_cells(uint32_t space, odin3_abc_cells *cells, odin3_abc_fail *fail) {
+    ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
+    ODIN3_ADAPTER_ASSERT(adp_frame != NULL && cells != NULL && space <= ODIN3_ABC_CELLS_GIA);
+    adp_free_cells(true);
+    adp_cells_build build = {.fail = fail};
+    odin3_status st = adp_cells_network(space, &build.ntk, fail);
+    if (st == ODIN3_OK && Abc_NtkBoxNum(build.ntk) != Abc_NtkLatchNum(build.ntk)) {
+        st = odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "a box that is not a latch");
+    }
+    uint32_t regs = 0;
+    if (st == ODIN3_OK) {
+        regs = (uint32_t)Abc_NtkLatchNum(build.ntk);
+        build.order = Abc_NtkDfsIter(build.ntk, 1);
+        st = adp_cells_fill(&build, space);
+        Vec_PtrFree(build.order);
+        free(build.obj_of);
+    }
+    adp_delete_cells_ntk(); /* the names point into the library, not into the network */
+    if (st != ODIN3_OK) {
+        adp_free_cells(false);
+        return st;
+    }
+    *cells = (odin3_abc_cells){.net = {.fanins = adp_cells.fanins,
+                                       .truths = adp_cells.truths,
+                                       .ci_from = adp_cells.ci_from,
+                                       .n_objs = build.n_objs,
+                                       .n_regs = regs,
+                                       .lut_size = build.width},
+                               .gate = adp_cells.gate,
+                               .names = adp_cells.names,
+                               .n_names = build.n_names};
     return ODIN3_OK;
 }
 

@@ -16,7 +16,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { MAX_NODES = 4096, MAX_PORTS = 256, MAX_SOP_INPUTS = 64, NAME_BYTES = 40, CMD_BYTES = 8192 };
+enum {
+    MAX_NODES = 4096,
+    MAX_PORTS = 256,
+    MAX_SOP_INPUTS = 64,
+    NAME_BYTES = 40,
+    CMD_BYTES = 8192,
+    GENLIB_BYTES = 65536
+};
 
 #define LIT_NONE UINT32_MAX
 
@@ -54,7 +61,11 @@ typedef struct fake {
     char extra[NAME_BYTES * 2]; /* a command run just before every write_hie */
     odin3_abc_fail fail;
     bool open;
-    int map_mode; /* odin3_abc_fake_name_map */
+    int map_mode;               /* odin3_abc_fake_name_map */
+    bool aig_loaded;            /* the network came from load_aig (the in-memory exchange) */
+    char genlib[GENLIB_BYTES];  /* the last text load_genlib got */
+    char gate_and2[NAME_BYTES]; /* odin3_abc_fake_gate_names; "" means the default */
+    char gate_inv[NAME_BYTES];
 } fake;
 
 static fake fk;
@@ -200,6 +211,7 @@ static void reset_network(void) {
     fk.n_pos = 0;
     fk.n_latches = 0;
     fk.const_lut = -1;
+    fk.aig_loaded = false;
 }
 
 /* The inputs become PIs, the flip-flops latches. */
@@ -629,6 +641,7 @@ static odin3_status fake_load_aig(void *self, const odin3_abc_aig *aig, odin3_ab
         }
         po++;
     }
+    fk.aig_loaded = true;
     return ODIN3_OK;
 }
 
@@ -774,6 +787,126 @@ static odin3_status fake_name_map(void *self, const odin3_abc_luts *aligned, con
     return fake_fail_result(fail, "the fake engine has no name map");
 }
 
+/* --- gate mapping (ABI 5) ------------------------------------------------------------------ */
+
+static odin3_status fake_load_genlib(void *self, const char *text, odin3_abc_fail *fail) {
+    (void)self;
+    if (text == NULL || strlen(text) >= GENLIB_BYTES) {
+        return fake_fail_result(fail, "the fake engine cannot hold this genlib");
+    }
+    (void)snprintf(fk.genlib, GENLIB_BYTES, "%s", text);
+    return ODIN3_OK;
+}
+
+enum { GATE_AND2 = 0, GATE_INV = 1, FAKE_GATES = 2, TABLE_AND = 0x8 };
+
+static int32_t out_gate[MAX_OBJS]; /* per object: index into out_names, -1 none */
+static const char *out_names[FAKE_GATES];
+static int32_t name_slot[FAKE_GATES]; /* GATE_* -> index into out_names, -1 not used yet */
+static uint32_t n_out_names;
+static uint32_t inv_obj[MAX_NODES]; /* source node -> its inverter object, UINT32_MAX none */
+
+static const char *fake_gate_name(int which) {
+    const char *set = which == GATE_AND2 ? fk.gate_and2 : fk.gate_inv;
+    if (set[0] != '\0') {
+        return set;
+    }
+    return which == GATE_AND2 ? "AND2" : "INV";
+}
+
+/* Pushes a gate object of kind which; its name gets an index on first use. */
+static uint32_t push_gate(int which, const int32_t *fanins, uint32_t table) {
+    if (name_slot[which] < 0) {
+        name_slot[which] = (int32_t)n_out_names;
+        out_names[n_out_names++] = fake_gate_name(which);
+    }
+    uint32_t obj = out_push(fanins, table);
+    out_gate[obj] = name_slot[which];
+    return obj;
+}
+
+/* The object carrying literal lit: a constant, a source object, or the source's inverter. */
+static uint32_t cell_source(uint32_t lit) {
+    lit = resolve(lit);
+    uint32_t node = lit >> 1;
+    if (node == 0) {
+        return lit & 1U;
+    }
+    if ((lit & 1U) == 0) {
+        return out_node[node];
+    }
+    if (inv_obj[node] == UINT32_MAX) {
+        const int32_t one[LUT_SIZE] = {(int32_t)out_node[node], MINI_NULL};
+        inv_obj[node] = push_gate(GATE_INV, one, replicate(TABLE_NOT));
+    }
+    return inv_obj[node];
+}
+
+static void emit_cell_ands(const bool *used) {
+    for (uint32_t id = 1; id < fk.n_nodes; id++) {
+        if (used[id]) {
+            const int32_t fan[LUT_SIZE] = {(int32_t)cell_source(fk.nodes[id].fan0),
+                                           (int32_t)cell_source(fk.nodes[id].fan1)};
+            out_node[id] = push_gate(GATE_AND2, fan, replicate(TABLE_AND));
+        }
+    }
+}
+
+static void emit_cell_po(uint32_t lit) {
+    const int32_t fan[LUT_SIZE] = {(int32_t)cell_source(lit), MINI_NULL2};
+    (void)out_push(fan, 0);
+}
+
+/* Marks the cones of the POs and the kept registers; returns the kept register count. */
+static uint32_t mark_used(bool *used) {
+    memset(used, 0, sizeof(bool) * MAX_NODES);
+    for (uint32_t i = 0; i < fk.n_pos; i++) {
+        mark_cone(fk.pos[i].lit, used);
+    }
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < fk.n_latches; i++) {
+        if (fk.nodes[fk.latches[i]].rep == LIT_NONE) {
+            mark_cone(fk.nodes[fk.latches[i]].fan0, used);
+            kept++;
+        }
+    }
+    return kept;
+}
+
+static odin3_status fake_get_cells(void *self, uint32_t space, odin3_abc_cells *cells,
+                                   odin3_abc_fail *fail) {
+    (void)self;
+    (void)space;
+    if (!fk.aig_loaded) {
+        return fake_fail_result(fail, "the fake engine has no cells");
+    }
+    static bool used[MAX_NODES];
+    uint32_t kept = mark_used(used);
+    memset(out_gate, 0xFF, sizeof out_gate);
+    memset(inv_obj, 0xFF, sizeof inv_obj);
+    name_slot[GATE_AND2] = -1;
+    name_slot[GATE_INV] = -1;
+    n_out_names = 0;
+    out_objs = 0;
+    (void)out_push(NULL, 0);          /* constant 0 */
+    (void)out_push(NULL, UINT32_MAX); /* constant 1 */
+    emit_inputs();
+    emit_cell_ands(used);
+    for (uint32_t i = 0; i < fk.n_pos; i++) {
+        emit_cell_po(fk.pos[i].lit);
+    }
+    for (uint32_t i = 0; i < fk.n_latches; i++) {
+        if (fk.nodes[fk.latches[i]].rep == LIT_NONE) {
+            emit_cell_po(fk.nodes[fk.latches[i]].fan0);
+        }
+    }
+    cells->net = (odin3_abc_luts){out_fanins, out_truths, out_ci_from, out_objs, kept, LUT_SIZE};
+    cells->gate = out_gate;
+    cells->names = out_names;
+    cells->n_names = n_out_names;
+    return ODIN3_OK;
+}
+
 static void fake_close(void *self) {
     (void)self;
     fk.open = false;
@@ -789,6 +922,8 @@ static const odin3_abc_engine k_fake = {ODIN3_ABC_ENGINE_VERSION,
                                         fake_exec,
                                         fake_get_luts,
                                         fake_name_map,
+                                        fake_load_genlib,
+                                        fake_get_cells,
                                         fake_close,
                                         {NULL, NULL, NULL, NULL}};
 
@@ -823,4 +958,13 @@ void odin3_abc_fake_extra(const char *command) {
 
 void odin3_abc_fake_name_map(int mode) {
     fk.map_mode = mode;
+}
+
+const char *odin3_abc_fake_genlib(void) {
+    return fk.genlib;
+}
+
+void odin3_abc_fake_gate_names(odin3_abc_fake_gates names) {
+    (void)snprintf(fk.gate_and2, NAME_BYTES, "%s", names.and2 == NULL ? "" : names.and2);
+    (void)snprintf(fk.gate_inv, NAME_BYTES, "%s", names.inv == NULL ? "" : names.inv);
 }

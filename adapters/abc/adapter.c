@@ -35,6 +35,8 @@ odin3_status odin3_abc_adapter_init(void) {
         .exec = odin3_abc_session_exec,
         .get_luts = odin3_abc_session_get_luts,
         .name_map = odin3_abc_session_name_map,
+        .load_genlib = odin3_abc_session_load_genlib,
+        .get_cells = odin3_abc_session_get_cells,
         .close = odin3_abc_session_close,
         .reserved = {NULL, NULL, NULL, NULL},
     };

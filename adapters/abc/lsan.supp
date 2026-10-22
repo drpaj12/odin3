@@ -7,3 +7,14 @@ leak:^Gia_
 leak:^Cmd_
 leak:^Extra_
 leak:^Mem_
+# A formula ABC cannot parse leaves its parser stacks and the expressions on them behind:
+# Mio_ParseFormula (map/mio/mioParse.c) returns NULL on an error without freeing pStackFn,
+# pStackOp or the Vec_Int_t expressions it made (Exp_Var, Exp_And, Exp_Or, Exp_Not, ... in
+# map/mio/exp.h, each called from it). The adapter calls it to refuse such a gate library
+# (bridge.c, adp_formula_parses).
+leak:^Mio_ParseFormula
+# The same leak when ASan's unwinder stops in the inlined expression builder (ABC is built
+# without frame pointers): Exp_And (map/mio/exp.h:138, also through Exp_Or at exp.h:152),
+# called by Mio_ParseFormulaOper (mioParse.c:77, :79), whose results Mio_ParseFormula leaves on
+# pStackFn when it returns NULL (mioParse.c:380).
+leak:^Exp_And
