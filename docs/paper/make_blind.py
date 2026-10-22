@@ -19,9 +19,11 @@ NAMES = [("Leman~Russ~III", "AnonHT"), ("Leman Russ III", "AnonHT"), ("The Norns
          ("The Norns III", "AnonPlace"), ("Norns~III", "AnonPlace"), ("Norns III", "AnonPlace"),
          ("Yggdrasil~III", "AnonSuite"), ("Yggdrasil III", "AnonSuite"), ("Wyrd~III", "AnonGUI"),
          ("Wyrd III", "AnonGUI"), ("Loki~III", "AnonRE"), ("Loki III", "AnonRE"),
+         ("Verdandi~III", "AnonTrace~III"), ("Verdandi III", "AnonTrace III"),
          ("Midgard~III", "AnonGame"), ("Midgard III", "AnonGame"), ("Bifrost~III", "AnonSim"),
          ("Bifrost III", "AnonSim")]
-THEME = ("Yggdrasil", "Wyrd", "Loki", "Midgard", "Bifrost", "Leman", "Norns", "Norse", "world tree")
+THEME = ("Yggdrasil", "Wyrd", "Loki", "Midgard", "Bifrost", "Leman", "Norns", "Norse", "world tree",
+         "Verdandi")
 def rename(t):
     t = t.replace("Odin~III", NAME).replace("Odin III", NAME)
     for a, b in NAMES:
