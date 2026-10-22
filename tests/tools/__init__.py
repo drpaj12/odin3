@@ -33,6 +33,7 @@ for _sub in (
     "tools/flatten-check",
     "tools/netlist-ingest",
     "tools/lower-check",
+    "tools/gatemap-check",
     "tools/hardmap-check",
     "tools/partial-map-check",
     "tools/lpm-check",

@@ -2206,6 +2206,8 @@ static odin3_status write_as_names(blif_writer *wr, odin3_node_id node, odin3_ce
         write_constant(wr, pin_name(wr, odin3_node_port(wr->module, node, 0).first), value);
         return wr->st;
     }
+    /* Any status but NO_MEMORY only says "not a constant cell" (a state or other cell): it is
+     * dropped on purpose and the cell goes on to the state and plain rules below. */
     if (st == ODIN3_ERR_NO_MEMORY) {
         return wr_fail(wr, st);
     }

@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# gatemap-run: one design through `abc --gates` and `dfflibmap`, equivalent to the RTL, with the
+# provenance checks (gatemap spec 9; plan Task 14). See gatemap_run.py.
+# Exit codes: 0 ok, 1 differs/foreign-cell/noprov/error, 2 usage, 3 odin3 error, 4 unproven, 77 skipped.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+export PYTHONPATH="$here:$here/../elab-check:$here/../opt-check:$here/../lower-check${PYTHONPATH:+:$PYTHONPATH}"
+exec python3 "$here/gatemap_run.py" "$@"
