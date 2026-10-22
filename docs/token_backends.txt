@@ -10,3 +10,4 @@
 # Start is inclusive, end is exclusive. "open" means the window has not closed yet.
 # Only the backend "deepseek" is known. Requests outside every window are "anthropic".
 # Blank lines and lines starting with # are ignored.
+deepseek 2026-10-22T20:00:00Z open
