@@ -242,6 +242,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/args.c
     src/passes/abc/region.c
     src/passes/abc/result.c
+    src/passes/abc/cells.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
     src/passes/abc/aig.c
@@ -1398,7 +1399,7 @@ if(BUILD_TESTING)
     # abc_fake_engine.c, which never links ABC). Each test writes its files under abc_tests/<name>.
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/abc_tests)
     foreach(_abc_test test_abc_args test_abc_region test_abc_result test_abc_xblif
-                      test_abc_exchange test_abc_splice test_abc_prov)
+                      test_abc_exchange test_abc_splice test_abc_prov test_abc_gates)
         odin3_add_unit_test(${_abc_test})
         target_compile_definitions(${_abc_test} PRIVATE
             ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"

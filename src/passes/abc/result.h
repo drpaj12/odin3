@@ -31,11 +31,14 @@ typedef struct odin3_abc_result_expect {
  * - co_driver holds the driver object of each CO: the n_cos real COs, then n_obs observation
  *   outputs (in-memory only), then the n_regs_out register inputs.
  * - old_lit maps objects to old AIG literals (§8.2); empty without a name map.
+ * - gate gives each LUT, under abc --gates, its library gate: an index into the run's lib.gates
+ *   (gatemap plan Task 11, cells.h); empty outside --gates.
  * All vecs hold uint32_t except truth (uint64_t).
  */
 typedef struct odin3_abc_result {
     uint32_t n_cis, n_regs_out, n_luts, n_cos, n_obs;
     odin3_vec fanin_start, fanins, lut_k, truth_start, truth, reg_from, co_driver, old_lit;
+    odin3_vec gate;
 } odin3_abc_result;
 
 /* An empty result with its vecs initialised (also valid after odin3_abc_result_free). */

@@ -516,9 +516,9 @@ static void test_gates_note_texts_with_ports(void) {
                         "  in A 1 ; out Y 1\n"
                         "  fn Y = ~A\n"
                         "end\n"
-                        "cell NAND2 gate area 1\n"
+                        "cell AND2 gate area 1\n"
                         "  in A 1 ; in B 1 ; out Y 1\n"
-                        "  fn Y = ~(A & B)\n"
+                        "  fn Y = A & B\n"
                         "end\n"
                         "cell IGN gate area 1\n"
                         "  in A 1 ; in B 1 ; out Y 1\n"
@@ -539,7 +539,6 @@ static void test_gates_note_texts_with_ports(void) {
 }
 
 static void test_gates_genlib_loaded(void) {
-    TEST_IGNORE_MESSAGE("the exchange loads the genlib from Task 11");
     read_generic();
     build_and();
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());

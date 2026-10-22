@@ -8,6 +8,7 @@
 #include "passes/abc/abc.h"
 #include "passes/abc/aig.h"
 #include "passes/abc/aligned.h"
+#include "passes/abc/cells.h"
 #include "passes/abc/child.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
@@ -320,12 +321,27 @@ odin3_status odin3_abc_exchange_blif(odin3_abc_run *run, odin3_abc_result *out) 
 
 enum { REASON_TEXT_BYTES = ODIN3_ABC_REASON_BYTES - 64 };
 
-/* load_aig, `&put`, the script and (when it ends in the network space) `&get -m -n` (AB-22). */
+/* abc --gates: the genlib becomes the session's gate library, before any command (gatemap spec
+ * 4.2). */
+static odin3_status gates_load_genlib(odin3_abc_run *run) {
+    const odin3_abc_engine *eng = run->engine;
+    odin3_abc_fail fail = {0};
+    odin3_status st = eng->load_genlib(eng->self, run->genlib.data, &fail);
+    flush_lines(run);
+    return st == ODIN3_ERR_ENGINE ? report_fail(run, &fail, "load_genlib", NULL) : st;
+}
+
+/* (With --gates, load_genlib), load_aig, `&put`, the script and (when it ends in the network space
+ * and maps to LUTs) `&get -m -n` (AB-22). */
 static odin3_status aig_commands(odin3_abc_run *run) {
     const odin3_abc_engine *eng = run->engine;
     odin3_abc_fail fail = {0};
     odin3_abc_aig view = odin3_abc_aig_view(&run->aig);
-    odin3_status st = eng->load_aig(eng->self, &view, &fail);
+    odin3_status st = run->gates_mode ? gates_load_genlib(run) : ODIN3_OK;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = eng->load_aig(eng->self, &view, &fail);
     flush_lines(run);
     if (st == ODIN3_ERR_ENGINE) {
         return report_fail(run, &fail, "load_aig", NULL);
@@ -335,7 +351,7 @@ static odin3_status aig_commands(odin3_abc_run *run) {
         const odin3_abc_cmd *src = odin3_abc_script_cmd(&run->script, i);
         st = exec_line(run, src->line, src);
     }
-    if (st == ODIN3_OK && run->script.final_space == ODIN3_ABC_SPACE_NTK) {
+    if (st == ODIN3_OK && run->script.final_space == ODIN3_ABC_SPACE_NTK && !run->gates_mode) {
         st = exec_line(run, "&get -m -n", NULL);
     }
     return st;
@@ -439,6 +455,29 @@ static odin3_status aig_collect(odin3_abc_run *run, odin3_abc_result *out) {
     return st == ODIN3_OK ? aig_name_map(run, &luts, out) : st;
 }
 
+/* abc --gates: get_cells of the script's end space and the cell result (gatemap spec 4.3); no name
+ * map, so provenance uses cut cones (G-2). */
+static odin3_status gates_collect(odin3_abc_run *run, odin3_abc_result *out) {
+    const odin3_abc_engine *eng = run->engine;
+    odin3_abc_cells cells = {0};
+    odin3_abc_fail fail = {0};
+    uint32_t space =
+        run->script.final_space == ODIN3_ABC_SPACE_GIA ? ODIN3_ABC_CELLS_GIA : ODIN3_ABC_CELLS_NTK;
+    odin3_status st = eng->get_cells(eng->self, space, &cells, &fail);
+    flush_lines(run);
+    if (st == ODIN3_ERR_ENGINE) {
+        return report_fail(run, &fail, "get_cells", NULL);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_arena *arena = odin3_arena_create(0);
+    st = arena != NULL ? odin3_abc_result_from_cells(run, &cells, arena, out) : ODIN3_ERR_NO_MEMORY;
+    odin3_arena_destroy(arena);
+    (void)snprintf(run->nomap_reason, sizeof run->nomap_reason, "--gates");
+    return st;
+}
+
 static odin3_status aig_session(odin3_abc_run *run, odin3_abc_result *out) {
     const odin3_abc_engine *eng = run->engine;
     odin3_abc_fail fail = {0};
@@ -453,7 +492,9 @@ static odin3_status aig_session(odin3_abc_run *run, odin3_abc_result *out) {
     }
     double opened = odin3_now_ms();
     st = aig_commands(run);
-    st = st == ODIN3_OK ? aig_collect(run, out) : st;
+    if (st == ODIN3_OK) {
+        st = run->gates_mode ? gates_collect(run, out) : aig_collect(run, out);
+    }
     eng->close(eng->self);
     flush_lines(run);
     double spent = odin3_now_ms() - opened - run->stats.namemap_ms;

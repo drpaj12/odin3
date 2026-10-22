@@ -35,6 +35,7 @@ void odin3_abc_result_init(odin3_abc_result *res) {
     odin3_vec_init(&res->reg_from, sizeof(uint32_t));
     odin3_vec_init(&res->co_driver, sizeof(uint32_t));
     odin3_vec_init(&res->old_lit, sizeof(uint32_t));
+    odin3_vec_init(&res->gate, sizeof(uint32_t));
 }
 
 void odin3_abc_result_free(odin3_abc_result *res) {
@@ -46,6 +47,7 @@ void odin3_abc_result_free(odin3_abc_result *res) {
     odin3_vec_free(&res->reg_from);
     odin3_vec_free(&res->co_driver);
     odin3_vec_free(&res->old_lit);
+    odin3_vec_free(&res->gate);
     odin3_abc_result_init(res);
 }
 
