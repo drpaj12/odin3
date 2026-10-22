@@ -67,16 +67,28 @@ static odin3_net_id find_const(const odin3_module *mod, int value) {
     return (odin3_net_id){0};
 }
 
+bool sp_type_named(const odin3_design *design, const char *name, odin3_celltype_id *type) {
+    uint32_t str = 0;
+    return odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(name), &str) &&
+           odin3_celltype_find(design, str, type);
+}
+
+uint32_t sp_out_port(const odin3_design *design, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(design, type);
+    uint32_t port = 0;
+    while (def != NULL && port < def->n_ports && def->ports[port].dir != ODIN3_DIR_OUT) {
+        port++;
+    }
+    return port;
+}
+
 /* Creates `$_CONST<value>_` and its net; *node_out and *net_out get them (both or neither). */
 static odin3_status make_const(odin3_abc_run *run, int value, odin3_node_id *node_out,
                                odin3_net_id *net_out) {
     odin3_module *mod = run->module;
     const odin3_design *design = run->design;
-    uint32_t name = 0;
     odin3_celltype_id type = {0};
-    if (!odin3_strtab_find(odin3_design_strtab(design),
-                           odin3_bytes_cstr(value != 0 ? "$_CONST1_" : "$_CONST0_"), &name) ||
-        !odin3_celltype_find(design, name, &type)) {
+    if (!sp_type_named(design, value != 0 ? "$_CONST1_" : "$_CONST0_", &type)) {
         odin3_log(ODIN3_LOG_ERROR, "abc: the constant cell type is missing");
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -110,12 +122,85 @@ odin3_status odin3_abc_canonical_const(odin3_abc_run *run, int value, odin3_net_
     return make_const(run, value, &node, out);
 }
 
+/* --- abc --gates: TIE cells (G-7) ---------------------------------------------------------- */
+
+enum { TIE_PORTS_MAX = 8 }; /* a TIE cell has no input; a few outputs at most */
+
+/* The lowest-ID live net whose one driver is a node of type tie; none when there is no. */
+static odin3_net_id find_tie(const odin3_module *mod, odin3_celltype_id tie) {
+    for (uint32_t id = 1; id < odin3_module_net_end(mod); id++) {
+        odin3_net_id net = {id};
+        if (odin3_net_live(mod, net) && odin3_net_driver_count(mod, net) == 1 &&
+            odin3_node_type(mod, odin3_pin_node(mod, odin3_net_driver(mod, net))).v == tie.v) {
+            return net;
+        }
+    }
+    return (odin3_net_id){0};
+}
+
+/* A new instance of tie on a new net (its first output), with the run's coarse record; both
+ * logged for the rollback. */
+static odin3_status make_tie(splice *sp, odin3_celltype_id tie, odin3_net_id *net_out) {
+    const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, tie);
+    uint32_t out_port = sp_out_port(sp->run->design, tie);
+    if (def == NULL || def->n_ports > TIE_PORTS_MAX || out_port >= def->n_ports) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: internal: the library's TIE cell cannot be used");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_prov_id prov = {0};
+    odin3_net_id net = {0};
+    odin3_status st = sp_coarse(sp, &prov);
+    st = st == ODIN3_OK ? odin3_net_create(sp->mod, 0, prov, &net) : st;
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NET, net.v}) : st;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    static const odin3_net_id k_none = {0};
+    odin3_netvec ports[TIE_PORTS_MAX];
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        ports[port] = (odin3_netvec){&k_none, 1};
+    }
+    ports[out_port] = (odin3_netvec){&net, 1};
+    odin3_node_spec spec = {tie, 0, prov, NULL, 0};
+    odin3_node_id node = {0};
+    st = odin3_node_create_connected(sp->mod, &spec, ports, &node);
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node.v}) : st;
+    if (st != ODIN3_OK && odin3_node_live(sp->mod, node)) {
+        (void)odin3_node_delete(sp->mod, node);
+    }
+    *net_out = net;
+    return st;
+}
+
+/* With --gates and a TIE cell of value: its canonical net, found or made; *done false
+ * otherwise (the constant cells' rule applies). */
+static odin3_status gates_canon(splice *sp, int value, odin3_net_id *out, bool *done) {
+    const odin3_abc_run *run = sp->run;
+    odin3_celltype_id tie = value != 0 ? run->lib.tie1 : run->lib.tie0;
+    *done = run->gates_mode && odin3_celltype_valid(tie);
+    if (!*done) {
+        return ODIN3_OK;
+    }
+    *out = find_tie(sp->mod, tie);
+    return odin3_net_valid(*out) ? ODIN3_OK : make_tie(sp, tie, out);
+}
+
 /* The canonical net of value for the splice: found, else made and logged for the rollback. */
 odin3_status sp_canon(splice *sp, int value, odin3_net_id *out) {
     odin3_net_id *cached = &sp->canon[value != 0 ? 1 : 0];
     if (odin3_net_valid(*cached)) {
         *out = *cached;
         return ODIN3_OK;
+    }
+    bool done = false;
+    odin3_net_id tie_net = {0};
+    odin3_status tie_st = gates_canon(sp, value, &tie_net, &done);
+    if (done) {
+        if (tie_st == ODIN3_OK) {
+            *cached = tie_net;
+            *out = tie_net;
+        }
+        return tie_st;
     }
     odin3_net_id net = find_const(sp->mod, value);
     if (!odin3_net_valid(net)) {
@@ -133,6 +218,37 @@ odin3_status sp_canon(splice *sp, int value, odin3_net_id *out) {
     *cached = net;
     *out = net;
     return ODIN3_OK;
+}
+
+odin3_status sp_coarse(splice *sp, odin3_prov_id *out) {
+    if (!sp->fallback_made) {
+        odin3_status st = odin3_abc_coarse_record(sp->run, &sp->fallback);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+        sp->fallback_made = true;
+    }
+    *out = sp->fallback;
+    return ODIN3_OK;
+}
+
+bool sp_new_logic(const splice *sp, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, type);
+    if (def == NULL) {
+        return false;
+    }
+    if (!sp->run->gates_mode) {
+        return strcmp(def->name, "$lut") == 0;
+    }
+    if (strcmp(def->name, "$_BUF_") == 0) {
+        return true;
+    }
+    for (size_t at = 0; at < sp->run->lib.gates.len; at++) {
+        if (((const odin3_libgate *)odin3_vec_cat(&sp->run->lib.gates, at))->type.v == type.v) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* --- net tests ----------------------------------------------------------------------------- */
@@ -237,7 +353,7 @@ static void count_survivors(splice *sp) {
         }
         odin3_celltype_id type = odin3_node_type(sp->mod, node);
         const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, type);
-        if (def != NULL && strcmp(def->name, "$lut") == 0) {
+        if (sp_new_logic(sp, type)) {
             sp->stats.luts++;
         } else if (def != NULL && (def->flags & ODIN3_CT_SEQ_EDGE) != 0) {
             sp->stats.ffs++;

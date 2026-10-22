@@ -37,7 +37,9 @@ enum {
     LUT_EST_CAP = 1 << 24, /* the AIG estimate of one wide $lut stops here */
     DOMAIN_KEY_SHIFT = 2,
     EDGE_KEY_BASE = 4, /* edge keys start here; the global key is 2 */
-    ROLE_OOM = 0xFF    /* classify ran out of memory (not a role) */
+    ROLE_OOM = 0xFF,   /* classify ran out of memory (not a role) */
+    PARAM_INIT = 0,    /* a flip-flop's INIT is its first parameter */
+    INIT_ONE = 1
 };
 
 /* --- text ---------------------------------------------------------------------------------- */
@@ -597,13 +599,30 @@ static uint8_t classify(rscan *sc, odin3_node_id node) {
     return ODIN3_ABC_ROLE_CUT;
 }
 
+/* GM-6: under abc --gates a flip-flop whose INIT is 1 stays a cut point (a library gate cannot be
+ * flipped as restore.c flips a LUT), counted as an other cell. */
+static bool gates_cut_init_one(rscan *sc, uint32_t node) {
+    if (!sc->run->gates_mode) {
+        return false;
+    }
+    const odin3_value *init = odin3_node_param(sc->module, (odin3_node_id){node}, PARAM_INIT);
+    if (init == NULL || init->kind != ODIN3_VAL_INT || init->i != INIT_ONE) {
+        return false;
+    }
+    count_cut(sc, ODIN3_ABC_CUT_OTHER);
+    return true;
+}
+
 /* Marks the run's flip-flops REG, then classifies every live node into region->role. */
 static odin3_status classify_all(rscan *sc) {
     odin3_abc_region *region = sc->region;
     uint32_t end = odin3_module_node_end(sc->module);
     odin3_status st = vec_zeros(&region->role, 1, end);
     for (size_t i = 0; st == ODIN3_OK && sc->domain != NULL && i < sc->domain->ffs.len; i++) {
-        *role_at(sc, vec_get_u32(&sc->domain->ffs, i)) = ODIN3_ABC_ROLE_REG;
+        uint32_t node = vec_get_u32(&sc->domain->ffs, i);
+        if (!gates_cut_init_one(sc, node)) {
+            *role_at(sc, node) = ODIN3_ABC_ROLE_REG;
+        }
     }
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};

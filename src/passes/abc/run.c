@@ -479,7 +479,8 @@ static result_shape shape_of(const odin3_abc_result *res) {
     return shape;
 }
 
-/* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11). */
+/* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11; with --gates,
+ * the gate count instead of the LUT shape). */
 static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats *stats,
                          result_shape shape, double ms) {
     char domain[DOMAIN_TEXT_BYTES];
@@ -488,6 +489,14 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats 
         odin3_log(ODIN3_LOG_INFO,
                   "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
                   module_text(run), domain, run->nomap_reason);
+    }
+    if (run->gates_mode) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "abc: module '%s', %s: %u cells and %u flip-flops -> %u gates and %u flip-flops, "
+                  "%.1f ms in ABC",
+                  module_text(run), domain, (unsigned)run->region->soft.len,
+                  (unsigned)run->region->regs.len, (unsigned)stats->luts, (unsigned)stats->ffs, ms);
+        return;
     }
     odin3_log(ODIN3_LOG_INFO,
               "abc: module '%s', %s: %u cells and %u flip-flops -> %u LUTs (at most %u inputs, "
@@ -537,6 +546,19 @@ static void emit_report(const odin3_abc_run *run, const odin3_abc_splice_stats *
     report_fn(&rep, report_user);
 }
 
+/* Constant folding of a LUT result; with --gates (no folding: a gate is spliced as mapped) the
+ * check that every LUT carries its gate tag. */
+static odin3_status fold_or_check_tags(const odin3_abc_run *run, odin3_abc_result *result) {
+    if (!run->gates_mode) {
+        return odin3_abc_result_fold(result);
+    }
+    if (result->gate.len != result->n_luts) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: internal: the gate result lost its gate tags");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 /* The exchange, folding and the splice of a built region, then the run's INFO lines. */
 static odin3_status map_region(odin3_abc_run *run) {
     odin3_abc_result result;
@@ -553,7 +575,7 @@ static odin3_status map_region(odin3_abc_run *run) {
     }
     double spent = now_ms() - start; /* the INFO "ms": caps check and exchange, as before 3D-8 */
     double folded = now_ms();
-    st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
+    st = st == ODIN3_OK ? fold_or_check_tags(run, &result) : st; /* no folding of gates */
     run->stats.check_ms += now_ms() - folded;
     odin3_abc_splice_stats stats = {0};
     double spliced = now_ms();
