@@ -491,13 +491,19 @@ static void run_script(const char *text) {
 }
 
 /* Reads Verilog `src` with the VTR library and runs proc, opt and hardmap. */
-static void flow(const char *src) {
+static void flow_file(const char *path) {
     char text[PATH_BUF * 2];
-    write_text("t.v", odin3_bytes_cstr(src));
     (void)snprintf(text, sizeof text,
-                   "read_techlib %s\nread_verilog --vtr-compat %s/t.v\nproc\nopt\nhardmap\n",
-                   ODIN3_UM_LIB, dir);
+                   "read_techlib %s\nread_verilog --vtr-compat %s\nproc\nopt\nhardmap\n",
+                   ODIN3_UM_LIB, path);
     run_script(text);
+}
+
+static void flow(const char *src) {
+    char path[PATH_BUF];
+    write_text("t.v", odin3_bytes_cstr(src));
+    (void)snprintf(path, sizeof path, "%s/t.v", dir);
+    flow_file(path);
 }
 
 static void expect_params(odin3_node_id node, const int64_t want[5]) {
@@ -915,6 +921,105 @@ static void test_unmap_mul_shared_product(void) {
     check_clean();
 }
 
+/* --- Task 9: RAM cells to $mem ------------------------------------------------------------- */
+
+enum {
+    MEM_SIZE = 1,
+    MEM_ABITS = 3,
+    MEM_WIDTH,
+    MEM_RD_PORTS,
+    MEM_WR_PORTS,
+    MEM_RD_CLK_ENABLE,
+    MEM_RD_CLK_POLARITY,
+    MEM_RD_TRANSPARENT,
+    MEM_WR_CLK_ENABLE,
+    MEM_INIT = 12
+};
+enum { PORT_RD_EN = 1, PORT_WR_EN = 5, MEM_SLICES_MAX = 32 };
+
+static odin3_node_id only_mem(void) {
+    odin3_node_id mem[2];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$mem", mem, 2));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("single_port_ram", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("dual_port_ram", NULL, 0));
+    return mem[0];
+}
+
+/* The first of `count` $mem cells (the slices partial_map made: one data bit each). */
+static odin3_node_id first_mem(uint32_t count) {
+    odin3_node_id mem[MEM_SLICES_MAX];
+    TEST_ASSERT_EQUAL_UINT32(count, nodes_of("$mem", mem, MEM_SLICES_MAX));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("single_port_ram", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("dual_port_ram", NULL, 0));
+    return mem[0];
+}
+
+static int64_t mem_param(odin3_node_id mem, uint32_t index) {
+    return odin3_node_param(top(), mem, index)->i;
+}
+
+/* ABITS, WIDTH, RD_PORTS and WR_PORTS of a $mem. */
+static void expect_shape(odin3_node_id mem, const int64_t want[4]) {
+    int64_t got[4] = {mem_param(mem, MEM_ABITS), mem_param(mem, MEM_WIDTH),
+                      mem_param(mem, MEM_RD_PORTS), mem_param(mem, MEM_WR_PORTS)};
+    TEST_ASSERT_EQUAL_INT64_ARRAY(want, got, 4);
+    TEST_ASSERT_EQUAL_INT64(want[0] < 62 ? (int64_t)1 << want[0] : 0, mem_param(mem, MEM_SIZE));
+}
+
+static void test_unmap_spram(void) {
+    flow_file("tests/micro/verilog/common/spram.v");
+    run_script("unmap --no-regroup\nopt_clean");
+    odin3_node_id mem = first_mem(16); /* 16 one-bit slices; Task 10 merges them */
+    expect_shape(mem, (const int64_t[4]){8, 1, 1, 1});
+    const odin3_value *clk_en = odin3_node_param(top(), mem, MEM_RD_CLK_ENABLE);
+    TEST_ASSERT_EQUAL_UINT32(1, clk_en->len);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_1, clk_en->bits[0]);
+    TEST_ASSERT_EQUAL_UINT8(ODIN3_BIT_0, odin3_node_param(top(), mem, MEM_RD_TRANSPARENT)->bits[0]);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_node_param(top(), mem, MEM_INIT)->len);
+    TEST_ASSERT_EQUAL_INT(UM_VCC,
+                          um_net_class(top(), um_port_net(top(), mem, (um_pos){PORT_RD_EN, 0})));
+    TEST_ASSERT_EQUAL_INT(UM_SIG,
+                          um_net_class(top(), um_port_net(top(), mem, (um_pos){PORT_WR_EN, 0})));
+    check_clean();
+}
+
+static void test_unmap_dpram(void) {
+    flow_file("tests/micro/verilog/common/dpram.v");
+    run_script("unmap --no-regroup\nopt_clean");
+    expect_shape(first_mem(16), (const int64_t[4]){8, 1, 2, 2});
+    check_clean();
+}
+
+static void test_unmap_rom(void) {
+    flow_file("tests/micro/verilog/common/rom.v");
+    run_script("unmap --no-regroup\nopt_clean");
+    odin3_node_id mem = first_mem(8);
+    TEST_ASSERT_EQUAL_INT64(0, mem_param(mem, MEM_WR_PORTS));
+    TEST_ASSERT_EQUAL_INT64(1, mem_param(mem, MEM_RD_PORTS));
+    check_clean();
+}
+
+static void test_unmap_ram_dead(void) {
+    load_lib();
+    read_blif(".model m\n.inputs x\n.outputs y\n.names gnd\n.names x y\n1 1\n"
+              ".subckt single_port_ram clk=x data[0]=x addr[0]=x we=gnd\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    expect_shape(only_mem(), (const int64_t[4]){1, 1, 1, 0});
+    check_clean();
+}
+
+static void test_unmap_ram_blif_pad(void) {
+    load_lib();
+    read_blif(".model m\n.inputs a0 a1 a2 a3 a4 a5 d w c\n.outputs o\n.names unconn\n"
+              ".subckt single_port_ram clk=c data[0]=d we=w out[0]=o addr[0]=a0 addr[1]=a1 "
+              "addr[2]=a2 addr[3]=a3 addr[4]=a4 addr[5]=a5 addr[6]=unconn addr[7]=unconn "
+              "addr[8]=unconn addr[9]=unconn addr[10]=unconn addr[11]=unconn addr[12]=unconn "
+              "addr[13]=unconn addr[14]=unconn\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    expect_shape(only_mem(), (const int64_t[4]){6, 1, 1, 1});
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -959,5 +1064,10 @@ int main(void) {
     RUN_TEST(test_unmap_mul_split_80x40);
     RUN_TEST(test_unmap_mul_low_only);
     RUN_TEST(test_unmap_mul_shared_product);
+    RUN_TEST(test_unmap_spram);
+    RUN_TEST(test_unmap_dpram);
+    RUN_TEST(test_unmap_rom);
+    RUN_TEST(test_unmap_ram_dead);
+    RUN_TEST(test_unmap_ram_blif_pad);
     return UNITY_END();
 }
