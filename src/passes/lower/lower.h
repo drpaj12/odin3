@@ -62,6 +62,11 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report, odin
  * failing one are complete); only a failure while merging the outputs of one cell can leave that
  * cell partly connected (its undriven outputs are legal, check rule 4 W), and the pass says so.
  */
+/* True when `lower` has a rule for the cell type `def` (a word cell or a gate-level flip-flop);
+ * false for NULL, for a type it does not touch and for the word types it deliberately has no rule
+ * for ($proc, $tribuf, $pow, $memrd, $memwr, plugin types). */
+bool odin3_lower_handles(const odin3_celltype_def *def);
+
 odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
                              const odin3_lower_opts *opts);
 
