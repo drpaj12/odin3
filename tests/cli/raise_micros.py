@@ -63,7 +63,34 @@ def micros() -> list[cc.Micro]:
     add4 = [f"-param {p}_WIDTH=4" for p in ("A", "B", "Y")]
     out.append(cc.Micro("ripple4_swapped_refused", text, swapped, "$add", "refused",
                         refusal="not equivalent", params=add4))
+    text, binding = cc.incrementer(4)
+    inc = [f"-param {p}" for p in ("A_WIDTH=4", "B_WIDTH=1", "Y_WIDTH=4")] + ["-const B=1"]
+    out.append(cc.Micro("inc4_raised", text, binding, "$add", "equivalent", params=inc))
+    text, binding = cc.eq_const(4, 13)
+    eq = [f"-param {p}" for p in ("A_WIDTH=4", "B_WIDTH=4", "Y_WIDTH=1")]
+    out.append(cc.Micro("eq13_raised", text, binding, "$eq", "equivalent",
+                        params=[*eq, "-const B=13"]))
     return out
+
+
+def const_mismatch(binary: str, work: Path) -> str:
+    """cone_check proves eq13 with -const B=13; raise with -const B=12 is refused."""
+    text, binding = cc.eq_const(4, 13)
+    eq = [f"-param {p}" for p in ("A_WIDTH=4", "B_WIDTH=4", "Y_WIDTH=1")]
+    micro = cc.Micro("eq13_mismatch", text, binding, "$eq", "refused", params=eq)
+    blif, plain, marked = (work / n for n in ("t.blif", "a.json", "b.json"))
+    blif.write_text(micro.blif, encoding="utf-8")
+    first = cc.odin3(binary, f"read_techlib {cc.TECHLIB}; read_blif {blif}; write_json --odin3 "
+                             f"{plain}")
+    if first.returncode != 0:
+        return "could not read the micro: " + first.stderr.strip()[-200:]
+    cc.mark(plain, marked, micro)
+    base = " ".join([f"-attr grp={cc.GROUP}", f"-cell {micro.cell}", *micro.params])
+    second = cc.odin3(binary, f"read_techlib {cc.TECHLIB}; read_json --top m {marked}; "
+                              f"cone_check {base} -const B=13; raise {base} -const B=12")
+    text = second.stderr + second.stdout
+    ok = second.returncode != 0 and "cone_check proved group" in text
+    return "" if ok else "expected a refusal: " + text.strip()[-200:]
 
 
 def never_proved(binary: str, work: Path) -> str:
@@ -102,7 +129,12 @@ def main(argv: list[str]) -> int:
     reason = never_proved(binary, work)
     failed += 1 if reason else 0
     print(f"never_proved_refused {'ok' if not reason else 'FAIL: ' + reason}", flush=True)
-    print(f"raise_micros: {len(cases) + 1} micros, {failed} failed")
+    work = out_dir / "const_mismatch"
+    work.mkdir(parents=True, exist_ok=True)
+    reason = const_mismatch(binary, work)
+    failed += 1 if reason else 0
+    print(f"const_mismatch_refused {'ok' if not reason else 'FAIL: ' + reason}", flush=True)
+    print(f"raise_micros: {len(cases) + 2} micros, {failed} failed")
     return 1 if failed else 0
 
 
