@@ -13,8 +13,18 @@ def sub(old, new, s=None):
     if n != 1:
         sys.exit("count %d: %s" % (n, old[:70]))
     src = src.replace(old, new)
+# Suite and tool names (Norse theme) to placeholders, longest first.
+NAMES = [("Leman~Russ~III", "AnonHT"), ("Leman Russ III", "AnonHT"), ("The Norns~III", "AnonPlace"),
+         ("The Norns III", "AnonPlace"), ("Norns~III", "AnonPlace"), ("Norns III", "AnonPlace"),
+         ("Yggdrasil~III", "AnonSuite"), ("Yggdrasil III", "AnonSuite"), ("Wyrd~III", "AnonGUI"),
+         ("Wyrd III", "AnonGUI"), ("Loki~III", "AnonRE"), ("Loki III", "AnonRE"),
+         ("Midgard~III", "AnonGame"), ("Midgard III", "AnonGame"), ("Bifrost~III", "AnonSim"),
+         ("Bifrost III", "AnonSim")]
+THEME = ("Yggdrasil", "Wyrd", "Loki", "Midgard", "Bifrost", "Leman", "Norns", "Norse", "world tree")
 def rename(t):
     t = t.replace("Odin~III", NAME).replace("Odin III", NAME)
+    for a, b in NAMES:
+        t = t.replace(a, b)
     return re.sub(r"(?<!IMAGE/)odin3(?!-tikz-styles)", CODE, t)
 # Part I only: cut Part II and the second reference list
 head, sep, _ = src.partition("\\bibliography{joined}\n")
@@ -54,6 +64,8 @@ sub("Gharibian et al.\\ met it in placement", "Earlier work met it in placement"
 sub("Midgard~III (verilogTown~\\cite{verilogtown2017})", "Midgard~III (a Verilog teaching game~\\cite{verilogtown2017})")
 sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and Odin~II in 2010.")
 sub("the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.", "the original creation of Odin and Odin~II, which humans verified at high cost.")
+sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
+sub("Yggdrasil~III, the world tree (Fig.", "Yggdrasil~III (Fig.")
 sub("Our latest paper applies", "Later work applies")
 for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):
     for m in re.finditer(bad, src):
@@ -72,11 +84,15 @@ for f in figs:
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
-for bad in ("drpaj12", "Jamieson", "Miami", "Odin~III", "Odin III", "verilogTown"):
-    if bad in src:
-        sys.exit("leak: " + bad)
+body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
+for f in figs:
+    body += "\n".join(ln for ln in open("IMAGE/blind/%s.tex" % f).read().splitlines() if not ln.lstrip().startswith("%"))
+for bad in ("drpaj12", "Jamieson", "Miami", "Odin~III", "Odin III", "verilogTown") + THEME:
+    if bad in body:
+        i = body.index(bad)
+        sys.exit("leak: " + body[i - 60:i + 40])
 hdr = ("% Double-blind 8-page version for FCCM (Part I only), made from odin3.tex by a script: authors,\n"
-       "% self-citations (blind.bib), repository URLs and the tool name (placeholder " + NAME + ") withheld;\n"
+       "% self-citations (blind.bib), repository URLs, the tool and suite names (placeholders " + NAME + ", AnonSuite, ...) withheld;\n"
        "% figures from IMAGE/blind/. On acceptance use odin3.tex.\n")
 open("odin3_blind.tex", "w").write(hdr + src)
 print("ok", figs)

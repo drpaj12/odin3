@@ -1,5 +1,5 @@
 % Double-blind 8-page version for FCCM (Part I only), made from odin3.tex by a script: authors,
-% self-citations (blind.bib), repository URLs and the tool name (placeholder AnonSynth) withheld;
+% self-citations (blind.bib), repository URLs, the tool and suite names (placeholders AnonSynth, AnonSuite, ...) withheld;
 % figures from IMAGE/blind/. On acceptance use odin3.tex.
 % AnonSynth paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
@@ -43,7 +43,7 @@
 % Earlier title: "AnonSynth: A Provenance-Tracked HDL Elaboration and Front-End Synthesis Framework
 % for FPGA CAD Research".
 \title{AnonSynth, the Final Frontier:\\
-Verilog Synthesis for FPGAs - again\\Built by the DarkFactory and Leads to Yggdrasil~III}
+Verilog Synthesis for FPGAs - again\\Built by the DarkFactory and Leads to AnonSuite}
 
 \author{\IEEEauthorblockN{Anonymous Author(s)}
 \IEEEauthorblockA{Affiliation withheld for double-blind review}}
@@ -51,7 +51,7 @@ Verilog Synthesis for FPGAs - again\\Built by the DarkFactory and Leads to Yggdr
 \maketitle
 
 \begin{abstract}
-Odin was written in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build AnonSynth, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. AnonSynth (MIT licence) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, behind a versioned C ABI for plugins and AI tools. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the Yggdrasil III ecosystem, now made possible by this approach.
+Odin was written in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build AnonSynth, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. AnonSynth (MIT licence) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, behind a versioned C ABI for plugins and AI tools. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the AnonSuite ecosystem, now made possible by this approach.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -75,7 +75,7 @@ The contributions of this work are:
 \item an account of building a Yosys-class FPGA synthesis front end with a Dark Factory under daily human oversight, specification first and checked against oracles, with its time and token cost (Sec.~\ref{sec:results});
 \item the architecture: one provenance-tracked IR with word and bit views, two-stage elaboration, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, and a versioned C ABI for plugins and AI tools (Sec.~\ref{sec:arch});
 \item the evidence: quality of results against the Parmys flow on the VTR benchmarks that fit the development machine, equivalence and functional checks, byte-identical reruns, and defects in the Parmys flow found against oracles, to be reported upstream (Secs.~\ref{sec:results}, \ref{sec:parmys-bugs});
-\item a presentation of how we created the overarching Yggdrasil III, and a description of what it is, including a reimplementation of an earlier Verilog teaching game~\cite{anon03}, now called Midgard, to fit the Norse theme.
+\item a presentation of how we created the overarching AnonSuite, and a description of what it is, including a reimplementation of an earlier Verilog teaching game~\cite{anon03}, now called AnonGame.
 \item a discussion of what the process suggests for CAD research (Sec.~\ref{sec:discussion}).
 \end{itemize}
 
@@ -83,12 +83,12 @@ The approach has limits, and I state them first. It was not a lights-out factory
 
 The community may object to such a process. It may also ask a harder question: if a guided Dark Factory with oracles can rebuild a tool like this, could a reverse-engineering process let open-source tools rip out the human-years of engineering behind today's EDA tool landscape? (To the companies, I would suggest moving to a cloud service model as soon as possible.) My goal is narrower: to run experiments I couldn't do with Yosys, and with AnonSynth I can now, and the ideas I hoped my students could pursue were limited by inflexibilities in the toolflow.
 
-I call this new suite Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}). AnonSynth is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for VTR out), and every path passes through its one provenance IR, which is why I see it as a final frontier. The oracles (Yosys, Parmys, Odin~II, VTR's golden results, and ABC) stand as a small forest beside the trunk, to compare against. In the canopy are Wyrd~III (the experiment runner and GUI); Bifrost~III (the simulation bridge); Midgard~III, a port of an earlier Verilog teaching game~\cite{anon04}, which Wyrd~III connects to; and Loki~III (reverse engineering), which continues earlier netlist-to-RTL work~\cite{anon05}; The Norns~III, an earlier placement experiment~\cite{anon06,anon07}, redone with provenance (Sec.~\ref{sec:provenance-problem}). All the code is public (URL withheld for review).
+I call this new suite AnonSuite (Fig.~\ref{fig:yggdrasil}). AnonSynth is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for VTR out), and every path passes through its one provenance IR, which is why I see it as a final frontier. The oracles (Yosys, Parmys, Odin~II, VTR's golden results, and ABC) stand as a small forest beside the trunk, to compare against. In the canopy are AnonGUI (the experiment runner and GUI); AnonSim (the simulation bridge); AnonGame, a port of an earlier Verilog teaching game~\cite{anon04}, which AnonGUI connects to; and AnonRE (reverse engineering), which continues earlier netlist-to-RTL work~\cite{anon05}; AnonPlace, an earlier placement experiment~\cite{anon06,anon07}, redone with provenance (Sec.~\ref{sec:provenance-problem}). All the code is public (URL withheld for review).
 
 \begin{figure*}[t]
 \centering
 \odinfit{\textwidth}{\input{IMAGE/blind/fig_yggdrasil}}
-\caption{Yggdrasil~III drawn as a tree. The roots are the inputs and the tools AnonSynth links to. The trunk is AnonSynth, with its steps. The oracles are the small forest beside it. The canopy holds Wyrd~III, Bifrost~III, Midgard~III (a Verilog teaching game~\cite{anon04}) and other tools and experments Loki~III and The Norns~III (placement~\cite{anon07}).}
+\caption{AnonSuite drawn as a tree. The roots are the inputs and the tools AnonSynth links to. The trunk is AnonSynth, with its steps. The oracles are the small forest beside it. The canopy holds AnonGUI, AnonSim, AnonGame (a Verilog teaching game~\cite{anon04}) and other tools and experments AnonRE and AnonPlace (placement~\cite{anon07}).}
 \label{fig:yggdrasil}
 \end{figure*}
 
@@ -329,7 +329,7 @@ could not supply, and how did that knowledge enter the specification?  Many clai
 \section{Conclusion}
 \label{sec:conclusion}
 
-AnonSynth answers the final-frontier question with a qualified yes. A Dark Factory, watched daily by an experienced FPGA CAD developer and checked against Yosys, Parmys and Odin~II as oracles, built a Verilog front end that keeps Odin~II's good ideas (the node, pin and net model, the architecture file and partial mapping), follows Yosys's semantics, and plugs into the VTR flow: all 15 VTR designs that fit the development machine route, with geomean results inside the gate against Parmys. It adds what neither predecessor has: provenance from every netlist object back to its HDL, and a versioned C ABI through which plugins and AI tools extend it. No one has read the code deeply, and we've tested it on a subset of scenarios; the oracles make more testing possible. The experiments I could not run with Yosys come next, in Wyrd~III (a GUI and experiment runner) and Loki~III (reverse engineering), which use AnonSynth as a package (URL withheld for review).
+AnonSynth answers the final-frontier question with a qualified yes. A Dark Factory, watched daily by an experienced FPGA CAD developer and checked against Yosys, Parmys and Odin~II as oracles, built a Verilog front end that keeps Odin~II's good ideas (the node, pin and net model, the architecture file and partial mapping), follows Yosys's semantics, and plugs into the VTR flow: all 15 VTR designs that fit the development machine route, with geomean results inside the gate against Parmys. It adds what neither predecessor has: provenance from every netlist object back to its HDL, and a versioned C ABI through which plugins and AI tools extend it. No one has read the code deeply, and we've tested it on a subset of scenarios; the oracles make more testing possible. The experiments I could not run with Yosys come next, in AnonGUI (a GUI and experiment runner) and AnonRE (reverse engineering), which use AnonSynth as a package (URL withheld for review).
 
 \section*{Acknowledgment}
 We acknowledge the use of Claude (Anthropic, \url{https://claude.ai}) for editorial assistance, GitHub Copilot for code design, and Grammarly for writing review.
