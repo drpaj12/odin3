@@ -121,6 +121,10 @@ static bool lowerable(const odin3_celltype_def *def) {
                            (def->gran == ODIN3_GRAN_BIT && lw_ff_gate_name(def->name)));
 }
 
+bool odin3_lower_handles(const odin3_celltype_def *def) {
+    return lowerable(def) && lw_rule_find(def->name) != NULL;
+}
+
 /* Resolves every lowerable type of the design to its rule once (plugin types get NULL). */
 static odin3_status rules_build(const odin3_design *design, lw_rules *rules) {
     uint32_t count = 0;
