@@ -141,6 +141,26 @@ static void expect_check_error(check_case want) {
     TEST_ASSERT_EQUAL_STRING(want.want, g_msg);
 }
 
+/* gm-gates follow-ups (a), (b): cells whose names ABC cannot take (or that clash with the reserved
+ * constant gates) are not in the text, so the adapter never refuses the core's genlib. */
+static void test_genlib_skips_bad_cell_names(void) {
+    load_text("library t\n"
+              "cell AND2.X1 gate area 1 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = A & B ; end\n"
+              "cell $odin3_const0 gate area 1 ; in A 1 ; out Y 1 ; fn Y = ~A ; end\n"
+              "cell 2NAND gate area 1 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = ~(A & B) ; end\n"
+              "cell INV gate area 1 ; in A 1 ; out Y 1 ; fn Y = ~A ; end\n"
+              "cell AND2 gate area 2.5 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = A & B ; end\n");
+    derive("t");
+    TEST_ASSERT_EQUAL_STRING("GATE INV 1 Y=!A;\n"
+                             "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                             "GATE AND2 2.5 Y=A*B;\n"
+                             "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                             "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                             "GATE $odin3_const0 0 Y=CONST0;\n"
+                             "GATE $odin3_const1 0 Y=CONST1;\n",
+                             g_text.data);
+}
+
 static void test_genlib_check_errors(void) {
     expect_check_error((check_case){"nolib",
                                     "abc: --gates: library 'nolib' is not loaded; read it with "
@@ -205,6 +225,7 @@ int main(void) {
     RUN_TEST(test_genlib_cmos6_golden);
     RUN_TEST(test_genlib_generic_golden);
     RUN_TEST(test_genlib_delay_text);
+    RUN_TEST(test_genlib_skips_bad_cell_names);
     RUN_TEST(test_genlib_check_errors);
     RUN_TEST(test_genlib_sha256_stable);
     RUN_TEST(test_genlib_text_out_of_memory);

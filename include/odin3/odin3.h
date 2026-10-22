@@ -1805,8 +1805,8 @@ typedef struct odin3_abc_cells {
  *   Mio_LibraryReadBuffer, named, then Mio_UpdateGenlib). Only the canonical form the core's genlib
  *   writer emits is read: "GATE name area out=formula;" lines, each followed by its explicit
  *   "PIN name phase" lines with six numbers (at most 6 PINs, each named by the formula, no generic
- *   pin), printable ASCII with single spaces and '\n' only (no comments, tabs, '\r', '\\' or
- *   LATCH).
+ *   pin), every number (area too) digits[.digits], printable ASCII with single spaces and '\n'
+ *   only (no comments, tabs, '\r', '\\' or LATCH).
  *   Anything else is RESULT "ABC cannot read the gate library (line N: reason)"; a formula ABC
  *   cannot parse is RESULT "ABC cannot read the gate library (gate \"name\")". Load it before the
  *   mapping script: once any exec has run in the session, load_genlib is RESULT "load the gate

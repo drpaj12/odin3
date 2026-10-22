@@ -524,6 +524,10 @@ static void test_gates_note_texts_with_ports(void) {
                         "  in A 1 ; in B 1 ; out Y 1\n"
                         "  fn Y = ~A\n"
                         "end\n"
+                        "cell AND2.X1 gate area 1\n"
+                        "  in A 1 ; in B 1 ; out Y 1\n"
+                        "  fn Y = A & B\n"
+                        "end\n"
                         "cell CPIN gate area 1\n"
                         "  in CONST0 1 ; out Y 1\n"
                         "  fn Y = ~CONST0\n"
@@ -536,6 +540,9 @@ static void test_gates_note_texts_with_ports(void) {
     TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
                              "abc: note: library 'ports': cell 'CPIN' is not used "
                              "for gate mapping: port 'CONST0' is not a genlib name"));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
+                             "abc: note: library 'ports': cell 'AND2.X1' is not "
+                             "used for gate mapping: its name is not a genlib name"));
 }
 
 static void test_gates_genlib_loaded(void) {
