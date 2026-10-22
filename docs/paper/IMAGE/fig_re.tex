@@ -1,18 +1,18 @@
 % Reverse-engineering and analysis flow (paper section "Reverse Engineering"; D10, D11, PHASE5, PHASE6).
-% Column width. Built = in v1.0; planned = after v1.0 (research plugins).
+% Column width.
 \begin{tikzpicture}[odin, node distance=3mm,
   box/.append style={minimum height=9mm, text width=24mm}]
-  \node[box, built]   (lpm)  at (1.25, 0)    {LPM Verilog, BLIF\\\odinsub{5.1, 5.2; 1C}};
-  \node[box, built]   (rd)   at (4.25, 0)    {gate-level ingest\\\odinsub{6.1}};
-  \node[box, built, emph] (ir) at (7.25, 0)  {IR with provenance\\\odinsub{IDs, hierarchy; 1B, 3A}};
+  \node[box, light]   (lpm)  at (1.25, 0)    {LPM Verilog, BLIF\\\odinsub{5.1, 5.2; 1C}};
+  \node[box, light]   (rd)   at (4.25, 0)    {gate-level ingest\\\odinsub{6.1}};
+  \node[box, light, emph] (ir) at (7.25, 0)  {IR with provenance\\\odinsub{IDs, hierarchy; 1B, 3A}};
 
-  \node[box, built]   (api)  at (1.25, -2.0) {\odintt{write\_dot}, C ABI walk\\\odinsub{1D, 1F; color-by 6.2}};
-  \node[box, built]   (gx)   at (4.25, -2.0) {graph export\\\odinsub{Yosys JSON + keys; 6.3}};
-  \node[box, built]   (lev)  at (7.25, -2.0) {\odintt{levelize}\\\odinsub{6.4}};
+  \node[box, light]   (api)  at (1.25, -2.0) {\odintt{write\_dot}, C ABI walk\\\odinsub{1D, 1F; color-by 6.2}};
+  \node[box, light]   (gx)   at (4.25, -2.0) {graph export\\\odinsub{Yosys JSON + keys; 6.3}};
+  \node[box, light]   (lev)  at (7.25, -2.0) {\odintt{levelize}\\\odinsub{6.4}};
 
-  \node[box, built]   (src)  at (1.25, -4.0) {AST and source lines\\\odinsub{D9; coverage gate 6.5}};
-  \node[box, built]   (re)   at (7.25, -4.0) {\odintt{submod}, \odintt{raise}\\\odinsub{cone\_check, copy; 7.4}};
-  \node[box, planned] (gra)  at (4.25, -4.0) {graph analysis\\\odinsub{plugins, after v1.0}};
+  \node[box, light]   (src)  at (1.25, -4.0) {AST and source lines\\\odinsub{D9; coverage gate 6.5}};
+  \node[box, light]   (re)   at (7.25, -4.0) {\odintt{submod}, \odintt{raise}\\\odinsub{cone\_check, copy; 7.4}};
+  \node[box, light] (gra)  at (4.25, -4.0) {graph analysis\\\odinsub{plugins}};
 
   \draw[flow] (lpm) -- (rd);
   \draw[flow] (rd) -- (ir);
@@ -20,7 +20,7 @@
   \draw[flow] (ir.south west) -- (gx.north east);
   \draw[flow] (ir) -- (lev);
   \draw[flow] (re.east) to[out=0,in=0] node[edgelabel, right, fill=none] {new level} (ir.east);
-  \draw[flowplanned] (gx) -- (gra);
+  \draw[flow] (gx) -- (gra);
   \draw[ref] (gra) -- node[edgelabel, right, fill=none] {provenance} (src);
   \draw[ref] (api.south) -- (src.north);
 \end{tikzpicture}

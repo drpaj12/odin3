@@ -23,7 +23,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { SM_NONE = 0, SM_INTERNAL, SM_IN, SM_OUT, SM_INT_TEXT = 32 };
+enum { SM_INT_TEXT = 32 };
 
 /* The state of one extraction. Per-ID vectors are indexed by the old module's IDs. */
 typedef struct sm_run {
@@ -41,9 +41,11 @@ typedef struct sm_run {
     odin3_vec ports;     /* odin3_submod_port, nets unset until the end */
     odin3_vec port_nets; /* odin3_net_id: the old nets of every port bit, in port order */
     odin3_node_id instance;
-    odin3_vec vals;    /* odin3_value scratch */
-    odin3_vec nets;    /* odin3_net_id scratch */
-    odin3_vec netvecs; /* odin3_netvec scratch */
+    odin3_vec vals;            /* odin3_value scratch */
+    odin3_vec nets;            /* odin3_net_id scratch */
+    odin3_vec netvecs;         /* odin3_netvec scratch */
+    odin3_submod_busset buses; /* -bus: the NAME[BIT] table, empty without it */
+    bool check_only;           /* the check phase: no warnings */
 } sm_run;
 
 static void run_init(sm_run *run) {
@@ -57,6 +59,8 @@ static void run_init(sm_run *run) {
     odin3_vec_init(&run->vals, sizeof(odin3_value));
     odin3_vec_init(&run->nets, sizeof(odin3_net_id));
     odin3_vec_init(&run->netvecs, sizeof(odin3_netvec));
+    odin3_submod_busset_init(&run->buses);
+    run->check_only = false;
 }
 
 static void run_free(sm_run *run) {
@@ -69,6 +73,7 @@ static void run_free(sm_run *run) {
     odin3_vec_free(&run->vals);
     odin3_vec_free(&run->nets);
     odin3_vec_free(&run->netvecs);
+    odin3_submod_busset_free(&run->buses);
 }
 
 /* Appends count zero bytes or words so that index count - 1 is valid. */
@@ -93,10 +98,7 @@ static void first_leaf(void *user, odin3_prov_id leaf) {
 }
 
 /* Logs an error located at the source of prov when it has one; always ERR_INVALID_ARG. */
-static odin3_status sm_error(const sm_run *run, odin3_prov_id prov, const char *fmt, ...)
-    ODIN3_PRINTF(3, 4);
-
-static odin3_status sm_error(const sm_run *run, odin3_prov_id prov, const char *fmt, ...) {
+odin3_status odin3_submod_error(odin3_design *design, odin3_prov_id prov, const char *fmt, ...) {
     char msg[ODIN3_LOG_BUF];
     va_list args;
     va_start(args, fmt);
@@ -104,20 +106,23 @@ static odin3_status sm_error(const sm_run *run, odin3_prov_id prov, const char *
     va_end(args);
     odin3_prov_id leaf = {0};
     if (prov.v != 0) {
-        (void)odin3_prov_sources(run->design, prov, first_leaf, &leaf);
+        (void)odin3_prov_sources(design, prov, first_leaf, &leaf);
     }
-    const odin3_prov_record *rec = leaf.v != 0 ? odin3_prov_get(run->design, leaf) : NULL;
+    const odin3_prov_record *rec = leaf.v != 0 ? odin3_prov_get(design, leaf) : NULL;
     if (rec != NULL && rec->n_locs > 0 && rec->locs[0].loc != 0) {
-        odin3_diag(run->design, ODIN3_LOG_ERROR, (odin3_loc){rec->locs[0].loc}, "%s", msg);
+        odin3_diag(design, ODIN3_LOG_ERROR, (odin3_loc){rec->locs[0].loc}, "%s", msg);
     } else if (rec != NULL && rec->n_locs > 0) {
         odin3_log(ODIN3_LOG_ERROR, "%s:%" PRIu32 ":%" PRIu32 ": error: %s",
-                  odin3_strtab_get(odin3_design_strtab(run->design), rec->locs[0].file),
+                  odin3_strtab_get(odin3_design_strtab(design), rec->locs[0].file),
                   rec->locs[0].line, rec->locs[0].col, msg);
     } else {
         odin3_log(ODIN3_LOG_ERROR, "%s", msg);
     }
     return ODIN3_ERR_INVALID_ARG;
 }
+
+/* The run's design for odin3_submod_error. */
+#define sm_error(run, prov, ...) odin3_submod_error((run)->design, (prov), __VA_ARGS__)
 
 static const char *module_text(const sm_run *run) {
     return odin3_strtab_get(odin3_design_strtab(run->design), odin3_module_name(run->src));
@@ -427,6 +432,12 @@ static odin3_status add_port(sm_run *run, odin3_net_id net, uint32_t port_no) {
     return st == ODIN3_OK ? copy_port_wire_attrs(run, odin3_net_primary(run->src, net).wire) : st;
 }
 
+/* The bus (index + 1) of an ok `-bus` set that net belongs to, else 0 (spec B-5). */
+static uint32_t bus_of(const sm_run *run, odin3_net_id net) {
+    const uint32_t *of_net = run->buses.of_net.data;
+    return net.v < run->buses.of_net.len ? of_net[net.v] : 0U;
+}
+
 /* True when `wire` has two or more bits, a real name, and every bit is a boundary net of one
  * direction that has the bit as its primary: it can be one bus port. */
 static bool full_bus(sm_run *run, odin3_wire_id wire) {
@@ -444,7 +455,7 @@ static bool full_bus(sm_run *run, odin3_wire_id wire) {
         uint8_t state =
             odin3_net_valid(net) ? *(uint8_t *)odin3_vec_at(&run->state, net.v) : (uint8_t)SM_NONE;
         if ((state != SM_IN && state != SM_OUT) || (bit > 0 && state != dir) ||
-            prim.wire.v != wire.v || prim.bit != bit) {
+            prim.wire.v != wire.v || prim.bit != bit || bus_of(run, net) != 0) {
             return false;
         }
         dir = state;
@@ -488,8 +499,40 @@ static odin3_status add_bus_port(sm_run *run, odin3_wire_id wire) {
     return st == ODIN3_OK ? copy_port_wire_attrs(run, wire) : st;
 }
 
-/* The port for boundary net `net`: a bus when its primary wire is one in full, else a scalar. */
+/* Adds the vector port of bus `index` of the `-bus` table (spec B-1, B-2): width W, range [W-1:0],
+ * named NAME (made unique), bit i on the net tagged NAME[i]; no wire attributes (B-6). */
+static odin3_status add_attr_bus_port(sm_run *run, uint32_t index) {
+    const odin3_submod_bus *bus = (const odin3_submod_bus *)run->buses.buses.data + index;
+    const odin3_net_id *nets = (const odin3_net_id *)run->buses.nets.data + bus->first;
+    odin3_port_spec spec = {0,
+                            bus->dir == SM_IN ? ODIN3_DIR_IN : ODIN3_DIR_OUT,
+                            bus->width,
+                            false,
+                            run->prov,
+                            true,
+                            (int32_t)bus->width - 1,
+                            0,
+                            false};
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st = odin3_strbuf_appendf(
+        &text, "%s", odin3_strtab_get(odin3_design_strtab(run->design), bus->name));
+    st = st == ODIN3_OK ? unique_wire_name(run, &text, &spec.name) : st;
+    odin3_strbuf_free(&text);
+    odin3_node_id port = {0};
+    st = st == ODIN3_OK ? odin3_module_add_port(run->dst, &spec, &port) : st;
+    for (uint32_t bit = 0; st == ODIN3_OK && bit < bus->width; bit++) {
+        map_port_bit(run, port, bit, nets[bit]);
+    }
+    return st == ODIN3_OK ? record_port(run, &spec, nets) : st;
+}
+
+/* The port for boundary net `net`: its `-bus` vector when it is in one, a bus when its primary
+ * wire is one in full, else a scalar. */
 static odin3_status add_boundary_port(sm_run *run, odin3_net_id net, uint32_t port_no) {
+    if (bus_of(run, net) != 0) {
+        return add_attr_bus_port(run, bus_of(run, net) - 1U);
+    }
     odin3_wire_id wire = odin3_net_primary(run->src, net).wire;
     if (odin3_wire_valid(wire) && full_bus(run, wire)) {
         return add_bus_port(run, wire);
@@ -665,7 +708,13 @@ static odin3_status move_all(sm_run *run) {
 static odin3_status analyze(sm_run *run) {
     odin3_status st = run->src != NULL ? collect_group(run) : ODIN3_ERR_INVALID_ARG;
     st = st == ODIN3_OK ? check_group(run) : st;
-    return st == ODIN3_OK ? classify_nets(run) : st;
+    st = st == ODIN3_OK ? classify_nets(run) : st;
+    run->buses.quiet = run->check_only;
+    if (st == ODIN3_OK && run->group->bus_key != NULL) {
+        st = odin3_submod_busset_build(run->src, &run->state, run->group->bus_key,
+                                       run->group->value, &run->buses);
+    }
+    return st;
 }
 
 odin3_status odin3_submod_check_named(odin3_pass_ctx *ctx, odin3_module_id module_id,
@@ -676,6 +725,7 @@ odin3_status odin3_submod_check_named(odin3_pass_ctx *ctx, odin3_module_id modul
     run.design = ctx->design;
     run.src = odin3_module_get(ctx->design, module_id);
     run.group = group;
+    run.check_only = true;
     odin3_status st = analyze(&run);
     run_free(&run);
     return st;
@@ -732,7 +782,7 @@ odin3_status odin3_submod_extract_named(odin3_pass_ctx *ctx, odin3_module_id mod
 odin3_status odin3_submod_extract_ctx(odin3_pass_ctx *ctx, odin3_module_id module_id,
                                       const char *key, const char *value,
                                       odin3_submod_result *out) {
-    odin3_submod_group group = {key, value, value};
+    odin3_submod_group group = {key, value, value, NULL};
     return odin3_submod_extract_named(ctx, module_id, &group, out);
 }
 

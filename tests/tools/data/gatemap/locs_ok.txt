@@ -1,0 +1,7 @@
+top|module|top|a.v:1
+top|node:$port_in|a|a.v:1
+top|node:NAND2|g1|a.v:2
+top|node:DFF|q|a.v:3
+top|node:$_CONST0_|c|a.v:4
+top|node:sub|u1|a.v:5
+sub|module|sub|a.v:9

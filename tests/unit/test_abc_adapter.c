@@ -1172,6 +1172,22 @@ static void test_load_genlib_goldens(void) {
 
 #define PIN_LINE(name) "PIN " name " UNKNOWN 1 999 1 0 1 0\n"
 
+/* gm-gates follow-up (c): numbers are digits[.digits], as the .o3lib reader writes them; decimal
+ * areas and delays load. */
+static void test_load_genlib_decimal_numbers(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status st =
+        odin3_abc_session_load_genlib(self(),
+                                      "GATE INV 2.5 Y=!A;\nPIN A UNKNOWN 1 999 0.25 0 0.25 0\n"
+                                      "GATE AND2 10.125 Y=A*B;\n" PIN_LINE("A") PIN_LINE("B"),
+                                      &fail);
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+}
+
 /* Texts outside the canonical subset (session.c), each refused with its RESULT before ABC reads
  * it: the re-check's bypasses first, then the rest of the subset's rules. */
 typedef struct bad_genlib {
@@ -1217,6 +1233,19 @@ static const bad_genlib BAD_GENLIBS[] = {
     {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1 0 0\n",
      "line 2: a bad pin number or a word after the last"},
     {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1e 0 1 0\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1e3 Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X -1 Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X +2 Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X .5 Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X 1. Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X inf Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X 0x10 Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1.5e2 0 1 0\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 -1 0 1 0\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 .25 0 1 0\n",
      "line 2: a bad pin number or a word after the last"},
     {"GATE X 1 Y=A;\nPIN A SIDEWAYS 1 999 1 0 1 0\n", "line 2: a bad pin phase"},
     {"GATE X 1 Y=A;\nPIN 0 UNKNOWN 1 999 1 0 1 0\n", "line 2: a bad pin name (PIN * is not read)"},
@@ -2082,6 +2111,7 @@ int main(int argc, char **argv) {
     RUN_TEST(test_get_cells_constant);
     RUN_TEST(test_load_genlib_goldens);
     RUN_TEST(test_load_genlib_rejects);
+    RUN_TEST(test_load_genlib_decimal_numbers);
     RUN_TEST(test_load_genlib_bad_formulas);
     RUN_TEST(test_load_genlib_formula_fuzz);
     RUN_TEST(test_load_genlib_after_exec);

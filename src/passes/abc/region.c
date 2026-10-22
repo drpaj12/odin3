@@ -37,7 +37,9 @@ enum {
     LUT_EST_CAP = 1 << 24, /* the AIG estimate of one wide $lut stops here */
     DOMAIN_KEY_SHIFT = 2,
     EDGE_KEY_BASE = 4, /* edge keys start here; the global key is 2 */
-    ROLE_OOM = 0xFF    /* classify ran out of memory (not a role) */
+    ROLE_OOM = 0xFF,   /* classify ran out of memory (not a role) */
+    PARAM_INIT = 0,    /* a flip-flop's INIT is its first parameter */
+    INIT_ONE = 1
 };
 
 /* --- text ---------------------------------------------------------------------------------- */
@@ -170,6 +172,21 @@ bool odin3_abc_net_undefined(const odin3_module *module, odin3_net_id net) {
     return width != NULL && cover != NULL && width->i == 0 && cover->len == 0;
 }
 
+/* The value of a library TIE cell that is the one driver of net (its type classified TK_TIE,
+ * gatemap review), or -1. */
+static int tie_literal(const odin3_abc_run *run, odin3_net_id net) {
+    if (run->gate_index == NULL || odin3_net_driver_count(run->module, net) != 1) {
+        return -1;
+    }
+    odin3_node_id node = odin3_pin_node(run->module, odin3_net_driver(run->module, net));
+    uint64_t index = 0;
+    if (!odin3_u64map_get(run->gate_index, odin3_node_type(run->module, node).v, &index)) {
+        return -1;
+    }
+    const odin3_abc_gate *entry = odin3_vec_cat(&run->gates, (size_t)index);
+    return entry->kind == ODIN3_ABC_TK_TIE ? (int)entry->table : -1;
+}
+
 int odin3_abc_pin_literal(const odin3_abc_run *run, odin3_net_id net) {
     if (!odin3_net_valid(net)) {
         return -1;
@@ -182,7 +199,7 @@ int odin3_abc_pin_literal(const odin3_abc_run *run, odin3_net_id net) {
     case ODIN3_CONST_Z:
         return 0;
     default:
-        return -1;
+        return tie_literal(run, net);
     }
 }
 
@@ -215,6 +232,21 @@ static uint8_t type_kind(const odin3_celltype_def *def) {
     return odin3_gate_truth_eligible(def) ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
 }
 
+/* A library cell whose fn is a constant (a TIE cell) is a constant generator, not a cut cell: its
+ * value from its fn (odin3_gate_const_value). Leaves *entry as it is for any other type. */
+static odin3_status tie_entry(const odin3_abc_run *run, odin3_celltype_id type,
+                              const odin3_celltype_def *def, odin3_abc_gate *entry) {
+    const odin3_techlib_cell *lib = def == NULL ? NULL : odin3_celltype_lib(run->design, type);
+    int value = 0;
+    odin3_status st =
+        lib == NULL ? ODIN3_ERR_INVALID_ARG : odin3_gate_const_value(def, lib, &value);
+    if (st == ODIN3_OK) {
+        entry->kind = ODIN3_ABC_TK_TIE;
+        entry->table = value != 0 ? 1U : 0U;
+    }
+    return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
+}
+
 /* The cached entry of a type, made on first use. NULL on out of memory. */
 static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id type) {
     uint64_t index = 0;
@@ -232,6 +264,8 @@ static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id ty
         /* A type the simulator cannot size (its scratch hook refuses it) is a cut cell. */
         entry.kind = st == ODIN3_OK ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
         entry.n_inputs = st == ODIN3_OK ? odin3_gate_truth_inputs(def) : 0;
+    } else if (entry.kind == ODIN3_ABC_TK_OTHER && tie_entry(run, type, def, &entry) != ODIN3_OK) {
+        return NULL;
     }
     odin3_abc_gate *slot = odin3_vec_push(&run->gates);
     if (slot == NULL) {
@@ -586,6 +620,11 @@ static uint8_t classify(rscan *sc, odin3_node_id node) {
     case ODIN3_ABC_TK_DFF_N:
     case ODIN3_ABC_TK_FF:
         return flop_role(sc, node, entry->kind);
+    case ODIN3_ABC_TK_TIE:
+        if (sole_driver(sc, node)) {
+            return ODIN3_ABC_ROLE_CONST;
+        }
+        break;
     default:
         break;
     }
@@ -597,13 +636,30 @@ static uint8_t classify(rscan *sc, odin3_node_id node) {
     return ODIN3_ABC_ROLE_CUT;
 }
 
+/* GM-6: under abc --gates a flip-flop whose INIT is 1 stays a cut point (a library gate cannot be
+ * flipped as restore.c flips a LUT), counted as an other cell. */
+static bool gates_cut_init_one(rscan *sc, uint32_t node) {
+    if (!sc->run->gates_mode) {
+        return false;
+    }
+    const odin3_value *init = odin3_node_param(sc->module, (odin3_node_id){node}, PARAM_INIT);
+    if (init == NULL || init->kind != ODIN3_VAL_INT || init->i != INIT_ONE) {
+        return false;
+    }
+    count_cut(sc, ODIN3_ABC_CUT_OTHER);
+    return true;
+}
+
 /* Marks the run's flip-flops REG, then classifies every live node into region->role. */
 static odin3_status classify_all(rscan *sc) {
     odin3_abc_region *region = sc->region;
     uint32_t end = odin3_module_node_end(sc->module);
     odin3_status st = vec_zeros(&region->role, 1, end);
     for (size_t i = 0; st == ODIN3_OK && sc->domain != NULL && i < sc->domain->ffs.len; i++) {
-        *role_at(sc, vec_get_u32(&sc->domain->ffs, i)) = ODIN3_ABC_ROLE_REG;
+        uint32_t node = vec_get_u32(&sc->domain->ffs, i);
+        if (!gates_cut_init_one(sc, node)) {
+            *role_at(sc, node) = ODIN3_ABC_ROLE_REG;
+        }
     }
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};

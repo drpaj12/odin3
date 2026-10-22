@@ -16,14 +16,14 @@ import zipfile
 
 # Page order of IMAGE/figures.tex: one TikZ figure per page.
 FIGURES = ["pipeline", "project", "elab_seam", "proc", "util", "ir_model", "prov", "srcman",
-           "techlib", "abi", "re", "yggdrasil", "yggdrasil_tree", "yggdrasil_hybrid"]
+           "techlib", "abi", "re", "yggdrasil"]
 
 
 def overleaf_files() -> list[str]:
     """What the paper needs on Overleaf: the source, the bibliography, the shared TikZ styles,
     every TikZ figure, and the PDF converted from the one SVG figure."""
     figs = sorted(f for f in glob.glob("IMAGE/fig_*.tex"))
-    return ["odin3.tex", "odin3.bib", "IMAGE/odin3-tikz-styles.tex", *figs, "IMAGE/fig_ast.pdf"]
+    return ["odin3.tex", "joined.bib", "IMAGE/odin3-tikz-styles.tex", *figs, "IMAGE/fig_ast.pdf"]
 
 
 def make_zip(out: str) -> None:

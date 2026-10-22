@@ -1,0 +1,45 @@
+% Provenance lineage DAG (IR-12, IR-13), an illustrative example: one source line inside a
+% generate loop elaborates to two $add cells (two SOURCE records, told apart by hier path);
+% lowering each $add is one operation (one DERIVED record shared by its pieces); merging two
+% gates is one operation with two parents. Records are immutable, hash-consed and design-wide;
+% parents always have smaller IDs. Run and op numbers are illustrative. Single column.
+\begin{tikzpicture}[odin,
+  rec/.style={box, light, text width=21mm, minimum height=8.5mm},
+  obj/.style={ellipse, draw=o3brn6, fill=white, line width=0.5pt, font=\scriptsize,
+              align=center, inner xsep=-1pt, inner ysep=0pt, minimum height=6mm, text width=13mm},
+  parent/.style={flow, draw=o3grn8},
+  pid/.style={line width=0.5pt, draw=o3brn6, dash pattern=on 2pt off 1.4pt},
+  band/.style={fill=o3brn1, draw=o3brn3, line width=0.4pt},
+  bandlabel/.style={font=\scriptsize\bfseries, color=o3brn7, anchor=north west, inner sep=2pt}]
+  % ---- run bands ---------------------------------------------------------------------------
+  \foreach \y/\t in {0/{run 3: \odintt{read\_verilog}}, -1.58/{run 7: \odintt{lower}},
+                     -3.16/{run 9: \odintt{opt}}} {
+    \fill[band] (0, \y+0.72) rectangle (8.55, \y-0.86);
+    \node[bandlabel] at (0, \y+0.72) {\t};
+  }
+  % ---- records -----------------------------------------------------------------------------
+  \node[rec] (r1) at (3.0, -0.18)  {\#1 SOURCE\\\odinsub{\odintt{f.v:42}, \odintt{top/g[0]}}};
+  \node[rec] (r2) at (5.55, -0.18)  {\#2 SOURCE\\\odinsub{\odintt{f.v:42}, \odintt{top/g[1]}}};
+  \node[rec] (r3) at (3.0, -1.76) {\#3 DERIVED\\\odinsub{op 15}};
+  \node[rec] (r4) at (5.55, -1.76) {\#4 DERIVED\\\odinsub{op 16}};
+  \node[rec] (r5) at (4.275, -3.34) {\#5 DERIVED\\\odinsub{op 2, two parents}};
+  % ---- IR objects --------------------------------------------------------------------------
+  \node[obj] (a1) at (0.95, -0.2) {\odintt{\$add}\\[-1pt](dead)};
+  \node[obj] (a2) at (7.6, -0.2) {\odintt{\$add}\\[-1pt](tombstone)};
+  \node[obj] (g1) at (0.95, -1.76) {gates of\\[-1pt]\odintt{g[0]}};
+  \node[obj] (g2) at (7.6, -1.76) {gates of\\[-1pt]\odintt{g[1]}};
+  \node[obj] (g3) at (1.9, -3.34) {merged\\[-1pt]gate};
+  % ---- edges -------------------------------------------------------------------------------
+  \draw[parent] (r3) -- (r1);
+  \draw[parent] (r4) -- (r2);
+  \draw[parent] (r5.north) ++(-0.5,0) |- ($(r3.south)+(0,-0.3)$) -- (r3.south);
+  \draw[parent] (r5.north) ++(0.5,0) |- ($(r4.south)+(0,-0.3)$) -- (r4.south);
+  \foreach \o/\r in {a1/r1, a2/r2, g1/r3, g2/r4, g3/r5} \draw[pid] (\o) -- (\r);
+  % ---- key ---------------------------------------------------------------------------------
+  \begin{scope}[shift={(5.85, -3.6)}]
+    \draw[parent] (0, 0.32) -- (0.45, 0.32);
+    \node[font=\scriptsize, anchor=west, inner sep=1pt] at (0.5, 0.32) {parent};
+    \draw[pid] (0, 0) -- (0.45, 0);
+    \node[font=\scriptsize, anchor=west, inner sep=1pt] at (0.5, 0) {object's prov ID};
+  \end{scope}
+\end{tikzpicture}

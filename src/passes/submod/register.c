@@ -29,13 +29,16 @@ static const char k_default_key[] = "submod";
 typedef struct sm_opts {
     odin3_strbuf key;
     odin3_strbuf name;
+    odin3_strbuf bus;
     bool has_name;
+    bool has_bus;
 } sm_opts;
 
 static odin3_status take_value(odin3_bytes *args, const char *option, odin3_strbuf *into) {
     odin3_bytes value = odin3_pass_arg_next(args);
     if (value.ptr == NULL || value.len == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "submod: %s needs a value (usage: submod [-attr KEY] [-name N])",
+        odin3_log(ODIN3_LOG_ERROR,
+                  "submod: %s needs a value (usage: submod [-attr KEY] [-name N] [-bus BUSKEY])",
                   option);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -52,10 +55,13 @@ static odin3_status parse_args(odin3_bytes args, sm_opts *opts) {
         } else if (odin3_pass_arg_is(word, "-name")) {
             st = take_value(&args, "-name", &opts->name);
             opts->has_name = st == ODIN3_OK;
+        } else if (odin3_pass_arg_is(word, "-bus")) {
+            st = take_value(&args, "-bus", &opts->bus);
+            opts->has_bus = st == ODIN3_OK;
         } else {
             odin3_log(ODIN3_LOG_ERROR,
-                      "submod: unknown option '%.*s' (options: -attr KEY, -name N)", (int)word.len,
-                      (const char *)word.ptr);
+                      "submod: unknown option '%.*s' (options: -attr KEY, -name N, -bus BUSKEY)",
+                      (int)word.len, (const char *)word.ptr);
             st = ODIN3_ERR_INVALID_ARG;
         }
     }
@@ -171,8 +177,8 @@ static odin3_status extract_groups(odin3_pass_ctx *ctx, odin3_module_id mid, con
     const size_t *offs = groups.order.data;
     for (size_t i = 0; st == ODIN3_OK && i < groups.order.len; i++) {
         const char *value = groups.pool.data + offs[i];
-        odin3_submod_group group = {opts->key.data, value,
-                                    opts->has_name ? opts->name.data : value};
+        odin3_submod_group group = {opts->key.data, value, opts->has_name ? opts->name.data : value,
+                                    opts->has_bus ? opts->bus.data : NULL};
         if (claimed != NULL) {
             st = check_group(ctx, mid, &group, claimed);
         } else {
@@ -228,7 +234,9 @@ static odin3_status submod_pass_run(odin3_pass_ctx *ctx, odin3_design *design, o
     sm_opts opts;
     odin3_strbuf_init(&opts.key);
     odin3_strbuf_init(&opts.name);
+    odin3_strbuf_init(&opts.bus);
     opts.has_name = false;
+    opts.has_bus = false;
     uint32_t end = odin3_design_module_end(design);
     uint32_t moved = 0;
     odin3_status st = parse_args(args, &opts);
@@ -248,9 +256,11 @@ static odin3_status submod_pass_run(odin3_pass_ctx *ctx, odin3_design *design, o
     }
     odin3_strbuf_free(&opts.key);
     odin3_strbuf_free(&opts.name);
+    odin3_strbuf_free(&opts.bus);
     return st;
 }
 
-const odin3_pass_def odin3_pass_submod = {"submod",        "submod [-attr KEY] [-name N]",
-                                          submod_pass_run, NULL,
-                                          false,           ODIN3_PASS_PROCESSES_REFUSE};
+const odin3_pass_def odin3_pass_submod = {
+    "submod",        "submod [-attr KEY] [-name N] [-bus BUSKEY]",
+    submod_pass_run, NULL,
+    false,           ODIN3_PASS_PROCESSES_REFUSE};

@@ -1,6 +1,6 @@
 # Odin III paper (IEEE conference draft)
 
-`odin3.tex` is the paper in the IEEEtran conference class, `odin3.bib` its references, and
+`odin3.tex` is the paper in the IEEEtran conference class, `joined.bib` its references (Peter's joined bibliography; `odin3.bib` was the earlier, smaller one), and
 `IMAGE/` its figures. Gaps that need measurements or Peter's input are marked `\todo{…}` in the
 text and print as **[TODO: …]**.
 
@@ -15,7 +15,7 @@ Fifteen figures are TikZ, drawn at print size in the paper's fonts; one, the byt
 is a hand-drawn SVG.
 
 - `IMAGE/odin3-tikz-styles.tex` holds the shared palette and styles. The palette is ColorBrewer
-  Blues and Greys, which is colourblind-safe. It also holds the build-status key and two
+  greens and browns with black ink. It also holds the build-status key and two
   helpers: `\odinrecord`, a struct drawn as a matrix, and `\odinfit`, a safety net that scales a
   figure down only if it is wider than the column and writes `ODINFIT` to the log when it does.
 - `IMAGE/fig_<name>.tex` holds one `tikzpicture` per figure. The paper pulls each one in with
@@ -37,10 +37,10 @@ Build status is coded by fill and by border, so it survives greyscale printing:
 
 | State | Look | Meaning |
 |---|---|---|
-| built | mid-blue fill, solid border | merged on `main` with its exit test |
-| in progress | pale-blue fill, solid border | being implemented against an approved plan |
-| specified | white fill, dashed blue border | approved specification and plan |
-| planned | white fill, dotted grey border | a later phase (Phase 3's plan is approved) |
+| built | mid-green fill, solid border | merged on `main` with its exit test |
+| in progress | pale-green fill, solid border | being implemented against an approved plan |
+| specified | white fill, dashed green border | approved specification and plan |
+| planned | white fill, dotted brown border | a later phase (Phase 3's plan is approved) |
 
 The status shown is as of the v1.0.0 release, 2026-10-21 (v1.0 phases: ADR D11):
 
@@ -66,17 +66,28 @@ features table and the phases table together.
 | `fig_techlib` | the `.o3lib` tech library and its users | TikZ | `\columnwidth` |
 | `fig_abi` | the C ABI and plugin model | TikZ | `\columnwidth` |
 | `fig_re` | the reverse-engineering and analysis flow | TikZ | `\columnwidth` |
-| `fig_yggdrasil` | Yggdrasil III: Odin III as the trunk, with Wyrd III, Loki III, Leman Russ III, Bifrost III and Midgard III | TikZ | `\textwidth` |
-| `fig_yggdrasil_tree`, `fig_yggdrasil_hybrid` | Variants of the Yggdrasil III figure for comparison (organic tree; tree silhouette with boxes), not used by the paper | TikZ | `\textwidth` |
+| `fig_yggdrasil` | Yggdrasil III drawn as a tree: Odin III steps as the trunk, the oracles as a forest, Wyrd III, Loki III, Bifrost III and Midgard III in the canopy | TikZ | `\textwidth` |
 | `fig_flow` | the flow of a design, with what each stage does (drawn by `fig_flow_base`) | TikZ | `\textwidth` |
 | `fig_flow_verify` | the same flow, annotated with the verification techniques | TikZ | `\textwidth` |
 | `fig_flow_prov` | the same flow, annotated with the provenance records | TikZ | `\textwidth` |
+
+## Two reference lists (multibib)
+
+Part I ends with a reference list of the works Part I cites (`\cite`). The document ends with a
+second list, "References (Parts I and II)", of every work cited in either part. The `multibib`
+package makes it: Part II cites with `\citeall{...}`, and `\nociteall{...}` right after
+`\begin{document}` adds the Part I keys in Part I citation order, so a work has the same number in
+both lists. multibib writes a second aux file, `all.aux`, so BibTeX runs twice: on `odin3.aux` and on
+`all.aux`. Overleaf runs both automatically (it uses latexmk), and so does `make` with Tectonic or
+`LATEX=latexmk`. With a plain `pdflatex` loop, run `bibtex odin3` and `bibtex all` between passes. When
+Part I gains or loses a citation, regenerate the `\nociteall` list from the order of `\bibitem`
+keys in the Part I `.bbl`.
 
 ## Build on Overleaf (primary)
 
 1. Make the upload zip from this directory with `make zip`, or `make zip ZIP=/some/path.zip`.
    It uses Python's `zipfile`, so `zip` is not needed. The zip holds:
-   - `odin3.tex` and `odin3.bib`;
+   - `odin3.tex` and `joined.bib`;
    - `IMAGE/odin3-tikz-styles.tex`;
    - every `IMAGE/fig_*.tex`;
    - `IMAGE/fig_ast.pdf`.
@@ -86,8 +97,8 @@ features table and the phases table together.
 3. Under *Menu → Compiler*, choose **pdfLaTeX**. The main document is `odin3.tex`.
 
 No shell-escape is needed. The paper uses only packages that Overleaf ships: IEEEtran, cite,
-amsmath, graphicx, booktabs, array, url, listings and tikz. It uses relative paths only, and Overleaf
-runs BibTeX itself. pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
+multibib, amsmath, graphicx, booktabs, array, url, listings and tikz. It uses relative paths only, and Overleaf
+runs BibTeX itself (see below). pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. That warning is harmless.
 
 ## Build locally (optional)
 

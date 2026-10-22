@@ -2,11 +2,11 @@
 % design-owned project record; read_verilog, the tech library, dump_project and (Phase 4) the
 % partial mapper only read it. Single column: \columnwidth.
 \begin{tikzpicture}[odin,
-  fmt/.style={box, built, text width=18mm, minimum height=10.5mm},
+  fmt/.style={box, light, text width=18mm, minimum height=10.5mm},
   use/.style={box, text width=18.4mm, minimum height=11mm, inner xsep=1.5pt},
-  fld/.style={draw=o3grey6, fill=white, line width=0.5pt, font=\scriptsize, align=left,
+  fld/.style={draw=o3brn6, fill=white, line width=0.5pt, font=\scriptsize, align=left,
               text width=40mm, minimum height=5.6mm, inner xsep=2.2pt, inner ysep=1pt},
-  fldh/.style={fld, fill=o3blue4, draw=o3blue8, font=\footnotesize, align=center,
+  fldh/.style={fld, fill=o3grn4, draw=o3grn8, font=\footnotesize, align=center,
                text width=80mm+3.9pt, minimum height=5mm}]
   % ---- the four formats --------------------------------------------------------------------
   \foreach \n/\x/\t/\s in {
@@ -34,17 +34,16 @@
        {inventory (\odintt{available}); overrides (\odintt{hide}, \odintt{cell from})};
   \node[fld, anchor=north west] (f8) at ($(f6.south west)+(0,\pgflinewidth)$)
        {revision; output (Odin~II XML)};
-  \node[fit=(rh)(f1)(f8), inner sep=0pt, draw=o3blue8, line width=0.7pt] (rec) {};
+  \node[fit=(rh)(f1)(f8), inner sep=0pt, draw=o3grn8, line width=0.7pt] (rec) {};
 
   % ---- the readers of the record ------------------------------------------------------------
-  \node[use, built]  (rv) at (1.05, -5.0) {{\scriptsize\odintt{read\_verilog}}\\\odinsub{preprocess, parse,\\[-2pt]elaborate}};
-  \node[use, built]   (rt) at (3.25, -5.0) {{\scriptsize\odintt{read\_techlib}}\\\odinsub{\odintt{.o3lib}, 1G}};
-  \node[use, built] (pm) at (5.45, -5.0) {{\scriptsize\odintt{partial\_map}}\\\odinsub{Phase 4}};
-  \node[use, built]   (dp) at (7.65, -5.0) {{\scriptsize\odintt{dump\_project}}\\\odinsub{JSON: the corpus\\[-2pt]oracle record}};
+  \node[use, light]  (rv) at (1.05, -5.0) {{\scriptsize\odintt{read\_verilog}}\\\odinsub{preprocess, parse,\\[-2pt]elaborate}};
+  \node[use, light]   (rt) at (3.25, -5.0) {{\scriptsize\odintt{read\_techlib}}\\\odinsub{\odintt{.o3lib}, 1G}};
+  \node[use, light] (pm) at (5.45, -5.0) {{\scriptsize\odintt{partial\_map}}\\\odinsub{Phase 4}};
+  \node[use, light]   (dp) at (7.65, -5.0) {{\scriptsize\odintt{dump\_project}}\\\odinsub{JSON: the corpus\\[-2pt]oracle record}};
 
   \foreach \n in {o3, fl, qs, ox} \draw[flow] (\n.south) -- (\n.south |- rec.north);
   \foreach \n in {rv, rt, dp}     \draw[flow] (\n.north |- rec.south) -- (\n.north);
   \draw[flow] (pm.north |- rec.south) -- (pm.north);
 
-  \odinlegend{anchor=north, at={(4.35, -5.75)}}
 \end{tikzpicture}

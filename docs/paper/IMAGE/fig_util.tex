@@ -2,17 +2,17 @@
 % allocation wrapper whose test hook fails the n-th allocation. Arrows point from a container to
 % what it uses. Single column: \columnwidth.
 \begin{tikzpicture}[odin,
-  c/.style={box, built, text width=12.3mm, minimum height=10mm, inner xsep=1.2pt},
-  wide/.style={box, built, minimum height=7mm}]
+  c/.style={box, light, text width=12.3mm, minimum height=10mm, inner xsep=1.2pt},
+  wide/.style={box, light, minimum height=7mm}]
   % ---- containers (tier 1) -----------------------------------------------------------------
   \node[c] (arena) at (0.667, 0) {\odintt{arena}\\\odinsub{bump allocator}};
   \node[c] (vec)   at (2.097, 0) {\odintt{vec}\\\odinsub{growable array}};
   \node[c] (pv)    at (3.527, 0) {\odintt{pagevec}\\\odinsub{stable pages\\[-2pt]of $2^k$ items}};
   \node[c] (u64)   at (4.957, 0) {\odintt{u64map}\\\odinsub{Robin Hood\\[-2pt]u64$\to$u64}};
-  \node[c, fill=o3blue3] (hash) at (6.387, 0) {\odintt{hash}\\\odinsub{FNV-1a\\[-2pt]+ fmix64}};
+  \node[c, fill=o3grn3] (hash) at (6.387, 0) {\odintt{hash}\\\odinsub{FNV-1a\\[-2pt]+ fmix64}};
   \node[c] (idx)   at (7.817, 0) {\odintt{idindex}\\\odinsub{hash-cons\\[-2pt]index}};
   % ---- foundation (tier 0) and strings / log (tier 2) ----------------------------------------
-  \node[wide, fill=o3blue3, text width=82mm] (alloc) at (4.242, -1.3)
+  \node[wide, fill=o3grn3, text width=82mm] (alloc) at (4.242, -1.3)
        {\odintt{alloc}: \odinsub{the one \odintt{malloc} wrapper; a test hook fails the $n$-th allocation}};
   \node[wide, text width=26mm] (str) at (7.102, 1.35)
        {\odintt{strtab} / \odintt{strbuf}\\\odinsub{bytes $\leftrightarrow$ u32 ID; ID 0 is empty}};

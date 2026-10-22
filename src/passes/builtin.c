@@ -776,11 +776,10 @@ static const odin3_pass_def WRITE_BLIF = {
     "write_blif",
     "write_blif [--vtr] [--lut-k K] [--name-style short|provenance|hash [--name-map <file>]] "
     "[--src-attr] [--gates-as-names] <file>: write the design as BLIF (the top first); --vtr "
-    "writes the top alone in "
-    "the dialect VPR reads; hash names write the name map to <file>.names or --name-map; "
-    "--src-attr (plain dialect only) writes each cell's HDL locations as `.attr src \"SRC\"`; "
-    "--gates-as-names (plain dialect only) writes gate cells as `.names` and library state cells "
-    "as `.latch`",
+    "writes the top alone in the dialect VPR reads; hash names write the name map to "
+    "<file>.names or --name-map; --src-attr (plain dialect only) writes each cell's HDL "
+    "locations as `.attr src \"SRC\"`; --gates-as-names (plain dialect only) writes gate cells "
+    "as `.names` and library state cells as `.latch`",
     write_blif_run,
     NULL,
     false,

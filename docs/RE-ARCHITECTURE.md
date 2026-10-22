@@ -83,6 +83,8 @@ Fixed in 7.4e:
 
 - The Python binding did not register the linked ABC, so `cone_check` and `abc` failed with
   `ENGINE` outside the CLI. Fix made: `Odin3.load_abc()` (loads `libodin3_abc.so` as a plugin).
+- `submod` made one scalar port per boundary net, so a tool could not commit a bus as one vector
+  port. Closed in v1.0.5: `submod -bus BUSKEY` (nets tagged `NAME[BIT]`).
 
 Open:
 
@@ -108,6 +110,8 @@ Open:
 7. No cell can be created or edited through the ABI: all mutation is a pass. A tool that wants a
    cell type other than those `raise` templates (`$add`, `$and`, ...) must add a pass. Fix: a
    generic `raise` with a plugin-supplied template, or `odin3_node_create` guarded by `check`.
+   Partly closed in v1.0.5: `-const PORT=V` on `cone_check` and `raise` (a template input port
+   tied to a constant).
 8. The counterexample `odin3:cone_cex` is text (`PORT[i]=v,...`); the binding has no parser.
    Fix: `Module.cone_cex() -> dict[str, int]` once a tool needs it.
 9. One linked ABC engine per process, passes run serially: scoring thousands of hypotheses is

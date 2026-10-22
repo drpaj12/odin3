@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
+    src/passes/submod/busattr.c
     src/passes/submod/register.c
     src/passes/cone_check/cone_check.c
     src/passes/cone_check/bind.c
@@ -255,6 +256,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/args.c
     src/passes/abc/region.c
     src/passes/abc/result.c
+    src/passes/abc/cells.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
     src/passes/abc/aig.c
@@ -1438,11 +1440,12 @@ if(BUILD_TESTING)
     # abc_fake_engine.c, which never links ABC). Each test writes its files under abc_tests/<name>.
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/abc_tests)
     foreach(_abc_test test_abc_args test_abc_region test_abc_result test_abc_xblif
-                      test_abc_exchange test_abc_splice test_abc_prov)
+                      test_abc_exchange test_abc_splice test_abc_prov test_abc_gates)
         odin3_add_unit_test(${_abc_test})
         target_compile_definitions(${_abc_test} PRIVATE
             ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
-            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_GENLIB_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/genlib")
         if(NOT _abc_test STREQUAL "test_abc_result")
             target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
         endif()
@@ -2336,6 +2339,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_BINARY_DIR}/raise_micros
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(raise_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # v1.0.2 gate mapping (gatemap plan Task 13): abc --gates and dfflibmap with the real linked
+        # ABC on generic_gates and cmos6, equivalent to write_blif --gates-as-names after lower.
+        add_test(NAME abc_gates_cli
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/abc_gates_cli.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/abc_gates_cli
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_gates_cli PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
@@ -3082,6 +3095,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
+    add_test(NAME python_sim
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_sim
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_sim PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # S1 Task 9 (spec SW-3, SW-4): sim --vcd against the vector file and, when found, Icarus.
     add_test(NAME sim_vcd_check
         COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
@@ -3098,6 +3118,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_re_round
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(python_re_round PROPERTIES
+            LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
+        # v1.0.5: cone_check/raise -const (and submod -bus) through the Python binding.
+        add_test(NAME python_core_options
+            COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                    ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe> ODIN3_REQUIRE_ABC=1
+                    "ODIN3_ABC_LIB=$<TARGET_FILE:odin3_abc>"
+                    ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_core_options
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(python_core_options PROPERTIES
             LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
     endif()
     # Phase 6 (6.3, spec E-3 to E-7): write_json --odin3, the reader's handlers and the loader
@@ -4047,6 +4076,48 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${_micro_dir})
         set_tests_properties(lower_run_micro lower_sim_micro lower_equiv_micro
                              PROPERTIES LABELS "sweep;lower")
+        # v1.0.2 gate mapping (gatemap plan Task 14, spec 9): every micro through read_techlib L;
+        # read_verilog --nolatches; proc; opt; lower; abc --gates L; dfflibmap L, equivalent to
+        # write_blif --gates-as-names after lower (equiv-check), only library cells, constants and
+        # ports left, every library cell with a SRC (tools/gatemap-check/gatemap-run). The
+        # smoke tests run four micros with --remap (the gate netlist read back and mapped again).
+        # The expect-fail lists hold what the flow cannot decide, each with a reason (tests/gatemap).
+        # No Yosys is needed; the lists are shared with the lower sweeps and need the oracle block.
+        if(ODIN3_WITH_ABC)
+            set(_gatemap_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+                --odin3 $<TARGET_FILE:odin3> --jobs 2 --mem-cap 2G --gatemap-run
+                --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                --opt-arg=--equiv-check=${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+            # Floors: the measured count of compared micros less 5 percent (release build,
+            # 2026-10-22, 539 micros each): generic_gates 439, cmos6 437.
+            foreach(_gm_lib IN ITEMS generic cmos6)
+                if(_gm_lib STREQUAL "generic")
+                    set(_gm_name generic_gates)
+                    set(_gm_floor 417)
+                else()
+                    set(_gm_name cmos6)
+                    set(_gm_floor 415)
+                endif()
+                set(_gm_arg --opt-arg=--lib=${_gm_name}=${PROJECT_SOURCE_DIR}/lib/${_gm_name}.o3lib)
+                add_test(NAME gatemap_smoke_${_gm_lib}
+                    COMMAND ${_gatemap_sweep} --jobs 1 ${_gm_arg} --opt-arg=--remap
+                            --root ${_micro_dir}
+                            ${_micro_dir}/micro/bm_DL_logic_w_Dff.v
+                            ${_micro_dir}/micro/bm_DL_2_1_mux.v
+                            ${_micro_dir}/micro/bm_DL_4_bit_comparator.v
+                            ${_micro_dir}/micro/bm_DL_4_bit_shift_register.v)
+                set_tests_properties(gatemap_smoke_${_gm_lib} PROPERTIES LABELS "tools;gatemap"
+                                     SKIP_RETURN_CODE 77 TIMEOUT 1800)
+                odin3_add_sweep_test(gatemap_micro_${_gm_lib} LABEL sweep
+                    COMMAND ${_gatemap_sweep} ${_gm_arg} --opt-arg=--remap
+                            --min-compared-total ${_gm_floor} ${_lower_micro_expect}
+                            --expect-fail ${PROJECT_SOURCE_DIR}/tests/lower/run_micro_expect_fail.txt
+                            --expect-fail
+                            ${PROJECT_SOURCE_DIR}/tests/gatemap/expect_fail_${_gm_lib}.txt
+                            ${_micro_dir})
+                set_tests_properties(gatemap_micro_${_gm_lib} PROPERTIES LABELS "sweep;gatemap")
+            endforeach()
+        endif()
         # opt_diff_micro: every micro with the Phase 2 script and `opt -full`; a difference fails
         # unless tests/opt/diff_expect.txt lists it with a reason.
         odin3_add_sweep_test(opt_diff_micro LABEL sweep

@@ -1,0 +1,31 @@
+% The C ABI and plugin model (1D spec, DESIGN.md section 15.3, include/anonsynth/anonsynth.h ABI v4).
+% Everything outside the core sees only anonsynth.h. Single column: \columnwidth.
+\begin{tikzpicture}[odin,
+  client/.style={box, text width=14.2mm, minimum height=11.5mm, inner xsep=1.5pt},
+  layer/.style={box, text width=83mm, minimum height=9mm}]
+  % ---- clients -------------------------------------------------------------------------------
+  \foreach \n/\x/\s/\t/\u in {
+      cli/0.83/light/{CLI}/{\odintt{anonsynth -p},\\\odintt{.o3} scripts},
+      so/2.6/light/{C plugin}/{\odintt{.so}: passes,\\cell types},
+      py/4.37/light/{Python}/{\odintt{cffi},\\ABI mode},
+      hook/6.14/light/{exec hooks}/{JSON on stdio}}
+    \node[client, \s] (\n) at (\x, 0) {\t\\\odinsub{\u}};
+  % ---- layers --------------------------------------------------------------------------------
+  \node[layer, light, emph] (hdr) at (4.37, -1.62)
+       {\odintt{include/anonsynth/anonsynth.h}: ABI version 4, 134 functions\\
+        \odinsub{opaque \odintt{anonsynth\_design}; \odintt{uint32\_t} IDs with a module handle;
+                 \odintt{anonsynth\_status} returns; out-pointers}};
+  \node[layer, light] (lib) at (4.37, -2.82)
+       {\odintt{libanonsynth.so}\\
+        \odinsub{hidden visibility, exports only \odintt{src/api}; the pass manager: provenance
+                 run, \odintt{check} before and after, timing}};
+  \node[layer, light] (core) at (4.37, -4.0)
+       {core objects\\
+        \odinsub{\odintt{util}, \odintt{ir}, \odintt{ast}, \odintt{frontends}, \odintt{passes},
+                 \odintt{backends}, \odintt{sim}, \odintt{techlib}}};
+  % ---- edges ---------------------------------------------------------------------------------
+  \foreach \n in {cli, so, py} \draw[flow] (\n.south) -- (\n.south |- hdr.north);
+  \foreach \n in {hook}    \draw[flow] (\n.south) -- (\n.south |- hdr.north);
+  \draw[flow] (hdr) -- (lib);
+  \draw[flow] (lib) -- (core);
+\end{tikzpicture}

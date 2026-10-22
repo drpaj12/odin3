@@ -16,6 +16,19 @@ without changing its core: Wyrd III (experiment runner and GUI, <https://github.
 Loki III (reverse engineering of structural netlists, <https://github.com/drpaj12/loki>), Bifrost III
 (the simulation bridge) and Midgard III (the Verilog Town game).
 
+## Documentation
+
+Start at the Yggdrasil III hub; every manual links to the others.
+
+- [Yggdrasil III hub](https://drpaj12.github.io/YggdrasilIII/): the suite, how the pieces connect, getting started.
+- [Odin III manual](https://drpaj12.github.io/odin3/).
+- [Wyrd III manual](https://drpaj12.github.io/wyrd/), with
+  [simulation (Bifrost III)](https://drpaj12.github.io/wyrd/simulation.html) and
+  [Midgard III (Verilog Town)](https://drpaj12.github.io/wyrd/midgard.html).
+- Tutorials (PDF): [command line](https://drpaj12.github.io/wyrd/wyrd-tutorial.pdf) and
+  [GUI](https://drpaj12.github.io/wyrd/wyrd-gui-tutorial.pdf).
+- [Loki III manual](https://drpaj12.github.io/loki/).
+
 ## Install
 
 From source (Ubuntu 24.04, native or WSL2; CMake 3.25 or later, Ninja, gcc or clang, `bison`,

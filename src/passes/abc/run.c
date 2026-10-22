@@ -8,6 +8,7 @@
 #include "passes/abc/abc_test.h"
 #include "passes/abc/engine.h"
 #include "passes/abc/exchange.h"
+#include "passes/abc/genlib.h"
 #include "passes/abc/prov.h"
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
@@ -69,6 +70,7 @@ odin3_status odin3_abc_run_create(odin3_pass_ctx *ctx, const odin3_abc_opts *opt
     run->gate_index = odin3_u64map_create(0);
     odin3_vec_init(&run->gates, sizeof(odin3_abc_gate));
     odin3_strbuf_init(&run->lines);
+    odin3_strbuf_init(&run->genlib);
     if (run->arena == NULL || run->gate_index == NULL) {
         odin3_abc_run_destroy(run);
         return ODIN3_ERR_NO_MEMORY;
@@ -118,6 +120,8 @@ void odin3_abc_run_destroy(odin3_abc_run *run) {
     odin3_vec_free(&run->gates);
     odin3_u64map_destroy(run->gate_index);
     odin3_strbuf_free(&run->lines);
+    odin3_libcells_free(&run->lib);
+    odin3_strbuf_free(&run->genlib);
     odin3_arena_destroy(run->arena);
     odin3_util_free(run);
 }
@@ -213,14 +217,18 @@ odin3_status odin3_abc_run_ensure_dir(odin3_abc_run *run) {
 
 /* --- start-up ------------------------------------------------------------------------------ */
 
-/* The checked script of the choice: the file, or the embedded default's bytes. */
+/* The checked script of the choice: the file, or the embedded default's bytes (with --gates,
+ * lib/abc/gates.abc's; the checker then wants a gate-mapped end). */
 static odin3_status load_script(odin3_abc_run *run) {
     odin3_abc_script_src src = {run->choice.given, run->choice.resolved, {NULL, 0}};
     if (run->choice.source == ODIN3_ABC_SRC_BUILTIN) {
-        src.text = (odin3_bytes){odin3_abc_default_script, odin3_abc_default_script_len};
+        src.text = run->gates_mode
+                       ? (odin3_bytes){odin3_abc_gates_script, odin3_abc_gates_script_len}
+                       : (odin3_bytes){odin3_abc_default_script, odin3_abc_default_script_len};
         src.resolved = NULL;
     }
-    odin3_status st = odin3_abc_script_parse(&src, run->opts.lut_k, run->exchange, &run->script);
+    const odin3_abc_script_mode mode = {run->opts.lut_k, run->exchange, run->gates_mode};
+    odin3_status st = odin3_abc_script_parse_mode(&src, &mode, &run->script);
     if (st == ODIN3_OK && !odin3_abc_hex_digest(run->script.sha256_hex, run->digest)) {
         st = ODIN3_ERR_INVALID_ARG;
     }
@@ -254,19 +262,114 @@ static void log_start(const odin3_abc_run *run) {
         (void)snprintf(k_text, sizeof k_text, "none");
     }
     odin3_log(ODIN3_LOG_INFO,
-              "abc: script %s (%s), sha256 %.*s\xE2\x80\xA6, K=%s, exchange %s, ABC %.*s",
+              "abc: script %s (%s), sha256 %.*s\xE2\x80\xA6, K=%s, exchange %s%s%s, ABC %.*s",
               run->choice.given, run->choice.resolved, SHA_SHOWN, run->script.sha256_hex, k_text,
-              run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif", COMMIT_SHOWN,
-              run->engine->abc_commit);
+              run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif",
+              run->gates_mode ? ", gates " : "", run->gates_mode ? run->opts.gates : "",
+              COMMIT_SHOWN, run->engine->abc_commit);
 }
 
-/* Steps 3 to 7 of the start-up order; step 1 and 2 are in odin3_abc_pass_run. */
-static odin3_status startup_checks(odin3_abc_run *run) {
+/* --- start-up with --gates (gatemap spec 3, 4, G-2, G-4, G-5; plan Task 10, GM-4, GM-11, GM-12) */
+
+/* The options --gates cannot be used with. */
+static odin3_status gates_refusals(const odin3_abc_run *run) {
+    if (run->opts.lut_k != 0) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: --lut does not apply with --gates");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (run->opts.via_blif != NULL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "abc: --gates runs ABC in memory; --via-blif cannot be used with it");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
+/* One note per cell of the library that is not a gate cell (GM-12: a NOTE is an INFO line). */
+static void log_skips(const odin3_abc_run *run) {
+    for (size_t at = 0; at < run->lib.skips.len; at++) {
+        const odin3_libskip *skip = odin3_vec_cat(&run->lib.skips, at);
+        const odin3_celltype_def *def = odin3_celltype_get(run->design, skip->type);
+        if (def == NULL) {
+            continue;
+        }
+        char why[CELL_TEXT_BYTES];
+        bool has_port = skip->why == ODIN3_LIBCELL_NO_SUPPORT || skip->why == ODIN3_LIBCELL_NAME;
+        (void)snprintf(why, sizeof why, odin3_libcell_skip_text(skip->why),
+                       has_port && skip->port < def->n_ports ? def->ports[skip->port].name : "");
+        odin3_log(ODIN3_LOG_INFO,
+                  "abc: note: library '%s': cell '%s' is not used for gate mapping: %s",
+                  run->opts.gates, def->name, why);
+    }
+}
+
+/* The library's cells, the checks, the notes, the genlib text and its hash. */
+static odin3_status gates_library(odin3_abc_run *run) {
+    const char *library = run->opts.gates;
+    odin3_status st = odin3_libcells_collect(run->design, library, &run->lib);
+    st = st == ODIN3_OK ? odin3_abc_genlib_check(run->design, &run->lib, library) : st;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    log_skips(run);
+    st = odin3_abc_genlib_text(run->design, &run->lib, &run->genlib);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    odin3_abc_genlib_sha256(&run->genlib, run->genlib_sha256_hex);
+    odin3_log(ODIN3_LOG_INFO, "abc: --gates library '%s': %u gates, genlib sha256 %.*s\xE2\x80\xA6",
+              library, (unsigned)run->lib.gates.len, SHA_SHOWN, run->genlib_sha256_hex);
+    return ODIN3_OK;
+}
+
+/* GM-11: only --script overrides the gate script; a project's or CLI script is not used. */
+static odin3_status gates_choose_script(odin3_abc_run *run) {
+    odin3_status st = odin3_abc_choose_script(run->design, &run->opts, run->arena, &run->choice);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (run->choice.source == ODIN3_ABC_SRC_PROJECT || run->choice.source == ODIN3_ABC_SRC_CLI) {
+        odin3_log(ODIN3_LOG_INFO, "abc: note: --gates does not use the project's or "
+                                  "--abc-script's script; give --script to choose one");
+    }
+    if (run->choice.source != ODIN3_ABC_SRC_PASS) {
+        run->choice = (odin3_abc_script_choice){ODIN3_ABC_GATES_SCRIPT_NAME, "embedded",
+                                                ODIN3_ABC_SRC_BUILTIN};
+    }
+    return ODIN3_OK;
+}
+
+/* Before the engine: the refusals, the library, cone provenance (G-2), the in-memory exchange
+ * (GM-4) and the gate script. */
+static odin3_status gates_startup(odin3_abc_run *run) {
+    odin3_status st = gates_refusals(run);
+    st = st == ODIN3_OK ? gates_library(run) : st;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    if (run->opts.prov_given && run->opts.prov == ODIN3_ABC_PROV_FINE) {
+        odin3_log(ODIN3_LOG_INFO, "abc: note: --prov fine is not available with --gates; "
+                                  "provenance uses cut cones (gatemap spec G-2)");
+    }
+    run->opts.prov = ODIN3_ABC_PROV_CONE;
+    run->exchange = ODIN3_ABC_EXCHANGE_AIG;
+    st = gates_choose_script(run);
+    return st == ODIN3_OK ? load_script(run) : st;
+}
+
+/* Without --gates: the --via-blif directory's bytes (I12), the exchange and the script. */
+static odin3_status lut_startup(odin3_abc_run *run) {
     odin3_status st = run->opts.via_blif != NULL ? choose_dir(run) : ODIN3_OK; /* I12 */
     st = st == ODIN3_OK ? odin3_abc_exchange_choice(&run->opts, &run->exchange) : st;
     st = st == ODIN3_OK ? odin3_abc_choose_script(run->design, &run->opts, run->arena, &run->choice)
                         : st;
-    st = st == ODIN3_OK ? load_script(run) : st;
+    return st == ODIN3_OK ? load_script(run) : st;
+}
+
+/* Steps 3 to 7 of the start-up order; step 1 and 2 are in odin3_abc_pass_run. */
+static odin3_status startup_checks(odin3_abc_run *run) {
+    run->gates_mode = run->opts.gates != NULL;
+    odin3_status st = run->gates_mode ? gates_startup(run) : lut_startup(run);
     if (st != ODIN3_OK) {
         return st;
     }
@@ -276,7 +379,7 @@ static odin3_status startup_checks(odin3_abc_run *run) {
                                    "with ODIN3_WITH_ABC=ON)");
         return ODIN3_ERR_ENGINE;
     }
-    run->route = odin3_abc_route(run->digest);
+    run->route = run->gates_mode ? ODIN3_ABC_ROUTE_LINKED : odin3_abc_route(run->digest);
     if (run->route == ODIN3_ABC_ROUTE_CHILD) {
         run->exchange = ODIN3_ABC_EXCHANGE_BLIF; /* the subprocess always uses the BLIF exchange */
     }
@@ -376,7 +479,8 @@ static result_shape shape_of(const odin3_abc_result *res) {
     return shape;
 }
 
-/* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11). */
+/* §8.2's line for runs without a name map, then the run's summary line (§8.3, §11; with --gates,
+ * the gate count instead of the LUT shape). */
 static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats *stats,
                          result_shape shape, double ms) {
     char domain[DOMAIN_TEXT_BYTES];
@@ -385,6 +489,14 @@ static void log_run_info(const odin3_abc_run *run, const odin3_abc_splice_stats 
         odin3_log(ODIN3_LOG_INFO,
                   "abc: module '%s', %s: no name map (%s); provenance uses cut cones",
                   module_text(run), domain, run->nomap_reason);
+    }
+    if (run->gates_mode) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "abc: module '%s', %s: %u cells and %u flip-flops -> %u gates and %u flip-flops, "
+                  "%.1f ms in ABC",
+                  module_text(run), domain, (unsigned)run->region->soft.len,
+                  (unsigned)run->region->regs.len, (unsigned)stats->luts, (unsigned)stats->ffs, ms);
+        return;
     }
     odin3_log(ODIN3_LOG_INFO,
               "abc: module '%s', %s: %u cells and %u flip-flops -> %u LUTs (at most %u inputs, "
@@ -434,6 +546,19 @@ static void emit_report(const odin3_abc_run *run, const odin3_abc_splice_stats *
     report_fn(&rep, report_user);
 }
 
+/* Constant folding of a LUT result; with --gates (no folding: a gate is spliced as mapped) the
+ * check that every LUT carries its gate tag. */
+static odin3_status fold_or_check_tags(const odin3_abc_run *run, odin3_abc_result *result) {
+    if (!run->gates_mode) {
+        return odin3_abc_result_fold(result);
+    }
+    if (result->gate.len != result->n_luts) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: internal: the gate result lost its gate tags");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 /* The exchange, folding and the splice of a built region, then the run's INFO lines. */
 static odin3_status map_region(odin3_abc_run *run) {
     odin3_abc_result result;
@@ -450,7 +575,7 @@ static odin3_status map_region(odin3_abc_run *run) {
     }
     double spent = now_ms() - start; /* the INFO "ms": caps check and exchange, as before 3D-8 */
     double folded = now_ms();
-    st = st == ODIN3_OK ? odin3_abc_result_fold(&result) : st;
+    st = st == ODIN3_OK ? fold_or_check_tags(run, &result) : st; /* no folding of gates */
     run->stats.check_ms += now_ms() - folded;
     odin3_abc_splice_stats stats = {0};
     double spliced = now_ms();
@@ -546,9 +671,13 @@ static odin3_status finish_info(odin3_abc_run *run) {
                  {"abc", run->engine->abc_commit},
                  {"K", k_text},
                  {"exchange", run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif"},
+                 {"gates", run->opts.gates},
+                 {"genlib", run->genlib_sha256_hex},
                  {"depth", depth_text}};
     for (size_t i = 0; st == ODIN3_OK && i < sizeof words / sizeof words[0]; i++) {
-        st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));
+        if (words[i].value != NULL && (run->gates_mode || strcmp(words[i].key, "genlib") != 0)) {
+            st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));
+        }
     }
     uint32_t str = 0;
     st = st == ODIN3_OK ? odin3_design_intern(run->design, odin3_bytes_cstr(info.data), &str) : st;
@@ -577,8 +706,9 @@ odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3
 
 const odin3_pass_def odin3_pass_abc = {
     "abc",
-    "abc [--script FILE] [--lut K] [--via-blif DIR] [--log FILE] [--prov fine|cone]: map each "
-    "module's soft logic to K-input LUTs with linked ABC (one run per clock domain)",
+    "abc [--script FILE] [--lut K] [--gates LIB] [--via-blif DIR] [--log FILE] [--prov fine|cone]: "
+    "map each module's soft logic to K-input LUTs (--lut) or to library LIB's gates (--gates) "
+    "with linked ABC (one run per clock domain)",
     odin3_abc_pass_run,
     NULL,
     false,

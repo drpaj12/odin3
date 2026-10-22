@@ -210,6 +210,30 @@ static void test_genlib_skips_reserved_port_name(void) {
     TEST_ASSERT_EQUAL_STRING("port 'A$1' is not a genlib name", text);
 }
 
+/* gm-gates follow-ups (a) and (b): a cell whose own name is not a genlib name, the genlib's
+ * reserved constant gate names included, is skipped, so the adapter never sees it. */
+static void test_genlib_skips_bad_cell_name(void) {
+    load_text("library t\n"
+              "cell AND2.X1 gate area 1 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = A & B ; end\n"
+              "cell nand2-x1 gate area 1 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = ~(A & B) ; end\n"
+              "cell 2NAND gate area 1 ; in A 1 ; in B 1 ; out Y 1 ; fn Y = ~(A & B) ; end\n"
+              "cell $odin3_const0 gate area 1 ; in A 1 ; out Y 1 ; fn Y = ~A ; end\n"
+              "cell $odin3_const1 gate area 1 ; in A 1 ; out Y 1 ; fn Y = A ; end\n"
+              "cell CONST0 gate area 1 ; in A 1 ; out Y 1 ; fn Y = ~A ; end\n"
+              "cell INV_X1 gate area 1 ; in A 1 ; out Y 1 ; fn Y = ~A ; end\n");
+    collect("t");
+    TEST_ASSERT_EQUAL_size_t(1, g_cells.gates.len);
+    TEST_ASSERT_EQUAL_size_t(6, g_cells.skips.len);
+    expect_skip(0, "AND2.X1", ODIN3_LIBCELL_CELL_NAME);
+    expect_skip(1, "nand2-x1", ODIN3_LIBCELL_CELL_NAME);
+    expect_skip(2, "2NAND", ODIN3_LIBCELL_CELL_NAME);
+    expect_skip(3, "$odin3_const0", ODIN3_LIBCELL_CELL_NAME);
+    expect_skip(4, "$odin3_const1", ODIN3_LIBCELL_CELL_NAME);
+    expect_skip(5, "CONST0", ODIN3_LIBCELL_CELL_NAME);
+    TEST_ASSERT_TRUE(odin3_celltype_valid(g_cells.inv));
+    TEST_ASSERT_FALSE(odin3_celltype_valid(g_cells.buf));
+}
+
 static void test_buf_smallest_area_then_order(void) {
     load_text("library t\n"
               "cell B0 gate ; in A 1 ; out Y 1 ; fn Y = A ; end\n"
@@ -316,6 +340,8 @@ static void test_skip_texts(void) {
                              odin3_libcell_skip_text(ODIN3_LIBCELL_CONSTANT));
     TEST_ASSERT_EQUAL_STRING("not one output and 1 to 6 one-bit inputs without parameters",
                              odin3_libcell_skip_text(ODIN3_LIBCELL_SHAPE));
+    TEST_ASSERT_EQUAL_STRING("its name is not a genlib name",
+                             odin3_libcell_skip_text(ODIN3_LIBCELL_CELL_NAME));
     TEST_ASSERT_EQUAL_STRING("", odin3_libcell_skip_text(0));
 }
 
@@ -364,6 +390,7 @@ int main(void) {
     RUN_TEST(test_collect_unknown_library);
     RUN_TEST(test_genlib_skips_non_support_input);
     RUN_TEST(test_genlib_skips_reserved_port_name);
+    RUN_TEST(test_genlib_skips_bad_cell_name);
     RUN_TEST(test_buf_smallest_area_then_order);
     RUN_TEST(test_tie_without_area);
     RUN_TEST(test_libstate_init_constant);

@@ -1,7 +1,9 @@
 /*
  * splice_a.c — phase A of the splice (3D spec §6.5, AB-18; plan Task 17): the record, the fresh
  * nets, the $lut nodes, the new flip-flops, the buffers phase B needs, and the plan of phase B.
- * It allocates and changes no existing object; sp_rollback undoes it.
+ * It allocates and changes no existing object; sp_rollback undoes it. With abc --gates (gatemap
+ * spec 4.4, G-7; plan Task 12) the LUTs are library gate instances and a buffer is the library's
+ * BUF cell, else `$_BUF_`.
  */
 #include "ir/celltype.h"
 #include "ir/lut.h"
@@ -11,10 +13,13 @@
 #include "passes/abc/region.h"
 #include "passes/abc/run.h"
 #include "passes/abc/splice_int.h"
+#include "sim/gate_truth.h"
+#include "techlib/libcells.h"
 #include "util/arena.h"
 #include "util/clock.h"
 #include "util/log.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -24,7 +29,8 @@ enum {
     PORT_Y_BUFFER = 1, /* the Y port of a $lut */
     IDENTITY_TABLE = 0x2,
     INIT_UNKNOWN = 2, /* INIT 2 and 3 are both written back as 2 (P3-12) */
-    INIT_UNKNOWN_HI = 3
+    INIT_UNKNOWN_HI = 3,
+    GATE_PORTS_MAX = ODIN3_GATE_TRUTH_MAX_INPUTS + 1 /* a gate cell: its inputs and one output */
 };
 
 static uint32_t obj_count(const odin3_abc_result *res) {
@@ -49,24 +55,24 @@ static odin3_status make_records(splice *sp) {
  * use. */
 static odin3_status obj_prov(splice *sp, uint32_t obj, odin3_prov_id *out) {
     uint32_t own = sp_u32(&sp->objprov, obj);
-    if (own == 0 && !sp->fallback_made) {
-        odin3_status st = odin3_abc_coarse_record(sp->run, &sp->fallback);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-        sp->fallback_made = true;
-    }
-    *out = sp->fallback;
     if (own != 0) {
         *out = (odin3_prov_id){own};
+        return ODIN3_OK;
     }
-    return ODIN3_OK;
+    return sp_coarse(sp, out);
 }
 
-/* True when a CO or register input is driven by constant 0 or 1. */
-static bool uses_constant(const odin3_abc_result *res, uint32_t value) {
+/* True when a CO or register input is driven by constant 0 or 1; with --gates (no folding) also
+ * when a gate reads it. */
+static bool uses_constant(const splice *sp, uint32_t value) {
+    const odin3_abc_result *res = sp->res;
     for (size_t at = 0; at < res->co_driver.len; at++) {
         if (sp_u32(&res->co_driver, at) == value) {
+            return true;
+        }
+    }
+    for (size_t at = 0; sp->run->gates_mode && at < res->fanins.len; at++) {
+        if (sp_u32(&res->fanins, at) == value) {
             return true;
         }
     }
@@ -92,7 +98,7 @@ static odin3_status object_net(splice *sp, uint32_t obj, odin3_net_id *net) {
     const odin3_abc_result *res = sp->res;
     *net = (odin3_net_id){0};
     if (obj < FIRST_OBJ) {
-        return uses_constant(res, obj) ? sp_canon(sp, (int)obj, net) : ODIN3_OK;
+        return uses_constant(sp, obj) ? sp_canon(sp, (int)obj, net) : ODIN3_OK;
     }
     if (obj < FIRST_OBJ + res->n_cis) {
         *net = (odin3_net_id){sp_u32(&sp->region->cis, obj - FIRST_OBJ)};
@@ -142,6 +148,58 @@ static odin3_status make_lut(splice *sp, const lut_req *rq, odin3_node_id *node)
     return st;
 }
 
+/* A new cell of type with net ins[j] on port in_ports[j] (n of them) and out on out_port (none:
+ * left open); every other port open. */
+typedef struct cell_req {
+    odin3_celltype_id type;
+    uint32_t n;
+    const uint32_t *in_ports;
+    const odin3_net_id *ins;
+    uint32_t out_port;
+    odin3_net_id out;
+    odin3_prov_id prov;
+} cell_req;
+
+static odin3_status make_cell(splice *sp, const cell_req *rq, odin3_node_id *node) {
+    const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, rq->type);
+    if (def == NULL || def->n_ports > GATE_PORTS_MAX || rq->out_port >= def->n_ports) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: internal: gate type %u cannot be instantiated",
+                  (unsigned)rq->type.v);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    static const odin3_net_id k_none = {0};
+    odin3_netvec ports[GATE_PORTS_MAX];
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        ports[port] = (odin3_netvec){&k_none, 1};
+    }
+    for (uint32_t j = 0; j < rq->n; j++) {
+        if (rq->in_ports[j] >= def->n_ports) {
+            odin3_log(ODIN3_LOG_ERROR, "abc: internal: gate type %u has no input port %u",
+                      (unsigned)rq->type.v, (unsigned)rq->in_ports[j]);
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        ports[rq->in_ports[j]] = (odin3_netvec){&rq->ins[j], 1};
+    }
+    ports[rq->out_port] = (odin3_netvec){&rq->out, 1};
+    odin3_node_spec spec = {rq->type, 0, rq->prov, NULL, 0};
+    odin3_status st = odin3_node_create_connected(sp->mod, &spec, ports, node);
+    st = st == ODIN3_OK ? sp_note(sp, (sp_created){SP_NODE, node->v}) : st;
+    if (st != ODIN3_OK && odin3_node_live(sp->mod, *node)) {
+        (void)odin3_node_delete(sp->mod, *node);
+    }
+    return st;
+}
+
+/* LUT lut's library gate (--gates): its inputs on the gate's input ports in pin order. */
+static odin3_status make_gate(splice *sp, uint32_t lut, const lut_req *rq, odin3_node_id *node) {
+    const odin3_abc_result *res = sp->res;
+    assert(lut < res->gate.len); /* run.c checked the tags before the splice */
+    const odin3_libgate *gate = odin3_vec_cat(&sp->run->lib.gates, sp_u32(&res->gate, lut));
+    cell_req cr = {gate->type,     gate->n_inputs, gate->in_port, rq->ins,
+                   gate->out_port, rq->out,        rq->prov};
+    return make_cell(sp, &cr, node);
+}
+
 static odin3_status create_luts(splice *sp) {
     odin3_abc_result *res = sp->res;
     for (uint32_t lut = 0; lut < res->n_luts; lut++) {
@@ -160,7 +218,9 @@ static odin3_status create_luts(splice *sp) {
                       {0}};
         odin3_node_id node = {0};
         odin3_status st = obj_prov(sp, obj, &rq.prov);
-        st = st == ODIN3_OK ? make_lut(sp, &rq, &node) : st;
+        if (st == ODIN3_OK) {
+            st = sp->run->gates_mode ? make_gate(sp, lut, &rq, &node) : make_lut(sp, &rq, &node);
+        }
         if (st != ODIN3_OK) {
             return st;
         }
@@ -275,13 +335,33 @@ static bool co_special(const splice *sp, odin3_net_id net) {
            sp_is_clock(sp->mod, net) || odin3_abc_net_keep(sp->mod, net);
 }
 
+/* With --gates, a buffer of in: the library's BUF cell, else `$_BUF_` (G-7); its output open. */
+static odin3_status make_gate_buffer(splice *sp, odin3_net_id in, odin3_prov_id prov,
+                                     odin3_node_id *node) {
+    odin3_celltype_id type = sp->run->lib.buf;
+    if (!odin3_celltype_valid(type) && !sp_type_named(sp->run->design, "$_BUF_", &type)) {
+        odin3_log(ODIN3_LOG_ERROR, "abc: the buffer cell type is missing");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, type);
+    uint32_t in_port = 0;
+    while (def != NULL && in_port < def->n_ports && def->ports[in_port].dir != ODIN3_DIR_IN) {
+        in_port++;
+    }
+    cell_req cr = {type, 1, &in_port, &in, sp_out_port(sp->run->design, type), {0}, prov};
+    return make_cell(sp, &cr, node);
+}
+
 static odin3_status make_buffer(splice *sp, uint32_t obj, sp_step *step) {
     odin3_net_id in = {sp_u32(&sp->objnet, obj)};
     static const uint64_t k_identity = IDENTITY_TABLE;
     lut_req rq = {1, &k_identity, &in, {0}, {0}};
     odin3_node_id node = {0};
     odin3_status st = obj_prov(sp, obj, &rq.prov);
-    st = st == ODIN3_OK ? make_lut(sp, &rq, &node) : st;
+    if (st == ODIN3_OK) {
+        st = sp->run->gates_mode ? make_gate_buffer(sp, in, rq.prov, &node)
+                                 : make_lut(sp, &rq, &node);
+    }
     step->act = SP_BUFFER;
     step->buffer = node.v;
     return st;
