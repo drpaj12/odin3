@@ -231,6 +231,10 @@ sim_vectors_in)
         -p "$pre; sim --vectors-in $work/a.vec 4 1"
     expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim --vectors-in"
     expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 --vectors-in $work/a.vec --vectors-in $work/a.vec"
+    expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 \"\""
+    expect_fail "sim: --vcd is not available yet" -p "$pre; sim 4 1 --vcd $work/w.vcd"
+    expect_fail "sim: --vcd is not available yet" -p "$pre; sim --vectors-in $work/a.vec --vcd $work/w.vcd"
+    expect_fail "sim: --vcd needs a file name, not \`-\`" -p "$pre; sim 4 1 --vcd -"
     ;;
 check_flag)
     "$odin3" --check -p "read_blif $fixture; check --fast" 2>"$work/err" || fail "--check failed"

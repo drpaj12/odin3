@@ -10,6 +10,7 @@
 #include "sim/sim.h"
 #include "sim/vectors.h"
 #include "unity.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -18,8 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
-enum { LOG_TEXT = 4096, TRAFFIC_CYCLES = 16, TRAFFIC_SEED = 5 };
+enum { LONG_LINE = 10240, OOM_ROUNDS = 64, LOG_TEXT = 4096, TRAFFIC_CYCLES = 16, TRAFFIC_SEED = 5 };
 
 static odin3_design *design;
 static odin3_sim *sim;
@@ -150,6 +152,126 @@ static void test_parse_no_input_design(void) {
     odin3_sim_vectors_in_free(&in);
 }
 
+static void test_title_only_before_vectors(void) {
+    load_netnames();
+    odin3_sim_vectors_in in;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, parse_text("0 11\n# t seed 9 cycles 5\n", &in),
+                                  log_text);
+    TEST_ASSERT_EQUAL_UINT32(1, in.cycles);
+    TEST_ASSERT_EQUAL_UINT64(0, in.seed);
+    odin3_sim_vectors_in_free(&in);
+}
+
+static void test_header_edge_cases(void) {
+    load_netnames();
+    expect_parse_error(
+        (parse_case){"0 11\n# input a 1\n", "v.vec:2: a port line after the first vector line"});
+    expect_parse_error((parse_case){"# clock clk 0\n# input a 1\n0 11\n",
+                                    "v.vec:2: the header lists 2 port lines, the design has 4"});
+    expect_parse_error(
+        (parse_case){"# clock clk 0\n# input a 1\n# input b 1\n# output y 1\n# output z 1\n0 11\n",
+                     "v.vec:5: the header lists 5 port lines, the design has 4"});
+    expect_parse_error((parse_case){"# t seed 1 cycles 1\n0 11\n1 00\n",
+                                    "v.vec:3: the title says 1 cycles, the file has 2"});
+}
+
+/* Text of `prefix`, LONG_LINE copies of chr and `suffix` in text. */
+static void long_text(odin3_strbuf *text, const char *prefix, char chr, const char *suffix) {
+    char block[LONG_LINE];
+    memset(block, chr, sizeof block);
+    odin3_strbuf_init(text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(text, odin3_bytes_cstr(prefix)));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(text, (odin3_bytes){block, sizeof block}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_strbuf_append(text, odin3_bytes_cstr(suffix)));
+}
+
+typedef struct capped_case {
+    const char *prefix; /* the text before the long run */
+    char chr;           /* the run's character */
+    const char *suffix; /* the text after it */
+    const char *msg;    /* what the error log must hold */
+} capped_case;
+
+static void expect_capped(capped_case tc) {
+    odin3_strbuf text;
+    long_text(&text, tc.prefix, tc.chr, tc.suffix);
+    expect_parse_error((parse_case){text.data, tc.msg});
+    TEST_ASSERT_TRUE(strlen(log_text) < 400);
+    odin3_strbuf_free(&text);
+}
+
+static void test_long_port_line_is_capped(void) {
+    load_netnames();
+    expect_capped((capped_case){"# input ", 'a', "\n0 11\n",
+                                "aaa...` does not match the design: expected `# clock clk 0`"});
+}
+
+static void test_long_words_are_capped(void) {
+    load_netnames();
+    expect_capped(
+        (capped_case){"0 ", '1', "\n", "v.vec:1: expected 2 input bits of 0 and 1, found `1111"});
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "11...`"));
+    expect_capped((capped_case){"", '7', " 11\n", "v.vec:1: expected cycle 0, found `7777"});
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "77...`"));
+}
+
+/* A temporary file holding text (size 0: truncated to `size` bytes instead). */
+static void make_temp(char *path, const char *text, off_t size) {
+    int fd = mkstemp(path);
+    TEST_ASSERT_TRUE(fd >= 0);
+    if (size > 0) {
+        TEST_ASSERT_EQUAL_INT(0, ftruncate(fd, size));
+    } else {
+        TEST_ASSERT_EQUAL_INT((int)strlen(text), (int)write(fd, text, strlen(text)));
+    }
+    TEST_ASSERT_EQUAL_INT(0, close(fd));
+}
+
+static void test_read_oversize_file(void) {
+    load_netnames();
+    char path[] = "/tmp/odin3_vin_big_XXXXXX";
+    make_temp(path, "", (off_t)ODIN3_SIM_VECTORS_MAX_BYTES + 1);
+    odin3_sim_vectors_in in;
+    odin3_status st = odin3_sim_vectors_read(sim, path, &in);
+    (void)remove(path);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, st);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, ": larger than 268435456 bytes"));
+    TEST_ASSERT_NULL(in.bits);
+}
+
+/* One read of path with allocation `at` failing; true when it worked. */
+static bool read_with_failure(const char *path, long at) {
+    odin3_sim_vectors_in in;
+    odin3_util_set_alloc_fail_after(at);
+    odin3_status st = odin3_sim_vectors_read(sim, path, &in);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE_MESSAGE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY,
+                             "an injected failure gave another status");
+    if (st == ODIN3_OK) {
+        TEST_ASSERT_EQUAL_UINT32(2, in.cycles);
+        odin3_sim_vectors_in_free(&in);
+        return true;
+    }
+    TEST_ASSERT_NULL(in.bits);
+    return false;
+}
+
+/* The reader with every allocation in turn failing: OK or NO_MEMORY, never a leak (ASan). */
+static void test_read_alloc_failures(void) {
+    load_netnames();
+    char path[] = "/tmp/odin3_vin_oom_XXXXXX";
+    make_temp(path,
+              "# t seed 3 cycles 2\n# clock clk 0\n# input a 1\n# input b 1\n"
+              "# output y 1\n0 10 0\n1 01 1\n",
+              0);
+    long at = 0;
+    while (at < OOM_ROUNDS && !read_with_failure(path, at)) {
+        at++;
+    }
+    (void)remove(path);
+    TEST_ASSERT_TRUE_MESSAGE(at < OOM_ROUNDS, "the reader never succeeded within the rounds");
+}
+
 static void test_read_missing_file(void) {
     load_netnames();
     odin3_sim_vectors_in in;
@@ -209,6 +331,12 @@ int main(void) {
     RUN_TEST(test_parse_bare_lines_crlf_comments);
     RUN_TEST(test_parse_errors);
     RUN_TEST(test_parse_no_input_design);
+    RUN_TEST(test_title_only_before_vectors);
+    RUN_TEST(test_header_edge_cases);
+    RUN_TEST(test_long_port_line_is_capped);
+    RUN_TEST(test_long_words_are_capped);
+    RUN_TEST(test_read_oversize_file);
+    RUN_TEST(test_read_alloc_failures);
     RUN_TEST(test_read_missing_file);
     RUN_TEST(test_drive_then_line_round_trips);
     return UNITY_END();

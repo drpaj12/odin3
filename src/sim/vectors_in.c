@@ -14,7 +14,16 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { DECIMAL = 10, TITLE_WORDS = 4, MAX_VECTOR_WORDS = 3 };
+enum { DECIMAL = 10, TITLE_WORDS = 4, MAX_VECTOR_WORDS = 3, ECHO_MAX = 80 };
+
+/* Error messages echo at most ECHO_MAX characters of a word or line, then "...". */
+static int echo_len(size_t len) {
+    return (int)(len < ECHO_MAX ? len : ECHO_MAX);
+}
+
+static const char *echo_tail(size_t len) {
+    return len > ECHO_MAX ? "..." : "";
+}
 
 /* The state of one parse. */
 typedef struct vin {
@@ -159,8 +168,9 @@ static odin3_status check_port_line(vin *state, line_view line) {
     size_t want = (size_t)(nl - state->next_port);
     if (want != line.len || memcmp(state->next_port, line.ptr, want) != 0) {
         odin3_log(ODIN3_LOG_ERROR,
-                  "%s:%u: port line `%.*s` does not match the design: expected `%.*s`", state->path,
-                  state->line_no, (int)line.len, line.ptr, (int)want, state->next_port);
+                  "%s:%u: port line `%.*s%s` does not match the design: expected `%.*s%s`",
+                  state->path, state->line_no, echo_len(line.len), line.ptr, echo_tail(line.len),
+                  echo_len(want), state->next_port, echo_tail(want));
         return ODIN3_ERR_PARSE;
     }
     state->next_port = nl + 1;
@@ -172,16 +182,21 @@ static odin3_status check_port_line(vin *state, line_view line) {
 static odin3_status header_line(vin *state, line_view line) {
     const char *pos = line.ptr;
     const char *end = line.ptr + line.len;
-    if (!state->first_hash_done) {
+    if (!state->first_hash_done && !state->in_vectors) {
         state->first_hash_done = true;
         read_title(state, pos, end);
     }
     line_view word;
     line_view kind;
-    if (state->in_vectors || !next_word(&pos, end, &word) || !next_word(&pos, end, &kind)) {
+    if (!next_word(&pos, end, &word) || !next_word(&pos, end, &kind)) {
         return ODIN3_OK;
     }
     if (word_is(kind, "input") || word_is(kind, "clock") || word_is(kind, "output")) {
+        if (state->in_vectors) {
+            odin3_log(ODIN3_LOG_ERROR, "%s:%u: a port line after the first vector line",
+                      state->path, state->line_no);
+            return ODIN3_ERR_PARSE;
+        }
         return check_port_line(state, line);
     }
     return ODIN3_OK;
@@ -194,8 +209,9 @@ static odin3_status input_bits_error(const vin *state, line_view word) {
         odin3_log(ODIN3_LOG_ERROR, "%s:%u: expected `-`: the design has no non-clock input bit",
                   state->path, state->line_no);
     } else {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: expected %u input bits of 0 and 1, found `%.*s`",
-                  state->path, state->line_no, state->n_bits, (int)word.len, word.ptr);
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: expected %u input bits of 0 and 1, found `%.*s%s`",
+                  state->path, state->line_no, state->n_bits, echo_len(word.len), word.ptr,
+                  echo_tail(word.len));
     }
     return ODIN3_ERR_PARSE;
 }
@@ -238,8 +254,9 @@ static odin3_status vector_line(vin *state, line_view line) {
     }
     uint64_t cycle = 0;
     if (!parse_decimal(words[0], UINT32_MAX, &cycle) || cycle != state->cycles) {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: expected cycle %u, found `%.*s`", state->path,
-                  state->line_no, state->cycles, (int)words[0].len, words[0].ptr);
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: expected cycle %u, found `%.*s%s`", state->path,
+                  state->line_no, state->cycles, echo_len(words[0].len), words[0].ptr,
+                  echo_tail(words[0].len));
         return ODIN3_ERR_PARSE;
     }
     odin3_status st = take_input_bits(state, words[1]);

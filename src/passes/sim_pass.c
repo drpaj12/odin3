@@ -83,7 +83,7 @@ static odin3_status split_args(odin3_bytes args, sim_args *out, odin3_bytes *pos
             ok = take_option_file(&args, &out->vectors_in);
         } else if (word_is(word, "--vcd")) {
             ok = take_option_file(&args, &out->vcd);
-        } else if (*npos < MAX_POSITIONALS) {
+        } else if (*npos < MAX_POSITIONALS && word.len > 0) {
             pos[(*npos)++] = word;
         } else {
             ok = false;
