@@ -198,6 +198,15 @@ static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
 }
 
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
+    /* S1 SA-11: an open simulation points into module storage; no pass may change it. */
+    uint32_t holds = odin3_design_sim_holds(design);
+    if (holds > 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "pass %s: the design has %u open simulation(s); close them first "
+                  "(odin3_simulation_close)",
+                  def->name, holds);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     double start = odin3_now_ms();
     odin3_design_set_diag_paths(design, g_options.diag_paths); /* PRJ-18 --diag-paths */
     /* 2D EL-33: a REFUSE pass never meets a process; refused before its pass run opens. */

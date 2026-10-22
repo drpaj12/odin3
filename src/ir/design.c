@@ -20,6 +20,7 @@
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -171,6 +172,20 @@ odin3_status odin3_design_set_top(odin3_design *design, odin3_module_id module) 
 
 odin3_module_id odin3_design_top(const odin3_design *design) {
     return design->top;
+}
+
+uint32_t odin3_design_sim_holds(const odin3_design *design) {
+    return design == NULL ? 0 : design->sim_holds;
+}
+
+void odin3_design_sim_hold(odin3_design *design) {
+    assert(design->sim_holds < UINT32_MAX);
+    design->sim_holds++;
+}
+
+void odin3_design_sim_release(odin3_design *design) {
+    assert(design->sim_holds > 0);
+    design->sim_holds--;
 }
 
 ODIN3_EXPORT odin3_status odin3_design_get_srcman(odin3_design *design, odin3_srcman **sm) {
