@@ -6,9 +6,10 @@ plan `docs/plans/2026-10-21-unmap-plan.md`).
 | File | What |
 |---|---|
 | `run.sh` | the command-line cases `cli_unmap_rtl` (round trip), `cli_unmap_golden` (RTLIL goldens), `cli_unmap_blif` (VTR BLIF without provenance, ambiguity cases) |
-| `micros.txt` | the micros of the round trip: `<path> <comb\|seq>` |
+| `micros.txt` | the micros of the round trip: `<path> <comb\|seq> [glue] [arch=<xml>]` |
 | `expect.txt` | what may differ from equivalent and equal counts, one reason per line; a line that does not occur is stale and fails |
-| `*.v` | the new micros: signed add and sub, the 40x40, 40x8, 8x40 and 80x80 multipliers, a signed multiplier, an 8-bit RAM and a 2r1w RAM |
+| `*.v` | the new micros: signed add and sub, the 40x40, 40x8, 8x40 and 80x80 multipliers, a signed multiplier, an 8-bit RAM, a 2r1w RAM and two small depth micros (`ram_deep_w2.v`, `ram_deep_2r.v`) |
+| `arch_d2.xml` | an architecture with RAM blocks of 2 address bits: a 4-bit address memory splits into four leaves and stays small enough for equiv-check (the 2^17-word `ram_deep.v` is equiv-skip) |
 | `expected/*.il` | `write_rtlil` after `hardmap; unmap; opt_clean` for the add, sub, 8x7 and 40x40 multiplier and spram micros |
 | `blif/*.blif` | hand-made VTR netlists for the ambiguity cases (a branching carry, a carry tap, two RAMs with equal control nets) |
 
