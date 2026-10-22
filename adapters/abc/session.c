@@ -39,6 +39,7 @@ typedef struct adp_session {
     pthread_t thread;     /* the thread that opened the session */
     bool open;            /* between a successful open and close */
     bool loaded;          /* load_aig succeeded in this session (loaded holds its shape) */
+    bool executed;        /* an exec reached ABC in this session (load_genlib is then refused) */
     adp_shape shape;      /* the loaded AIG's counts */
     odin3_capture cap;    /* fds 1 and 2 during each call */
 } adp_session;
@@ -77,6 +78,7 @@ static void adp_release(adp_session *session) {
     odin3_capture_close(&session->cap);
     session->open = false;
     session->loaded = false;
+    session->executed = false;
     (void)pthread_mutex_unlock(&session->lock);
 }
 
@@ -149,6 +151,7 @@ static odin3_status adp_exec(adp_session *session, const char *command, odin3_ab
         return ready;
     }
     adp_exec_arg exec = {.command = command, .rc = 0};
+    session->executed = true;
     odin3_status st = odin3_guard_run(adp_exec_fn, &exec, fail);
     if (st != ODIN3_OK) {
         return st;
@@ -487,92 +490,405 @@ odin3_status odin3_abc_session_name_map(void *self, const odin3_abc_luts *aligne
 
 /* --- gate mapping: load_genlib and get_cells (ABI 5) ------------------------------------------ */
 
-/* A token of Abc_UtilStrtok (abc_global.h), found without writing: at and len, and whether a
- * separator ends it (closed) rather than the end of the text. */
-typedef struct adp_token {
-    const char *at;
-    size_t len;
-    bool closed;
-} adp_token;
-
-#define ADP_GENLIB_BLANKS " \t\r\n" /* mioRead.c's separators between words */
+/*
+ * The genlib the adapter hands to ABC: exactly the canonical form Odin III's own writer
+ * (src/passes/abc/genlib.c) emits, and nothing else. ABC's reader is not total (it dereferences
+ * missing words, runs past a comment on the last line, joins lines at a '\\', reads a PIN * formula
+ * past its fixed name table), so the adapter does not chase it: a text outside this subset is
+ * refused before ABC sees it.
+ *
+ * Characters: printable ASCII, single spaces and '\n' only. Lines, each ended by '\n' (the last
+ * one may end the text), none empty:
+ *   GATE <name> <number> <name>=<formula>;
+ *   PIN <name> UNKNOWN|INV|NONINV <number> <number> <number> <number> <number> <number>
+ * A name is [A-Za-z_$][A-Za-z0-9_$]*, a number [-+]?(digits[.digits]|.digits)[e[-+]digits], each
+ * at most ADP_GENLIB_TOKEN_MAX bytes. A formula is names, "!*&+|^'()" and single spaces. Each GATE
+ * has at most ADP_GENLIB_PINS_MAX PINs, all distinct, and its formula names each of them and no
+ * other name; a GATE without PINs has the formula CONST0 or CONST1. No two GATEs share a name.
+ * (The formula's grammar is checked in bridge.c, before Mio_ParseFormula.)
+ */
 
 enum {
-    ADP_PIN_FIELDS = 8,      /* a PIN's name, phase and six numbers */
-    ADP_PIN_PHASE_FIELD = 1, /* the phase */
-    ADP_GATE_WORDS = 2       /* a GATE's name and area, before its formula */
+    ADP_GENLIB_TOKEN_MAX = 128, /* a name's or a number's bytes */
+    ADP_GENLIB_PINS_MAX = 6,    /* the core's ODIN3_ABC_GATE_MAX_INPUTS (Mio_GateReadTruth) */
+    ADP_GENLIB_PIN_NUMBERS = 6, /* a PIN's two loads and four delays */
+    ADP_GENLIB_FIRST_PRINT = '!',
+    ADP_GENLIB_LAST_PRINT = '~'
 };
 
-/* The next token of *at as Abc_UtilStrtok(NULL, seps) finds it; false at the end. */
-static bool adp_next_token(const char **at, const char *seps, adp_token *tok) {
-    const char *from = *at + strspn(*at, seps);
-    if (*from == '\0') {
-        *at = from;
-        return false;
+#define ADP_GENLIB_FORMULA_SYMBOLS "!*&+|^'() " /* mioFunc.c's MIO_SYMB_*, and the blank */
+
+/* A run of the text: at and len. */
+typedef struct adp_span {
+    const char *at;
+    size_t len;
+} adp_span;
+
+/* A GATE's name and the line it is on (the duplicate check sorts these). */
+typedef struct adp_gate_name {
+    adp_span name;
+    uint32_t line;
+} adp_gate_name;
+
+/* The GATE being read: its name, formula, PINs and line. */
+typedef struct adp_genlib_gate {
+    adp_span name;
+    adp_span formula;
+    adp_span pins[ADP_GENLIB_PINS_MAX];
+    uint32_t n_pins;
+    uint32_t line;
+} adp_genlib_gate;
+
+/* One check in progress: the line it is on, the open GATE and the GATE names so far. */
+typedef struct adp_genlib_scan {
+    uint32_t line;
+    bool in_gate;
+    adp_genlib_gate gate;
+    adp_gate_name *names; /* odin3_abc_alloc, one per line at most */
+    size_t n_names;
+} adp_genlib_scan;
+
+/* Why the byte sym (after a blank when after_blank) is not allowed, or NULL. */
+static const char *adp_genlib_char(unsigned char sym, bool after_blank) {
+    if (sym == '\t') {
+        return "a tab";
     }
-    tok->at = from;
-    tok->len = strcspn(from, seps);
-    tok->closed = from[tok->len] != '\0';
-    *at = from + tok->len + (tok->closed ? 1U : 0U);
-    return true;
+    if (sym == '\r') {
+        return "a carriage return";
+    }
+    if (sym == '#') {
+        return "a comment ('#')";
+    }
+    if (sym == '\\') {
+        return "a backslash";
+    }
+    if (sym == ' ') {
+        return after_blank ? "two spaces" : NULL;
+    }
+    if (sym != '\n' && (sym < ADP_GENLIB_FIRST_PRINT || sym > ADP_GENLIB_LAST_PRINT)) {
+        return "a control character or a byte outside ASCII";
+    }
+    return NULL;
 }
 
-static bool adp_token_is(const adp_token *tok, const char *word) {
-    return tok->len == strlen(word) && memcmp(tok->at, word, tok->len) == 0;
+/* Why text has a character outside the subset (*line gets its line), or NULL; *lines gets the
+ * number of lines. */
+static const char *adp_genlib_chars(const char *text, uint32_t *line, size_t *lines) {
+    bool after_blank = false;
+    *line = 1;
+    *lines = 1;
+    for (const char *at = text; *at != '\0'; at++) {
+        unsigned char sym = (unsigned char)*at;
+        const char *why = adp_genlib_char(sym, after_blank);
+        if (why != NULL) {
+            return why;
+        }
+        if (sym == '\n') {
+            (*line)++;
+            (*lines)++;
+        }
+        after_blank = sym == ' ';
+    }
+    return NULL;
 }
 
-/* One PIN after its keyword: a name, a phase mioRead.c knows, six more words. */
-static bool adp_genlib_pin(const char **at) {
-    adp_token tok = {.at = NULL, .len = 0, .closed = false};
-    for (uint32_t field = 0; field < ADP_PIN_FIELDS; field++) {
-        if (!adp_next_token(at, ADP_GENLIB_BLANKS, &tok)) {
-            return false;
-        }
-        if (field == ADP_PIN_PHASE_FIELD && !adp_token_is(&tok, "UNKNOWN") &&
-            !adp_token_is(&tok, "INV") && !adp_token_is(&tok, "NONINV")) {
-            return false;
-        }
-    }
-    return true;
+static bool adp_is_name_start(char sym) {
+    return (sym >= 'A' && sym <= 'Z') || (sym >= 'a' && sym <= 'z') || sym == '_' || sym == '$';
 }
 
-/* One GATE after its keyword (name, area, "out=", "formula;") and its PINs; *more and *tok get
- * the token after them. */
-static bool adp_genlib_gate(const char **at, adp_token *tok, bool *more) {
-    for (uint32_t word = 0; word < ADP_GATE_WORDS; word++) { /* the name and the area */
-        if (!adp_next_token(at, ADP_GENLIB_BLANKS, tok)) {
-            return false;
-        }
-    }
-    if (!adp_next_token(at, "=", tok) || !tok->closed || !adp_next_token(at, ";", tok) ||
-        !tok->closed) {
-        return false;
-    }
-    while ((*more = adp_next_token(at, ADP_GENLIB_BLANKS, tok)) && adp_token_is(tok, "PIN")) {
-        if (!adp_genlib_pin(at)) {
-            return false;
-        }
-    }
-    return true;
+static bool adp_is_digit(char sym) {
+    return sym >= '0' && sym <= '9';
 }
 
-/*
- * The genlib subset the adapter hands to ABC: GATE statements, each "GATE name area out=formula;"
- * and its "PIN name phase n n n n n n" lines, then nothing, ".end" or a word ABC stops at. ABC's
- * reader dereferences missing words (atof, strcmp, chomp of NULL) and runs past the end of a
- * comment on the last line, so a text outside the subset (a short statement, a LATCH, '#' or
- * '\\') is refused here, before ABC sees it, with the same RESULT as a text ABC cannot read.
- */
-static odin3_status adp_check_genlib(const char *text, odin3_abc_fail *fail) {
+static bool adp_is_name_char(char sym) {
+    return adp_is_name_start(sym) || adp_is_digit(sym);
+}
+
+/* The length of the run of name characters at at (before end). */
+static size_t adp_name_run(const char *at, const char *end) {
+    size_t len = 0;
+    while (at + len < end && adp_is_name_char(at[len])) {
+        len++;
+    }
+    return len;
+}
+
+/* A name's length at at, or 0. */
+static size_t adp_name_len(const char *at, const char *end) {
+    if (at == end || !adp_is_name_start(*at)) {
+        return 0;
+    }
+    size_t len = adp_name_run(at, end);
+    return len <= ADP_GENLIB_TOKEN_MAX ? len : 0;
+}
+
+static size_t adp_digits(const char *at, const char *end) {
+    size_t len = 0;
+    while (at + len < end && adp_is_digit(at[len])) {
+        len++;
+    }
+    return len;
+}
+
+static bool adp_is_sign(const char *at, const char *end) {
+    return at < end && (*at == '-' || *at == '+');
+}
+
+/* A number's length at at, or 0. */
+static size_t adp_number_len(const char *at, const char *end) {
+    size_t len = adp_is_sign(at, end) ? 1U : 0U;
+    size_t whole = adp_digits(at + len, end);
+    size_t frac = 0;
+    len += whole;
+    if (at + len < end && at[len] == '.') {
+        frac = adp_digits(at + len + 1, end);
+        len += 1 + frac;
+    }
+    if (whole + frac == 0) {
+        return 0;
+    }
+    if (at + len < end && (at[len] == 'e' || at[len] == 'E')) {
+        size_t exp = len + 1 + (adp_is_sign(at + len + 1, end) ? 1U : 0U);
+        size_t digits = adp_digits(at + exp, end);
+        if (digits == 0) {
+            return 0;
+        }
+        len = exp + digits;
+    }
+    return len <= ADP_GENLIB_TOKEN_MAX ? len : 0;
+}
+
+/* A word's length at at (up to a blank or the line's end). */
+static size_t adp_word_len(const char *at, const char *end) {
+    size_t len = 0;
+    while (at + len < end && at[len] != ' ') {
+        len++;
+    }
+    return len;
+}
+
+/* A formula's length at at: names and ADP_GENLIB_FORMULA_SYMBOLS. */
+static size_t adp_formula_len(const char *at, const char *end) {
+    size_t len = 0;
+    while (at + len < end &&
+           (adp_is_name_char(at[len]) || strchr(ADP_GENLIB_FORMULA_SYMBOLS, at[len]) != NULL)) {
+        len++;
+    }
+    return len;
+}
+
+typedef size_t (*adp_len_fn)(const char *at, const char *end);
+
+/* The token at *at that len_of measures, then sep ('\0': the line's end) into *out, moving *at
+ * past sep; false when the token is empty or sep does not follow it. */
+static bool adp_take(const char **at, const char *end, adp_len_fn len_of, char sep, adp_span *out) {
+    size_t len = len_of(*at, end);
+    const char *after = *at + len;
+    bool ok = len > 0 && (sep == '\0' ? after == end : (after < end && *after == sep));
+    if (ok) {
+        out->at = *at;
+        out->len = len;
+        *at = sep == '\0' ? after : after + 1;
+    }
+    return ok;
+}
+
+static bool adp_span_is(const adp_span *span, const char *word) {
+    return span->len == strlen(word) && memcmp(span->at, word, span->len) == 0;
+}
+
+static bool adp_span_eq(const adp_span *one, const adp_span *two) {
+    return one->len == two->len && memcmp(one->at, two->at, one->len) == 0;
+}
+
+/* The index of name among pins, or n_pins. */
+static uint32_t adp_pin_index(const adp_span *pins, uint32_t n_pins, const adp_span *name) {
+    uint32_t k = 0;
+    while (k < n_pins && !adp_span_eq(&pins[k], name)) {
+        k++;
+    }
+    return k;
+}
+
+/* Why the open GATE's formula and PINs do not match, or NULL. */
+static const char *adp_genlib_gate_end(const adp_genlib_gate *gate) {
+    if (gate->n_pins == 0) {
+        bool constant =
+            adp_span_is(&gate->formula, "CONST0") || adp_span_is(&gate->formula, "CONST1");
+        return constant ? NULL : "a gate without PINs whose formula is not CONST0 or CONST1";
+    }
+    bool named[ADP_GENLIB_PINS_MAX] = {false};
+    const char *at = gate->formula.at;
+    const char *end = at + gate->formula.len;
+    while (at < end) {
+        adp_span name = {.at = at, .len = adp_name_run(at, end)};
+        if (name.len == 0) {
+            at++;
+            continue;
+        }
+        uint32_t pin = adp_pin_index(gate->pins, gate->n_pins, &name);
+        if (pin == gate->n_pins) {
+            return "a formula name that is not a PIN of its gate";
+        }
+        named[pin] = true;
+        at += name.len;
+    }
+    for (uint32_t k = 0; k < gate->n_pins; k++) {
+        if (!named[k]) {
+            return "a PIN its gate's formula does not name";
+        }
+    }
+    return NULL;
+}
+
+/* Why the GATE line [at, end) (after "GATE ") is not one, or NULL; it becomes the open GATE. */
+static const char *adp_genlib_gate_line(adp_genlib_scan *scan, const char *at, const char *end) {
+    adp_genlib_gate *gate = &scan->gate;
+    adp_span area;
+    adp_span out;
+    gate->n_pins = 0;
+    gate->line = scan->line;
+    scan->in_gate = true;
+    if (!adp_take(&at, end, adp_name_len, ' ', &gate->name)) {
+        return "a bad gate name";
+    }
+    if (!adp_take(&at, end, adp_number_len, ' ', &area)) {
+        return "a bad area";
+    }
+    if (!adp_take(&at, end, adp_name_len, '=', &out)) {
+        return "a bad output name or no '='";
+    }
+    if (!adp_take(&at, end, adp_formula_len, ';', &gate->formula) || at != end) {
+        return "a bad formula character or no ';' at the end";
+    }
+    scan->names[scan->n_names++] = (adp_gate_name){.name = gate->name, .line = scan->line};
+    return NULL;
+}
+
+/* Why the PIN line [at, end) (after "PIN ") is not one, or NULL; it joins the open GATE. */
+static const char *adp_genlib_pin_line(adp_genlib_scan *scan, const char *at, const char *end) {
+    adp_genlib_gate *gate = &scan->gate;
+    adp_span name;
+    adp_span word;
+    if (!scan->in_gate) {
+        return "a PIN before any GATE";
+    }
+    if (!adp_take(&at, end, adp_name_len, ' ', &name)) {
+        return "a bad pin name (PIN * is not read)";
+    }
+    if (!adp_take(&at, end, adp_word_len, ' ', &word) ||
+        !(adp_span_is(&word, "UNKNOWN") || adp_span_is(&word, "INV") ||
+          adp_span_is(&word, "NONINV"))) {
+        return "a bad pin phase";
+    }
+    for (uint32_t k = 0; k < ADP_GENLIB_PIN_NUMBERS; k++) {
+        char sep = k + 1 < ADP_GENLIB_PIN_NUMBERS ? ' ' : '\0';
+        if (!adp_take(&at, end, adp_number_len, sep, &word)) {
+            return "a bad pin number or a word after the last";
+        }
+    }
+    if (gate->n_pins == ADP_GENLIB_PINS_MAX) {
+        return "more than 6 PINs on a gate";
+    }
+    if (adp_pin_index(gate->pins, gate->n_pins, &name) < gate->n_pins) {
+        return "a PIN declared twice";
+    }
+    gate->pins[gate->n_pins++] = name;
+    return NULL;
+}
+
+/* Why the line [at, end) is not a GATE or PIN line of the subset, or NULL. A GATE line first
+ * closes the open GATE (scan->line then gets that GATE's line when it fails). */
+static const char *adp_genlib_line(adp_genlib_scan *scan, const char *at, const char *end) {
+    static const char gate_kw[] = "GATE ";
+    static const char pin_kw[] = "PIN ";
+    size_t len = (size_t)(end - at);
+    if (len > sizeof gate_kw - 1 && memcmp(at, gate_kw, sizeof gate_kw - 1) == 0) {
+        const char *why = scan->in_gate ? adp_genlib_gate_end(&scan->gate) : NULL;
+        if (why != NULL) {
+            scan->line = scan->gate.line;
+            return why;
+        }
+        return adp_genlib_gate_line(scan, at + sizeof gate_kw - 1, end);
+    }
+    if (len > sizeof pin_kw - 1 && memcmp(at, pin_kw, sizeof pin_kw - 1) == 0) {
+        return adp_genlib_pin_line(scan, at + sizeof pin_kw - 1, end);
+    }
+    return len == 0 ? "an empty line" : "not a GATE or PIN statement";
+}
+
+/* Why text's lines are not the subset's, or NULL (scan->line gets the line). */
+static const char *adp_genlib_lines(adp_genlib_scan *scan, const char *text) {
     const char *at = text;
-    adp_token tok = {.at = NULL, .len = 0, .closed = false};
-    bool ok = strpbrk(text, "#\\") == NULL;
-    bool more = ok && adp_next_token(&at, ADP_GENLIB_BLANKS, &tok);
-    while (ok && more && adp_token_is(&tok, "GATE")) {
-        ok = adp_genlib_gate(&at, &tok, &more);
+    const char *why = NULL;
+    scan->line = 0;
+    while (why == NULL && *at != '\0') {
+        const char *end = at + strcspn(at, "\n");
+        scan->line++;
+        why = adp_genlib_line(scan, at, end);
+        at = *end == '\n' ? end + 1 : end;
     }
-    if (!ok || (more && adp_token_is(&tok, "LATCH"))) {
-        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "ABC cannot read the gate library");
+    if (why == NULL && !scan->in_gate) {
+        scan->line = 0;
+        return "no gates";
+    }
+    if (why == NULL) {
+        scan->line = scan->gate.line;
+        why = adp_genlib_gate_end(&scan->gate);
+    }
+    return why;
+}
+
+/* qsort's order of GATE names: by name, then by line. */
+static int adp_gate_name_cmp(const void *lhs, const void *rhs) {
+    const adp_gate_name *left = lhs;
+    const adp_gate_name *right = rhs;
+    size_t len = left->name.len < right->name.len ? left->name.len : right->name.len;
+    int by_name = memcmp(left->name.at, right->name.at, len);
+    if (by_name != 0) {
+        return by_name;
+    }
+    if (left->name.len != right->name.len) {
+        return left->name.len < right->name.len ? -1 : 1;
+    }
+    return (left->line > right->line) - (left->line < right->line);
+}
+
+/* Why two GATEs share a name, or NULL (*line gets the later one's line). */
+static const char *adp_genlib_twins(adp_genlib_scan *scan, uint32_t *line) {
+    qsort(scan->names, scan->n_names, sizeof *scan->names, adp_gate_name_cmp);
+    for (size_t i = 1; i < scan->n_names; i++) {
+        if (adp_span_eq(&scan->names[i - 1].name, &scan->names[i].name)) {
+            *line = scan->names[i].line;
+            return "a gate name used twice (ABC would make a two-output gate)";
+        }
+    }
+    return NULL;
+}
+
+/* RESULT "ABC cannot read the gate library (line N: reason)" (or "(reason)" for a reason of the
+ * whole text) unless text is the subset above; ODIN3_ERR_NO_MEMORY. */
+static odin3_status adp_check_genlib(const char *text, odin3_abc_fail *fail) {
+    adp_genlib_scan scan = {.line = 0, .in_gate = false, .names = NULL, .n_names = 0};
+    size_t lines = 0;
+    const char *why = adp_genlib_chars(text, &scan.line, &lines);
+    if (why == NULL) {
+        scan.names = odin3_abc_alloc(sizeof *scan.names * lines);
+        if (scan.names == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        why = adp_genlib_lines(&scan, text);
+        why = why == NULL ? adp_genlib_twins(&scan, &scan.line) : why;
+        free(scan.names);
+    }
+    if (why != NULL && scan.line == 0) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                  "ABC cannot read the gate library (%s)", why);
+    }
+    if (why != NULL) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                  "ABC cannot read the gate library (line %u: %s)",
+                                  (unsigned)scan.line, why);
     }
     return ODIN3_OK;
 }
@@ -594,6 +910,12 @@ static odin3_status adp_load_genlib(adp_session *session, const char *text, odin
     }
     if (text == NULL) {
         return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT, "no gate library (text is NULL)");
+    }
+    /* The library must not change under anything an exec made: a mapped network, its backup
+     * (mainFrame.c:469), an &save copy or an undo point into it, and Mio_UpdateGenlib frees it. */
+    if (session->executed) {
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                  "load the gate library before the mapping script");
     }
     st = adp_check_genlib(text, fail);
     if (st != ODIN3_OK) {

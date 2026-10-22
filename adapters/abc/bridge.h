@@ -71,14 +71,13 @@ odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32
  * Gate mapping (ABI 5): a copy of text (NUL-terminated genlib; ABC's reader edits its buffer) read
  * with Mio_LibraryReadBuffer, named "odin3.genlib" (no file of that name is opened), then made the
  * frame's gate library with Mio_UpdateGenlib, which frees the previous one (and with it the names
- * an earlier get_cells returned). Before ABC reads it, every GATE's formula is parsed over its pin
- * names (Mio_ParseFormula after a grammar check): mioFunc.c:264 dereferences the NULL it returns
- * for a formula it cannot parse, and Mio_ParseFormulaOper asserts on a '!' after '!' or an
- * operator with no operand. ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library"
- * (with ` (gate "name")` when a formula did not parse), or "a gate library is already in use by a
- * mapped network" when the network space holds a mapped network or the & space a cell mapping
- * (Mio_UpdateGenlib would free what it points into); ODIN3_ERR_NO_MEMORY when a copy cannot be
- * made.
+ * an earlier get_cells returned). text is in session.c's canonical subset (checked before this
+ * call), and the session refuses the call once an exec has run. Before ABC reads it, every GATE's
+ * formula is parsed over its pin names (Mio_ParseFormula after a grammar check): mioFunc.c:264
+ * dereferences the NULL it returns for a formula it cannot parse, and Mio_ParseFormulaOper asserts
+ * on a '!' after '!' or an operator with no operand. ABC reads the copy with a '\n' appended.
+ * ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library" (with ` (gate "name")` when
+ * a formula did not parse); ODIN3_ERR_NO_MEMORY when a copy cannot be made.
  */
 odin3_status odin3_bridge_load_genlib(const char *text, odin3_abc_fail *fail);
 

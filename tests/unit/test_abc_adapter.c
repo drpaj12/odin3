@@ -1099,59 +1099,199 @@ static void test_get_cells_constant(void) {
     cells_copy_free(&out);
 }
 
-/* Texts the adapter refuses before ABC reads them (ABC's genlib reader would crash on them:
- * atof or strcmp of a missing token), and texts ABC itself cannot read. */
-static const char *const BAD_GENLIBS[] = {
-    "GATE",                                        /* no name, area or formula */
-    "GATE X 1",                                    /* no formula */
-    "GATE X 1 Y",                                  /* no '=' */
-    "GATE X 1 Y=A",                                /* no ';' */
-    "GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1",    /* a PIN short of a field */
-    "GATE X 1 Y=A;\nPIN A SIDEWAYS 1 999 1 0 1 0", /* a phase Mio does not know */
-    "LATCH L 1 Q=D;",                              /* a latch statement */
-    "# a comment\nGATE X 1 Y=A;",                  /* comments are not accepted */
-    "PIN A UNKNOWN 1 999 1 0 1 0",                 /* ABC: no gate */
+/* Task 4's generic_gates golden (tests/unit/data/genlib/generic_gates.genlib on feat/gatemap-lib).
+ */
+static const char k_generic_genlib[] = "GATE BUF 1 Y=A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE INV 1 Y=!A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE AND2 1 Y=A*B;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE AND3 2 Y=A*B*C;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN C UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE AND4 2 Y=A*B*C*D;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN C UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN D UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE OR2 1 Y=B+A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE OR3 2 Y=C+B+A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN C UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE OR4 2 Y=D+C+B+A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN C UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN D UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE NAND2 1 Y=!B+!A;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE NOR2 1 Y=!A*!B;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE XOR2 2 Y=A*!B+!A*B;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE XNOR2 2 Y=!A*!B+A*B;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE MUX2 2 Y=A*!S+B*S;\n"
+                                       "PIN A UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN B UNKNOWN 1 999 1 0 1 0\n"
+                                       "PIN S UNKNOWN 1 999 1 0 1 0\n"
+                                       "GATE $odin3_const0 0 Y=CONST0;\n"
+                                       "GATE $odin3_const1 0 Y=CONST1;\n";
+
+/* Both of the core's goldens are read, one after the other before any exec, and the second maps. */
+static void test_load_genlib_goldens(void) {
+    static lines got;
+    odin3_abc_fail fail;
+    odin3_abc_cells cells;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
+    odin3_status cmos6 = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, &fail);
+    odin3_status st =
+        cmos6 == ODIN3_OK ? odin3_abc_session_load_genlib(self(), k_generic_genlib, &fail) : cmos6;
+    st = st == ODIN3_OK ? odin3_abc_session_load_aig(self(), &AND2_AIG, &fail) : st;
+    for (size_t i = 0; st == ODIN3_OK && i < GATES_MAP.count; i++) {
+        st = odin3_abc_session_exec(self(), GATES_MAP.commands[i], &fail);
+    }
+    st = st == ODIN3_OK ? odin3_abc_session_get_cells(self(), ODIN3_ABC_CELLS_NTK, &cells, &fail)
+                        : st;
+    bool and2 = st == ODIN3_OK && cells.n_names == 1 && strcmp(cells.names[0], "AND2") == 0;
+    odin3_abc_session_close(self());
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
+    TEST_ASSERT_TRUE(and2);
+    TEST_ASSERT_FALSE(odin3_guard_disabled());
+}
+
+#define PIN_LINE(name) "PIN " name " UNKNOWN 1 999 1 0 1 0\n"
+
+/* Texts outside the canonical subset (session.c), each refused with its RESULT before ABC reads
+ * it: the re-check's bypasses first, then the rest of the subset's rules. */
+typedef struct bad_genlib {
+    const char *text;
+    const char *why; /* the RESULT's reason */
+} bad_genlib;
+
+static const bad_genlib BAD_GENLIBS[] = {
+    {"# lib\nGATE X 1 Y=A;\n" PIN_LINE("A"), "line 1: a comment ('#')"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1 0 # c\n", "line 2: a comment ('#')"},
+    {"GATE X 1 Y=A;\n" PIN_LINE("A") "# end", "line 3: a comment ('#')"},
+    {"GATE X 1 Y=A\t*B;\nPIN * UNKNOWN 1 999 1 0 1 0\n", "line 1: a tab"},
+    {"GATE X 1 Y=A;\nPIN * UNKNOWN 1 999 1 0 1 0\n", "line 2: a bad pin name (PIN * is not read)"},
+    {"GATE X 1 Y=A*B*C*D*E*F*G;\n" PIN_LINE("A") PIN_LINE("B") PIN_LINE("C") PIN_LINE("D")
+         PIN_LINE("E") PIN_LINE("F") PIN_LINE("G"),
+     "line 8: more than 6 PINs on a gate"},
+    {"GATE X 1 Y=A B;\n" PIN_LINE("A"), "line 1: a formula name that is not a PIN of its gate"},
+    {"GATE X 1 Y=A*B;\n" PIN_LINE("A") PIN_LINE("C"),
+     "line 1: a formula name that is not a PIN of its gate"},
+    {"GATE X 1 Y=A;\n" PIN_LINE("A") PIN_LINE("B"),
+     "line 1: a PIN its gate's formula does not name"},
+    {"GATE X 1 Y=A;\n" PIN_LINE("A") PIN_LINE("A"), "line 3: a PIN declared twice"},
+    {"GATE X 1 Y=A;\r\n" PIN_LINE("A"), "line 1: a carriage return"},
+    {"GATE X 1 Y=A;\\\n" PIN_LINE("A"), "line 1: a backslash"},
+    {"GATE X 1  Y=A;\n" PIN_LINE("A"), "line 1: two spaces"},
+    {"GATE X 1 Y=A;\n\x01" PIN_LINE("A"), "line 2: a control character or a byte outside ASCII"},
+    {"GATE X 1 Y=A;\n\n" PIN_LINE("A"), "line 2: an empty line"},
+    {"", "no gates"},
+    {"GATE", "line 1: not a GATE or PIN statement"},
+    {" GATE X 1 Y=A;\n" PIN_LINE("A"), "line 1: not a GATE or PIN statement"},
+    {"LATCH L 1 Q=D;\n", "line 1: not a GATE or PIN statement"},
+    {"GATE X 1 Y=A;\n" PIN_LINE("A") ".end\n", "line 3: not a GATE or PIN statement"},
+    {PIN_LINE("A"), "line 1: a PIN before any GATE"},
+    {"GATE X 1", "line 1: a bad area"},
+    {"GATE 1X 1 Y=A;\n" PIN_LINE("A"), "line 1: a bad gate name"},
+    {"GATE X one Y=A;\n" PIN_LINE("A"), "line 1: a bad area"},
+    {"GATE X 1 Y;\n" PIN_LINE("A"), "line 1: a bad output name or no '='"},
+    {"GATE X 1 Y=A\n" PIN_LINE("A"), "line 1: a bad formula character or no ';' at the end"},
+    {"GATE X 1 Y=A;;\n" PIN_LINE("A"), "line 1: a bad formula character or no ';' at the end"},
+    {"GATE X 1 Y=A=B;\n" PIN_LINE("A"), "line 1: a bad formula character or no ';' at the end"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1 0 0\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1 Y=A;\nPIN A UNKNOWN 1 999 1e 0 1 0\n",
+     "line 2: a bad pin number or a word after the last"},
+    {"GATE X 1 Y=A;\nPIN A SIDEWAYS 1 999 1 0 1 0\n", "line 2: a bad pin phase"},
+    {"GATE X 1 Y=A;\nPIN 0 UNKNOWN 1 999 1 0 1 0\n", "line 2: a bad pin name (PIN * is not read)"},
+    {"GATE X 0 Y=CONST2;\n", "line 1: a gate without PINs whose formula is not CONST0 or CONST1"},
+    {"GATE X 0 Y=1;\n", "line 1: a gate without PINs whose formula is not CONST0 or CONST1"},
+    {"GATE X 1 Y=A*1;\n" PIN_LINE("A"), "line 1: a formula name that is not a PIN of its gate"},
+    {"GATE X 1 Y=A;\n" PIN_LINE("A") "GATE X 1 Y=!A;\n" PIN_LINE("A"),
+     "line 3: a gate name used twice (ABC would make a two-output gate)"},
 };
+
+/* GATE X over 33 pins P0 .. P32 (the re-check's 33-pin library) into text. */
+enum { WIDE_PINS = 33, WIDE_TEXT_BYTES = 2048 };
+static void wide_gate_text(char *text) {
+    size_t at = (size_t)snprintf(text, WIDE_TEXT_BYTES, "GATE X 1 Y=P0");
+    for (int k = 1; k < WIDE_PINS; k++) {
+        at += (size_t)snprintf(text + at, WIDE_TEXT_BYTES - at, "*P%d", k);
+    }
+    at += (size_t)snprintf(text + at, WIDE_TEXT_BYTES - at, ";\n");
+    for (int k = 0; k < WIDE_PINS; k++) {
+        at +=
+            (size_t)snprintf(text + at, WIDE_TEXT_BYTES - at, "PIN P%d UNKNOWN 1 999 1 0 1 0\n", k);
+    }
+    TEST_ASSERT_TRUE(at < WIDE_TEXT_BYTES);
+}
+
+static void expect_refused(odin3_status st, const odin3_abc_fail *fail, const bad_genlib *bad) {
+    char want[ODIN3_ABC_FAIL_TEXT_BYTES];
+    (void)snprintf(want, sizeof want, "ABC cannot read the gate library (%s)", bad->why);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, st, bad->text);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(ODIN3_ABC_FAIL_RESULT, fail->kind, bad->text);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(want, fail->text, bad->text);
+}
 
 static void test_load_genlib_rejects(void) {
     static lines got;
+    static char wide[WIDE_TEXT_BYTES];
     enum { BAD_COUNT = sizeof BAD_GENLIBS / sizeof BAD_GENLIBS[0] };
     odin3_abc_fail fail[BAD_COUNT];
     odin3_status st[BAD_COUNT];
     odin3_abc_fail null_fail;
+    odin3_abc_fail wide_fail;
     odin3_abc_fail open_fail;
+    wide_gate_text(wide);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &open_fail));
     for (size_t i = 0; i < BAD_COUNT; i++) {
-        st[i] = odin3_abc_session_load_genlib(self(), BAD_GENLIBS[i], &fail[i]);
+        st[i] = odin3_abc_session_load_genlib(self(), BAD_GENLIBS[i].text, &fail[i]);
     }
+    odin3_status wide_st = odin3_abc_session_load_genlib(self(), wide, &wide_fail);
     odin3_status null_st = odin3_abc_session_load_genlib(self(), NULL, &null_fail);
     odin3_abc_session_close(self());
     for (size_t i = 0; i < BAD_COUNT; i++) {
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_ENGINE, st[i], BAD_GENLIBS[i]);
-        TEST_ASSERT_EQUAL_UINT32_MESSAGE(ODIN3_ABC_FAIL_RESULT, fail[i].kind, BAD_GENLIBS[i]);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE("ABC cannot read the gate library", fail[i].text,
-                                         BAD_GENLIBS[i]);
+        expect_refused(st[i], &fail[i], &BAD_GENLIBS[i]);
     }
+    const bad_genlib wide_bad = {.text = wide, .why = "line 8: more than 6 PINs on a gate"};
+    expect_refused(wide_st, &wide_fail, &wide_bad);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, null_st);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, null_fail.kind);
     TEST_ASSERT_EQUAL_STRING("no gate library (text is NULL)", null_fail.text);
     TEST_ASSERT_FALSE(odin3_guard_disabled());
 }
 
-/* Formulas ABC's reader cannot parse: Mio_ParseFormula returns NULL and mioFunc.c:264 would
- * dereference it. Each is refused with a RESULT naming the gate, and the engine stays usable. */
-static const char k_second_gate_bad[] = "GATE G 1 Y=A;\nPIN A UNKNOWN 1 999 1 0 1 0\nGATE X 1 "
-                                        "Y=A+;\nPIN A UNKNOWN 1 999 1 0 1 0\n";
+/* Formulas inside the subset that ABC's reader cannot parse: Mio_ParseFormula returns NULL (and
+ * mioFunc.c:264 would dereference it) or asserts. Each is refused with a RESULT naming the gate,
+ * and the engine stays usable. */
+static const char k_second_gate_bad[] =
+    "GATE G 1 Y=A;\n" PIN_LINE("A") "GATE X 1 Y=A+;\n" PIN_LINE("A");
 
 static const char *const BAD_FORMULAS[] = {
-    "GATE X 1 Y=(A;\nPIN A UNKNOWN 1 999 1 0 1 0\n",   /* an unclosed parenthesis */
-    "GATE X 1 Y=A B;\nPIN A UNKNOWN 1 999 1 0 1 0\n",  /* B has no pin */
-    "GATE X 1 Y=*A;\nPIN A UNKNOWN 1 999 1 0 1 0\n",   /* an operator with no operand */
-    "GATE X 1 Y=A+;\nPIN A UNKNOWN 1 999 1 0 1 0\n",   /* a dangling operator */
-    "GATE X 1 Y=(A;\nPIN * UNKNOWN 1 999 1 0 1 0\n",   /* the generic pin */
-    "GATE X 1 Y=A*B);\nPIN * UNKNOWN 1 999 1 0 1 0\n", /* a closing one too many */
-    "GATE X 1 Y=A!!B;\nPIN * UNKNOWN 1 999 1 0 1 0\n", /* ABC asserts on this one */
-    k_second_gate_bad,                                 /* the second gate */
+    "GATE X 1 Y=(A;\n" PIN_LINE("A"),                   /* an unclosed parenthesis */
+    "GATE X 1 Y=*A;\n" PIN_LINE("A"),                   /* an operator with no operand */
+    "GATE X 1 Y=A+;\n" PIN_LINE("A"),                   /* a dangling operator */
+    "GATE X 1 Y=A*B);\n" PIN_LINE("A") PIN_LINE("B"),   /* a closing one too many */
+    "GATE X 1 Y=A!!B;\n" PIN_LINE("A") PIN_LINE("B"),   /* ABC asserts on this one */
+    "GATE X 1 Y=A B ();\n" PIN_LINE("A") PIN_LINE("B"), /* an empty pair */
+    k_second_gate_bad,                                  /* the second gate */
 };
 
 static void test_load_genlib_bad_formulas(void) {
@@ -1181,20 +1321,27 @@ static void test_load_genlib_bad_formulas(void) {
     TEST_ASSERT_FALSE(odin3_guard_disabled());
 }
 
-/* Every formula of up to FUZZ_LEN symbols over a small alphabet, with the generic pin: each is
- * read or refused with a RESULT, and none reaches an ABC assertion or a crash. */
-enum { FUZZ_LEN = 5, FUZZ_TEXT_BYTES = 64 };
+/* Every formula of up to FUZZ_LEN symbols over a small alphabet, with a PIN for each of A, B and
+ * C it names: each is read or refused with a RESULT, and none reaches an ABC assertion or a
+ * crash. */
+enum { FUZZ_LEN = 5, FUZZ_TEXT_BYTES = 160 };
 static const char FUZZ_ALPHABET[] = "AB()!'+^C";
 enum { FUZZ_ALPHA = sizeof FUZZ_ALPHABET - 1 };
 
 /* The index-th formula in base FUZZ_ALPHA, as a genlib text. */
 static void fuzz_text(uint32_t index, char *text) {
+    static const char *const pins[] = {"A", "B", "C"};
     char formula[FUZZ_LEN + 1] = {0};
     for (uint32_t pos = 0; pos < FUZZ_LEN; pos++) {
         formula[pos] = FUZZ_ALPHABET[index % FUZZ_ALPHA];
         index /= FUZZ_ALPHA;
     }
-    (void)snprintf(text, FUZZ_TEXT_BYTES, "GATE X 1 Y=%s;\nPIN * UNKNOWN 1 999 1 0 1 0\n", formula);
+    size_t at = (size_t)snprintf(text, FUZZ_TEXT_BYTES, "GATE X 1 Y=%s;\n", formula);
+    for (size_t k = 0; k < sizeof pins / sizeof pins[0]; k++) {
+        if (strchr(formula, pins[k][0]) != NULL) {
+            at += (size_t)snprintf(text + at, FUZZ_TEXT_BYTES - at, PIN_LINE("%s"), pins[k]);
+        }
+    }
 }
 
 /* load_genlib of every formula; the number read, or UINT32_MAX at the first one that is neither
@@ -1229,29 +1376,44 @@ static void test_load_genlib_formula_fuzz(void) {
     TEST_ASSERT_FALSE(odin3_guard_disabled());
 }
 
-/* A second load_genlib after a mapping would free the library the mapping points into. */
-static void test_load_genlib_in_use(void) {
+/* One session: load_genlib(cmos6), load_aig, the commands, then load_genlib again. */
+static odin3_status reload_after(const script *run, odin3_abc_fail *fail) {
     static lines got;
-    odin3_abc_fail fail;
-    odin3_abc_fail ntk_fail;
-    odin3_abc_fail gia_fail;
-    cells_copy out = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &fail));
-    odin3_status st = gates_in_session(&AND2_AIG, &GATES_MAP, ODIN3_ABC_CELLS_NTK, &out, &fail);
-    odin3_status ntk_st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, &ntk_fail);
-    st = st == ODIN3_OK ? odin3_abc_session_load_aig(self(), &AND2_AIG, &fail) : st;
-    for (size_t i = 0; st == ODIN3_OK && i < GATES_NF.count; i++) {
-        st = odin3_abc_session_exec(self(), GATES_NF.commands[i], &fail);
+    odin3_abc_fail open_fail;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_session_open(self(), collect, &got, &open_fail));
+    odin3_status st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, &open_fail);
+    st = st == ODIN3_OK ? odin3_abc_session_load_aig(self(), &AND2_AIG, &open_fail) : st;
+    for (size_t i = 0; i < run->count; i++) { /* a failing command counts too */
+        (void)odin3_abc_session_exec(self(), run->commands[i], &open_fail);
     }
-    odin3_status gia_st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, &gia_fail);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, open_fail.text);
+    st = odin3_abc_session_load_genlib(self(), k_cmos6_genlib, fail);
     odin3_abc_session_close(self());
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, st, fail.text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, ntk_st);
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, ntk_fail.kind);
-    TEST_ASSERT_EQUAL_STRING("a gate library is already in use by a mapped network", ntk_fail.text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, gia_st);
-    TEST_ASSERT_EQUAL_STRING("a gate library is already in use by a mapped network", gia_fail.text);
-    cells_copy_free(&out);
+    return st;
+}
+
+/* Once any exec has run, load_genlib is refused: a mapped network, the backup a later command
+ * keeps of it (map; strash), an &save copy or an undo would point into the freed library. A new
+ * session reads one again. */
+static void test_load_genlib_after_exec(void) {
+    static const char *const map_strash[] = {"&put", "strash", "map", "strash"};
+    static const char *const nf[] = {"&st", "&nf"};
+    static const char *const unknown[] = {"no_such_command"};
+    static const char *const stats[] = {"print_stats"};
+    static const script runs[] = {{.commands = map_strash, .count = 4, .get = NULL},
+                                  {.commands = nf, .count = 2, .get = NULL},
+                                  {.commands = unknown, .count = 1, .get = NULL},
+                                  {.commands = stats, .count = 1, .get = NULL}};
+    for (size_t i = 0; i < sizeof runs / sizeof runs[0]; i++) {
+        odin3_abc_fail fail;
+        odin3_status st = reload_after(&runs[i], &fail);
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE, st);
+        TEST_ASSERT_EQUAL_UINT32(ODIN3_ABC_FAIL_RESULT, fail.kind);
+        TEST_ASSERT_EQUAL_STRING("load the gate library before the mapping script", fail.text);
+    }
+    odin3_abc_fail fail;
+    static const script none = {.commands = NULL, .count = 0, .get = NULL};
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, reload_after(&none, &fail), fail.text);
     TEST_ASSERT_FALSE(odin3_guard_disabled());
 }
 
@@ -1326,10 +1488,10 @@ static void test_adapter_oom_cells(void) {
         injected++;
     }
     odin3_abc_test_fail_alloc_after(UINT32_MAX);
-    /* tmpfile, the formula check's copy of the text and of each of the 4 gates' formulas with pins,
-     * genlib copy, AIG copy; get_cells(NTK): object map, fanins,
-     * truths, gate, names, ci_from; get_cells(GIA): the same six */
-    TEST_ASSERT_EQUAL_UINT32(20, injected);
+    /* tmpfile, the subset check's gate names, the formula check's copy of the text, genlib copy,
+     * AIG copy; get_cells(NTK): object map, fanins, truths, gate, names, ci_from; get_cells(GIA):
+     * the same six */
+    TEST_ASSERT_EQUAL_UINT32(17, injected);
 }
 
 /* --- determinism and threads on a 40-AND network (§9, Review Focus 5) ------------------------ */
@@ -1918,10 +2080,11 @@ int main(int argc, char **argv) {
     RUN_TEST(test_get_cells_gia);
     RUN_TEST(test_get_cells_registers);
     RUN_TEST(test_get_cells_constant);
+    RUN_TEST(test_load_genlib_goldens);
     RUN_TEST(test_load_genlib_rejects);
     RUN_TEST(test_load_genlib_bad_formulas);
     RUN_TEST(test_load_genlib_formula_fuzz);
-    RUN_TEST(test_load_genlib_in_use);
+    RUN_TEST(test_load_genlib_after_exec);
     RUN_TEST(test_get_cells_unmapped);
     RUN_TEST(test_adapter_oom_cells);
     build_net40();

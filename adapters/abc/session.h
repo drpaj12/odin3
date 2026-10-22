@@ -104,8 +104,11 @@ odin3_status odin3_abc_session_name_map(void *self, const odin3_abc_luts *aligne
 /*
  * The engine's load_genlib (gatemap spec 4.2, ABI 5): text (a NUL-terminated genlib, copied)
  * becomes the session's gate library (Mio_LibraryReadBuffer, then Mio_UpdateGenlib; bridge.h).
- * ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library" or "no gate library (text
- * is NULL)", EXIT/ABORT/ASSERT or DISABLED; ODIN3_ERR_NO_MEMORY when the copy cannot be made.
+ * Only the canonical genlib subset (session.c, adp_check_genlib) reaches ABC, and only before the
+ * session's first exec. ODIN3_ERR_ENGINE with fail RESULT "ABC cannot read the gate library
+ * (line N: reason)" (or "(gate \"name\")", or no detail when ABC itself refuses), "load the gate
+ * library before the mapping script" or "no gate library (text is NULL)", EXIT/ABORT/ASSERT or
+ * DISABLED; ODIN3_ERR_NO_MEMORY when a copy cannot be made.
  */
 odin3_status odin3_abc_session_load_genlib(void *self, const char *text, odin3_abc_fail *fail);
 

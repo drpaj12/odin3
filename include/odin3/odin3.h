@@ -1802,11 +1802,16 @@ typedef struct odin3_abc_cells {
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
  *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
  * load_genlib: text (a NUL-terminated genlib, copied) becomes the session's gate library (ABC's
- *   Mio_LibraryReadBuffer, named, then Mio_UpdateGenlib). Load it before the script that maps:
- *   RESULT "a gate library is already in use by a mapped network" when the network space holds a
- *   mapped network or the & space a cell mapping. RESULT "no gate library (text is NULL)"; RESULT
- *   "ABC cannot read the gate library" when ABC cannot read the text, with the gate's name when a
- *   formula does not parse.
+ *   Mio_LibraryReadBuffer, named, then Mio_UpdateGenlib). Only the canonical form the core's genlib
+ *   writer emits is read: "GATE name area out=formula;" lines, each followed by its explicit
+ *   "PIN name phase" lines with six numbers (at most 6 PINs, each named by the formula, no generic
+ *   pin), printable ASCII with single spaces and '\n' only (no comments, tabs, '\r', '\\' or
+ *   LATCH).
+ *   Anything else is RESULT "ABC cannot read the gate library (line N: reason)"; a formula ABC
+ *   cannot parse is RESULT "ABC cannot read the gate library (gate \"name\")". Load it before the
+ *   mapping script: once any exec has run in the session, load_genlib is RESULT "load the gate
+ *   library before the mapping script" (a mapped network, its backup, an &save copy or an undo
+ *   would point into the library it frees). RESULT "no gate library (text is NULL)".
  * get_cells: the gate-mapped network of space (an odin3_abc_cells_space), owned by the session
  *   until close or the next call. RESULT "no gate-mapped network in the network space", "no cell
  *   mapping in the & space", "a node without a library gate", "a box that is not a latch", "a gate

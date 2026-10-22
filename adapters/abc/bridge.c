@@ -318,40 +318,13 @@ odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32
 /* --- gate mapping (ABI 5) ------------------------------------------------------------------- */
 
 enum {
-    ADP_FORMULA_NAMES = 100, /* mioFunc.c's pPinNames[100], which ABC fills without a bound */
-    ADP_PIN_TAIL = 7         /* a PIN's words after its name */
+    ADP_PIN_TAIL = 7 /* a PIN's words after its name */
 };
 
 #define ADP_WORD_BLANKS " \t\r\n"
 #define ADP_FORMULA_SYMBOLS                                                                        \
     "*&+|^!'()" /* mioFunc.c's MIO_SYMB_*, which ABC blanks to find names                          \
                  */
-
-/* The distinct names of formula (edited: its operators become blanks) into names; their count,
- * or -1 past ADP_FORMULA_NAMES. Mio_GateCollectNames is not used: it has no bound. */
-static int adp_formula_names(char *formula, char **names) {
-    for (char *sym = formula; *sym != '\0'; sym++) {
-        if (strchr(ADP_FORMULA_SYMBOLS, *sym) != NULL) {
-            *sym = ' ';
-        }
-    }
-    int count = 0;
-    char *save = NULL;
-    for (char *word = Abc_UtilStrtok(formula, ADP_WORD_BLANKS, &save); word != NULL;
-         word = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, &save)) {
-        int seen = 0;
-        while (seen < count && strcmp(names[seen], word) != 0) {
-            seen++;
-        }
-        if (seen == count && count == ADP_FORMULA_NAMES) {
-            return -1;
-        }
-        if (seen == count) {
-            names[count++] = word;
-        }
-    }
-    return count;
-}
 
 /* Where a formula is in its grammar: what the last symbol allows next. */
 typedef enum adp_formula_state {
@@ -442,13 +415,13 @@ static char *adp_pin_name(char **save) {
 }
 
 /* A GATE's PIN lines after its formula: their names into pins, their number in *count, the
- * token after them in *next. False for a short PIN or more than ADP_FORMULA_NAMES. */
+ * token after them in *next. False for a short PIN or more than ADP_GATE_MAX_INPUTS. */
 static bool adp_gate_pins(char **pins, int *count, char **next, char **save) {
     *count = 0;
     *next = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
     while (*next != NULL && strcmp(*next, "PIN") == 0) {
         char *name = adp_pin_name(save);
-        if (name == NULL || *count == ADP_FORMULA_NAMES) {
+        if (name == NULL || *count == ADP_GATE_MAX_INPUTS) {
             return false;
         }
         pins[(*count)++] = name;
@@ -457,28 +430,14 @@ static bool adp_gate_pins(char **pins, int *count, char **next, char **save) {
     return true;
 }
 
-/* ODIN3_OK when formula parses over its pin names (the formula's own when the first pin is "*"),
- * or is one ABC rejects without parsing; ODIN3_ERR_ENGINE when it does not parse;
- * ODIN3_ERR_NO_MEMORY. Works on a copy of formula. */
+/* ODIN3_OK when formula parses over its pin names (session.c's check has made them exactly the
+ * formula's names), or has no pins (CONST0 or CONST1, which ABC reads without parsing);
+ * ODIN3_ERR_ENGINE when it does not parse. */
 static odin3_status adp_formula_ok(const char *formula, char **pins, int n_pins) {
-    if (n_pins == 0) { /* a constant, or a formula ABC rejects */
+    if (n_pins == 0) {
         return ODIN3_OK;
     }
-    size_t bytes = strlen(formula) + 1;
-    char *work = odin3_abc_alloc(bytes); /* adp_formula_names edits what it reads */
-    char *names[ADP_FORMULA_NAMES];
-    if (work == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    memcpy(work, formula, bytes);
-    int n_names = adp_formula_names(work, names);
-    bool ok = n_names >= 0;
-    if (ok && n_names > 0) {
-        bool own = strcmp(pins[0], "*") == 0;
-        ok = adp_formula_parses((char *)formula, own ? names : pins, own ? n_names : n_pins);
-    }
-    free(work);
-    return ok ? ODIN3_OK : ODIN3_ERR_ENGINE;
+    return adp_formula_parses((char *)formula, pins, n_pins) ? ODIN3_OK : ODIN3_ERR_ENGINE;
 }
 
 /* One GATE after its keyword, as Mio_GateParseFormula meets it (adp_formula_ok's statuses). *gate
@@ -488,7 +447,7 @@ static odin3_status adp_gate_formula(char **gate, char **next, char **save) {
     const char *area = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
     const char *out = Abc_UtilStrtok(NULL, "=", save);
     const char *formula = Abc_UtilStrtok(NULL, ";", save);
-    char *pins[ADP_FORMULA_NAMES];
+    char *pins[ADP_GATE_MAX_INPUTS];
     int n_pins = 0;
     if (*gate == NULL || area == NULL || out == NULL || formula == NULL ||
         !adp_gate_pins(pins, &n_pins, next, save)) {
@@ -521,33 +480,25 @@ static odin3_status adp_genlib_formulas(const char *text, odin3_abc_fail *fail) 
     return st;
 }
 
-/* Whether the frame holds a network or a cell mapping that points into the gate library. */
-static bool adp_library_in_use(void) {
-    Abc_Ntk_t *ntk = Abc_FrameReadNtk(adp_frame);
-    Gia_Man_t *gia = Abc_FrameReadGia(adp_frame);
-    return (ntk != NULL && Abc_NtkIsMappedLogic(ntk)) ||
-           (gia != NULL && Gia_ManHasCellMapping(gia));
-}
-
 odin3_status odin3_bridge_load_genlib(const char *text, odin3_abc_fail *fail) {
     ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL && text != NULL);
-    if (adp_library_in_use()) { /* Mio_UpdateGenlib would free what that mapping points into */
-        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
-                                  "a gate library is already in use by a mapped network");
-    }
     /* ABC dereferences the NULL that Mio_ParseFormula returns for a formula it cannot parse
      * (mioFunc.c:264), a crash the guard cannot catch: every formula is parsed here first. */
     odin3_status st = adp_genlib_formulas(text, fail);
     if (st != ODIN3_OK) {
         return st;
     }
-    size_t bytes = strlen(text) + 1;
-    char *copy = odin3_abc_alloc(bytes); /* the reader edits its buffer */
+    size_t len = strlen(text);
+    char *copy = odin3_abc_alloc(len + 2); /* the reader edits its buffer */
     if (copy == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    memcpy(copy, text, bytes);
+    /* A last '\n', so Io_ReadFileRemoveComments' scan for the end of a comment (mioRead.c:755)
+     * stops inside the buffer even if a '#' got past session.c's check. */
+    memcpy(copy, text, len);
+    copy[len] = '\n';
+    copy[len + 1] = '\0';
     /* Not Mio_LibraryRead: with a buffer it dereferences the library it failed to read
      * (mioRead.c:96). The buffer reader returns NULL instead, and the name is set as mio.c does. */
     Mio_Library_t *lib = Mio_LibraryReadBuffer(copy, ADP_GENLIB_PLAIN, NULL, 0, 0);
