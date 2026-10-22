@@ -2302,6 +2302,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_BINARY_DIR}/raise_micros
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(raise_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # v1.0.2 gate mapping (gatemap plan Task 13): abc --gates and dfflibmap with the real linked
+        # ABC on generic_gates and cmos6, equivalent to write_blif --gates-as-names after lower.
+        add_test(NAME abc_gates_cli
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/abc_gates_cli.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/abc_gates_cli
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_gates_cli PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).
