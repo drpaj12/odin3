@@ -1,0 +1,24 @@
+
+.model DFFP
+.inputs D C
+.outputs Q
+.blackbox
+.end
+
+.model DFFN
+.inputs D C
+.outputs Q
+.blackbox
+.end
+
+.model DLATCHP
+.inputs D E
+.outputs Q
+.blackbox
+.end
+
+.model DLATCHN
+.inputs D E
+.outputs Q
+.blackbox
+.end

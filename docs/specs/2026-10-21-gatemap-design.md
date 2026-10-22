@@ -84,9 +84,9 @@ The engine ABI gains the library load and the cell-result read; `ODIN3_ABI_VERSI
 
 - For each `$_DFF_P_`, `$_DFF_N_`, `$_DLATCH_P_` and `$_DLATCH_N_`: pick the library state cell
   whose `seq` has the same edge (or level), no asynchronous control, and an init that is `x` or equal
-  to the cell's init; on several matches, the smallest area. A `$_DFF_N_` with no negedge library
-  cell uses the posedge cell with a library inverter on the clock (as `lower --neg-edge invert`
-  would). Any other state cell type is an error naming it.
+  to the cell's init; on several matches, the smallest area. A `$_DFF_N_` with no init-compatible
+  NEGEDGE library cell uses the posedge cell with a library inverter on the clock (as
+  `lower --neg-edge invert` would). Any other state cell type is an error naming it.
 - No match: error naming the cell type and the library.
 - Provenance: the new cell takes the old cell's records unchanged (one-to-one).
 

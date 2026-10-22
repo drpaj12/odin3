@@ -1,0 +1,12 @@
+
+.model DFF
+.inputs C D
+.outputs Q
+.blackbox
+.end
+
+.model INV
+.inputs A
+.outputs Y
+.blackbox
+.end
