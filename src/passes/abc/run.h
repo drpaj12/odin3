@@ -15,6 +15,7 @@
 #include "passes/abc/aig.h"
 #include "passes/abc/region.h"
 #include "passes/abc/script.h"
+#include "techlib/libcells.h"
 #include "util/arena.h"
 #include "util/str.h"
 #include "util/u64map.h"
@@ -84,6 +85,13 @@ struct odin3_abc_run {
         aig; /* the in-memory exchange's AIG of the run in progress (net_lit NULL: none) */
     char nomap_reason[ODIN3_ABC_REASON_BYTES]; /* why the run has no name map, "" when it has one */
     odin3_abc_run_stats stats;                 /* reset by each run (run_domain) */
+    /* abc --gates (gatemap spec 3, 4; plan Task 10): gates_mode (the plan's `gates`, a name the
+     * type table above already has), the library's cells, its genlib text and the text's SHA-256
+     * (64 hex digits). Without --gates: lib and genlib empty, the digest "". */
+    bool gates_mode;
+    odin3_libcells lib;
+    odin3_strbuf genlib;
+    char genlib_sha256_hex[ODIN3_SHA256_HEX_CHARS];
 };
 
 /*
@@ -101,6 +109,14 @@ odin3_status odin3_abc_run_create(odin3_pass_ctx *ctx, const odin3_abc_opts *opt
  * opens --log and creates a given --via-blif directory, and logs the first INFO line. *out is a
  * run ready for the module loop (run->module and the rest unset); odin3_abc_pass_run is this, the
  * loop, compaction and odin3_abc_run_destroy. Errors as odin3_abc_pass_run's.
+ *
+ * With --gates (gatemap plan Task 10), before the script choice, in order: --lut, then --via-blif,
+ * is refused (INVALID_ARG); the library's cells are collected and checked
+ * (odin3_abc_genlib_check), one `abc: note:` INFO line per cell that is not a gate cell, the genlib
+ * text and its SHA-256 (an INFO line); provenance is CONE (a note when --prov fine was given); the
+ * exchange is AIG whatever ODIN3_ABC_EXCHANGE says; the script is --script, else the embedded
+ * lib/abc/gates.abc (a note when a project's or CLI script is not used), checked to end
+ * gate-mapped; the route is LINKED.
  */
 odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_abc_run **out);
 

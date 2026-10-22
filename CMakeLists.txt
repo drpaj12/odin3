@@ -1402,7 +1402,8 @@ if(BUILD_TESTING)
         odin3_add_unit_test(${_abc_test})
         target_compile_definitions(${_abc_test} PRIVATE
             ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
-            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_GENLIB_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/genlib")
         if(NOT _abc_test STREQUAL "test_abc_result")
             target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
         endif()
