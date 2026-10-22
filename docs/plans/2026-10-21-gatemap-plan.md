@@ -66,7 +66,7 @@ G-1 to G-9). Executors read both. Where this plan deviates from the spec it says
    name (pin order drift): `abc: ABC returned a malformed network: ...`, IR unchanged (Task 11
    `test_from_cells_wrong_function`, `test_from_cells_wrong_arity`).
 
-## Spec gaps and agent defaults (decided here; logged as GM-1..GM-12 in Task 15)
+## Spec gaps and agent defaults (decided here; logged as GM-1..GM-13 in Task 15)
 
 | # | Gap found in the code | Decision |
 |---|---|---|
@@ -82,6 +82,7 @@ G-1 to G-9). Executors read both. Where this plan deviates from the spec it says
 | GM-10 | "the RTL's BLIF" (spec 9) is not defined; the plain BLIF writer writes `$_AND_` and the other bit gates as `.subckt`, which equiv-check cuts. | `--gates-as-names` writes every gate-like cell (built-in or library) as `.names`; the reference is `write_blif --gates-as-names` right after `lower`. |
 | GM-11 | AB-20's script precedence would pick a project's or `--abc-script`'s LUT script for `--gates`. | With `--gates` only `--script` overrides; otherwise `builtin:lib/abc/gates.abc`. An INFO line says a project or CLI script was not used. |
 | GM-12 | The log has no NOTE level. | Spec "NOTE" lines are INFO lines whose text starts `abc: note:`. |
+| GM-13 | Spec 8 gave every cmos6 gate area 1. | cmos6 areas follow Yosys cmos_cells.lib (review finding) so `map -a` matches Gate-Breaker's flow: BUF 6, INV 3, NAND2 4, NOR2 4, DFF 18, DFFSR 18. |
 
 ## PRs, order and parallelism
 
@@ -285,12 +286,12 @@ head SHA equals the reviewed SHA.
   `port '%s' is not a genlib name`.
 - `lib/cmos6.o3lib` (exact cells, header comment: "the six cells of Yosys's
   examples/cmos/cmos_cells.lib under Gate-Breaker's names (gatemap spec 8); DFFSR is a black box:
-  .o3lib's seq has no asynchronous set or reset (GM-7); its function: Q <= D on posedge C, S low
-  sets Q, R low resets Q, both asynchronous"):
-  `library cmos6`; `cell BUF gate area 1` (in A, out Y, `fn Y = A`); `cell INV gate area 1`
-  (`fn Y = ~A`); `cell NAND2 gate area 1` (in A, B; `fn Y = ~(A & B)`); `cell NOR2 gate area 1`
-  (`fn Y = ~(A | B)`); `cell DFF gate area 4` (`in C 1 clock ; in D 1 ; out Q 1`,
-  `seq Q <= D @ posedge C init x`); `cell DFFSR blackbox area 4` (`in C 1 clock ; in D 1 ; in S 1 ; in R 1 ; out Q 1`).
+  .o3lib's seq has no asynchronous set or reset (GM-7); its function: Q <= D on posedge C, S high
+  sets Q, R high resets Q, both asynchronous, S wins over R"):
+  `library cmos6`; `cell BUF gate area 6` (in A, out Y, `fn Y = A`); `cell INV gate area 3`
+  (`fn Y = ~A`); `cell NAND2 gate area 4` (in A, B; `fn Y = ~(A & B)`); `cell NOR2 gate area 4`
+  (`fn Y = ~(A | B)`); `cell DFF gate area 18` (`in C 1 clock ; in D 1 ; out Q 1`,
+  `seq Q <= D @ posedge C init x`); `cell DFFSR blackbox area 18` (`in C 1 clock ; in D 1 ; in S 1 ; in R 1 ; out Q 1`).
 
 - [ ] **Step 1: Write the failing tests** (`test_libcells.c`, reading `ODIN3_LIB_DIR` files with `odin3_techlib_read`):
   - `test_collect_generic_gates`: 13 gates in order BUF INV AND2 AND3 AND4 OR2 OR3 OR4 NAND2 NOR2 XOR2 XNOR2 MUX2; tables `0x2 0x1 0x8 0x80 0x8000 0xE 0xFE 0xFFFE 0x7 0x1 0x6 0x9 0xCA`; 4 states (DFFP POSEDGE, DFFN NEGEDGE, DLATCHP HIGH, DLATCHN LOW, all init -1, data_port 0, clock_port 1, q_port 2); skips = the 4 state cells (STATE) and TIE0, TIE1 (CONSTANT); `buf`, `inv`, `tie0`, `tie1` are BUF, INV, TIE0, TIE1.
@@ -739,10 +740,10 @@ write_blif --gates-as-names rtl.blif; abc --gates <L>; dfflibmap <L>; write_blif
 flow and the `dfflibmap` step), `CHANGELOG.md` (`## [Unreleased]` / `### Added`: `abc --gates`,
 `dfflibmap`, `write_blif --gates-as-names`, `lib/cmos6.o3lib`, `lib/abc/gates.abc`),
 `docs/V1.0.2.md` (create it: title `Odin III v1.0.2: gate mapping`; decisions log from `1.`, one per
-GM-1..GM-12 as "(Agent default, gatemap)", plus the sweep counts and floors under "Exit evidence").
+GM-1..GM-13 as "(Agent default, gatemap)", plus the sweep counts and floors under "Exit evidence").
 
 - [ ] **Step 1:** write the docs; `ctest --preset debug -R docs` (the Sphinx build, if present) and lint.
-- [ ] **Step 2: Commit** `docs: gate mapping (flow, CHANGELOG, V1.0.2 decisions GM-1..12)`; push; PR 7.
+- [ ] **Step 2: Commit** `docs: gate mapping (flow, CHANGELOG, V1.0.2 decisions GM-1..13)`; push; PR 7.
 
 ## Release v1.0.2 (Peter 2026-10-21: post-v1.0 core features are patch releases)
 

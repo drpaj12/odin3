@@ -248,6 +248,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/aligned.c
     src/passes/abc/exchange.c
     src/passes/abc/splice.c
+    src/passes/abc/genlib.c
     src/passes/abc/splice_a.c
     src/passes/abc/splice_bc.c
     src/passes/abc/splice_d.c
@@ -407,6 +408,7 @@ add_library(odin3_core OBJECT
     src/techlib/reader_cell.c
     src/techlib/fnsim_compile.c
     src/techlib/fnsim_eval.c
+    src/techlib/libcells.c
     src/sim/build.c
     src/sim/build_hier.c
     src/sim/build_names.c
@@ -415,6 +417,7 @@ add_library(odin3_core OBJECT
     src/sim/prng.c
     src/sim/vectors.c
     src/sim/word.c
+    src/sim/gate_truth.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
     src/backends/json/emit.c
@@ -1652,6 +1655,12 @@ if(BUILD_TESTING)
         ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_TECHLIB_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/techlib"
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_libcells)
+    target_compile_definitions(test_libcells PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_abc_genlib)
+    target_compile_definitions(test_abc_genlib PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+        ODIN3_GENLIB_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/genlib")
     odin3_add_unit_test(test_sim_cells)
     odin3_add_unit_test(test_dffx_cells)
     odin3_add_unit_test(test_sim_build)
