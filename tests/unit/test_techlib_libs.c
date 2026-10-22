@@ -1,6 +1,7 @@
 /*
- * test_techlib_libs.c — the shipped libraries (lib/vtr.o3lib, lib/generic_gates.o3lib) and the
- * goldens' black boxes resolved against lib/vtr.o3lib by the BLIF reader and writer (IR-7b).
+ * test_techlib_libs.c — the shipped libraries (lib/vtr.o3lib, lib/generic_gates.o3lib,
+ * lib/cmos6.o3lib) and the goldens' black boxes resolved against lib/vtr.o3lib by the BLIF
+ * reader and writer (IR-7b).
  */
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
@@ -30,6 +31,7 @@ enum { MSG_MAX = 1024, PATH_LEN = 512, TEXT_MAX = 1 << 16, MAX_FIXTURES = 256 };
 
 static const char *const VTR = ODIN3_LIB_DIR "/vtr.o3lib";
 static const char *const GATES = ODIN3_LIB_DIR "/generic_gates.o3lib";
+static const char *const CMOS6 = ODIN3_LIB_DIR "/cmos6.o3lib";
 static const char *const IN_PATH = "odin3_libs_test_in.blif";
 static const char *const OUT_PATH = "odin3_libs_test_out.blif";
 
@@ -142,6 +144,38 @@ static void test_generic_gates(void) {
     TEST_ASSERT_TRUE(dffn->ports[1].clock);
     const odin3_techlib_cell *latch = odin3_techlib_cell_get(g_design, type_of("DLATCHN"));
     TEST_ASSERT_EQUAL_INT(ODIN3_TECHLIB_LOW, latch->seqs[0].trigger);
+}
+
+/* The number of cell types whose library data names library (a strtab ID). */
+static uint32_t cells_of_library(uint32_t library) {
+    uint32_t count = 0;
+    for (uint32_t id = 1; odin3_celltype_get(g_design, (odin3_celltype_id){id}) != NULL; id++) {
+        const odin3_techlib_cell *lib = odin3_techlib_cell_get(g_design, (odin3_celltype_id){id});
+        count += lib != NULL && lib->library == library ? 1U : 0U;
+    }
+    return count;
+}
+
+/* cmos6.o3lib (gatemap spec 8): four gates, DFF and the black box DFFSR, all of one library. */
+static void test_cmos6(void) {
+    load(CMOS6);
+    static const char *const cells[] = {"BUF", "INV", "NAND2", "NOR2", "DFF", "DFFSR"};
+    uint32_t library = 0;
+    TEST_ASSERT_TRUE(
+        odin3_strtab_find(odin3_design_strtab(g_design), odin3_bytes_cstr("cmos6"), &library));
+    TEST_ASSERT_EQUAL_UINT32(6, cells_of_library(library));
+    for (size_t i = 0; i < sizeof cells / sizeof cells[0]; i++) {
+        const odin3_techlib_cell *lib = odin3_techlib_cell_get(g_design, type_of(cells[i]));
+        TEST_ASSERT_NOT_NULL_MESSAGE(lib, cells[i]);
+        TEST_ASSERT_EQUAL_UINT32(library, lib->library);
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_GRAN_BLACKBOX, def_of("DFFSR")->gran);
+    TEST_ASSERT_EQUAL_UINT32(5, def_of("DFFSR")->n_ports);
+    expect_port(def_of("DFF"), 0, "C", ODIN3_DIR_IN);
+    expect_port(def_of("DFF"), 2, "Q", ODIN3_DIR_OUT);
+    const odin3_techlib_cell *dff = odin3_techlib_cell_get(g_design, type_of("DFF"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_TECHLIB_POSEDGE, dff->seqs[0].trigger);
+    TEST_ASSERT_NULL(dff->seqs[0].init);
 }
 
 /* A cell's expected ports: names in order, the first n_in inputs and the rest outputs. */
@@ -485,6 +519,7 @@ static void test_missing_library_is_io_error(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_generic_gates);
+    RUN_TEST(test_cmos6);
     RUN_TEST(test_vtr_ports);
     RUN_TEST(test_vtr_parameters);
     RUN_TEST(test_vtr_reads_pair_with_outputs);
