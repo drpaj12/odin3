@@ -32,6 +32,8 @@ typedef struct odin3_blif_write_opts {
     uint32_t lut_k;                   /* VTR only: max .names inputs; 0 = the default */
     bool src_attr;                    /* PLAIN only: `.attr src` with each cell's HDL locations */
     const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (5.4f, H-4) */
+    bool gates_as_names;  /* PLAIN only: gate cells as `.names`, library state cells as `.latch`
+                             (gatemap spec 7, G-8); see odin3_blif_write_with */
 } odin3_blif_write_opts;
 
 #define ODIN3_BLIF_VTR_DEFAULT_K 6U /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */
@@ -98,6 +100,16 @@ typedef struct odin3_blif_write_opts {
  * `.attr`/`.param` listed by its ODIN3_BLIF_ATTR_EXTRAS attribute, in that order; a listed key
  * without a `blif.attr:`/`blif.param:` prefix or without a STRING attribute on the cell is skipped
  * with a warning.
+ *
+ * opts->gates_as_names (PLAIN only; the VTR dialect is refused: "odin3_blif_write_with:
+ * gates_as_names applies to the PLAIN dialect only"; gatemap spec 7, G-8): after the `$_CONST*_`
+ * check and before the cases above, a gate cell (a built-in bit gate such as `$_AND_`, or a
+ * library gate: odin3_gate_truth_eligible) is written as `.names <inputs in port order> <output>`
+ * with odin3_blif_isop's cover of its truth table (a constant table as the zero-input `.names
+ * Y`); a library cell with no input and a constant output (a TIE cell) as the zero-input
+ * generator; a library state cell (odin3_libstate_of) as `.latch D Q re|fe|ah|al C init` (init 0,
+ * 1, or 2 for x). Every other cell is written as without the option. Without the option the bytes
+ * are unchanged.
  *
  * Constants (spec 3E §9.4; Parmys's `write_blif -true + vcc -false + gnd -undef + unconn`): a
  * `$_CONST0_`, `$_CONST1_`, `$_CONSTX_` or `$_CONSTZ_` cell writes no line, never `.subckt

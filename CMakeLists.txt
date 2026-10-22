@@ -1040,6 +1040,12 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_memory_merge_soft PROPERTIES LABELS unit)
+    add_test(NAME cli_write_blif_gates_vtr_refused
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh write_blif_gates_vtr_refused
+                $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_write_blif_gates_vtr_refused PROPERTIES LABELS unit)
     add_test(NAME cli_pm_ramstyle
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_ramstyle $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1575,7 +1581,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_netlist_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
-        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 3E-5: odin3_blif_isop, the irredundant cover write_blif writes a $lut as.
     odin3_add_unit_test(test_blif_isop)
     # 3E: write_blif --vtr (tests/unit/blif_vtr_test.c: read a BLIF text, run write_blif).
