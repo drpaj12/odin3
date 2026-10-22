@@ -417,8 +417,10 @@ add_library(odin3_core OBJECT
     src/sim/levelize.c
     src/sim/prng.c
     src/sim/vectors.c
+    src/sim/vectors_in.c
     src/sim/word.c
     src/sim/signals.c
+    src/sim/vcd.c
     src/sim/gate_truth.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
@@ -1040,6 +1042,12 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_memory_merge_soft PROPERTIES LABELS unit)
+    add_test(NAME cli_write_blif_gates_vtr_refused
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh write_blif_gates_vtr_refused
+                $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_write_blif_gates_vtr_refused PROPERTIES LABELS unit)
     add_test(NAME cli_pm_ramstyle
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_ramstyle $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1575,7 +1583,8 @@ if(BUILD_TESTING)
     target_compile_definitions(test_netlist_locs PRIVATE ODIN3_LOCS_ROOT="${PROJECT_BINARY_DIR}")
     odin3_add_unit_test(test_blif_writer)
     target_compile_definitions(test_blif_writer PRIVATE
-        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+        ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif"
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     # 3E-5: odin3_blif_isop, the irredundant cover write_blif writes a $lut as.
     odin3_add_unit_test(test_blif_isop)
     # 3E: write_blif --vtr (tests/unit/blif_vtr_test.c: read a BLIF text, run write_blif).
@@ -1669,10 +1678,16 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_sim_cycle)
     target_compile_definitions(test_sim_cycle PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_sim_vectors_in)
+    target_compile_definitions(test_sim_vectors_in PRIVATE
+        ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_word)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_sim_signals)
     target_compile_definitions(test_sim_signals PRIVATE
+        ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
+    odin3_add_unit_test(test_sim_vcd)
+    target_compile_definitions(test_sim_vcd PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_dot_writer)
     odin3_add_unit_test(test_hdl_loc)
@@ -2415,7 +2430,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage techlib plugin writers sim keep_ast
+                           help_runs_nothing check_flag usage techlib plugin writers sim sim_vectors_in sim_vcd keep_ast
                            project_dump project_top project_revision project_diag_paths
                            project_preprocess parse_only parse_only_with_script elab_only
                            elab_only_with_script abc_script_missing abc_script_project opt_snapshot opt_determinism)
@@ -3032,6 +3047,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # S1 Task 9 (spec SW-3, SW-4): sim --vcd against the vector file and, when found, Icarus.
+    add_test(NAME sim_vcd_check
+        COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_vcd
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_vcd_check PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 9 (spec 3.5): plugins/python/re_round.py, one round of the RE loop, through
     # the CLI and equiv-check (needs the linked ABC for cone_check and equiv-check).
     if(ODIN3_WITH_ABC)
