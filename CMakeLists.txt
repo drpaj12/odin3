@@ -3057,6 +3057,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
+    add_test(NAME python_sim
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_sim
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_sim PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # S1 Task 9 (spec SW-3, SW-4): sim --vcd against the vector file and, when found, Icarus.
     add_test(NAME sim_vcd_check
         COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"

@@ -76,6 +76,49 @@ One node per cell and per module port, one edge per driver-to-sink pin pair on a
 attributes are `kind`, `type`, `parameters`, `attributes`, and `odin3_level` and `odin3_prov` when
 the file has them. A file whose `odin3_version` is not 1 is refused.
 
+## Simulation
+
+`Design.simulate()` opens a `Simulation` of the top module (or of a module given by name). It steps
+the existing netlist simulator one cycle at a time: set inputs, step, read values, reset. A
+Verilog design must be run through the simulable flow first; a BLIF or JSON netlist needs no pass.
+
+```python
+design = Design()
+design.run_script('read_verilog "traffic.v"; proc; opt; lower')
+with design.simulate() as sim:
+    sim["rst"] = 1               # inputs keep their value until set again
+    sim.step()                   # one clock cycle
+    sim["rst"] = 0
+    sim["car_ew"] = 1
+    sim.step(2)
+    print(sim["light_ns"], sim["light_ew"], sim.cycle)   # 1 0 3
+```
+
+Rules:
+
+- **Names.** A signal is found by its HDL name; instances are separated by `.`
+  (`sim["u0.inner"]`), and a bit select is `sim["a[2]"]`. `sim.signal(name)` returns a
+  `SignalInfo` (id, name, width, kind, declared range, scope, IR object) or `None`;
+  `sim.signals()` lists the named signals and `sim.scopes()` the expanded instances. A name the
+  simulated netlist does not have raises `KeyError`. Names are the same after `flatten`.
+- **Values.** Unsigned Python ints, bit i of the int is bit i of the signal, any width. `set` of a
+  negative value or one of `2**width` or more raises `ValueError`; `set` of anything but an input
+  raises `Odin3Error`.
+- **A step.** `step(n)` runs n cycles: settle with the inputs as set, raise every clock and send
+  the rising edge to the registers, settle, lower the clocks, settle. Values read afterwards are
+  those after the last settle. `settle()` shows the combinational effect of inputs just set
+  without advancing state. `reset()` is a power-on reset (all values 0, register INIT applied,
+  `cycle` back to 0); it is not the design's own reset input.
+- **Clocks.** Clocks must be top input ports. A port whose bits are all clocks is kind `"clock"`
+  and the steps drive it; do not set it. For a gated or derived clock use a clock enable instead.
+- **Removed names.** `opt` and `abc` delete logic nothing observes, including an unused register.
+  Mark a signal you want to keep with `(* keep *)` in the HDL, or open the simulation before that
+  pass.
+- **Passes are refused while a simulation is open.** `run_pass` and `run_script` on the design
+  raise `Odin3Error` until `sim.close()`. Several simulations of one design may be open at once,
+  each with its own state. `Design.close()` closes its simulations first, and a design and its
+  simulations may be garbage-collected in any order.
+
 ## Plugins
 
 A shared-object plugin is loaded with `odin3 --plugin FILE` (C ABI, repeatable) or from Python
