@@ -43,7 +43,9 @@ HAND_SUB_LINE = 18  # `.subckt sub ...` (u_sub)
 READ_REJECTS = {
     "neg_e8_mixed.in.blif", "elsif_both_defined.odin.blif", "neg_e12_multidriver.in.blif",
     "c9_two_drivers.blif", "multidriver.blif", "c5_row_width.blif", "c6_init4.blif",
-    "c7_no_port.blif", "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif"}
+    "c7_no_port.blif", "c7_twice.blif", "c7_wide_port.blif", "c7_ram_data_bit.blif",
+    # Black-box cell models only, appended to a netlist by test_cli.sh; no top module.
+    "models.blif", "models_neg.blif"}
 
 try:
     import cffi  # noqa: F401
