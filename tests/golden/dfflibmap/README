@@ -1,0 +1,15 @@
+dfflibmap golden (gatemap spec 6, G-6; plan Task 9; CTest cli_dfflibmap_golden).
+
+input.blif has one .latch of each kind dfflibmap maps: re ($_DFF_P_), fe ($_DFF_N_), ah
+($_DLATCH_P_) and al ($_DLATCH_N_), on one clock. The script
+
+  read_techlib lib/generic_gates.o3lib; read_blif input.blif; dfflibmap generic_gates;
+  write_blif out.blif
+
+maps them onto DFFP, DFFN, DLATCHP and DLATCHN (the only cell of each trigger; their init is x,
+so every INIT matches; q1's INIT 0 is lost, with the warning). expected.blif was written by hand
+from that rule: one .subckt per cell, ports by name, the old cell's nets. write_blif writes no
+model for a library gate cell, so models.blif holds hand-written black-box stubs of the four cells
+(ports in library order). tests/cli/test_cli.sh case dfflibmap appends models.blif to out.blif and
+to expected.blif, compares the two (tools/netlist-compare, exit 0), checks the INFO and WARNING
+lines, and checks that cmos6 (no latch) refuses the same input with the named error.

@@ -67,6 +67,8 @@ extern const odin3_pass_def odin3_pass_hardmap;
 /* src/passes/partial_map/register_merge.c (4.7): `memory_merge`. */
 extern const odin3_pass_def odin3_pass_memory_merge;
 extern const odin3_pass_def odin3_pass_lpmmap;
+/* src/passes/dfflibmap/dfflibmap.c (gatemap Task 9). */
+extern const odin3_pass_def odin3_pass_dfflibmap;
 /* src/frontends/verilog/read_verilog.c (2C §4). */
 extern const odin3_pass_def odin3_read_verilog_pass;
 

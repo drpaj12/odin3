@@ -1,0 +1,8 @@
+.model top
+.inputs clk d0 d1 d2 d3
+.outputs q0 q1 q2 q3
+.subckt DFFP D=d0 C=clk Q=q0
+.subckt DFFN D=d1 C=clk Q=q1
+.subckt DLATCHP D=d2 E=clk Q=q2
+.subckt DLATCHN D=d3 E=clk Q=q3
+.end
