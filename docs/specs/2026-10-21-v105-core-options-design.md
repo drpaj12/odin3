@@ -208,7 +208,7 @@ net still binds it); sequential templates (gap 3); net renaming through the ABI;
 from attribute buses whose bits are split across groups; changes to the Python binding or the C
 ABI.
 
-## 9. Open questions (with recommendations)
+## 9. Open questions (Peter accepted every recommendation, 2026-10-21)
 
 1. **One PR for `cone_check` and `raise`** (V105-6) against rule 1. Recommend one PR; Peter
    reviews it as an IR change (it is the first core pass after v1.0 that adds constant cells to a
