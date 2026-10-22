@@ -3,13 +3,13 @@
 % (fig_flow, fig_flow_verify, fig_flow_prov) define \flowbandA ... \flowbandJ, the text of each
 % band, and then input this file. Wide figure: \textwidth.
 \begin{tikzpicture}[odin,
-  st/.style={box, built, text width=29.5mm, minimum height=13mm, inner ysep=2pt},
+  st/.style={box, light, text width=29.5mm, minimum height=13mm, inner ysep=2pt},
   band/.style={font=\scriptsize, text width=29.5mm, align=left, anchor=north, inner sep=1.2pt,
                color=o3ink}]
   % ---- row 1 ---------------------------------------------------------------------------
   \node[st] (s1) at (0, 0) {\textbf{Code}\\[-1pt]\odinsub{Verilog and the project}};
   \node[st] (s2) at (3.4, 0) {\textbf{Parse}\\[-1pt]\odinsub{\odintt{read\_verilog}: AST and symbol table}};
-  \node[st, planned] (s3) at (6.8, 0) {\textbf{Before elaboration}\\[-1pt]\odinsub{no optimisation pass}};
+  \node[st, light] (s3) at (6.8, 0) {\textbf{Before elaboration}\\[-1pt]\odinsub{no optimisation pass}};
   \node[st] (s4) at (10.2, 0) {\textbf{Elaborate}\\[-1pt]\odinsub{stage 1, stage 2, \odintt{proc}}};
   \node[st] (s5) at (13.6, 0) {\textbf{Word-level passes}\\[-1pt]\odinsub{\odintt{fsm}, \odintt{opt}, \odintt{flatten}, \odintt{wreduce}}};
   % ---- row 2 ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@
   \node[st] (s7) at (3.4, -5.4) {\textbf{Lower}\\[-1pt]\odinsub{\odintt{lower}: words to bits}};
   \node[st] (s8) at (6.8, -5.4) {\textbf{Logic and LUTs}\\[-1pt]\odinsub{linked ABC: \odintt{abc --lut K}}};
   \node[st] (s9) at (10.2, -5.4) {\textbf{Outputs}\\[-1pt]\odinsub{\odintt{write\_blif --vtr}, Verilog, JSON, LPM, dot}};
-  \node[st, built] (s10) at (13.6, -5.4) {\textbf{Read back}\\[-1pt]\odinsub{BLIF, Verilog, JSON readers (Phase 5)}};
+  \node[st, light] (s10) at (13.6, -5.4) {\textbf{Read back}\\[-1pt]\odinsub{BLIF, Verilog, JSON readers (Phase 5)}};
   % ---- bands ---------------------------------------------------------------------------
   \foreach \i/\t in {1/\flowbandA, 2/\flowbandB, 3/\flowbandC, 4/\flowbandD, 5/\flowbandE,
                      6/\flowbandF, 7/\flowbandG, 8/\flowbandH, 9/\flowbandI, 10/\flowbandJ}

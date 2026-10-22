@@ -5,12 +5,12 @@
 % parents always have smaller IDs. Run and op numbers are illustrative. Single column.
 \begin{tikzpicture}[odin,
   rec/.style={box, light, text width=21mm, minimum height=8.5mm},
-  obj/.style={ellipse, draw=o3grey6, fill=white, line width=0.5pt, font=\scriptsize,
+  obj/.style={ellipse, draw=o3brn6, fill=white, line width=0.5pt, font=\scriptsize,
               align=center, inner xsep=-1pt, inner ysep=0pt, minimum height=6mm, text width=13mm},
-  parent/.style={flow, draw=o3blue8},
-  pid/.style={line width=0.5pt, draw=o3grey6, dash pattern=on 2pt off 1.4pt},
-  band/.style={fill=o3grey1, draw=o3grey3, line width=0.4pt},
-  bandlabel/.style={font=\scriptsize\bfseries, color=o3grey7, anchor=north west, inner sep=2pt}]
+  parent/.style={flow, draw=o3grn8},
+  pid/.style={line width=0.5pt, draw=o3brn6, dash pattern=on 2pt off 1.4pt},
+  band/.style={fill=o3brn1, draw=o3brn3, line width=0.4pt},
+  bandlabel/.style={font=\scriptsize\bfseries, color=o3brn7, anchor=north west, inner sep=2pt}]
   % ---- run bands ---------------------------------------------------------------------------
   \foreach \y/\t in {0/{run 3: \odintt{read\_verilog}}, -1.58/{run 7: \odintt{lower}},
                      -3.16/{run 9: \odintt{opt}}} {

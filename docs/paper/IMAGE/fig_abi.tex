@@ -5,28 +5,27 @@
   layer/.style={box, text width=83mm, minimum height=9mm}]
   % ---- clients -------------------------------------------------------------------------------
   \foreach \n/\x/\s/\t/\u in {
-      cli/0.83/built/{CLI}/{\odintt{odin3 -p},\\\odintt{.o3} scripts},
-      so/2.6/built/{C plugin}/{\odintt{.so}: passes,\\cell types},
-      py/4.37/built/{Python}/{\odintt{cffi},\\ABI mode},
-      hook/6.14/planned/{exec hooks}/{JSON on stdio;\\after v1.0}}
+      cli/0.83/light/{CLI}/{\odintt{odin3 -p},\\\odintt{.o3} scripts},
+      so/2.6/light/{C plugin}/{\odintt{.so}: passes,\\cell types},
+      py/4.37/light/{Python}/{\odintt{cffi},\\ABI mode},
+      hook/6.14/light/{exec hooks}/{JSON on stdio}}
     \node[client, \s] (\n) at (\x, 0) {\t\\\odinsub{\u}};
   % ---- layers --------------------------------------------------------------------------------
-  \node[layer, built, emph] (hdr) at (4.37, -1.62)
+  \node[layer, light, emph] (hdr) at (4.37, -1.62)
        {\odintt{include/odin3/odin3.h}: ABI version 4, 134 functions\\
         \odinsub{opaque \odintt{odin3\_design}; \odintt{uint32\_t} IDs with a module handle;
                  \odintt{odin3\_status} returns; out-pointers}};
-  \node[layer, built] (lib) at (4.37, -2.82)
+  \node[layer, light] (lib) at (4.37, -2.82)
        {\odintt{libodin3.so}\\
         \odinsub{hidden visibility, exports only \odintt{src/api}; the pass manager: provenance
                  run, \odintt{check} before and after, timing}};
-  \node[layer, built] (core) at (4.37, -4.0)
+  \node[layer, light] (core) at (4.37, -4.0)
        {core objects\\
         \odinsub{\odintt{util}, \odintt{ir}, \odintt{ast}, \odintt{frontends}, \odintt{passes},
                  \odintt{backends}, \odintt{sim}, \odintt{techlib}}};
   % ---- edges ---------------------------------------------------------------------------------
   \foreach \n in {cli, so, py} \draw[flow] (\n.south) -- (\n.south |- hdr.north);
-  \foreach \n in {hook}    \draw[flowplanned] (\n.south) -- (\n.south |- hdr.north);
+  \foreach \n in {hook}    \draw[flow] (\n.south) -- (\n.south |- hdr.north);
   \draw[flow] (hdr) -- (lib);
   \draw[flow] (lib) -- (core);
-  \odinlegend{anchor=north, at={(4.37, -4.75)}}
 \end{tikzpicture}

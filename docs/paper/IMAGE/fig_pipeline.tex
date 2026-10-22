@@ -4,51 +4,51 @@
 \begin{tikzpicture}[odin, node distance=3mm,
   box/.append style={minimum height=10.5mm}, store/.append style={minimum height=10.5mm}]
   % ---- row 1: project input and the Verilog front end ----------------------------------
-  \begin{scope}[every node/.append style={box, built, font=\scriptsize,
+  \begin{scope}[every node/.append style={box, light, font=\scriptsize,
                 text width=22mm, minimum height=4.4mm, inner ysep=1pt}]
     \node (o3proj) at (1.45, 0.81)  {\odintt{.o3proj}};
     \node (flist)  at (1.45, 0.27)  {\odintt{-f}/\odintt{-F} file list};
     \node (qsf)    at (1.45, -0.27) {Quartus project};
     \node (odin2)  at (1.45, -0.81) {Odin~II XML};
   \end{scope}
-  \node[box, built, text width=17mm] (record) at (3.95, 0)
+  \node[box, light, text width=17mm] (record) at (3.95, 0)
        {project record\\\odinsub{files, top, params,\\arch, rules, flow}};
-  \node[box, built, text width=15mm] (pp) at (6.05, 0) {preprocessor\\\odinsub{segment map}};
-  \node[box, built, text width=13.5mm] (parser) at (7.95, 0) {parser\\\odinsub{Bison/Flex, 2C}};
-  \node[store, built, text width=12mm] (past) at (9.75, 0) {parsed\\AST};
-  \node[box, built, text width=13.5mm] (st1) at (11.5, 0) {elaboration\\stage 1\\[-1pt]\odinsub{2D}};
-  \node[store, built, emph, text width=13mm] (east) at (13.3, 0) {elaborated\\AST\\[-1pt]\odinsub{the seam}};
-  \node[box, built, text width=13.5mm] (st2) at (15.1, 0) {elaboration\\stage 2\\[-1pt]\odinsub{2D}};
-  \node[store, built, text width=13mm] (wir) at (16.95, 0)
+  \node[box, light, text width=15mm] (pp) at (6.05, 0) {preprocessor\\\odinsub{segment map}};
+  \node[box, light, text width=13.5mm] (parser) at (7.95, 0) {parser\\\odinsub{Bison/Flex, 2C}};
+  \node[store, light, text width=12mm] (past) at (9.75, 0) {parsed\\AST};
+  \node[box, light, text width=13.5mm] (st1) at (11.5, 0) {elaboration\\stage 1\\[-1pt]\odinsub{2D}};
+  \node[store, light, emph, text width=13mm] (east) at (13.3, 0) {elaborated\\AST\\[-1pt]\odinsub{the seam}};
+  \node[box, light, text width=13.5mm] (st2) at (15.1, 0) {elaboration\\stage 2\\[-1pt]\odinsub{2D}};
+  \node[store, light, text width=13mm] (wir) at (16.95, 0)
        {word-level\\IR\\[-1pt]\odinsub{with \odintt{\$proc}}};
 
   % ---- row 0: other front ends and the Yosys bridge -----------------------------------
-  \node[box, built, text width=16mm] (rtlil) at (16.95, 1.7)
+  \node[box, light, text width=16mm] (rtlil) at (16.95, 1.7)
        {RTLIL writer\\\odinsub{to Yosys 0.55; 2D-1}};
 
   % ---- row 2: passes (right to left) ----------------------------------------------------
-  \node[box, built, text width=12mm] (proc) at (16.95, -2.2) {\odintt{proc}\\\odinsub{2E}};
-  \node[box, built, text width=12mm] (opt) at (15.1, -2.2) {\odintt{opt}\\\odinsub{2F}};
-  \node[box, built, text width=15.5mm] (flat) at (13.2, -2.2)
+  \node[box, light, text width=12mm] (proc) at (16.95, -2.2) {\odintt{proc}\\\odinsub{2E}};
+  \node[box, light, text width=12mm] (opt) at (15.1, -2.2) {\odintt{opt}\\\odinsub{2F}};
+  \node[box, light, text width=15.5mm] (flat) at (13.2, -2.2)
        {\odintt{wreduce},\\\odintt{flatten}\\[-1pt]\odinsub{3G, 3A}};
-  \node[box, built, text width=15mm] (hmap) at (11.2, -2.2) {\odintt{hardmap}\\\odinsub{3C, 4.2}};
-  \node[box, built, text width=11mm] (lower) at (9.25, -2.2) {\odintt{lower}\\\odinsub{3B}};
-  \node[box, built, text width=12mm] (abc) at (7.75, -2.2) {linked\\ABC\\[-1pt]\odinsub{3D}};
-  \node[store, built, text width=13mm] (bir) at (5.95, -2.2) {bit-level\\IR};
-  \node[box, built, text width=15mm] (rblif) at (3.6, -2.2) {BLIF reader\\\odinsub{1C}};
+  \node[box, light, text width=15mm] (hmap) at (11.2, -2.2) {\odintt{hardmap}\\\odinsub{3C, 4.2}};
+  \node[box, light, text width=11mm] (lower) at (9.25, -2.2) {\odintt{lower}\\\odinsub{3B}};
+  \node[box, light, text width=12mm] (abc) at (7.75, -2.2) {linked\\ABC\\[-1pt]\odinsub{3D}};
+  \node[store, light, text width=13mm] (bir) at (5.95, -2.2) {bit-level\\IR};
+  \node[box, light, text width=15mm] (rblif) at (3.6, -2.2) {BLIF reader\\\odinsub{1C}};
 
   % ---- row 3: writers, simulator, the VTR flow and the QoR harness -----------------------
   \begin{scope}[every node/.append style={box, text width=13mm, minimum height=7.6mm}]
-    \node[built]  (wblif) at (0.85, -4.05) {BLIF writer\\\odinsub{1C}};
-    \node[built]  (wjson) at (2.55, -4.05) {JSON\\\odinsub{Yosys schema}};
-    \node[built]  (wver)  at (4.25, -4.05) {Verilog\\\odinsub{structural}};
-    \node[built]  (wdot)  at (5.95, -4.05) {Graphviz\\\odinsub{\odintt{dot}}};
-    \node[built]  (sim)   at (7.65, -4.05) {simulator\\\odinsub{1E}};
-    \node[built]  (wvtr)  at (9.35, -4.05) {VPR BLIF\\\odinsub{\odintt{--vtr}, 3E}};
+    \node[light]  (wblif) at (0.85, -4.05) {BLIF writer\\\odinsub{1C}};
+    \node[light]  (wjson) at (2.55, -4.05) {JSON\\\odinsub{Yosys schema}};
+    \node[light]  (wver)  at (4.25, -4.05) {Verilog\\\odinsub{structural}};
+    \node[light]  (wdot)  at (5.95, -4.05) {Graphviz\\\odinsub{\odintt{dot}}};
+    \node[light]  (sim)   at (7.65, -4.05) {simulator\\\odinsub{1E}};
+    \node[light]  (wvtr)  at (9.35, -4.05) {VPR BLIF\\\odinsub{\odintt{--vtr}, 3E}};
   \end{scope}
-  \node[box, built, text width=17mm, minimum height=7.6mm] (vtr) at (11.7, -4.05)
+  \node[box, light, text width=17mm, minimum height=7.6mm] (vtr) at (11.7, -4.05)
        {VTR flow\\\odinsub{ABC stage, VPR}};
-  \node[box, built, text width=34mm, minimum height=7.6mm] (qor) at (14.9, -4.05)
+  \node[box, light, text width=34mm, minimum height=7.6mm] (qor) at (14.9, -4.05)
        {\odintt{vtr-qor}, \odinsub{3H}\\\odinsub{legs P, P$'$, O, O$'$, R, Oprov; fcheck}};
 
   % ---- edges ----------------------------------------------------------------------------
@@ -91,5 +91,4 @@
           label={[regionlabel, anchor=north west]south west:writers and simulator}] (rout) {};
   \end{scope}
 
-  \odinlegend{anchor=north east, at={(17.75, -4.85)}}
 \end{tikzpicture}

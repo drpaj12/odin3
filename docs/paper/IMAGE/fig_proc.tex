@@ -2,10 +2,9 @@
 % internal phases of one pass, per module. Step A analyses every process of a module without
 % changing the IR; steps B-F lower it only if no process of the module has an error, so a module
 % is lowered completely or not at all. Each box: 2E's phase, the Yosys 0.55 sub-pass it mirrors,
-% and what it does. Status 2026-10-19: 2E and 2F are built; opt_expr -keepdc is
-% 2F's (specified). Single column: \columnwidth.
+% and what it does. Single column: \columnwidth.
 \begin{tikzpicture}[odin,
-  ph/.style={box, built, text width=35mm, align=left, minimum height=7.4mm, inner ysep=1.4pt}]
+  ph/.style={box, light, text width=35mm, align=left, minimum height=7.4mm, inner ysep=1.4pt}]
   % ---- input ---------------------------------------------------------------------------------
   \node[box, neutral, text width=35mm] (in) at (1.98, 1.12)
        {\odintt{\$proc} cells from 2D\\[-1pt]\odinsub{\odintt{I}/\odintt{O} pins, opaque \odintt{BODY} (EL-33)}};
@@ -31,7 +30,7 @@
        {\odintt{ff}\hfill{\scriptsize\color{o3sub}\odintt{proc\_dff}}\\[-1pt]\odinsub{\odintt{\$dff}, \odintt{\$adff}, \odintt{\$aldff}, \ldots}};
   \node[ph] (cup) at (6.62, -3.0)
        {\odintt{cleanup}\\[-1pt]\odinsub{nets the deleted \odintt{\$proc} left}};
-  \node[ph, built] (opt) at (6.62, -4.0)
+  \node[ph, light] (opt) at (6.62, -4.0)
        {\odintt{opt\_expr -keepdc}\hfill{\scriptsize\color{o3sub}2F}\\[-1pt]\odinsub{Yosys's trailing \odintt{opt\_expr}}};
   \node[box, neutral, text width=35mm, minimum height=7.4mm] (out) at (6.62, -5.0)
        {word-level cells\\[-1pt]\odinsub{no \odintt{\$proc} left}};
