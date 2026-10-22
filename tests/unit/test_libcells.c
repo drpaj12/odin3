@@ -287,6 +287,28 @@ static void test_collect_out_of_memory(void) {
     TEST_ASSERT_EQUAL_size_t(0, g_cells.gates.len);
 }
 
+/* collect with the n-th allocation failing, for n = 0.. until it succeeds: every failure is
+ * NO_MEMORY and leaves nothing behind (ASan checks the leaks). */
+static void test_collect_oom_sweep(void) {
+    enum { SWEEP_MAX = 10000 };
+    load_file("cmos6.o3lib");
+    long fail = 0;
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (; fail < SWEEP_MAX && st != ODIN3_OK; fail++) {
+        odin3_libcells_free(&g_cells);
+        odin3_util_set_alloc_fail_after(fail);
+        st = odin3_libcells_collect(g_design, "cmos6", &g_cells);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+            TEST_ASSERT_EQUAL_UINT32(0, g_cells.n_cells);
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_TRUE(fail > 1);
+    TEST_ASSERT_EQUAL_size_t(4, g_cells.gates.len);
+}
+
 static void test_skip_texts(void) {
     TEST_ASSERT_EQUAL_STRING("not a gate cell", odin3_libcell_skip_text(ODIN3_LIBCELL_NOT_GATE));
     TEST_ASSERT_EQUAL_STRING("a flip-flop or latch", odin3_libcell_skip_text(ODIN3_LIBCELL_STATE));
@@ -347,6 +369,7 @@ int main(void) {
     RUN_TEST(test_libstate_init_constant);
     RUN_TEST(test_shape_skips);
     RUN_TEST(test_collect_out_of_memory);
+    RUN_TEST(test_collect_oom_sweep);
     RUN_TEST(test_skip_texts);
     RUN_TEST(test_gate_truth_builtin);
     RUN_TEST(test_gate_truth_library);

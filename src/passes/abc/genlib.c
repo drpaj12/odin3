@@ -11,6 +11,7 @@
 #include "util/sha256.h"
 #include "util/str.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -87,9 +88,9 @@ static odin3_status append_product(const odin3_celltype_def *def, const odin3_li
                                   def->ports[gate->in_port[j]].name);
         first = false;
     }
-    if (st == ODIN3_OK && first) { /* a row of `-` only: the constant 1 (not for a gate cell) */
-        st = odin3_strbuf_append(out, odin3_bytes_cstr("CONST1"));
-    }
+    /* A row of `-` only would be the constant 1; the NO_SUPPORT check (a gate must depend on every
+     * input) rejects such a cell before this point. */
+    assert(!first || st != ODIN3_OK);
     return st;
 }
 
@@ -100,9 +101,8 @@ static odin3_status append_formula(const odin3_celltype_def *def, const odin3_li
     odin3_strbuf_init(&cover);
     uint32_t rows = 0;
     odin3_status st = odin3_blif_isop_set(&gate->table, gate->n_inputs, false, &cover, &rows);
-    if (st == ODIN3_OK && rows == 0) { /* the constant 0 (not for a gate cell) */
-        st = odin3_strbuf_append(out, odin3_bytes_cstr("CONST0"));
-    }
+    /* No on-set rows would be the constant 0; the NO_SUPPORT check rejects such a cell earlier. */
+    assert(st != ODIN3_OK || rows > 0);
     const char *row = cover.data;
     for (uint32_t k = 0; k < rows && st == ODIN3_OK; k++) {
         st = k == 0 ? ODIN3_OK : odin3_strbuf_append(out, odin3_bytes_cstr("+"));

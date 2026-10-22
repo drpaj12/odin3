@@ -178,6 +178,28 @@ static void test_genlib_text_out_of_memory(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, odin3_abc_genlib_text(g_design, &g_cells, &g_text));
 }
 
+/* The genlib text with the n-th allocation failing, for n = 0.. until it succeeds: every failure
+ * is NO_MEMORY (ASan checks the leaks) and the first success is the golden text. */
+static void test_genlib_text_oom_sweep(void) {
+    enum { SWEEP_MAX = 10000 };
+    load_file("cmos6.o3lib");
+    collect("cmos6");
+    long fail = 0;
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    for (; fail < SWEEP_MAX && st != ODIN3_OK; fail++) {
+        odin3_strbuf_clear(&g_text);
+        odin3_util_set_alloc_fail_after(fail);
+        st = odin3_abc_genlib_text(g_design, &g_cells, &g_text);
+        odin3_util_set_alloc_fail_after(-1);
+        if (st != ODIN3_OK) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, st);
+        }
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, st);
+    TEST_ASSERT_TRUE(fail > 1);
+    expect_golden("cmos6.genlib");
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_genlib_cmos6_golden);
@@ -186,5 +208,6 @@ int main(void) {
     RUN_TEST(test_genlib_check_errors);
     RUN_TEST(test_genlib_sha256_stable);
     RUN_TEST(test_genlib_text_out_of_memory);
+    RUN_TEST(test_genlib_text_oom_sweep);
     return UNITY_END();
 }

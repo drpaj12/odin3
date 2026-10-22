@@ -1,7 +1,7 @@
 /*
  * test_techlib_libs.c — the shipped libraries (lib/vtr.o3lib, lib/generic_gates.o3lib,
- * lib/cmos6.o3lib) and the
- * goldens' black boxes resolved against lib/vtr.o3lib by the BLIF reader and writer (IR-7b).
+ * lib/cmos6.o3lib) and the goldens' black boxes resolved against lib/vtr.o3lib by the BLIF
+ * reader and writer (IR-7b).
  */
 #include "backends/blif/writer.h"
 #include "frontends/blif/reader.h"
