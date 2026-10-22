@@ -11,6 +11,11 @@ object in the output can be traced to the HDL text it came from.
 Release notes: [`docs/RELEASE-NOTES-1.0.md`](docs/RELEASE-NOTES-1.0.md). Changes:
 [`CHANGELOG.md`](CHANGELOG.md). Design: [`docs/DESIGN.md`](docs/DESIGN.md).
 
+Odin III is the trunk of **Yggdrasil III**, a suite of research tools that use it as a package
+without changing its core: Wyrd III (experiment runner and GUI, <https://github.com/drpaj12/wyrd>),
+Loki III (reverse engineering of structural netlists, <https://github.com/drpaj12/loki>), Bifrost III
+(the simulation bridge) and Midgard III (the Verilog Town game).
+
 ## Install
 
 From source (Ubuntu 24.04, native or WSL2; CMake 3.25 or later, Ninja, gcc or clang, `bison`,

@@ -15,6 +15,7 @@
 #include "util/sha256.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -34,6 +35,7 @@ enum {
     PATH_CAP = 512
 };
 
+static bool g_gates;              /* abc --gates for the next parse (reset by setUp) */
 static char g_last[LINE_MAX_LOG]; /* the last message logged */
 static size_t g_lines;            /* messages logged, any level */
 static char g_big[BIG];           /* scratch for the long scripts */
@@ -49,6 +51,7 @@ static void sink(odin3_log_level level, const char *msg, void *user) {
 }
 
 void setUp(void) {
+    g_gates = false;
     g_lines = 0;
     g_last[0] = '\0';
     odin3_log_set_sink(sink, NULL);
@@ -63,7 +66,8 @@ void tearDown(void) {
 
 /* --- helpers -------------------------------------------------------------------------------- */
 
-/* How a script is checked: --lut K (0: none) and the exchange. */
+/* How a script is checked: --lut K (0: none) and the exchange; g_gates (abc --gates) is set by the
+ * gate-mapping tests and reset by setUp. */
 typedef struct run {
     uint32_t lut_k;
     uint32_t exchange;
@@ -79,7 +83,8 @@ static odin3_bytes text_of(const char *text) {
 
 static odin3_status parse_bytes(odin3_bytes text, run how, odin3_abc_script *out) {
     odin3_abc_script_src src = {"t.abc", NULL, text};
-    return odin3_abc_script_parse(&src, how.lut_k, how.exchange, out);
+    odin3_abc_script_mode mode = {how.lut_k, how.exchange, g_gates};
+    return odin3_abc_script_parse_mode(&src, &mode, out);
 }
 
 /* The text parses, logging nothing. */
@@ -477,6 +482,9 @@ static void check_row(const odin3_abc_command_info *row) {
     char text[128];
     int wrote = snprintf(text, sizeof text, "%s\nif -K 6", row->name);
     TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+    if (strcmp(row->name, "map") == 0 || strcmp(row->name, "&nf") == 0) {
+        return; /* gate mappers: test_map_needs_gates and test_nf_needs_gates */
+    }
     if (row->cls >= ODIN3_ABC_CLASS_OPT && row->cls <= ODIN3_ABC_CLASS_PRINT) {
         odin3_abc_script script;
         accept(text, k_mem, &script);
@@ -577,13 +585,13 @@ static void test_file_and_crash_options(void) {
         file_seen += check_file_options(odin3_abc_command_at(i));
         crash_seen += check_crash_options(odin3_abc_command_at(i));
     }
-    /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i;
-     * crashes: if scY, &if swYjbi, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr
+    /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i, &nf
+     * MZ; crashes: if scY, &if swYjbi, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr
      * NFS, mfs tMp, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M, lutpack o, print_latch s,
-     * print_gates v, print_fanio m, &ps as, print_dsd pd (Task 10 fix rounds 1-3, Task 11's
-     * audit, its fix round 1, the final review and its addendum) */
-    TEST_ASSERT_EQUAL_UINT32(16, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(40, crash_seen); /* 34 + the addendum's six letters */
+     * print_gates v, print_fanio m, &ps as, print_dsd pd, map AB, &nf fk (Task 10 fix rounds 1-3,
+     * Task 11's audit, its fix round 1, the final review and its addendum) */
+    TEST_ASSERT_EQUAL_UINT32(18, file_seen);
+    TEST_ASSERT_EQUAL_UINT32(44, crash_seen); /* 34 + the addendum's six + map AB, &nf fk */
 }
 
 static void test_options_from_alias(void) {
@@ -732,6 +740,15 @@ static void test_k_linked_cap(void) {
     odin3_abc_script_free(&script);
 }
 
+/* Writes a formatted message into buf, which must hold it. */
+static void fmt_to(char *buf, size_t cap, const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    int wrote = vsnprintf(buf, cap, format, args);
+    va_end(args);
+    TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < cap);
+}
+
 /* The expected range refusal: the command, its option letter and the text after them. */
 typedef struct range_msg {
     const char *cmd;
@@ -755,6 +772,24 @@ static const char k_range_k[] =
 static const char k_range_e[] =
     "must stand alone as '-E <n>' with <n> from 1 to 1000000: a smaller "
     "value crashes ABC at the pin (a3001b72)";
+static const char k_range_c_nf[] = "must stand alone as '-C <n>' with <n> from 2 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_f_nf[] = "must stand alone as '-F <n>' with <n> from 1 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_a_nf[] = "must stand alone as '-A <n>' with <n> from 1 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_audit[] =
+    "larger values overflow in &nf's timing arithmetic (giaNf.c:1270, 1480, 1497) and were not "
+    "audited";
+
+/* The range rule text of an audit-capped letter (0 to 1000). */
+static void refuse_audit_range(const char *text, const char *cmd, char letter) {
+    char rule[384];
+    fmt_to(rule, sizeof rule, "must stand alone as '-%c <n>' with <n> from 0 to 1000: %s", letter,
+           k_range_audit);
+    refuse_range(text, (range_msg){cmd, letter, rule});
+}
+
 static const char k_range_n[] =
     "must stand alone as '-N <n>' with <n> from 2 to 1000000: a smaller "
     "value crashes ABC at the pin (a3001b72)";
@@ -846,8 +881,12 @@ static void test_count_cap(void) {
 
 /* --- spaces and mapping (step 11) ----------------------------------------------------------- */
 
-static const char k_unmapped[] = "t.abc: the script leaves the network unmapped; end it with a LUT "
-                                 "mapper such as 'if -K {K}'";
+static const char k_unmapped[] =
+    "t.abc: the script leaves the network unmapped; end it with a LUT "
+    "mapper such as 'if -K {K}' (with --gates: a gate mapper, 'map' or "
+    "'&nf')";
+static const char k_not_gate_end[] = "t.abc: the script does not end gate-mapped; with --gates end "
+                                     "it with a gate mapper ('map' or '&nf')";
 
 static void test_refuse_unmapped_end(void) {
     static const char *const unmapped[] = {"strash",
@@ -1004,6 +1043,256 @@ static void test_step11_mutants(void) {
     refuse("strash; dch; &get; &mfs\n&if -K 6", k_blif,
            "t.abc:2: '&if' needs a network in the & space without the choices that '&get' "
            "copied; add '&st'");
+}
+
+/* --- gate mapping (gatemap spec 5) ---------------------------------------------------------- */
+
+static void test_map_needs_gates(void) {
+    g_gates = false;
+    refuse("strash\nmap\n", k_mem,
+           "t.abc:2: 'map' maps to a gate library, which only abc --gates loads");
+    refuse("strash\nmap -a\nif -K 6", k_mem,
+           "t.abc:2: 'map' maps to a gate library, which only abc --gates loads");
+}
+
+static void test_nf_needs_gates(void) {
+    g_gates = false;
+    refuse("&st\n&nf\n", k_mem,
+           "t.abc:2: '&nf' maps to a gate library, which only abc --gates loads");
+}
+
+static void test_gates_end_map(void) {
+    g_gates = true;
+    odin3_abc_script script;
+    accept("strash\nmap\n", k_mem, &script);
+    TEST_ASSERT_EQUAL_UINT8(NTK, script.final_space);
+    odin3_abc_script_free(&script);
+}
+
+static void test_gates_end_nf(void) {
+    g_gates = true;
+    odin3_abc_script script;
+    accept("&st\n&nf\n", k_mem, &script);
+    TEST_ASSERT_EQUAL_UINT8(GIA, script.final_space);
+    odin3_abc_script_free(&script);
+}
+
+static const char k_after_ntk[] = "cannot follow a gate mapping: the gate mapper must be the last "
+                                  "command that changes a network, and only 'print_stats' may "
+                                  "follow it";
+static const char k_after_gia[] = "cannot follow a gate mapping: the gate mapper must be the last "
+                                  "command that changes a network, and only '&ps' may follow it";
+
+/* After a gate mapper only print_stats (network space) or &ps (& space) is allowed (review 3). */
+static void test_gates_only_print_after_mapping(void) {
+    g_gates = true;
+    odin3_abc_script script;
+    accept("strash\nmap -a\nprint_stats\n", k_mem, &script);
+    TEST_ASSERT_EQUAL_UINT8(NTK, script.final_space);
+    odin3_abc_script_free(&script);
+    accept("&st\n&nf\n&ps\n", k_mem, &script);
+    TEST_ASSERT_EQUAL_UINT8(GIA, script.final_space);
+    odin3_abc_script_free(&script);
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: '&put' %s", k_after_gia);
+    refuse("&st\n&nf\n&put\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: 'print_io' %s", k_after_ntk);
+    refuse("strash\nmap\nprint_io\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: '&st' %s", k_after_gia);
+    refuse("&st\n&nf\n&st\n", k_mem, want);
+    /* the print command of the other space does not fit either */
+    fmt_to(want, sizeof want, "t.abc:3: 'print_stats' %s", k_after_gia);
+    refuse("&st\n&nf\nprint_stats\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:3: '&ps' %s", k_after_ntk);
+    refuse("strash\nmap\n&ps\n", k_mem, want);
+}
+
+static void test_gates_refuses_lut_ending(void) {
+    g_gates = true;
+    refuse("strash\nif -K 4\n", k_mem, k_not_gate_end);
+    refuse("&st\n&if -K 4\n", k_mem, k_not_gate_end);
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: 'strash' %s", k_after_ntk);
+    refuse("strash\nmap\nstrash\n", k_mem, want);
+}
+
+static void test_map_needs_strashed(void) {
+    g_gates = true;
+    refuse("strash\nif -K 4\nmap\n", k_mem,
+           "t.abc:3: 'map' needs a strashed network; add 'strash'");
+    refuse("map\n", k_blif, "t.abc:1: 'map' needs a strashed network; add 'strash'");
+}
+
+static void test_nf_needs_unmapped_gia(void) {
+    g_gates = true;
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: '&nf' %s", k_after_gia);
+    refuse("&st\n&nf\n&nf\n", k_mem, want);
+    refuse("&st\n&if -K 4\n&nf\n", k_mem,
+           "t.abc:3: '&nf' needs an unmapped network in the & space, which is mapped here; "
+           "add '&st'");
+    fmt_to(want, sizeof want, "t.abc:3: '&if' %s", k_after_gia);
+    refuse("&st\n&nf\n&if -K 4\n", k_mem, want);
+}
+
+/* Every command after a gate mapping but the print command is refused, the LUT-network ones too;
+ * &get -m has its own message (a gate mapping is not one &get can keep). */
+static void test_after_mapping_refusals(void) {
+    g_gates = true;
+    char want[320];
+    static const char *const ntk[] = {"mfs", "mfs2", "lutpack", "&get", "sweep", "map"};
+    for (size_t i = 0; i < sizeof ntk / sizeof ntk[0]; i++) {
+        char text[64];
+        fmt_to(text, sizeof text, "strash\nmap\n%s\n", ntk[i]);
+        fmt_to(want, sizeof want, "t.abc:3: '%s' %s", ntk[i], k_after_ntk);
+        refuse(text, k_mem, want);
+    }
+    fmt_to(want, sizeof want, "t.abc:3: '&mfs' %s", k_after_gia);
+    refuse("&st\n&nf\n&mfs\n", k_mem, want);
+}
+
+static void test_get_m_after_cellmapped(void) {
+    g_gates = true;
+    static const char k_get_m[] = "'&get -m' after a gate mapping is not supported";
+    char want[320];
+    fmt_to(want, sizeof want, "t.abc:3: %s", k_get_m);
+    refuse("strash\nmap\n&get -m\n", k_mem, want);
+    refuse("strash\nmap\n&get -m\n&nf\n", k_mem, want);
+    fmt_to(want, sizeof want, "t.abc:4: %s", k_get_m);
+    refuse("strash\nmap\nprint_stats\n&get -m\n&nf\n", k_mem, want);
+    /* before the gate mapping, &get -m of a LUT mapping is the usual one */
+    odin3_abc_script script;
+    accept("strash\nif -K 4\n&get -m\n&st\n&nf\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+/* Review finding 4: the choices a plain &get copies make &nf refuse, as they do &if. */
+static void test_nf_refuses_copied_choices(void) {
+    g_gates = true;
+    refuse("strash\ndch -f\n&get\n&nf\n", k_mem,
+           "t.abc:4: '&nf' needs a network in the & space without the choices that '&get' "
+           "copied; add '&st'");
+    odin3_abc_script script;
+    accept("strash\ndch -f\n&get -s\n&nf\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+    accept("strash\ndch -f\n&get\n&st\n&nf\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+/* Review finding 2: &nf -R, -E, -Q and map -M, -F take 0 to the audited 1000. */
+static void test_audit_caps(void) {
+    g_gates = true;
+    static const char *const nf[] = {"R", "E", "Q"};
+    static const char *const map[] = {"M", "F"};
+    odin3_abc_script script;
+    char text[64];
+    for (size_t i = 0; i < sizeof nf / sizeof nf[0]; i++) {
+        fmt_to(text, sizeof text, "&st\n&nf -%s 1000\n", nf[i]);
+        accept(text, k_mem, &script);
+        odin3_abc_script_free(&script);
+        fmt_to(text, sizeof text, "&nf -%s 1001", nf[i]);
+        refuse_audit_range(text, "&nf", nf[i][0]);
+    }
+    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++) {
+        fmt_to(text, sizeof text, "strash\nmap -%s 1000\n", map[i]);
+        accept(text, k_mem, &script);
+        odin3_abc_script_free(&script);
+        fmt_to(text, sizeof text, "map -%s 1001", map[i]);
+        refuse_audit_range(text, "map", map[i][0]);
+    }
+    /* map -F is read by atof: 1000.5 is past the cap, 999.5 is not */
+    refuse_audit_range("map -F 1000.5", "map", 'F');
+    accept("strash\nmap -F 999.5\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+static void test_unmapped_end_message_names_both(void) {
+    g_gates = false;
+    refuse("strash\n", k_mem, k_unmapped);
+}
+
+static void test_nf_file_letters(void) {
+    g_gates = true;
+    const char *const file_z =
+        "t.abc:2: option '-Z' of '&nf' reads or writes a file or takes a string "
+        "and is not allowed";
+    const char *const file_m =
+        "t.abc:2: option '-M' of '&nf' reads or writes a file or takes a string "
+        "and is not allowed";
+    refuse("&st\n&nf -Z x\n", k_mem, file_z);
+    refuse("&st\n&nf -M 3\n", k_mem, file_m);
+}
+
+static void test_gates_script_checks(void) {
+    odin3_abc_script_src src = {
+        ODIN3_ABC_GATES_SCRIPT_NAME, NULL, {odin3_abc_gates_script, odin3_abc_gates_script_len}};
+    odin3_abc_script_mode mode = {0, AIG, true};
+    odin3_abc_script script;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_script_parse_mode(&src, &mode, &script));
+    TEST_ASSERT_EQUAL_UINT32(7, script.n_cmds);
+    TEST_ASSERT_EQUAL_STRING("map -a", script.cmds[5].line);
+    TEST_ASSERT_EQUAL_UINT8(NTK, script.final_space);
+    odin3_abc_script_free(&script);
+}
+
+static void test_gates_script_needs_gates(void) {
+    odin3_abc_script_src src = {
+        ODIN3_ABC_GATES_SCRIPT_NAME, NULL, {odin3_abc_gates_script, odin3_abc_gates_script_len}};
+    odin3_abc_script script;
+    g_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_abc_script_parse(&src, 0, AIG, &script));
+    TEST_ASSERT_EQUAL_size_t(1, g_lines);
+    TEST_ASSERT_EQUAL_STRING("abc: builtin:lib/abc/gates.abc:8: 'map' maps to a gate library, "
+                             "which only abc --gates loads",
+                             g_last);
+}
+
+/* The Task 6 audit's crash letters of map (A, B) and &nf (f, k), and the &nf value ranges. */
+static void test_map_nf_crash_letters(void) {
+    g_gates = true;
+    static const char *const letters[] = {"map", "A", "map", "B", "&nf", "f", "&nf", "k"};
+    for (size_t i = 0; i < sizeof letters / sizeof letters[0]; i += 2) {
+        char text[64];
+        char want[256];
+        int wrote = snprintf(text, sizeof text, "strash\n%s -%s 6", letters[i], letters[i + 1]);
+        TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+        wrote = snprintf(want, sizeof want,
+                         "t.abc:2: option '-%s' of '%s' crashes ABC at the pin (a3001b72) and is "
+                         "not allowed",
+                         letters[i + 1], letters[i]);
+        TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+        refuse(text, k_mem, want);
+    }
+    refuse_range("&nf -C 1", (range_msg){"&nf", 'C', k_range_c_nf});
+    refuse_range("&nf -F 0", (range_msg){"&nf", 'F', k_range_f_nf});
+    refuse_range("&nf -A 0", (range_msg){"&nf", 'A', k_range_a_nf});
+    odin3_abc_script script;
+    accept("&st\n&nf -C 2 -F 1 -A 1 -a -p -q -K 4 -R 5 -L 2 -E 50 -D 3 -Q 2 -W 3 -vw\n", k_mem,
+           &script);
+    odin3_abc_script_free(&script);
+    accept("strash\nmap -D 2.5 -F 1 -S 2 -G 3 -M 1 -a -r -s -p -f -u -o -v\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
+/* One test entry for the gate-mapping checks (each sets g_gates itself). */
+static void test_gate_mapping_checks(void) {
+    test_map_needs_gates();
+    test_nf_needs_gates();
+    test_gates_end_map();
+    test_gates_end_nf();
+    test_gates_only_print_after_mapping();
+    test_gates_refuses_lut_ending();
+    test_map_needs_strashed();
+    test_nf_needs_unmapped_gia();
+    test_after_mapping_refusals();
+    test_get_m_after_cellmapped();
+    test_nf_refuses_copied_choices();
+    test_audit_caps();
+    test_unmapped_end_message_names_both();
+    test_nf_file_letters();
+    test_gates_script_checks();
+    test_gates_script_needs_gates();
+    test_map_nf_crash_letters();
 }
 
 /* --- output (step 12) ----------------------------------------------------------------------- */
@@ -1254,6 +1543,7 @@ int main(void) {
     RUN_TEST(test_blif_logic_start);
     RUN_TEST(test_blif_start_rebuild);
     RUN_TEST(test_step11_mutants);
+    RUN_TEST(test_gate_mapping_checks);
     RUN_TEST(test_accepted_cases);
     RUN_TEST(test_sha256);
     RUN_TEST(test_accessors);

@@ -100,8 +100,8 @@ The engine ABI gains the library load and the cell-result read; `ODIN3_ABI_VERSI
 ## 8. Libraries
 
 - `lib/generic_gates.o3lib` (exists).
-- New `lib/cmos6.o3lib`: BUF, INV, NAND2, NOR2 (gates, area 1, 1, 1, 1), DFF (posedge), DFFSR
-  (posedge, active-low asynchronous set and reset, as Yosys's `cmos_cells.lib`, so the library matches
+- New `lib/cmos6.o3lib`: BUF, INV, NAND2, NOR2 (gates, area 6, 3, 4, 4, as in Yosys's `cmos_cells.lib`), DFF (posedge, area 18), DFFSR
+  (area 18; posedge, active-high asynchronous set and reset, S wins over R, as Yosys's `cmos_cells.lib`, so the library matches
   Gate-Breaker's; `dfflibmap` does not choose it in this version, G-6), written by hand from the
   function each cell computes.
 

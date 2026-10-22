@@ -438,7 +438,8 @@ static void check_rejected(uint32_t n_lines) {
     static const char k_prefix[] = "abc: f.abc:";
     static const char k_size[] = "abc: f.abc: abc script is larger than 65536 bytes";
     static const char k_unmapped[] = "abc: f.abc: the script leaves the network unmapped; end it "
-                                     "with a LUT mapper such as 'if -K {K}'";
+                                     "with a LUT mapper such as 'if -K {K}' (with --gates: a gate "
+                                     "mapper, 'map' or '&nf')";
     if (g_count.lines != 1) {
         fail("a refused script did not log exactly one line");
     }

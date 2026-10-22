@@ -8,7 +8,7 @@
 #include "ir/module.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/run.h"
-#include "sim/cell.h"
+#include "sim/gate_truth.h"
 #include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -33,7 +33,6 @@ enum {
     PORT_Q_DFF = 2,  /* ... and its Q */
     PORT_D_GCLK = 0, /* $_FF_'s D */
     PORT_Q_GCLK = 1, /* ... and its Q */
-    MAX_GATE_PORTS = 8,
     TEXT_BYTES = 192,
     LUT_EST_CAP = 1 << 24, /* the AIG estimate of one wide $lut stops here */
     DOMAIN_KEY_SHIFT = 2,
@@ -196,55 +195,8 @@ static bool reads_as_unknown(const odin3_abc_run *run, odin3_net_id net) {
 
 /* --- cell types ---------------------------------------------------------------------------- */
 
-/* The port is one scalar bit (a gate's pins are single bits). */
-static bool port_is_bit(const odin3_port_def *port) {
-    return port->width == 1 && port->width_fn == NULL && port->width_expr == NULL &&
-           port->width_param == NULL && port->dir != ODIN3_DIR_INOUT;
-}
-
-static bool gate_eligible(const odin3_celltype_def *def) {
-    const uint32_t refused_flags =
-        ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL | ODIN3_CT_TRISTATE | ODIN3_CT_ANYVIEW;
-    if (def->gran != ODIN3_GRAN_BIT || def->n_params != 0 || def->simulate == NULL ||
-        (def->flags & refused_flags) != 0 || def->n_ports < 2 || def->n_ports > MAX_GATE_PORTS) {
-        return false;
-    }
-    uint32_t inputs = 0;
-    uint32_t outputs = 0;
-    for (uint32_t port = 0; port < def->n_ports; port++) {
-        if (!port_is_bit(&def->ports[port])) {
-            return false;
-        }
-        inputs += def->ports[port].dir == ODIN3_DIR_IN ? 1U : 0U;
-        outputs += def->ports[port].dir == ODIN3_DIR_OUT ? 1U : 0U;
-    }
-    return outputs == 1 && inputs >= 1 && inputs <= ODIN3_ABC_GATE_MAX_INPUTS;
-}
-
-/* The truth table of def's simulate hook over all 2^n inputs (input j = the j-th input pin). */
-static uint64_t gate_truth(const odin3_celltype_def *def, uint32_t n_inputs) {
-    uint8_t values[MAX_GATE_PORTS] = {0};
-    uint32_t index[MAX_GATE_PORTS];
-    odin3_sim_span spans[MAX_GATE_PORTS];
-    uint32_t next_in = 0;
-    uint32_t out_slot = n_inputs;
-    for (uint32_t port = 0; port < def->n_ports; port++) {
-        index[port] = def->ports[port].dir == ODIN3_DIR_IN ? next_in++ : out_slot;
-        spans[port] = (odin3_sim_span){&index[port], 1};
-    }
-    odin3_sim_cell cell = {values, spans,          def->n_ports, NULL, NULL,
-                           0,      ODIN3_SIM_COMB, NULL,         NULL, 0};
-    uint64_t table = 0;
-    for (uint32_t row = 0; row < (1U << n_inputs); row++) {
-        for (uint32_t j = 0; j < n_inputs; j++) {
-            values[j] = (uint8_t)((row >> j) & 1U);
-        }
-        values[out_slot] = 0;
-        def->simulate(&cell);
-        table |= (uint64_t)(cell.values[out_slot] != 0 ? 1U : 0U) << row;
-    }
-    return table;
-}
+_Static_assert(ODIN3_GATE_TRUTH_MAX_INPUTS - ODIN3_ABC_GATE_MAX_INPUTS == 0,
+               "the gate truth helper and the abc pass bound a gate's inputs alike");
 
 static uint8_t type_kind(const odin3_celltype_def *def) {
     static const struct {
@@ -260,7 +212,7 @@ static uint8_t type_kind(const odin3_celltype_def *def) {
             return k_named[i].kind;
         }
     }
-    return gate_eligible(def) ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
+    return odin3_gate_truth_eligible(def) ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
 }
 
 /* The cached entry of a type, made on first use. NULL on out of memory. */
@@ -272,10 +224,14 @@ static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id ty
     const odin3_celltype_def *def = odin3_celltype_get(run->design, type);
     odin3_abc_gate entry = {type.v, def == NULL ? ODIN3_ABC_TK_OTHER : type_kind(def), 0, 0};
     if (entry.kind == ODIN3_ABC_TK_GATE) {
-        for (uint32_t port = 0; port < def->n_ports; port++) {
-            entry.n_inputs += def->ports[port].dir == ODIN3_DIR_IN ? 1U : 0U;
+        odin3_status st =
+            odin3_gate_truth(def, odin3_celltype_lib(run->design, type), &entry.table);
+        if (st == ODIN3_ERR_NO_MEMORY) {
+            return NULL;
         }
-        entry.table = gate_truth(def, entry.n_inputs);
+        /* A type the simulator cannot size (its scratch hook refuses it) is a cut cell. */
+        entry.kind = st == ODIN3_OK ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
+        entry.n_inputs = st == ODIN3_OK ? odin3_gate_truth_inputs(def) : 0;
     }
     odin3_abc_gate *slot = odin3_vec_push(&run->gates);
     if (slot == NULL) {
