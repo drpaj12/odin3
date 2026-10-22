@@ -245,6 +245,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/args.c
     src/passes/abc/region.c
     src/passes/abc/result.c
+    src/passes/abc/cells.c
     src/passes/abc/xblif.c
     src/passes/abc/xblif_read.c
     src/passes/abc/aig.c
@@ -1415,11 +1416,12 @@ if(BUILD_TESTING)
     # abc_fake_engine.c, which never links ABC). Each test writes its files under abc_tests/<name>.
     file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/abc_tests)
     foreach(_abc_test test_abc_args test_abc_region test_abc_result test_abc_xblif
-                      test_abc_exchange test_abc_splice test_abc_prov)
+                      test_abc_exchange test_abc_splice test_abc_prov test_abc_gates)
         odin3_add_unit_test(${_abc_test})
         target_compile_definitions(${_abc_test} PRIVATE
             ODIN3_ABC_TEST_DIR="${PROJECT_BINARY_DIR}/abc_tests/${_abc_test}"
-            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+            ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
+            ODIN3_GENLIB_DIR="${PROJECT_SOURCE_DIR}/tests/unit/data/genlib")
         if(NOT _abc_test STREQUAL "test_abc_result")
             target_sources(${_abc_test} PRIVATE tests/unit/abc_fake_engine.c)
         endif()
@@ -2311,6 +2313,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_BINARY_DIR}/raise_micros
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(raise_micros PROPERTIES LABELS tools TIMEOUT 900)
+        # v1.0.2 gate mapping (gatemap plan Task 13): abc --gates and dfflibmap with the real linked
+        # ABC on generic_gates and cmos6, equivalent to write_blif --gates-as-names after lower.
+        add_test(NAME abc_gates_cli
+            COMMAND ${CMAKE_COMMAND} -E env ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe>
+                    ODIN3_REQUIRE_ABC=1
+                    ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tests/cli/abc_gates_cli.py
+                    $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check
+                    ${PROJECT_BINARY_DIR}/abc_gates_cli
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(abc_gates_cli PROPERTIES LABELS tools TIMEOUT 900)
         # 6.1 (spec G-5): each netlist micro of tests/netlist, Verilog over the cmos.v cells and
         # BLIF, read, proc, flatten, lower, LUT-mapped (the linked ABC) and equivalent to the RTL's
         # own flow (tools/netlist-ingest, equiv-check).

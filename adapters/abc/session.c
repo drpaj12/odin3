@@ -501,11 +501,12 @@ odin3_status odin3_abc_session_name_map(void *self, const odin3_abc_luts *aligne
  * one may end the text), none empty:
  *   GATE <name> <number> <name>=<formula>;
  *   PIN <name> UNKNOWN|INV|NONINV <number> <number> <number> <number> <number> <number>
- * A name is [A-Za-z_$][A-Za-z0-9_$]*, a number [-+]?(digits[.digits]|.digits)[e[-+]digits], each
- * at most ADP_GENLIB_TOKEN_MAX bytes. A formula is names, "!*&+|^'()" and single spaces. Each GATE
- * has at most ADP_GENLIB_PINS_MAX PINs, all distinct, and its formula names each of them and no
- * other name; a GATE without PINs has the formula CONST0 or CONST1. No two GATEs share a name.
- * (The formula's grammar is checked in bridge.c, before Mio_ParseFormula.)
+ * A name is [A-Za-z_$][A-Za-z0-9_$]*, a number digits[.digits] (the .o3lib reader's area and delay
+ * form; no sign, exponent, bare point, inf or nan), each at most ADP_GENLIB_TOKEN_MAX bytes. A
+ * formula is names, "!*&+|^'()" and single spaces. Each GATE has at most ADP_GENLIB_PINS_MAX PINs,
+ * all distinct, and its formula names each of them and no other name; a GATE without PINs has the
+ * formula CONST0 or CONST1. No two GATEs share a name. (The formula's grammar is checked in
+ * bridge.c, before Mio_ParseFormula.)
  */
 
 enum {
@@ -630,30 +631,18 @@ static size_t adp_digits(const char *at, const char *end) {
     return len;
 }
 
-static bool adp_is_sign(const char *at, const char *end) {
-    return at < end && (*at == '-' || *at == '+');
-}
-
-/* A number's length at at, or 0. */
+/* A number's length at at (digits[.digits], the .o3lib reader's form), or 0. */
 static size_t adp_number_len(const char *at, const char *end) {
-    size_t len = adp_is_sign(at, end) ? 1U : 0U;
-    size_t whole = adp_digits(at + len, end);
-    size_t frac = 0;
-    len += whole;
-    if (at + len < end && at[len] == '.') {
-        frac = adp_digits(at + len + 1, end);
-        len += 1 + frac;
-    }
-    if (whole + frac == 0) {
+    size_t len = adp_digits(at, end);
+    if (len == 0) {
         return 0;
     }
-    if (at + len < end && (at[len] == 'e' || at[len] == 'E')) {
-        size_t exp = len + 1 + (adp_is_sign(at + len + 1, end) ? 1U : 0U);
-        size_t digits = adp_digits(at + exp, end);
-        if (digits == 0) {
+    if (at + len < end && at[len] == '.') {
+        size_t frac = adp_digits(at + len + 1, end);
+        if (frac == 0) {
             return 0;
         }
-        len = exp + digits;
+        len += 1 + frac;
     }
     return len <= ADP_GENLIB_TOKEN_MAX ? len : 0;
 }

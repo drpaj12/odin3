@@ -1,6 +1,6 @@
 /*
  * args.c — the abc pass's arguments, script precedence and exchange choice (3D spec §7.1, §7.2,
- * AB-19, AB-20; plan Task 14 and point (z)).
+ * AB-19, AB-20; plan Task 14 and point (z); --gates: gatemap plan Task 10).
  */
 #include "frontends/project/paths.h"
 #include "frontends/project/project.h"
@@ -41,11 +41,12 @@ typedef enum abc_option {
     OPT_VIA_BLIF,
     OPT_LOG,
     OPT_PROV,
+    OPT_GATES,
     OPT_COUNT
 } abc_option;
 
-static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut", "--via-blif", "--log",
-                                                      "--prov"};
+static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut",  "--via-blif",
+                                                      "--log",    "--prov", "--gates"};
 
 static int option_of(odin3_bytes word) {
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -84,6 +85,9 @@ static odin3_status set_option(abc_option which, const char *value, odin3_abc_op
     case OPT_LOG:
         out->log = value;
         return ODIN3_OK;
+    case OPT_GATES:
+        out->gates = value;
+        return ODIN3_OK;
     case OPT_LUT:
         if (!parse_lut(value, &out->lut_k)) {
             odin3_log(ODIN3_LOG_ERROR, "abc: --lut must be an integer from 2 to 16, not '%s'",
@@ -94,6 +98,7 @@ static odin3_status set_option(abc_option which, const char *value, odin3_abc_op
     default:
         break;
     }
+    out->prov_given = true;
     if (strcmp(value, "fine") == 0) {
         out->prov = ODIN3_ABC_PROV_FINE;
     } else if (strcmp(value, "cone") == 0) {

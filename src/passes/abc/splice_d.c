@@ -11,15 +11,15 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <string.h>
 
 /* --- unread new cells ---------------------------------------------------------------------- */
 
-/* True when node is a new LUT or edge-triggered flip-flop (what phase A made). */
+/* True when node is a new LUT (with --gates: library gate or buffer) or edge-triggered flip-flop
+ * (what phase A made). */
 static bool removable_kind(const splice *sp, odin3_node_id node) {
-    const odin3_celltype_def *def =
-        odin3_celltype_get(sp->run->design, odin3_node_type(sp->mod, node));
-    return def != NULL && (strcmp(def->name, "$lut") == 0 || (def->flags & ODIN3_CT_SEQ_EDGE) != 0);
+    odin3_celltype_id type = odin3_node_type(sp->mod, node);
+    const odin3_celltype_def *def = odin3_celltype_get(sp->run->design, type);
+    return def != NULL && (sp_new_logic(sp, type) || (def->flags & ODIN3_CT_SEQ_EDGE) != 0);
 }
 
 /* The net on node's driving pin; none when it drives nothing. */

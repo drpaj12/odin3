@@ -114,15 +114,17 @@ typedef struct odin3_abc_opts {
     uint32_t lut_k;
     const char *via_blif;
     const char *log;
-    uint8_t prov; /* an odin3_abc_prov_mode */
+    uint8_t prov;      /* an odin3_abc_prov_mode */
+    const char *gates; /* --gates: the library name (gatemap spec G-4), NULL without */
+    bool prov_given;   /* --prov was given (its value is in prov) */
 } odin3_abc_opts;
 
 /*
- * Splits args with odin3_pass_arg_next (§7.1, AB-19); each option may appear once. Returns
- * ODIN3_ERR_INVALID_ARG after logging exactly one error: `abc: unknown argument '<arg>'`, `abc:
- * <option> given twice`, `abc: <option> needs a value`, `abc: --lut must be an integer from 2 to
- * 16, not '<v>'` or `abc: --prov must be fine or cone, not '<v>'`. ODIN3_ERR_NO_MEMORY (not
- * logged). *out is zeroed first and filled as far as the parse got.
+ * Splits args with odin3_pass_arg_next (§7.1, AB-19; --gates, gatemap spec G-4); each option may
+ * appear once. Returns ODIN3_ERR_INVALID_ARG after logging exactly one error: `abc: unknown
+ * argument '<arg>'`, `abc: <option> given twice`, `abc: <option> needs a value`, `abc: --lut must
+ * be an integer from 2 to 16, not '<v>'` or `abc: --prov must be fine or cone, not '<v>'`.
+ * ODIN3_ERR_NO_MEMORY (not logged). *out is zeroed first and filled as far as the parse got.
  */
 odin3_status odin3_abc_parse_args(odin3_bytes args, odin3_arena *arena, odin3_abc_opts *out);
 

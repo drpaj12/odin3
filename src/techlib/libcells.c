@@ -173,6 +173,9 @@ static odin3_status add_gate_cell(collect_ctx *ctx, odin3_celltype_id type,
     if (ignored < gate.n_inputs) {
         return push_skip(ctx->out, type, ODIN3_LIBCELL_NO_SUPPORT, gate.in_port[ignored]);
     }
+    if (!is_genlib_name(def->name)) {
+        return push_skip(ctx->out, type, ODIN3_LIBCELL_CELL_NAME, SKIP_PORT_NONE);
+    }
     uint32_t bad = first_bad_name(def);
     if (bad < def->n_ports) {
         return push_skip(ctx->out, type, ODIN3_LIBCELL_NAME, bad);
@@ -341,6 +344,8 @@ const char *odin3_libcell_skip_text(uint8_t why) {
         return "its function ignores input '%s'";
     case ODIN3_LIBCELL_NAME:
         return "port '%s' is not a genlib name";
+    case ODIN3_LIBCELL_CELL_NAME:
+        return "its name is not a genlib name";
     default:
         return "";
     }
