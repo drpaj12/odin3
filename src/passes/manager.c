@@ -197,7 +197,24 @@ static void raise_keep(odin3_design *design, const odin3_pass_def *def) {
     }
 }
 
+/* S1 SA-11: an open simulation points into module storage; no pass may change it. */
+static odin3_status refuse_while_simulating(const odin3_design *design, const odin3_pass_def *def) {
+    uint32_t holds = odin3_design_sim_holds(design);
+    if (holds > 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "pass %s: the design has %u open simulation(s); close them first "
+                  "(odin3_simulation_close)",
+                  def->name, holds);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 static odin3_status run_def(odin3_design *design, const odin3_pass_def *def, odin3_bytes args) {
+    odin3_status refused = refuse_while_simulating(design, def);
+    if (refused != ODIN3_OK) {
+        return refused;
+    }
     double start = odin3_now_ms();
     odin3_design_set_diag_paths(design, g_options.diag_paths); /* PRJ-18 --diag-paths */
     /* 2D EL-33: a REFUSE pass never meets a process; refused before its pass run opens. */
@@ -244,6 +261,10 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
     if (!quotes_closed(args)) {
         odin3_log(ODIN3_LOG_ERROR, "pass %s: unterminated quote in the arguments", name);
         return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status refused = refuse_while_simulating(design, def);
+    if (refused != ODIN3_OK) {
+        return refused; /* a refused call changes nothing, the keep level included */
     }
     raise_keep(design, def);
     return run_def(design, def, args);
@@ -378,6 +399,13 @@ static odin3_status find_passes(odin3_vec *cmds, const odin3_script_src *src) {
 
 static odin3_status run_cmds(odin3_design *design, const odin3_vec *cmds,
                              const odin3_script_src *src) {
+    if (cmds->len > 0) { /* a refused script changes nothing, the keep level included */
+        odin3_status refused =
+            refuse_while_simulating(design, ((const script_cmd *)odin3_vec_cat(cmds, 0))->def);
+        if (refused != ODIN3_OK) {
+            return refused;
+        }
+    }
     for (size_t i = 0; i < cmds->len; i++) { /* every keep level is raised before any pass runs */
         raise_keep(design, ((const script_cmd *)odin3_vec_cat(cmds, i))->def);
     }

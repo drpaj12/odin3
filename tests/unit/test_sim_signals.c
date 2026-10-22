@@ -583,6 +583,42 @@ static void test_build_oom(void) {
     TEST_ASSERT_TRUE(fail > 0);
 }
 
+/* --- Task 3: the open-simulation counter (SA-11) ---------------------------------------------- */
+
+static const char *const HELD_TEXT =
+    "pass stats: the design has 1 open simulation(s); close them first (odin3_simulation_close)";
+
+static void test_pass_refused_while_held(void) {
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_sim_holds(design));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_sim_holds(NULL));
+    odin3_design_sim_hold(design);
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_design_sim_holds(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_run(design, "stats", (odin3_bytes){0}));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, HELD_TEXT));
+    odin3_design_sim_release(design);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_sim_holds(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "stats", (odin3_bytes){0}));
+}
+
+static void test_script_refused_while_held(void) {
+    odin3_script_src src = {"-p", ODIN3_SCRIPT_BY_COMMAND};
+    odin3_design_sim_hold(design);
+    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, odin3_design_run_script(design, "stats", src));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, HELD_TEXT));
+    odin3_design_sim_release(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_script(design, "stats", src));
+}
+
+static void test_copy_is_not_held(void) {
+    odin3_design *copy = NULL;
+    odin3_design_sim_hold(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_copy(design, &copy));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_sim_holds(copy));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(copy, "stats", (odin3_bytes){0}));
+    odin3_design_destroy(copy);
+    odin3_design_sim_release(design);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_settle_edges_equal_cycle);
@@ -605,5 +641,8 @@ int main(void) {
     RUN_TEST(test_unconnected_bit_reads_zero);
     RUN_TEST(test_hint_only_for_lowerable);
     RUN_TEST(test_build_oom);
+    RUN_TEST(test_pass_refused_while_held);
+    RUN_TEST(test_script_refused_while_held);
+    RUN_TEST(test_copy_is_not_held);
     return UNITY_END();
 }

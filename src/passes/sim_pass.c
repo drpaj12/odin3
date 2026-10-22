@@ -6,7 +6,9 @@
 #include "passes/builtin.h"
 #include "passes/manager.h"
 #include "sim/prng.h"
+#include "sim/signals.h"
 #include "sim/sim.h"
+#include "sim/vcd.h"
 #include "sim/vectors.h"
 #include "util/file.h"
 #include "util/log.h"
@@ -131,17 +133,27 @@ static odin3_status parse_sim_args(odin3_bytes args, sim_args *out) {
 typedef struct input_source {
     odin3_prng prng;
     const odin3_sim_vectors_in *in;
+    odin3_sim_vcd *vcd; /* the waveform writer; NULL without --vcd */
 } input_source;
 
 /* One cycle of the source's inputs; appends its line to line. */
 static odin3_status source_step(odin3_sim *sim, input_source *src, uint32_t cyc,
                                 odin3_strbuf *line) {
-    if (src->in == NULL) {
+    if (src->in == NULL && src->vcd == NULL) {
         return odin3_sim_vectors_step(sim, &src->prng, cyc, line);
     }
-    odin3_sim_vectors_drive(sim, src->in, cyc);
-    odin3_sim_cycle(sim);
-    return odin3_sim_vectors_line(sim, cyc, line);
+    if (src->in == NULL) {
+        odin3_sim_drive_random(sim, &src->prng);
+    } else {
+        odin3_sim_vectors_drive(sim, src->in, cyc);
+    }
+    odin3_status st = ODIN3_OK;
+    if (src->vcd == NULL) {
+        odin3_sim_cycle(sim);
+    } else {
+        st = odin3_sim_vcd_cycle(src->vcd, sim, cyc);
+    }
+    return st == ODIN3_OK ? odin3_sim_vectors_line(sim, cyc, line) : st;
 }
 
 /* Writes the header and every cycle's line to out; false when a line could not be built. */
@@ -214,14 +226,42 @@ static odin3_status load_inputs(const odin3_sim *sim, const sim_args *args,
     return st;
 }
 
+/* Runs emit, with the waveform on an atomic file when --vcd was given. */
+static odin3_status run_vcd(odin3_sim *sim, const odin3_sim_vectors *run, input_source *src,
+                            const sim_args *args) {
+    if (args->vcd.len == 0) {
+        return emit(sim, run, src, args);
+    }
+    odin3_sim_signals *sig = NULL;
+    odin3_atomic_file file;
+    odin3_sim_vcd vcd = {0};
+    odin3_status st = odin3_sim_signals_create(sim, &sig);
+    if (st == ODIN3_OK) {
+        st = odin3_atomic_file_open(&file, args->vcd.data);
+    }
+    if (st != ODIN3_OK) {
+        odin3_sim_signals_destroy(sig);
+        return st;
+    }
+    st = odin3_sim_vcd_begin(&vcd, sig, file.fp);
+    if (st == ODIN3_OK) {
+        src->vcd = &vcd;
+        st = emit(sim, run, src, args);
+        src->vcd = NULL;
+    }
+    odin3_sim_vcd_free(&vcd);
+    odin3_sim_signals_destroy(sig);
+    return odin3_atomic_file_close(&file, st);
+}
+
 static odin3_status run_sim(odin3_sim *sim, const sim_args *args, const odin3_strbuf *title) {
     odin3_sim_vectors run = {title->data, args->seed, args->cycles};
     odin3_sim_vectors_in in = {0};
     odin3_status st = load_inputs(sim, args, &in, &run);
     if (st == ODIN3_OK) {
-        input_source src = {{0}, args->vectors_in.len > 0 ? &in : NULL};
+        input_source src = {{0}, args->vectors_in.len > 0 ? &in : NULL, NULL};
         odin3_prng_seed(&src.prng, run.seed);
-        st = emit(sim, &run, &src, args);
+        st = run_vcd(sim, &run, &src, args);
     }
     odin3_sim_vectors_in_free(&in);
     return st;
@@ -240,10 +280,6 @@ static odin3_status sim_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_byt
     odin3_sim *sim = NULL;
     odin3_module_id top = odin3_design_top(design);
     odin3_status st = parse_sim_args(args, &parsed);
-    if (st == ODIN3_OK && parsed.vcd.len > 0) {
-        odin3_log(ODIN3_LOG_ERROR, "sim: --vcd is not available yet");
-        st = ODIN3_ERR_INVALID_ARG;
-    }
     if (st == ODIN3_OK && !odin3_module_valid(top)) {
         odin3_log(ODIN3_LOG_ERROR, "sim: the design has no top module (read_blif or hierarchy)");
         st = ODIN3_ERR_INVALID_ARG;
