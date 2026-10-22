@@ -68,6 +68,50 @@ def and_bits(width: int) -> tuple[str, dict[str, str]]:
     return text, binding
 
 
+def incrementer(width: int) -> tuple[str, dict[str, str]]:
+    """s = a + 1 modulo 2**width: s0 = !a0, s_i = a_i ^ c_i, c_1 = a0, c_(i+1) = a_i & c_i."""
+    ins = [f"a{i}" for i in range(width)]
+    outs = [f"s{i}" for i in range(width)]
+    text = f".model m\n.inputs {' '.join(ins)}\n.outputs {' '.join(outs)}\n"
+    text += ".names a0 s0\n0 1\n"
+    for i in range(1, width):
+        carry = "a0" if i == 1 else f"c{i}"
+        text += f".names a{i} {carry} s{i}\n01 1\n10 1\n"
+        if i + 1 < width:
+            text += f".names a{i} {carry} c{i + 1}\n11 1\n"
+    binding = {f"a{i}": f"A[{i}]" for i in range(width)}
+    binding.update({f"s{i}": f"Y[{i}]" for i in range(width)})
+    return text + ".end\n", binding
+
+
+def eq_const(width: int, value: int) -> tuple[str, dict[str, str]]:
+    """y = (a == value): one row, bit i of value for input a_i."""
+    ins = [f"a{i}" for i in range(width)]
+    row = "".join(str((value >> i) & 1) for i in range(width))
+    text = f".model m\n.inputs {' '.join(ins)}\n.outputs y\n"
+    text += f".names {' '.join(ins)} y\n{row} 1\n.end\n"
+    binding = {f"a{i}": f"A[{i}]" for i in range(width)}
+    binding["y"] = "Y[0]"
+    return text, binding
+
+
+def const_micros() -> list[Micro]:
+    """The -const micros (v1.0.5 plan Task 2): a constant operand of the template."""
+    out: list[Micro] = []
+    text, binding = incrementer(4)
+    inc = [f"-param {p}" for p in ("A_WIDTH=4", "B_WIDTH=1", "Y_WIDTH=4")] + ["-const B=1"]
+    out.append(Micro("inc4_vs_add_const", text, binding, "$add", "equivalent", params=inc))
+    text, binding = eq_const(4, 13)
+    eq = [f"-param {p}" for p in ("A_WIDTH=4", "B_WIDTH=4", "Y_WIDTH=1")]
+    out.append(Micro("eq13_vs_eq_const", text, binding, "$eq", "equivalent",
+                     params=[*eq, "-const B=13"]))
+    out.append(Micro("eq13_wrong_const", text, binding, "$eq", "differs",
+                     params=[*eq, "-const B=12"]))
+    out.append(Micro("const_output_refused", text, binding, "$eq", "refused",
+                     refusal="is not an input", params=[*eq, "-const Y=1"]))
+    return out
+
+
 def micros() -> list[Micro]:
     out: list[Micro] = []
     for width in (4, 8):
@@ -88,7 +132,7 @@ def micros() -> list[Micro]:
     reg = ".model m\n.inputs a b clk\n.outputs q\n.names a b d\n11 1\n.latch d q re clk 0\n.end\n"
     out.append(Micro("register_refused", reg, {"a": "A[0]", "b": "A[1]", "q": "Y[0]"}, "$and",
                      "refused", refusal="register", params=["-param A_WIDTH=2"]))
-    return out
+    return out + const_micros()
 
 
 def odin3(binary: str, script: str) -> subprocess.CompletedProcess[str]:

@@ -211,13 +211,104 @@ static odin3_status make_prov(const rs_job *job, odin3_prov_id *out) {
 
 /* --- the replacement ----------------------------------------------------------------------- */
 
-static odin3_status create_cell(rs_job *job, odin3_node_id *cell) {
-    odin3_prov_id prov = {0};
-    odin3_status st = make_prov(job, &prov);
+static odin3_status create_cell(rs_job *job, odin3_prov_id prov, odin3_node_id *cell) {
     odin3_node_spec spec = {job->tmpl.type, 0, prov, job->tmpl.params.data,
                             job->tmpl.def->n_params};
-    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, job->ports.data, cell)
-                          : st;
+    return odin3_node_create_connected(job->module, &spec, job->ports.data, cell);
+}
+
+/* --- the constants (-const, spec K-6) -------------------------------------------------------- */
+
+/* True when node carries the group attribute (any value): it is in this run's group or in another
+ * group, which a later run may delete, so its net is never reused. */
+static bool in_any_group(const rs_job *job, odin3_node_id node, uint32_t key_str) {
+    const uint8_t *inside = job->group.inside.data;
+    return (node.v < job->group.inside.len && inside[node.v] != 0) ||
+           (key_str != 0 &&
+            odin3_attr_get(job->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key_str) != NULL);
+}
+
+/* The net of the lowest-ID live node of constant type `type` outside every marked group, else
+ * {0}. */
+static odin3_net_id find_const_net(const rs_job *job, odin3_celltype_id type) {
+    const odin3_module *mod = job->module;
+    uint32_t key_str = 0;
+    (void)odin3_strtab_find(odin3_design_strtab(job->group.design),
+                            odin3_bytes_cstr(job->opts->key), &key_str);
+    for (uint32_t nid = 1; nid < odin3_module_node_end(mod); nid++) {
+        odin3_node_id node = {nid};
+        if (odin3_node_live(mod, node) && odin3_node_type(mod, node).v == type.v &&
+            !in_any_group(job, node, key_str)) {
+            return odin3_pin_net(mod, odin3_node_pins(mod, node).first);
+        }
+    }
+    return (odin3_net_id){0};
+}
+
+/* A new constant node of type `type` on a new net; its net is *net. */
+static odin3_status make_const(rs_job *job, odin3_celltype_id type, odin3_prov_id prov,
+                               odin3_node_id *made) {
+    odin3_net_id net = {0};
+    odin3_status st = odin3_net_create(job->module, 0, prov, &net);
+    odin3_node_spec spec = {type, 0, prov, NULL, 0};
+    odin3_netvec ports = {&net, 1};
+    return st == ODIN3_OK ? odin3_node_create_connected(job->module, &spec, &ports, made) : st;
+}
+
+/* The net of constant `kind` (0 or 1): a live constant node outside the group, else a new one
+ * (recorded in *made). */
+static odin3_status const_net(rs_job *job, unsigned kind, odin3_prov_id prov, odin3_node_id *made,
+                              odin3_net_id *out) {
+    uint32_t str = 0;
+    odin3_celltype_id type = {0};
+    odin3_design *design = job->group.design;
+    odin3_status st =
+        odin3_design_intern(design, odin3_bytes_cstr(kind != 0 ? "$_CONST1_" : "$_CONST0_"), &str);
+    if (st == ODIN3_OK && !odin3_celltype_find(design, str, &type)) {
+        return cc_error(design, (odin3_prov_id){0}, "raise: constant cell types are missing");
+    }
+    *out = st == ODIN3_OK ? find_const_net(job, type) : (odin3_net_id){0};
+    if (st != ODIN3_OK || odin3_net_valid(*out)) {
+        return st;
+    }
+    st = make_const(job, type, prov, made);
+    *out = st == ODIN3_OK ? odin3_pin_net(job->module, odin3_node_pins(job->module, *made).first)
+                          : (odin3_net_id){0};
+    return st;
+}
+
+/* Fills bit_net for every constant template bit; made[kind] is a node created for constant
+ * `kind`, else 0. Called only in the run phase, so a failed check leaves no node behind. */
+static odin3_status tie_constants(rs_job *job, odin3_prov_id prov, odin3_node_id made[2]) {
+    const uint8_t *cbit = job->tmpl.cbit.data;
+    odin3_net_id nets[2] = {{0}, {0}};
+    for (size_t bit = 0; bit < job->tmpl.cbit.len; bit++) {
+        if (cbit[bit] == CC_BIT_NET) {
+            continue;
+        }
+        unsigned kind = cbit[bit] == CC_BIT_CONST1 ? 1U : 0U;
+        if (!odin3_net_valid(nets[kind])) {
+            odin3_status st = const_net(job, kind, prov, &made[kind], &nets[kind]);
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+        *(odin3_net_id *)odin3_vec_at(&job->bit_net, bit) = nets[kind];
+    }
+    return ODIN3_OK;
+}
+
+/* Takes back the constant nodes (and their nets) a failed replacement made. */
+static void drop_made(rs_job *job, const odin3_node_id made[2]) {
+    for (unsigned kind = 0; kind < 2; kind++) {
+        if (made[kind].v == 0) {
+            continue;
+        }
+        odin3_net_id net =
+            odin3_pin_net(job->module, odin3_node_pins(job->module, made[kind]).first);
+        (void)odin3_node_delete(job->module, made[kind]);
+        (void)odin3_net_delete(job->module, net);
+    }
 }
 
 /* True when net is a net only the group touched: no pin left, not on the boundary. */
@@ -290,15 +381,21 @@ odin3_status raise_check_module(odin3_pass_ctx *ctx, odin3_module *module, const
 /* Creates the cell, then deletes the group; the cell is taken back when no node is gone yet. */
 static odin3_status replace_group(rs_job *job) {
     odin3_node_id cell = {0};
-    odin3_status st = create_cell(job, &cell);
+    odin3_node_id made[2] = {{0}, {0}};
+    odin3_prov_id prov = {0};
+    odin3_status st = make_prov(job, &prov);
+    st = st == ODIN3_OK ? tie_constants(job, prov, made) : st;
+    st = st == ODIN3_OK ? create_cell(job, prov, &cell) : st;
     size_t deleted = 0;
     if (st != ODIN3_OK) {
+        drop_made(job, made);
         return st;
     }
     st = delete_group(job, &deleted);
     if (st != ODIN3_OK && deleted == 0) {
         /* nothing of the group is gone yet: take the new cell back so it never double-drives */
         (void)odin3_node_delete(job->module, cell);
+        drop_made(job, made);
     }
     if (st != ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "raise: module '%s': replacing the group failed (%d)%s",

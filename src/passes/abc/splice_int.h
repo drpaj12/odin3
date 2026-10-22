@@ -79,8 +79,23 @@ odin3_status sp_phase_c(splice *sp);
 void sp_phase_d(splice *sp);
 
 /* The canonical constant net of value (0 or 1) for this splice: found or made (and logged for
- * the rollback). */
+ * the rollback). With abc --gates and a library TIE cell of that value (G-7): the lowest-ID live
+ * net whose one driver is such a cell, else a new one on a new net with the coarse record. */
 odin3_status sp_canon(splice *sp, int value, odin3_net_id *out);
+
+/* The run's coarse record (odin3_abc_coarse_record), made on first use and kept in sp->fallback.
+ * NO_MEMORY. */
+odin3_status sp_coarse(splice *sp, odin3_prov_id *out);
+
+/* True for a cell type the splice makes as logic: `$lut`; with abc --gates a library gate of the
+ * run or `$_BUF_` (gatemap plan Task 12). */
+bool sp_new_logic(const splice *sp, odin3_celltype_id type);
+
+/* The type named name (a built-in such as `$_BUF_`), or false. */
+bool sp_type_named(const odin3_design *design, const char *name, odin3_celltype_id *type);
+
+/* The index of the first output port of type, or its port count when it has none. */
+uint32_t sp_out_port(const odin3_design *design, odin3_celltype_id type);
 
 /* True when the net has a pin on a port node (a port net). */
 bool sp_on_port(const odin3_module *mod, odin3_net_id net);

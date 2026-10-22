@@ -35,6 +35,7 @@ void odin3_abc_result_init(odin3_abc_result *res) {
     odin3_vec_init(&res->reg_from, sizeof(uint32_t));
     odin3_vec_init(&res->co_driver, sizeof(uint32_t));
     odin3_vec_init(&res->old_lit, sizeof(uint32_t));
+    odin3_vec_init(&res->gate, sizeof(uint32_t));
 }
 
 void odin3_abc_result_free(odin3_abc_result *res) {
@@ -46,6 +47,7 @@ void odin3_abc_result_free(odin3_abc_result *res) {
     odin3_vec_free(&res->reg_from);
     odin3_vec_free(&res->co_driver);
     odin3_vec_free(&res->old_lit);
+    odin3_vec_free(&res->gate);
     odin3_abc_result_init(res);
 }
 
@@ -309,18 +311,16 @@ typedef struct lread {
     uint32_t words; /* 32-bit truth words per MiniLUT object */
 } lread;
 
-enum { OBJ_PI = 0, OBJ_PO, OBJ_LUT };
-
 static const int32_t *fanins_of(const lread *lr, uint32_t obj) {
     return lr->luts->fanins + (size_t)lr->luts->lut_size * obj;
 }
 
-static uint32_t obj_kind(const lread *lr, uint32_t obj) {
-    const int32_t *fan = fanins_of(lr, obj);
+odin3_abc_mini_kind odin3_abc_mini_kind_of(const odin3_abc_luts *luts, uint32_t obj) {
+    const int32_t *fan = luts->fanins + (size_t)luts->lut_size * obj;
     if (fan[0] == MINI_NULL) {
-        return OBJ_PI;
+        return ODIN3_ABC_MINI_PI;
     }
-    return fan[1] == MINI_NULL2 ? OBJ_PO : OBJ_LUT;
+    return fan[1] == MINI_NULL2 ? ODIN3_ABC_MINI_PO : ODIN3_ABC_MINI_LUT;
 }
 
 static odin3_status lr_fail(const char *why) {
@@ -338,21 +338,21 @@ static void lr_scan(lread *lr) {
             lr->map[obj] = obj;
             continue;
         }
-        uint32_t kind = obj_kind(lr, obj);
+        odin3_abc_mini_kind kind = odin3_abc_mini_kind_of(lr->luts, obj);
         lr->map[obj] = NOT_A_LUT;
-        pis += kind == OBJ_PI ? 1U : 0U;
-        luts += kind == OBJ_LUT ? 1U : 0U;
-        lr->n_pos += kind == OBJ_PO ? 1U : 0U;
+        pis += kind == ODIN3_ABC_MINI_PI ? 1U : 0U;
+        luts += kind == ODIN3_ABC_MINI_LUT ? 1U : 0U;
+        lr->n_pos += kind == ODIN3_ABC_MINI_PO ? 1U : 0U;
     }
     lr->n_pis = pis;
     lr->n_luts = luts;
     uint32_t next_pi = FIRST_OBJ;
     uint32_t next_lut = FIRST_OBJ + pis;
     for (uint32_t obj = FIRST_OBJ; obj < lr->luts->n_objs; obj++) {
-        uint32_t kind = obj_kind(lr, obj);
-        if (kind == OBJ_PI) {
+        odin3_abc_mini_kind kind = odin3_abc_mini_kind_of(lr->luts, obj);
+        if (kind == ODIN3_ABC_MINI_PI) {
             lr->map[obj] = next_pi++;
-        } else if (kind == OBJ_LUT) {
+        } else if (kind == ODIN3_ABC_MINI_LUT) {
             lr->map[obj] = next_lut++;
         }
     }
@@ -451,10 +451,10 @@ static odin3_status lr_fill(lread *lr, const odin3_abc_result_expect *expect) {
     odin3_status st = push_u32(&res->fanin_start, 0);
     st = st == ODIN3_OK ? push_u32(&res->truth_start, 0) : st;
     for (uint32_t obj = FIRST_OBJ; st == ODIN3_OK && obj < lr->luts->n_objs; obj++) {
-        uint32_t kind = obj_kind(lr, obj);
-        if (kind == OBJ_LUT) {
+        odin3_abc_mini_kind kind = odin3_abc_mini_kind_of(lr->luts, obj);
+        if (kind == ODIN3_ABC_MINI_LUT) {
             st = lr_lut(lr, obj);
-        } else if (kind == OBJ_PO) {
+        } else if (kind == ODIN3_ABC_MINI_PO) {
             st = lr_po(lr, obj);
         }
     }

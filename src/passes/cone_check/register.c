@@ -18,7 +18,8 @@
 
 enum { DECIMAL = 10 };
 
-static const char k_usage[] = "cone_check -attr KEY=V -cell TYPE [-param P=V ...] [-timeout S]";
+static const char k_usage[] =
+    "cone_check -attr KEY=V -cell TYPE [-param P=V ...] [-const PORT=V ...] [-timeout S]";
 
 /* --- options ------------------------------------------------------------------------------- */
 
@@ -80,6 +81,19 @@ static odin3_status take_param(odin3_bytes *args, cc_opts *opts) {
     return st;
 }
 
+static odin3_status take_const(odin3_bytes *args, cc_opts *opts) {
+    cc_param pair = {NULL, NULL};
+    odin3_status st = take_pair(args, "-const", opts, &pair);
+    cc_const *slot = st == ODIN3_OK ? odin3_vec_push(&opts->consts) : NULL;
+    if (st == ODIN3_OK && slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (slot != NULL) {
+        *slot = (cc_const){pair.name, pair.value};
+    }
+    return st;
+}
+
 static odin3_status take_option(odin3_bytes word, odin3_bytes *args, cc_opts *opts) {
     if (odin3_pass_arg_is(word, "-attr")) {
         cc_param pair = {NULL, NULL};
@@ -94,6 +108,9 @@ static odin3_status take_option(odin3_bytes word, odin3_bytes *args, cc_opts *op
     }
     if (odin3_pass_arg_is(word, "-param")) {
         return take_param(args, opts);
+    }
+    if (odin3_pass_arg_is(word, "-const")) {
+        return take_const(args, opts);
     }
     if (opts->timeout_ok && odin3_pass_arg_is(word, "-timeout")) {
         return take_timeout(args, opts);
@@ -129,6 +146,7 @@ static odin3_status cone_check_pass_run(odin3_pass_ctx *ctx, odin3_design *desig
     opts.timeout_ok = true;
     opts.arena = odin3_arena_create(0);
     odin3_vec_init(&opts.params, sizeof(cc_param));
+    odin3_vec_init(&opts.consts, sizeof(cc_const));
     odin3_status st = opts.arena != NULL ? cc_parse_args(args, &opts) : ODIN3_ERR_NO_MEMORY;
     bool any = false;
     uint32_t end = odin3_design_module_end(design);
@@ -144,6 +162,7 @@ static odin3_status cone_check_pass_run(odin3_pass_ctx *ctx, odin3_design *desig
         st = ODIN3_ERR_INVALID_ARG;
     }
     odin3_vec_free(&opts.params);
+    odin3_vec_free(&opts.consts);
     odin3_arena_destroy(opts.arena);
     return st;
 }

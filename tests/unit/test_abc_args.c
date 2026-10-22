@@ -19,6 +19,10 @@
 #include <regex.h>
 #include <unistd.h>
 
+#if !defined(ODIN3_LIB_DIR) || !defined(ODIN3_GENLIB_DIR)
+#error "ODIN3_LIB_DIR and ODIN3_GENLIB_DIR must be defined"
+#endif
+
 static odin3_design *design;
 static odin3_arena *arena;
 
@@ -329,8 +333,9 @@ static void test_pass_table_entry(void) {
     TEST_ASSERT_FALSE(def->wants_ast);
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PASS_PROCESSES_REFUSE, def->processes);
     TEST_ASSERT_EQUAL_STRING(
-        "abc [--script FILE] [--lut K] [--via-blif DIR] [--log FILE] [--prov fine|cone]: map each "
-        "module's soft logic to K-input LUTs with linked ABC (one run per clock domain)",
+        "abc [--script FILE] [--lut K] [--gates LIB] [--via-blif DIR] [--log FILE] [--prov "
+        "fine|cone]: map each module's soft logic to K-input LUTs (--lut) or to library LIB's "
+        "gates (--gates) with linked ABC (one run per clock domain)",
         def->help);
 }
 
@@ -341,6 +346,215 @@ static void test_process_is_refused(void) {
     TEST_ASSERT_TRUE(
         afx_has(ODIN3_LOG_ERROR, "pass 'abc': module 'm' has processes; run proc first"));
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
+}
+
+/* --- abc --gates: option and start-up (gatemap plan Task 10) ---------------------------------- */
+
+static void read_generic(void) {
+    char lib[AFX_PATH];
+    (void)snprintf(lib, sizeof lib, "%s/generic_gates.o3lib", ODIN3_LIB_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(lib)));
+}
+
+/* The run information of the last pass run. */
+static const char *last_info(void) {
+    return odin3_strtab_get(
+        odin3_design_strtab(design),
+        odin3_passrun_info(design, (odin3_passrun_id){odin3_passrun_end(design) - 1U}));
+}
+
+static void test_gates_needs_library(void) {
+    build_and();
+    expect_refused("--gates generic_gates", ODIN3_ERR_INVALID_ARG,
+                   "abc: --gates: library 'generic_gates' is not loaded; read it with read_techlib "
+                   "first");
+    expect_refused("--gates", ODIN3_ERR_INVALID_ARG, "abc: --gates needs a value");
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
+}
+
+static void test_gates_unknown_library(void) {
+    read_generic();
+    build_and();
+    expect_refused("--gates nosuch", ODIN3_ERR_INVALID_ARG,
+                   "abc: --gates: library 'nosuch' is not loaded; read it with read_techlib first");
+}
+
+static void test_gates_with_lut_refused(void) {
+    read_generic();
+    build_and();
+    expect_refused("--gates generic_gates --lut 6", ODIN3_ERR_INVALID_ARG,
+                   "abc: --lut does not apply with --gates");
+}
+
+static void test_gates_with_via_blif_refused(void) {
+    read_generic();
+    build_and();
+    char dir[AFX_PATH];
+    afx_path(dir, "gates_via");
+    char args[2 * AFX_PATH];
+    (void)snprintf(args, sizeof args, "--gates generic_gates --via-blif %s", dir);
+    expect_refused(args, ODIN3_ERR_INVALID_ARG,
+                   "abc: --gates runs ABC in memory; --via-blif cannot be used with it");
+    TEST_ASSERT_FALSE(afx_exists(dir));
+}
+
+static void test_gates_lut_script_refused(void) {
+    read_generic();
+    build_and();
+    char path[AFX_PATH];
+    afx_path(path, "lut_end.abc");
+    AFX_WRITE(path, "strash\nif -K 4\n");
+    char args[2 * AFX_PATH];
+    char line[3 * AFX_PATH];
+    (void)snprintf(args, sizeof args, "--gates generic_gates --script %s", path);
+    (void)snprintf(line, sizeof line,
+                   "abc: %s: the script does not end gate-mapped; with --gates end it with a gate "
+                   "mapper ('map' or '&nf')",
+                   path);
+    expect_refused(args, ODIN3_ERR_PARSE, line);
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
+}
+
+static void test_gates_default_script_is_gates_abc(void) {
+    read_generic();
+    build_and();
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());
+    const char *info = last_info();
+    TEST_ASSERT_NOT_NULL(info);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(info, "script=builtin:lib/abc/gates.abc "), info);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(info, " K=none exchange=aig gates=generic_gates genlib="),
+                                 info);
+    const char *line = afx_only(ODIN3_LOG_INFO, "abc: script ");
+    regex_t re;
+    TEST_ASSERT_EQUAL_INT(0,
+                          regcomp(&re,
+                                  "^abc: script builtin:lib/abc/gates.abc \\(embedded\\), sha256 "
+                                  "[0-9a-f]{16}\xE2\x80\xA6, K=none, exchange aig, gates "
+                                  "generic_gates, ABC [0-9a-f]{12}$",
+                                  REG_EXTENDED | REG_NOSUB));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, regexec(&re, line, 0, NULL, 0), line);
+    regfree(&re);
+    const char *lib_line = afx_only(ODIN3_LOG_INFO, "abc: --gates library ");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0,
+                                  regcomp(&re,
+                                          "^abc: --gates library 'generic_gates': 13 gates, "
+                                          "genlib sha256 [0-9a-f]{16}\xE2\x80\xA6$",
+                                          REG_EXTENDED | REG_NOSUB),
+                                  lib_line);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(0, regexec(&re, lib_line, 0, NULL, 0), lib_line);
+    regfree(&re);
+}
+
+static void test_gates_ignores_project_and_cli_script(void) {
+    read_generic();
+    build_and();
+    set_cli_script("cli.abc");
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
+                             "abc: note: --gates does not use the project's or --abc-script's "
+                             "script; give --script to choose one"));
+    TEST_ASSERT_NOT_NULL(strstr(last_info(), "script=builtin:lib/abc/gates.abc "));
+}
+
+static void test_gates_prov_fine_note(void) {
+    static const char k_note[] = "abc: note: --prov fine is not available with --gates; "
+                                 "provenance uses cut cones (gatemap spec G-2)";
+    read_generic();
+    build_and();
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());
+    TEST_ASSERT_FALSE(afx_has(ODIN3_LOG_INFO, k_note));
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates --prov fine"),
+                                  afx_errors());
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, k_note));
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates --prov cone"),
+                                  afx_errors());
+    TEST_ASSERT_FALSE(afx_has(ODIN3_LOG_INFO, k_note));
+}
+
+static void test_gates_logs_skipped_cells(void) {
+    read_generic();
+    build_and();
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());
+    TEST_ASSERT_EQUAL_UINT32(
+        6, afx_count(ODIN3_LOG_INFO, "abc: note: library 'generic_gates': cell "));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, "abc: note: library 'generic_gates': cell 'DFFP' is "
+                                             "not used for gate mapping: a flip-flop or latch"));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
+                             "abc: note: library 'generic_gates': cell 'TIE1' is not used for gate "
+                             "mapping: a constant cell (used for constants)"));
+}
+
+/* Reads an .o3lib text (written to inline.o3lib first). */
+static void read_inline_library(const char *text) {
+    char path[AFX_PATH];
+    afx_path(path, "inline.o3lib");
+    AFX_WRITE(path, text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run(design, "read_techlib", odin3_bytes_cstr(path)));
+}
+
+static void test_gates_no_inverter_refused(void) {
+    read_inline_library("library noinv\n"
+                        "cell AND2 gate area 1\n"
+                        "  in A 1 ; in B 1 ; out Y 1\n"
+                        "  fn Y = A & B\n"
+                        "end\n");
+    build_and();
+    expect_refused("--gates noinv", ODIN3_ERR_INVALID_ARG,
+                   "abc: --gates: library 'noinv' has no inverter and 2-input AND, NAND, OR or NOR "
+                   "gate; ABC cannot map to it");
+}
+
+static void test_gates_note_texts_with_ports(void) {
+    read_inline_library("library ports\n"
+                        "cell INV gate area 1\n"
+                        "  in A 1 ; out Y 1\n"
+                        "  fn Y = ~A\n"
+                        "end\n"
+                        "cell AND2 gate area 1\n"
+                        "  in A 1 ; in B 1 ; out Y 1\n"
+                        "  fn Y = A & B\n"
+                        "end\n"
+                        "cell IGN gate area 1\n"
+                        "  in A 1 ; in B 1 ; out Y 1\n"
+                        "  fn Y = ~A\n"
+                        "end\n"
+                        "cell AND2.X1 gate area 1\n"
+                        "  in A 1 ; in B 1 ; out Y 1\n"
+                        "  fn Y = A & B\n"
+                        "end\n"
+                        "cell CPIN gate area 1\n"
+                        "  in CONST0 1 ; out Y 1\n"
+                        "  fn Y = ~CONST0\n"
+                        "end\n");
+    build_and();
+    afx_log_reset();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates ports"), afx_errors());
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO, "abc: note: library 'ports': cell 'IGN' is not used "
+                                             "for gate mapping: its function ignores input 'B'"));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
+                             "abc: note: library 'ports': cell 'CPIN' is not used "
+                             "for gate mapping: port 'CONST0' is not a genlib name"));
+    TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_INFO,
+                             "abc: note: library 'ports': cell 'AND2.X1' is not "
+                             "used for gate mapping: its name is not a genlib name"));
+}
+
+static void test_gates_genlib_loaded(void) {
+    read_generic();
+    build_and();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--gates generic_gates"), afx_errors());
+    char path[AFX_PATH];
+    (void)snprintf(path, sizeof path, "%s/generic_gates.genlib", ODIN3_GENLIB_DIR);
+    char want[8192];
+    (void)snprintf(want, sizeof want, "%s", afx_slurp(path));
+    TEST_ASSERT_TRUE(want[0] != '\0');
+    TEST_ASSERT_EQUAL_STRING(want, odin3_abc_fake_genlib());
 }
 
 int main(void) {
@@ -359,5 +573,17 @@ int main(void) {
     RUN_TEST(test_budget);
     RUN_TEST(test_pass_table_entry);
     RUN_TEST(test_process_is_refused);
+    RUN_TEST(test_gates_needs_library);
+    RUN_TEST(test_gates_unknown_library);
+    RUN_TEST(test_gates_with_lut_refused);
+    RUN_TEST(test_gates_with_via_blif_refused);
+    RUN_TEST(test_gates_lut_script_refused);
+    RUN_TEST(test_gates_default_script_is_gates_abc);
+    RUN_TEST(test_gates_ignores_project_and_cli_script);
+    RUN_TEST(test_gates_prov_fine_note);
+    RUN_TEST(test_gates_logs_skipped_cells);
+    RUN_TEST(test_gates_no_inverter_refused);
+    RUN_TEST(test_gates_note_texts_with_ports);
+    RUN_TEST(test_gates_genlib_loaded);
     return UNITY_END();
 }

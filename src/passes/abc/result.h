@@ -31,11 +31,14 @@ typedef struct odin3_abc_result_expect {
  * - co_driver holds the driver object of each CO: the n_cos real COs, then n_obs observation
  *   outputs (in-memory only), then the n_regs_out register inputs.
  * - old_lit maps objects to old AIG literals (§8.2); empty without a name map.
+ * - gate gives each LUT, under abc --gates, its library gate: an index into the run's lib.gates
+ *   (gatemap plan Task 11, cells.h); empty outside --gates.
  * All vecs hold uint32_t except truth (uint64_t).
  */
 typedef struct odin3_abc_result {
     uint32_t n_cis, n_regs_out, n_luts, n_cos, n_obs;
     odin3_vec fanin_start, fanins, lut_k, truth_start, truth, reg_from, co_driver, old_lit;
+    odin3_vec gate;
 } odin3_abc_result;
 
 /* An empty result with its vecs initialised (also valid after odin3_abc_result_free). */
@@ -56,6 +59,18 @@ uint32_t odin3_abc_result_first_lut(const odin3_abc_result *res);
  */
 odin3_status odin3_abc_result_check(const odin3_abc_result *res,
                                     const odin3_abc_result_expect *expect, odin3_abc_fail *fail);
+
+/* The kind of a MiniLUT object (§4.3's layout): a PI (fanin 0 is the null marker 0x7FFFFFFF), a PO
+ * (fanin 1 is the second marker 0x7FFFFFFE) or a LUT (under abc --gates, a gate). */
+typedef enum odin3_abc_mini_kind {
+    ODIN3_ABC_MINI_PI = 0,
+    ODIN3_ABC_MINI_PO,
+    ODIN3_ABC_MINI_LUT
+} odin3_abc_mini_kind;
+
+/* The kind of object obj (below luts->n_objs; objects 0 and 1, the constants, read as PIs). The one
+ * rule the result reader, the aligned MiniLUT and the gate reader (cells.c) share. */
+odin3_abc_mini_kind odin3_abc_mini_kind_of(const odin3_abc_luts *luts, uint32_t obj);
 
 /*
  * The in-memory exchange's result (§6.1, AB-16): the engine's MiniLUT (odin3_abc_luts, §4.3's

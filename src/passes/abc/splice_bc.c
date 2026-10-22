@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum { PORT_Y = 1, /* the Y port of a $lut */ FIRST_OBJ = 2 };
+enum { FIRST_OBJ = 2 };
 
 /* --- phase B ------------------------------------------------------------------------------- */
 
@@ -27,8 +27,10 @@ static odin3_status apply_step(splice *sp, const sp_step *step, odin3_net_id net
     case SP_CONST:
         st = odin3_net_merge(mod, (odin3_net_pair){{step->keep}, net});
         break;
-    default: {
-        odin3_pinslice out = odin3_node_port(mod, (odin3_node_id){step->buffer}, PORT_Y);
+    default: { /* the buffer's output: Y of a $lut, else the first output of its type (--gates) */
+        odin3_node_id buffer = {step->buffer};
+        uint32_t port = sp_out_port(sp->run->design, odin3_node_type(mod, buffer));
+        odin3_pinslice out = odin3_node_port(mod, buffer, port);
         st = odin3_pin_connect(mod, out.first, net);
         sp->stats.buffers += st == ODIN3_OK ? 1U : 0U;
         return st;

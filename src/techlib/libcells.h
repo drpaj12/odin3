@@ -7,11 +7,13 @@
  * strtab ID, in type-ID order (= file order). A gate cell has techlib kind GATE, one fn, no seq,
  * no memory, is odin3_gate_truth_eligible (one 1-bit output, 1 to ODIN3_GATE_TRUTH_MAX_INPUTS
  * 1-bit inputs, no parameters), its function depends on every input (the two cofactors of its
- * table on each input differ), and every port name matches [A-Za-z_][A-Za-z0-9_]* and is not
- * CONST0 or CONST1 (genlib names). A state cell is what odin3_libstate_of accepts. Every other
- * cell is a skip, with the first reason that applies, in this order: NOT_GATE (kind hard or
- * blackbox), STATE (a seq cell: a state cell; a seq cell odin3_libstate_of refuses is SHAPE),
- * CONSTANT (no input, a constant output: odin3_gate_const_value), SHAPE, NO_SUPPORT, NAME.
+ * table on each input differ), and its own name and every port name match [A-Za-z_][A-Za-z0-9_]*
+ * and are not CONST0 or CONST1 (genlib names: so AND2.X1, nand2-x1, 2NAND and the genlib's
+ * reserved $odin3_const0 and $odin3_const1 are never gate cells). A state cell is what
+ * odin3_libstate_of accepts. Every other cell is a skip, with the first reason that applies, in
+ * this order: NOT_GATE (kind hard or blackbox), STATE (a seq cell: a state cell; a seq cell
+ * odin3_libstate_of refuses is SHAPE), CONSTANT (no input, a constant output:
+ * odin3_gate_const_value), SHAPE, NO_SUPPORT, CELL_NAME, NAME.
  * buf, inv, tie0 and tie1 are the gate with 1 input and table 0x2, with table 0x1, and the
  * CONSTANT cells of value 0 and 1; each the one of smallest area (odin3_libcells_area), a cell
  * without a numeric area after every one with, ties to library order.
@@ -36,7 +38,8 @@ typedef enum odin3_libcell_skip {
     ODIN3_LIBCELL_CONSTANT,     /* no input: a TIE cell (the splice's, G-7) */
     ODIN3_LIBCELL_SHAPE,        /* not one fn output and 1 to 6 1-bit inputs without parameters */
     ODIN3_LIBCELL_NO_SUPPORT,   /* the function ignores input `port` */
-    ODIN3_LIBCELL_NAME          /* port `port` is not a genlib name */
+    ODIN3_LIBCELL_NAME,         /* port `port` is not a genlib name */
+    ODIN3_LIBCELL_CELL_NAME     /* the cell's own name is not a genlib name (checked before NAME) */
 } odin3_libcell_skip;
 
 /* A gate cell. */
@@ -102,7 +105,7 @@ bool odin3_libstate_of(const odin3_design *design, odin3_celltype_id type, odin3
  * The text of a skip reason, a printf format; NO_SUPPORT's and NAME's take the port name (%s):
  * "not a gate cell", "a flip-flop or latch", "a constant cell (used for constants)", "not one
  * output and 1 to 6 one-bit inputs without parameters", "its function ignores input '%s'", "port
- * '%s' is not a genlib name". "" for an unknown value.
+ * '%s' is not a genlib name", "its name is not a genlib name". "" for an unknown value.
  */
 const char *odin3_libcell_skip_text(uint8_t why);
 

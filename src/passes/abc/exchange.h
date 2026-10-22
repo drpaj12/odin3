@@ -39,6 +39,10 @@ odin3_status odin3_abc_exchange_blif(odin3_abc_run *run, odin3_abc_result *out);
  * yet folded; with a name map its old_lit holds one MiniAIG literal (or -1) per object, and
  * run->nomap_reason is "". Without one (--prov cone, a map above ODIN3_ABC_NAMEMAP_MAX_OBJS, a
  * RESULT or COMMAND failure of name_map) old_lit is empty and run->nomap_reason is the §8.2 reason.
+ * With --gates (gatemap spec 4.2, 4.3; plan Task 11) the session is open; load_genlib (run->genlib;
+ * a failure reported as load_genlib's); load_aig; `&put`; the script; get_cells of the script's
+ * end space; close: no `&get -m -n` and no name map (nomap_reason "--gates"), and *out is
+ * odin3_abc_result_from_cells' result, its gate vec filled.
  * run->run_no is incremented. ODIN3_ERR_PARSE (logged) when the AIG needs too many objects.
  */
 odin3_status odin3_abc_exchange_aig(odin3_abc_run *run, odin3_abc_result *out);

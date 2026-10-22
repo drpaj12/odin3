@@ -61,4 +61,7 @@ an unproved group.
   boundary net to `NAME[BIT]` (`h12[0]`, `h12[1]`, ...) before the call; a complete set of one
   direction becomes one port `NAME`, an incomplete one stays scalar with a warning. The port sits at the position of its lowest-net-ID
   bit, among the other ports in net ID order.
+- `cone_check` and `raise` take `-const PORT=V` (v1.0.5): a template input port tied to a
+  constant, so `A == 13` and `Q + 1` cones prove against `$eq` and `$add` with `-const B=13` and
+  `-const B=1`. Give `raise` the same options, `-const` spelling included.
 - Gaps found while writing the example are listed in `docs/RE-ARCHITECTURE.md` section 5.

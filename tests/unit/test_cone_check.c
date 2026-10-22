@@ -10,6 +10,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "passes/cone_check/cone_check.h"
+#include "passes/cone_check/cone_check_int.h"
 #include "passes/manager.h"
 #include "unity.h"
 #include "util/log.h"
@@ -37,7 +38,8 @@ enum {
     LOG_MAX = 16384,
     HASH_HEX = 65,
     CEX_BITS = 8,
-    PAIR_BYTES = 16
+    PAIR_BYTES = 16,
+    CONST_TEST_BITS = 64
 };
 
 /* 4-bit ripple adder: a half adder at bit 0, full adders above; the last carry is unused. */
@@ -49,6 +51,11 @@ enum {
     ".names a3 b3 c3 s3\n001 1\n010 1\n100 1\n111 1\n.end\n"
 
 #define ADD4 "-attr grp=add4 -cell $add -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=4"
+
+#define EQ4 "-attr grp=add4 -cell $eq -param A_WIDTH=4 -param B_WIDTH=4 -param Y_WIDTH=1"
+
+/* y = (a == 13): the one row 1011 is a0=1 a1=0 a2=1 a3=1. */
+#define EQ13_BLIF ".model m\n.inputs a0 a1 a2 a3\n.outputs y\n.names a0 a1 a2 a3 y\n1011 1\n.end\n"
 
 static char dir[DIR_BUF];
 static odin3_design *design;
@@ -405,6 +412,144 @@ static void test_cone_check_usage_errors(void) {
     FAILS_WITH(ADD4 " -bogus", "-bogus");
 }
 
+/* --- the cases of v1.0.5 plan Task 1: -const -------------------------------------------------- */
+
+static void load_eq13(void) {
+    read_blif(EQ13_BLIF);
+    mark_all();
+    for (int i = 0; i < 4; i++) {
+        char pair[PAIR_BYTES];
+        (void)snprintf(pair, sizeof pair, "a%d=A[%d]", i, i);
+        bind(pair);
+    }
+    bind("y=Y[0]");
+}
+
+static void test_cone_check_const_errors(void) {
+    load_eq13();
+    shape before = shape_of();
+    FAILS_WITH(EQ4 " -const C=1", "has no port 'C'");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const Y=1", "is not an input");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=1 -const B=2", "twice");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=16", "does not fit port 'B' (4 bits)");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=18446744073709551616", "does not fit port 'B' (4 bits)");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=1x", "not a constant");
+    log_text[0] = '\0';
+    FAILS_WITH(EQ4 " -const B=", "needs NAME=VALUE");
+    TEST_ASSERT_NULL(text_attr("odin3:cone_check"));
+    expect_same(before);
+}
+
+static void test_cone_check_const_net_bound_refused(void) {
+    load_eq13();
+    bind("a3=B[3]");
+    FAILS_WITH(EQ4 " -const B=13", "port 'B' is constant");
+}
+
+static void test_cone_check_const_cell_text(void) {
+    load_eq13();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ4 " -const B=13 -timeout 0"), log_text);
+    TEST_ASSERT_EQUAL_STRING("$eq A_WIDTH=4 B_WIDTH=4 Y_WIDTH=1 -const B=13",
+                             text_attr("odin3:cone_cell"));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ4 " -const B=0b1101 -timeout 0"), log_text);
+    TEST_ASSERT_EQUAL_STRING("$eq A_WIDTH=4 B_WIDTH=4 Y_WIDTH=1 -const B=0b1101",
+                             text_attr("odin3:cone_cell"));
+    cc_opts opts;
+    memset(&opts, 0, sizeof opts);
+    opts.cell = "$add";
+    odin3_vec_init(&opts.params, sizeof(cc_param));
+    odin3_vec_init(&opts.consts, sizeof(cc_const));
+    cc_const *slot = odin3_vec_push(&opts.consts);
+    TEST_ASSERT_NOT_NULL(slot);
+    *slot = (cc_const){"B", "1"};
+    slot = odin3_vec_push(&opts.consts);
+    TEST_ASSERT_NOT_NULL(slot);
+    *slot = (cc_const){"A", "2"};
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, cc_cell_text(&opts, &text));
+    TEST_ASSERT_EQUAL_STRING("$add -const A=2 -const B=1", text.data);
+    odin3_strbuf_free(&text);
+    odin3_vec_free(&opts.params);
+    odin3_vec_free(&opts.consts);
+}
+
+static void expect_bits(const char *text, uint32_t width, const uint8_t *want) {
+    uint8_t bits[CONST_TEST_BITS];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, cc_const_bits(text, width, bits));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(want, bits, width);
+}
+
+static void test_cone_check_const_value_widths(void) {
+    const uint8_t thirteen[4] = {1, 0, 1, 1};
+    uint8_t bits[CONST_TEST_BITS];
+    expect_bits("13", 4, thirteen);
+    expect_bits("0b00001101", 4, thirteen);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, cc_const_bits("0b10000", 4, bits));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, cc_const_bits("18446744073709551615", CONST_TEST_BITS, bits));
+    TEST_ASSERT_EQUAL_UINT8(1, bits[CONST_TEST_BITS - 1]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          cc_const_bits("18446744073709551616", CONST_TEST_BITS, bits));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, cc_const_bits("0b", 4, bits));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, cc_const_bits("-1", 4, bits));
+}
+
+/* s = a + 1 mod 16 as half adders: s0 = !a0, s1 = a1 ^ a0, c2 = a1 & a0, ... */
+#define INC4_BLIF                                                                                  \
+    ".model m\n.inputs a0 a1 a2 a3\n.outputs s0 s1 s2 s3\n.names a0 s0\n0 1\n"                     \
+    ".names a1 a0 s1\n01 1\n10 1\n.names a1 a0 c2\n11 1\n"                                         \
+    ".names a2 c2 s2\n01 1\n10 1\n.names a2 c2 c3\n11 1\n"                                         \
+    ".names a3 c3 s3\n01 1\n10 1\n.end\n"
+
+#define INC_ARGS "-attr grp=add4 -cell $add -param A_WIDTH=4 -param B_WIDTH=1 -param Y_WIDTH=4"
+
+static void test_cone_check_const_increment_equivalent(void) {
+    use_real_abc();
+    read_blif(INC4_BLIF);
+    mark_all();
+    for (int i = 0; i < 4; i++) {
+        char pair[PAIR_BYTES];
+        (void)snprintf(pair, sizeof pair, "a%d=A[%d]", i, i);
+        bind(pair);
+        (void)snprintf(pair, sizeof pair, "s%d=Y[%d]", i, i);
+        bind(pair);
+    }
+    shape before = shape_of();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(INC_ARGS " -const B=1"), log_text);
+    TEST_ASSERT_EQUAL_STRING("equivalent", text_attr("odin3:cone_check"));
+    TEST_ASSERT_NULL(text_attr("odin3:cone_cex"));
+    expect_same(before);
+}
+
+static void test_cone_check_const_eq13_equivalent(void) {
+    use_real_abc();
+    load_eq13();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ4 " -const B=13"), log_text);
+    TEST_ASSERT_EQUAL_STRING("equivalent", text_attr("odin3:cone_check"));
+}
+
+static void test_cone_check_const_eq13_differs(void) {
+    use_real_abc();
+    load_eq13();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(EQ4 " -const B=12"), log_text);
+    TEST_ASSERT_EQUAL_STRING("differs", text_attr("odin3:cone_check"));
+    const char *cex = text_attr("odin3:cone_cex");
+    TEST_ASSERT_NOT_NULL(cex);
+    TEST_ASSERT_NOT_NULL(strstr(cex, "A[0]="));
+    TEST_ASSERT_NULL(strstr(cex, "B["));
+}
+
+static void test_cone_check_no_const_text_unchanged(void) {
+    load_adder(false);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run(ADD4 " -timeout 0"), log_text);
+    TEST_ASSERT_EQUAL_STRING("$add A_WIDTH=4 B_WIDTH=4 Y_WIDTH=4", text_attr("odin3:cone_cell"));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_cone_check_ripple_adder_equivalent);
@@ -419,5 +564,13 @@ int main(void) {
     RUN_TEST(test_cone_check_template_xz_refused);
     RUN_TEST(test_cone_check_constant_x_unproven);
     RUN_TEST(test_cone_check_usage_errors);
+    RUN_TEST(test_cone_check_const_errors);
+    RUN_TEST(test_cone_check_const_net_bound_refused);
+    RUN_TEST(test_cone_check_const_cell_text);
+    RUN_TEST(test_cone_check_const_value_widths);
+    RUN_TEST(test_cone_check_no_const_text_unchanged);
+    RUN_TEST(test_cone_check_const_increment_equivalent);
+    RUN_TEST(test_cone_check_const_eq13_equivalent);
+    RUN_TEST(test_cone_check_const_eq13_differs);
     return UNITY_END();
 }
