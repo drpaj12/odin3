@@ -1,8 +1,8 @@
-% Yggdrasil III drawn as a tree. Roots (dark brown) at the bottom: what AnonSynth reads and writes, and the
+% AnonSuite drawn as a tree. Roots (dark brown) at the bottom: what AnonSynth reads and writes, and the
 % tools it links to. The trunk (brown) is AnonSynth, its steps running DOWN from parse to the roots. A small
 % forest of mini trees on the right holds the oracles, to compare against. The canopy (green oval) is the
-% tree-top: Wyrd III, Bifrost III (the arrow to Midgard III) and Midgard III (verilogTown). Loki III, Leman
-% Russ III and The Norns III are side branches off the trunk, tools and experiments. No status; the GitHub
+% tree-top: AnonGUI, AnonSim (the arrow to AnonGame) and AnonGame (verilogTown). AnonRE, Leman
+% Russ III and AnonPlace are side branches off the trunk, tools and experiments. No status; the GitHub
 % links are in the caption.
 \begin{tikzpicture}[odin, node distance=3mm,
   leaf/.style={ellipse, draw=o3grn8, fill=o3grn1, align=center, line width=0.6pt, inner xsep=1pt,
@@ -65,12 +65,12 @@
     \draw[->, draw=o3brn3, line width=0.5pt] (st\a.south) -- (st\b.north);
   }
   % ---- canopy pieces ----------------------------------------------------------------------------
-  \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-4.8,9.4) {\textbf{Wyrd~III}\\\odinsub{experiments, GUI}};
-  \node[leaf, text width=30mm, minimum height=10mm] (mid) at (5.6,9.4) {\textbf{Midgard~III}\\\odinsub{(Verilog teaching game)}};
+  \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-4.8,9.4) {\textbf{AnonGUI}\\\odinsub{experiments, GUI}};
+  \node[leaf, text width=30mm, minimum height=10mm] (mid) at (5.6,9.4) {\textbf{AnonGame}\\\odinsub{(Verilog teaching game)}};
   \draw[->, line width=1.6pt, draw=o3grn8] (wyrd.east) -- (mid.west)
-    node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{Bifrost~III}\\\odinsub{simulation bridge}};
+    node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{AnonSim}\\\odinsub{simulation bridge}};
   % ---- tools and experiments on side branches ---------------------------------------------------------
-  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.0) {\textbf{Loki~III}\\\odinsub{Tool \& Experiment: reverse engineering}};
-  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.1) {\textbf{Leman~Russ~III}\\\odinsub{Tool \& Experiment: HT detection tools}};
-  \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,2.2) {\textbf{The Norns~III}\\\odinsub{Tool \& Experiment: Placement with Provenance}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.0) {\textbf{AnonRE}\\\odinsub{Tool \& Experiment: reverse engineering}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.1) {\textbf{AnonHT}\\\odinsub{Tool \& Experiment: HT detection tools}};
+  \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,2.2) {\textbf{AnonPlace}\\\odinsub{Tool \& Experiment: Placement with Provenance}};
 \end{tikzpicture}

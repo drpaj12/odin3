@@ -3,7 +3,8 @@
 import os, re, sys
 NAME, CODE = "AnonSynth", "anonsynth"
 src = open("odin3.tex").read()
-keys = ["jamieson2005odin","jamieson2011odin2","verilogTown","verilogtown2017","faruque2025gatebreaker",
+# Odin and Odin II stay cited: they are named in the text, so blinding them would point to the author.
+keys = ["verilogTown","verilogtown2017","faruque2025gatebreaker",
         "gharibian2010finding","gharibian2013analyzing","gharibian2014identifying","jamieson2022datamining",
         "sarihi2024seekers"]
 amap = {k: "anon%02d" % (i + 1) for i, k in enumerate(keys)}
@@ -13,8 +14,18 @@ def sub(old, new, s=None):
     if n != 1:
         sys.exit("count %d: %s" % (n, old[:70]))
     src = src.replace(old, new)
+# Suite and tool names (Norse theme) to placeholders, longest first.
+NAMES = [("Leman~Russ~III", "AnonHT"), ("Leman Russ III", "AnonHT"), ("The Norns~III", "AnonPlace"),
+         ("The Norns III", "AnonPlace"), ("Norns~III", "AnonPlace"), ("Norns III", "AnonPlace"),
+         ("Yggdrasil~III", "AnonSuite"), ("Yggdrasil III", "AnonSuite"), ("Wyrd~III", "AnonGUI"),
+         ("Wyrd III", "AnonGUI"), ("Loki~III", "AnonRE"), ("Loki III", "AnonRE"),
+         ("Midgard~III", "AnonGame"), ("Midgard III", "AnonGame"), ("Bifrost~III", "AnonSim"),
+         ("Bifrost III", "AnonSim")]
+THEME = ("Yggdrasil", "Wyrd", "Loki", "Midgard", "Bifrost", "Leman", "Norns", "Norse", "world tree")
 def rename(t):
     t = t.replace("Odin~III", NAME).replace("Odin III", NAME)
+    for a, b in NAMES:
+        t = t.replace(a, b)
     return re.sub(r"(?<!IMAGE/)odin3(?!-tikz-styles)", CODE, t)
 # Part I only: cut Part II and the second reference list
 head, sep, _ = src.partition("\\bibliography{joined}\n")
@@ -38,8 +49,8 @@ sub("""\\author{\\IEEEauthorblockN{Peter Jamieson}
 \\todo{jamiespa@miamioh.edu}}}""",
 """\\author{\\IEEEauthorblockN{Anonymous Author(s)}
 \\IEEEauthorblockA{Affiliation withheld for double-blind review}}""")
-sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a compiler front end properly:""",
-"""started from nothing. It used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end cost a year of work to learn the basics of Verilog synthesis. Odin~II~\\cite{jamieson2011odin2} followed and wrote a compiler front end properly:""")
+sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a proper compiler front end:""",
+"""started from nothing. It used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end cost a year of work to learn the basics of Verilog synthesis. Odin~II~\\cite{jamieson2011odin2} followed and wrote a proper compiler front end:""")
 sub("Odin~III is public at \\url{https://github.com/drpaj12/odin3}.", "Odin~III is public (URL withheld for review).")
 sub("All the code is available at \\url{https://github.com/drpaj12/YggdrasilIII}.", "All the code is public (URL withheld for review).")
 sub("as a package \\url{https://github.com/drpaj12/YggdrasilIII}.", "as a package (URL withheld for review).")
@@ -50,10 +61,13 @@ sub("our earlier verilogTown \\cite{verilogTown}", "an earlier Verilog teaching 
 sub("a port of my verilogTown Verilog teaching game", "a port of an earlier Verilog teaching game")
 sub("continues the netlist-to-RTL work of Faruque et al.~", "continues earlier netlist-to-RTL work~")
 sub("the placement experiment of Gharibian et al.~", "an earlier placement experiment~")
-sub("Gharibian et al.\\ met it in placement", "Earlier work met it in placement")
+sub("Gharibian et al.\\ addressed it in placement", "Earlier work addressed it in placement")
 sub("Midgard~III (verilogTown~\\cite{verilogtown2017})", "Midgard~III (a Verilog teaching game~\\cite{verilogtown2017})")
 sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and Odin~II in 2010.")
 sub("the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.", "the original creation of Odin and Odin~II, which humans verified at high cost.")
+sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
+sub("Yggdrasil~III, the world tree (Fig.", "Yggdrasil~III (Fig.")
+sub("Verilog Synthesis for FPGAs - again\\\\", "Verilog Synthesis for FPGAs\\\\")
 sub("Our latest paper applies", "Later work applies")
 for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):
     for m in re.finditer(bad, src):
@@ -72,11 +86,18 @@ for f in figs:
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
-for bad in ("drpaj12", "Jamieson", "Miami", "Odin~III", "Odin III", "verilogTown"):
-    if bad in src:
-        sys.exit("leak: " + bad)
+# Odin and Odin II stay cited, so the tree is scaled to 88% to keep 8 pages.
+sub("\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}",
+    "\\scalebox{0.88}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
+body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
+for f in figs:
+    body += "\n".join(ln for ln in open("IMAGE/blind/%s.tex" % f).read().splitlines() if not ln.lstrip().startswith("%"))
+for bad in ("drpaj12", "Jamieson", "Miami", "Odin~III", "Odin III", "verilogTown") + THEME:
+    if bad in body:
+        i = body.index(bad)
+        sys.exit("leak: " + body[i - 60:i + 40])
 hdr = ("% Double-blind 8-page version for FCCM (Part I only), made from odin3.tex by a script: authors,\n"
-       "% self-citations (blind.bib), repository URLs and the tool name (placeholder " + NAME + ") withheld;\n"
+       "% self-citations (blind.bib), repository URLs, the tool and suite names (placeholders " + NAME + ", AnonSuite, ...) withheld;\n"
        "% figures from IMAGE/blind/. On acceptance use odin3.tex.\n")
 open("odin3_blind.tex", "w").write(hdr + src)
 print("ok", figs)
