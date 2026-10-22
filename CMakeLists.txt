@@ -119,6 +119,9 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/register.c
     src/passes/raise/raise.c
     src/passes/raise/register.c
+    src/passes/unmap/unmap.c
+    src/passes/unmap/register.c
+    src/passes/unmap/kit.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1800,6 +1803,8 @@ if(BUILD_TESTING)
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     # Phase 7 (7.4d): the raise pass; it needs the cone_check proof, so the unit test links the ABC too.
+    odin3_add_unit_test(test_unmap)
+    target_compile_definitions(test_unmap PRIVATE ODIN3_UM_ROOT="${PROJECT_BINARY_DIR}" ODIN3_UM_LIB="${PROJECT_SOURCE_DIR}/lib/vtr.o3lib")
     odin3_add_unit_test(test_raise)
     target_compile_definitions(test_raise PRIVATE ODIN3_RS_ROOT="${PROJECT_BINARY_DIR}")
     if(ODIN3_WITH_ABC)
