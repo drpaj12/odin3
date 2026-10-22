@@ -414,6 +414,48 @@ static void test_pi_names(void) {
     free_all();
 }
 
+/* ABI 5: the fake's load_genlib keeps the text; get_cells gives AND2/INV gate objects, named by
+ * odin3_abc_fake_gate_names, in the MiniLUT layout; without a loaded AIG it is a RESULT. */
+static void test_fake_get_cells(void) {
+    const odin3_abc_engine *eng = odin3_abc_fake_engine();
+    odin3_abc_fail fail = {0};
+    odin3_abc_cells cells = {0};
+    odin3_abc_fake_reset();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ENGINE,
+                          eng->get_cells(eng->self, ODIN3_ABC_CELLS_NTK, &cells, &fail));
+    TEST_ASSERT_EQUAL_STRING("the fake engine has no cells", fail.text);
+    load_text((blif_text){"gates.blif", ".model g\n.inputs a b\n.outputs y\n"
+                                        ".names a b y\n10 1\n.end\n"});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, build_aig(), afx_errors());
+    odin3_abc_aig view = odin3_abc_aig_view(&aig);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->open(eng->self, NULL, NULL, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->load_genlib(eng->self, "GATE X 1 Y=A;", &fail));
+    TEST_ASSERT_EQUAL_STRING("GATE X 1 Y=A;", odin3_abc_fake_genlib());
+    odin3_abc_fake_gate_names((odin3_abc_fake_gates){"G_AND", "G_INV"});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->load_aig(eng->self, &view, &fail));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, eng->get_cells(eng->self, ODIN3_ABC_CELLS_GIA, &cells, &fail));
+    TEST_ASSERT_EQUAL_UINT32(2, cells.net.lut_size);
+    TEST_ASSERT_EQUAL_UINT32(2, cells.n_names); /* y = a & !b: one AND2, one INV */
+    uint32_t ands = 0;
+    for (uint32_t obj = 0; obj < cells.net.n_objs; obj++) {
+        int32_t gate = cells.gate[obj];
+        if (gate >= 0 && strcmp(cells.names[gate], "G_AND") == 0) {
+            TEST_ASSERT_EQUAL_HEX32(0x8, cells.net.truths[obj] & 0xFU);
+            ands++;
+        } else if (gate >= 0) {
+            TEST_ASSERT_EQUAL_STRING("G_INV", cells.names[gate]);
+            TEST_ASSERT_EQUAL_HEX32(0x1, cells.net.truths[obj] & 0x3U);
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, ands);
+    int32_t driver = cells.net.fanins[(size_t)2 * (cells.net.n_objs - 1U)];
+    TEST_ASSERT_TRUE(cells.gate[driver] >= 0); /* the PO is driven by a gate */
+    eng->close(eng->self);
+    odin3_abc_fake_reset();
+    TEST_ASSERT_EQUAL_STRING("", odin3_abc_fake_genlib());
+    free_all();
+}
+
 /* The session's commands: open, load_aig, &put, the script, `&get -m -n`, get_luts, close. */
 static void test_session_commands(void) {
     load_t1(0);
@@ -887,6 +929,7 @@ int main(void) {
     RUN_TEST(test_lut_size_checked);
     RUN_TEST(test_pi_names);
     RUN_TEST(test_aligned_after_scorr_merge);
+    RUN_TEST(test_fake_get_cells);
     RUN_TEST(test_result_names_checked);
     RUN_TEST(test_session_commands);
     RUN_TEST(test_session_commands_aig);

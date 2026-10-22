@@ -11,7 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-enum { ABC_COMMIT_DIGITS = 40, ABC_ENGINE_FUNCTIONS = 6 };
+enum { ABC_COMMIT_DIGITS = 40, ABC_ENGINE_FUNCTIONS = 8 };
 
 /* abc_commit: exactly ABC_COMMIT_DIGITS lower-case hex digits; stops at the first non-hex byte. */
 static bool abc_commit_ok(const char *commit) {
@@ -27,15 +27,16 @@ static bool abc_commit_ok(const char *commit) {
     return commit[ABC_COMMIT_DIGITS] == '\0';
 }
 
-/* The first of the six functions, in table order, that is NULL; NULL when all are set. */
+/* The first of the eight functions, in table order, that is NULL; NULL when all are set. */
 static const char *missing_function(const odin3_abc_engine *engine) {
     const struct {
         bool set;
         const char *name;
     } fns[ABC_ENGINE_FUNCTIONS] = {
-        {engine->open != NULL, "open"},         {engine->load_aig != NULL, "load_aig"},
-        {engine->exec != NULL, "exec"},         {engine->get_luts != NULL, "get_luts"},
-        {engine->name_map != NULL, "name_map"}, {engine->close != NULL, "close"},
+        {engine->open != NULL, "open"},           {engine->load_aig != NULL, "load_aig"},
+        {engine->exec != NULL, "exec"},           {engine->get_luts != NULL, "get_luts"},
+        {engine->name_map != NULL, "name_map"},   {engine->load_genlib != NULL, "load_genlib"},
+        {engine->get_cells != NULL, "get_cells"}, {engine->close != NULL, "close"},
     };
     for (size_t i = 0; i < ABC_ENGINE_FUNCTIONS; i++) {
         if (!fns[i].set) {
