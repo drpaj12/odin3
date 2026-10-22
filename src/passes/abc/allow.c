@@ -23,6 +23,11 @@
  *   &if -S, -J      abc.c:45359, 45373  pLutStruct = the string (usage abc.c:45832 "[-SJ str]")
  *   &ps -D          abc.c:36140 pDumpFile = the file (usage abc.c:36173 "[-D file]";
  *                               Gia_ManLogAigStats, giaMan.c:460-462)
+ *   &nf -Z          abc.c:47212 ZFile: Nf_ManDumpMatches / Nf_ManDumpMatchesBin fopen it (and
+ *                               <name>.bin, <name>.gates; giaNf.c:2177, 2297-2301, 2453-2457)
+ *   &nf -M          abc.c:47190 nMaxMatches: with -Z, Nf_ManDumpMatchesBin writes the matches
+ *                               (giaNf.c:2279-2292); refused with it (gatemap plan Task 5)
+ *   map             has no file option (getopt "DABFSGMarspfuovh", abc.c:21453)
  *   mfs2 -i         abc.c:5916  fIndDCs: with the frames set (-j) the unrolled network is written
  *                               to unroll_dump.blif (abc.c:5946-5950, abcMfs.c:555; Task 11)
  *
@@ -166,6 +171,8 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"mfs", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "tMp"},
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "o"},
+    /* gate mapping (only with abc --gates, gatemap spec 5) */
+    {"map", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_CELLMAPPED, "", ""},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
@@ -174,6 +181,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
     {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swYjbi"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
+    {"&nf", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_CELLMAPPED, "MZ", ""},
     /* printing: the 34 print_* commands at the pin but print_constr, print_status, print_box,
      * print_cone and print_npn;
      * print_mint is registered only under ABC_USE_CUDD (on in the pinned build) */
