@@ -1137,8 +1137,7 @@ static void test_unmap_ram_width_merge(void) {
     }
     check_clean();
 }
-
-/* The slice order of R-6 is node-ID order; the role numbers partial_map wrote agree (the one
+/* partial_map's role numbers agree with node-ID order; the tests below run unmap on it. */
  * place a test reads `hardmap`). */
 static void test_unmap_ram_bit_order(void) {
     flow_file(src_path("tests/unmap/ram_w8.v"));
@@ -1153,6 +1152,82 @@ static void test_unmap_ram_bit_order(void) {
         TEST_ASSERT_NOT_NULL(tag);
         TEST_ASSERT_EQUAL_INT64(i, strtol(tag + 2, &end, 10));
     }
+}
+
+/* The nets the slices of ram_w8 write (port data1) and read (port out2), in node-ID order. */
+enum { HARD_DATA1 = 2, HARD_OUT2 = 7, MEM_RD_DATA_PORT = 3, MEM_WR_DATA_PORT = 7 };
+
+typedef struct slice_nets {
+    odin3_node_id slice[RAM_BITS];
+    odin3_net_id wdata[RAM_BITS];
+    odin3_net_id rdata[RAM_BITS];
+} slice_nets;
+
+static void read_slices(slice_nets *sn) {
+    TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("dual_port_ram", sn->slice, RAM_BITS));
+    for (int i = 0; i < RAM_BITS; i++) {
+        sn->wdata[i] = um_port_net(top(), sn->slice[i], (um_pos){HARD_DATA1, 0});
+        sn->rdata[i] = um_port_net(top(), sn->slice[i], (um_pos){HARD_OUT2, 0});
+        TEST_ASSERT_TRUE(odin3_net_valid(sn->wdata[i]) && odin3_net_valid(sn->rdata[i]));
+    }
+}
+
+/* Gives slice `node` the role `b<bit>` partial_map writes. */
+static void set_role(odin3_node_id node, int bit) {
+    char text[32];
+    (void)snprintf(text, sizeof text, "dual_port_ram:b%d", bit);
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, intern(text), 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_attr_set(top(), (odin3_objref){ODIN3_OBJ_NODE, node.v},
+                                                   intern("hardmap"), &value));
+}
+
+/* The merged $mem takes slice `order[k]` as data bit k. */
+static void expect_merged_order(const slice_nets *sn, const int order[RAM_BITS]) {
+    odin3_node_id mem = first_mem(1);
+    expect_shape(mem, (const int64_t[4]){6, RAM_BITS, 1, 1});
+    for (int k = 0; k < RAM_BITS; k++) {
+        TEST_ASSERT_EQUAL_UINT32(
+            sn->wdata[order[k]].v,
+            um_port_net(top(), mem, (um_pos){MEM_WR_DATA_PORT, (uint32_t)k}).v);
+        TEST_ASSERT_EQUAL_UINT32(
+            sn->rdata[order[k]].v,
+            um_port_net(top(), mem, (um_pos){MEM_RD_DATA_PORT, (uint32_t)k}).v);
+    }
+}
+
+static void test_unmap_ram_merged_bit_order(void) {
+    flow_file(src_path("tests/unmap/ram_w8.v"));
+    slice_nets sn;
+    read_slices(&sn);
+    run_script("unmap");
+    expect_merged_order(&sn, (const int[RAM_BITS]){0, 1, 2, 3, 4, 5, 6, 7});
+}
+
+/* R-6: the role numbers decide when every slice has one, whatever the node-ID order is. */
+static void test_unmap_ram_role_order(void) {
+    flow_file(src_path("tests/unmap/ram_w8.v"));
+    slice_nets sn;
+    read_slices(&sn);
+    for (int i = 0; i < RAM_BITS; i++) {
+        set_role(sn.slice[i], RAM_BITS - 1 - i);
+    }
+    run_script("unmap");
+    expect_merged_order(&sn, (const int[RAM_BITS]){7, 6, 5, 4, 3, 2, 1, 0});
+}
+
+/* One slice without a role: node-ID order for all of them. */
+static void test_unmap_ram_role_order_partial(void) {
+    flow_file(src_path("tests/unmap/ram_w8.v"));
+    slice_nets sn;
+    read_slices(&sn);
+    for (int i = 0; i < RAM_BITS; i++) {
+        set_role(sn.slice[i], RAM_BITS - 1 - i);
+    }
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_attr_remove(top(), (odin3_objref){ODIN3_OBJ_NODE, sn.slice[3].v}, intern("hardmap")));
+    run_script("unmap");
+    expect_merged_order(&sn, (const int[RAM_BITS]){0, 1, 2, 3, 4, 5, 6, 7});
 }
 
 static void test_unmap_ram_replicas(void) {
@@ -1688,6 +1763,9 @@ static void run_ram_tests(void) {
     RUN_TEST(test_unmap_ram_blif_pad);
     RUN_TEST(test_unmap_ram_width_merge);
     RUN_TEST(test_unmap_ram_bit_order);
+    RUN_TEST(test_unmap_ram_merged_bit_order);
+    RUN_TEST(test_unmap_ram_role_order);
+    RUN_TEST(test_unmap_ram_role_order_partial);
     RUN_TEST(test_unmap_ram_replicas);
     RUN_TEST(test_unmap_ram_blif_candidates);
     RUN_TEST(test_unmap_ram_no_regroup);

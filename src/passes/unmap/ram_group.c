@@ -14,6 +14,7 @@
 
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- a stable merge sort of indices with a context comparator ------------------------------ */
@@ -259,6 +260,48 @@ static odin3_status add_candset(odin3_vec *wgs, size_t from, odin3_vec *sets, co
     return ODIN3_OK;
 }
 
+/* The data bit `<n>` of the role "<type>:b<n>[.path]" that partial_map wrote on the cell; false
+ * when the cell has no such role (a BLIF, or a cell of another tool). */
+static bool role_bit(const um_ctx *uc, odin3_node_id node, uint32_t *bit) {
+    const char *attr = um_attr_text(uc, node, "hardmap");
+    const char *colon = attr != NULL ? strchr(attr, ':') : NULL;
+    if (colon == NULL || colon[1] != 'b' || colon[2] < '0' || colon[2] > '9') {
+        return false;
+    }
+    char *end = NULL;
+    unsigned long value = strtoul(colon + 2, &end, 10);
+    *bit = (uint32_t)value;
+    return value <= UINT32_MAX;
+}
+
+/* R-6: the slices of a group go in the order of their roles `b<n>` when every one has it, else in
+ * node-ID order (the order they are in). A stable insertion sort: the groups are small. */
+static void order_by_role(const um_gctx *gc, um_wgroup *group) {
+    uint32_t *cells = group->members.data;
+    size_t count = group->members.len;
+    for (size_t i = 0; i < count; i++) {
+        uint32_t unused = 0;
+        if (!role_bit(gc->uc, gc->cells[cells[i]].node, &unused)) {
+            return;
+        }
+    }
+    for (size_t i = 1; i < count; i++) {
+        uint32_t held = cells[i];
+        uint32_t key = 0;
+        (void)role_bit(gc->uc, gc->cells[held].node, &key);
+        size_t at = i;
+        for (; at > 0; at--) {
+            uint32_t before = 0;
+            (void)role_bit(gc->uc, gc->cells[cells[at - 1]].node, &before);
+            if (before <= key) {
+                break;
+            }
+            cells[at] = cells[at - 1];
+        }
+        cells[at] = held;
+    }
+}
+
 /* The units of one run idx[run] of equal control: each becomes a width group. */
 static odin3_status run_units(const um_gctx *gc, const odin3_vec *idx, um_range run,
                               odin3_vec *wgs) {
@@ -273,6 +316,9 @@ static odin3_status run_units(const um_gctx *gc, const odin3_vec *idx, um_range 
             end++;
         }
         st = add_wgroup(wgs, idx, (um_range){unit, end}, origin);
+        if (st == ODIN3_OK) {
+            order_by_role(gc, (um_wgroup *)wgs->data + (wgs->len - 1));
+        }
         unit = end;
     }
     return st;
