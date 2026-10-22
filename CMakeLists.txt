@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
+    src/passes/submod/busattr.c
     src/passes/submod/register.c
     src/passes/cone_check/cone_check.c
     src/passes/cone_check/bind.c
@@ -3073,6 +3074,15 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_re_round
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(python_re_round PROPERTIES
+            LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
+        # v1.0.5: cone_check/raise -const (and submod -bus) through the Python binding.
+        add_test(NAME python_core_options
+            COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                    ODIN3_ABC=$<TARGET_FILE:odin3_abc_exe> ODIN3_REQUIRE_ABC=1
+                    "ODIN3_ABC_LIB=$<TARGET_FILE:odin3_abc>"
+                    ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_core_options
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(python_core_options PROPERTIES
             LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
     endif()
     # Phase 6 (6.3, spec E-3 to E-7): write_json --odin3, the reader's handlers and the loader
