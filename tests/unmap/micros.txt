@@ -1,6 +1,7 @@
 # The micros of the unmap round trip (cli_unmap_rtl, plan Task 12, spec T-2).
 # Syntax: `<path relative to the repo> <comb|seq>`. `comb` micros also compare sim vectors before
 # hardmap and after unmap (the sim pass has no word-level flip-flops, so `seq` ones are not run).
+# A third word `glue` also checks that the `$mux $dff $and $not` counts are those before hardmap.
 tests/hardmap/add_8x6.v comb
 tests/hardmap/sub_pad_s.v comb
 tests/hardmap/mul_8x7.v comb
@@ -24,3 +25,4 @@ tests/micro/verilog/common/2r1w.v seq
 tests/unmap/ram_w8.v seq
 tests/unmap/ram_2r1w.v seq
 tests/hardmap/adder_use.v comb
+tests/unmap/ram_deep.v seq glue

@@ -74,14 +74,14 @@ run_odin3() { # run_odin3 <script> <what>
     "$odin3" "${top[@]}" -p "$1" >"$work/out" 2>"$work/err" || fail "$2: odin3 failed"
 }
 
-rtl_micro() { # rtl_micro <repo-relative path> <comb|seq>
+rtl_micro() { # rtl_micro <repo-relative path> <comb|seq> [glue]
     local design=$repo/$1
     top_name=$(grep -m1 -oE '^[[:space:]]*module[[:space:]]+[A-Za-z_0-9]+' "$design" | awk '{print $2}')
-    run_odin3 "$(script "$design" ref "$work/ref.blif")" "$1 without hardmap"
-    run_odin3 "$(script "$design" new "$work/new.blif")" "$1 with unmap"
     if listed "$1" equiv-skip; then
         :
     else
+        run_odin3 "$(script "$design" ref "$work/ref.blif")" "$1 without hardmap"
+        run_odin3 "$(script "$design" new "$work/new.blif")" "$1 with unmap"
         local code=0
         "$equiv" "$work/ref.blif" "$work/new.blif" >"$work/eq" 2>&1 || code=$?
         if [[ $code -eq 4 ]] && listed "$1" unproven; then
@@ -98,6 +98,14 @@ rtl_micro() { # rtl_micro <repo-relative path> <comb|seq>
             listed "$1" counts || fail "$1: $type count $(count "$work/before.il" "$type") before, $(count "$work/after.il" "$type") after"
         fi
     done
+    if [[ ${3:-} == glue ]]; then
+        # a depth split: the glue partial_map built is gone, no more RTL cells are left than before
+        # (the registered read is merged into the RAM, so a `$dff` may be gone too)
+        for type in '$mux' '$dff' '$and' '$not'; do
+            [[ $(count "$work/after.il" "$type") -le $(count "$work/before.il" "$type") ]] ||
+                fail "$1: $type count $(count "$work/before.il" "$type") before, $(count "$work/after.il" "$type") after: glue left"
+        done
+    fi
     if [[ $2 == comb ]]; then
         local pre="read_techlib $lib; read_verilog --lib $adder_lib; read_verilog --nolatches --vtr-compat $design"
         local prep="proc; opt; wreduce; opt_clean; opt -full; flatten; opt -full"
@@ -128,9 +136,9 @@ stale_check() {
 
 case $case_name in
 rtl)
-    while read -r path kind; do
+    while read -r path kind extra; do
         [[ -z $path || $path == \#* ]] && continue
-        rtl_micro "$path" "$kind"
+        rtl_micro "$path" "$kind" "$extra"
     done <"$repo/tests/unmap/micros.txt"
     stale_check rtl
     ;;

@@ -1320,6 +1320,98 @@ static void test_depth_write_duplicate_path(void) {
     odin3_vec_free(&leaves);
 }
 
+/* --- Task 16: depth recovery, read side and merge ------------------------------------------ */
+
+static void flow_deep(void) {
+    flow_file(src_path("tests/unmap/ram_deep.v"));
+}
+
+static void test_unmap_depth_roundtrip(void) {
+    flow_deep();
+    run_script("unmap\nopt_clean");
+    odin3_node_id mem = first_mem(1);
+    expect_shape(mem, (const int64_t[4]){17, 1, 1, 1});
+    TEST_ASSERT_EQUAL_UINT32(intern("ram.depth"), attr_of(mem, "unmap")->str);
+    /* the three `$mux` cells proc made for the write (RTL logic) stay; the glue is gone */
+    TEST_ASSERT_EQUAL_UINT32(3, nodes_of("$mux", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$dff", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$and", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$not", NULL, 0));
+    check_clean();
+}
+
+/* A user `$not` reads the output of a glue `$not` of the write side. */
+static odin3_node_id add_reader_of_glue_not(void) {
+    odin3_node_id glue[8];
+    uint32_t count = nodes_of("$not", glue, 8);
+    TEST_ASSERT_TRUE(count > 0);
+    odin3_net_id shared = um_port_net(top(), glue[0], (um_pos){1, 0});
+    odin3_net_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top(), 0, odin3_module_prov(top()), &out));
+    odin3_netvec ports[2] = {{&shared, 1}, {&out, 1}};
+    odin3_value params[3] = {odin3_value_int(0), odin3_value_int(1), odin3_value_int(1)};
+    odin3_node_spec spec = {type_named("$not"), 0, odin3_module_prov(top()), params, 3};
+    odin3_node_id user = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &user));
+    return glue[0];
+}
+
+static void test_unmap_depth_shared_not(void) {
+    flow_deep();
+    odin3_node_id kept = add_reader_of_glue_not();
+    run_script("unmap");
+    first_mem(1);
+    TEST_ASSERT_TRUE(odin3_node_live(top(), kept)); /* somebody else reads it: it stays */
+    check_clean();
+}
+
+/* The first `$mux` of the output tree: the glue partial_map built carries `hardmap`. */
+static odin3_node_id first_glue_mux(void) {
+    odin3_node_id mux[16];
+    uint32_t count = nodes_of("$mux", mux, 16);
+    for (uint32_t i = 0; i < count && i < 16; i++) {
+        if (attr_of(mux[i], "hardmap") != NULL) {
+            return mux[i];
+        }
+    }
+    TEST_FAIL_MESSAGE("no glue mux");
+    return (odin3_node_id){0};
+}
+
+/* Swaps the data inputs of the first glue `$mux`. */
+static void swap_mux_inputs(void) {
+    odin3_node_id mux = first_glue_mux();
+    odin3_pinslice pin_a = odin3_node_port(top(), mux, 0);
+    odin3_pinslice pin_b = odin3_node_port(top(), mux, 1);
+    odin3_net_id net_a = odin3_pin_net(top(), pin_a.first);
+    odin3_net_id net_b = odin3_pin_net(top(), pin_b.first);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top(), pin_a.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top(), pin_b.first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top(), pin_a.first, net_b));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top(), pin_b.first, net_a));
+}
+
+static void test_unmap_depth_mismatch_note(void) {
+    flow_deep();
+    swap_mux_inputs();
+    run_script("unmap");
+    odin3_node_id mems[4];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", mems, DEEP_LEAVES));
+    for (uint32_t i = 0; i < DEEP_LEAVES; i++) {
+        TEST_ASSERT_EQUAL_UINT32(intern("ram:depth"), attr_of(mems[i], "unmap_note")->str);
+    }
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "not recovered: depth"));
+}
+
+static void test_unmap_depth_lowered(void) {
+    flow_deep();
+    run_script("lower\nunmap");
+    odin3_node_id mems[4];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", mems, DEEP_LEAVES));
+    TEST_ASSERT_NULL(attr_of(mems[0], "unmap_note"));
+    TEST_ASSERT_NULL(strstr(log_text, "not recovered"));
+}
+
 static void run_kit_tests(void) {
     RUN_TEST(test_unmap_options);
     RUN_TEST(test_net_class);
@@ -1388,6 +1480,10 @@ static void run_misc_tests(void) {
     RUN_TEST(test_depth_write_tree);
     RUN_TEST(test_depth_write_mismatch);
     RUN_TEST(test_depth_write_duplicate_path);
+    RUN_TEST(test_unmap_depth_roundtrip);
+    RUN_TEST(test_unmap_depth_shared_not);
+    RUN_TEST(test_unmap_depth_mismatch_note);
+    RUN_TEST(test_unmap_depth_lowered);
     RUN_TEST(test_unmap_info_line);
     RUN_TEST(test_unmap_info_line_regroup);
     RUN_TEST(test_unmap_idempotent);

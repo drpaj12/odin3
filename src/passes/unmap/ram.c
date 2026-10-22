@@ -316,7 +316,7 @@ static odin3_value bits_value(const odin3_vec *bits, size_t first, uint32_t coun
 }
 
 /* MEMID: the namesake's name, else `$mem$<node id>`. */
-static odin3_status memid_value(um_ctx *uc, odin3_node_id namesake, odin3_value *out) {
+odin3_status um_ram_memid(um_ctx *uc, odin3_node_id namesake, odin3_value *out) {
     char text[UM_MEMID_CAP];
     uint32_t name = odin3_node_name(uc->module, namesake);
     if (name != 0) {
@@ -344,7 +344,7 @@ static odin3_status mem_params(um_ctx *uc, odin3_node_id namesake, um_shape shap
     odin3_status st = push_bits(bits, shape.reads * 2, ODIN3_BIT_1);
     st = st == ODIN3_OK ? push_bits(bits, shape.reads, ODIN3_BIT_0) : st;
     st = st == ODIN3_OK ? push_bits(bits, shape.writes * 2, ODIN3_BIT_1) : st;
-    st = st == ODIN3_OK ? memid_value(uc, namesake, &params[0]) : st;
+    st = st == ODIN3_OK ? um_ram_memid(uc, namesake, &params[0]) : st;
     if (st != ODIN3_OK) {
         return st;
     }

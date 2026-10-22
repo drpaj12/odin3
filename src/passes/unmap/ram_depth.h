@@ -18,6 +18,7 @@ typedef struct um_write_tree {
     odin3_vec paths;  /* uint32_t per leaf: bit L is the path bit of level L */
     odin3_vec ad;     /* odin3_net_id per level: the address net of level L */
     odin3_net_id we0; /* the write enable the chains start from */
+    odin3_vec glue;   /* odin3_node_id: the `$and` and `$not` cells the chains are made of */
 } um_write_tree;
 
 void um_write_tree_free(um_write_tree *tree);

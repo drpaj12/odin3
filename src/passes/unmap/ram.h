@@ -52,6 +52,10 @@ odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group);
 odin3_status um_ram_groups(um_ctx *uc, const odin3_vec *cells, odin3_vec *groups);
 void um_rgroups_free(odin3_vec *groups);
 
+/* MEMID of a `$mem` made from `namesake`: its name, else `$mem$<node id>` (an interned string
+ * value). */
+odin3_status um_ram_memid(um_ctx *uc, odin3_node_id namesake, odin3_value *out);
+
 /* Phase D. */
 odin3_status um_ram_phase(um_ctx *uc);
 

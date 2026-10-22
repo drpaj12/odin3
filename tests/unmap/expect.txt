@@ -5,6 +5,7 @@
 
 # An explicit single_port_ram or dual_port_ram instance is a black box in the reference (no
 # hardmap), so the two netlists cannot be paired by equiv-check; the round trip checks counts.
+tests/unmap/ram_deep.v equiv-skip too large for equiv-check (2^17 words, 131072 latches soft); checked structurally: one $mem and no glue
 tests/micro/verilog/common/spram.v equiv-skip explicit RAM instance: the reference keeps the black box
 tests/micro/verilog/common/dpram.v equiv-skip explicit RAM instance: the reference keeps the black box
 tests/micro/verilog/common/spram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
