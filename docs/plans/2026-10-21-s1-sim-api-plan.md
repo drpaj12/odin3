@@ -784,3 +784,10 @@ Spec coverage: SC-1 T1; SC-2..4 T1, T4; SA-1..12 T3, T4; SA-4/5 T2; SP-1..5 T5; 
 SW-1..4 T8, T9; section 10 trace T4, T5. Review Focus lines 1 to 5 map to `test_script_refused_while_held`,
 `test_gc_order_is_safe`, `test_write_rules` / `test_mixed_clock_port`, Task 6 errors and the Task 7
 "no output on error" check, `test_flattened_names` / `test_find`.
+
+## Release v1.0.3 (Peter 2026-10-21: post-v1.0 core features are patch releases)
+
+S1 simulation API is Odin III **v1.0.3**. Its log is `docs/V1.0.3.md` (create it: title `Odin III v1.0.3: s1 simulation api`,
+a checklist, and a decisions log numbered from 1 holding this document's decisions and agent defaults).
+The release bumps `project(odin3 VERSION 1.0.3)`, adds `docs/RELEASE-NOTES-1.0.3.md` and a CHANGELOG section,
+and is tagged only on Peter's explicit go.

@@ -115,7 +115,10 @@ ADRs, IR, passes, oracles, phase checklists.
 Version 1.0.0 is released (tag `v1.0.0`, 2026-10-21; Phases 0 to 7 closed, see the `docs/PHASE*.md`
 logs and `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to
 <https://drpaj12.github.io/odin3/>. After v1.0, new tools live in their own repos and use Odin III
-as a pip package without changing the core: Wyrd-I (GUI and experiment runner,
-github.com/drpaj12/wyrd) and Loki (reverse engineering, github.com/drpaj12/loki). Core changes
-after v1.0 (SystemVerilog and VHDL front ends, ADR D11; a per-cycle simulation call) each get
-their own spec and PR.
+as a pip package without changing the core: Wyrd III (GUI and experiment runner,
+github.com/drpaj12/wyrd) and Loki III (reverse engineering, github.com/drpaj12/loki). The suite is
+Yggdrasil III: Odin III is the trunk; Wyrd III, Loki III, Midgard III (the Verilog Town game),
+Bifrost III (the simulation bridge) and Leman Russ III branch from it. Core changes after v1.0 are
+patch releases, each with its own spec, plan and log `docs/V1.0.<n>.md`: v1.0.1 route retry,
+v1.0.2 gate mapping, v1.0.3 S1 simulation API, v1.0.4 unmap, v1.0.5 core options for Loki III.
+Tags only on Peter's go. SystemVerilog and VHDL front ends (ADR D11) are later.
