@@ -6,6 +6,8 @@
 #   rtl     every micro of tests/unmap/micros.txt: the Phase 3 script with `hardmap; unmap; opt_clean`
 #           against the same script without hardmap, equiv-check exit 0; the counts of word cells
 #           before hardmap and after unmap; for comb micros the sim vectors before and after.
+#   blif    VTR BLIFs without provenance: unmap, hardmap again, equiv-check and the hard-cell counts;
+#           the adder-only soft check; the ambiguity micros of tests/unmap/blif.
 #   golden  `write_rtlil` after hardmap, unmap, opt_clean equals tests/unmap/expected/<name>.il.
 # tests/unmap/expect.txt lists what may differ: `<path> <kind> <reason>`, kind one of `unproven`
 # (equiv-check exit 4), `counts` (the word-cell counts differ, M-7) or `equiv-skip` (too large for
@@ -104,11 +106,22 @@ rtl_micro() { # rtl_micro <repo-relative path> <comb|seq>
     fi
 }
 
+# stale_check <rtl|blif>: every line of its case that was not used is stale. The rtl lines name a
+# path (they have a `/`); the blif lines name a file that this run may not have had (the Parmys
+# goldens are optional), so they count only when the file was run (`ran`).
+ran=$work/ran
+: >"$ran"
 stale_check() {
-    local line
+    local line path kind
     while IFS= read -r line; do
         [[ $line =~ ^# || -z $line ]] && continue
         read -r path kind _ <<<"$line"
+        if [[ $1 == rtl && $path != */* ]] || [[ $1 == blif && $path == */* ]]; then
+            continue
+        fi
+        if [[ $1 == blif ]] && ! grep -qx "$path" "$ran"; then
+            continue
+        fi
         grep -qx "$path $kind" "$used" || fail "stale line in expect.txt: $line"
     done <"$expect"
 }
@@ -119,7 +132,56 @@ rtl)
         [[ -z $path || $path == \#* ]] && continue
         rtl_micro "$path" "$kind"
     done <"$repo/tests/unmap/micros.txt"
-    stale_check
+    stale_check rtl
+    ;;
+blif)
+    blifs=$repo/tests/golden/blif-vtr
+    golden_root=${ODIN3_GOLDEN:-$HOME/odin3-ws/golden}/k6_frac_N10_frac_chain_mem32K_40nm/regression/verilog/common
+    # multiply_narrow.vtr.blif (an 8-bit multiply) and ram_dual_port_clock.vtr.blif (2-bit addresses)
+    # are not here: hardmap maps them to the arch's full-width cells, which write_blif cannot name
+    # beside the file's narrow models; test_unmap_mul_blif covers the multiply.
+    inputs=("$blifs/adder_hard_block.parmys.vtr.blif" "$repo/tests/hardmap/expected/add_8x6.blif"
+        "$repo/tests/hardmap/expected/mul_8x7.blif" "$blifs/ram_slice_unconn_addr.vtr.blif")
+    for name in adder mult mem rom spram dpram; do
+        [[ -f $golden_root/$name/$name.parmys.blif ]] && inputs+=("$golden_root/$name/$name.parmys.blif")
+    done
+    for x in "${inputs[@]}"; do
+        label=$(basename "$x")
+        echo "$label" >>"$ran"
+        # T-4: unmap, opt_clean, hardmap again: the same hard cells, equal function.
+        run_odin3 "read_techlib $lib; read_blif $x; unmap; opt_clean; hardmap; compact; write_blif --vtr $work/out.blif" "$label"
+        code=0
+        # the hard cells are rebuilt, so their instance names differ: pair the boxes by connection
+        "$equiv" --match-unnamed "$x" "$work/out.blif" >"$work/eq" 2>&1 || code=$?
+        if [[ $code -eq 4 ]] && listed "$label" unproven; then
+            :
+        elif [[ $code -ne 0 ]]; then
+            fail "$label: equiv-check exit $code: $(tail -3 "$work/eq")"
+        fi
+        for cell in adder multiply single_port_ram dual_port_ram; do
+            before=$(grep -c "^\.subckt $cell " "$x" || true)
+            after=$(grep -c "^\.subckt $cell " "$work/out.blif" || true)
+            [[ $before -eq $after ]] || listed "$label" "counts:$cell" ||
+                fail "$label: $before $cell cells in the input, $after after the round trip"
+        done
+    done
+    # T-5: a chain-only BLIF: unmap, then soft logic, equals the input (the adder box is expanded).
+    x=$blifs/adder_hard_block.parmys.vtr.blif
+    run_odin3 "read_techlib $lib; read_blif $x; unmap; lower; abc --lut 4; write_blif $work/soft.blif" "soft check"
+    "$equiv" "$x" "$work/soft.blif" >"$work/eq" 2>&1 || fail "soft check: equiv-check: $(tail -3 "$work/eq")"
+    # T-6: the ambiguity micros.
+    amb=$repo/tests/unmap/blif
+    run_odin3 "read_techlib $lib; read_blif $amb/branch.blif; unmap" "branch"
+    grep -qF "not recovered: cin_carry" "$work/err" || fail "branch: no cin_carry warning"
+    grep -qF "unmap: 4 adder cells to 1 \$add + 0 \$sub" "$work/err" || fail "branch: the first part was not recovered"
+    run_odin3 "read_techlib $lib; read_blif $amb/tap.blif; unmap" "tap"
+    grep -qF "not recovered: cin_carry" "$work/err" || fail "tap: no cin_carry warning"
+    grep -qF "unmap: 4 adder cells to 1 \$add + 0 \$sub" "$work/err" || fail "tap: the first part was not recovered"
+    run_odin3 "read_techlib $lib; read_blif $amb/ram_pair_equal_ctl.blif; unmap; write_rtlil $work/pair.il" "ram pair"
+    grep -qF "candidate set ram:0" "$work/err" || fail "ram pair: no candidate INFO line"
+    [[ $(grep -c 'attribute \\unmap_cand "ram:0"' "$work/pair.il") -eq 2 ]] || fail "ram pair: not two candidates"
+    [[ $(count "$work/pair.il" '$mem') -eq 2 ]] || fail "ram pair: not two \$mem cells"
+    stale_check blif
     ;;
 golden)
     for name in add_8x6 sub_8x6 mul_8x7 mul_40x40 spram; do

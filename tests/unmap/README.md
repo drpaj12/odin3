@@ -24,3 +24,15 @@ The explicit-instance micros (`spram`, `dpram`) have a black box in the referenc
 cannot pair the two netlists: they are `equiv-skip` and compared by counts.
 `common/adder.v` is not in the list: it instantiates a module through Parmys's flattened name
 (`add_add_module`), which the Odin III reader does not resolve.
+
+## BLIF without provenance
+
+`run.sh blif` reads VTR BLIFs (the Parmys `adder_hard_block`, the committed `hardmap` BLIFs of the 8x6
+add and 8x7 multiply, a RAM slice BLIF, and the `common/` Parmys goldens `adder mult mem rom spram
+dpram` when `~/odin3-ws/golden` (or `$ODIN3_GOLDEN`) has them), runs `unmap; opt_clean; hardmap`,
+and checks `equiv-check --match-unnamed` (exit 0) and the hard-cell counts per type against the
+input. A chain-only BLIF also goes through `unmap; lower; abc --lut 4` and must equal the input
+(T-5). The ambiguity micros of `blif/` check `cin_carry` for a branching carry and a carry tap, and
+`unmap_cand` for two RAMs with equal control nets. `multiply_narrow.vtr.blif` and
+`ram_dual_port_clock.vtr.blif` are not in the round trip: their file models are narrower than the
+arch's cells.

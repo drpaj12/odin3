@@ -1,0 +1,21 @@
+# unmap ambiguity micro (T-6): a carry-out in the middle of a chain also feeds logic. The first part
+# is recovered with the carry-out as an extra result bit, the rest keeps adder:cin_carry.
+.model tap
+.inputs x0 x1 x2 y0 y1 y2
+.outputs s0 s1 s2 t
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd cout=c0
+.subckt adder a=x0 b=y0 cin=c0 cout=c1 sumout=s0
+.subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1
+.subckt adder a=x2 b=y2 cin=c2 cout=c3 sumout=s2
+.names c1 t
+1 1
+.end
+
+.model adder
+.inputs a b cin
+.outputs sumout cout
+.blackbox
+.end

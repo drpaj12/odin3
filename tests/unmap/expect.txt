@@ -9,3 +9,9 @@ tests/micro/verilog/common/spram.v equiv-skip explicit RAM instance: the referen
 tests/micro/verilog/common/dpram.v equiv-skip explicit RAM instance: the reference keeps the black box
 tests/micro/verilog/common/spram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
 tests/micro/verilog/common/dpram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
+
+# The BLIF round trip (tests/unmap/run.sh blif): the names are the BLIF files.
+# partial_map gives every non-nocarry add a top stage; Parmys's second add (3 bits plus 1 bit into 3
+# bits) has none, so unmap then hardmap gives one adder cell more. Equivalence holds.
+adder_hard_block.parmys.vtr.blif counts:adder partial_map builds a top stage that Parmys's 3-bit add does not have
+adder.parmys.blif counts:adder partial_map builds a top stage that Parmys's adder does not have

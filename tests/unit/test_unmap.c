@@ -28,6 +28,9 @@
 #ifndef ODIN3_UM_ROOT
 #error "ODIN3_UM_ROOT must name the build tree"
 #endif
+#ifndef ODIN3_UM_SRC
+#error "ODIN3_UM_SRC must name the source tree"
+#endif
 #ifndef ODIN3_UM_LIB
 #error "ODIN3_UM_LIB must name lib/vtr.o3lib"
 #endif
@@ -81,6 +84,13 @@ static void write_text(const char *name, odin3_bytes text) {
     TEST_ASSERT_NOT_NULL(file);
     TEST_ASSERT_EQUAL_size_t(text.len, fwrite(text.ptr, 1, text.len, file));
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
+}
+
+/* The path of a file of the source tree (the tests run from the build directory). */
+static const char *src_path(const char *relative) {
+    static char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/%s", ODIN3_UM_SRC, relative);
+    return path;
 }
 
 static void load_lib(void) {
@@ -631,8 +641,9 @@ static void test_unmap_parmys_blif(void) {
     load_lib();
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK,
-        odin3_pass_run(design, "read_blif",
-                       odin3_bytes_cstr("tests/golden/blif-vtr/adder_hard_block.parmys.vtr.blif")),
+        odin3_pass_run(
+            design, "read_blif",
+            odin3_bytes_cstr(src_path("tests/golden/blif-vtr/adder_hard_block.parmys.vtr.blif"))),
         log_text);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     odin3_node_id add[3];
@@ -722,8 +733,9 @@ static void test_unmap_mul_blif(void) {
     load_lib();
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK,
-        odin3_pass_run(design, "read_blif",
-                       odin3_bytes_cstr("tests/golden/blif-vtr/multiply_narrow.vtr.blif")),
+        odin3_pass_run(
+            design, "read_blif",
+            odin3_bytes_cstr(src_path("tests/golden/blif-vtr/multiply_narrow.vtr.blif"))),
         log_text);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     expect_params(only_mul(), (const int64_t[5]){0, 0, 8, 8, 16});
@@ -967,7 +979,7 @@ static void expect_shape(odin3_node_id mem, const int64_t want[4]) {
 }
 
 static void test_unmap_spram(void) {
-    flow_file("tests/micro/verilog/common/spram.v");
+    flow_file(src_path("tests/micro/verilog/common/spram.v"));
     run_script("unmap --no-regroup\nopt_clean");
     odin3_node_id mem = first_mem(16); /* 16 one-bit slices; Task 10 merges them */
     expect_shape(mem, (const int64_t[4]){8, 1, 1, 1});
@@ -984,14 +996,14 @@ static void test_unmap_spram(void) {
 }
 
 static void test_unmap_dpram(void) {
-    flow_file("tests/micro/verilog/common/dpram.v");
+    flow_file(src_path("tests/micro/verilog/common/dpram.v"));
     run_script("unmap --no-regroup\nopt_clean");
     expect_shape(first_mem(16), (const int64_t[4]){8, 1, 2, 2});
     check_clean();
 }
 
 static void test_unmap_rom(void) {
-    flow_file("tests/micro/verilog/common/rom.v");
+    flow_file(src_path("tests/micro/verilog/common/rom.v"));
     run_script("unmap --no-regroup\nopt_clean");
     odin3_node_id mem = first_mem(8);
     TEST_ASSERT_EQUAL_INT64(0, mem_param(mem, MEM_WR_PORTS));
@@ -1025,7 +1037,7 @@ static void test_unmap_ram_blif_pad(void) {
 enum { PORT_WR_DATA = 7, RAM_BITS = 8 };
 
 static void test_unmap_ram_width_merge(void) {
-    flow_file("tests/unmap/ram_w8.v");
+    flow_file(src_path("tests/unmap/ram_w8.v"));
     odin3_node_id slices[RAM_BITS];
     TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("dual_port_ram", slices, RAM_BITS));
     odin3_net_id data[RAM_BITS];
@@ -1049,7 +1061,7 @@ static void test_unmap_ram_width_merge(void) {
 /* The slice order of R-6 is node-ID order; the role numbers partial_map wrote agree (the one
  * place a test reads `hardmap`). */
 static void test_unmap_ram_bit_order(void) {
-    flow_file("tests/unmap/ram_w8.v");
+    flow_file(src_path("tests/unmap/ram_w8.v"));
     odin3_node_id slices[RAM_BITS];
     TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("dual_port_ram", slices, RAM_BITS));
     for (int i = 0; i < RAM_BITS; i++) {
@@ -1064,7 +1076,7 @@ static void test_unmap_ram_bit_order(void) {
 }
 
 static void test_unmap_ram_replicas(void) {
-    flow_file("tests/unmap/ram_2r1w.v");
+    flow_file(src_path("tests/unmap/ram_2r1w.v"));
     run_script("unmap\nopt_clean");
     odin3_node_id mem = first_mem(1);
     expect_shape(mem, (const int64_t[4]){4, 4, 2, 1});
@@ -1088,7 +1100,7 @@ static void test_unmap_ram_blif_candidates(void) {
 }
 
 static void test_unmap_ram_no_regroup(void) {
-    flow_file("tests/unmap/ram_w8.v");
+    flow_file(src_path("tests/unmap/ram_w8.v"));
     run_script("unmap --no-regroup\nopt_clean");
     TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("$mem", NULL, 0));
 }

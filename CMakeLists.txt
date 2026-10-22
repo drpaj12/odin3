@@ -1043,6 +1043,10 @@ if(BUILD_TESTING)
         COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh rtl $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR})
     set_tests_properties(cli_unmap_rtl PROPERTIES LABELS unit TIMEOUT 900)
+    add_test(NAME cli_unmap_blif
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh blif $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_blif PROPERTIES LABELS unit TIMEOUT 600)
     add_test(NAME cli_unmap_golden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh golden $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR})
@@ -1819,7 +1823,7 @@ if(BUILD_TESTING)
     endif()
     # Phase 7 (7.4d): the raise pass; it needs the cone_check proof, so the unit test links the ABC too.
     odin3_add_unit_test(test_unmap)
-    target_compile_definitions(test_unmap PRIVATE ODIN3_UM_ROOT="${PROJECT_BINARY_DIR}" ODIN3_UM_LIB="${PROJECT_SOURCE_DIR}/lib/vtr.o3lib")
+    target_compile_definitions(test_unmap PRIVATE ODIN3_UM_ROOT="${PROJECT_BINARY_DIR}" ODIN3_UM_LIB="${PROJECT_SOURCE_DIR}/lib/vtr.o3lib" ODIN3_UM_SRC="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_raise)
     target_compile_definitions(test_raise PRIVATE ODIN3_RS_ROOT="${PROJECT_BINARY_DIR}")
     if(ODIN3_WITH_ABC)
