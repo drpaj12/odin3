@@ -211,7 +211,7 @@ same problem in in-system debug: signals of a circuit built by high-level synthe
 back to the source, and they built signal-tracing and debug techniques for such circuits on
 FPGAs~\cite{goeders2014effective,goeders2015dynamic,goeders2017signaltracing}. Each line of work had
 to recover a link that the synthesis tool did not keep. Odin~III keeps it (Sec.~\ref{sec:arch}),
-so its analysis flow (Sec.~\ref{sec:re-graph}) can redo the placement-correlation experiment with
+so its analysis flow (provenance coverage, \code{levelize}, graph export; Part~II, Sec.~\ref{sec:re-graph}) can redo the placement-correlation experiment with
 the link to the HDL measured rather than recovered.
 
 \subsection{Oracles, ASTs and elaboration}
@@ -322,7 +322,7 @@ version~4 exposes an opaque design handle and raw 32-bit IDs, every function ret
 \code{libodin3.so} exports only what the header declares (a script checks it), and a plugin that
 asks for another ABI version is refused. Plugins register passes and cell types from an
 \code{odin3\_plugin\_init} entry point, and Python uses the same header through cffi
-(Sec.~\ref{sec:abi}).
+(Part~II, Sec.~\ref{sec:abi}).
 
 The same boundary is how AI tools attach. Agents built Odin~III by driving its command-line
 scripts and reading its tools' exit codes, which follow one convention (0 holds, 1 differs, 2 tool
@@ -331,7 +331,7 @@ parsing text. Through the Python binding an agent, or a learned model, can walk 
 provenance and add cell types for the structures it recognises, recording its own decisions as
 DERIVED provenance records. The analysis flow of v1.0 includes a graph export (Yosys JSON
 plus versioned Odin~III keys) that networkx and PyTorch Geometric load without Odin~III
-(Sec.~\ref{sec:re}). A tool-calling server for language models would be one more plugin over this
+(Part~II, Sec.~\ref{sec:re}). A tool-calling server for language models would be one more plugin over this
 ABI; none is built yet. \todo{Peter: which AI-tool links to claim or plan}
 
 \subsection{Odin III against Odin II and Yosys}
@@ -368,7 +368,7 @@ Table~\ref{tab:compare-short} summarises the differences (Part~II, Table~\ref{ta
 tool by a wide margin, with a pass library, formal flows and language coverage Odin~III will not
 match for years; Odin~II pioneered architecture-aware hard-block mapping for VTR. The differences
 are choices made for Odin~III's research goals and method, not claims of general superiority
-(Sec.~\ref{sec:compare}).
+(Part~II, Sec.~\ref{sec:compare}).
 
 % ------------------------------------------------------------------------------------------
 \section{Results}
@@ -445,7 +445,7 @@ Names are tools of the repository; the text of this section explains each method
 Each stage is checked by a tool separate from the code, against an oracle, under the exit-code
 convention of Sec.~\ref{sec:abi-summary}, in which a list of expected differences never turns
 an unproven result into a pass. Figure~\ref{fig:flow-verify} marks which technique checks which
-stage; Sec.~\ref{sec:verify} explains each.
+stage; Part~II, Sec.~\ref{sec:verify} explains each.
 
 \emph{Equivalence on micros.} The \code{lower} refinement proof (\code{lower-equiv}), run on the
 micro-benchmarks, gives 399 ok, 140 expected and 0 unexpected results, with 272 designs compared;
@@ -540,7 +540,7 @@ tokens, 95\% of them prompt-cache reads and 65.8 million of them output, across 
 and 880 subagent runs; 226 pull requests merged. Subagents used 82\% of the tokens and the
 controller sessions 18\%. My own part was about 414 messages (about 9,400 words): the
 specification, the decisions and the reviews. Active time passed 20\,h on six of the 14 days
-because agents worked through the night (Sec.~\ref{sec:time-agents}). The work ran on a Claude Max
+because agents worked through the night (Part~II, Sec.~\ref{sec:time-agents}). The work ran on a Claude Max
 subscription; controller sessions may also run on DeepSeek's API, but no DeepSeek window fell
 before v1.0.
 
