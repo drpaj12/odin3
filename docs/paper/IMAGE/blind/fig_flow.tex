@@ -1,0 +1,23 @@
+% The AnonSynth flow with what each stage does (see fig_flow_base.tex). Wide: \textwidth.
+\def\flowbandA{Verilog files, include paths, defines, top, parameters, and the architecture and
+  rules: one project record.}%
+\def\flowbandB{Preprocessor with a segment map; Bison/Flex parser builds the AST; the symbol
+  table maps each name to its declaration, per scope.}%
+\def\flowbandC{None. Stage 1 of elaboration evaluates parameters, \odintt{generate} and constant
+  functions, because the language requires it. The script runs no \odintt{opt} before \odintt{proc}.}%
+\def\flowbandD{Stage 1: elaborated AST (the seam). Stage 2: bind names, widths, word cells;
+  \odintt{always} becomes a \odintt{\$proc} cell. \odintt{proc}: muxes, latches, flip-flops.}%
+\def\flowbandE{\odintt{fsm}: find and recode state machines. \odintt{opt}: \odintt{opt\_expr}
+  folds constants; \odintt{opt\_clean} removes dead cells; \odintt{opt\_merge} merges equal cells;
+  \odintt{opt\_share} shares operators. \odintt{flatten}: inline instances. \odintt{wreduce}: narrow widths.}%
+\def\flowbandF{Binds \odintt{\$mul}, \odintt{\$add}/\odintt{\$sub} and \odintt{\$mem} to the hard
+  blocks the arch record lists: multipliers, adder chains, RAM. The rest stays soft.}%
+\def\flowbandG{Every word cell becomes bit cells; flip-flops become \odintt{\$\_DFF\_P\_}; a
+  leftover \odintt{\$mem} becomes flip-flops and muxes.}%
+\def\flowbandH{Linked ABC optimises the soft logic as an AIG and maps it to $K$-input LUTs,
+  one run per clock domain. Hard cells are cut points.}%
+\def\flowbandI{BLIF \odintt{--vtr} for VPR; structural Verilog; Yosys JSON; LPM Verilog for
+  Quartus; Graphviz \odintt{dot}; RTLIL to Yosys.}%
+\def\flowbandJ{Each output can be read back with its HDL locations: \odintt{read\_blif},
+  \odintt{read\_verilog -icells}, \odintt{read\_json}.}%
+\input{IMAGE/blind/fig_flow_base}

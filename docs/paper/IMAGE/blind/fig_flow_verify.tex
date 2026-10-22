@@ -1,0 +1,20 @@
+% The flow annotated with the checks of the Verification section. Wide: \textwidth.
+\def\flowbandA{Project corpus: 55 cases in every format, checked against a Python reference parser.}%
+\def\flowbandB{\odintt{parse-check}: location oracle, print and re-parse. libFuzzer on bytes and
+  tokens. \odintt{verilog-gen} against Yosys. \odintt{pp-fuzz} on the preprocessor.}%
+\def\flowbandC{Nothing to check.}%
+\def\flowbandD{\odintt{elab-diff} and \odintt{proc-diff} against Yosys~0.55 through RTLIL.
+  Random processes. \odintt{fuzz\_elab}.}%
+\def\flowbandE{\odintt{opt-equiv}: each sub-pass call is a refinement. \odintt{flatten-diff}.
+  \odintt{fsm-diff} and \odintt{fsm-equiv}. \odintt{fuzz\_opt}.}%
+\def\flowbandF{\odintt{hardmap-diff}: hard-cell counts, then \odintt{equiv-check} against
+  Parmys. RAM semantics by simulation.}%
+\def\flowbandG{\odintt{lower-diff} against \odintt{techmap}, \odintt{lower-equiv} refinement
+  proof, \odintt{lower-sim}, \odintt{lower-gen-diff} seeds.}%
+\def\flowbandH{\odintt{abc-diff}: both exchanges against the input and each other. Script
+  checker. \odintt{fuzz\_abc\_script}, \odintt{fuzz\_abc\_splice}.}%
+\def\flowbandI{\odintt{netlist-compare} and \odintt{equiv-check} (\odintt{cec}, \odintt{dsec})
+  against goldens. \odintt{blif-vtr-check}. \odintt{fcheck} with Verilator. Byte-identical reruns.}%
+\def\flowbandJ{Write, read, write again: the second and third generation must agree, and
+  \odintt{equiv-check} must hold.}%
+\input{IMAGE/blind/fig_flow_base}

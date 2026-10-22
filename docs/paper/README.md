@@ -1,6 +1,6 @@
 # Odin III paper (IEEE conference draft)
 
-`odin3.tex` is the paper in the IEEEtran conference class, `odin3.bib` its references, and
+`odin3.tex` is the paper in the IEEEtran conference class, `joined.bib` its references (Peter's joined bibliography; `odin3.bib` was the earlier, smaller one), and
 `IMAGE/` its figures. Gaps that need measurements or Peter's input are marked `\todo{…}` in the
 text and print as **[TODO: …]**.
 
@@ -87,7 +87,7 @@ keys in the Part I `.bbl`.
 
 1. Make the upload zip from this directory with `make zip`, or `make zip ZIP=/some/path.zip`.
    It uses Python's `zipfile`, so `zip` is not needed. The zip holds:
-   - `odin3.tex` and `odin3.bib`;
+   - `odin3.tex` and `joined.bib`;
    - `IMAGE/odin3-tikz-styles.tex`;
    - every `IMAGE/fig_*.tex`;
    - `IMAGE/fig_ast.pdf`.
