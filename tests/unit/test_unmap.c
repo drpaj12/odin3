@@ -9,6 +9,7 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "passes/manager.h"
+#include "passes/unmap/chain.h"
 #include "passes/unmap/kit.h"
 #include "passes/unmap/unmap.h"
 #include "unity.h"
@@ -360,6 +361,124 @@ static void test_replace_failure_keeps_group(void) {
     check_clean();
 }
 
+/* --- Task 4: carry chain discovery -------------------------------------------------------- */
+
+#define CHAIN_HEAD                                                                                 \
+    ".model m\n.inputs x0 x1 x2 y0 y1 y2 z\n.outputs s0 s1 s2 t\n.names gnd\n.names vcc\n1\n"
+#define HEAD_CELL ".subckt adder a=vcc b=gnd cin=gnd cout=c0\n"
+#define STAGE0 ".subckt adder a=x0 b=y0 cin=c0 cout=c1 sumout=s0\n"
+#define STAGE1 ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+#define STAGE2 ".subckt adder a=x2 b=y2 cin=c2 cout=c3 sumout=s2\n"
+
+static const um_walk *walk_at(const odin3_vec *walks, size_t index) {
+    TEST_ASSERT_TRUE(index < walks->len);
+    return (const um_walk *)walks->data + index;
+}
+
+static void expect_cells(const um_walk *walk, const odin3_node_id *want, size_t count) {
+    TEST_ASSERT_EQUAL_size_t(count, walk->cells.len);
+    for (size_t i = 0; i < count; i++) {
+        TEST_ASSERT_EQUAL_UINT32(want[i].v, ((const odin3_node_id *)walk->cells.data)[i].v);
+    }
+}
+
+static void test_walks_simple(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0 STAGE1 STAGE2 ".end\n");
+    odin3_node_id cells[4];
+    TEST_ASSERT_EQUAL_UINT32(4, nodes_of("adder", cells, 4));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(1, walks.len);
+    expect_cells(walk_at(&walks, 0), cells, 4);
+    TEST_ASSERT_NULL(walk_at(&walks, 0)->decline);
+    um_walks_free(&walks);
+}
+
+static void test_walks_order_independent(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD STAGE2 STAGE1 STAGE0 HEAD_CELL ".end\n");
+    odin3_node_id cells[4]; /* file order: s2 s1 s0 head */
+    TEST_ASSERT_EQUAL_UINT32(4, nodes_of("adder", cells, 4));
+    odin3_node_id want[4] = {cells[3], cells[2], cells[1], cells[0]};
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(1, walks.len);
+    expect_cells(walk_at(&walks, 0), want, 4);
+    um_walks_free(&walks);
+}
+
+static void test_walks_branch(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0
+              ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+              ".subckt adder a=x2 b=y2 cin=c1 cout=c3 sumout=s2\n.end\n");
+    odin3_node_id cells[4];
+    TEST_ASSERT_EQUAL_UINT32(4, nodes_of("adder", cells, 4));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(3, walks.len);
+    expect_cells(walk_at(&walks, 0), cells, 2); /* head, stage 0 (the branching cell) */
+    expect_cells(walk_at(&walks, 1), cells + 2, 1);
+    expect_cells(walk_at(&walks, 2), cells + 3, 1);
+    um_walks_free(&walks);
+}
+
+static void test_walks_tap(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0 STAGE1 ".names c1 t\n1 1\n.end\n");
+    odin3_node_id cells[3];
+    TEST_ASSERT_EQUAL_UINT32(3, nodes_of("adder", cells, 3));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(2, walks.len);
+    expect_cells(walk_at(&walks, 0), cells, 2);
+    expect_cells(walk_at(&walks, 1), cells + 2, 1);
+    um_walks_free(&walks);
+}
+
+static void test_walks_cycle(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=c3 cout=c1 sumout=s0\n"
+                         ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+                         ".subckt adder a=x2 b=y2 cin=c2 cout=c3 sumout=s2\n.end\n");
+    odin3_node_id cells[3];
+    TEST_ASSERT_EQUAL_UINT32(3, nodes_of("adder", cells, 3));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(1, walks.len);
+    expect_cells(walk_at(&walks, 0), cells, 3);
+    TEST_ASSERT_EQUAL_STRING("cycle", walk_at(&walks, 0)->decline);
+    um_walks_free(&walks);
+}
+
+static void test_walks_two_chains(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD HEAD_CELL STAGE0
+              ".subckt adder a=x1 b=y1 cin=gnd cout=d1 sumout=s1\n"
+              ".subckt adder a=x2 b=y2 cin=d1 cout=d2 sumout=s2\n.end\n");
+    odin3_node_id cells[4];
+    TEST_ASSERT_EQUAL_UINT32(4, nodes_of("adder", cells, 4));
+    um_opts opts = {true};
+    um_ctx uc = make_ctx(&opts);
+    odin3_vec walks;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, um_chain_walks(&uc, &walks));
+    TEST_ASSERT_EQUAL_size_t(2, walks.len);
+    expect_cells(walk_at(&walks, 0), cells, 2);
+    expect_cells(walk_at(&walks, 1), cells + 2, 2);
+    um_walks_free(&walks);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -373,5 +492,11 @@ int main(void) {
     RUN_TEST(test_replace_provenance_and_attrs);
     RUN_TEST(test_replace_no_prov);
     RUN_TEST(test_replace_failure_keeps_group);
+    RUN_TEST(test_walks_simple);
+    RUN_TEST(test_walks_order_independent);
+    RUN_TEST(test_walks_branch);
+    RUN_TEST(test_walks_tap);
+    RUN_TEST(test_walks_cycle);
+    RUN_TEST(test_walks_two_chains);
     return UNITY_END();
 }

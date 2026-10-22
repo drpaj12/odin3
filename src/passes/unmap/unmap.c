@@ -6,12 +6,16 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
+#include "passes/unmap/chain.h"
 
 #include <string.h>
 
 odin3_status um_module(um_ctx *uc) {
-    (void)uc;
-    return ODIN3_OK;
+    odin3_status st = ODIN3_OK;
+    if (uc->types.adder.v != 0) {
+        st = um_adder_phase(uc);
+    }
+    return st;
 }
 
 odin3_status um_run(odin3_pass_ctx *ctx, odin3_design *design, const um_opts *opts,
