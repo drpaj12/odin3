@@ -7,3 +7,8 @@ leak:^Gia_
 leak:^Cmd_
 leak:^Extra_
 leak:^Mem_
+# A formula ABC cannot parse leaves its parser stacks behind (Mio_ParseFormula returns NULL
+# without freeing them or the expressions on them); the adapter calls it to refuse such a gate
+# library (bridge.c). Exp_ is mio/exp.h's expression allocator.
+leak:^Mio_
+leak:^Exp_

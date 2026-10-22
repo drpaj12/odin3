@@ -55,20 +55,41 @@ The gate-mapping calls (ABI 5, `docs/specs/2026-10-21-gatemap-design.md` 4.2 and
 - **`load_genlib`** checks the text first: only `GATE name area out=formula;` statements with
   their `PIN name phase` and six numbers, then nothing, `.end` or a word ABC stops at; a short
   statement, a `LATCH`, `#` or `\` is `RESULT` `ABC cannot read the gate library`, because ABC's
-  reader dereferences missing words and runs past a comment on the last line. A copy then goes to
+  reader dereferences missing words and runs past a comment on the last line. Then, inside the
+  guarded call and before ABC reads anything, every gate's formula is parsed over its pin names
+  (the formula's own names for a `*` pin): a grammar check, then `Mio_ParseFormula`. ABC's
+  `Mio_GateParseFormula` hands the `NULL` that `Mio_ParseFormula` returns for a formula it cannot
+  parse to `Mio_LibDeriveSop` (`mioFunc.c:264`), a segmentation fault the guard cannot catch, and
+  `Mio_ParseFormulaOper` asserts on some `!!` and on an operator with no operand. So an unclosed or extra parenthesis (`Y=(A;`), a name
+  with no pin (`Y=A B;` with one pin), a leading or dangling operator (`Y=*A;`, `Y=A+;`) and `!!` are `RESULT` `ABC cannot read the gate library (gate "name")`, and the engine
+  stays usable. Also refused: a name that starts with `0` or `1` (ABC reads it as a constant), and
+  more than 100 pins or distinct formula names (ABC's fixed `pPinNames[100]` has no bound).
+  The checks do not make ABC's reader total: a library that passes them and still breaks an ABC
+  assumption would be caught by the guard (escape, engine disabled). A copy of the text then goes to
   `Mio_LibraryReadBuffer`, not `Mio_LibraryRead`, which dereferences the library it failed to read
-  (`mioRead.c:96`); a `NULL` library is the same `RESULT`. The library is named `odin3.genlib` (no
-  file is read) and made the frame's with `Mio_UpdateGenlib`. A formula ABC cannot parse is not
-  checked: ABC may then escape (Odin III's own genlib comes from an ISOP and always parses).
+  (`mioRead.c:96`); a `NULL` library is the plain `RESULT`. The library is named `odin3.genlib` (no
+  file is read) and made the frame's with `Mio_UpdateGenlib`, which frees the previous one. So
+  load the library before the script that maps: while the network space holds a mapped network or
+  the `&` space a cell mapping, `load_genlib` is `RESULT` `a gate library is already in use by a
+  mapped network`. Other texts: `no gate library (text is NULL)`.
 - **`get_cells`** reads the network space's mapped network (`Abc_NtkIsMappedLogic`, after `map`)
   or converts the `&` space's cell mapping (`Gia_ManHasCellMapping`, after `&nf`) with
   `Abc_NtkFromCellMappedGia`, deleted again before the call returns. Objects follow MiniLUT's
   layout: the constants 0 and 1 (a constant node is one of them, by its gate's truth), the PIs and
   register outputs, the gates in `Abc_NtkDfsIter` order (fanins in pin order, the 64-bit
   `Mio_GateReadTruth` as two words when a gate has 6 inputs), the POs and register inputs; `gate`
-  and `names` give each gate object's library gate (names point into the library). `RESULT` for
-  no such network, a box that is not a latch, a node without a gate or a gate wider than 6.
+  and `names` give each gate object's library gate (names point into the library). `RESULT` texts:
+  `no gate-mapped network in the network space`, `no cell mapping in the & space`, `a box that is
+  not a latch`, `a node without a library gate`, `a gate with N inputs (at most 6)`, `a fanin that
+  is not a gate, an input or a constant`, `no network space N` (a space that is neither), and
+  `nowhere to put the cells (cells is NULL)`.
 - What `get_cells` returns stays valid until the next `get_cells`, `load_genlib` or `close`.
+- Bounded leaks. Memory the adapter allocated and ABC's own error paths leave behind are not
+  freed after an escape (the engine is disabled, so nothing more is allocated): `load_genlib`'s
+  text copies (the genlib copy and the formula check's) and `get_cells`' object map
+  (`build.obj_of`) and order vector (`build.order`). What `get_cells` returned is freed at close.
+  A `Mio_ParseFormula` that returns `NULL` also leaves its parser stacks and expressions (tens of bytes
+  per refused gate, more for a long formula; `lsan.supp` names `Mio_` and `Exp_` for it). Each is bounded by one call.
 
 ## Start-up and licence
 

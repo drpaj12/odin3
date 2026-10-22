@@ -317,9 +317,231 @@ odin3_status odin3_bridge_name_map(const odin3_bridge_luts *aligned, const int32
 
 /* --- gate mapping (ABI 5) ------------------------------------------------------------------- */
 
+enum {
+    ADP_FORMULA_NAMES = 100, /* mioFunc.c's pPinNames[100], which ABC fills without a bound */
+    ADP_PIN_TAIL = 7         /* a PIN's words after its name */
+};
+
+#define ADP_WORD_BLANKS " \t\r\n"
+#define ADP_FORMULA_SYMBOLS                                                                        \
+    "*&+|^!'()" /* mioFunc.c's MIO_SYMB_*, which ABC blanks to find names                          \
+                 */
+
+/* The distinct names of formula (edited: its operators become blanks) into names; their count,
+ * or -1 past ADP_FORMULA_NAMES. Mio_GateCollectNames is not used: it has no bound. */
+static int adp_formula_names(char *formula, char **names) {
+    for (char *sym = formula; *sym != '\0'; sym++) {
+        if (strchr(ADP_FORMULA_SYMBOLS, *sym) != NULL) {
+            *sym = ' ';
+        }
+    }
+    int count = 0;
+    char *save = NULL;
+    for (char *word = Abc_UtilStrtok(formula, ADP_WORD_BLANKS, &save); word != NULL;
+         word = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, &save)) {
+        int seen = 0;
+        while (seen < count && strcmp(names[seen], word) != 0) {
+            seen++;
+        }
+        if (seen == count && count == ADP_FORMULA_NAMES) {
+            return -1;
+        }
+        if (seen == count) {
+            names[count++] = word;
+        }
+    }
+    return count;
+}
+
+/* Where a formula is in its grammar: what the last symbol allows next. */
+typedef enum adp_formula_state {
+    ADP_FORM_WANT, /* an operand: the start, an opening parenthesis or an operator */
+    ADP_FORM_NEG,  /* an operand, after a '!' (a second one asserts in Mio_ParseFormulaOper) */
+    ADP_FORM_HAVE  /* an operand is complete: a name, a closing parenthesis or a quote */
+} adp_formula_state;
+
+/* A formula's name, which ends at a blank or any of ADP_FORMULA_SYMBOLS; its length. A name that
+ * starts with '0' or '1' is a constant to Mio_ParseFormula, so it counts as no name here. */
+static size_t adp_formula_name_len(const char *at) {
+    size_t len = strcspn(at, ADP_WORD_BLANKS ADP_FORMULA_SYMBOLS);
+    return (at[0] == '0' || at[0] == '1') ? 0 : len;
+}
+
+/* One symbol or name of a formula at *at, moving *state and *depth; false when the grammar
+ * (term := '!'* (name | '(' expr ')') '\''*, expr := term (op term)*, a juxtaposed term an AND)
+ * does not allow it. */
+static bool adp_formula_step(const char **at, adp_formula_state *state, int *depth) {
+    char sym = **at;
+    bool operand = *state != ADP_FORM_HAVE;
+    (*at)++;
+    switch (sym) {
+    case '*':
+    case '&':
+    case '+':
+    case '|':
+    case '^':
+        *state = ADP_FORM_WANT;
+        return !operand;
+    case '\'':
+        return !operand;
+    case ')':
+        (*depth)--;
+        return !operand && *depth >= 0;
+    case '(':
+        (*depth)++;
+        *state = ADP_FORM_WANT;
+        return true;
+    case '!':
+        operand = *state == ADP_FORM_NEG;
+        *state = ADP_FORM_NEG;
+        return !operand;
+    default:
+        (*at)--;
+        size_t len = adp_formula_name_len(*at);
+        *at += len;
+        *state = ADP_FORM_HAVE;
+        return len > 0;
+    }
+}
+
+/* Whether formula is one Mio_ParseFormula meets without an assertion: it asserts (Vec_IntPop of
+ * an empty stack) on an operator with no operand, and returns NULL for the other errors. */
+static bool adp_formula_syntax(const char *formula) {
+    adp_formula_state state = ADP_FORM_WANT;
+    int depth = 0;
+    const char *at = formula;
+    bool ok = true;
+    while (ok && *at != '\0') {
+        if (strchr(ADP_WORD_BLANKS, *at) != NULL) {
+            at++;
+        } else {
+            ok = adp_formula_step(&at, &state, &depth);
+        }
+    }
+    return ok && state == ADP_FORM_HAVE && depth == 0;
+}
+
+static bool adp_formula_parses(char *formula, char **names, int count) {
+    Vec_Int_t *expr = adp_formula_syntax(formula) ? Mio_ParseFormula(formula, names, count) : NULL;
+    if (expr == NULL) {
+        return false;
+    }
+    Vec_IntFree(expr);
+    return true;
+}
+
+/* One PIN after its keyword: its name, then ADP_PIN_TAIL more words; NULL when one is missing. */
+static char *adp_pin_name(char **save) {
+    char *name = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    for (int k = 0; k < ADP_PIN_TAIL; k++) {
+        if (Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save) == NULL) {
+            return NULL;
+        }
+    }
+    return name;
+}
+
+/* A GATE's PIN lines after its formula: their names into pins, their number in *count, the
+ * token after them in *next. False for a short PIN or more than ADP_FORMULA_NAMES. */
+static bool adp_gate_pins(char **pins, int *count, char **next, char **save) {
+    *count = 0;
+    *next = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    while (*next != NULL && strcmp(*next, "PIN") == 0) {
+        char *name = adp_pin_name(save);
+        if (name == NULL || *count == ADP_FORMULA_NAMES) {
+            return false;
+        }
+        pins[(*count)++] = name;
+        *next = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    }
+    return true;
+}
+
+/* ODIN3_OK when formula parses over its pin names (the formula's own when the first pin is "*"),
+ * or is one ABC rejects without parsing; ODIN3_ERR_ENGINE when it does not parse;
+ * ODIN3_ERR_NO_MEMORY. Works on a copy of formula. */
+static odin3_status adp_formula_ok(const char *formula, char **pins, int n_pins) {
+    if (n_pins == 0) { /* a constant, or a formula ABC rejects */
+        return ODIN3_OK;
+    }
+    size_t bytes = strlen(formula) + 1;
+    char *work = odin3_abc_alloc(bytes); /* adp_formula_names edits what it reads */
+    char *names[ADP_FORMULA_NAMES];
+    if (work == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    memcpy(work, formula, bytes);
+    int n_names = adp_formula_names(work, names);
+    bool ok = n_names >= 0;
+    if (ok && n_names > 0) {
+        bool own = strcmp(pins[0], "*") == 0;
+        ok = adp_formula_parses((char *)formula, own ? names : pins, own ? n_names : n_pins);
+    }
+    free(work);
+    return ok ? ODIN3_OK : ODIN3_ERR_ENGINE;
+}
+
+/* One GATE after its keyword, as Mio_GateParseFormula meets it (adp_formula_ok's statuses). *gate
+ * gets the name; *next the token after the gate. */
+static odin3_status adp_gate_formula(char **gate, char **next, char **save) {
+    *gate = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    const char *area = Abc_UtilStrtok(NULL, ADP_WORD_BLANKS, save);
+    const char *out = Abc_UtilStrtok(NULL, "=", save);
+    const char *formula = Abc_UtilStrtok(NULL, ";", save);
+    char *pins[ADP_FORMULA_NAMES];
+    int n_pins = 0;
+    if (*gate == NULL || area == NULL || out == NULL || formula == NULL ||
+        !adp_gate_pins(pins, &n_pins, next, save)) {
+        return ODIN3_ERR_ENGINE;
+    }
+    return adp_formula_ok(formula, pins, n_pins);
+}
+
+/* RESULT unless every GATE's formula of text parses (the check works on a copy). */
+static odin3_status adp_genlib_formulas(const char *text, odin3_abc_fail *fail) {
+    size_t bytes = strlen(text) + 1;
+    char *scan = odin3_abc_alloc(bytes);
+    if (scan == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    memcpy(scan, text, bytes);
+    char *save = NULL;
+    char *gate = NULL;
+    char *tok = Abc_UtilStrtok(scan, ADP_WORD_BLANKS, &save);
+    odin3_status st = ODIN3_OK;
+    while (st == ODIN3_OK && tok != NULL && strcmp(tok, "GATE") == 0) {
+        st = adp_gate_formula(&gate, &tok, &save);
+    }
+    if (st == ODIN3_ERR_ENGINE) {
+        st = odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                "ABC cannot read the gate library (gate \"%s\")",
+                                gate != NULL ? gate : "?");
+    }
+    free(scan);
+    return st;
+}
+
+/* Whether the frame holds a network or a cell mapping that points into the gate library. */
+static bool adp_library_in_use(void) {
+    Abc_Ntk_t *ntk = Abc_FrameReadNtk(adp_frame);
+    Gia_Man_t *gia = Abc_FrameReadGia(adp_frame);
+    return (ntk != NULL && Abc_NtkIsMappedLogic(ntk)) ||
+           (gia != NULL && Gia_ManHasCellMapping(gia));
+}
+
 odin3_status odin3_bridge_load_genlib(const char *text, odin3_abc_fail *fail) {
     ODIN3_ADAPTER_ASSERT(odin3_guard_active_here());
     ODIN3_ADAPTER_ASSERT(adp_frame != NULL && text != NULL);
+    if (adp_library_in_use()) { /* Mio_UpdateGenlib would free what that mapping points into */
+        return odin3_abc_fail_set(fail, ODIN3_ABC_FAIL_RESULT,
+                                  "a gate library is already in use by a mapped network");
+    }
+    /* ABC dereferences the NULL that Mio_ParseFormula returns for a formula it cannot parse
+     * (mioFunc.c:264), a crash the guard cannot catch: every formula is parsed here first. */
+    odin3_status st = adp_genlib_formulas(text, fail);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     size_t bytes = strlen(text) + 1;
     char *copy = odin3_abc_alloc(bytes); /* the reader edits its buffer */
     if (copy == NULL) {
@@ -463,7 +685,7 @@ static odin3_status adp_cells_inputs(adp_cells_build *build, bool names_from_ntk
 static int32_t adp_cells_name(adp_cells_build *build, Mio_Gate_t *gate) {
     const char *name = Mio_GateReadName(gate);
     for (uint32_t i = 0; i < build->n_names; i++) {
-        if (adp_cells.names[i] == name) {
+        if (strcmp(adp_cells.names[i], name) == 0) {
             return (int32_t)i;
         }
     }

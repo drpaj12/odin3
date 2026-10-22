@@ -1802,10 +1802,16 @@ typedef struct odin3_abc_cells {
  * name_map: aligned (the loaded AIG's PI, PO, register counts) as ABC's LUT side; *lits gets one
  *   MiniAIG literal or -1 per object, valid until close or the next name_map. RESULT.
  * load_genlib: text (a NUL-terminated genlib, copied) becomes the session's gate library (ABC's
- *   Mio_LibraryRead, then Mio_UpdateGenlib). RESULT when ABC cannot read it.
+ *   Mio_LibraryReadBuffer, named, then Mio_UpdateGenlib). Load it before the script that maps:
+ *   RESULT "a gate library is already in use by a mapped network" when the network space holds a
+ *   mapped network or the & space a cell mapping. RESULT "no gate library (text is NULL)"; RESULT
+ *   "ABC cannot read the gate library" when ABC cannot read the text, with the gate's name when a
+ *   formula does not parse.
  * get_cells: the gate-mapped network of space (an odin3_abc_cells_space), owned by the session
  *   until close or the next call. RESULT "no gate-mapped network in the network space", "no cell
- *   mapping in the & space", "a node without a library gate", "a box that is not a latch".
+ *   mapping in the & space", "a node without a library gate", "a box that is not a latch", "a gate
+ *   with N inputs (at most 6)", "no network space N", "nowhere to put the cells (cells is NULL)",
+ *   "a fanin that is not a gate, an input or a constant".
  * close: frees all the session returned; after an escape, leaks ABC's state and disables.
  * Every call of a session must come from the thread that opened it; the linked engine treats a
  * call from another thread as an adapter assertion (ASSERT), which disables it for the process.
