@@ -138,6 +138,10 @@ static odin3_celltype_id type_named(const char *name) {
     return id;
 }
 
+static void ok(odin3_status status) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, status);
+}
+
 /* The live nodes of the top module with type `name`, in node-ID order; returns the count. */
 static uint32_t nodes_of(const char *name, odin3_node_id *out, uint32_t cap) {
     odin3_celltype_id type = type_named(name);
@@ -674,11 +678,10 @@ static void test_unmap_declines(void) {
  * the second run, when the multiply is a `$mul` that carries `unmap`. */
 static void test_unmap_cin_from_multiply_twice(void) {
     load_lib();
-    read_blif(CHAIN_HEAD
-              ".subckt multiply a[0]=x2 b[0]=y2 out[0]=m0 out[1]=m1\n"
-              ".subckt adder a=x0 b=y0 cin=m0 cout=c1 sumout=s0\n"
-              ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
-              ".names m1 s2\n1 1\n.end\n");
+    read_blif(CHAIN_HEAD ".subckt multiply a[0]=x2 b[0]=y2 out[0]=m0 out[1]=m1\n"
+                         ".subckt adder a=x0 b=y0 cin=m0 cout=c1 sumout=s0\n"
+                         ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+                         ".names m1 s2\n1 1\n.end\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     odin3_node_id cells[2];
     TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", cells, 2));
@@ -686,6 +689,191 @@ static void test_unmap_cin_from_multiply_twice(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
     TEST_ASSERT_EQUAL_UINT32(2, nodes_of("adder", cells, 2));
     TEST_ASSERT_EQUAL_UINT32(intern("adder:cin_signal"), attr_of(cells[0], "unmap_note")->str);
+}
+
+/* --- S-7 and the decline reasons ---------------------------------------------------------- */
+
+/* A text of the design that a second run must not change: every live node's ID, type, notes and
+ * the nets of its pins. */
+static char *census(void) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    um_ctx uc = {.design = design, .module = top()};
+    for (uint32_t nid = 1; nid < odin3_module_node_end(top()); nid++) {
+        odin3_node_id node = {nid};
+        if (!odin3_node_live(top(), node)) {
+            continue;
+        }
+        const char *note = um_attr_text(&uc, node, "unmap_note");
+        const char *cand = um_attr_text(&uc, node, "unmap_cand");
+        ok(odin3_strbuf_appendf(&buf, "%u t%u %s %s:", nid, odin3_node_type(top(), node).v,
+                                note != NULL ? note : "-", cand != NULL ? cand : "-"));
+        odin3_pinslice pins = odin3_node_pins(top(), node);
+        for (uint32_t i = 0; i < pins.count; i++) {
+            ok(odin3_strbuf_appendf(&buf, " %u",
+                                    odin3_pin_net(top(), (odin3_pin_id){pins.first.v + i}).v));
+        }
+        ok(odin3_strbuf_appendf(&buf, "\n"));
+    }
+    char *text = strdup(buf.data);
+    odin3_strbuf_free(&buf);
+    TEST_ASSERT_NOT_NULL(text);
+    return text;
+}
+
+/* S-7: a second run of unmap on the result of the first changes nothing and keeps every note. */
+static void expect_second_run_same(const char *blif) {
+    load_lib();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_pass_run(design, "read_blif", odin3_bytes_cstr(src_path(blif))), log_text);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    char *first = census();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    char *second = census();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+    check_clean();
+}
+
+static void test_unmap_second_run_tap(void) {
+    expect_second_run_same("tests/unmap/blif/tap.blif");
+}
+
+static void test_unmap_second_run_branch(void) {
+    expect_second_run_same("tests/unmap/blif/branch.blif");
+}
+
+static void test_unmap_second_run_ram_pair(void) {
+    expect_second_run_same("tests/unmap/blif/ram_pair_equal_ctl.blif");
+}
+
+/* One adder cell the pass declines: the note on the cell, the same after a second run. */
+static void expect_adder_note(const char *blif, const char *note) {
+    load_lib();
+    read_blif(blif);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id cell[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("adder", cell, 1));
+    TEST_ASSERT_EQUAL_UINT32(intern(note), attr_of(cell[0], "unmap_note")->str);
+    char *first = census();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    char *second = census();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+    check_clean();
+}
+
+#define ADDER_MODEL "\n.model adder\n.inputs a b cin\n.outputs sumout cout\n.blackbox\n.end\n"
+
+/* C-4: a subtraction whose last carry-out is read. */
+static void test_unmap_decline_cout_sub(void) {
+    expect_adder_note(CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n"
+                                 ".names c1 t\n1 1\n.end\n" ADDER_MODEL,
+                      "adder:cout_sub");
+}
+
+/* C-5: a subtraction whose b is not an inverted operand. */
+static void test_unmap_decline_carry_in_one(void) {
+    expect_adder_note(CHAIN_HEAD
+                      ".subckt adder a=x0 b=y0 cin=vcc cout=c1 sumout=s0\n.end\n" ADDER_MODEL,
+                      "adder:carry_in_one");
+}
+
+/* A multiply cell with WIDTH 0 has no operand bits: kept as it is, with the note. */
+static void test_unmap_decline_mul_width(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD ".end\n");
+    odin3_net_id none = {0};
+    odin3_netvec ports[3] = {{&none, 0}, {&none, 0}, {&none, 0}};
+    odin3_value width = odin3_value_int(0);
+    odin3_node_spec spec = {type_named("multiply"), 0, odin3_module_prov(top()), &width, 1};
+    odin3_node_id made = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &made));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("multiply", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(intern("mul:width"), attr_of(made, "unmap_note")->str);
+    char *first = census();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    char *second = census();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
+/* R-2: a RAM with 32 address bits is not converted. */
+static void test_unmap_decline_ram_abits(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD
+              ".subckt single_port_ram clk=x0 we=x1 addr[31]=x2 data[0]=y0 out[0]=s2\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id ram[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("single_port_ram", ram, 1));
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:abits"), attr_of(ram[0], "unmap_note")->str);
+}
+
+/* C-1: a ring of adders: the note is on the cells of the ring. */
+static void test_unmap_decline_cycle(void) {
+    load_lib();
+    read_blif(CHAIN_HEAD ".subckt adder a=x0 b=y0 cin=c3 cout=c1 sumout=s0\n"
+                         ".subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1\n"
+                         ".subckt adder a=x2 b=y2 cin=c2 cout=c3 sumout=s2\n.end\n" ADDER_MODEL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id cells[3];
+    TEST_ASSERT_EQUAL_UINT32(3, nodes_of("adder", cells, 3));
+    for (uint32_t i = 0; i < 3; i++) {
+        TEST_ASSERT_EQUAL_UINT32(intern("adder:cycle"), attr_of(cells[i], "unmap_note")->str);
+    }
+    char *first = census();
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    char *second = census();
+    TEST_ASSERT_EQUAL_STRING(first, second);
+    free(first);
+    free(second);
+}
+
+/* R-2: two cells of one group with 32 address bits: both get the note (they stay as they are). */
+static void test_unmap_decline_ram_abits_group(void) {
+    enum { WIDE = 32 };
+    odin3_strbuf blif;
+    odin3_strbuf_init(&blif);
+    ok(odin3_strbuf_appendf(&blif, ".model m\n.inputs c w d0 d1"));
+    for (int i = 0; i < WIDE; i++) {
+        ok(odin3_strbuf_appendf(&blif, " a%d", i));
+    }
+    ok(odin3_strbuf_appendf(&blif, "\n.outputs\n.end\n"));
+    load_lib();
+    read_blif(blif.data);
+    odin3_strbuf_free(&blif);
+    odin3_prov_id prov = odin3_module_prov(top());
+    odin3_net_id addr[WIDE];
+    for (int i = 0; i < WIDE; i++) {
+        char name[16];
+        (void)snprintf(name, sizeof name, "a%d", i);
+        addr[i] = net_named(name);
+    }
+    odin3_node_id cells[2];
+    const char *data[2] = {"d0", "d1"};
+    for (int i = 0; i < 2; i++) {
+        odin3_net_id clk = net_named("c");
+        odin3_net_id we = net_named("w");
+        odin3_net_id din = net_named(data[i]);
+        odin3_net_id dout = {0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top(), 0, prov, &dout));
+        odin3_netvec ports[5] = {{&clk, 1}, {&din, 1}, {addr, WIDE}, {&we, 1}, {&dout, 1}};
+        odin3_value params[2] = {odin3_value_int(WIDE), odin3_value_int(1)};
+        odin3_node_spec spec = {type_named("single_port_ram"), 0, prov, params, 2};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_node_create_connected(top(), &spec, ports, &cells[i]));
+    }
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("single_port_ram", NULL, 0));
+    for (int i = 0; i < 2; i++) {
+        const odin3_value *note = attr_of(cells[i], "unmap_note");
+        TEST_ASSERT_NOT_NULL(note);
+        TEST_ASSERT_EQUAL_UINT32(intern("ram:abits"), note->str);
+    }
 }
 
 static void test_trim_and_run(void) {
@@ -770,10 +958,6 @@ typedef struct p1_shape {
     int keep;  /* q: B bits of both */
     bool tap;  /* a LUT also reads a net of the low product's upper half */
 } p1_shape;
-
-static void ok(odin3_status status) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, status);
-}
 
 /* One multiply cell: A bits x[first ..] (len of them), B bits y[0 .. keep), the rest of the pins
  * pad, and len + keep product bits on the nets l<j> (low) or u<j> (high). */
@@ -1752,6 +1936,15 @@ static void run_chain_tests(void) {
     RUN_TEST(test_unmap_declines);
     RUN_TEST(test_trim_and_run);
     RUN_TEST(test_unmap_cin_from_multiply_twice);
+    RUN_TEST(test_unmap_second_run_tap);
+    RUN_TEST(test_unmap_second_run_branch);
+    RUN_TEST(test_unmap_second_run_ram_pair);
+    RUN_TEST(test_unmap_decline_cout_sub);
+    RUN_TEST(test_unmap_decline_carry_in_one);
+    RUN_TEST(test_unmap_decline_mul_width);
+    RUN_TEST(test_unmap_decline_ram_abits);
+    RUN_TEST(test_unmap_decline_cycle);
+    RUN_TEST(test_unmap_decline_ram_abits_group);
 }
 
 static void run_mul_tests(void) {

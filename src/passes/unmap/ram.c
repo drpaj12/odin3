@@ -391,6 +391,24 @@ static odin3_status replace_cells(um_ctx *uc, const um_rgroup *group, const um_n
     return st;
 }
 
+/* A group with too many address bits stays as it is: every cell of it gets the note. */
+static odin3_status decline_abits(um_ctx *uc, const um_rgroup *group) {
+    const um_ram *cells = group->cells.data;
+    odin3_vec nodes;
+    odin3_vec_init(&nodes, sizeof(odin3_node_id));
+    odin3_status st = odin3_vec_reserve(&nodes, group->cells.len);
+    for (size_t i = 0; st == ODIN3_OK && i < group->cells.len; i++) {
+        odin3_node_id *slot = odin3_vec_push(&nodes);
+        st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        if (slot != NULL) {
+            *slot = cells[i].node;
+        }
+    }
+    st = st == ODIN3_OK ? um_decline(uc, nodes.data, nodes.len, (um_why){"ram", "abits"}) : st;
+    odin3_vec_free(&nodes);
+    return st;
+}
+
 odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group) {
     const um_ram *cells = group->cells.data;
     um_mem mem;
@@ -399,8 +417,7 @@ odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group) {
     odin3_vec_init(&bits, sizeof(uint8_t));
     odin3_status st = ODIN3_OK;
     if (cells[0].abits > UM_MAX_ABITS) {
-        odin3_node_id node = cells[0].node;
-        st = um_decline(uc, &node, 1, (um_why){"ram", "abits"});
+        st = decline_abits(uc, group);
         mem_free(&mem);
         return st;
     }
