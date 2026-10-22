@@ -143,6 +143,11 @@ the companies, I would suggest moving to a cloud service model as soon as possib
 is narrower. I wanted to run experiments that I could not do with Yosys, and I wanted the
 capabilities to run them. With Odin~III I now can.
 
+I call the suite that grows from Odin~III Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}, in
+Part~II). Odin~III is the trunk: every path from HDL to the tools passes through its one
+provenance IR, which is why I see it as the final frontier of the Odin line. The branches are
+Wyrd~III, Loki~III, Bifrost~III and Midgard~III (the Verilog Town game), and most of them are planned.
+
 % ------------------------------------------------------------------------------------------
 \section{Background}
 \label{sec:background}
@@ -608,7 +613,7 @@ against Parmys. It adds what neither predecessor has: provenance from every netl
 its HDL, and a versioned C ABI through which plugins and AI tools extend it. The code has not been
 deeply read by a human and has been tested on a subset of scenarios, and the oracles make more
 testing possible. The experiments I could not run with Yosys come next: version~1.0.0 was released on
-2026-10-21, and Wyrd-I (a GUI and experiment runner) and Loki (reverse engineering) will use it
+2026-10-21, and Wyrd~III (a GUI and experiment runner) and Loki~III (reverse engineering) will use it
 as a package. Part~II describes the system in detail and how it will be used after version~1.0.
 
 \section*{Acknowledgment}
@@ -1929,7 +1934,7 @@ lines per object. The hooks are:
 \end{itemize}
 The route after v1.0 is the one the architect named: add the research techniques through libraries
 and plugins, without changing the core. D10's last rule protects that route: IR provenance, IDs,
-hierarchy and the C ABI stay intact. The tool that follows this route is Loki
+hierarchy and the C ABI stay intact. The tool that follows this route is Loki~III
 (Sec.~\ref{sec:v1plan}).
 
 \subsection{Gate-Breaker as the method baseline}
@@ -1946,12 +1951,12 @@ the abstract syntax tree and of the control flow graph. The paper's own conclusi
 external graph tools should help the model: clustering to name buses, a classification of signals
 as datapath or control, and partitioning of the netlist into smaller parts.
 
-Loki's flow differs in three ways (Sec.~\ref{sec:v1plan}). First, it has no language model for
+Loki~III's flow differs in three ways (Sec.~\ref{sec:v1plan}). First, it has no language model for
 now: pattern detectors give likelihoods, and the hypotheses are updated by Bayes' rule. Second,
 a guess is checked by proof, not by simulation: \code{cone\_check} says equivalent, differs or
 unproven, and that is a strong term in the update. Third, a confirmed guess is committed as a
 new level of an ordinary Odin III design (\code{submod}, \code{raise}), so the result can be
-written, drawn and traced back to the gates, and the next round runs on that level. Loki
+written, drawn and traced back to the gates, and the next round runs on that level. Loki~III
 targets exactly the three items that Gate-Breaker leaves as future work. None of this is built
 or measured yet, so I make no claim about how it compares in accuracy.
 
@@ -2454,31 +2459,87 @@ writers (ADR D10) are not part of v1.0.
 \label{sec:v1plan}
 
 After v1.0 the new tools live in their own repositories and use Odin III as a pip package, with
-no change to the core. The three items below are my decisions of 2026-10-21. They are planned,
-and none is built.
+no change to the core. I named the whole suite Yggdrasil~III, the world tree
+(Figs.~\ref{fig:yggdrasil} to~\ref{fig:yggdrasil-hybrid}, three drafts of one picture). Odin~III is the trunk, and each project below is a branch. The
+decisions are mine of 2026-10-21. Only Odin~III v1.0 and the Wyrd~III runner are built.
 
-\emph{Wyrd-I} (\url{https://github.com/drpaj12/wyrd}) is a GUI wrapper around Odin III and an
-experiment runner. Its first piece, W1, is a command-line experiment runner: projects in TOML, a
-run store in SQLite and a scheduler that respects a memory budget. A Qt GUI follows, with a
-Quartus-like report, simulation and waveforms, and Verilog Town, Jamieson's Verilog teaching
-game, ported to pygame-ce on Odin III.
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil}}
+\caption{Yggdrasil~III. Odin III is the trunk: every path from HDL and netlists, through the tools it
+links to, goes through its one provenance IR, and the oracles check it. The patch releases grow up
+the trunk. Wyrd~III and Loki~III branch to the left, and Leman~Russ~III is a placeholder branch from Loki~III.
+Bifrost~III is the bridge from the trunk's simulation API (S1) to Midgard~III and the Wyrd~III simulation
+panel. Status as of 2026-10-21.}
+\label{fig:yggdrasil}
+\end{figure*}
 
-\emph{Loki} (\url{https://github.com/drpaj12/loki}) is the reverse-engineering tool for
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil_tree}}
+\caption{Yggdrasil~III drawn as a tree: the same pieces and status as Fig.~\ref{fig:yggdrasil}, with
+the inputs, linked tools and oracles as roots, Odin~III as the trunk, the tools as branches and
+Bifrost~III in the crown.}
+\label{fig:yggdrasil-tree}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil_hybrid}}
+\caption{Yggdrasil~III, hybrid of Figs.~\ref{fig:yggdrasil} and~\ref{fig:yggdrasil-tree}: the
+labelled blocks laid out on the tree's silhouette.}
+\label{fig:yggdrasil-hybrid}
+\end{figure*}
+
+\emph{Odin~III} is the trunk. Core features after v1.0 are patch releases, so that the v1.0 base
+stays clean. Version 1.0.1 is the route retry for a one-CLB VPR failure and is merged. Version
+1.0.2 maps ABC's result onto library gates and is being built. Version 1.0.3 adds S1, a per-cycle
+simulation API: open a design, set inputs by port, step one clock, read outputs and named nets,
+and write a VCD whose signal names come from provenance. Version 1.0.4 is unmap, the inverse of
+partial mapping: VTR hard cells return to \code{\$add}, \code{\$mul} and \code{\$mem} with
+provenance. Version 1.0.5 adds two options that Loki~III's L1 needs: \code{raise -const} and vector
+ports for \code{submod}. Each release is tagged only on my go. The SystemVerilog and VHDL front
+ends (ADR D11) and FF feature matching (4.6) come later.
+
+\emph{Wyrd~III} takes its name from wyrd, fate, which the Norns weave at the well under the tree. It
+(\url{https://github.com/drpaj12/wyrd}) is a GUI wrapper around Odin III and an experiment
+runner. Its first piece, W1, is built: a command-line runner with projects in TOML, a run store
+in SQLite and a scheduler that respects a memory budget. W2 is a Qt GUI with a project tree,
+source and report tabs, a Messages pane and a Quartus-like report. W3 adds a simulation panel on
+Bifrost~III.
+
+\emph{Bifrost~III} is the rainbow bridge. Here it is \code{wyrd.bifrost}, a session over S1 with
+named inputs and outputs, step, reset and VCD. The Wyrd~III simulation panel and Midgard~III are both
+its clients, so I design its interface with Midgard~III in mind. It is planned.
+
+\emph{Midgard~III} is the world where people live, and here it is where people play. It is the Verilog
+Town game~\cite{verilogtown2017}, my Verilog teaching game, ported to pygame-ce on Bifrost~III. One
+game tick is one simulation step, and the player's Verilog is compiled when a level starts, with
+errors shown in the game at file and line. It reuses the original images and levels under the
+MIT licence. It is planned.
+
+\emph{Loki~III} (\url{https://github.com/drpaj12/loki}) is the reverse-engineering tool for
 structural netlists (Sec.~\ref{sec:re}). L0 is a provenance ground-truth dataset made from the
 benchmarks. L1 is a Bayesian hypothesis flow: pattern detectors give likelihoods, \code{cone\_check}
 proofs confirm them, and \code{raise} and \code{submod} move the design up the hierarchy. L2 adds
-graph export, clustering (k-means and affinity propagation) and graphlet signatures (GraphCrunch
-and ORCA). There is no LLM step for now. Loki targets the future work of Gate-Breaker itself:
-clustering for bus naming, separating datapath from control, and partitioning. Trojan detection
-comes later.
+graph export, clustering (k-means and affinity propagation) and graphlet signatures, counted
+with ORCA as a separate process (GraphCrunch is cited only). Loki~III's specifications are approved
+and none of it is built. There is no LLM step for now. Loki~III targets the future work of
+Gate-Breaker itself: clustering for bus naming, separating datapath from control, and
+partitioning. A Trojan detection step comes later.
 
-\emph{The placement experiment} uses the provenance, or the clusters that Loki recovers, as VPR
-placement constraints (\code{--read\_vpr\_constraints}). It revisits the study of system-level
-information and FPGA placement~\cite{gharibian2010finding,gharibian2013analyzing}.
+\emph{Leman~Russ~III}, the wolf-king hunter, is a placeholder for higher-level detection techniques
+that build on the structure Loki~III recovers. The first target is hardware Trojan detection as the
+Seeker's Dilemma poses it~\cite{sarihi2024seekers}: the detector does not know whether a circuit
+holds a Trojan, so it must decide whether one exists and, if so, where. Loki~III's clusters and L2
+graph analysis would supply the evidence. Leman~Russ~III is planned and not yet specified.
 
-The core changes that remain each get their own specification and pull request: the
-SystemVerilog and VHDL front ends (ADR D11) and a per-cycle simulation call. FF feature matching
-(4.6) is a later plugin or v1.1.
-
+\emph{The Norns~III} is the placement experiment. It uses the provenance, or the clusters that
+Loki~III recovers, as VPR placement constraints (\code{--read\_vpr\_constraints}). Urd uses what the
+design was (the provenance hierarchy), Verdandi what is recovered now (Loki~III clusters), and Skuld
+what shall be (the placement they constrain); they run as Wyrd~III steps. It revisits the study of
+system-level information and FPGA
+placement~\cite{gharibian2010finding,gharibian2013analyzing}. It is a backlog item until the projects
+above finish.
 
 \end{document}
