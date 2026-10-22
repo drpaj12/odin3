@@ -16,7 +16,7 @@ import zipfile
 
 # Page order of IMAGE/figures.tex: one TikZ figure per page.
 FIGURES = ["pipeline", "project", "elab_seam", "proc", "util", "ir_model", "prov", "srcman",
-           "techlib", "abi", "re", "yggdrasil", "yggdrasil_tree", "yggdrasil_hybrid"]
+           "techlib", "abi", "re", "yggdrasil"]
 
 
 def overleaf_files() -> list[str]:

@@ -1,69 +1,79 @@
-% Yggdrasil III, the world tree: Odin III is the trunk and every tool grows from it (Part II, After v1.0).
-% Status as of 2026-10-21 (POST-V1-ROADMAP). Wide figure: \textwidth (figure*).
-% Roots at the bottom (inputs, tools, oracles), the trunk in the middle (one provenance IR and its
-% patch releases, oldest at the bottom), branches left (Wyrd~III, Loki~III, Leman~Russ~III) and a bridge
-% (Bifrost~III) to Midgard~III at the crown.
+% Yggdrasil III drawn as a tree. Roots (dark brown) at the bottom: the inputs and the tools Odin III
+% links to. The trunk (brown) is Odin III, its steps from the roots to the crown. A small forest of
+% mini trees beside it holds the oracles, to compare against. The canopy (green oval) is the tree-top:
+% Loki III, Wyrd III, Bifrost III (the arc to Midgard III) and Midgard III (verilogTown). Leman Russ III
+% and The Norns III are small pieces on the left. No status; the GitHub links are in the caption.
 \begin{tikzpicture}[odin, node distance=3mm,
-  box/.append style={minimum height=6.5mm},
-  rel/.style={box, text width=38mm, minimum height=7mm},
-  sm/.style={box, font=\scriptsize, text width=13mm, minimum height=8mm, inner sep=1.5pt}]
-  % ---- roots -------------------------------------------------------------------------
-  \node[box, built, text width=15mm] (v)  at (-7.6,-1.6) {Verilog};
-  \node[box, built, text width=15mm] (bl) at (-5.7,-1.6) {BLIF};
-  \node[box, built, text width=15mm] (yj) at (-3.8,-1.6) {Yosys JSON};
-  \node[box, built, text width=15mm] (gv) at (-1.9,-1.6) {gate Verilog};
-  \node[box, external, text width=13mm] (abc) at (0.6,-1.6) {ABC};
-  \node[box, external, text width=13mm] (vpr) at (2.5,-1.6) {VTR, VPR};
-  \node[box, external, text width=40mm] (orc) at (6.2,-1.6) {oracles: Yosys, Parmys, Odin~II};
-  \node[regionlabel] at (-4.75,-2.6) {HDL and netlists in};
-  \node[regionlabel] at (1.55,-2.6) {tools they link to};
-  \node[regionlabel] at (6.2,-2.6) {what it is checked against};
-  % ---- trunk -------------------------------------------------------------------------
-  \node[rel, built, emph]  (ir) at (0,1.0) {\textbf{one provenance IR}\\\odinsub{v1.0.0: IDs, hierarchy, C ABI}};
-  \node[rel, built]        (r1) at (0,2.0) {v1.0.1 route retry};
-  \node[rel, inprog]       (r2) at (0,3.0) {v1.0.2 gate mapping};
-  \node[rel, spec]         (r3) at (0,4.0) {v1.0.3 S1 simulation API};
-  \node[rel, spec]         (r4) at (0,5.0) {v1.0.4 unmap};
-  \node[rel, planned]      (r5) at (0,6.0) {v1.0.5 core options for L1};
-  \node[regionlabel] (tl) at (0,6.8) {Odin III, the trunk};
-  % ---- Wyrd~III ------------------------------------------------------------------------
-  \node[sm, built]   (w1) at (-8.0,6.0) {W1\\runner};
-  \node[sm, spec]    (w2) at (-6.3,6.0) {W2\\GUI};
-  \node[sm, planned] (w3) at (-4.6,6.0) {W3\\sim panel};
-  \node[regionlabel] (wl) at (-6.3,6.85) {Wyrd~III: experiments and GUI};
-  % ---- Loki~III --------------------------------------------------------------------------
-  \node[sm, spec] (l0) at (-8.0,3.8) {L0\\dataset};
-  \node[sm, spec] (l1) at (-6.3,3.8) {L1\\Bayesian};
-  \node[sm, spec] (l2) at (-4.6,3.8) {L2\\graphs};
-  \node[regionlabel] (ll) at (-6.3,4.65) {Loki~III: reverse engineering};
-  % ---- Leman~Russ~III --------------------------------------------------------------------
-  \node[box, planned, text width=48mm] (lr) at (-6.3,1.9) {\textbf{Leman~Russ~III}\\\odinsub{higher-level detection, first target: Trojans}};
-  % ---- crown -------------------------------------------------------------------------
-  \node[box, planned, text width=56mm] (bif) at (0,8.6) {\textbf{Bifrost~III}\\\odinsub{\odintt{wyrd.bifrost}: a session over S1}};
-  \node[box, planned, text width=40mm] (mid) at (6.3,8.6) {\textbf{Midgard~III}\\\odinsub{Verilog Town, people play}};
-  % ---- regions -----------------------------------------------------------------------
-  \begin{scope}[on background layer]
-    \node[bluregion, fit=(ir)(r1)(r2)(r3)(r4)(r5)(tl), inner sep=3pt, draw=o3blue7, line width=0.8pt] (trunk) {};
-    \node[region, fit=(w1)(w3)(wl)] (wr) {};
-    \node[region, fit=(l0)(l2)(ll)] (lk) {};
-  \end{scope}
-  % ---- edges -------------------------------------------------------------------------
-  \draw[flow] (v.north)  -- ([xshift=-14mm]trunk.south);
-  \draw[flow] (bl.north) -- ([xshift=-9mm]trunk.south);
-  \draw[flow] (yj.north) -- ([xshift=-4mm]trunk.south);
-  \draw[flow] (gv.north) -- ([xshift=1mm]trunk.south);
-  \draw[<->, line width=0.55pt] (abc.north) -- ([xshift=8mm]trunk.south);
-  \draw[flow] ([xshift=14mm]trunk.south) -- (vpr.north);
-  \draw[ref] (orc.north west) -- (trunk.south east);
-  \draw[flow] (wr.south) -- node[edgelabel, right] {runs as steps} (lk.north);
-  \draw[flow] (lk.south) -- node[edgelabel, right] {grows into} (lr.north);
-  \draw[flow] (wr.east) -- node[edgelabel, above] {pip package} (trunk.west |- wr.east);
-  \draw[flow] (lk.east) -- node[edgelabel, above] {provenance} (trunk.west |- lk.east);
-  \draw[flowplanned] (lr.east) -- node[edgelabel, above] {} (trunk.west |- lr.east);
-  \draw[flowplanned] (r3.east) -| ([xshift=-3mm]bif.south east);
-  \draw[flowplanned] (bif.east) -- (mid.west);
-  \draw[flowplanned] (bif.west) -| node[edgelabel, above, pos=0.2] {sim panel} (wr.north);
-  \node[box, planned, text width=40mm] (nor) at (6.3,5.4) {\textbf{The Norns~III}\\\odinsub{placement experiment, backlog}};
-  \draw[flowplanned] (trunk.east |- nor.west) -- (nor.west);
-  \odinlegend{anchor=north east, at={(9.0,3.4)}}
+  leaf/.style={ellipse, draw=o3grn8, fill=o3grn1, align=center, line width=0.6pt, inner xsep=1pt,
+               inner ysep=1pt, minimum width=15mm, minimum height=8.5mm, font=\scriptsize},
+  tip/.style={ellipse, draw=o3brn9, fill=o3brn3, align=center, line width=0.6pt, inner xsep=1pt,
+              inner ysep=1pt, minimum height=7mm, font=\scriptsize},
+  limb/.style={line width=8pt, draw=o3brn5, line cap=round},
+  limbin/.style={line width=5.8pt, draw=o3brn4, line cap=round},
+  twig/.style={line width=2.4pt, draw=o3brn5, line cap=round},
+  rootl/.style={line width=3.4pt, draw=o3brn9, line cap=round},
+  rootin/.style={line width=1.6pt, draw=o3brn7, line cap=round},
+  stp/.style={font=\scriptsize\bfseries, text=white, inner sep=0pt, align=center},
+  mini/.style={ellipse, draw=o3grn8, fill=o3grn3, line width=0.5pt, align=center, inner sep=0pt,
+               minimum width=17mm, minimum height=12mm, font=\scriptsize}]
+  % ---- roots (drawn first, behind the trunk): inputs and linked tools --------------------
+  \foreach \x/\tx in {-7.4/-1.5, -5.4/-1.0, -3.4/-0.5, -1.4/0.0, 1.8/0.6, 4.0/1.1}{
+    \draw[rootl]  (\tx,0.3) .. controls (\tx,-0.9) and (\x,-0.8) .. (\x,-1.85);
+    \draw[rootin] (\tx,0.3) .. controls (\tx,-0.9) and (\x,-0.8) .. (\x,-1.85);
+  }
+  \node[tip, text width=11mm]   at (-7.4,-2.35) {Verilog};
+  \node[tip, text width=11mm]   at (-5.4,-2.35) {BLIF};
+  \node[tip, text width=14mm]   at (-3.4,-2.35) {Yosys JSON};
+  \node[tip, text width=14mm]   at (-1.4,-2.35) {gate Verilog};
+  \node[tip, text width=9mm]    at (1.8,-2.35)  {ABC};
+  \node[tip, text width=12mm]   at (4.0,-2.35)  {VTR, VPR};
+  \node[regionlabel] at (-4.4,-3.3) {HDL and netlists in};
+  \node[regionlabel] at (2.9,-3.3)  {tools it links to};
+  % ---- ground line ---------------------------------------------------------------------
+  \draw[o3brn5, line width=0.6pt] (-8.8,0.3) -- (8.8,0.3);
+  % ---- the oracle forest, behind the main tree: mini trees ----------------------------------
+  \foreach \x/\y/\t/\c in {5.05/1.55/Parmys/o3grn3, 6.75/1.55/{VTR\\golden}/o3grn3,
+                            4.2/0.3/Yosys/o3grn4, 5.9/0.3/{Odin~II}/o3grn4, 7.6/0.3/ABC/o3grn4}{
+    \draw[line width=3pt, draw=o3brn5, line cap=round] (\x,\y) -- (\x,\y+0.9);
+    \node[mini, fill=\c] at (\x,\y+1.45) {\t};
+  }
+  \node[regionlabel] at (6.1,4.15) {oracles, to compare against};
+  % ---- canopy: the oval is the tree-top --------------------------------------------------
+  \node[ellipse, fill=o3grn3, draw=o3grn7, line width=0.8pt, minimum width=176mm,
+        minimum height=68mm, inner sep=0pt] at (0,9.7) {};
+  % ---- limbs and twigs (behind the trunk) -------------------------------------------------
+  \draw[limb]   (-1.7,6.7) .. controls (-3.0,7.2) and (-4.6,7.9) .. (-5.8,9.1);
+  \draw[limbin] (-1.7,6.7) .. controls (-3.0,7.2) and (-4.6,7.9) .. (-5.8,9.1);
+  \draw[limb]   (1.7,6.7) .. controls (3.0,7.2) and (4.6,7.9) .. (6.4,9.1);
+  \draw[limbin] (1.7,6.7) .. controls (3.0,7.2) and (4.6,7.9) .. (6.4,9.1);
+  \draw[limb]   (-0.3,7.0) .. controls (-0.6,8.0) and (-1.2,8.6) .. (-1.6,9.2);
+  \draw[limbin] (-0.3,7.0) .. controls (-0.6,8.0) and (-1.2,8.6) .. (-1.6,9.2);
+  \draw[limb]   (-1.85,3.7) .. controls (-3.2,3.7) and (-4.0,4.2) .. (-4.9,4.4);
+  \draw[limbin] (-1.85,3.7) .. controls (-3.2,3.7) and (-4.0,4.2) .. (-4.9,4.4);
+  \draw[limb]   (-1.85,1.9) .. controls (-3.2,1.9) and (-4.0,2.3) .. (-4.9,2.5);
+  \draw[limbin] (-1.85,1.9) .. controls (-3.2,1.9) and (-4.0,2.3) .. (-4.9,2.5);
+  % ---- trunk: Odin III and its steps --------------------------------------------------------
+  \path[draw=o3brn8, fill=o3brn6, line width=0.9pt]
+    (-2.3,0.1) .. controls (-1.6,0.7) and (-1.9,1.3) .. (-1.85,2.5)
+    .. controls (-1.8,4.5) and (-1.95,6.0) .. (-1.7,7.5)
+    -- (1.7,7.5) .. controls (1.95,6.0) and (1.8,4.5) .. (1.85,2.5)
+    .. controls (1.9,1.3) and (1.6,0.7) .. (2.3,0.1) -- cycle;
+  \node[font=\small\bfseries, text=white] at (0,0.85) {Odin III};
+  \foreach \y/\t [count=\i] in {1.7/parse, 2.6/elaborate, 3.5/{proc, opt}, 4.4/partial map,
+                                5.3/lower, 6.2/ABC, 7.0/{write BLIF, VTR}}{
+    \node[stp] (st\i) at (0,\y) {\t};
+  }
+  \foreach \a/\b in {1/2, 2/3, 3/4, 4/5, 5/6, 6/7}{
+    \draw[->, draw=o3brn3, line width=0.5pt] (st\a.north) -- (st\b.south);
+  }
+  % ---- canopy pieces ----------------------------------------------------------------------------
+  \node[leaf, text width=24mm, minimum height=10mm] (loki) at (-6.2,10.1) {\textbf{Loki~III}\\\odinsub{reverse engineering}};
+  \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-1.6,10.1) {\textbf{Wyrd~III}\\\odinsub{experiments, GUI}};
+  \node[leaf, text width=30mm, minimum height=10mm] (mid) at (6.4,10.1) {\textbf{Midgard~III}\\\odinsub{(verilogTown)}};
+  \draw[->, line width=1.6pt, draw=o3grn8] (wyrd.east) .. controls +(1.6,2.3) and ($(mid.west)+(-1.6,2.3)$) .. (mid.west)
+    node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{Bifrost~III}\\\odinsub{simulation bridge}};
+  % ---- small pieces on the left ----------------------------------------------------------------------
+  \draw[twig] (-4.2,4.25) .. controls (-4.6,5.3) and (-5.0,6.2) .. (-4.3,7.35);
+  \node[leaf, text width=26mm] (lr) at (-6.6,4.5) {\textbf{Leman~Russ~III}};
+  \node[leaf, text width=26mm] (nor) at (-6.6,2.5) {\textbf{The Norns~III}\\\odinsub{placement}};
 \end{tikzpicture}

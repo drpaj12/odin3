@@ -37,7 +37,7 @@
 % Earlier title: "Odin III: A Provenance-Tracked HDL Elaboration and Front-End Synthesis Framework
 % for FPGA CAD Research".
 \title{Odin III, the Final Frontier:\\
-A Verilog Front End for VTR Built by a Dark Factory}
+Verilog Synthesis, again, Now Leading to Yggdrasil~III built by the dark factory}
 
 \author{\IEEEauthorblockN{Peter Jamieson}
 \IEEEauthorblockA{\todo{affiliation}\\
@@ -143,10 +143,25 @@ the companies, I would suggest moving to a cloud service model as soon as possib
 is narrower. I wanted to run experiments that I could not do with Yosys, and I wanted the
 capabilities to run them. With Odin~III I now can.
 
-I call the suite that grows from Odin~III Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}, in
-Part~II). Odin~III is the trunk: every path from HDL to the tools passes through its one
-provenance IR, which is why I see it as the final frontier of the Odin line. The branches are
-Wyrd~III, Loki~III, Bifrost~III and Midgard~III (the Verilog Town game), and most of them are planned.
+I call the suite that grows from Odin~III Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}).
+Odin~III is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for
+VTR out), and every path passes through its one provenance IR, which is why I see it as the final
+frontier of the Odin line. The oracles (Yosys, Parmys, Odin~II, VTR's golden results and ABC) stand
+as a small forest beside the trunk, to compare against. At the top, in the canopy, are Wyrd~III (the
+experiment runner and GUI), Loki~III (reverse engineering), Bifrost~III (the simulation bridge) and
+Midgard~III, the Verilog Town game, which Wyrd~III connects to. The code is at
+\url{https://github.com/drpaj12/odin3}, \url{https://github.com/drpaj12/wyrd} and
+\url{https://github.com/drpaj12/loki}.
+
+\begin{figure*}[t]
+\centering
+\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil}}
+\caption{Yggdrasil~III drawn as a tree. The roots are the inputs and the tools Odin~III links to. The
+trunk is Odin~III, with its steps from the roots to the crown. The oracles are the small forest beside
+it. The canopy holds Wyrd~III, Loki~III, Bifrost~III and Midgard~III (verilogTown). Code:
+\texttt{github.com/drpaj12/odin3}, \texttt{github.com/drpaj12/wyrd}, \texttt{github.com/drpaj12/loki}.}
+\label{fig:yggdrasil}
+\end{figure*}
 
 % ------------------------------------------------------------------------------------------
 \section{Background}
@@ -2192,7 +2207,7 @@ was about 414 messages over the 14 days (a median of 33 a day, about 9,400 words
 from the main-session transcripts: approvals, design answers, corrections and new directions.
 
 % ------------------------------------------------------------------------------------------
-\section{Status and After v1.0}
+\section{v1.0 Phases and After v1.0}
 \label{sec:status}
 \begin{table*}[t]
 \caption{Development phases (ADR D11, 2026-10-19) and status at the v1.0.0 release, 2026-10-21}
@@ -2234,7 +2249,7 @@ Ph. & Deliverable & Exit test & Status at v1.0 \\
 \end{tabular}
 \end{table*}
 
-Table~\ref{tab:phases} lists the phases. The status comes from the repository's phase
+Table~\ref{tab:phases} lists the phases. The table comes from the repository's phase
 documents and from the measured runs that Sec.~\ref{sec:measured} reports. Version 1.0.0 was
 tagged on 2026-10-21, 14 calendar days after the first commit, with 226 pull requests merged. The
 GitHub release carries a source tarball with the ABC and Unity submodules
@@ -2460,40 +2475,12 @@ writers (ADR D10) are not part of v1.0.
 
 After v1.0 the new tools live in their own repositories and use Odin III as a pip package, with
 no change to the core. I named the whole suite Yggdrasil~III, the world tree
-(Figs.~\ref{fig:yggdrasil} to~\ref{fig:yggdrasil-hybrid}, three drafts of one picture). Odin~III is the trunk, and each project below is a branch. The
-decisions are mine of 2026-10-21. Only Odin~III v1.0 and the Wyrd~III runner are built.
-
-\begin{figure*}[t]
-\centering
-\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil}}
-\caption{Yggdrasil~III. Odin III is the trunk: every path from HDL and netlists, through the tools it
-links to, goes through its one provenance IR, and the oracles check it. The patch releases grow up
-the trunk. Wyrd~III and Loki~III branch to the left, and Leman~Russ~III is a placeholder branch from Loki~III.
-Bifrost~III is the bridge from the trunk's simulation API (S1) to Midgard~III and the Wyrd~III simulation
-panel. Status as of 2026-10-21.}
-\label{fig:yggdrasil}
-\end{figure*}
-
-\begin{figure*}[t]
-\centering
-\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil_tree}}
-\caption{Yggdrasil~III drawn as a tree: the same pieces and status as Fig.~\ref{fig:yggdrasil}, with
-the inputs, linked tools and oracles as roots, Odin~III as the trunk, the tools as branches and
-Bifrost~III in the crown.}
-\label{fig:yggdrasil-tree}
-\end{figure*}
-
-\begin{figure*}[t]
-\centering
-\odinfit{\textwidth}{\input{IMAGE/fig_yggdrasil_hybrid}}
-\caption{Yggdrasil~III, hybrid of Figs.~\ref{fig:yggdrasil} and~\ref{fig:yggdrasil-tree}: the
-labelled blocks laid out on the tree's silhouette.}
-\label{fig:yggdrasil-hybrid}
-\end{figure*}
+(Fig.~\ref{fig:yggdrasil}). Odin~III is the trunk, and each project below grows from it. The
+decisions are mine of 2026-10-21.
 
 \emph{Odin~III} is the trunk. Core features after v1.0 are patch releases, so that the v1.0 base
-stays clean. Version 1.0.1 is the route retry for a one-CLB VPR failure and is merged. Version
-1.0.2 maps ABC's result onto library gates and is being built. Version 1.0.3 adds S1, a per-cycle
+stays clean. Version 1.0.1 is the route retry for a one-CLB VPR failure. Version
+1.0.2 maps ABC's result onto library gates. Version 1.0.3 adds S1, a per-cycle
 simulation API: open a design, set inputs by port, step one clock, read outputs and named nets,
 and write a VCD whose signal names come from provenance. Version 1.0.4 is unmap, the inverse of
 partial mapping: VTR hard cells return to \code{\$add}, \code{\$mul} and \code{\$mem} with
@@ -2503,28 +2490,27 @@ ends (ADR D11) and FF feature matching (4.6) come later.
 
 \emph{Wyrd~III} takes its name from wyrd, fate, which the Norns weave at the well under the tree. It
 (\url{https://github.com/drpaj12/wyrd}) is a GUI wrapper around Odin III and an experiment
-runner. Its first piece, W1, is built: a command-line runner with projects in TOML, a run store
+runner. Its first piece, W1, is a command-line runner with projects in TOML, a run store
 in SQLite and a scheduler that respects a memory budget. W2 is a Qt GUI with a project tree,
 source and report tabs, a Messages pane and a Quartus-like report. W3 adds a simulation panel on
 Bifrost~III.
 
 \emph{Bifrost~III} is the rainbow bridge. Here it is \code{wyrd.bifrost}, a session over S1 with
 named inputs and outputs, step, reset and VCD. The Wyrd~III simulation panel and Midgard~III are both
-its clients, so I design its interface with Midgard~III in mind. It is planned.
+its clients, so I design its interface with Midgard~III in mind.
 
 \emph{Midgard~III} is the world where people live, and here it is where people play. It is the Verilog
 Town game~\cite{verilogtown2017}, my Verilog teaching game, ported to pygame-ce on Bifrost~III. One
 game tick is one simulation step, and the player's Verilog is compiled when a level starts, with
 errors shown in the game at file and line. It reuses the original images and levels under the
-MIT licence. It is planned.
+MIT licence.
 
 \emph{Loki~III} (\url{https://github.com/drpaj12/loki}) is the reverse-engineering tool for
 structural netlists (Sec.~\ref{sec:re}). L0 is a provenance ground-truth dataset made from the
 benchmarks. L1 is a Bayesian hypothesis flow: pattern detectors give likelihoods, \code{cone\_check}
 proofs confirm them, and \code{raise} and \code{submod} move the design up the hierarchy. L2 adds
 graph export, clustering (k-means and affinity propagation) and graphlet signatures, counted
-with ORCA as a separate process (GraphCrunch is cited only). Loki~III's specifications are approved
-and none of it is built. There is no LLM step for now. Loki~III targets the future work of
+with ORCA as a separate process (GraphCrunch is cited only). There is no LLM step for now. Loki~III targets the future work of
 Gate-Breaker itself: clustering for bus naming, separating datapath from control, and
 partitioning. A Trojan detection step comes later.
 
@@ -2532,14 +2518,13 @@ partitioning. A Trojan detection step comes later.
 that build on the structure Loki~III recovers. The first target is hardware Trojan detection as the
 Seeker's Dilemma poses it~\cite{sarihi2024seekers}: the detector does not know whether a circuit
 holds a Trojan, so it must decide whether one exists and, if so, where. Loki~III's clusters and L2
-graph analysis would supply the evidence. Leman~Russ~III is planned and not yet specified.
+graph analysis would supply the evidence.
 
 \emph{The Norns~III} is the placement experiment. It uses the provenance, or the clusters that
 Loki~III recovers, as VPR placement constraints (\code{--read\_vpr\_constraints}). Urd uses what the
 design was (the provenance hierarchy), Verdandi what is recovered now (Loki~III clusters), and Skuld
 what shall be (the placement they constrain); they run as Wyrd~III steps. It revisits the study of
 system-level information and FPGA
-placement~\cite{gharibian2010finding,gharibian2013analyzing}. It is a backlog item until the projects
-above finish.
+placement~\cite{gharibian2010finding,gharibian2013analyzing}. It comes after the projects above.
 
 \end{document}

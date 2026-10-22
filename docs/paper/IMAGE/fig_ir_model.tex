@@ -3,17 +3,17 @@
 % Solid arrows are typed 32-bit ID references; double-headed arrows are the two directions of
 % one relation; grey arrows are ownership.
 \begin{tikzpicture}[odin,
-  idref/.style={flow, draw=o3blue8},
+  idref/.style={flow, draw=o3grn8},
   idref2/.style={idref, <->},
-  owns/.style={flow, draw=o3grey6},
+  owns/.style={flow, draw=o3brn6},
   lab/.style={edgelabel, fill=none, inner sep=1pt}]
   % ---- design and module -------------------------------------------------------------------
   \odinrecord{design}{anchor=north, nodes={text width=26mm},
-              row 1/.style={nodes={fill=o3blue4}}, at={(1.39, 0)}}{Design}{
+              row 1/.style={nodes={fill=o3grn4}}, at={(1.39, 0)}}{Design}{
     strings (names, paths) \\ provenance store \\ pass-run table \\ tombstones \\
     cell-type table \\ modules[\,] \\ top \\}
   \odinrecord{module}{anchor=north, nodes={text width=31mm},
-              row 1/.style={nodes={fill=o3blue4}}, at={(4.92, 0)}}{Module (IR-18)}{
+              row 1/.style={nodes={fill=o3grn4}}, at={(4.92, 0)}}{Module (IR-18)}{
     nodes: \odintt{pagevec} of node \\ pins: \odintt{pagevec} of pin \\
     nets: \odintt{pagevec} of net \\ wires: \odintt{pagevec} of wire \\
     name maps: \odintt{u64map} \\ alias, attribute side tables \\
@@ -31,12 +31,12 @@
   \odinrecord{wire}{anchor=north, nodes={text width=27mm}, at={(12.23, -3.25)}}{wire \textmd{(40 B)}}{
     name, prov \\ {[}msb:lsb{]}, signed \\ nets[\,], LSB first \\ port node \\}
   % ---- design-wide records -----------------------------------------------------------------
-  \odinrecord{ct}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3grey3}},
+  \odinrecord{ct}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3brn3}},
               at={(15.96, 0)}}{cell type (IR-8)}{
     name: \odintt{\$add}, \odintt{\$\_AND\_}, \odintt{adder}, \ldots \\
     granularity: word, bit, hard, black box, module, port \\ ports and width rules \\
     params and defaults \\ hooks: verify, const\_value, simulate, writers \\}
-  \odinrecord{prov}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3grey3}},
+  \odinrecord{prov}{anchor=north, nodes={text width=31mm}, row 1/.style={nodes={fill=o3brn3}},
               at={(15.96, -3.25)}}{provenance record (IR-12)}{
     kind: SOURCE, IMPORTED, DERIVED \\ pass run, operation \\ locations (file:line, raw) \\
     AST node ID \\ hierarchical path \\ parents[\,] \\}
