@@ -2416,7 +2416,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # tests/cli/test_cli.sh <case> ...: pass scripts end to end (round trip, located errors, --top).
     foreach(_case IN ITEMS script_roundtrip p_roundtrip unknown_pass_p unknown_pass_script
                            unknown_pass_later_script top top_written_first top_unapplied quoted
-                           help_runs_nothing check_flag usage techlib plugin writers sim sim_vectors_in keep_ast
+                           help_runs_nothing check_flag usage techlib plugin writers sim sim_vectors_in sim_vcd keep_ast
                            project_dump project_top project_revision project_diag_paths
                            project_preprocess parse_only parse_only_with_script elab_only
                            elab_only_with_script abc_script_missing abc_script_project opt_snapshot opt_determinism)
@@ -3033,6 +3033,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # S1 Task 9 (spec SW-3, SW-4): sim --vcd against the vector file and, when found, Icarus.
+    add_test(NAME sim_vcd_check
+        COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_vcd
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_vcd_check PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 9 (spec 3.5): plugins/python/re_round.py, one round of the RE loop, through
     # the CLI and equiv-check (needs the linked ABC for cone_check and equiv-check).
     if(ODIN3_WITH_ABC)

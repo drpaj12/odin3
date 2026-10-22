@@ -232,9 +232,20 @@ sim_vectors_in)
     expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim --vectors-in"
     expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 --vectors-in $work/a.vec --vectors-in $work/a.vec"
     expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 \"\""
-    expect_fail "sim: --vcd is not available yet" -p "$pre; sim 4 1 --vcd $work/w.vcd"
-    expect_fail "sim: --vcd is not available yet" -p "$pre; sim --vectors-in $work/a.vec --vcd $work/w.vcd"
     expect_fail "sim: --vcd needs a file name, not \`-\`" -p "$pre; sim 4 1 --vcd -"
+    ;;
+sim_vcd)
+    hv=$fixtures/../../sim/hier.v
+    pre="read_verilog $hv; proc; opt; lower"
+    "$odin3" -p "$pre; sim 8 3 $work/a.vec --vcd $work/a.vcd; sim 8 3 $work/b.vec" \
+        2>"$work/err" || fail "vcd run failed"
+    cmp -s "$work/a.vec" "$work/b.vec" || fail "vectors changed by --vcd"
+    head -1 "$work/a.vcd" | grep -qxF '$version odin3 sim $end' || fail "bad first line"
+    grep -qxF '$scope module u0 $end' "$work/a.vcd" || fail "no u0 scope"
+    grep -qxF '$var wire 4 " a [3:0] $end' "$work/a.vcd" || fail "no a [3:0]"
+    "$odin3" -p "$pre; sim 8 3 --vcd $work/c.vcd" 2>"$work/err" || fail "second vcd run failed"
+    cmp -s "$work/a.vcd" "$work/c.vcd" || fail "vcd not deterministic"
+    expect_fail "sim: --vcd needs a file name, not \`-\`" -p "$pre; sim 8 3 --vcd -"
     ;;
 check_flag)
     "$odin3" --check -p "read_blif $fixture; check --fast" 2>"$work/err" || fail "--check failed"
