@@ -160,7 +160,7 @@ static void port_info(const odin3_sim_signals *sig, odin3_wire_id wire, sig_spec
             continue;
         }
         uint32_t first = sim->in_ports[pidx].first + item->first_bit;
-        bool all_clock = true;
+        bool all_clock = item->width > 0;
         for (uint32_t k = 0; k < item->width; k++) {
             all_clock = all_clock && sim->in_clock[first + k] != 0;
         }

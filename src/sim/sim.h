@@ -122,11 +122,13 @@ void odin3_sim_cycle(odin3_sim *sim);
 void odin3_sim_settle(odin3_sim *sim);
 
 /*
- * One clock edge: event is ODIN3_SIM_POSEDGE or ODIN3_SIM_NEGEDGE (asserted). Sets every clock
- * input to 1 (POSEDGE) or 0 (NEGEDGE), sends the event to every edge-triggered cell, then settles.
- * Allocates nothing and cannot fail.
+ * One clock edge: event is ODIN3_SIM_POSEDGE or ODIN3_SIM_NEGEDGE. Sets every clock input bit to
+ * 1 (POSEDGE) or 0 (NEGEDGE) and leaves the other input bits as they are, sends the event to every
+ * edge-triggered cell, then settles. A design with no clock input is not an error: no input
+ * changes, and the call is a settle. ODIN3_ERR_INVALID_ARG (not logged, nothing changed) for any
+ * other event. Allocates nothing.
  */
-void odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
+odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
 
 /*
  * Returns the simulator to its state right after the build: every value (inputs included, clocks

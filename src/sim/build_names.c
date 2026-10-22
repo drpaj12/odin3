@@ -2,6 +2,7 @@
 #include "build_internal.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "passes/lower/lower.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -183,7 +184,7 @@ void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odi
     const char *why = "the cell type has no simulate hook";
     if (def->gran == ODIN3_GRAN_BLACKBOX) {
         why = "a black box has no semantics";
-    } else if (def->gran == ODIN3_GRAN_WORD) {
+    } else if (def->gran == ODIN3_GRAN_WORD && odin3_lower_handles(def)) {
         why = "the cell type has no simulate hook; run `lower` first";
     }
     err_cell(bld, frame, node, why);

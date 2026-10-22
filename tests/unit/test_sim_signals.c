@@ -3,6 +3,7 @@
  * signal table (scopes, HDL names, lookup, read and write).
  */
 #include "ir/design.h"
+#include "ir/module.h"
 #include "passes/manager.h"
 #include "sim/prng.h"
 #include "sim/signals.h"
@@ -118,8 +119,8 @@ static void test_settle_edges_equal_cycle(void) {
         odin3_sim_drive_random(sim_b, &prng_b);
         odin3_sim_cycle(sim_a);
         odin3_sim_settle(sim_b);
-        odin3_sim_clock_edge(sim_b, ODIN3_SIM_POSEDGE);
-        odin3_sim_clock_edge(sim_b, ODIN3_SIM_NEGEDGE);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edge(sim_b, ODIN3_SIM_POSEDGE));
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edge(sim_b, ODIN3_SIM_NEGEDGE));
         for (uint32_t port = 0; port < odin3_sim_output_count(sim_a); port++) {
             for (uint32_t bit = 0; bit < odin3_sim_output_width(sim_a, port); bit++) {
                 bool val_a = false;
@@ -439,6 +440,149 @@ static void test_signals_oom(void) {
     }
 }
 
+/* --- fix round: edges, hints, unconnected bits, build OOM ------------------------------------- */
+
+static void expect_out(odin3_sim *sim, uint32_t port, bool want) {
+    bool val = !want;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_get_output(sim, (odin3_sim_bit){port, 0}, &val));
+    TEST_ASSERT_EQUAL_INT(want, val);
+}
+
+static void set_in(odin3_sim *sim, odin3_sim_bit at, bool val) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_set_input(sim, at, val));
+}
+
+static void expect_in(odin3_sim *sim, odin3_sim_bit at, bool want) {
+    bool val = !want;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_get_input(sim, at, &val));
+    TEST_ASSERT_EQUAL_INT(want, val);
+}
+
+static void edge(odin3_sim *sim, odin3_sim_event event) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edge(sim, event));
+}
+
+/* A clock edge moves clock bits only: ck[1] of mixclk is data and keeps its value. */
+static void test_edge_leaves_data_bits(void) {
+    load_v((fixture){"mixclk.v", "proc opt lower"});
+    g_sim = build_ok();
+    const odin3_sim_bit clock = {0, 0};
+    const odin3_sim_bit data = {0, 1};
+    set_in(g_sim, data, true);
+    edge(g_sim, ODIN3_SIM_POSEDGE);
+    expect_in(g_sim, clock, true);
+    expect_in(g_sim, data, true);
+    expect_out(g_sim, 0, true);
+    edge(g_sim, ODIN3_SIM_NEGEDGE);
+    expect_in(g_sim, clock, false);
+    expect_in(g_sim, data, true);
+    expect_out(g_sim, 0, true);
+}
+
+/* Two clock ports: one edge event moves both, and both domains capture. */
+static void test_edge_two_clocks(void) {
+    load_v((fixture){"twoclk.v", "proc opt lower"});
+    g_sim = build_ok();
+    const odin3_sim_bit clk1 = {0, 0};
+    const odin3_sim_bit clk2 = {1, 0};
+    TEST_ASSERT_TRUE(odin3_sim_input_is_clock(g_sim, clk1));
+    TEST_ASSERT_TRUE(odin3_sim_input_is_clock(g_sim, clk2));
+    set_in(g_sim, (odin3_sim_bit){2, 0}, true);
+    edge(g_sim, ODIN3_SIM_POSEDGE);
+    expect_in(g_sim, clk1, true);
+    expect_in(g_sim, clk2, true);
+    expect_out(g_sim, 0, true);
+    expect_out(g_sim, 1, true);
+    edge(g_sim, ODIN3_SIM_NEGEDGE);
+    expect_in(g_sim, clk1, false);
+    expect_in(g_sim, clk2, false);
+}
+
+/* A design with no clock: an edge changes no input and acts as a settle. */
+static void test_edge_no_clock(void) {
+    load_v((fixture){"noclk.v", "proc opt lower"});
+    g_sim = build_ok();
+    const odin3_sim_bit low = {0, 0};
+    const odin3_sim_bit high = {0, 1};
+    set_in(g_sim, low, true);
+    set_in(g_sim, high, true);
+    expect_out(g_sim, 0, false);
+    edge(g_sim, ODIN3_SIM_POSEDGE);
+    expect_out(g_sim, 0, true);
+    expect_in(g_sim, low, true);
+    expect_in(g_sim, high, true);
+    edge(g_sim, ODIN3_SIM_NEGEDGE);
+    expect_out(g_sim, 0, true);
+}
+
+static void test_edge_bad_event(void) {
+    load_v((fixture){"traffic.v", "proc opt lower"});
+    g_sim = build_ok();
+    const uint64_t calls = g_sim->n_hook_calls;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_sim_clock_edge(g_sim, ODIN3_SIM_COMB));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_sim_clock_edge(g_sim, ODIN3_SIM_INIT));
+    TEST_ASSERT_EQUAL_UINT64(calls, g_sim->n_hook_calls);
+}
+
+/* IR-7: a zero-width port cannot exist, so port_info never sees one (its width > 0 test is a
+ * guard on the CLOCK kind only). */
+static void test_zero_width_port_refused(void) {
+    odin3_module_id mid = {0};
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("zw"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, name, (odin3_prov_id){0}, &mid));
+    odin3_port_spec spec = {name, ODIN3_DIR_IN, 0, true, {0}, false, 0, 0, false};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_module_add_port(odin3_module_get(design, mid), &spec, NULL));
+}
+
+/* An unconnected wire bit has no slot: it reads constant 0 (S1-AD1). */
+static void test_unconnected_bit_reads_zero(void) {
+    load_v((fixture){"unc.v", "proc"});
+    open_table();
+    uint32_t id = id_of("w[1]");
+    TEST_ASSERT_NOT_EQUAL(0, id);
+    TEST_ASSERT_EQUAL_UINT32(1, sig_at(id)->width);
+    TEST_ASSERT_EQUAL_UINT32(0, peek("w[1]"));
+    TEST_ASSERT_EQUAL_UINT32(0, peek("w"));
+    put("a", 1);
+    odin3_sim_settle(g_sim);
+    TEST_ASSERT_EQUAL_UINT32(0, peek("w"));
+    TEST_ASSERT_EQUAL_UINT32(1, peek("y"));
+}
+
+/* The hint `run lower first` only for types lower handles. */
+static void test_hint_only_for_lowerable(void) {
+    odin3_sim *sim = NULL;
+    load_v((fixture){"pow.v", "proc opt"});
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, build(&sim));
+    TEST_ASSERT_NULL(sim);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "the cell type has no simulate hook"));
+    TEST_ASSERT_NULL(strstr(log_text, "run `lower` first"));
+}
+
+/* Build with the fail-th allocation failing; true when it succeeded (and the sim is freed). */
+static bool build_failing_at(int fail) {
+    odin3_sim *sim = NULL;
+    odin3_util_set_alloc_fail_after(fail);
+    odin3_status st = build(&sim);
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_TRUE(st == ODIN3_OK || st == ODIN3_ERR_NO_MEMORY);
+    TEST_ASSERT_EQUAL_INT(st == ODIN3_OK, sim != NULL);
+    odin3_sim_destroy(sim);
+    return st == ODIN3_OK;
+}
+
+/* Every allocation of odin3_sim_build failing in turn, the keep_names handover included. */
+static void test_build_oom(void) {
+    load_v((fixture){"hier.v", "proc opt lower"});
+    int fail = 0;
+    while (!build_failing_at(fail)) {
+        TEST_ASSERT_TRUE(++fail < BIG);
+    }
+    TEST_ASSERT_TRUE(fail > 0);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_settle_edges_equal_cycle);
@@ -453,5 +597,13 @@ int main(void) {
     RUN_TEST(test_write_rules);
     RUN_TEST(test_mixed_clock_port);
     RUN_TEST(test_signals_oom);
+    RUN_TEST(test_edge_leaves_data_bits);
+    RUN_TEST(test_edge_two_clocks);
+    RUN_TEST(test_edge_no_clock);
+    RUN_TEST(test_edge_bad_event);
+    RUN_TEST(test_zero_width_port_refused);
+    RUN_TEST(test_unconnected_bit_reads_zero);
+    RUN_TEST(test_hint_only_for_lowerable);
+    RUN_TEST(test_build_oom);
     return UNITY_END();
 }

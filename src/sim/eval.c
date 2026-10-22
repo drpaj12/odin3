@@ -6,7 +6,6 @@
 #include "sim/sim_internal.h"
 #include "util/str.h"
 
-#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -29,10 +28,14 @@ void odin3_sim_settle(odin3_sim *sim) {
 /*
  * Raises (POSEDGE) or lowers (NEGEDGE) every clock input, then sends event to every edge-triggered
  * cell (each copies its inputs, as settled before the edge, into its state and writes no output,
- * so their order does not matter), then settles.
+ * so their order does not matter), then settles. Any other event: ODIN3_ERR_INVALID_ARG, nothing
+ * changed. A design with no clock input still sends the event to its edge-triggered cells (none)
+ * and settles.
  */
-void odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event) {
-    assert(event == ODIN3_SIM_POSEDGE || event == ODIN3_SIM_NEGEDGE);
+odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event) {
+    if (event != ODIN3_SIM_POSEDGE && event != ODIN3_SIM_NEGEDGE) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     uint8_t level = event == ODIN3_SIM_POSEDGE ? 1 : 0;
     for (uint32_t k = 0; k < sim->n_in_bits; k++) {
         if (sim->in_clock[k] != 0) {
@@ -43,6 +46,7 @@ void odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event) {
         send(sim, &sim->cells[sim->order[i]], event);
     }
     odin3_sim_settle(sim);
+    return ODIN3_OK;
 }
 
 void odin3_sim_start(odin3_sim *sim) {
@@ -71,8 +75,8 @@ void odin3_sim_reset(odin3_sim *sim) {
 
 void odin3_sim_cycle(odin3_sim *sim) {
     odin3_sim_settle(sim);
-    odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
-    odin3_sim_clock_edge(sim, ODIN3_SIM_NEGEDGE);
+    (void)odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
+    (void)odin3_sim_clock_edge(sim, ODIN3_SIM_NEGEDGE);
 }
 
 /* --- ports ------------------------------------------------------------------------------------ */

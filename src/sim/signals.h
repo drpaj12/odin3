@@ -27,7 +27,10 @@ typedef struct odin3_sim_scope {
     uint32_t parent; /* 0 for scope 0 */
 } odin3_sim_scope;
 
-/* A named signal: a wire (or a bit of one) or a net, in one scope. */
+/*
+ * A named signal: a wire (or a bit of one) or a net, in one scope. A bit that no cell or port
+ * connects (an unconnected wire bit) reads constant 0 (agent default S1-AD1; the spec is silent).
+ */
 typedef struct odin3_sim_signal {
     uint32_t name, leaf; /* table string IDs: full name, leaf */
     uint32_t scope;
@@ -71,8 +74,9 @@ const char *odin3_sim_signals_text(const odin3_sim_signals *sig, uint32_t str);
 /*
  * Resolves `name` (spec section SA-5): *id gets the signal's ID, 0 when the netlist has no such
  * name (ODIN3_OK both ways). A name found by bit select, wire, net or hierarchical path that is
- * not listed is appended as a new signal (ID total + 1). ODIN3_ERR_NO_MEMORY, with the table
- * unchanged, when appending fails.
+ * not listed is appended as a new signal (ID total + 1). ODIN3_ERR_NO_MEMORY when appending
+ * fails: the signals, their slots and the name lookup are as before; only the strings interned for
+ * the failed signal stay in the table (until destroy).
  */
 odin3_status odin3_sim_signals_find(odin3_sim_signals *sig, odin3_bytes name, uint32_t *id);
 
