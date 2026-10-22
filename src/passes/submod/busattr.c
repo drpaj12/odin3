@@ -9,6 +9,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
@@ -57,10 +58,13 @@ typedef struct bus_entry {
     uint8_t dir;
 } bus_entry;
 
-/* The sort key of an entry: name, direction, bit (the net ID breaks ties). */
+/* The sort key of an entry: name, direction, bit (the net ID breaks ties). The direction takes one
+ * bit (SM_IN 0, SM_OUT 1) between the name and the bit, so keys of distinct names never collide. */
 static uint64_t entry_key(const bus_entry *entry) {
-    return ((uint64_t)entry->name << KEY_NAME_SHIFT) | ((uint64_t)entry->dir << KEY_DIR_SHIFT) |
-           entry->bit;
+    assert(entry->dir == SM_IN || entry->dir == SM_OUT);
+    assert(entry->bit <= BUS_MAX_BIT);
+    return ((uint64_t)entry->name << KEY_NAME_SHIFT) |
+           ((uint64_t)(entry->dir - SM_IN) << KEY_DIR_SHIFT) | entry->bit;
 }
 
 /* Shell sort by (name, dir, bit, net): iterative, no recursion, no helper with two like params. */
