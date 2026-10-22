@@ -19,6 +19,8 @@
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  * ABI v4 (cont., 7.4b): odin3_design_copy.
+ * ABI v5 (cont., S1): simulations (odin3_simulation_*): open a top, find signals, set inputs,
+ * step, read values, reset, close; passes are refused while a simulation is open.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -1848,6 +1850,177 @@ typedef struct odin3_abc_engine {
  * process (see odin3_abc_engine).
  */
 odin3_status odin3_abc_engine_register(const odin3_abc_engine *engine);
+
+/* --- simulation (S1) ---------------------------------------------------------------------------
+ *
+ * Per-cycle simulation of a top module through the 2-state, cycle-based netlist simulator
+ * (spec docs/specs/2026-10-21-s1-sim-api-design.md). The design must reach the netlist view
+ * first: a Verilog design runs `read_verilog; proc; opt; lower`, a BLIF or JSON netlist needs no
+ * pass. Hierarchical names use "."; signal IDs start at 1 (0 is "none").
+ */
+
+/* An open simulation of one top module (opaque; odin3_simulation_open, odin3_simulation_close). */
+typedef struct odin3_simulation odin3_simulation;
+
+/* What a signal is, in odin3_simulation_signal.kind. */
+typedef enum odin3_simulation_kind {
+    ODIN3_SIMULATION_INPUT = 0,   /* a top input port (or one bit of it) the caller sets */
+    ODIN3_SIMULATION_CLOCK = 1,   /* a top input port whose every bit is a clock: steps toggle it */
+    ODIN3_SIMULATION_OUTPUT = 2,  /* a top output port (or one bit of it) */
+    ODIN3_SIMULATION_INTERNAL = 3 /* any other wire or net, at any depth */
+} odin3_simulation_kind;
+
+/* A signal (odin3_simulation_get_signal). Strings are owned by the simulation (SA-10). */
+typedef struct odin3_simulation_signal {
+    const char *name; /* full name: the scope's path, ".", the leaf; the leaf alone in scope 0 */
+    const char *leaf; /* the wire's or net's own name, or "name[i]" for a bit select */
+    uint32_t width;   /* bits, >= 1 */
+    uint32_t kind;    /* an odin3_simulation_kind value */
+    int32_t msb;      /* declared range of the wire (a bit select: its index twice; a net: 0, 0) */
+    int32_t lsb;
+    uint32_t scope;     /* the scope it belongs to (0 = the top) */
+    odin3_obj obj;      /* the wire (ODIN3_OBJ_WIRE) or net (ODIN3_OBJ_NET) in the scope's module */
+    uint32_t first_bit; /* vector position in obj of the signal's bit 0 (0 but for a bit select) */
+} odin3_simulation_signal;
+
+/* An expanded module instance (odin3_simulation_get_scope). Strings as for signals (SA-10). */
+typedef struct odin3_simulation_scope {
+    const char *name; /* instance path from the top, "." separated; "" for scope 0 */
+    const char *leaf; /* instance name ("#<node ID>" when unnamed); the top module's name for 0 */
+    uint32_t parent;  /* parent scope; 0 for scope 0 */
+    uint32_t module;  /* the module this scope is an instance of */
+    odin3_ref inst;   /* the instance node in the parent scope's module; {0, 0} for scope 0 */
+} odin3_simulation_scope;
+
+/*
+ * SA-1. Builds the simulation of `module` (0: the design's top). *out gets a handle the caller owns
+ * and frees with odin3_simulation_close; NULL on any failure. Failures, all logged:
+ * ODIN3_ERR_INVALID_ARG for a NULL design or out, a module ID that is not a module of the design,
+ * module 0 when the design has no top ("odin3_simulation_open: the design has no top module"), a
+ * design with processes ("module '<m>' has processes; run proc first"), and every build rejection
+ * of the simulator (a cell type without a simulate hook: "run `lower` first"; a clock not driven
+ * by a top input port; an inout top port; a combinational loop; two drivers on a net; the
+ * flattening budget); ODIN3_ERR_NO_MEMORY. The design is not changed. On success the simulation
+ * is in its power-on state (odin3_simulation_reset) and the design counts one more open
+ * simulation: until it is closed every pass and script command on the design is refused (SA-11:
+ * ODIN3_ERR_INVALID_ARG, "pass <name>: the design has <n> open simulation(s); close them first
+ * (odin3_simulation_close)"). Readers, string attribute writes and odin3_design_set_top_module stay
+ * allowed; odin3_design_copy gives a copy with no open simulation. Several simulations of one
+ * design may be open at once, each with its own state. A design and all its simulations are used
+ * by one thread at a time.
+ */
+odin3_status odin3_simulation_open(odin3_design *design, uint32_t module, odin3_simulation **out);
+
+/*
+ * SA-2. Frees the simulation and every string it handed out; the design counts one fewer open
+ * simulation. NULL is a no-op. It must be called before odin3_design_destroy of its design.
+ */
+void odin3_simulation_close(odin3_simulation *sim);
+
+/*
+ * SA-3. One scope per expanded module instance, in expansion order: scope 0 is the top, then each
+ * instance in the order the simulator expanded it (breadth first: a scope's instances in node-ID
+ * order, appended after all scopes already listed). *count gets the number of scopes; get_scope
+ * fills *info (strings owned by the simulation, valid until close). ODIN3_ERR_INVALID_ARG (logged)
+ * for a NULL argument or scope >= count.
+ */
+odin3_status odin3_simulation_get_scope_count(const odin3_simulation *sim, uint32_t *count);
+odin3_status odin3_simulation_get_scope(const odin3_simulation *sim, uint32_t scope,
+                                        odin3_simulation_scope *info);
+
+/*
+ * SA-4. *count gets the number of listed signals, IDs 1..count, in this order: the top's input
+ * ports in port order; its output ports in port order; then for each scope in scope order: its
+ * module's live wires with a public name (named, not starting with '$') in wire-ID order, skipping
+ * the top's own port wires; then its module's live nets with a public name of their own and no wire
+ * membership at all, in net-ID order, width 1. A top input port is CLOCK when every bit of it
+ * drives a clock, else INPUT; a child scope's port wires are INTERNAL. Signals that
+ * odin3_simulation_find_signal appends are not counted. ODIN3_ERR_INVALID_ARG (logged) for a NULL
+ * argument.
+ */
+odin3_status odin3_simulation_get_signal_count(const odin3_simulation *sim, uint32_t *count);
+
+/*
+ * Fills *info for signal `signal`: a listed one (1..count) or one find_signal appended. Strings are
+ * owned by the simulation and valid until close (appending signals never moves them).
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument or an unknown signal.
+ */
+odin3_status odin3_simulation_get_signal(const odin3_simulation *sim, uint32_t signal,
+                                         odin3_simulation_signal *info);
+
+/*
+ * SA-5. *signal gets the ID of the signal named `name`, or 0 when the simulated netlist has no
+ * such name (ODIN3_OK in both cases). The lookup, in order: (1) a listed signal whose full name
+ * equals name (the first of equal names); (2) a signal appended before under the same text; (3) in
+ * the current scope (scope 0 first), a bit select "base[n]" of a live wire with a bit of declared
+ * index n: a new 1-bit signal of that bit's kind (a top input port bit INPUT, or CLOCK when it is a
+ * clock; a top output port bit OUTPUT; else INTERNAL); (4) in the current scope, a live wire named
+ * name ('$' included), else a live net whose name or alias is name: a new signal (a net: width 1),
+ * kind as in (3) for a top port wire, else INTERNAL; (5) a hierarchical name: at the first "."
+ * from the left whose prefix names a live instance with a scope, enter that scope and resolve the
+ * rest by (3) to (5); no backtracking. Steps 3 to 5 append the new signal (ID total + 1, ...);
+ * get_signal_count still returns the listed count. So a flattened design and the unflattened one
+ * answer the same names. A name that `opt` or `abc` removed is not found (keep it with (* keep *),
+ * or simulate before that pass). ODIN3_ERR_INVALID_ARG (logged) for a NULL argument;
+ * ODIN3_ERR_NO_MEMORY (logged) when appending fails.
+ */
+odin3_status odin3_simulation_find_signal(odin3_simulation *sim, const char *name,
+                                          uint32_t *signal);
+
+/*
+ * SA-7. Sets an INPUT signal for the following settles and steps (it keeps its value until set
+ * again). set takes the value LSB first in value, for width <= 64; set_bits takes count bytes,
+ * bits[i] the value (0 or 1) of bit i, count equal to the width (the buffer is used only during
+ * the call). A clock bit inside an INPUT signal must be given as 0 and is left alone.
+ * ODIN3_ERR_INVALID_ARG (logged; nothing changes) for: NULL arguments, signal 0 or unknown, a kind
+ * other than INPUT, width > 64 (set), a value with a bit set at or above the width (set), count
+ * not equal to the width, a byte other than 0 or 1, a clock bit given as 1.
+ */
+odin3_status odin3_simulation_set(odin3_simulation *sim, uint32_t signal, uint64_t value);
+odin3_status odin3_simulation_set_bits(odin3_simulation *sim, uint32_t signal, const uint8_t *bits,
+                                       uint32_t count);
+
+/*
+ * SA-8. Reads any signal as of the last settle (open, reset, settle or step). get: width <= 64,
+ * LSB first in *value, upper bits 0. get_bits: count equal to the width, bits[i] = bit i (the
+ * buffer is used only during the call). ODIN3_ERR_INVALID_ARG (logged; output untouched) for NULL
+ * arguments, an unknown signal, width > 64 (get), a wrong count.
+ */
+odin3_status odin3_simulation_get(const odin3_simulation *sim, uint32_t signal, uint64_t *value);
+odin3_status odin3_simulation_get_bits(const odin3_simulation *sim, uint32_t signal, uint8_t *bits,
+                                       uint32_t count);
+
+/*
+ * SA-9, SC-3. One settle: the combinational effect of inputs just set shows in the values, no
+ * state advances and the cycle counter is unchanged. Allocates nothing; ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL sim.
+ */
+odin3_status odin3_simulation_settle(odin3_simulation *sim);
+
+/*
+ * SA-9, SC-2. Runs `cycles` cycles (0: nothing) and adds cycles to the cycle counter. One cycle
+ * ticks every clock of the top together: settle with the inputs as set; raise every clock input
+ * and send the rising edge to every edge-triggered cell; settle; lower every clock and send the
+ * falling edge; settle. Values read afterwards are those after the last settle; the values match
+ * the `sim` pass's vector file for the same inputs. A design with no clock steps too. Allocates
+ * nothing; time per cycle is linear in the flattened design. ODIN3_ERR_INVALID_ARG (logged) for a
+ * NULL sim.
+ */
+odin3_status odin3_simulation_step(odin3_simulation *sim, uint32_t cycles);
+
+/*
+ * SA-9. *cycle gets the number of cycles stepped since open or the last reset.
+ * ODIN3_ERR_INVALID_ARG (logged) for a NULL argument.
+ */
+odin3_status odin3_simulation_get_cycle(const odin3_simulation *sim, uint64_t *cycle);
+
+/*
+ * SA-9, SC-4. Power-on reset: every value and state bit 0 (inputs included, clocks low), every
+ * sequential cell gets its INIT again (INIT 1 starts at 1, others at 0), one settle, cycle counter
+ * 0. It is not the design's reset input, which is an ordinary input the caller sets and steps.
+ * Appended signals stay valid. Allocates nothing; ODIN3_ERR_INVALID_ARG (logged) for a NULL sim.
+ */
+odin3_status odin3_simulation_reset(odin3_simulation *sim);
 
 /* ODIN3_CDEF_END */
 

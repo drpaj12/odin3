@@ -65,6 +65,7 @@ add_library(odin3_core OBJECT
     src/api/attr.c
     src/api/log.c
     src/api/abc.c
+    src/api/sim_abi.c
     src/util/alloc.c
     src/util/arena.c
     src/util/hash.c
@@ -1983,6 +1984,12 @@ if(BUILD_TESTING)
     target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
     add_test(NAME test_ast_abi COMMAND test_ast_abi)
     set_tests_properties(test_ast_abi PROPERTIES LABELS unit)
+    add_executable(test_sim_abi tests/unit/test_sim_abi.c)
+    target_link_libraries(test_sim_abi PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_sim_abi PRIVATE ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim"
+        ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_sim_abi.vec")
+    add_test(NAME test_sim_abi COMMAND test_sim_abi)
+    set_tests_properties(test_sim_abi PROPERTIES LABELS unit)
     # A plugin whose init registers, then fails (it must stay loaded: test_abi_ext).
     add_library(plugin_bad_init MODULE tests/unit/plugin_bad_init.c)
     set_target_properties(plugin_bad_init PROPERTIES PREFIX "")
