@@ -3,7 +3,8 @@
 import os, re, sys
 NAME, CODE = "AnonSynth", "anonsynth"
 src = open("odin3.tex").read()
-keys = ["jamieson2005odin","jamieson2011odin2","verilogTown","verilogtown2017","faruque2025gatebreaker",
+# Odin and Odin II stay cited: they are named in the text, so blinding them would point to the author.
+keys = ["verilogTown","verilogtown2017","faruque2025gatebreaker",
         "gharibian2010finding","gharibian2013analyzing","gharibian2014identifying","jamieson2022datamining",
         "sarihi2024seekers"]
 amap = {k: "anon%02d" % (i + 1) for i, k in enumerate(keys)}
@@ -84,6 +85,9 @@ for f in figs:
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
+# Odin and Odin II stay cited, so the tree is scaled to 90% to keep 8 pages.
+sub("\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}",
+    "\\scalebox{0.9}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
 body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
 for f in figs:
     body += "\n".join(ln for ln in open("IMAGE/blind/%s.tex" % f).read().splitlines() if not ln.lstrip().startswith("%"))
