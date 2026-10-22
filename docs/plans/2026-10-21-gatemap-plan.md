@@ -22,7 +22,7 @@ linked-ABC adapter (`adapters/abc`, C17 with ABC's headers), ABC at pin `a3001b7
 
 **Spec:** `docs/specs/2026-10-21-gatemap-design.md` (sections cited as spec 3, 4, ...; decisions
 G-1 to G-9). Executors read both. Where this plan deviates from the spec it says so in
-"Spec gaps and agent defaults" below; those rows go into `docs/PHASE7.md` (Task 15).
+"Spec gaps and agent defaults" below; those rows go into `docs/V1.0.2.md` (Task 15).
 
 ## Global Constraints
 
@@ -738,9 +738,15 @@ write_blif --gates-as-names rtl.blif; abc --gates <L>; dfflibmap <L>; write_blif
 **Files:** Modify `docs/user/flow.md` (section 9: a "Gate mapping" subsection with the spec 1
 flow and the `dfflibmap` step), `CHANGELOG.md` (`## [Unreleased]` / `### Added`: `abc --gates`,
 `dfflibmap`, `write_blif --gates-as-names`, `lib/cmos6.o3lib`, `lib/abc/gates.abc`),
-`docs/PHASE7.md` (decisions log: `10.` onward, one per GM-1..GM-12 as "(Agent default,
-gatemap)", plus the sweep counts and floors under "Exit evidence" in a `### Post-1.0: gatemap`
-subsection).
+`docs/V1.0.2.md` (create it: title `Odin III v1.0.2: gate mapping`; decisions log from `1.`, one per
+GM-1..GM-12 as "(Agent default, gatemap)", plus the sweep counts and floors under "Exit evidence").
 
 - [ ] **Step 1:** write the docs; `ctest --preset debug -R docs` (the Sphinx build, if present) and lint.
-- [ ] **Step 2: Commit** `docs: gate mapping (flow, CHANGELOG, PHASE7 decisions GM-1..12)`; push; PR 7.
+- [ ] **Step 2: Commit** `docs: gate mapping (flow, CHANGELOG, V1.0.2 decisions GM-1..12)`; push; PR 7.
+
+## Release v1.0.2 (Peter 2026-10-21: post-v1.0 core features are patch releases)
+
+Gate mapping is Odin III **v1.0.2**. Its log is `docs/V1.0.2.md` (create it: title `Odin III v1.0.2: gate mapping`,
+a checklist, and a decisions log numbered from 1 holding this document's decisions and agent defaults).
+The release bumps `project(odin3 VERSION 1.0.2)`, adds `docs/RELEASE-NOTES-1.0.2.md` and a CHANGELOG section,
+and is tagged only on Peter's explicit go.
