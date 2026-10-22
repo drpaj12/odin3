@@ -7,6 +7,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "sim/cell.h"
 #include "sim/prng.h"
 
 #include <stdbool.h>
@@ -113,6 +114,25 @@ void odin3_sim_drive_random(odin3_sim *sim, odin3_prng *prng);
  * linear in the flattened design (three settles plus two edge events per edge-triggered cell).
  */
 void odin3_sim_cycle(odin3_sim *sim);
+
+/*
+ * One settle: every cell's COMB once, in level order. The combinational effect of inputs just set
+ * shows in the values, no state advances. Allocates nothing and cannot fail.
+ */
+void odin3_sim_settle(odin3_sim *sim);
+
+/*
+ * One clock edge: event is ODIN3_SIM_POSEDGE or ODIN3_SIM_NEGEDGE (asserted). Sets every clock
+ * input to 1 (POSEDGE) or 0 (NEGEDGE), sends the event to every edge-triggered cell, then settles.
+ * Allocates nothing and cannot fail.
+ */
+void odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
+
+/*
+ * Returns the simulator to its state right after the build: every value (inputs included, clocks
+ * low) and state bit 0, the INIT event to every sequential cell, one settle. Allocates nothing.
+ */
+void odin3_sim_reset(odin3_sim *sim);
 
 /* *value gets output bit `at` as of the last settle; ODIN3_ERR_INVALID_ARG (not logged, *value
  * untouched) out of range. */

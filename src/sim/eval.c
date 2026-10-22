@@ -6,8 +6,10 @@
 #include "sim/sim_internal.h"
 #include "util/str.h"
 
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 /* --- the engine ------------------------------------------------------------------------------- */
 
@@ -18,7 +20,7 @@ static void send(odin3_sim *sim, odin3_sim_flat *flat, odin3_sim_event event) {
 }
 
 /* Runs every cell's COMB once in level order (the edge-triggered cells come first). */
-static void settle(odin3_sim *sim) {
+void odin3_sim_settle(odin3_sim *sim) {
     for (uint32_t i = 0; i < sim->n_cells; i++) {
         send(sim, &sim->cells[sim->order[i]], ODIN3_SIM_COMB);
     }
@@ -27,9 +29,10 @@ static void settle(odin3_sim *sim) {
 /*
  * Raises (POSEDGE) or lowers (NEGEDGE) every clock input, then sends event to every edge-triggered
  * cell (each copies its inputs, as settled before the edge, into its state and writes no output,
- * so their order does not matter).
+ * so their order does not matter), then settles.
  */
-static void edge(odin3_sim *sim, odin3_sim_event event) {
+void odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event) {
+    assert(event == ODIN3_SIM_POSEDGE || event == ODIN3_SIM_NEGEDGE);
     uint8_t level = event == ODIN3_SIM_POSEDGE ? 1 : 0;
     for (uint32_t k = 0; k < sim->n_in_bits; k++) {
         if (sim->in_clock[k] != 0) {
@@ -39,6 +42,7 @@ static void edge(odin3_sim *sim, odin3_sim_event event) {
     for (uint32_t i = 0; i < sim->n_edge; i++) {
         send(sim, &sim->cells[sim->order[i]], event);
     }
+    odin3_sim_settle(sim);
 }
 
 void odin3_sim_start(odin3_sim *sim) {
@@ -52,15 +56,23 @@ void odin3_sim_start(odin3_sim *sim) {
             send(sim, &sim->cells[i], ODIN3_SIM_INIT);
         }
     }
-    settle(sim);
+    odin3_sim_settle(sim);
+}
+
+void odin3_sim_reset(odin3_sim *sim) {
+    if (sim->values != NULL) {
+        memset(sim->values, 0, sim->n_values);
+    }
+    if (sim->state != NULL) {
+        memset(sim->state, 0, sim->n_state);
+    }
+    odin3_sim_start(sim);
 }
 
 void odin3_sim_cycle(odin3_sim *sim) {
-    settle(sim);
-    edge(sim, ODIN3_SIM_POSEDGE);
-    settle(sim);
-    edge(sim, ODIN3_SIM_NEGEDGE);
-    settle(sim);
+    odin3_sim_settle(sim);
+    odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
+    odin3_sim_clock_edge(sim, ODIN3_SIM_NEGEDGE);
 }
 
 /* --- ports ------------------------------------------------------------------------------------ */

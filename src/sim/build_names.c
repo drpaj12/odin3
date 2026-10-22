@@ -180,9 +180,13 @@ static void err_cell(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id
 void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
     const odin3_module *mod = frame_module(bld, frame);
     const odin3_celltype_def *def = odin3_celltype_get(bld->design, odin3_node_type(mod, node));
-    err_cell(bld, frame, node,
-             def->gran == ODIN3_GRAN_BLACKBOX ? "a black box has no semantics"
-                                              : "the cell type has no simulate hook");
+    const char *why = "the cell type has no simulate hook";
+    if (def->gran == ODIN3_GRAN_BLACKBOX) {
+        why = "a black box has no semantics";
+    } else if (def->gran == ODIN3_GRAN_WORD) {
+        why = "the cell type has no simulate hook; run `lower` first";
+    }
+    err_cell(bld, frame, node, why);
 }
 
 void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
