@@ -97,4 +97,11 @@ typedef struct um_why {
  */
 odin3_status um_decline(um_ctx *uc, const odin3_node_id *cells, size_t count, um_why why);
 
+/* A string attribute of a node (NULL when absent or not a string); text valid until the design
+ * dies. */
+const char *um_attr_text(const um_ctx *uc, odin3_node_id node, const char *key);
+
+/* An integer attribute of a node; false when absent or not an integer. */
+bool um_attr_int(const um_ctx *uc, odin3_node_id node, const char *key, int64_t *out);
+
 #endif

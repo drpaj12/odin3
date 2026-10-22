@@ -724,6 +724,145 @@ static void test_unmap_mul_blif(void) {
     check_clean();
 }
 
+/* --- Task 7: multiplier regroup, pattern P1 ------------------------------------------------ */
+
+typedef struct p1_shape {
+    int width; /* the multiply WIDTH */
+    int cut;   /* s: A bits of the low product */
+    int high;  /* h: A bits of the high product */
+    int keep;  /* q: B bits of both */
+    bool tap;  /* a LUT also reads a net of the low product's upper half */
+} p1_shape;
+
+static void ok(odin3_status status) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, status);
+}
+
+/* One multiply cell: A bits x[first ..] (len of them), B bits y[0 .. keep), the rest of the pins
+ * pad, and len + keep product bits on the nets l<j> (low) or u<j> (high). */
+static void put_mul(odin3_strbuf *buf, const p1_shape *shape, int first, int len, bool low) {
+    ok(odin3_strbuf_appendf(buf, ".subckt multiply"));
+    for (int i = 0; i < shape->width; i++) {
+        if (i < len) {
+            ok(odin3_strbuf_appendf(buf, " a[%d]=x%d", i, first + i));
+        } else {
+            ok(odin3_strbuf_appendf(buf, " a[%d]=unconn", i));
+        }
+        if (i < shape->keep) {
+            ok(odin3_strbuf_appendf(buf, " b[%d]=y%d", i, i));
+        } else {
+            ok(odin3_strbuf_appendf(buf, " b[%d]=unconn", i));
+        }
+    }
+    for (int i = 0; i < len + shape->keep; i++) {
+        if (low) {
+            ok(odin3_strbuf_appendf(buf, " out[%d]=l%d", i, i));
+        } else {
+            ok(odin3_strbuf_appendf(buf, " out[%d]=u%d", i, i));
+        }
+    }
+    ok(odin3_strbuf_appendf(buf, "\n"));
+}
+
+static void put_header(odin3_strbuf *buf, const p1_shape *shape) {
+    ok(odin3_strbuf_appendf(buf, ".model m\n.inputs"));
+    for (int i = 0; i < shape->cut + shape->high; i++) {
+        ok(odin3_strbuf_appendf(buf, " x%d", i));
+    }
+    for (int i = 0; i < shape->keep; i++) {
+        ok(odin3_strbuf_appendf(buf, " y%d", i));
+    }
+    ok(odin3_strbuf_appendf(buf, shape->tap ? "\n.outputs t" : "\n.outputs"));
+    for (int i = 0; i < shape->cut + shape->high + shape->keep; i++) {
+        ok(odin3_strbuf_appendf(buf, " p%d", i));
+    }
+    ok(odin3_strbuf_appendf(buf, "\n.names gnd\n.names vcc\n1\n.names unconn\n"));
+}
+
+/* The adder chain add0 = l[cut ..) + u[0 ..) without a top stage, and the output buffers. */
+static void put_chain(odin3_strbuf *buf, const p1_shape *shape) {
+    int stages = shape->high + shape->keep;
+    ok(odin3_strbuf_appendf(buf, ".subckt adder a=vcc b=gnd cin=gnd cout=cr0\n"));
+    for (int i = 0; i < stages; i++) {
+        if (i < shape->keep) {
+            ok(odin3_strbuf_appendf(buf, ".subckt adder a=l%d", shape->cut + i));
+        } else {
+            ok(odin3_strbuf_appendf(buf, ".subckt adder a=gnd"));
+        }
+        ok(odin3_strbuf_appendf(buf, " b=u%d cin=cr%d", i, i));
+        ok(odin3_strbuf_appendf(buf, " cout=cr%d sumout=z%d\n", i + 1, i));
+    }
+    for (int i = 0; i < shape->cut; i++) {
+        ok(odin3_strbuf_appendf(buf, ".names l%d p%d\n1 1\n", i, i));
+    }
+    for (int i = 0; i < stages; i++) {
+        ok(odin3_strbuf_appendf(buf, ".names z%d p%d\n1 1\n", i, shape->cut + i));
+    }
+}
+
+/* The hard cells of a one-side (A) split of an (cut + high) x keep multiplier, as VTR maps it. */
+static void read_p1_blif(const p1_shape *shape) {
+    odin3_strbuf buf;
+    odin3_strbuf_init(&buf);
+    put_header(&buf, shape);
+    put_mul(&buf, shape, 0, shape->cut, true);
+    put_mul(&buf, shape, shape->cut, shape->high, false);
+    put_chain(&buf, shape);
+    if (shape->tap) {
+        ok(odin3_strbuf_appendf(&buf, ".names l%d t\n1 1\n", shape->cut + 1));
+    }
+    ok(odin3_strbuf_appendf(&buf, ".end\n"));
+    read_blif(buf.data);
+    odin3_strbuf_free(&buf);
+}
+
+static void test_unmap_mul_split_a(void) {
+    flow("module t(input [39:0] a, input [7:0] b, output [47:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    odin3_node_id mul = only_mul();
+    expect_params(mul, (const int64_t[5]){0, 0, 40, 8, 48});
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(intern("mul.p1"), attr_of(mul, "unmap")->str);
+    TEST_ASSERT_EQUAL_INT64(36, attr_int(mul, "unmap_w"));
+    check_clean();
+}
+
+static void test_unmap_mul_split_b(void) {
+    flow("module t(input [7:0] a, input [39:0] b, output [47:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap\nopt_clean");
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 8, 40, 48});
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    check_clean();
+}
+
+static void test_unmap_mul_no_regroup(void) {
+    flow("module t(input [39:0] a, input [7:0] b, output [47:0] p); assign p = a * b; endmodule\n");
+    run_script("unmap --no-regroup\nopt_clean");
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$mul", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", NULL, 0));
+    check_clean();
+}
+
+static void test_unmap_mul_blif_p1(void) {
+    load_lib();
+    read_p1_blif(&(p1_shape){8, 8, 3, 4, false});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$add", NULL, 0));
+    expect_params(only_mul(), (const int64_t[5]){0, 0, 11, 4, 15});
+    check_clean();
+}
+
+static void test_unmap_mul_split_other_w(void) {
+    load_lib();
+    read_p1_blif(&(p1_shape){8, 5, 6, 3, false});
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$mul", NULL, 0));
+    odin3_node_id add[1];
+    TEST_ASSERT_EQUAL_UINT32(1, nodes_of("$add", add, 1));
+    TEST_ASSERT_NULL(attr_of(add[0], "unmap_note"));
+    check_clean();
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -758,5 +897,10 @@ int main(void) {
     RUN_TEST(test_unmap_mul_trunc);
     RUN_TEST(test_unmap_mul_dead);
     RUN_TEST(test_unmap_mul_blif);
+    RUN_TEST(test_unmap_mul_split_a);
+    RUN_TEST(test_unmap_mul_split_b);
+    RUN_TEST(test_unmap_mul_no_regroup);
+    RUN_TEST(test_unmap_mul_blif_p1);
+    RUN_TEST(test_unmap_mul_split_other_w);
     return UNITY_END();
 }

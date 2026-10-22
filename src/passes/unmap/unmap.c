@@ -8,6 +8,7 @@
 #include "odin3/odin3.h"
 #include "passes/unmap/chain.h"
 #include "passes/unmap/mul.h"
+#include "passes/unmap/mul_group.h"
 
 #include <string.h>
 
@@ -18,6 +19,9 @@ odin3_status um_module(um_ctx *uc) {
     }
     if (st == ODIN3_OK && uc->types.multiply.v != 0) {
         st = um_mul_phase(uc);
+    }
+    if (st == ODIN3_OK && uc->opts->regroup && uc->types.multiply.v != 0) {
+        st = um_mul_group_phase(uc);
     }
     return st;
 }

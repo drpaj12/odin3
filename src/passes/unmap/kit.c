@@ -434,3 +434,27 @@ odin3_status um_decline(um_ctx *uc, const odin3_node_id *cells, size_t count, um
     uc->stats.declined++;
     return ODIN3_OK;
 }
+
+/* --- attribute reads ----------------------------------------------------------------------- */
+
+static const odin3_value *attr_value(const um_ctx *uc, odin3_node_id node, const char *key) {
+    uint32_t key_str = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(uc->design), odin3_bytes_cstr(key), &key_str)) {
+        return NULL;
+    }
+    return odin3_attr_get(uc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key_str);
+}
+
+const char *um_attr_text(const um_ctx *uc, odin3_node_id node, const char *key) {
+    const odin3_value *value = attr_value(uc, node, key);
+    return value != NULL && value->kind == ODIN3_VAL_STRING ? str_text(uc, value->str) : NULL;
+}
+
+bool um_attr_int(const um_ctx *uc, odin3_node_id node, const char *key, int64_t *out) {
+    const odin3_value *value = attr_value(uc, node, key);
+    if (value == NULL || value->kind != ODIN3_VAL_INT) {
+        return false;
+    }
+    *out = value->i;
+    return true;
+}
