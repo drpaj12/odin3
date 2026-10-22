@@ -17,6 +17,8 @@
 #include "ir/prov.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
+#include "sim/gate_truth.h"
+#include "techlib/libcells.h"
 #include "techlib/reader.h"
 #include "util/alloc.h"
 #include "util/file.h"
@@ -1206,15 +1208,21 @@ static int const_driver(const blif_writer *wr, odin3_net_id net) {
     return -1;
 }
 
+/* The row `1` for value 1, none for 0: the body of a zero-input generator. */
+static odin3_status write_constant_body(blif_writer *wr, int value) {
+    if (value == 1) {
+        wr_put(wr, odin3_bytes_cstr("1"));
+        wr_newline(wr);
+    }
+    return wr->st;
+}
+
 /* `.names <name>`, with the row `1` for value 1: a zero-input generator. */
 static void write_constant(blif_writer *wr, odin3_bytes name, int value) {
     wr_begin(wr, ".names");
     wr_token(wr, name);
     wr_end(wr);
-    if (value == 1) {
-        wr_put(wr, odin3_bytes_cstr("1"));
-        wr_newline(wr);
-    }
+    (void)write_constant_body(wr, value);
 }
 
 /* §5 item 4: each generator a pin or buffer reads that no written zero-input $sop already is, in
@@ -2128,6 +2136,98 @@ static odin3_status write_cell_vtr(blif_writer *wr, odin3_node_id node) {
     return write_subckt_vtr(wr, node);
 }
 
+/* --gates-as-names: a gate cell as `.names` with the cover of its truth table (a constant table as
+ * the zero-input generator, its inputs dropped; the cover is the shorter of the on-set and off-set
+ * ISOP, as for a $lut), the inputs in port order. */
+static odin3_status write_gate_names(blif_writer *wr, odin3_node_id node,
+                                     const odin3_celltype_def *def, const void *type_data) {
+    uint64_t table = 0;
+    odin3_status st = odin3_gate_truth(def, type_data, &table);
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    uint32_t inputs = odin3_gate_truth_inputs(def);
+    uint32_t rows = 0;
+    int constant = -1;
+    odin3_strbuf_clear(&wr->cover);
+    st = odin3_blif_isop(&table, inputs, &wr->cover, &rows, &constant);
+    if (st != ODIN3_OK) {
+        return wr_fail(wr, st);
+    }
+    odin3_bytes out = {0};
+    wr_begin(wr, ".names");
+    for (uint32_t port = 0; port < def->n_ports; port++) {
+        odin3_pin_id pin = odin3_node_port(wr->module, node, port).first;
+        if (def->ports[port].dir == ODIN3_DIR_OUT) {
+            out = pin_name(wr, pin);
+        } else if (constant < 0) {
+            wr_token(wr, pin_name(wr, pin));
+        }
+    }
+    wr_token(wr, out);
+    wr_end(wr);
+    if (constant >= 0) {
+        return write_constant_body(wr, constant);
+    }
+    write_cover(wr, inputs);
+    return wr->st;
+}
+
+/* --gates-as-names: a library state cell as `.latch D Q re|fe|ah|al C init`, init 2 for x. */
+static odin3_status write_state_latch(blif_writer *wr, odin3_node_id node,
+                                      const odin3_libstate *state) {
+    static const char *const TRIGGER_WORDS[] = {"re", "fe", "ah", "al"};
+    static const char *const INIT_WORDS[] = {"0", "1", "2"};
+    enum { INIT_X_WORD = 2 };
+    assert((size_t)state->trigger < sizeof TRIGGER_WORDS / sizeof TRIGGER_WORDS[0]);
+    wr_begin(wr, ".latch");
+    wr_token(wr, pin_name(wr, odin3_node_port(wr->module, node, state->data_port).first));
+    wr_token(wr, pin_name(wr, odin3_node_port(wr->module, node, state->q_port).first));
+    wr_token(wr, odin3_bytes_cstr(TRIGGER_WORDS[state->trigger]));
+    wr_token(wr, pin_name(wr, odin3_node_port(wr->module, node, state->clock_port).first));
+    wr_token(wr, odin3_bytes_cstr(INIT_WORDS[state->init < 0 ? INIT_X_WORD : state->init]));
+    wr_end(wr);
+    return wr->st;
+}
+
+/* --gates-as-names: *done is true when the cell was written here (a gate, a constant cell or a
+ * library state cell), false when the ordinary rules apply. */
+static odin3_status write_as_names(blif_writer *wr, odin3_node_id node, odin3_celltype_id type,
+                                   const odin3_celltype_def *def, bool *done) {
+    const void *data = odin3_celltype_lib(wr->design, type);
+    odin3_libstate state;
+    int value = 0;
+    *done = true;
+    if (odin3_gate_truth_eligible(def)) {
+        return write_gate_names(wr, node, def, data);
+    }
+    odin3_status st = odin3_gate_const_value(def, data, &value);
+    if (st == ODIN3_OK) {
+        write_constant(wr, pin_name(wr, odin3_node_port(wr->module, node, 0).first), value);
+        return wr->st;
+    }
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        return wr_fail(wr, st);
+    }
+    if (odin3_libstate_of(wr->design, type, &state)) {
+        return write_state_latch(wr, node, &state);
+    }
+    *done = false;
+    return ODIN3_OK;
+}
+
+/* The plain dialect's ordinary rules for a cell. */
+static odin3_status write_plain_cell(blif_writer *wr, odin3_node_id node, odin3_celltype_id type) {
+    wr_builtin which = builtin_of(wr, type);
+    if (which == WR_SOP) {
+        return write_names(wr, node);
+    }
+    if (is_lut(wr, type)) {
+        return write_lut(wr, node);
+    }
+    return which < WR_BUILTINS ? write_latch(wr, node, which) : write_subckt(wr, node);
+}
+
 static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     odin3_celltype_id type = odin3_node_type(wr->module, node);
     const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
@@ -2150,16 +2250,13 @@ static odin3_status write_cell(blif_writer *wr, odin3_node_id node) {
     if (odin3_blif_vtr_const_cell(wr->module, node)) {
         return wr->st; /* spec 3E §9.4: its readers read gnd/vcc/unconn (net_name) */
     }
-    wr_builtin which = builtin_of(wr, type);
+    bool done = false;
     odin3_status st = ODIN3_OK;
-    if (which == WR_SOP) {
-        st = write_names(wr, node);
-    } else if (is_lut(wr, type)) {
-        st = write_lut(wr, node);
-    } else if (which < WR_BUILTINS) {
-        st = write_latch(wr, node, which);
-    } else {
-        st = write_subckt(wr, node);
+    if (wr->opts->gates_as_names) {
+        st = write_as_names(wr, node, type, def, &done);
+    }
+    if (!done && st == ODIN3_OK) {
+        st = write_plain_cell(wr, node, type);
     }
     if (st == ODIN3_OK) {
         write_cell_extras(wr, node);
@@ -2584,6 +2681,16 @@ static void wr_free(blif_writer *wr) {
     odin3_u64map_destroy(wr->widest);
 }
 
+/* The refusal text of a PLAIN-only option set in opts, NULL when none is. */
+static const char *plain_only_option(const odin3_blif_write_opts *opts) {
+    if (opts->src_attr) {
+        return "odin3_blif_write_with: src_attr applies to the PLAIN dialect only";
+    }
+    return opts->gates_as_names
+               ? "odin3_blif_write_with: gates_as_names applies to the PLAIN dialect only"
+               : NULL;
+}
+
 /* The options' refusals for odin3_blif_write_with (plan 3E points (m) and (n)), before the
  * preflight (whose own option checks serve its direct callers); logged, ODIN3_ERR_INVALID_ARG. */
 static odin3_status check_opts(const odin3_blif_write_opts *opts) {
@@ -2597,8 +2704,8 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
         why = "odin3_blif_write_with: unknown name_style";
     } else if (!vtr && (opts->lut_k != 0 || provenance)) {
         why = "odin3_blif_write_with: lut_k and name_style apply to the VTR dialect only";
-    } else if (vtr && opts->src_attr) {
-        why = "odin3_blif_write_with: src_attr applies to the PLAIN dialect only";
+    } else if (vtr && plain_only_option(opts) != NULL) {
+        why = plain_only_option(opts);
     } else if (opts->lut_k != 0 &&
                (opts->lut_k < ODIN3_BLIF_VTR_MIN_K || opts->lut_k > ODIN3_BLIF_VTR_MAX_K)) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_blif_write_with: lut_k %u is outside %u..%u",
@@ -2764,8 +2871,8 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
     }
     odin3_blif_write_opts use =
         opts != NULL ? *opts
-                     : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0,
-                                               false, NULL};
+                     : (odin3_blif_write_opts){
+                           ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL, false};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {
