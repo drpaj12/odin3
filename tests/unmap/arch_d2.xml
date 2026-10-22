@@ -1,0 +1,37 @@
+<!-- Depth micros of the unmap tests: a RAM block of 2 address bits and 1 data bit, so a 4-bit address memory splits into four leaves (R-8) and stays small enough for equiv-check. No multiply or adder model. -->
+<architecture>
+  <models>
+    <model name="single_port_ram">
+      <input_ports>
+        <port name="we" clock="clk"/><port name="addr" clock="clk"/><port name="data" clock="clk"/>
+        <port name="clk" is_clock="1"/>
+      </input_ports>
+      <output_ports><port name="out" clock="clk"/></output_ports>
+    </model>
+    <model name="dual_port_ram">
+      <input_ports>
+        <port name="we1" clock="clk"/><port name="we2" clock="clk"/>
+        <port name="addr1" clock="clk"/><port name="addr2" clock="clk"/>
+        <port name="data1" clock="clk"/><port name="data2" clock="clk"/>
+        <port name="clk" is_clock="1"/>
+      </input_ports>
+      <output_ports><port name="out1" clock="clk"/><port name="out2" clock="clk"/></output_ports>
+    </model>
+  </models>
+  <complexblocklist>
+    <pb_type name="memory">
+      <pb_type name="sp2" blif_model=".subckt single_port_ram" class="memory">
+        <input name="addr" num_pins="2"/><input name="data" num_pins="1"/>
+        <input name="we" num_pins="1"/><output name="out" num_pins="1"/>
+        <clock name="clk" num_pins="1"/>
+      </pb_type>
+      <pb_type name="dp2" blif_model=".subckt dual_port_ram" class="memory">
+        <input name="addr1" num_pins="2"/><input name="addr2" num_pins="2"/>
+        <input name="data1" num_pins="1"/><input name="data2" num_pins="1"/>
+        <input name="we1" num_pins="1"/><input name="we2" num_pins="1"/>
+        <output name="out1" num_pins="1"/><output name="out2" num_pins="1"/>
+        <clock name="clk" num_pins="1"/>
+      </pb_type>
+    </pb_type>
+  </complexblocklist>
+</architecture>

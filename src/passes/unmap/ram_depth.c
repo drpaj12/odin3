@@ -35,6 +35,8 @@ enum {
     UM_DFF_CLK = 0,
     UM_DFF_D = 1,
     UM_DFF_Q = 2,
+    UM_DFF_P_WIDTH = 0,
+    UM_DFF_P_POLARITY = 1,
     UM_MAX_LEVELS = 16,
     UM_WR_EN_PORT = 5,
     UM_AND_A = 0,
@@ -166,6 +168,18 @@ static bool tree_init(um_write_tree *tree, size_t leaves, uint32_t levels) {
     return ok;
 }
 
+/* Every data bit of the leaf has the same write enable (R-8): WR_EN[j] is WR_EN[0]. */
+static bool same_enable(const um_ctx *uc, odin3_node_id leaf) {
+    odin3_pinslice pins = odin3_node_port(uc->module, leaf, UM_WR_EN_PORT);
+    odin3_net_id first = um_port_net(uc->module, leaf, (um_pos){UM_WR_EN_PORT, 0});
+    for (uint32_t i = 1; i < pins.count; i++) {
+        if (um_port_net(uc->module, leaf, (um_pos){UM_WR_EN_PORT, i}).v != first.v) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* One leaf: its chain, the agreement on we0, its path. */
 static bool add_leaf(const um_ctx *uc, odin3_net_id enable, uint32_t levels, um_write_tree *tree) {
     um_chain_end end = {0, {0}};
@@ -190,7 +204,7 @@ bool um_depth_write_tree(const um_ctx *uc, const odin3_vec *leaves, uint32_t lev
     const odin3_node_id *nodes = leaves->data;
     for (size_t i = 0; ok && i < leaves->len; i++) {
         odin3_net_id enable = um_port_net(uc->module, nodes[i], (um_pos){UM_WR_EN_PORT, 0});
-        ok = add_leaf(uc, enable, levels, out);
+        ok = same_enable(uc, nodes[i]) && add_leaf(uc, enable, levels, out);
     }
     return ok && all_distinct(&out->paths, levels);
 }
@@ -256,6 +270,15 @@ static odin3_node_id find_mux(const um_ctx *uc, odin3_net_id a_net, odin3_net_id
     return node;
 }
 
+/* A 1-bit rising-edge `$dff` whose Q bit 0 drives the net (R-8: the select register). */
+static bool is_select_dff(const um_ctx *uc, odin3_node_id dff, odin3_pin_id driver) {
+    return odin3_node_type(uc->module, dff).v == uc->types.dff.v &&
+           odin3_pin_port(uc->module, driver) == UM_DFF_Q &&
+           odin3_pin_bit(uc->module, driver) == 0 &&
+           odin3_node_param(uc->module, dff, UM_DFF_P_WIDTH)->i == 1 &&
+           odin3_node_param(uc->module, dff, UM_DFF_P_POLARITY)->i == 1;
+}
+
 /* The select of a mux of level `level` for read port `port`: a `$dff` clocked by the read clock;
  * the first one seen sets the port's address net of the level, later ones must agree. */
 static bool check_select(um_depth *dep, odin3_node_id mux, um_pos which) {
@@ -266,8 +289,7 @@ static bool check_select(um_depth *dep, odin3_node_id mux, um_pos which) {
         odin3_pin_valid(driver) ? odin3_pin_node(uc->module, driver) : (odin3_node_id){0};
     const odin3_node_id *leaves = dep->leaves->data;
     odin3_net_id clock = um_port_net(uc->module, leaves[0], (um_pos){UM_MEM_RD_CLK, which.port});
-    if (dff.v == 0 || odin3_node_type(uc->module, dff).v != uc->types.dff.v ||
-        odin3_pin_port(uc->module, driver) != UM_DFF_Q ||
+    if (dff.v == 0 || !is_select_dff(uc, dff, driver) ||
         um_port_net(uc->module, dff, (um_pos){UM_DFF_CLK, 0}).v != clock.v) {
         return false;
     }

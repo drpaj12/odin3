@@ -948,8 +948,8 @@ static void put_p2_mul(odin3_strbuf *buf, const char *const *pins, int out_len, 
 }
 
 /* An adder chain of `stages` stages: sum bit i is `<sum>i`; the operands are name arrays. */
-static void put_p2_chain(odin3_strbuf *buf, const char *const *a, const char *const *b,
-                         int stages, const char *sum) {
+static void put_p2_chain(odin3_strbuf *buf, const char *const *a, const char *const *b, int stages,
+                         const char *sum) {
     ok(odin3_strbuf_appendf(buf, ".subckt adder a=vcc b=gnd cin=gnd cout=%sc0\n", sum));
     for (int i = 0; i < stages; i++) {
         ok(odin3_strbuf_appendf(buf, ".subckt adder a=%s b=%s cin=%sc%d cout=%sc%d sumout=%s%d\n",
@@ -1491,6 +1491,142 @@ static void test_unmap_depth_lowered(void) {
     TEST_ASSERT_NULL(strstr(log_text, "not recovered"));
 }
 
+/* The micros of the small depth-2 architecture (tests/unmap/arch_d2.xml): 4-bit addresses split
+ * into four leaves per data bit. */
+static void flow_small(const char *micro) {
+    char text[PATH_BUF * 3];
+    (void)snprintf(text, sizeof text,
+                   "read_arch %s\nread_verilog --vtr-compat %s\nproc\nopt\nhardmap\n",
+                   src_path("tests/unmap/arch_d2.xml"), micro);
+    run_script(text);
+}
+
+static const char *micro_path(const char *name) {
+    static char path[PATH_BUF];
+    (void)snprintf(path, sizeof path, "%s/tests/unmap/%s", ODIN3_UM_SRC, name);
+    return path;
+}
+
+static void test_unmap_depth_multibit(void) {
+    flow_small(micro_path("ram_deep_w2.v"));
+    run_script("unmap\nopt_clean");
+    odin3_node_id mem = first_mem(1);
+    expect_shape(mem, (const int64_t[4]){4, 2, 1, 1});
+    TEST_ASSERT_EQUAL_UINT32(intern("ram.depth"), attr_of(mem, "unmap")->str);
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$and", NULL, 0));
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$not", NULL, 0));
+    check_clean();
+}
+
+/* Two read ports: the replicas of the write side keep two `$mem` cells, each depth-merged. */
+static void test_unmap_depth_two_reads(void) {
+    flow_small(micro_path("ram_deep_2r.v"));
+    run_script("unmap\nopt_clean");
+    odin3_node_id mems[2];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$mem", mems, 2));
+    for (uint32_t i = 0; i < 2; i++) {
+        expect_shape(mems[i], (const int64_t[4]){4, 2, 1, 1});
+        TEST_ASSERT_EQUAL_UINT32(intern("ram.depth"), attr_of(mems[i], "unmap")->str);
+    }
+    TEST_ASSERT_EQUAL_UINT32(0, nodes_of("$and", NULL, 0));
+    check_clean();
+}
+
+/* The two-bit memory refused once (a swapped mux), put right, then run again: the control of the
+ * tests that damage one more thing between the runs. */
+static void refuse_then_restore(void) {
+    flow_small(micro_path("ram_deep_w2.v"));
+    swap_mux_inputs();
+    run_script("unmap");
+    odin3_node_id leaves[4];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", leaves, DEEP_LEAVES));
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:depth"), attr_of(leaves[0], "unmap_note")->str);
+    swap_mux_inputs();
+}
+
+static void test_unmap_depth_second_run(void) {
+    refuse_then_restore();
+    run_script("unmap");
+    first_mem(1);
+    check_clean();
+}
+
+/* R-8: the write enable of every data bit of every leaf is the same net. */
+static void test_unmap_depth_bit_enables_differ(void) {
+    refuse_then_restore();
+    odin3_node_id leaves[4];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", leaves, DEEP_LEAVES));
+    odin3_pinslice enables = odin3_node_port(top(), leaves[2], PORT_WR_EN);
+    TEST_ASSERT_EQUAL_UINT32(2, enables.count);
+    odin3_pin_id second = {enables.first.v + 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_disconnect(top(), second));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_connect(top(), second, port_bit("we", 0)));
+    run_script("unmap");
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", leaves, DEEP_LEAVES));
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:depth"), attr_of(leaves[0], "unmap_note")->str);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "not recovered: depth"));
+}
+
+/* The registered select of a leaf level is replaced by a `$dff` with the given polarity and
+ * width; the select net stays bit `at` of its Q. */
+static void replace_select_dff(int64_t polarity, uint32_t width, uint32_t at) {
+    odin3_node_id dffs[8];
+    uint32_t count = nodes_of("$dff", dffs, 8);
+    odin3_node_id old = {0};
+    for (uint32_t i = 0; i < count && i < 8 && old.v == 0; i++) {
+        old = attr_of(dffs[i], "hardmap") != NULL ? dffs[i] : old;
+    }
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, old.v);
+    odin3_net_id clk = um_port_net(top(), old, (um_pos){0, 0});
+    odin3_net_id in = um_port_net(top(), old, (um_pos){1, 0});
+    odin3_net_id out = um_port_net(top(), old, (um_pos){2, 0});
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(top(), old));
+    odin3_net_id d[2] = {in, in};
+    odin3_net_id q[2] = {{0}, {0}};
+    for (uint32_t i = 0; i < width; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                              odin3_net_create(top(), 0, odin3_module_prov(top()), &q[i]));
+    }
+    q[at] = out;
+    odin3_netvec ports[3] = {{&clk, 1}, {d, width}, {q, width}};
+    odin3_value params[2] = {odin3_value_int(width), odin3_value_int(polarity)};
+    odin3_node_spec spec = {type_named("$dff"), 0, odin3_module_prov(top()), params, 2};
+    odin3_node_id made = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(top(), &spec, ports, &made));
+}
+
+static void expect_depth_refused(void) {
+    run_script("unmap");
+    odin3_node_id leaves[DEEP_LEAVES];
+    TEST_ASSERT_EQUAL_UINT32(DEEP_LEAVES, nodes_of("$mem", leaves, DEEP_LEAVES));
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:depth"), attr_of(leaves[0], "unmap_note")->str);
+}
+
+static void test_unmap_depth_select_dff_ok(void) {
+    flow_deep();
+    replace_select_dff(1, 1, 0);
+    run_script("unmap");
+    first_mem(1);
+}
+
+static void test_unmap_depth_select_negedge(void) {
+    flow_deep();
+    replace_select_dff(0, 1, 0);
+    expect_depth_refused();
+}
+
+static void test_unmap_depth_select_wide_dff(void) {
+    flow_deep();
+    replace_select_dff(1, 2, 0);
+    expect_depth_refused();
+}
+
+static void test_unmap_depth_select_on_upper_bit(void) {
+    flow_deep();
+    replace_select_dff(1, 2, 1);
+    expect_depth_refused();
+}
+
 static void run_kit_tests(void) {
     RUN_TEST(test_unmap_options);
     RUN_TEST(test_net_class);
@@ -1565,6 +1701,14 @@ static void run_misc_tests(void) {
     RUN_TEST(test_unmap_depth_shared_not);
     RUN_TEST(test_unmap_depth_mismatch_note);
     RUN_TEST(test_unmap_depth_lowered);
+    RUN_TEST(test_unmap_depth_multibit);
+    RUN_TEST(test_unmap_depth_two_reads);
+    RUN_TEST(test_unmap_depth_second_run);
+    RUN_TEST(test_unmap_depth_bit_enables_differ);
+    RUN_TEST(test_unmap_depth_select_dff_ok);
+    RUN_TEST(test_unmap_depth_select_negedge);
+    RUN_TEST(test_unmap_depth_select_wide_dff);
+    RUN_TEST(test_unmap_depth_select_on_upper_bit);
     RUN_TEST(test_unmap_info_line);
     RUN_TEST(test_unmap_info_line_regroup);
     RUN_TEST(test_unmap_idempotent);

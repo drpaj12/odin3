@@ -36,8 +36,13 @@ fail() {
 }
 
 # phase3 <design> <out>: the Phase 3 script, placeholders filled, comments and blanks dropped.
+# With arch_file set (a depth micro) `read_arch` replaces read_techlib, so the arch's small RAM blocks
+# make partial_map split the memory.
+arch_file=
 phase3() {
-    sed -e '/^#/d' -e '/^$/d' -e "s|@LIB@|$lib|" -e "s|@ADDERLIB@|$adder_lib|" \
+    local techlib="read_techlib $lib"
+    [[ -n $arch_file ]] && techlib="read_arch $arch_file"
+    sed -e '/^#/d' -e '/^$/d' -e "s|^read_techlib @LIB@|$techlib|" -e "s|@ADDERLIB@|$adder_lib|" \
         -e "s|@DESIGN@|$1|" -e "s|@OUT@|$2|" "$phase3"
 }
 
@@ -74,8 +79,10 @@ run_odin3() { # run_odin3 <script> <what>
     "$odin3" "${top[@]}" -p "$1" >"$work/out" 2>"$work/err" || fail "$2: odin3 failed"
 }
 
-rtl_micro() { # rtl_micro <repo-relative path> <comb|seq> [glue]
+rtl_micro() { # rtl_micro <repo-relative path> <comb|seq> [glue] [arch=<repo-relative xml>]
     local design=$repo/$1
+    arch_file=
+    [[ ${4:-} == arch=* ]] && arch_file=$repo/${4#arch=}
     top_name=$(grep -m1 -oE '^[[:space:]]*module[[:space:]]+[A-Za-z_0-9]+' "$design" | awk '{print $2}')
     if listed "$1" equiv-skip; then
         :
@@ -136,9 +143,9 @@ stale_check() {
 
 case $case_name in
 rtl)
-    while read -r path kind extra; do
+    while read -r path kind extra arch; do
         [[ -z $path || $path == \#* ]] && continue
-        rtl_micro "$path" "$kind" "$extra"
+        rtl_micro "$path" "$kind" "$extra" "$arch"
     done <"$repo/tests/unmap/micros.txt"
     stale_check rtl
     ;;
