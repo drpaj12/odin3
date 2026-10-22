@@ -362,7 +362,7 @@ static odin3_status replace_cells(um_ctx *uc, const um_rgroup *group, const um_n
     return st;
 }
 
-odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group, const char *rule) {
+odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group) {
     const um_ram *cells = group->cells.data;
     um_mem mem;
     mem_init(&mem);
@@ -392,7 +392,7 @@ odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group, const char *rule) {
                   UM_MEM_PARAMS,
                   ports,
                   cells[0].node,
-                  rule,
+                  group->rule,
                   shared_origin(uc, group),
                   0};
     st = st == ODIN3_OK ? replace_cells(uc, group, &req) : st;
@@ -413,7 +413,20 @@ static bool is_ram(const um_ctx *uc, odin3_node_id node) {
             (uc->types.dp_ram.v != 0 && type.v == uc->types.dp_ram.v));
 }
 
-odin3_status um_ram_phase(um_ctx *uc) {
+static odin3_status single_group(const um_ram *cell, um_rgroup *group) {
+    odin3_vec_init(&group->cells, sizeof(um_ram));
+    group->slices = 1;
+    group->rule = "ram";
+    um_ram *slot = odin3_vec_push(&group->cells);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = *cell;
+    return ODIN3_OK;
+}
+
+/* The summaries of every live RAM cell, node-ID order. */
+static odin3_status summarise(const um_ctx *uc, odin3_vec *cells) {
     uint32_t end = odin3_module_node_end(uc->module);
     odin3_status st = ODIN3_OK;
     for (uint32_t nid = 1; st == ODIN3_OK && nid < end; nid++) {
@@ -421,13 +434,44 @@ odin3_status um_ram_phase(um_ctx *uc) {
         if (!is_ram(uc, node)) {
             continue;
         }
-        um_rgroup group = {{0}, 1};
-        odin3_vec_init(&group.cells, sizeof(um_ram));
-        um_ram *slot = odin3_vec_push(&group.cells);
+        um_ram *slot = odin3_vec_push(cells);
         st = slot != NULL ? um_ram_summary(uc, node, slot) : ODIN3_ERR_NO_MEMORY;
-        uc->stats.ram_cells++;
-        st = st == ODIN3_OK ? um_ram_emit(uc, &group, "ram") : st;
-        odin3_vec_free(&group.cells);
     }
+    return st;
+}
+
+/* Every cell alone (--no-regroup). */
+static odin3_status alone(const odin3_vec *cells, odin3_vec *groups) {
+    odin3_vec_init(groups, sizeof(um_rgroup));
+    const um_ram *items = cells->data;
+    for (size_t i = 0; i < cells->len; i++) {
+        um_rgroup *group = odin3_vec_push(groups);
+        if (group == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        odin3_status st = single_group(&items[i], group);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status um_ram_phase(um_ctx *uc) {
+    odin3_vec cells;
+    odin3_vec groups;
+    odin3_vec_init(&cells, sizeof(um_ram));
+    odin3_vec_init(&groups, sizeof(um_rgroup));
+    odin3_status st = summarise(uc, &cells);
+    uc->stats.ram_cells += cells.len;
+    if (st == ODIN3_OK) {
+        st = uc->opts->regroup ? um_ram_groups(uc, &cells, &groups) : alone(&cells, &groups);
+    }
+    const um_rgroup *items = groups.data;
+    for (size_t i = 0; st == ODIN3_OK && i < groups.len; i++) {
+        st = um_ram_emit(uc, &items[i]);
+    }
+    um_rgroups_free(&groups);
+    odin3_vec_free(&cells);
     return st;
 }

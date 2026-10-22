@@ -37,10 +37,20 @@ odin3_status um_ram_summary(const um_ctx *uc, odin3_node_id node, um_ram *out);
 typedef struct um_rgroup {
     odin3_vec cells;
     uint32_t slices;
+    const char *rule; /* the `unmap` attribute: ram, ram.width or ram.replica */
 } um_rgroup;
 
-/* R-2, R-5: builds the `$mem` of the group and replaces its cells; `rule` is the `unmap` value. */
-odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group, const char *rule);
+/* R-2, R-5: builds the `$mem` of the group and replaces its cells. */
+odin3_status um_ram_emit(um_ctx *uc, const um_rgroup *group);
+
+/*
+ * R-5 to R-7: the groups of `cells` (um_ram, node-ID order): `groups` becomes an odin3_vec of
+ * um_rgroup in node-ID order of their first cell (free each `cells`, then the vec, with
+ * um_rgroups_free). Candidate sets (equal control nets, no common origin) are kept apart, get
+ * `unmap_cand` on their cells and one INFO line each.
+ */
+odin3_status um_ram_groups(um_ctx *uc, const odin3_vec *cells, odin3_vec *groups);
+void um_rgroups_free(odin3_vec *groups);
 
 /* Phase D. */
 odin3_status um_ram_phase(um_ctx *uc);

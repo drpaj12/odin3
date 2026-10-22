@@ -1020,6 +1020,79 @@ static void test_unmap_ram_blif_pad(void) {
     check_clean();
 }
 
+/* --- Task 10: RAM width and replica merge by origin ---------------------------------------- */
+
+enum { PORT_WR_DATA = 7, RAM_BITS = 8 };
+
+static void test_unmap_ram_width_merge(void) {
+    flow_file("tests/unmap/ram_w8.v");
+    odin3_node_id slices[RAM_BITS];
+    TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("dual_port_ram", slices, RAM_BITS));
+    odin3_net_id data[RAM_BITS];
+    for (uint32_t i = 0; i < RAM_BITS; i++) {
+        data[i] = um_port_net(top(), slices[i], (um_pos){2, 0}); /* data1 */
+    }
+    odin3_prov_id origin = odin3_node_prov(top(), slices[0]);
+    run_script("unmap\nopt_clean");
+    odin3_node_id mem = first_mem(1);
+    expect_shape(mem, (const int64_t[4]){6, 8, 1, 1});
+    TEST_ASSERT_EQUAL_UINT32(intern("ram.width"), attr_of(mem, "unmap")->str);
+    TEST_ASSERT_EQUAL_INT64(RAM_BITS, attr_int(mem, "unmap_pieces"));
+    TEST_ASSERT_TRUE(origin.v != 0);
+    TEST_ASSERT_EQUAL_INT64(origin.v, attr_int(mem, "unmap_origin"));
+    for (uint32_t i = 0; i < RAM_BITS; i++) {
+        TEST_ASSERT_EQUAL_UINT32(data[i].v, um_port_net(top(), mem, (um_pos){PORT_WR_DATA, i}).v);
+    }
+    check_clean();
+}
+
+/* The slice order of R-6 is node-ID order; the role numbers partial_map wrote agree (the one
+ * place a test reads `hardmap`). */
+static void test_unmap_ram_bit_order(void) {
+    flow_file("tests/unmap/ram_w8.v");
+    odin3_node_id slices[RAM_BITS];
+    TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("dual_port_ram", slices, RAM_BITS));
+    for (int i = 0; i < RAM_BITS; i++) {
+        char *end = NULL;
+        const char *role =
+            um_attr_text(&(um_ctx){.design = design, .module = top()}, slices[i], "hardmap");
+        TEST_ASSERT_NOT_NULL(role);
+        const char *tag = strstr(role, ":b");
+        TEST_ASSERT_NOT_NULL(tag);
+        TEST_ASSERT_EQUAL_INT64(i, strtol(tag + 2, &end, 10));
+    }
+}
+
+static void test_unmap_ram_replicas(void) {
+    flow_file("tests/unmap/ram_2r1w.v");
+    run_script("unmap\nopt_clean");
+    odin3_node_id mem = first_mem(1);
+    expect_shape(mem, (const int64_t[4]){4, 4, 2, 1});
+    TEST_ASSERT_EQUAL_UINT32(intern("ram.replica"), attr_of(mem, "unmap")->str);
+    check_clean();
+}
+
+static void test_unmap_ram_blif_candidates(void) {
+    load_lib();
+    read_blif(".model m\n.inputs c w a0 d0 d1\n.outputs o0 o1\n"
+              ".subckt single_port_ram clk=c we=w addr[0]=a0 data[0]=d0 out[0]=o0\n"
+              ".subckt single_port_ram clk=c we=w addr[0]=a0 data[0]=d1 out[0]=o1\n.end\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, unmap(""), log_text);
+    odin3_node_id mem[3];
+    TEST_ASSERT_EQUAL_UINT32(2, nodes_of("$mem", mem, 3));
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:0"), attr_of(mem[0], "unmap_cand")->str);
+    TEST_ASSERT_EQUAL_UINT32(intern("ram:0"), attr_of(mem[1], "unmap_cand")->str);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "unmap: 2 RAM cells with equal control nets and "
+                                          "different origin kept apart (candidate set ram:0)"));
+    check_clean();
+}
+
+static void test_unmap_ram_no_regroup(void) {
+    flow_file("tests/unmap/ram_w8.v");
+    run_script("unmap --no-regroup\nopt_clean");
+    TEST_ASSERT_EQUAL_UINT32(RAM_BITS, nodes_of("$mem", NULL, 0));
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_unmap_options);
@@ -1069,5 +1142,10 @@ int main(void) {
     RUN_TEST(test_unmap_rom);
     RUN_TEST(test_unmap_ram_dead);
     RUN_TEST(test_unmap_ram_blif_pad);
+    RUN_TEST(test_unmap_ram_width_merge);
+    RUN_TEST(test_unmap_ram_bit_order);
+    RUN_TEST(test_unmap_ram_replicas);
+    RUN_TEST(test_unmap_ram_blif_candidates);
+    RUN_TEST(test_unmap_ram_no_regroup);
     return UNITY_END();
 }
