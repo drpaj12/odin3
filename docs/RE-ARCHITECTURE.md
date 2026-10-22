@@ -106,6 +106,8 @@ Open:
 7. No cell can be created or edited through the ABI: all mutation is a pass. A tool that wants a
    cell type other than those `raise` templates (`$add`, `$and`, ...) must add a pass. Fix: a
    generic `raise` with a plugin-supplied template, or `odin3_node_create` guarded by `check`.
+   Partly closed in v1.0.5: `-const PORT=V` on `cone_check` and `raise` (a template input port
+   tied to a constant).
 8. The counterexample `odin3:cone_cex` is text (`PORT[i]=v,...`); the binding has no parser.
    Fix: `Module.cone_cex() -> dict[str, int]` once a tool needs it.
 9. One linked ABC engine per process, passes run serially: scoring thousands of hypotheses is

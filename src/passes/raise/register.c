@@ -15,9 +15,9 @@
 #include <stdint.h>
 #include <string.h>
 
-static const char k_usage[] =
-    "raise -attr KEY=V -cell TYPE [-param P=V ...] (trusts the cone_check result in "
-    "the module attributes: run cone_check in this session first)";
+static const char k_usage[] = "raise -attr KEY=V -cell TYPE [-param P=V ...] [-const PORT=V ...] "
+                              "(trusts the cone_check result in "
+                              "the module attributes: run cone_check in this session first)";
 
 static odin3_status raise_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                    void *user) {
@@ -28,6 +28,7 @@ static odin3_status raise_pass_run(odin3_pass_ctx *ctx, odin3_design *design, od
     opts.who = "raise";
     opts.usage = k_usage;
     odin3_vec_init(&opts.params, sizeof(cc_param));
+    odin3_vec_init(&opts.consts, sizeof(cc_const));
     odin3_status st = opts.arena != NULL ? cc_parse_args(args, &opts) : ODIN3_ERR_NO_MEMORY;
     bool any = false;
     uint32_t end = odin3_design_module_end(design);
@@ -49,6 +50,7 @@ static odin3_status raise_pass_run(odin3_pass_ctx *ctx, odin3_design *design, od
         st = ODIN3_ERR_INVALID_ARG;
     }
     odin3_vec_free(&opts.params);
+    odin3_vec_free(&opts.consts);
     odin3_arena_destroy(opts.arena);
     return st;
 }

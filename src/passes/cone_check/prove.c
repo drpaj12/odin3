@@ -318,7 +318,8 @@ static odin3_status cex_text(const cc_job *job, const cc_aig *ag, const uint8_t 
     const uint32_t *ord = job->tmpl.ord.data;
     odin3_status st = ODIN3_OK;
     for (uint32_t bit = 0; st == ODIN3_OK && bit < first[job->tmpl.def->n_ports]; bit++) {
-        if (cc_tmpl_dir(&job->tmpl, bit) != ODIN3_DIR_IN) {
+        if (cc_tmpl_dir(&job->tmpl, bit) != ODIN3_DIR_IN ||
+            ((const uint8_t *)job->tmpl.cbit.data)[bit] != CC_BIT_NET) {
             continue;
         }
         uint32_t net = cc_port_net(job->mod, ins[ord[bit]]).v;
