@@ -414,6 +414,7 @@ add_library(odin3_core OBJECT
     src/sim/levelize.c
     src/sim/prng.c
     src/sim/vectors.c
+    src/sim/vectors_in.c
     src/sim/word.c
     src/backends/common/attrs.c
     src/backends/dot/writer.c
@@ -1658,6 +1659,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_sim_cycle)
     target_compile_definitions(test_sim_cycle PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
+    odin3_add_unit_test(test_sim_vectors_in)
+    target_compile_definitions(test_sim_vectors_in PRIVATE
+        ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_word)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_dot_writer)

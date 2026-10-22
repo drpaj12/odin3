@@ -1,0 +1,9 @@
+.model netnames
+.inputs clk a b
+.outputs y
+.names a b n1
+11 1
+.latch n1 q re clk 0
+.names q y
+1 1
+.end
