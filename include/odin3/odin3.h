@@ -19,6 +19,8 @@
  * ODIN3_ERR_ENGINE and the ABC engine (odin3_abc_engine_register).
  * ABI v4 (cont., 2F): odin3_pass_set_opt_snapshot.
  * ABI v4 (cont., 7.4b): odin3_design_copy.
+ * ABI v5 (v1.0.2 gate mapping): ABC engine load_genlib and get_cells, odin3_abc_cells,
+ *   ODIN3_ABC_ENGINE_VERSION 2.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
