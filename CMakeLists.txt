@@ -4313,6 +4313,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt
                         --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_expect.txt
                         ${_hm_vtr})
+            # v1.0.4 unmap (spec T-7): the same 19, hardmap then unmap, smallest first; no group
+            # declined with cycle or cin_carry unless tests/unmap/vtr_expect.txt lists it.
+            odin3_add_sweep_test(unmap_vtr_sweep LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/unmap-check/unmap-vtr
+                        --odin3 $<TARGET_FILE:odin3>
+                        --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        --expect ${PROJECT_SOURCE_DIR}/tests/unmap/vtr_expect.txt
+                        ${_hm_vtr})
         else()
             message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")
         endif()
