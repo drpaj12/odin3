@@ -59,6 +59,17 @@ odin3_status odin3_design_set_top(odin3_design *design, odin3_module_id module);
 odin3_module_id odin3_design_top(const odin3_design *design);
 
 /*
+ * S1 SA-11: the design counts its open simulations (odin3_simulation_open holds, close releases).
+ * While the count is above 0 the pass manager refuses every pass and script command, since a
+ * simulation points into module storage and names. A copy (odin3_design_clone) starts at 0.
+ * odin3_design_sim_holds is 0 for a NULL design; odin3_design_sim_release asserts the count is
+ * above 0.
+ */
+uint32_t odin3_design_sim_holds(const odin3_design *design);
+void odin3_design_sim_hold(odin3_design *design);
+void odin3_design_sim_release(odin3_design *design);
+
+/*
  * odin3_design_get_srcman (public, odin3.h): the design's source manager (AST-1), created on
  * first use; it lives as long as the design, which destroys it.
  */
