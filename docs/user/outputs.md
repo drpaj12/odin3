@@ -35,3 +35,23 @@ Every IR object carries provenance. Where the writer can express it, so does the
 
 The dump of every location of a run is `dump_locs`; `tools/prov-cover` reports how many objects
 of a final netlist have a location (see {doc}`analysis`).
+
+## Waveforms (VCD)
+
+`sim` writes a waveform of the whole run next to its vectors:
+
+```
+odin3 -p "read_verilog top.v; proc; opt; lower; sim 64 1 out.vec --vcd wave.vcd"
+```
+
+`--vcd <file>` works with random inputs and with `--vectors-in`. The file is an IEEE 1364 VCD
+with the values 0 and 1 only, written atomically, and is a function of the netlist and the inputs
+(no date). Every named signal appears: the top ports first, then the wires and named nets of each
+module instance, in one scope per instance, named by the HDL names (a bus shows as `name [msb:lsb]`).
+
+One cycle is 10 time units (`$timescale 1ns`). Time 0 holds the power-on state. In cycle `c` the
+inputs are driven at `10c+2`, the clock rises at `10c+5` and falls at `10c+10`, so a clock reads
+0, 1, 0 at those three times, as in a testbench that changes its inputs 2 units after the falling
+edge. A time is written only when some signal changed. The values at `10c+10` are the outputs the
+vector file prints on line `c`. Open the file with GTKWave (`gtkwave wave.vcd`) or any other VCD
+viewer.

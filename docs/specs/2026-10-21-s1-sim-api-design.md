@@ -333,7 +333,9 @@ A line starting with `#` is a header or comment line:
 - **port lines**: `#` lines whose second word is `input`, `clock` or `output`; when the file has
   any, their sequence must equal, line for line, the port lines `odin3_sim_vectors_header` writes
   for the design (the title excluded; trailing blanks ignored);
-- any other `#` line is a comment.
+- any other `#` line is a comment. After the first vector line every `#` line is a comment (the
+  title is not looked for again), except that a port line there is refused, "<path>:<line>: a
+  port line after the first vector line" (agent default S1-AD2).
 
 A vector line is `<cycle> <inputs> [<outputs>]`, words separated by blanks or tabs: `<cycle>` is
 the decimal count of vector lines before it (0, 1, 2, ...); `<inputs>` is every non-clock input
@@ -341,6 +343,10 @@ bit, port by port in port order, each port MSB first (exactly what the writer pr
 `1`, or `-` when the design has no non-clock input bit; `<outputs>` is ignored (a file written by
 `sim` replays as is). The header is optional, so a hand-written file needs only vector lines;
 `sim 0 0 tmpl.vec` writes a header-only template.
+
+Memory: the reader holds the whole file plus one byte per input bit (peak about 2x the file size
+for a file of mostly input bits; the 2^28-byte limit bounds it). Error messages echo at most 80
+characters of a word or line, then `...`.
 
 **SV-3 Errors.** All `ODIN3_ERR_PARSE`, logged "<path>:<line>: <message>", nothing simulated and
 no output written (the whole file is parsed before the first cycle):
