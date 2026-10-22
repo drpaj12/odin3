@@ -824,7 +824,10 @@ static const abc_range k_abc_ranges[] = {
     {"&if", 'K', false, ODIN3_ABC_LUT_MIN, ODIN3_ABC_MAX_LUT_LINKED, k_abc_why_lut},
     {"if", 'E', true, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
     {"&if", 'E', true, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
-    {"refactor", 'N', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash}};
+    {"refactor", 'N', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"&nf", 'C', false, 2, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"&nf", 'F', false, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash},
+    {"&nf", 'A', false, 1, ODIN3_ABC_MAX_NUMBER, k_abc_why_crash}};
 
 /* Whether words[at] is `-<letter>` alone, followed by a number word in the range. */
 static bool range_holds(const abc_item *item, uint32_t at, const abc_range *rule) {

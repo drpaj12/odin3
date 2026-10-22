@@ -43,6 +43,30 @@
  *   print_auto -O   abc.c:2652  Output: an index past the last output reads a stray BDD
  *                               (Extra_SupportArray, extraBddMisc.c:550; fix round 3)
  *
+ * Gate mapping (gatemap plan Task 6): map and &nf, audited with the Release and the Debug abc on
+ * cmos6 (BUF, INV, NAND2, NOR2) and on a 13-gate generic library (AND2..4, OR2..4, XOR, XNOR,
+ * MUX2), each loaded with read_genlib in the abc binary, on tests/golden/blif/ff.odin.blif
+ * (sequential) and tests/unit/data/abc/dup_fanin.blif (combinational): `strash; map <opts>` and
+ * `&get -n; &st; &nf <opts>`; every valued letter alone at 0, 1, 64, -1, 3 and 1000, every pair of
+ * flag letters, `dch -f; map` and `&get -n; &st; &dch -f; &nf` (no crash: &nf keeps native
+ * choices), then K, C, F, A, R, L, E, D, Q, M and W at 2 to 100. 1,424 runs, then 268 more. Found:
+ *
+ *   map -A          abc.c:21474 AreaMulti: the factor <fanins>^A overflows; from about 30 the
+ *                               Debug abc dereferences a bad gate in Super_WriteCompare
+ *                               (superGate.c:1155, via Map_SuperLibDeriveFromGenlib)
+ *   map -B          abc.c:21483 DelayMulti: the same overflow asserts in Mio_DelayCompare
+ *                               (mioUtils.c:413); both refused whole (value-dependent)
+ *   &nf -f          abc.c:47228 fPinFilter: asserts Vec_WecSize(vTt2Match) == Vec_WecSize(vProfs)
+ *                               (Nf_StoCreateGateAdd, giaNf.c:212)
+ *   &nf -k          abc.c:47219 fCoarsen: with cmos6 (no XOR or MUX) asserts D < SCL_INFINITY in
+ *                               Nf_ManCutMatch (giaNf.c:1330); SIGSEGV in the Release abc
+ *   &nf -C 1        abc.c:47099 nCutNum: Nf_StoCreate asserts nCutNum > 1 (giaNf.c:379); SIGSEGV
+ *                               in Release (script.c: -C at least 2)
+ *   &nf -F 0        abc.c:47113 nRounds: Nf_CutFromHandle asserts h > 0 (giaNf.c:155); SIGSEGV in
+ *                               Release (script.c: -F at least 1)
+ *   &nf -A 0        abc.c:47124 nRoundsEla: Nf_MatchDeref_rec asserts pM->fBest (giaNf.c:1769)
+ *                               (script.c: -A at least 1)
+ *
  * Task 11's first audit (every pair of each allowed command's other options, valued ones at 2,
  * and each valued option alone at 0, 1, 64, -1, 3 and 1000, on the same two designs, with the
  * Release abc) found these, each backtraced in the Debug abc; a value-dependent crash refuses the
@@ -106,8 +130,8 @@
  * script.c adds what a letter list cannot say: if/&if -K at most 12 (abc.c:22908, 45209; wider
  * mappings crash &st and &synch2, dauGia.c:451), -E at least 1 (abc.c:23055, 45337; If_Cut
  * AreaDerefed, ifCut.c:1117) and refactor -N at least 2 (abc.c:8434; Abc_NodeFindCut,
- * abcReconv.c:280), each as `-X <n>` alone; and the BLIF-start rules for &get -m, mfs and
- * print_xcut.
+ * abcReconv.c:280) and &nf -C at least 2, -F and -A at least 1 (above), each as `-X <n>` alone; and
+ * the BLIF-start rules for &get -m, mfs and print_xcut.
  *
  * print_box crashes with any option, so it is a refused row of class CRASH.
  *
@@ -172,7 +196,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"mfs2", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "i", "ZM"},
     {"lutpack", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_KEEP, "", "o"},
     /* gate mapping (only with abc --gates, gatemap spec 5) */
-    {"map", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_CELLMAPPED, "", ""},
+    {"map", ODIN3_ABC_CLASS_MAP, ODIN3_ABC_FX_NTK_CELLMAPPED, "", "AB"},
     /* the & space */
     {"&get", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_GET, "", ""},
     {"&put", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_NTK_PUT, "", "e"},
@@ -181,7 +205,7 @@ static const odin3_abc_command_info k_abc_commands[] = {
     {"&dch", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_AIG, "", "mW"},
     {"&if", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_MAPPED, "SJ", "swYjbi"},
     {"&mfs", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_KEEP, "", "M"},
-    {"&nf", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_CELLMAPPED, "MZ", ""},
+    {"&nf", ODIN3_ABC_CLASS_GIA, ODIN3_ABC_FX_GIA_CELLMAPPED, "MZ", "fk"},
     /* printing: the 34 print_* commands at the pin but print_constr, print_status, print_box,
      * print_cone and print_npn;
      * print_mint is registered only under ABC_USE_CUDD (on in the pinned build) */

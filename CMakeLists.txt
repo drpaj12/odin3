@@ -452,6 +452,15 @@ string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ODIN3_ABC_DEFAULT_SCRIPT_BYTE
 configure_file(cmake/abc_default_script.c.in
                ${PROJECT_BINARY_DIR}/generated/abc/default_script.c @ONLY)
 target_sources(odin3_core PRIVATE ${PROJECT_BINARY_DIR}/generated/abc/default_script.c)
+# The same for lib/abc/gates.abc, the default script of abc --gates (gatemap spec G-5).
+set(_abc_gates_script ${PROJECT_SOURCE_DIR}/lib/abc/gates.abc)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_abc_gates_script})
+file(READ ${_abc_gates_script} _abc_gates_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," ODIN3_ABC_GATES_SCRIPT_BYTES
+       "${_abc_gates_hex}")
+configure_file(cmake/abc_gates_script.c.in
+               ${PROJECT_BINARY_DIR}/generated/abc/gates_script.c @ONLY)
+target_sources(odin3_core PRIVATE ${PROJECT_BINARY_DIR}/generated/abc/gates_script.c)
 # The child runner (3D spec §7.9, AB-33) uses glibc's posix_spawn_file_actions_addchdir_np and
 # _addclosefrom_np, which need _DEFAULT_SOURCE on top of odin3_flags' _POSIX_C_SOURCE.
 set_source_files_properties(src/passes/abc/child.c PROPERTIES COMPILE_DEFINITIONS _DEFAULT_SOURCE)
@@ -538,7 +547,7 @@ install(FILES include/odin3/odin3.h DESTINATION ${_odin3_inc_dir})
 file(GLOB _odin3_share_libs CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/lib/*.o3lib)
 file(GLOB _odin3_share_qor CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tools/vtr-qor/*.py)
 install(FILES ${_odin3_share_libs} DESTINATION ${_odin3_share_dir}/lib)
-install(FILES lib/abc/vtr.abc DESTINATION ${_odin3_share_dir}/lib/abc)
+install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/lib/abc)
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(PROGRAMS tools/flow/odin3-flow DESTINATION ${_odin3_share_dir}/tools/flow)

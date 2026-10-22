@@ -587,10 +587,10 @@ static void test_file_and_crash_options(void) {
     /* files: print_stats bd, rewrite x, resub PD, scorr PefI, if SJf, &if SJ, &ps D, mfs2 i, &nf
      * MZ; crashes: if scY, &if swYjbi, &dch mW, &put e, print_auto O, dc2 f, drw fCN, drf C, scorr
      * NFS, mfs tMp, mfs2 ZM, dch Ws, &synch2 W, resub F, &st M, &mfs M, lutpack o, print_latch s,
-     * print_gates v, print_fanio m, &ps as, print_dsd pd (Task 10 fix rounds 1-3, Task 11's
-     * audit, its fix round 1, the final review and its addendum) */
+     * print_gates v, print_fanio m, &ps as, print_dsd pd, map AB, &nf fk (Task 10 fix rounds 1-3,
+     * Task 11's audit, its fix round 1, the final review and its addendum) */
     TEST_ASSERT_EQUAL_UINT32(18, file_seen);
-    TEST_ASSERT_EQUAL_UINT32(40, crash_seen); /* 34 + the addendum's six letters */
+    TEST_ASSERT_EQUAL_UINT32(44, crash_seen); /* 34 + the addendum's six + map AB, &nf fk */
 }
 
 static void test_options_from_alias(void) {
@@ -762,6 +762,12 @@ static const char k_range_k[] =
 static const char k_range_e[] =
     "must stand alone as '-E <n>' with <n> from 1 to 1000000: a smaller "
     "value crashes ABC at the pin (a3001b72)";
+static const char k_range_c_nf[] = "must stand alone as '-C <n>' with <n> from 2 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_f_nf[] = "must stand alone as '-F <n>' with <n> from 1 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
+static const char k_range_a_nf[] = "must stand alone as '-A <n>' with <n> from 1 to 1000000: a "
+                                   "smaller value crashes ABC at the pin (a3001b72)";
 static const char k_range_n[] =
     "must stand alone as '-N <n>' with <n> from 2 to 1000000: a smaller "
     "value crashes ABC at the pin (a3001b72)";
@@ -1124,6 +1130,57 @@ static void test_nf_file_letters(void) {
     refuse("&st\n&nf -M 3\n", k_mem, file_m);
 }
 
+static void test_gates_script_checks(void) {
+    odin3_abc_script_src src = {
+        ODIN3_ABC_GATES_SCRIPT_NAME, NULL, {odin3_abc_gates_script, odin3_abc_gates_script_len}};
+    odin3_abc_script_mode mode = {0, AIG, true};
+    odin3_abc_script script;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_script_parse_mode(&src, &mode, &script));
+    TEST_ASSERT_EQUAL_UINT32(7, script.n_cmds);
+    TEST_ASSERT_EQUAL_STRING("map -a", script.cmds[5].line);
+    TEST_ASSERT_EQUAL_UINT8(NTK, script.final_space);
+    odin3_abc_script_free(&script);
+}
+
+static void test_gates_script_needs_gates(void) {
+    odin3_abc_script_src src = {
+        ODIN3_ABC_GATES_SCRIPT_NAME, NULL, {odin3_abc_gates_script, odin3_abc_gates_script_len}};
+    odin3_abc_script script;
+    g_lines = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_abc_script_parse(&src, 0, AIG, &script));
+    TEST_ASSERT_EQUAL_size_t(1, g_lines);
+    TEST_ASSERT_EQUAL_STRING("abc: builtin:lib/abc/gates.abc:8: 'map' maps to a gate library, "
+                             "which only abc --gates loads",
+                             g_last);
+}
+
+/* The Task 6 audit's crash letters of map (A, B) and &nf (f, k), and the &nf value ranges. */
+static void test_map_nf_crash_letters(void) {
+    g_gates = true;
+    static const char *const letters[] = {"map", "A", "map", "B", "&nf", "f", "&nf", "k"};
+    for (size_t i = 0; i < sizeof letters / sizeof letters[0]; i += 2) {
+        char text[64];
+        char want[256];
+        int wrote = snprintf(text, sizeof text, "strash\n%s -%s 6", letters[i], letters[i + 1]);
+        TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof text);
+        wrote = snprintf(want, sizeof want,
+                         "t.abc:2: option '-%s' of '%s' crashes ABC at the pin (a3001b72) and is "
+                         "not allowed",
+                         letters[i + 1], letters[i]);
+        TEST_ASSERT_TRUE(wrote > 0 && (size_t)wrote < sizeof want);
+        refuse(text, k_mem, want);
+    }
+    refuse_range("&nf -C 1", (range_msg){"&nf", 'C', k_range_c_nf});
+    refuse_range("&nf -F 0", (range_msg){"&nf", 'F', k_range_f_nf});
+    refuse_range("&nf -A 0", (range_msg){"&nf", 'A', k_range_a_nf});
+    odin3_abc_script script;
+    accept("&st\n&nf -C 2 -F 1 -A 1 -a -p -q -K 4 -R 5 -L 2 -E 50 -D 3 -Q 2 -W 3 -vw\n", k_mem,
+           &script);
+    odin3_abc_script_free(&script);
+    accept("strash\nmap -D 2.5 -F 1 -S 2 -G 3 -M 1 -a -r -s -p -f -u -o -v\n", k_mem, &script);
+    odin3_abc_script_free(&script);
+}
+
 /* One test entry for the gate-mapping checks (each sets g_gates itself). */
 static void test_gate_mapping_checks(void) {
     test_map_needs_gates();
@@ -1137,6 +1194,9 @@ static void test_gate_mapping_checks(void) {
     test_mfs_refuses_cellmapped();
     test_unmapped_end_message_names_both();
     test_nf_file_letters();
+    test_gates_script_checks();
+    test_gates_script_needs_gates();
+    test_map_nf_crash_letters();
 }
 
 /* --- output (step 12) ----------------------------------------------------------------------- */
