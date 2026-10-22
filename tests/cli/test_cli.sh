@@ -214,6 +214,28 @@ sim)
     expect_fail "sim: expects <cycles> <seed>" -p "read_blif $ff; sim x 1"
     expect_fail "sim: the design has no top module" -p "sim 4 1"
     ;;
+sim_vectors_in)
+    tv=$fixtures/../../sim/traffic.v
+    pre="read_verilog $tv; proc; opt; lower"
+    "$odin3" -p "$pre; sim 32 5 $work/a.vec; sim --vectors-in $work/a.vec $work/b.vec" \
+        2>"$work/err" || fail "replay failed"
+    cmp -s "$work/a.vec" "$work/b.vec" || fail "replay differs from the random run"
+    "$odin3" -p "$pre; sim --vectors-in $work/a.vec" 2>"$work/err" || fail "summary run failed"
+    grep -qF "sim: traffic: 32 cycles from $work/a.vec; last cycle: $(tail -1 "$work/a.vec")" \
+        "$work/err" || fail "no replay summary"
+    printf '0 101\n1 0x0\n' >"$work/bad.vec"
+    expect_fail "bad.vec:2: expected 3 input bits of 0 and 1, found \`0x0\`" \
+        -p "$pre; sim --vectors-in $work/bad.vec $work/out.vec"
+    [[ ! -e $work/out.vec ]] || fail "output written despite a parse error"
+    expect_fail "sim: --vectors-in replaces <cycles> <seed>" \
+        -p "$pre; sim --vectors-in $work/a.vec 4 1"
+    expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim --vectors-in"
+    expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 --vectors-in $work/a.vec --vectors-in $work/a.vec"
+    expect_fail "sim: expects <cycles> <seed>" -p "$pre; sim 4 1 \"\""
+    expect_fail "sim: --vcd is not available yet" -p "$pre; sim 4 1 --vcd $work/w.vcd"
+    expect_fail "sim: --vcd is not available yet" -p "$pre; sim --vectors-in $work/a.vec --vcd $work/w.vcd"
+    expect_fail "sim: --vcd needs a file name, not \`-\`" -p "$pre; sim 4 1 --vcd -"
+    ;;
 check_flag)
     "$odin3" --check -p "read_blif $fixture; check --fast" 2>"$work/err" || fail "--check failed"
     ;;
