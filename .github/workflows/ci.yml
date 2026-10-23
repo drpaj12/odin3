@@ -106,6 +106,9 @@ jobs:
         run: |
           test -f build/debug/libodin3_slang.so
           test -f build/release/libodin3_slang.so
+          # The oracle cli_slang_flow requires: the distribution's Yosys (any with techmap works;
+          # the refs are equivalent under 0.55 and 0.69+). Printed so CI records which one ran.
+          yosys -V
       - name: ccache statistics
         if: always()
         run: ccache --show-stats

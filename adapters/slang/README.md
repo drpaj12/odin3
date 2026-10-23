@@ -20,7 +20,7 @@ whose path ends `.sv`/`.svh`, to it; a read mixing Verilog and SystemVerilog fil
 | `logic`, `wire`, `reg`, `bit`, `integer`, packed vectors, packed/unpacked arrays | `NET_DECL`/`VAR_DECL`, packed range in the declaration, unpacked `RANGE`s in the declarator |
 | module `parameter`/`localparam` | `PARAM_DECL[localparam]` with the final `NUMBER`/`STRING` value; instances carry one named `CONNECTION` per parameter |
 | packages, wildcard/qualified imports, `enum` values, `$bits`, constant expressions | folded to `NUMBER`/`STRING` leaves (no package or enum names reach stage 2) |
-| packed **and** unpacked structs (+ unions) | one packed vector `[W-1:0]`; `s.f` is a `SELECT` of `f`'s bit range (first field MSB) |
+| packed **and** unpacked structs | one packed vector `[W-1:0]`; `s.f` is a `SELECT` of `f`'s bit range (first field MSB). A union is declared as one packed vector too, but a union member access is refused (`member 'x' of a type with no bit layout`): a union has no field layout to select from |
 | `always_ff` / `always_comb` / `always_latch` | `ALWAYS` with that sub; `always @(...)` is `ALWAYS[always]` over `TIMING_STMT[EVENT_CONTROL, S]`, `@*`/`@(*)` the `STAR` event control |
 | `assign`, `initial`, blocking/nonblocking/compound assignments, `if`, `case/casez/casex`, `for`, `repeat`, `while`, blocks, local declarations | the matching Odin nodes; a `StatementList` is an unnamed `SEQ_BLOCK` |
 | module instances (ordered/named, arrays expanded by slang) | `INSTANTIATION` (the child specialization's name) → `INSTANCE` → one named `CONNECTION` per port in port order |
