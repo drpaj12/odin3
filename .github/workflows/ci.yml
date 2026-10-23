@@ -39,7 +39,10 @@ jobs:
   build:
     name: build (${{ matrix.cc }})
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # The debug leg builds and runs the ASan + UBSan suite for the vendored slang (1209 objects
+    # per configuration; gcc's ctest alone takes 36 min), then builds release. 45 min cut the
+    # gcc leg off inside the release build; 90 leaves room for a cold ccache.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -52,7 +55,9 @@ jobs:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
-      CCACHE_MAXSIZE: 1G
+      # 1G held neither slang's debug nor its release objects plus the core: the failed gcc run
+      # restored a cache that was 1.0/1.0 GB (98.43%) full, so entries were evicted between runs.
+      CCACHE_MAXSIZE: 2G
       CMAKE_C_COMPILER_LAUNCHER: ccache
       CMAKE_CXX_COMPILER_LAUNCHER: ccache
     steps:
