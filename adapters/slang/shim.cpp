@@ -1277,9 +1277,11 @@ uint32_t Adapter::stmt(const Statement &stat) {
         return stmtWhile(stat.as<WhileLoopStatement>(), loc, end);
     case StatementKind::Timed:
         return stmtTimed(stat.as<TimedStatement>(), loc, end);
-    default:
-        failf(ODIN3_ERR_PARSE, loc, "statement kind %d is not supported", (int)stat.kind);
+    default: {
+        const std::string kind(toString(stat.kind));
+        failf(ODIN3_ERR_PARSE, loc, "statement kind '%s' is not supported", kind.c_str());
         return 0;
+    }
     }
 }
 
@@ -1707,10 +1709,11 @@ uint32_t Adapter::emitAlways(const ProceduralBlockSymbol &pb, uint32_t loc, uint
     case ProceduralBlockKind::AlwaysFF:
         sub = ODIN3_AST_ALWAYS_ALWAYS_FF;
         break;
-    default:
-        failf(ODIN3_ERR_PARSE, loc, "procedural block kind %d is not supported",
-              (int)pb.procedureKind);
+    default: {
+        const std::string kind(toString(pb.procedureKind));
+        failf(ODIN3_ERR_PARSE, loc, "procedural block kind '%s' is not supported", kind.c_str());
         return 0;
+    }
     }
     const Statement &body = pb.getBody();
     uint32_t stmtNode = 0;

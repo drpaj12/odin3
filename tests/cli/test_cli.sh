@@ -42,6 +42,7 @@
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
 # pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
 # pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning; #262: on an arch with the 1-bit adder, an `adder #(W)` instance reads the adder soft body under --vtr-compat, with a located warning, and the plain read still errors).
+# sv_compound_assign (#264: a `^=`/`+=` compound assignment to a bit-select in SystemVerilog is equivalent (equiv-check, gate flow) to the explicit `q[i] = q[i] op rhs`, and an operator applied twice is not).
 # pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
 # dfflibmap (gatemap Task 9: dfflibmap generic_gates maps one .latch of each kind onto DFFP, DFFN, DLATCHP and DLATCHN; netlist-compare equal to tests/golden/dfflibmap/expected.blif; cmos6 has no latch: a named error; cmos6 on input_neg.blif shares one INV between two falling-edge flip-flops, equal to expected_neg.blif).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
@@ -980,6 +981,32 @@ pm_soft_blocks)
             fail "$design: no located warning naming the soft body"
         expect_fail "too many parameter values for cell type 'adder'" -p \
             "read_arch $adder_arch; read_verilog $mic/$design.v"
+    done
+    ;;
+sv_compound_assign)
+    # #264 semantics: a compound assignment to a bit-select must lower to `q[i] = q[i] op rhs` with
+    # the operator applied once. The `^=` and `+=` designs are equivalent (equiv-check) to their
+    # explicit forms through the gate flow; an operator applied twice (`q[2] ^ b ^ b`,
+    # `q[2] + b + b`) is NOT equivalent, so a double-applying lowering fails the control.
+    sv=$fixtures/../../unit/data/slang
+    equiv=$(dirname "$compare")/../equiv-check/equiv-check
+    lib=$fixtures/../../../lib/cmos6.o3lib
+    gate() { # gate <file> <top> <out>
+        "$odin3" --top "$2" -p \
+            "read_techlib $lib; read_verilog $1; proc; opt; lower; abc --gates cmos6; dfflibmap cmos6; write_blif --gates-as-names $3" \
+            >"$work/out" 2>"$work/err" || fail "$2: the gate flow failed"
+    }
+    for pair in xor plus; do
+        gate "$sv/compound_assign.sv" "${pair}_compound" "$work/${pair}_compound.blif"
+        gate "$sv/compound_assign_twins.sv" "${pair}_explicit" "$work/${pair}_explicit.blif"
+        "$equiv" "$work/${pair}_compound.blif" "$work/${pair}_explicit.blif" >"$work/out" 2>"$work/err" ||
+            fail "$pair: the compound form is not equivalent to its explicit form: $(cat "$work/out" "$work/err")"
+        gate "$sv/compound_assign_twins.sv" "${pair}_twice" "$work/${pair}_twice.blif"
+        status=0
+        "$equiv" "$work/${pair}_twice.blif" "$work/${pair}_explicit.blif" >"$work/out" 2>"$work/err" ||
+            status=$?
+        [[ $status -eq 1 ]] ||
+            fail "$pair: the twice-applied control gave status $status, not 1 (not equivalent): $(cat "$work/out" "$work/err")"
     done
     ;;
 pm_mem_rden)

@@ -1150,6 +1150,14 @@ if(BUILD_TESTING)
             set_tests_properties(cli_veval_corpus PROPERTIES
                 ENVIRONMENT "ODIN3_YOSYS=${ODIN3_SV_YOSYS}")
         endif()
+        # #264 semantics: a compound assignment to a bit-select is equivalent to the explicit form
+        # and an operator applied twice is not (tests/cli/test_cli.sh sv_compound_assign).
+        add_test(NAME cli_sv_compound_assign
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh sv_compound_assign
+                    $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+        set_tests_properties(cli_sv_compound_assign PROPERTIES LABELS unit TIMEOUT 300)
     endif()
     add_test(NAME cli_dfflibmap_golden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh dfflibmap $<TARGET_FILE:odin3>
