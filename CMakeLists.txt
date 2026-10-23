@@ -123,6 +123,16 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/register.c
     src/passes/raise/raise.c
     src/passes/raise/register.c
+    src/passes/unmap/unmap.c
+    src/passes/unmap/register.c
+    src/passes/unmap/kit.c
+    src/passes/unmap/chain.c
+    src/passes/unmap/operand.c
+    src/passes/unmap/mul.c
+    src/passes/unmap/mul_group.c
+    src/passes/unmap/ram.c
+    src/passes/unmap/ram_group.c
+    src/passes/unmap/ram_depth.c
     src/passes/arch_pass.c
     src/passes/proc/pw.c
     src/passes/proc/pw_sig.c
@@ -1094,6 +1104,19 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hardmap_add PROPERTIES LABELS unit)
+    # v1.0.4 unmap (tests/unmap/run.sh): the RTL round trip on the micros and the RTLIL goldens.
+    add_test(NAME cli_unmap_rtl
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh rtl $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_rtl PROPERTIES LABELS unit TIMEOUT 900)
+    add_test(NAME cli_unmap_blif
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh blif $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_blif PROPERTIES LABELS unit TIMEOUT 600)
+    add_test(NAME cli_unmap_golden
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/unmap/run.sh golden $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR})
+    set_tests_properties(cli_unmap_golden PROPERTIES LABELS unit)
     add_test(NAME cli_pm_alias
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh pm_alias $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1898,6 +1921,8 @@ if(BUILD_TESTING)
             ENVIRONMENT "LSAN_OPTIONS=suppressions=${PROJECT_SOURCE_DIR}/adapters/abc/lsan.supp")
     endif()
     # Phase 7 (7.4d): the raise pass; it needs the cone_check proof, so the unit test links the ABC too.
+    odin3_add_unit_test(test_unmap)
+    target_compile_definitions(test_unmap PRIVATE ODIN3_UM_ROOT="${PROJECT_BINARY_DIR}" ODIN3_UM_LIB="${PROJECT_SOURCE_DIR}/lib/vtr.o3lib" ODIN3_UM_SRC="${PROJECT_SOURCE_DIR}")
     odin3_add_unit_test(test_raise)
     target_compile_definitions(test_raise PRIVATE ODIN3_RS_ROOT="${PROJECT_BINARY_DIR}")
     if(ODIN3_WITH_ABC)
@@ -4455,6 +4480,14 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                         --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
                         --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/diff_expect.txt
                         --expect ${PROJECT_SOURCE_DIR}/tests/hardmap/vtr_expect.txt
+                        ${_hm_vtr})
+            # v1.0.4 unmap (spec T-7): the same 19, hardmap then unmap, smallest first; no group
+            # declined with cycle or cin_carry unless tests/unmap/vtr_expect.txt lists it.
+            odin3_add_sweep_test(unmap_vtr_sweep LABEL sweep
+                COMMAND ${PROJECT_SOURCE_DIR}/tools/unmap-check/unmap-vtr
+                        --odin3 $<TARGET_FILE:odin3>
+                        --arch $ENV{VTR_ROOT}/vtr_flow/arch/timing/k6_frac_N10_frac_chain_mem32K_40nm.xml
+                        --expect ${PROJECT_SOURCE_DIR}/tests/unmap/vtr_expect.txt
                         ${_hm_vtr})
         else()
             message(STATUS "exit_micro, exit_vtr not registered: needs VTR_ROOT with the k6_frac arch")

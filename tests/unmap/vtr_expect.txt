@@ -1,0 +1,2 @@
+# What unmap-vtr (the unmap_vtr_sweep) may report for a design: a group declined with reason `cycle`
+# or `cin_carry`. Syntax: `<design> <reason> <why>`. A line that does not occur is stale and fails.

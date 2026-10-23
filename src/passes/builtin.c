@@ -862,6 +862,7 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_levelize,
                                                       &odin3_pass_submod,
                                                       &odin3_pass_cone_check,
-                                                      &odin3_pass_raise};
+                                                      &odin3_pass_raise,
+                                                      &odin3_pass_unmap};
 const uint32_t odin3_builtin_pass_count =
     (uint32_t)(sizeof odin3_builtin_passes / sizeof odin3_builtin_passes[0]);

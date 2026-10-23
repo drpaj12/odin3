@@ -1,0 +1,19 @@
+# What the unmap round trip (tests/unmap/run.sh rtl) may report other than equivalent and equal
+# counts. Syntax: `<path> <kind> <reason>`; kind is `unproven` (equiv-check exit 4), `counts` (the
+# `$add $sub $mul $mem` counts before hardmap and after unmap differ) or `equiv-skip` (equiv-check
+# is not run). A line that does not occur is stale and fails: the list shrinks.
+
+# An explicit single_port_ram or dual_port_ram instance is a black box in the reference (no
+# hardmap), so the two netlists cannot be paired by equiv-check; the round trip checks counts.
+tests/unmap/ram_deep.v equiv-skip too large for equiv-check (2^17 words, 131072 latches soft); checked structurally: one $mem and no glue
+tests/unmap/ram_deep_2r.v counts the replicas of the two read ports each have their own write-enable tree, so R-7 cannot pair the leaves; R-8 then gives two `$mem` (one per read port), equivalent but not merged (a later R-7 pass over the depth results is not in the spec)
+tests/micro/verilog/common/spram.v equiv-skip explicit RAM instance: the reference keeps the black box
+tests/micro/verilog/common/dpram.v equiv-skip explicit RAM instance: the reference keeps the black box
+tests/micro/verilog/common/spram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
+tests/micro/verilog/common/dpram.v counts explicit RAM instance: no `$mem` before hardmap, one after unmap
+
+# The BLIF round trip (tests/unmap/run.sh blif): the names are the BLIF files.
+# partial_map gives every non-nocarry add a top stage; Parmys's second add (3 bits plus 1 bit into 3
+# bits) has none, so unmap then hardmap gives one adder cell more. Equivalence holds.
+adder_hard_block.parmys.vtr.blif counts:adder partial_map builds a top stage that Parmys's 3-bit add does not have
+adder.parmys.blif counts:adder partial_map builds a top stage that Parmys's adder does not have

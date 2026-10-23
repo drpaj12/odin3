@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# unmap-vtr: the VTR sweep of the unmap pass (v1.0.4, spec T-7): hardmap, then unmap, per design.
+# Exit codes: 0 every design finished and no declined reason needs a listing, 1 a design failed, a
+# group was declined with a reason that is not listed, or an expect line is stale, 2 usage error.
+# See unmap_vtr.py.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/unmap_vtr.py" "$@"

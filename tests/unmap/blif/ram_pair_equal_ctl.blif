@@ -1,0 +1,15 @@
+# unmap ambiguity micro (T-6): two RAM cells with the same clock, address and write enable and
+# different data. A BLIF gives them different origins, so they are kept apart and carry
+# unmap_cand = ram:0 (two memories with equal control nets equal one wide memory in function).
+.model ram_pair
+.inputs c w a0 a1 d0 d1
+.outputs o0 o1
+.subckt single_port_ram clk=c we=w addr[0]=a0 addr[1]=a1 data[0]=d0 out[0]=o0
+.subckt single_port_ram clk=c we=w addr[0]=a0 addr[1]=a1 data[0]=d1 out[0]=o1
+.end
+
+.model single_port_ram
+.inputs clk data[0] addr[0] addr[1] we
+.outputs out[0]
+.blackbox
+.end

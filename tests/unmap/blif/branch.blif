@@ -1,0 +1,20 @@
+# unmap ambiguity micro (T-6): one carry-out feeds two carry-ins. The chain has no single
+# continuation, so the cell after each branch is a stage with a carry-in that is another adder's
+# carry-out (note adder:cin_carry); the head and stage 0 are recovered as a one-bit add.
+.model branch
+.inputs x0 x1 x2 y0 y1 y2
+.outputs s0 s1 s2
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd cout=c0
+.subckt adder a=x0 b=y0 cin=c0 cout=c1 sumout=s0
+.subckt adder a=x1 b=y1 cin=c1 cout=c2 sumout=s1
+.subckt adder a=x2 b=y2 cin=c1 cout=c3 sumout=s2
+.end
+
+.model adder
+.inputs a b cin
+.outputs sumout cout
+.blackbox
+.end
