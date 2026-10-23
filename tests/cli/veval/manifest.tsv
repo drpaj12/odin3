@@ -85,13 +85,11 @@ Prob078_dualedge_ref.sv	ok
 Prob079_fsm3onehot_ref.sv	ok
 Prob080_timer_ref.sv	ok
 Prob081_7458_ref.sv	ok
-# Expected to flip to ok when issue #264 (compound assignment to a bit-select) is read.
-Prob082_lfsr32_ref.sv	refused:other	expression kind 26 is not supported
+Prob082_lfsr32_ref.sv	ok
 Prob083_mt2015_q4b_ref.sv	ok
 Prob084_ece241_2013_q12_ref.sv	ok
 Prob085_shift4_ref.sv	ok
-# Expected to flip to ok when issue #264 (compound assignment to a bit-select) is read.
-Prob086_lfsr5_ref.sv	refused:other	expression kind 26 is not supported
+Prob086_lfsr5_ref.sv	ok
 Prob087_gates_ref.sv	ok
 Prob088_ece241_2014_q5b_ref.sv	ok
 Prob089_ece241_2014_q5a_ref.sv	ok

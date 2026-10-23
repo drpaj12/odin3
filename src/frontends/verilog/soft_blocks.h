@@ -5,6 +5,11 @@
  * has no such model, as Parmys does, with a located WARNING at the instance. The bodies are
  * lib/soft_primitives/<name>.v, read as library units before the design files. Without
  * `--vtr-compat` the unresolved module stays the located error.
+ *
+ * #262: the body is read too when the record has the model but an instance's `#()` does not fit the
+ * hard cell (an `adder #(W)` on the 1-bit `adder`): the soft body is the primitive's parameterized
+ * form, as Parmys reads vtr_primitives.v for it. odin3_elab1_prefer_unit then keeps the cell for
+ * the instances whose `#()` does fit, warning at each one that does not.
  */
 #ifndef ODIN3_FRONTENDS_VERILOG_SOFT_BLOCKS_H
 #define ODIN3_FRONTENDS_VERILOG_SOFT_BLOCKS_H

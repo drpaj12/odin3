@@ -34,6 +34,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 - `odin3_flow` retries the VPR route at fixed wider channel widths when the final route at 1.3 x
   the minimum width fails after a finished minimum-width search (tiny devices such as
   `bm_DL_2_4_encoder` on k6); `summary.json` gets `route_retry`.
+- `read_verilog --vtr-compat` reads `lib/soft_primitives/<name>.v` for an instance whose `#()`
+  does not fit the registered hard cell of a VTR primitive (`adder #(W)` on the 1-bit `adder`),
+  so the micros `adder_hard_block` and `hard_adder_cin_propagation` parse; an instance that fits
+  keeps the hard cell, with the existing info line (`#262`).
+- The SystemVerilog adapter lowers compound assignments, a bit-select target included
+  (`q_next[21] ^= q[0];`), and names the kind in its unsupported-expression diagnostic instead
+  of printing the enum number; VerilogEval Prob082/086 pass (`#264`).
 
 ## [1.1.0] - 2026-10-23
 

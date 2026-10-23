@@ -1,6 +1,7 @@
 // Soft body of the VTR primitive `dual_port_ram` (Odin III's own behavioural description, MIT).
-// Read only when the architecture record has no `dual_port_ram` model (4.2 D18). Both ports read
-// the old word; a same-address write from both ports lets port 2 win.
+// Read only when the architecture record has no `dual_port_ram` model, or an instance's `#()` does
+// not fit the hard cell of that name (4.2 D18, #262). Both ports read the old word; a same-address
+// write from both ports lets port 2 win.
 module dual_port_ram #(
     parameter ADDR_WIDTH = 1,
     parameter DATA_WIDTH = 1

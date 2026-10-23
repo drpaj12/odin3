@@ -723,7 +723,7 @@ uint32_t odin3_elab1_typed_width(const odin3_elab1 *e1, odin3_ast_id node);
 int32_t odin3_elab1_given_decision(uint32_t idx);
 uint32_t odin3_elab1_given_of(int32_t decision);
 
-/* --- internals (elab1*.c only) ------------------------------------------------------------ */
+/* --- internals (elab1*.c, and read_verilog_lib.c for params_fit) ---------------------------- */
 
 /*
  * 2D-7b, spec 3.1a: a `read_verilog --lib` unit named like a hard or black-box cell type. res is
@@ -734,6 +734,12 @@ uint32_t odin3_elab1_given_of(int32_t decision);
  */
 void odin3_elab1_prefer_unit(odin3_elab1 *e1, odin3_ast_id item, odin3_elab_res *res);
 bool odin3_elab1_def_shadows_cell(const odin3_elab1 *e1, uint32_t def);
+
+/* Whether the `#()` of INSTANTIATION item fits type's parameters: ordered values no more than the
+ * type has, named ones by name (the prefer_unit rule; the reader asks it before reading a soft
+ * body for an instance the registered cell of that name cannot take, #262). */
+bool odin3_elab1_params_fit(const odin3_ast *ast, const odin3_design *design, odin3_ast_id item,
+                            const odin3_celltype_def *type);
 
 /* Why a MODULE's name is taken (EL-6), recorded by collect_defs and reported when reached. */
 typedef enum odin3_elab1_taken {

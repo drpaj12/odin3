@@ -1,5 +1,6 @@
 // Soft body of the VTR primitive `multiply` (Odin III's own behavioural description, MIT). Read
-// only when the architecture record has no `multiply` model (4.2 D18).
+// only when the architecture record has no `multiply` model, or an instance's `#()` does not fit
+// the hard cell of that name (4.2 D18, #262).
 module multiply #(
     parameter WIDTH = 1
 ) (

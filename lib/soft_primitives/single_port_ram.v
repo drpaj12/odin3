@@ -1,6 +1,7 @@
 // Soft body of the VTR primitive `single_port_ram` (Odin III's own behavioural description, MIT).
 // read_verilog --vtr-compat reads it, as a library unit, only when the architecture record has no
-// `single_port_ram` model (4.2 D18): Parmys then builds the instance from its own soft module too.
+// `single_port_ram` model or an instance's `#()` does not fit the hard cell of that name (4.2 D18,
+// #262): Parmys then builds the instance from its own soft module too.
 // Write-first is not modelled: the old word is read when the same address is written (read-first),
 // as the arch's RAM blocks do.
 module single_port_ram #(
