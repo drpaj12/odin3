@@ -1,5 +1,8 @@
 # clang-tidy configuration for Odin III (C17). Spec: docs/DESIGN.md section 15.2.
 # Enabled families: bugprone, cert, misc, performance, readability. modernize-* is OFF (C, not C++).
+# The C++ adapter (adapters/slang/*.cpp) has its own profile in adapters/slang/.clang-tidy, which
+# inherits this file with InheritParentConfig and documents each of its suppressions; this file
+# stays the C17 core's profile.
 # clang-analyzer-* is not requested by the spec and is not enabled (the leading -* clears defaults).
 #
 # Checks are a block scalar (comma separated), which cannot carry inline YAML comments, so the

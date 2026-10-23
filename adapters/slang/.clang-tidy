@@ -1,0 +1,81 @@
+# clang-tidy C++ profile for the SystemVerilog slang adapter (adapters/slang/*.cpp, *.hpp).
+#
+# The core is C17, so the repo-root .clang-tidy (docs/DESIGN.md 15.2) disables every
+# C++-only check there. clang-tidy finds this file for sources below adapters/slang/ and
+# InheritParentConfig appends its Checks block to the root one: the root's family enables,
+# WarningsAsErrors and CheckOptions (function size, identifier length, loop-counter names)
+# still apply, and this file only adds or narrows.
+# third_party/slang is vendored and stays outside the gate: tools/lint.sh's file lists exclude
+# third_party/, and its anchored header filter does not match slang's headers.
+#
+# The parent Checks string ends with the C++-only disables (-bugprone-use-after-move, ...,
+# -readability-use-anyofallof). The family re-enables below put those checks back for this
+# directory, which is the point of the profile: the adapter runs the C checks where they apply
+# to C++ *and* the C++-only ones. Every later -check removes only what is noise for this single
+# adapter translation unit, and every removal has its reason here. A re-enabled check that
+# produces no finding today stays on for free.
+#
+# Suppressed -- recursion is the input's shape, not an IR traversal:
+#   -misc-no-recursion
+#     The adapter is a slang-AST visitor: stmt()/stmtList()/stmtWhile()/stmtRepeat()/
+#     stmtTimed() call back into each other over child statements, and the expression visitor
+#     (expr/exprLeaf/exprOper and the expr* helpers) recurses over subexpressions; clang-tidy
+#     also reports the std::transform lambda call chains that carry them. locOf/ensureBuffer
+#     recurse once per included file while mapping a location to its buffer. Module instances
+#     are queued with an explicit worklist (queueBody/plans), so the only recursion is over one
+#     construct's statement/expression nesting and the include chain. That depth is the parsed
+#     source's nesting depth, bounded by the input text itself: slang's own recursive-descent
+#     parser and preprocessor walk the same nesting first, so any input deep enough to overflow
+#     this walk has already overflowed the parser's stack. It is not the IR traversal DESIGN
+#     15.1 forbids (a 2M-node IR list is walked with explicit worklists in src/; adapters are
+#     outside the core, D8').
+#
+# Suppressed -- findings are in the public C ABI header, not in adapter code:
+#   -performance-enum-size
+#     Fires only on include/odin3/odin3.h (odin3_status, odin3_log_level, ...). Those enums'
+#     underlying type is part of the C ABI and of struct layouts; narrowing it is an ABI change,
+#     not a lint fix. The check is C++-only, so the C profile never sees it; here every finding
+#     is in a C header and is a documented false positive.
+#
+# Suppressed -- printf-style diagnostics, CERT va_list core in place:
+#   -cert-dcl50-cpp
+#     failf() is the adapter's one C-style variadic function; it forwards to vsnprintf, which is
+#     the CERT-recommended va_list pattern for the work, and its output goes to the C log API.
+#     Removing the variadic layer means std::format at every call site, an adapter-wide rewrite
+#     with no safety gain.
+#
+# Suppressed -- include hygiene stays advisory (same policy as the root file):
+#   -misc-include-cleaner
+#     Re-disabled because misc-* above re-enables it. DESIGN 15.1/15.2 keep
+#     include-what-you-use advisory, not blocking.
+#
+# Suppressed -- modernize style rewrites the adapter does not adopt:
+#   -modernize-avoid-c-arrays
+#     The five C arrays are deliberate: fixed-size snprintf buffers passed to C string
+#     functions, and static const opcode tables iterated as arrays. std::array adds no safety
+#     at those sites.
+#   -modernize-use-auto
+#     The adapter spells out types, widths included (uint32_t ids, SVInt values); auto at the
+#     flagged casts hides exactly the type the code cares about. Style only.
+#   -modernize-use-trailing-return-type
+#     Classical return types are the house and LLVM style used by every definition in the file;
+#     the rewrite touches 300+ lines with no semantic change.
+#   -modernize-use-using
+#     typedef -> using is a pure style rewrite of the file's C-style typedefs (enums, opcode
+#     entry tables, function-pointer types) with identical semantics.
+InheritParentConfig: true
+Checks: >-
+  bugprone-*,
+  cert-*,
+  misc-*,
+  modernize-*,
+  performance-*,
+  readability-*,
+  -misc-no-recursion,
+  -performance-enum-size,
+  -cert-dcl50-cpp,
+  -misc-include-cleaner,
+  -modernize-avoid-c-arrays,
+  -modernize-use-auto,
+  -modernize-use-trailing-return-type,
+  -modernize-use-using

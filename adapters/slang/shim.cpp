@@ -77,6 +77,23 @@ using namespace slang::ast;
 namespace {
 
 constexpr int NAME_BUF = 512;
+/* Room for failf()'s "read_slang: <where>: " prefix around the formatted body. */
+constexpr int kMsgPrefixExtra = 256;
+/* The bit width of a Verilog integer, as isIntegerVar and numberI64 use it. */
+constexpr uint32_t kVerilogIntegerWidth = 32;
+
+/* A source range: the AST loc and end node ids of one construct, bundled so a call site
+ * cannot swap them. */
+struct LocSpan {
+    uint32_t loc;
+    uint32_t end;
+};
+
+/* A struct member's bit offset and width in its type's flattened vector. */
+struct BitSlice {
+    uint32_t offset;
+    uint32_t width;
+};
 
 /* The spelling of a unique/priority check, for the refusal message. */
 const char *checkName(UniquePriorityCheck check) {
@@ -184,21 +201,21 @@ class Adapter {
     }
 
     odin3_status run(const RootSymbol &root, const char *top);
-    odin3_status st = ODIN3_OK;
 
   private:
+    odin3_status st = ODIN3_OK; /* the first failure; run() returns it */
     /* --- diagnostics and locations --- */
     void failf(odin3_status status, uint32_t loc, const char *fmt, ...);
-    uint32_t locOf(SourceLocation l);
-    uint32_t endOf(SourceRange r);
-    uint32_t ensureBuffer(BufferID b);
+    uint32_t locOf(SourceLocation sloc);
+    uint32_t endOf(SourceRange range);
+    uint32_t ensureBuffer(BufferID buf);
     uint32_t intern(std::string_view text);
-    std::string_view textAt(BufferID b);
+    std::string_view textAt(BufferID buf);
 
     /* --- nodes --- */
     uint32_t node(const NodeFields &fields, const std::vector<uint32_t> &kids);
     uint32_t number(const SVInt &value, bool unsized, uint32_t loc, uint32_t end);
-    uint32_t numberI64(int64_t value, uint32_t loc, uint32_t end);
+    uint32_t numberI64(int64_t value, LocSpan span);
     uint32_t constant(const ConstantValue &cv, bool unsized, uint32_t loc, uint32_t end);
     uint32_t rangeNode(const ConstantRange &range, uint32_t loc, uint32_t end);
     uint32_t ident(const std::string &name, uint32_t loc, uint32_t end);
@@ -207,26 +224,27 @@ class Adapter {
     uint32_t binary(uint32_t op, uint32_t lhs, uint32_t rhs, uint32_t loc, uint32_t end);
 
     /* --- types and names --- */
-    const Type &stripArrays(const Type &type, std::vector<const Type *> &dims);
-    bool isIntegerVar(const Type &type);
+    static const Type &stripArrays(const Type &type, std::vector<const Type *> &dims);
+    static bool isIntegerVar(const Type &type);
     std::string symName(const Symbol &sym);
     std::string hoistName(const Symbol &sym);
     void collectModuleNames(const InstanceBodySymbol &body);
+    void flattenInterfaceSignals(const InstanceSymbol &inst);
     uint32_t declRanges(const Type &type, std::vector<uint32_t> &unpacked, uint32_t loc,
                         uint32_t end);
-    bool structMember(const Type &type, const Symbol &member, uint32_t &offset, uint32_t &width);
+    static bool structMember(const Type &type, const Symbol &member, BitSlice &slice);
     uint32_t memberSelect(const Expression &base, const Symbol &member, uint32_t loc, uint32_t end);
 
     /* --- expressions and statements --- */
-    uint32_t expr(const Expression &e);
-    uint32_t exprRaw(const Expression &e);
-    bool exprLeaf(const Expression &e, uint32_t &out);
-    bool exprOper(const Expression &e, uint32_t &out);
+    uint32_t expr(const Expression &ex);
+    uint32_t exprRaw(const Expression &ex);
+    bool exprLeaf(const Expression &ex, uint32_t &out);
+    bool exprOper(const Expression &ex, uint32_t &out);
     uint32_t exprNamed(const NamedValueExpression &nv, uint32_t loc, uint32_t end);
     uint32_t exprHierarchical(const HierarchicalValueExpression &hv, uint32_t loc, uint32_t end);
     uint32_t exprMember(const MemberAccessExpression &ma, uint32_t loc, uint32_t end);
-    uint32_t exprSelect(const Expression &e, uint32_t loc, uint32_t end);
-    uint32_t exprLiteral(const Expression &e, uint32_t loc, uint32_t end);
+    uint32_t exprSelect(const Expression &ex, uint32_t loc, uint32_t end);
+    uint32_t exprLiteral(const Expression &ex, uint32_t loc, uint32_t end);
     uint32_t exprUnary(const UnaryExpression &ue, uint32_t loc, uint32_t end);
     uint32_t exprBinary(const BinaryExpression &be, uint32_t loc, uint32_t end);
     uint32_t exprConditional(const ConditionalExpression &ce, uint32_t loc, uint32_t end);
@@ -234,7 +252,7 @@ class Adapter {
     uint32_t exprReplication(const ReplicationExpression &re, uint32_t loc, uint32_t end);
     uint32_t exprConversion(const ConversionExpression &cv, uint32_t loc, uint32_t end);
     uint32_t exprCall(const CallExpression &call, uint32_t loc, uint32_t end);
-    uint32_t stmt(const Statement &s);
+    uint32_t stmt(const Statement &stat);
     uint32_t stmtList(const StatementList &sl, uint32_t loc, uint32_t end);
     uint32_t stmtExpr(const ExpressionStatement &es, uint32_t loc, uint32_t end);
     uint32_t stmtDecl(const VariableDeclStatement &vd, uint32_t loc, uint32_t end);
@@ -245,36 +263,39 @@ class Adapter {
     uint32_t stmtRepeat(const RepeatLoopStatement &rs, uint32_t loc, uint32_t end);
     uint32_t stmtWhile(const WhileLoopStatement &ws, uint32_t loc, uint32_t end);
     uint32_t stmtTimed(const TimedStatement &ts, uint32_t loc, uint32_t end);
-    uint32_t assignStmt(const Expression &e, bool nonblocking);
+    uint32_t assignStmt(const Expression &ex, bool nonblocking);
     uint32_t assignExpression(const AssignmentExpression &ae);
     uint32_t incDecStmt(const UnaryExpression &ue, bool nonblocking);
-    uint32_t blockStmt(const BlockStatement &b);
-    uint32_t timing(const TimingControl &t, uint32_t loc, uint32_t end);
+    uint32_t blockStmt(const BlockStatement &block);
+    uint32_t blockLocalDecl(const VariableSymbol &variable, uint32_t loc, uint32_t end);
+    uint32_t timing(const TimingControl &tc, uint32_t loc, uint32_t end);
     uint32_t eventExpr(const SignalEventControl &se, uint32_t loc, uint32_t end);
 
     /* --- modules and items --- */
     std::vector<PortInfo> ports(const InstanceBodySymbol &body);
-    bool plainPort(const PortSymbol &p, PortInfo &info);
+    bool plainPort(const PortSymbol &portSym, PortInfo &info);
     bool modportPort(const InterfacePortSymbol &ip, const ModportPortSymbol &mp, PortInfo &info);
-    PortInfo ifaceSignal(const InterfacePortSymbol &ip, const Symbol &m);
+    static PortInfo ifaceSignal(const InterfacePortSymbol &ip, const Symbol &signalSym);
     void ifacePorts(const InterfacePortSymbol &ip, std::vector<PortInfo> &out);
+    void modportPorts(const InterfacePortSymbol &ip, const ModportSymbol &modport,
+                      std::vector<PortInfo> &out);
     void queueBody(const InstanceBodySymbol &body);
-    uint32_t emitModule(ModulePlan plan);
+    uint32_t emitModule(const ModulePlan &plan);
     uint32_t moduleLoc(const InstanceBodySymbol &body);
     uint32_t emitPortList(const std::vector<PortInfo> &portList, uint32_t loc);
     uint32_t emitParamList(const InstanceBodySymbol &body, uint32_t loc);
     void emitModuleItems(const InstanceBodySymbol &body, const std::vector<PortInfo> &portList,
                          std::vector<uint32_t> &items);
-    void emitMember(const Symbol &m, std::vector<uint32_t> &items);
-    void emitDeclItem(const Symbol &m, std::vector<uint32_t> &items);
+    void emitMember(const Symbol &member, std::vector<uint32_t> &items);
+    void emitDeclItem(const Symbol &member, std::vector<uint32_t> &items);
     void emitInstanceItem(const InstanceSymbol &inst, std::vector<uint32_t> &items);
     void emitInterfaceItem(const InstanceSymbol &inst, uint32_t loc, std::vector<uint32_t> &items);
     void emitInstanceArrayItem(const InstanceArraySymbol &arr, uint32_t loc,
                                std::vector<uint32_t> &items);
     void emitBlockItem(const ProceduralBlockSymbol &pb, uint32_t loc, std::vector<uint32_t> &items);
     void emitHoisted(std::vector<uint32_t> &items);
-    uint32_t emitPort(const PortInfo &p, uint32_t loc, uint32_t end);
-    uint32_t emitParamDecl(const ParameterSymbol &p, uint32_t loc, uint32_t end);
+    uint32_t emitPort(const PortInfo &portInfo, uint32_t loc, uint32_t end);
+    uint32_t emitParamDecl(const ParameterSymbol &paramSym, uint32_t loc, uint32_t end);
     uint32_t emitNetOrVar(const Symbol &sym, bool force_net = false);
     bool netAttributesOk(const NetSymbol &net, uint32_t loc);
     uint32_t emitInterfaces(const InstanceBodySymbol &body);
@@ -282,14 +303,18 @@ class Adapter {
     uint32_t emitInstantiation(const std::string &moduleName,
                                const std::vector<const Symbol *> &insts,
                                const InstanceBodySymbol *child, uint32_t loc, uint32_t end);
+    uint32_t emitParamConnections(const InstanceBodySymbol &child, uint32_t loc, uint32_t end);
+    void emitInstanceNodes(const std::vector<const Symbol *> &insts,
+                           const std::vector<PortInfo> &portList, uint32_t loc,
+                           std::vector<uint32_t> &instances);
     std::vector<uint32_t> emitConnections(const InstanceBodySymbol &body,
                                           const InstanceSymbol *inst,
                                           const std::vector<PortInfo> &portList, uint32_t loc);
     ConnectionValue
-    portConnectionValue(const PortInfo &p, const InstanceSymbol *inst,
+    portConnectionValue(const PortInfo &portInfo, const InstanceSymbol *inst,
                         const std::unordered_map<std::string_view, const PortConnection *> &byName,
                         uint32_t loc);
-    ConnectionValue ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst,
+    ConnectionValue ifaceConnectionValue(const PortInfo &portInfo, const InstanceSymbol &inst,
                                          uint32_t loc);
     uint32_t emitAlways(const ProceduralBlockSymbol &pb, uint32_t loc, uint32_t end);
     uint32_t emitInitial(const ProceduralBlockSymbol &pb, uint32_t loc, uint32_t end);
@@ -325,10 +350,10 @@ void Adapter::failf(odin3_status status, uint32_t loc, const char *fmt, ...) {
     va_start(ap, fmt);
     (void)vsnprintf(body, sizeof body, fmt, ap);
     va_end(ap);
-    char msg[NAME_BUF + 256];
+    char msg[NAME_BUF + kMsgPrefixExtra];
     if (loc != 0) {
-        const char *where = NULL;
-        if (odin3_srcman_get_format(sm, loc, &where) == ODIN3_OK && where != NULL) {
+        const char *where = nullptr;
+        if (odin3_srcman_get_format(sm, loc, &where) == ODIN3_OK && where != nullptr) {
             (void)snprintf(msg, sizeof msg, "read_slang: %s: %s", where, body);
         } else {
             (void)snprintf(msg, sizeof msg, "read_slang: %s", body);
@@ -340,14 +365,14 @@ void Adapter::failf(odin3_status status, uint32_t loc, const char *fmt, ...) {
     st = status;
 }
 
-std::string_view Adapter::textAt(BufferID b) {
-    return slsm.getSourceText(b);
+std::string_view Adapter::textAt(BufferID buf) {
+    return slsm.getSourceText(buf);
 }
 
 uint32_t Adapter::intern(std::string_view text) {
-    std::string copy(text);
+    const std::string copy(text);
     uint32_t id = 0;
-    odin3_status rc = odin3_ast_build_intern(ast, copy.c_str(), &id);
+    const odin3_status rc = odin3_ast_build_intern(ast, copy.c_str(), &id);
     if (rc != ODIN3_OK) {
         st = rc;
         return 0;
@@ -355,22 +380,22 @@ uint32_t Adapter::intern(std::string_view text) {
     return id;
 }
 
-uint32_t Adapter::ensureBuffer(BufferID b) {
-    auto it = buffers.find(b.getId());
+uint32_t Adapter::ensureBuffer(BufferID buf) {
+    auto it = buffers.find(buf.getId());
     if (it != buffers.end()) {
         return it->second;
     }
-    std::string raw(slsm.getRawFileName(b));
-    std::filesystem::path full = slsm.getFullPath(b);
-    std::string resolved = full.empty() ? raw : full.string();
-    uint32_t name = intern(raw.empty() ? "<unknown>" : raw);
-    uint32_t res = intern(resolved);
+    const std::string raw(slsm.getRawFileName(buf));
+    const std::filesystem::path full = slsm.getFullPath(buf);
+    const std::string resolved = full.empty() ? raw : full.string();
+    const uint32_t name = intern(raw.empty() ? "<unknown>" : raw);
+    const uint32_t res = intern(resolved);
     uint32_t parent = 0;
-    SourceLocation from = slsm.getIncludedFrom(b);
+    const SourceLocation from = slsm.getIncludedFrom(buf);
     if (from) {
         parent = locOf(from);
     }
-    std::string_view text = textAt(b);
+    const std::string_view text = textAt(buf);
     odin3_srcfile_spec spec = {};
     spec.name = name;
     spec.resolved = res;
@@ -382,7 +407,7 @@ uint32_t Adapter::ensureBuffer(BufferID b) {
         st = rc;
         return 0;
     }
-    buffers[b.getId()] = buffer;
+    buffers[buf.getId()] = buffer;
     /* Line starts after the first: offset 0 is line 1 implicitly (odin3_srcman_build_line). */
     for (size_t i = 0; i < text.size(); i++) {
         if (text[i] == '\n' && i + 1 < text.size()) {
@@ -396,21 +421,21 @@ uint32_t Adapter::ensureBuffer(BufferID b) {
     return buffer;
 }
 
-uint32_t Adapter::locOf(SourceLocation l) {
-    if (!l || st != ODIN3_OK) {
+uint32_t Adapter::locOf(SourceLocation sloc) {
+    if (!sloc || st != ODIN3_OK) {
         return 0;
     }
-    SourceLocation file = slsm.getFullyExpandedLoc(l);
-    BufferID b = file.buffer();
-    if (!b) {
+    const SourceLocation file = slsm.getFullyExpandedLoc(sloc);
+    const BufferID buf = file.buffer();
+    if (!buf) {
         return 0;
     }
-    uint32_t buffer = ensureBuffer(b);
+    const uint32_t buffer = ensureBuffer(buf);
     if (buffer == 0) {
         return 0;
     }
     uint32_t loc = 0;
-    odin3_status rc = odin3_srcman_get_loc(sm, buffer, (uint32_t)file.offset(), &loc);
+    const odin3_status rc = odin3_srcman_get_loc(sm, buffer, (uint32_t)file.offset(), &loc);
     if (rc != ODIN3_OK) {
         st = rc;
         return 0;
@@ -418,14 +443,14 @@ uint32_t Adapter::locOf(SourceLocation l) {
     return loc;
 }
 
-uint32_t Adapter::endOf(SourceRange r) {
-    return r.end() ? locOf(r.end()) : 0;
+uint32_t Adapter::endOf(SourceRange range) {
+    return range.end() ? locOf(range.end()) : 0;
 }
 
 /* --- nodes ---------------------------------------------------------------------------------- */
 
 uint32_t Adapter::node(const NodeFields &fields, const std::vector<uint32_t> &kids) {
-    uint32_t loc = fields.loc;
+    const uint32_t loc = fields.loc;
     uint32_t end = fields.end;
     if (st != ODIN3_OK) {
         return 0;
@@ -433,10 +458,10 @@ uint32_t Adapter::node(const NodeFields &fields, const std::vector<uint32_t> &ki
     /* loc <= end holds only when both name one buffer; a synthesized end (a module's, a
      * parent's) is dropped rather than risk the AST check's rule 1. */
     if (end != 0) {
-        odin3_srcpos a = {};
-        odin3_srcpos b = {};
-        if (loc == 0 || odin3_srcman_get_position(sm, loc, &a) != ODIN3_OK ||
-            odin3_srcman_get_position(sm, end, &b) != ODIN3_OK || a.buffer != b.buffer ||
+        odin3_srcpos posA = {};
+        odin3_srcpos posB = {};
+        if (loc == 0 || odin3_srcman_get_position(sm, loc, &posA) != ODIN3_OK ||
+            odin3_srcman_get_position(sm, end, &posB) != ODIN3_OK || posA.buffer != posB.buffer ||
             end < loc) {
             end = 0;
         }
@@ -450,8 +475,8 @@ uint32_t Adapter::node(const NodeFields &fields, const std::vector<uint32_t> &ki
     spec.name = fields.name;
     spec.payload = fields.payload;
     uint32_t made = 0;
-    odin3_status rc = odin3_ast_build_node(ast, &spec, kids.empty() ? NULL : kids.data(),
-                                           (uint32_t)kids.size(), &made);
+    const odin3_status rc = odin3_ast_build_node(ast, &spec, kids.empty() ? nullptr : kids.data(),
+                                                 (uint32_t)kids.size(), &made);
     if (rc != ODIN3_OK) {
         st = rc;
         return 0;
@@ -460,11 +485,11 @@ uint32_t Adapter::node(const NodeFields &fields, const std::vector<uint32_t> &ki
 }
 
 uint32_t Adapter::number(const SVInt &value, bool unsized, uint32_t loc, uint32_t end) {
-    uint32_t width = value.getBitWidth();
+    const uint32_t width = value.getBitWidth();
     std::string bits;
     bits.reserve(width);
     for (int i = (int)width - 1; i >= 0; i--) {
-        logic_t bit = value[(int32_t)i];
+        const logic_t bit = value[(int32_t)i];
         if (bit == logic_t::x) {
             bits.push_back('x');
         } else if (bit == logic_t::z) {
@@ -474,7 +499,7 @@ uint32_t Adapter::number(const SVInt &value, bool unsized, uint32_t loc, uint32_
         }
     }
     uint32_t payload = 0;
-    odin3_status rc =
+    const odin3_status rc =
         odin3_ast_number_new_str(ast, loc, unsized ? 0U : width, bits.c_str(), &payload);
     if (rc != ODIN3_OK) {
         if (st == ODIN3_OK) {
@@ -482,13 +507,13 @@ uint32_t Adapter::number(const SVInt &value, bool unsized, uint32_t loc, uint32_
         }
         return 0;
     }
-    uint32_t flags = value.isSigned() ? (uint32_t)ODIN3_AST_F_NUMBER_SIGNED : 0U;
+    const uint32_t flags = value.isSigned() ? (uint32_t)ODIN3_AST_F_NUMBER_SIGNED : 0U;
     return node({ODIN3_AST_NUMBER, ODIN3_AST_NUMBER_BIN, flags, loc, end, 0, payload}, {});
 }
 
-uint32_t Adapter::numberI64(int64_t value, uint32_t loc, uint32_t end) {
-    SVInt v = SVInt(32, (uint64_t)(int64_t)(int32_t)value, true);
-    return number(v, false, loc, end);
+uint32_t Adapter::numberI64(int64_t value, LocSpan span) {
+    const SVInt sv = SVInt(kVerilogIntegerWidth, (uint64_t)(int64_t)(int32_t)value, true);
+    return number(sv, false, span.loc, span.end);
 }
 
 uint32_t Adapter::constant(const ConstantValue &cv, bool unsized, uint32_t loc, uint32_t end) {
@@ -496,12 +521,12 @@ uint32_t Adapter::constant(const ConstantValue &cv, bool unsized, uint32_t loc, 
         return number(cv.integer(), unsized, loc, end);
     }
     if (cv.isString()) {
-        std::string text = cv.str();
-        uint32_t name = intern(text);
+        const std::string &text = cv.str();
+        const uint32_t name = intern(text);
         if (st != ODIN3_OK) {
             return 0;
         }
-        uint32_t flags = text.empty() ? (uint32_t)ODIN3_AST_F_STRING_EMPTY : 0U;
+        const uint32_t flags = text.empty() ? (uint32_t)ODIN3_AST_F_STRING_EMPTY : 0U;
         return node({ODIN3_AST_STRING, 0, flags, loc, end, name, 0}, {});
     }
     failf(ODIN3_ERR_PARSE, loc, "a constant that is not an integer or string");
@@ -509,13 +534,13 @@ uint32_t Adapter::constant(const ConstantValue &cv, bool unsized, uint32_t loc, 
 }
 
 uint32_t Adapter::rangeNode(const ConstantRange &range, uint32_t loc, uint32_t end) {
-    uint32_t left = numberI64(range.left, loc, end);
-    uint32_t right = numberI64(range.right, loc, end);
+    const uint32_t left = numberI64(range.left, {loc, end});
+    const uint32_t right = numberI64(range.right, {loc, end});
     return node({ODIN3_AST_RANGE, 0, 0, loc, end, 0, 0}, {left, right});
 }
 
 uint32_t Adapter::ident(const std::string &name, uint32_t loc, uint32_t end) {
-    uint32_t id = intern(name);
+    const uint32_t id = intern(name);
     if (st != ODIN3_OK) {
         return 0;
     }
@@ -537,18 +562,40 @@ uint32_t Adapter::binary(uint32_t op, uint32_t lhs, uint32_t rhs, uint32_t loc, 
 /* --- types and names ----------------------------------------------------------------------- */
 
 const Type &Adapter::stripArrays(const Type &type, std::vector<const Type *> &dims) {
-    const Type *t = &type;
-    while (t->isUnpackedArray()) {
-        dims.push_back(t);
-        t = &t->getCanonicalType().as<FixedSizeUnpackedArrayType>().elementType;
+    const Type *arr = &type;
+    while (arr->isUnpackedArray()) {
+        dims.push_back(arr);
+        arr = &arr->getCanonicalType().as<FixedSizeUnpackedArrayType>().elementType;
     }
-    return *t;
+    return *arr;
 }
 
 bool Adapter::isIntegerVar(const Type &type) {
-    const Type &t = type.getCanonicalType();
-    return t.isIntegral() && t.getBitWidth() == 32 && t.isSigned() && t.isPredefinedInteger() &&
-           t.kind != SymbolKind::EnumType;
+    const Type &canonical = type.getCanonicalType();
+    return canonical.isIntegral() && canonical.getBitWidth() == kVerilogIntegerWidth &&
+           canonical.isSigned() && canonical.isPredefinedInteger() &&
+           canonical.kind != SymbolKind::EnumType;
+}
+
+/* The generate-block, statement-block and interface-instance prefixes of a symbol's name,
+ * outermost first; the walk stops at the instance body. */
+void scopePrefixParts(const Symbol &sym, std::vector<std::string> &parts) {
+    const Scope *scope = sym.getParentScope();
+    while (scope != nullptr) {
+        const Symbol &owner = scope->asSymbol();
+        if (owner.kind == SymbolKind::InstanceBody) {
+            const InstanceBodySymbol &ownerBody = owner.as<InstanceBodySymbol>();
+            if (ownerBody.parentInstance != nullptr && ownerBody.parentInstance->isInterface()) {
+                parts.insert(parts.begin(), std::string(ownerBody.parentInstance->name));
+            }
+            return;
+        }
+        if ((owner.kind == SymbolKind::GenerateBlock || owner.kind == SymbolKind::StatementBlock) &&
+            !owner.name.empty()) {
+            parts.insert(parts.begin(), std::string(owner.name));
+        }
+        scope = owner.getParentScope();
+    }
 }
 
 /* The name a value symbol has in the module: its own name, prefixed by the generate blocks,
@@ -565,23 +612,7 @@ std::string Adapter::symName(const Symbol &sym) {
     }
     std::vector<std::string> parts;
     parts.emplace_back(sym.name);
-    const Scope *scope = sym.getParentScope();
-    while (scope != NULL) {
-        const Symbol &owner = scope->asSymbol();
-        if (owner.kind == SymbolKind::InstanceBody) {
-            const InstanceBodySymbol &body = owner.as<InstanceBodySymbol>();
-            if (body.parentInstance != NULL && body.parentInstance->isInterface()) {
-                parts.insert(parts.begin(), std::string(body.parentInstance->name));
-            }
-            break;
-        }
-        if (owner.kind == SymbolKind::GenerateBlock || owner.kind == SymbolKind::StatementBlock) {
-            if (!owner.name.empty()) {
-                parts.insert(parts.begin(), std::string(owner.name));
-            }
-        }
-        scope = owner.getParentScope();
-    }
+    scopePrefixParts(sym, parts);
     std::string out;
     for (size_t i = 0; i < parts.size(); i++) {
         if (i != 0) {
@@ -594,22 +625,23 @@ std::string Adapter::symName(const Symbol &sym) {
 }
 
 void Adapter::collectModuleNames(const InstanceBodySymbol &body) {
-    for (const Symbol &m : body.members()) {
-        if (m.kind == SymbolKind::Net || m.kind == SymbolKind::Variable) {
-            names[&m] = symName(m);
-        } else if ((m.kind == SymbolKind::Instance || m.kind == SymbolKind::InstanceArray) &&
-                   m.kind == SymbolKind::Instance) {
-            /* Interface instances are flattened: their signals get "<inst>.<signal>". */
-            const InstanceSymbol &inst = m.as<InstanceSymbol>();
-            if (!inst.isInterface()) {
-                continue;
+    for (const Symbol &member : body.members()) {
+        if (member.kind == SymbolKind::Net || member.kind == SymbolKind::Variable) {
+            names[&member] = symName(member);
+        } else if (member.kind == SymbolKind::Instance) {
+            const InstanceSymbol &inst = member.as<InstanceSymbol>();
+            if (inst.isInterface()) {
+                flattenInterfaceSignals(inst);
             }
-            const InstanceBodySymbol &ib = inst.body;
-            for (const Symbol &inner : ib.members()) {
-                if (inner.kind == SymbolKind::Net || inner.kind == SymbolKind::Variable) {
-                    names[&inner] = std::string(inst.name) + "." + std::string(inner.name);
-                }
-            }
+        }
+    }
+}
+
+/* Interface instances are flattened: their signals get "<inst>.<signal>". */
+void Adapter::flattenInterfaceSignals(const InstanceSymbol &inst) {
+    for (const Symbol &member : inst.body.members()) {
+        if (member.kind == SymbolKind::Net || member.kind == SymbolKind::Variable) {
+            names[&member] = std::string(inst.name) + "." + std::string(member.name);
         }
     }
 }
@@ -621,19 +653,20 @@ uint32_t Adapter::declRanges(const Type &type, std::vector<uint32_t> &unpacked, 
     std::transform(dims.begin(), dims.end(), std::back_inserter(unpacked), [&](const Type *dim) {
         return rangeNode(dim->getCanonicalType().as<FixedSizeUnpackedArrayType>().range, loc, end);
     });
-    const Type &t = base.getCanonicalType();
-    if (t.isPredefinedInteger()) {
+    const Type &canonical = base.getCanonicalType();
+    if (canonical.isPredefinedInteger()) {
         return 0; /* int/integer: the declaration's DT or VAR_DECL sub gives [31:0] */
     }
-    if (t.kind == SymbolKind::UnpackedStructType || t.kind == SymbolKind::UnpackedUnionType) {
-        uint64_t width = t.getSelectableWidth();
+    if (canonical.kind == SymbolKind::UnpackedStructType ||
+        canonical.kind == SymbolKind::UnpackedUnionType) {
+        const uint64_t width = canonical.getSelectableWidth();
         if (width > 1) {
             return rangeNode(ConstantRange((int32_t)(width - 1), 0), loc, end);
         }
         return 0;
     }
-    if (t.isIntegral() && t.getBitWidth() > 1) {
-        ConstantRange range = t.getFixedRange();
+    if (canonical.isIntegral() && canonical.getBitWidth() > 1) {
+        const ConstantRange range = canonical.getFixedRange();
         if (range.width() > 1) {
             return rangeNode(range, loc, end);
         }
@@ -641,39 +674,45 @@ uint32_t Adapter::declRanges(const Type &type, std::vector<uint32_t> &unpacked, 
     return 0;
 }
 
+/* The fields of a packed or unpacked struct type; false when the type is neither. */
+bool structFields(const Type &canonical, std::vector<const FieldSymbol *> &fields) {
+    if (canonical.kind == SymbolKind::PackedStructType) {
+        for (const Symbol &fieldSym : canonical.as<PackedStructType>().members()) {
+            if (fieldSym.kind == SymbolKind::Field) {
+                fields.push_back(&fieldSym.as<FieldSymbol>());
+            }
+        }
+        return true;
+    }
+    if (canonical.kind == SymbolKind::UnpackedStructType) {
+        for (const Symbol &fieldSym : canonical.as<UnpackedStructType>().members()) {
+            if (fieldSym.kind == SymbolKind::Field) {
+                fields.push_back(&fieldSym.as<FieldSymbol>());
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
 /* The bit offset (from the flattened vector's LSB) and width of struct member `member`. */
-bool Adapter::structMember(const Type &type, const Symbol &member, uint32_t &offset,
-                           uint32_t &width) {
-    const Type &t = type.getCanonicalType();
+bool Adapter::structMember(const Type &type, const Symbol &member, BitSlice &slice) {
+    const Type &canonical = type.getCanonicalType();
     std::vector<const FieldSymbol *> fields;
-    if (t.kind == SymbolKind::PackedStructType) {
-        const PackedStructType &packedType = t.as<PackedStructType>();
-        for (const Symbol &m : packedType.members()) {
-            if (m.kind == SymbolKind::Field) {
-                fields.push_back(&m.as<FieldSymbol>());
-            }
-        }
-    } else if (t.kind == SymbolKind::UnpackedStructType) {
-        const UnpackedStructType &unpackedType = t.as<UnpackedStructType>();
-        for (const Symbol &m : unpackedType.members()) {
-            if (m.kind == SymbolKind::Field) {
-                fields.push_back(&m.as<FieldSymbol>());
-            }
-        }
-    } else {
+    if (!structFields(canonical, fields)) {
         return false;
     }
-    uint32_t total =
-        std::accumulate(fields.begin(), fields.end(), 0U, [](uint32_t sum, const FieldSymbol *f) {
-            return sum + (uint32_t)f->getType().getBitWidth();
+    const uint32_t total = std::accumulate(
+        fields.begin(), fields.end(), 0U, [](uint32_t sum, const FieldSymbol *field) {
+            return sum + (uint32_t)field->getType().getBitWidth();
         });
-    uint32_t at = total;
-    for (const FieldSymbol *f : fields) {
-        uint32_t w = (uint32_t)f->getType().getBitWidth();
-        at -= w;
-        if (std::string_view(f->name) == std::string_view(member.name)) {
-            offset = at;
-            width = w;
+    uint32_t offset = total;
+    for (const FieldSymbol *field : fields) {
+        const uint32_t bitWidth = (uint32_t)field->getType().getBitWidth();
+        offset -= bitWidth;
+        if (std::string_view(field->name) == std::string_view(member.name)) {
+            slice.offset = offset;
+            slice.width = bitWidth;
             return true;
         }
     }
@@ -682,36 +721,35 @@ bool Adapter::structMember(const Type &type, const Symbol &member, uint32_t &off
 
 uint32_t Adapter::memberSelect(const Expression &base, const Symbol &member, uint32_t loc,
                                uint32_t end) {
-    uint32_t value = expr(base);
-    uint32_t offset = 0;
-    uint32_t width = 0;
-    if (!structMember(base.type->getCanonicalType(), member, offset, width)) {
+    const uint32_t value = expr(base);
+    BitSlice slice = {};
+    if (!structMember(base.type->getCanonicalType(), member, slice)) {
         failf(ODIN3_ERR_PARSE, loc, "member '%s' of a type with no bit layout",
               std::string(member.name).c_str());
         return 0;
     }
-    if (width == 0) {
+    if (slice.width == 0) {
         return 0;
     }
-    uint32_t msb = numberI64((int64_t)(offset + width - 1), loc, end);
-    uint32_t lsb = numberI64((int64_t)offset, loc, end);
+    const uint32_t msb = numberI64((int64_t)(slice.offset + slice.width - 1), {loc, end});
+    const uint32_t lsb = numberI64((int64_t)slice.offset, {loc, end});
     return node({ODIN3_AST_SELECT, ODIN3_AST_SELECT_PART, 0, loc, end, 0, 0}, {value, msb, lsb});
 }
 
 /* --- expressions --------------------------------------------------------------------------- */
 
-uint32_t Adapter::expr(const Expression &e) {
+uint32_t Adapter::expr(const Expression &ex) {
     if (st != ODIN3_OK) {
         return 0;
     }
-    uint32_t loc = locOf(e.sourceRange.start());
-    uint32_t end = endOf(e.sourceRange);
-    if (const ConstantValue *cv = e.getConstant()) {
+    const uint32_t loc = locOf(ex.sourceRange.start());
+    const uint32_t end = endOf(ex.sourceRange);
+    if (const ConstantValue *cv = ex.getConstant()) {
         if (!cv->bad() && (cv->isInteger() || cv->isString())) {
             return constant(*cv, false, loc, end);
         }
     }
-    return exprRaw(e);
+    return exprRaw(ex);
 }
 
 /* The operator tables: one entry per slang operator the adapter has an Odin AST node for. */
@@ -792,38 +830,38 @@ bool isIncDec(UnaryOperator op) {
            op == UnaryOperator::Predecrement || op == UnaryOperator::Postdecrement;
 }
 
-uint32_t Adapter::exprRaw(const Expression &e) {
+uint32_t Adapter::exprRaw(const Expression &ex) {
     uint32_t made = 0;
-    if (exprLeaf(e, made) || exprOper(e, made)) {
+    if (exprLeaf(ex, made) || exprOper(ex, made)) {
         return made;
     }
-    failf(ODIN3_ERR_PARSE, locOf(e.sourceRange.start()), "expression kind %d is not supported",
-          (int)e.kind);
+    failf(ODIN3_ERR_PARSE, locOf(ex.sourceRange.start()), "expression kind %d is not supported",
+          (int)ex.kind);
     return 0;
 }
 
 /* The value, select and literal kinds; false when e is none of them. */
-bool Adapter::exprLeaf(const Expression &e, uint32_t &out) {
-    uint32_t loc = locOf(e.sourceRange.start());
-    uint32_t end = endOf(e.sourceRange);
-    switch (e.kind) {
+bool Adapter::exprLeaf(const Expression &ex, uint32_t &out) {
+    const uint32_t loc = locOf(ex.sourceRange.start());
+    const uint32_t end = endOf(ex.sourceRange);
+    switch (ex.kind) {
     case ExpressionKind::NamedValue:
-        out = exprNamed(e.as<NamedValueExpression>(), loc, end);
+        out = exprNamed(ex.as<NamedValueExpression>(), loc, end);
         return true;
     case ExpressionKind::HierarchicalValue:
-        out = exprHierarchical(e.as<HierarchicalValueExpression>(), loc, end);
+        out = exprHierarchical(ex.as<HierarchicalValueExpression>(), loc, end);
         return true;
     case ExpressionKind::MemberAccess:
-        out = exprMember(e.as<MemberAccessExpression>(), loc, end);
+        out = exprMember(ex.as<MemberAccessExpression>(), loc, end);
         return true;
     case ExpressionKind::ElementSelect:
     case ExpressionKind::RangeSelect:
-        out = exprSelect(e, loc, end);
+        out = exprSelect(ex, loc, end);
         return true;
     case ExpressionKind::IntegerLiteral:
     case ExpressionKind::UnbasedUnsizedIntegerLiteral:
     case ExpressionKind::StringLiteral:
-        out = exprLiteral(e, loc, end);
+        out = exprLiteral(ex, loc, end);
         return true;
     default:
         return false;
@@ -831,30 +869,30 @@ bool Adapter::exprLeaf(const Expression &e, uint32_t &out) {
 }
 
 /* The operator and call kinds; false when e is none of them. */
-bool Adapter::exprOper(const Expression &e, uint32_t &out) {
-    uint32_t loc = locOf(e.sourceRange.start());
-    uint32_t end = endOf(e.sourceRange);
-    switch (e.kind) {
+bool Adapter::exprOper(const Expression &ex, uint32_t &out) {
+    const uint32_t loc = locOf(ex.sourceRange.start());
+    const uint32_t end = endOf(ex.sourceRange);
+    switch (ex.kind) {
     case ExpressionKind::UnaryOp:
-        out = exprUnary(e.as<UnaryExpression>(), loc, end);
+        out = exprUnary(ex.as<UnaryExpression>(), loc, end);
         return true;
     case ExpressionKind::BinaryOp:
-        out = exprBinary(e.as<BinaryExpression>(), loc, end);
+        out = exprBinary(ex.as<BinaryExpression>(), loc, end);
         return true;
     case ExpressionKind::ConditionalOp:
-        out = exprConditional(e.as<ConditionalExpression>(), loc, end);
+        out = exprConditional(ex.as<ConditionalExpression>(), loc, end);
         return true;
     case ExpressionKind::Concatenation:
-        out = exprConcat(e.as<ConcatenationExpression>(), loc, end);
+        out = exprConcat(ex.as<ConcatenationExpression>(), loc, end);
         return true;
     case ExpressionKind::Replication:
-        out = exprReplication(e.as<ReplicationExpression>(), loc, end);
+        out = exprReplication(ex.as<ReplicationExpression>(), loc, end);
         return true;
     case ExpressionKind::Conversion:
-        out = exprConversion(e.as<ConversionExpression>(), loc, end);
+        out = exprConversion(ex.as<ConversionExpression>(), loc, end);
         return true;
     case ExpressionKind::Call:
-        out = exprCall(e.as<CallExpression>(), loc, end);
+        out = exprCall(ex.as<CallExpression>(), loc, end);
         return true;
     default:
         return false;
@@ -928,18 +966,18 @@ uint32_t Adapter::exprMember(const MemberAccessExpression &ma, uint32_t loc, uin
     return 0;
 }
 
-uint32_t Adapter::exprSelect(const Expression &e, uint32_t loc, uint32_t end) {
-    if (e.kind == ExpressionKind::ElementSelect) {
-        const auto &se = e.as<ElementSelectExpression>();
-        uint32_t value = expr(se.value());
-        uint32_t index = expr(se.selector());
+uint32_t Adapter::exprSelect(const Expression &ex, uint32_t loc, uint32_t end) {
+    if (ex.kind == ExpressionKind::ElementSelect) {
+        const auto &se = ex.as<ElementSelectExpression>();
+        const uint32_t value = expr(se.value());
+        const uint32_t index = expr(se.selector());
         return node({ODIN3_AST_SELECT, ODIN3_AST_SELECT_BIT, 0, loc, end, 0, 0},
                     std::vector<uint32_t>{value, index, 0});
     }
-    const auto &rs = e.as<RangeSelectExpression>();
-    uint32_t value = expr(rs.value());
-    uint32_t left = expr(rs.left());
-    uint32_t right = expr(rs.right());
+    const auto &rs = ex.as<RangeSelectExpression>();
+    const uint32_t value = expr(rs.value());
+    const uint32_t left = expr(rs.left());
+    const uint32_t right = expr(rs.right());
     uint32_t sub = ODIN3_AST_SELECT_PART;
     if (rs.getSelectionKind() == RangeSelectionKind::IndexedUp) {
         sub = ODIN3_AST_SELECT_PART_PLUS;
@@ -949,19 +987,19 @@ uint32_t Adapter::exprSelect(const Expression &e, uint32_t loc, uint32_t end) {
     return node({ODIN3_AST_SELECT, sub, 0, loc, end, 0, 0}, {value, left, right});
 }
 
-uint32_t Adapter::exprLiteral(const Expression &e, uint32_t loc, uint32_t end) {
-    if (e.kind == ExpressionKind::IntegerLiteral) {
-        const auto &il = e.as<IntegerLiteral>();
+uint32_t Adapter::exprLiteral(const Expression &ex, uint32_t loc, uint32_t end) {
+    if (ex.kind == ExpressionKind::IntegerLiteral) {
+        const auto &il = ex.as<IntegerLiteral>();
         return number(il.getValue(), il.isDeclaredUnsized, loc, end);
     }
-    if (e.kind == ExpressionKind::UnbasedUnsizedIntegerLiteral) {
-        const auto &ul = e.as<UnbasedUnsizedIntegerLiteral>();
+    if (ex.kind == ExpressionKind::UnbasedUnsizedIntegerLiteral) {
+        const auto &ul = ex.as<UnbasedUnsizedIntegerLiteral>();
         return number(ul.getValue(), false, loc, end);
     }
-    const auto &sl = e.as<StringLiteral>();
-    std::string text(sl.getValue());
-    uint32_t name = intern(text);
-    uint32_t flags = text.empty() ? (uint32_t)ODIN3_AST_F_STRING_EMPTY : 0U;
+    const auto &sl = ex.as<StringLiteral>();
+    const std::string text(sl.getValue());
+    const uint32_t name = intern(text);
+    const uint32_t flags = text.empty() ? (uint32_t)ODIN3_AST_F_STRING_EMPTY : 0U;
     return node({ODIN3_AST_STRING, 0, flags, loc, end, name, 0}, {});
 }
 
@@ -1001,8 +1039,8 @@ uint32_t Adapter::exprConcat(const ConcatenationExpression &cc, uint32_t loc, ui
 }
 
 uint32_t Adapter::exprReplication(const ReplicationExpression &re, uint32_t loc, uint32_t end) {
-    uint32_t count = expr(re.count());
-    uint32_t concat = node({ODIN3_AST_CONCAT, 0, 0, loc, end, 0, 0}, {expr(re.concat())});
+    const uint32_t count = expr(re.count());
+    const uint32_t concat = node({ODIN3_AST_CONCAT, 0, 0, loc, end, 0, 0}, {expr(re.concat())});
     return node({ODIN3_AST_REPLICATE, 0, 0, loc, end, 0, 0}, {count, concat});
 }
 
@@ -1014,11 +1052,11 @@ uint32_t Adapter::exprConversion(const ConversionExpression &cv, uint32_t loc, u
               (int)cv.type->getBitWidth());
         return 0;
     }
-    uint32_t sub = expr(cv.operand());
-    bool from_signed = cv.operand().type->isSigned();
-    bool to_signed = cv.type->isSigned();
+    const uint32_t sub = expr(cv.operand());
+    const bool from_signed = cv.operand().type->isSigned();
+    const bool to_signed = cv.type->isSigned();
     if (!from_signed && to_signed) {
-        uint32_t name = intern("$signed");
+        const uint32_t name = intern("$signed");
         return node({ODIN3_AST_CALL, 0, ODIN3_AST_F_CALL_SYSTEM, loc, end, name, 0}, {sub});
     }
     return sub;
@@ -1030,17 +1068,17 @@ uint32_t Adapter::exprCall(const CallExpression &call, uint32_t loc, uint32_t en
         return 0;
     }
     const auto &sys = std::get<CallExpression::SystemCallInfo>(call.subroutine);
-    std::string_view name = sys.subroutine->name;
+    const std::string_view name = sys.subroutine->name;
     if (name == "$bits" && call.arguments().size() == 1) {
         const Type &arg = *call.arguments()[0]->type;
-        return numberI64((int64_t)arg.getSelectableWidth(), loc, end);
+        return numberI64((int64_t)arg.getSelectableWidth(), {loc, end});
     }
     if (name != "$signed" && name != "$unsigned") {
         failf(ODIN3_ERR_PARSE, loc, "system function '%s' is not supported",
               std::string(name).c_str());
         return 0;
     }
-    uint32_t id = intern(name);
+    const uint32_t id = intern(name);
     std::vector<uint32_t> args;
     std::transform(call.arguments().begin(), call.arguments().end(), std::back_inserter(args),
                    [this](const Expression *arg) { return expr(*arg); });
@@ -1049,16 +1087,16 @@ uint32_t Adapter::exprCall(const CallExpression &call, uint32_t loc, uint32_t en
 
 /* --- statements ---------------------------------------------------------------------------- */
 
-uint32_t Adapter::timing(const TimingControl &t, uint32_t loc, uint32_t end) {
-    switch (t.kind) {
+uint32_t Adapter::timing(const TimingControl &tc, uint32_t loc, uint32_t end) {
+    switch (tc.kind) {
     case TimingControlKind::SignalEvent: {
-        const auto &se = t.as<SignalEventControl>();
-        uint32_t event = eventExpr(se, loc, end);
+        const auto &se = tc.as<SignalEventControl>();
+        const uint32_t event = eventExpr(se, loc, end);
         return node({ODIN3_AST_EVENT_CONTROL, 0, 0, loc, end, 0, 0},
                     std::vector<uint32_t>{0, event});
     }
     case TimingControlKind::EventList: {
-        const auto &el = t.as<EventListControl>();
+        const auto &el = tc.as<EventListControl>();
         std::vector<uint32_t> events = {0};
         for (const TimingControl *ev : el.events) {
             if (ev->kind == TimingControlKind::SignalEvent) {
@@ -1088,125 +1126,130 @@ uint32_t Adapter::eventExpr(const SignalEventControl &se, uint32_t loc, uint32_t
     return node({ODIN3_AST_EVENT_EXPR, sub, 0, loc, end, 0, 0}, {expr(se.expr)});
 }
 
-uint32_t Adapter::blockStmt(const BlockStatement &b) {
-    uint32_t loc = locOf(b.sourceRange.start());
-    uint32_t end = endOf(b.sourceRange);
+uint32_t Adapter::blockStmt(const BlockStatement &block) {
+    const uint32_t loc = locOf(block.sourceRange.start());
+    const uint32_t end = endOf(block.sourceRange);
     std::vector<uint32_t> locals;
     std::string name;
-    if (b.blockSymbol != NULL) {
-        name = std::string(b.blockSymbol->name);
-        for (const Symbol &m : b.blockSymbol->members()) {
-            if (VariableSymbol::isKind(m.kind)) {
-                const auto &v = m.as<VariableSymbol>();
-                std::string full = "blk$" + std::to_string(next_block) + "$" + std::string(v.name);
-                hoisted[&v] = full;
-                std::vector<uint32_t> unpacked;
-                uint32_t range = declRanges(v.getType(), unpacked, loc, end);
-                uint32_t decl = ident(full, loc, end);
-                std::vector<uint32_t> dkids = {0};
-                if (const Expression *init = v.getInitializer()) {
-                    dkids[0] = expr(*init);
-                }
-                dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
-                uint32_t declr =
-                    node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, intern(full), 0}, dkids);
-                uint32_t sub =
-                    isIntegerVar(v.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
-                uint32_t flags =
-                    v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
-                locals.push_back(node({ODIN3_AST_VAR_DECL, sub, flags, loc, end, 0, 0},
-                                      std::vector<uint32_t>{range, declr}));
-                (void)decl;
-                next_block++;
+    if (block.blockSymbol != nullptr) {
+        name = std::string(block.blockSymbol->name);
+        for (const Symbol &member : block.blockSymbol->members()) {
+            if (VariableSymbol::isKind(member.kind)) {
+                locals.push_back(blockLocalDecl(member.as<VariableSymbol>(), loc, end));
             }
         }
         if (name.empty() && !locals.empty()) {
             name = "$unnamed_block$" + std::to_string(next_block);
         }
     }
-    uint32_t localList = locals.empty() ? 0 : listNode(locals, loc, end);
-    uint32_t body = stmt(b.body);
+    const uint32_t localList = locals.empty() ? 0 : listNode(locals, loc, end);
+    const uint32_t body = stmt(block.body);
     return node({ODIN3_AST_SEQ_BLOCK, 0, 0, loc, end, name.empty() ? 0 : intern(name), 0},
                 {localList, body});
 }
 
-uint32_t Adapter::assignStmt(const Expression &e, bool nonblocking) {
-    if (e.kind == ExpressionKind::Assignment) {
-        return assignExpression(e.as<AssignmentExpression>());
+/* One block variable, hoisted to module scope and declared here: its VAR_DECL node. */
+uint32_t Adapter::blockLocalDecl(const VariableSymbol &variable, uint32_t loc, uint32_t end) {
+    const std::string full = "blk$" + std::to_string(next_block) + "$" + std::string(variable.name);
+    hoisted[&variable] = full;
+    std::vector<uint32_t> unpacked;
+    const uint32_t range = declRanges(variable.getType(), unpacked, loc, end);
+    const uint32_t decl = ident(full, loc, end);
+    std::vector<uint32_t> dkids = {0};
+    if (const Expression *init = variable.getInitializer()) {
+        dkids[0] = expr(*init);
     }
-    if (e.kind == ExpressionKind::UnaryOp && isIncDec(e.as<UnaryExpression>().op)) {
-        return incDecStmt(e.as<UnaryExpression>(), nonblocking);
+    dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
+    const uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, intern(full), 0}, dkids);
+    const uint32_t sub =
+        isIntegerVar(variable.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
+    const uint32_t flags =
+        variable.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+    (void)decl;
+    next_block++;
+    return node({ODIN3_AST_VAR_DECL, sub, flags, loc, end, 0, 0},
+                std::vector<uint32_t>{range, declr});
+}
+
+uint32_t Adapter::assignStmt(const Expression &ex, bool nonblocking) {
+    if (ex.kind == ExpressionKind::Assignment) {
+        return assignExpression(ex.as<AssignmentExpression>());
     }
-    failf(ODIN3_ERR_PARSE, locOf(e.sourceRange.start()), "this assignment form is not supported");
+    if (ex.kind == ExpressionKind::UnaryOp && isIncDec(ex.as<UnaryExpression>().op)) {
+        return incDecStmt(ex.as<UnaryExpression>(), nonblocking);
+    }
+    failf(ODIN3_ERR_PARSE, locOf(ex.sourceRange.start()), "this assignment form is not supported");
     return 0;
 }
 
 uint32_t Adapter::assignExpression(const AssignmentExpression &ae) {
-    uint32_t loc = locOf(ae.sourceRange.start());
-    uint32_t end = endOf(ae.sourceRange);
+    const uint32_t loc = locOf(ae.sourceRange.start());
+    const uint32_t end = endOf(ae.sourceRange);
     if (ae.timingControl != nullptr) {
         failf(ODIN3_ERR_PARSE, loc, "an intra-assignment timing control is not supported");
         return 0;
     }
-    uint32_t lhs = expr(ae.left());
+    const uint32_t lhs = expr(ae.left());
     uint32_t rhs = expr(ae.right());
     if (ae.isCompound()) {
         uint32_t op = 0;
-        if (!binaryCode(*ae.op, op)) {
+        if (!ae.op.has_value() || !binaryCode(*ae.op, op)) {
             failf(ODIN3_ERR_PARSE, loc, "this compound assignment is not supported");
             return 0;
         }
-        uint32_t again = expr(ae.left());
+        const uint32_t again = expr(ae.left());
         rhs = binary(op, again, rhs, loc, end);
     }
-    uint32_t kind = ae.isNonBlocking() ? ODIN3_AST_NONBLOCKING_ASSIGN : ODIN3_AST_BLOCKING_ASSIGN;
+    const uint32_t kind =
+        ae.isNonBlocking() ? ODIN3_AST_NONBLOCKING_ASSIGN : ODIN3_AST_BLOCKING_ASSIGN;
     return node({kind, 0, 0, loc, end, 0, 0}, {lhs, 0, rhs});
 }
 
 /* `++x`, `x++`, `--x`, `x--` in a statement: one assignment of x +- 1. */
 uint32_t Adapter::incDecStmt(const UnaryExpression &ue, bool nonblocking) {
-    uint32_t loc = locOf(ue.sourceRange.start());
-    uint32_t end = endOf(ue.sourceRange);
-    bool dec = ue.op == UnaryOperator::Predecrement || ue.op == UnaryOperator::Postdecrement;
-    uint32_t lhs = expr(ue.operand());
-    uint32_t read = expr(ue.operand()); /* a tree: the read is another node */
-    uint32_t one = numberI64(1, loc, end);
-    uint32_t sum = binary(dec ? ODIN3_AST_BINARY_SUB : ODIN3_AST_BINARY_ADD, read, one, loc, end);
-    uint32_t kind = nonblocking ? ODIN3_AST_NONBLOCKING_ASSIGN : ODIN3_AST_BLOCKING_ASSIGN;
+    const uint32_t loc = locOf(ue.sourceRange.start());
+    const uint32_t end = endOf(ue.sourceRange);
+    const bool dec = ue.op == UnaryOperator::Predecrement || ue.op == UnaryOperator::Postdecrement;
+    const uint32_t lhs = expr(ue.operand());
+    const uint32_t read = expr(ue.operand()); /* a tree: the read is another node */
+    const uint32_t one = numberI64(1, {loc, end});
+    const uint32_t sum =
+        binary(dec ? ODIN3_AST_BINARY_SUB : ODIN3_AST_BINARY_ADD, read, one, loc, end);
+    const uint32_t kind = nonblocking ? ODIN3_AST_NONBLOCKING_ASSIGN : ODIN3_AST_BLOCKING_ASSIGN;
     return node({kind, 0, 0, loc, end, 0, 0}, {lhs, 0, sum});
 }
 
-uint32_t Adapter::stmt(const Statement &s) {
-    uint32_t loc = locOf(s.sourceRange.start());
-    uint32_t end = endOf(s.sourceRange);
+uint32_t Adapter::stmt(const Statement &stat) {
+    const uint32_t loc = locOf(stat.sourceRange.start());
+    const uint32_t end = endOf(stat.sourceRange);
     if (st != ODIN3_OK) {
         return 0;
     }
-    switch (s.kind) {
+    switch (stat.kind) {
     case StatementKind::Empty:
         return node({ODIN3_AST_NULL_STMT, 0, 0, loc, end, 0, 0}, {});
     case StatementKind::Block:
-        return blockStmt(s.as<BlockStatement>());
+        return blockStmt(stat.as<BlockStatement>());
     case StatementKind::List:
-        return stmtList(s.as<StatementList>(), loc, end);
+        return stmtList(stat.as<StatementList>(), loc, end);
     case StatementKind::ExpressionStatement:
-        return stmtExpr(s.as<ExpressionStatement>(), loc, end);
+        return stmtExpr(stat.as<ExpressionStatement>(), loc, end);
     case StatementKind::VariableDeclaration:
-        return stmtDecl(s.as<VariableDeclStatement>(), loc, end);
+        return stmtDecl(stat.as<VariableDeclStatement>(), loc, end);
     case StatementKind::Conditional:
-        return stmtConditional(s.as<ConditionalStatement>(), loc, end);
+        return stmtConditional(stat.as<ConditionalStatement>(), loc, end);
     case StatementKind::Case:
-        return stmtCase(s.as<CaseStatement>(), loc, end);
+        return stmtCase(stat.as<CaseStatement>(), loc, end);
     case StatementKind::ForLoop:
-        return stmtFor(s.as<ForLoopStatement>(), loc, end);
+        return stmtFor(stat.as<ForLoopStatement>(), loc, end);
     case StatementKind::RepeatLoop:
-        return stmtRepeat(s.as<RepeatLoopStatement>(), loc, end);
+        return stmtRepeat(stat.as<RepeatLoopStatement>(), loc, end);
     case StatementKind::WhileLoop:
-        return stmtWhile(s.as<WhileLoopStatement>(), loc, end);
+        return stmtWhile(stat.as<WhileLoopStatement>(), loc, end);
     case StatementKind::Timed:
-        return stmtTimed(s.as<TimedStatement>(), loc, end);
+        return stmtTimed(stat.as<TimedStatement>(), loc, end);
     default:
-        failf(ODIN3_ERR_PARSE, loc, "statement kind %d is not supported", (int)s.kind);
+        failf(ODIN3_ERR_PARSE, loc, "statement kind %d is not supported", (int)stat.kind);
         return 0;
     }
 }
@@ -1226,7 +1269,7 @@ uint32_t Adapter::stmtExpr(const ExpressionStatement &es, uint32_t loc, uint32_t
         const auto &call = es.expr.as<CallExpression>();
         if (std::holds_alternative<CallExpression::SystemCallInfo>(call.subroutine)) {
             const auto &sys = std::get<CallExpression::SystemCallInfo>(call.subroutine);
-            uint32_t id = intern(sys.subroutine->name);
+            const uint32_t id = intern(sys.subroutine->name);
             std::vector<uint32_t> args;
             std::transform(call.arguments().begin(), call.arguments().end(),
                            std::back_inserter(args),
@@ -1257,9 +1300,9 @@ uint32_t Adapter::stmtConditional(const ConditionalStatement &cs, uint32_t loc, 
         failf(ODIN3_ERR_PARSE, loc, "if with a pattern or several conditions is not supported");
         return 0;
     }
-    uint32_t cond = expr(*cs.conditions[0].expr);
-    uint32_t yes = stmt(cs.ifTrue);
-    uint32_t no = cs.ifFalse != nullptr ? stmt(*cs.ifFalse) : 0;
+    const uint32_t cond = expr(*cs.conditions[0].expr);
+    const uint32_t yes = stmt(cs.ifTrue);
+    const uint32_t no = cs.ifFalse != nullptr ? stmt(*cs.ifFalse) : 0;
     return node({ODIN3_AST_IF, 0, 0, loc, end, 0, 0}, {cond, yes, no});
 }
 
@@ -1292,13 +1335,13 @@ uint32_t Adapter::stmtCase(const CaseStatement &cs, uint32_t loc, uint32_t end) 
         std::vector<uint32_t> values;
         std::transform(group.expressions.begin(), group.expressions.end(),
                        std::back_inserter(values),
-                       [this](const Expression *v) { return expr(*v); });
-        uint32_t body = stmt(*group.stmt);
+                       [this](const Expression *ex) { return expr(*ex); });
+        const uint32_t body = stmt(*group.stmt);
         values.insert(values.begin(), body);
         kids.push_back(node({ODIN3_AST_CASE_ITEM, 0, 0, loc, end, 0, 0}, values));
     }
     if (cs.defaultCase != nullptr) {
-        uint32_t body = stmt(*cs.defaultCase);
+        const uint32_t body = stmt(*cs.defaultCase);
         kids.push_back(
             node({ODIN3_AST_CASE_ITEM, 0, ODIN3_AST_F_CASE_ITEM_DEFAULT, loc, end, 0, 0}, {body}));
     }
@@ -1308,30 +1351,30 @@ uint32_t Adapter::stmtCase(const CaseStatement &cs, uint32_t loc, uint32_t end) 
 uint32_t Adapter::stmtFor(const ForLoopStatement &fs, uint32_t loc, uint32_t end) {
     uint32_t init = 0;
     if (!fs.loopVars.empty()) {
-        const VariableSymbol &v = *fs.loopVars[0];
-        auto inserted = hoisted.try_emplace(&v);
+        const VariableSymbol &loopVar = *fs.loopVars[0];
+        auto inserted = hoisted.try_emplace(&loopVar);
         if (inserted.second) {
             inserted.first->second =
-                "blk$" + std::to_string(next_block++) + "$" + std::string(v.name);
-            module_hoisted.push_back(&v);
+                "blk$" + std::to_string(next_block++) + "$" + std::string(loopVar.name);
+            module_hoisted.push_back(&loopVar);
         }
-        uint32_t lhs = ident(hoisted[&v], loc, end);
+        const uint32_t lhs = ident(hoisted[&loopVar], loc, end);
         uint32_t rhs = 0;
-        if (const Expression *ie = v.getInitializer()) {
+        if (const Expression *ie = loopVar.getInitializer()) {
             rhs = expr(*ie);
         } else {
-            rhs = numberI64(0, loc, end);
+            rhs = numberI64(0, {loc, end});
         }
         init = node({ODIN3_AST_BLOCKING_ASSIGN, 0, 0, loc, end, 0, 0}, {lhs, 0, rhs});
     } else if (!fs.initializers.empty()) {
         init = assignStmt(*fs.initializers[0], false);
     }
-    uint32_t cond = fs.stopExpr != nullptr ? expr(*fs.stopExpr) : 0;
+    const uint32_t cond = fs.stopExpr != nullptr ? expr(*fs.stopExpr) : 0;
     uint32_t step = 0;
     if (!fs.steps.empty()) {
         step = assignStmt(*fs.steps[0], false);
     }
-    uint32_t body = stmt(fs.body);
+    const uint32_t body = stmt(fs.body);
     return node({ODIN3_AST_FOR, 0, 0, loc, end, 0, 0}, {init, cond, step, body});
 }
 
@@ -1386,20 +1429,20 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
 }
 
 /* One `input/output/inout` port's info; false (and a located error) for a ref port. */
-bool Adapter::plainPort(const PortSymbol &p, PortInfo &info) {
-    if (p.direction == ArgumentDirection::Ref) {
-        failf(ODIN3_ERR_PARSE, locOf(p.location), "ref port '%s' is not supported",
-              std::string(p.name).c_str());
+bool Adapter::plainPort(const PortSymbol &portSym, PortInfo &info) {
+    if (portSym.direction == ArgumentDirection::Ref) {
+        failf(ODIN3_ERR_PARSE, locOf(portSym.location), "ref port '%s' is not supported",
+              std::string(portSym.name).c_str());
         return false;
     }
-    info.name = std::string(p.name);
-    info.type = &p.getType();
-    info.dir = p.direction;
-    info.port = &p;
-    info.internal = p.internalSymbol;
-    info.loc = p.location;
-    if (p.internalSymbol != nullptr) {
-        const Symbol &in = *p.internalSymbol;
+    info.name = std::string(portSym.name);
+    info.type = &portSym.getType();
+    info.dir = portSym.direction;
+    info.port = &portSym;
+    info.internal = portSym.internalSymbol;
+    info.loc = portSym.location;
+    if (portSym.internalSymbol != nullptr) {
+        const Symbol &in = *portSym.internalSymbol;
         if (in.kind == SymbolKind::Variable) {
             info.is_var = true;
             info.is_integer = isIntegerVar(in.as<VariableSymbol>().getType());
@@ -1430,16 +1473,16 @@ bool Adapter::modportPort(const InterfacePortSymbol &ip, const ModportPortSymbol
 }
 
 /* One of an interface's own signals as a port, when the interface port has no modport. */
-PortInfo Adapter::ifaceSignal(const InterfacePortSymbol &ip, const Symbol &m) {
+PortInfo Adapter::ifaceSignal(const InterfacePortSymbol &ip, const Symbol &signalSym) {
     PortInfo info;
-    info.name = std::string(ip.name) + "." + std::string(m.name);
-    info.iface_signal = std::string(m.name);
+    info.name = std::string(ip.name) + "." + std::string(signalSym.name);
+    info.iface_signal = std::string(signalSym.name);
     info.dir = ArgumentDirection::InOut;
     info.is_interface = true;
     info.iface = &ip;
-    info.internal = &m;
-    info.type = &m.as<ValueSymbol>().getType();
-    info.loc = m.location;
+    info.internal = &signalSym;
+    info.type = &signalSym.as<ValueSymbol>().getType();
+    info.loc = signalSym.location;
     return info;
 }
 
@@ -1457,39 +1500,46 @@ void Adapter::ifacePorts(const InterfacePortSymbol &ip, std::vector<PortInfo> &o
     }
     const ModportSymbol *modport = conn.second;
     if (modport != nullptr) {
-        for (const Symbol &m : modport->members()) {
-            if (m.kind != SymbolKind::ModportPort) {
-                continue;
-            }
-            PortInfo info;
-            if (modportPort(ip, m.as<ModportPortSymbol>(), info)) {
-                out.push_back(std::move(info));
-            }
-        }
+        modportPorts(ip, *modport, out);
         return;
     }
-    for (const Symbol &m : inst->body.members()) {
-        if (m.kind == SymbolKind::Net || m.kind == SymbolKind::Variable) {
-            out.push_back(ifaceSignal(ip, m));
+    for (const Symbol &member : inst->body.members()) {
+        if (member.kind == SymbolKind::Net || member.kind == SymbolKind::Variable) {
+            out.push_back(ifaceSignal(ip, member));
+        }
+    }
+}
+
+/* One modport signal per modport port; a refused port is already a located error. */
+void Adapter::modportPorts(const InterfacePortSymbol &ip, const ModportSymbol &modport,
+                           std::vector<PortInfo> &out) {
+    for (const Symbol &member : modport.members()) {
+        if (member.kind != SymbolKind::ModportPort) {
+            continue;
+        }
+        PortInfo info;
+        if (modportPort(ip, member.as<ModportPortSymbol>(), info)) {
+            out.push_back(std::move(info));
         }
     }
 }
 
 void Adapter::queueBody(const InstanceBodySymbol &body) {
-    bool planned = std::any_of(plans.begin(), plans.end(),
-                               [&body](const ModulePlan &p) { return p.body->hasSameType(body); });
+    const bool planned = std::any_of(plans.begin(), plans.end(), [&body](const ModulePlan &plan) {
+        return plan.body->hasSameType(body);
+    });
     if (planned) {
         return;
     }
     ModulePlan plan;
     plan.body = &body;
-    std::string base(body.getDefinition().name);
+    const std::string base(body.getDefinition().name);
     if (plans.empty()) {
         plan.name = base; /* the top keeps its definition's name (EL-9) */
     } else {
         /* Loop until the name is free: a module literally named base$2 may be queued already. */
         plan.name = base;
-        while (taken.count(plan.name) != 0) {
+        while (taken.contains(plan.name)) {
             plan.name = base + "$" + std::to_string(next_special++);
         }
     }
@@ -1498,62 +1548,63 @@ void Adapter::queueBody(const InstanceBodySymbol &body) {
     queue.push_back(&body);
 }
 
-uint32_t Adapter::emitPort(const PortInfo &p, uint32_t loc, uint32_t end) {
+uint32_t Adapter::emitPort(const PortInfo &portInfo, uint32_t loc, uint32_t end) {
     std::vector<uint32_t> unpacked;
-    uint32_t range = p.type != nullptr ? declRanges(*p.type, unpacked, loc, end) : 0;
+    const uint32_t range =
+        portInfo.type != nullptr ? declRanges(*portInfo.type, unpacked, loc, end) : 0;
     uint32_t flags = (uint32_t)ODIN3_AST_F_PORT_DECL_IN_HEADER;
-    if (p.type != nullptr && p.type->isSigned()) {
+    if (portInfo.type != nullptr && portInfo.type->isSigned()) {
         flags |= ODIN3_AST_F_PORT_DECL_SIGNED;
     }
-    if (p.is_var) {
-        flags |= (p.is_integer ? ODIN3_AST_DT_INTEGER : ODIN3_AST_DT_REG)
+    if (portInfo.is_var) {
+        flags |= (portInfo.is_integer ? ODIN3_AST_DT_INTEGER : ODIN3_AST_DT_REG)
                  << ODIN3_AST_F_PORT_DECL_DT_SHIFT;
     } else {
         flags |= (1U + ODIN3_AST_NET_DECL_WIRE) << ODIN3_AST_F_PORT_DECL_NET_SHIFT;
     }
     uint32_t sub = ODIN3_AST_PORT_DECL_INPUT;
-    if (p.dir == ArgumentDirection::Out) {
+    if (portInfo.dir == ArgumentDirection::Out) {
         sub = ODIN3_AST_PORT_DECL_OUTPUT;
-    } else if (p.dir == ArgumentDirection::InOut) {
+    } else if (portInfo.dir == ArgumentDirection::InOut) {
         sub = ODIN3_AST_PORT_DECL_INOUT;
     }
-    uint32_t name = intern(p.name);
+    const uint32_t name = intern(portInfo.name);
     uint32_t init = 0;
-    if (p.port != nullptr && p.port->getInitializer() != nullptr) {
-        init = expr(*p.port->getInitializer());
+    if (portInfo.port != nullptr && portInfo.port->getInitializer() != nullptr) {
+        init = expr(*portInfo.port->getInitializer());
     }
     std::vector<uint32_t> dkids = {init};
     dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
-    uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
+    const uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
     return node({ODIN3_AST_PORT_DECL, sub, flags, loc, end, 0, 0},
                 std::vector<uint32_t>{range, declr});
 }
 
-uint32_t Adapter::emitParamDecl(const ParameterSymbol &p, uint32_t loc, uint32_t end) {
-    const ConstantValue &cv = p.getValue();
+uint32_t Adapter::emitParamDecl(const ParameterSymbol &paramSym, uint32_t loc, uint32_t end) {
+    const ConstantValue &cv = paramSym.getValue();
     if (!cv.isInteger() && !cv.isString()) {
         return 0;
     }
-    uint32_t name = intern(p.name);
-    uint32_t value = constant(cv, false, loc, end);
+    const uint32_t name = intern(paramSym.name);
+    const uint32_t value = constant(cv, false, loc, end);
     std::vector<uint32_t> unpacked;
-    uint32_t range = declRanges(p.getType(), unpacked, loc, end);
+    const uint32_t range = declRanges(paramSym.getType(), unpacked, loc, end);
     uint32_t flags = (uint32_t)ODIN3_AST_F_PARAM_DECL_IN_HEADER;
-    if (p.getType().isSigned()) {
+    if (paramSym.getType().isSigned()) {
         flags |= ODIN3_AST_F_PARAM_DECL_SIGNED;
     }
     std::vector<uint32_t> dkids = {value};
     dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
-    uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
+    const uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
     return node({ODIN3_AST_PARAM_DECL, ODIN3_AST_PARAM_DECL_LOCALPARAM, flags, loc, end, 0, 0},
                 std::vector<uint32_t>{range, declr});
 }
 
 uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
-    uint32_t loc = locOf(sym.location);
-    uint32_t end = 0;
-    bool is_net = sym.kind == SymbolKind::Net || force_net;
-    const ValueSymbol &v = sym.as<ValueSymbol>();
+    const uint32_t loc = locOf(sym.location);
+    const uint32_t end = 0;
+    const bool is_net = sym.kind == SymbolKind::Net || force_net;
+    const ValueSymbol &value = sym.as<ValueSymbol>();
     uint32_t net_sub = ODIN3_AST_NET_DECL_WIRE;
     if (sym.kind == SymbolKind::Net) {
         const NetSymbol &net = sym.as<NetSymbol>();
@@ -1568,22 +1619,24 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
         }
     }
     std::vector<uint32_t> unpacked;
-    uint32_t range = declRanges(v.getType(), unpacked, loc, end);
-    uint32_t name = intern(symName(v));
+    const uint32_t range = declRanges(value.getType(), unpacked, loc, end);
+    const uint32_t name = intern(symName(value));
     uint32_t init = 0;
-    if (const Expression *e = v.getInitializer()) {
-        init = expr(*e);
+    if (const Expression *initializer = value.getInitializer()) {
+        init = expr(*initializer);
     }
     std::vector<uint32_t> dkids = {init};
     dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
-    uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
+    const uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
     if (is_net) {
-        uint32_t flags = v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_NET_DECL_SIGNED : 0U;
+        const uint32_t flags =
+            value.getType().isSigned() ? (uint32_t)ODIN3_AST_F_NET_DECL_SIGNED : 0U;
         return node({ODIN3_AST_NET_DECL, net_sub, flags, loc, end, 0, 0},
                     std::vector<uint32_t>{0, range, 0, declr});
     }
-    uint32_t sub = isIntegerVar(v.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
-    uint32_t flags = v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+    const uint32_t sub =
+        isIntegerVar(value.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
+    const uint32_t flags = value.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
     return node({ODIN3_AST_VAR_DECL, sub, flags, loc, end, 0, 0},
                 std::vector<uint32_t>{range, declr});
 }
@@ -1598,15 +1651,15 @@ uint32_t Adapter::emitContinuous(const ContinuousAssignSymbol &ca, uint32_t loc,
         failf(ODIN3_ERR_PARSE, loc, "a delay on a continuous assignment is not supported");
         return 0;
     }
-    const Expression &e = ca.getAssignment();
-    if (e.kind != ExpressionKind::Assignment) {
+    const Expression &assignExpr = ca.getAssignment();
+    if (assignExpr.kind != ExpressionKind::Assignment) {
         failf(ODIN3_ERR_PARSE, loc, "a continuous assignment that is not an assignment");
         return 0;
     }
-    const auto &ae = e.as<AssignmentExpression>();
-    uint32_t lhs = expr(ae.left());
-    uint32_t rhs = expr(ae.right());
-    uint32_t assign = node({ODIN3_AST_NET_ASSIGN, 0, 0, loc, end, 0, 0}, {lhs, rhs});
+    const auto &ae = assignExpr.as<AssignmentExpression>();
+    const uint32_t lhs = expr(ae.left());
+    const uint32_t rhs = expr(ae.right());
+    const uint32_t assign = node({ODIN3_AST_NET_ASSIGN, 0, 0, loc, end, 0, 0}, {lhs, rhs});
     return node({ODIN3_AST_CONT_ASSIGN, 0, 0, loc, end, 0, 0}, {0, 0, assign});
 }
 
@@ -1634,8 +1687,9 @@ uint32_t Adapter::emitAlways(const ProceduralBlockSymbol &pb, uint32_t loc, uint
     uint32_t stmtNode = 0;
     if (body.kind == StatementKind::Timed) {
         const auto &ts = body.as<TimedStatement>();
-        uint32_t control = timing(ts.timing, locOf(ts.sourceRange.start()), endOf(ts.sourceRange));
-        uint32_t inner = stmt(ts.stmt);
+        const uint32_t control =
+            timing(ts.timing, locOf(ts.sourceRange.start()), endOf(ts.sourceRange));
+        const uint32_t inner = stmt(ts.stmt);
         stmtNode = node({ODIN3_AST_TIMING_STMT, 0, 0, locOf(body.sourceRange.start()),
                          endOf(body.sourceRange), 0, 0},
                         {control, inner});
@@ -1662,9 +1716,9 @@ std::vector<uint32_t> Adapter::emitConnections(const InstanceBodySymbol &body,
         }
     }
     std::vector<uint32_t> conns;
-    for (const PortInfo &p : portList) {
-        ConnectionValue conn = portConnectionValue(p, inst, byName, loc);
-        uint32_t name = intern(p.name);
+    for (const PortInfo &portInfo : portList) {
+        const ConnectionValue conn = portConnectionValue(portInfo, inst, byName, loc);
+        const uint32_t name = intern(portInfo.name);
         conns.push_back(
             node({ODIN3_AST_CONNECTION, 0, 0, conn.loc, conn.end, name, 0}, {conn.value}));
     }
@@ -1675,16 +1729,16 @@ std::vector<uint32_t> Adapter::emitConnections(const InstanceBodySymbol &body,
 /* The parent expression and source range of one child port connection (an unconnected port
  * has neither). */
 ConnectionValue Adapter::portConnectionValue(
-    const PortInfo &p, const InstanceSymbol *inst,
+    const PortInfo &portInfo, const InstanceSymbol *inst,
     const std::unordered_map<std::string_view, const PortConnection *> &byName, uint32_t loc) {
-    if (p.is_interface) {
-        return inst != nullptr ? ifaceConnectionValue(p, *inst, loc) : ConnectionValue{};
+    if (portInfo.is_interface) {
+        return inst != nullptr ? ifaceConnectionValue(portInfo, *inst, loc) : ConnectionValue{};
     }
     ConnectionValue out;
-    if (inst == nullptr || p.port == nullptr) {
+    if (inst == nullptr || portInfo.port == nullptr) {
         return out;
     }
-    auto it = byName.find(p.port->name);
+    auto it = byName.find(portInfo.port->name);
     if (it == byName.end() || it->second->getExpression() == nullptr) {
         return out;
     }
@@ -1701,19 +1755,21 @@ ConnectionValue Adapter::portConnectionValue(
 }
 
 /* A child's interface-port connection: the flattened "<iface instance>.<signal>" net. */
-ConnectionValue Adapter::ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst,
+ConnectionValue Adapter::ifaceConnectionValue(const PortInfo &portInfo, const InstanceSymbol &inst,
                                               uint32_t loc) {
     ConnectionValue out;
-    if (p.iface == nullptr) {
+    if (portInfo.iface == nullptr) {
         return out;
     }
-    for (const PortConnection *c : inst.getPortConnections()) {
-        if (c->port.kind != SymbolKind::InterfacePort || c->port.name != p.iface->name) {
+    for (const PortConnection *conn : inst.getPortConnections()) {
+        if (conn->port.kind != SymbolKind::InterfacePort ||
+            conn->port.name != portInfo.iface->name) {
             continue;
         }
-        auto ifaceConn = c->getIfaceConn();
+        auto ifaceConn = conn->getIfaceConn();
         if (ifaceConn.first != nullptr && ifaceConn.first->kind == SymbolKind::Instance) {
-            std::string name = std::string(ifaceConn.first->name) + "." + p.iface_signal;
+            const std::string name =
+                std::string(ifaceConn.first->name) + "." + portInfo.iface_signal;
             out.loc = locOf(ifaceConn.first->location);
             out.value = ident(name, loc, 0);
         }
@@ -1721,48 +1777,58 @@ ConnectionValue Adapter::ifaceConnectionValue(const PortInfo &p, const InstanceS
     return out;
 }
 
-uint32_t Adapter::emitInstantiation(const std::string &moduleName,
-                                    const std::vector<const Symbol *> &insts,
-                                    const InstanceBodySymbol *child, uint32_t loc, uint32_t end) {
-    uint32_t params = 0;
-    if (child != nullptr) {
-        std::vector<uint32_t> pconns;
-        for (const ParameterSymbolBase *base : child->getParameters()) {
-            if (base->symbol.kind != SymbolKind::Parameter) {
-                continue;
-            }
-            const ParameterSymbol &p = base->symbol.as<ParameterSymbol>();
-            if (p.isLocalParam()) {
-                continue;
-            }
-            const ConstantValue &cv = p.getValue();
-            if (!cv.isInteger() && !cv.isString()) {
-                continue;
-            }
-            uint32_t value = constant(cv, false, loc, end);
-            uint32_t name = intern(p.name);
-            pconns.push_back(node({ODIN3_AST_CONNECTION, 0, 0, loc, end, name, 0}, {value}));
+/* The child's non-local, constant-valued parameters as one CONNECTION LIST (0 when none). */
+uint32_t Adapter::emitParamConnections(const InstanceBodySymbol &child, uint32_t loc,
+                                       uint32_t end) {
+    std::vector<uint32_t> pconns;
+    for (const ParameterSymbolBase *base : child.getParameters()) {
+        if (base->symbol.kind != SymbolKind::Parameter) {
+            continue;
         }
-        params = pconns.empty() ? 0 : listNode(pconns, loc, end);
+        const ParameterSymbol &paramSym = base->symbol.as<ParameterSymbol>();
+        if (paramSym.isLocalParam()) {
+            continue;
+        }
+        const ConstantValue &cv = paramSym.getValue();
+        if (!cv.isInteger() && !cv.isString()) {
+            continue;
+        }
+        const uint32_t value = constant(cv, false, loc, end);
+        const uint32_t name = intern(paramSym.name);
+        pconns.push_back(node({ODIN3_AST_CONNECTION, 0, 0, loc, end, name, 0}, {value}));
     }
-    std::vector<PortInfo> portList;
-    if (child != nullptr) {
-        portList = ports(*child);
-    }
-    std::vector<uint32_t> instances;
+    return pconns.empty() ? 0 : listNode(pconns, loc, end);
+}
+
+/* One INSTANCE node per instance symbol, its port connections on the child body. */
+void Adapter::emitInstanceNodes(const std::vector<const Symbol *> &insts,
+                                const std::vector<PortInfo> &portList, uint32_t loc,
+                                std::vector<uint32_t> &instances) {
     for (const Symbol *sym : insts) {
         if (sym->kind != SymbolKind::Instance) {
             continue;
         }
         const InstanceSymbol &inst = sym->as<InstanceSymbol>();
         std::vector<uint32_t> conns = emitConnections(inst.body, &inst, portList, loc);
-        uint32_t name = intern(std::string(inst.name));
+        const uint32_t name = intern(std::string(inst.name));
         std::vector<uint32_t> kids = {0};
         kids.insert(kids.end(), conns.begin(), conns.end());
         instances.push_back(
             node({ODIN3_AST_INSTANCE, 0, 0, locOf(inst.location), 0, name, 0}, kids));
     }
-    uint32_t id = intern(moduleName);
+}
+
+uint32_t Adapter::emitInstantiation(const std::string &moduleName,
+                                    const std::vector<const Symbol *> &insts,
+                                    const InstanceBodySymbol *child, uint32_t loc, uint32_t end) {
+    const uint32_t params = child != nullptr ? emitParamConnections(*child, loc, end) : 0;
+    std::vector<PortInfo> portList;
+    if (child != nullptr) {
+        portList = ports(*child);
+    }
+    std::vector<uint32_t> instances;
+    emitInstanceNodes(insts, portList, loc, instances);
+    const uint32_t id = intern(moduleName);
     std::vector<uint32_t> kids = {params};
     kids.insert(kids.end(), instances.begin(), instances.end());
     return node({ODIN3_AST_INSTANTIATION, 0, 0, loc, 0, id, 0}, kids);
@@ -1775,31 +1841,31 @@ std::vector<uint32_t> Adapter::emitInterfaceAssigns(const InstanceSymbol &ifaceI
         if (port->kind != SymbolKind::Port) {
             continue;
         }
-        const PortSymbol &p = port->as<PortSymbol>();
-        if (p.direction != ArgumentDirection::In || p.internalSymbol == nullptr) {
+        const PortSymbol &portSym = port->as<PortSymbol>();
+        if (portSym.direction != ArgumentDirection::In || portSym.internalSymbol == nullptr) {
             continue;
         }
-        const PortConnection *conn = ifaceInst.getPortConnection(p);
+        const PortConnection *conn = ifaceInst.getPortConnection(portSym);
         if (conn == nullptr || conn->getExpression() == nullptr) {
             continue;
         }
-        std::string lhsName =
-            std::string(ifaceInst.name) + "." + std::string(p.internalSymbol->name);
-        uint32_t lhs = ident(lhsName, loc, 0);
-        uint32_t rhs = expr(*conn->getExpression());
-        uint32_t assign = node({ODIN3_AST_NET_ASSIGN, 0, 0, loc, 0, 0, 0}, {lhs, rhs});
+        const std::string lhsName =
+            std::string(ifaceInst.name) + "." + std::string(portSym.internalSymbol->name);
+        const uint32_t lhs = ident(lhsName, loc, 0);
+        const uint32_t rhs = expr(*conn->getExpression());
+        const uint32_t assign = node({ODIN3_AST_NET_ASSIGN, 0, 0, loc, 0, 0, 0}, {lhs, rhs});
         assigns.push_back(node({ODIN3_AST_CONT_ASSIGN, 0, 0, loc, 0, 0, 0}, {0, 0, assign}));
     }
     return assigns;
 }
 
-uint32_t Adapter::emitModule(ModulePlan plan) {
+uint32_t Adapter::emitModule(const ModulePlan &plan) {
     const InstanceBodySymbol &body = *plan.body;
-    uint32_t loc = moduleLoc(body);
+    const uint32_t loc = moduleLoc(body);
     collectModuleNames(body);
-    std::vector<PortInfo> portList = ports(body);
-    uint32_t portList_node = emitPortList(portList, loc);
-    uint32_t paramList = emitParamList(body, loc);
+    const std::vector<PortInfo> portList = ports(body);
+    const uint32_t portList_node = emitPortList(portList, loc);
+    const uint32_t paramList = emitParamList(body, loc);
     std::vector<uint32_t> items;
     /* Declarations and assignments, then instances and processes (source order within each). */
     emitModuleItems(body, portList, items);
@@ -1811,15 +1877,15 @@ uint32_t Adapter::emitModule(ModulePlan plan) {
 }
 
 uint32_t Adapter::moduleLoc(const InstanceBodySymbol &body) {
-    uint32_t loc = locOf(body.getDefinition().location);
+    const uint32_t loc = locOf(body.getDefinition().location);
     return loc != 0 ? loc : locOf(body.location);
 }
 
 uint32_t Adapter::emitPortList(const std::vector<PortInfo> &portList, uint32_t loc) {
     std::vector<uint32_t> portDecls;
-    for (const PortInfo &p : portList) {
-        uint32_t ploc = locOf(p.loc);
-        portDecls.push_back(emitPort(p, ploc != 0 ? ploc : loc, 0));
+    for (const PortInfo &portInfo : portList) {
+        const uint32_t ploc = locOf(portInfo.loc);
+        portDecls.push_back(emitPort(portInfo, ploc != 0 ? ploc : loc, 0));
     }
     return listNode(portDecls, loc, 0);
 }
@@ -1828,7 +1894,7 @@ uint32_t Adapter::emitParamList(const InstanceBodySymbol &body, uint32_t loc) {
     std::vector<uint32_t> paramDecls;
     for (const ParameterSymbolBase *base : body.getParameters()) {
         if (base->symbol.kind == SymbolKind::Parameter) {
-            uint32_t decl =
+            const uint32_t decl =
                 emitParamDecl(base->symbol.as<ParameterSymbol>(), locOf(base->symbol.location), 0);
             if (decl != 0) {
                 paramDecls.push_back(decl);
@@ -1841,42 +1907,43 @@ uint32_t Adapter::emitParamList(const InstanceBodySymbol &body, uint32_t loc) {
 void Adapter::emitModuleItems(const InstanceBodySymbol &body, const std::vector<PortInfo> &portList,
                               std::vector<uint32_t> &items) {
     std::unordered_set<const Symbol *> portSymbols;
-    for (const PortInfo &p : portList) {
-        if (p.internal != nullptr) {
-            portSymbols.insert(p.internal);
+    for (const PortInfo &portInfo : portList) {
+        if (portInfo.internal != nullptr) {
+            portSymbols.insert(portInfo.internal);
         }
     }
-    for (const Symbol &m : body.members()) {
-        if (portSymbols.count(&m) == 0) {
-            emitMember(m, items);
+    for (const Symbol &member : body.members()) {
+        if (!portSymbols.contains(&member)) {
+            emitMember(member, items);
         }
     }
 }
 
 /* One module member as an item: a declaration, an instance, an assignment or a process. */
-void Adapter::emitMember(const Symbol &m, std::vector<uint32_t> &items) {
-    switch (m.kind) {
+void Adapter::emitMember(const Symbol &member, std::vector<uint32_t> &items) {
+    switch (member.kind) {
     case SymbolKind::Net:
     case SymbolKind::Variable:
-        emitDeclItem(m, items);
+        emitDeclItem(member, items);
         break;
     case SymbolKind::Instance: {
-        const InstanceSymbol &inst = m.as<InstanceSymbol>();
+        const InstanceSymbol &inst = member.as<InstanceSymbol>();
         if (inst.isInterface()) {
-            emitInterfaceItem(inst, locOf(m.location), items);
+            emitInterfaceItem(inst, locOf(member.location), items);
         } else {
             emitInstanceItem(inst, items);
         }
         break;
     }
     case SymbolKind::InstanceArray:
-        emitInstanceArrayItem(m.as<InstanceArraySymbol>(), locOf(m.location), items);
+        emitInstanceArrayItem(member.as<InstanceArraySymbol>(), locOf(member.location), items);
         break;
     case SymbolKind::ContinuousAssign:
-        items.push_back(emitContinuous(m.as<ContinuousAssignSymbol>(), locOf(m.location), 0));
+        items.push_back(
+            emitContinuous(member.as<ContinuousAssignSymbol>(), locOf(member.location), 0));
         break;
     case SymbolKind::ProceduralBlock:
-        emitBlockItem(m.as<ProceduralBlockSymbol>(), locOf(m.location), items);
+        emitBlockItem(member.as<ProceduralBlockSymbol>(), locOf(member.location), items);
         break;
     default:
         break;
@@ -1885,24 +1952,25 @@ void Adapter::emitMember(const Symbol &m, std::vector<uint32_t> &items) {
 
 /* A module-level net or variable declaration; a hoisted block variable is emitted once by
  * emitHoisted, and an interface's signals by emitInterfaceItem. */
-void Adapter::emitDeclItem(const Symbol &m, std::vector<uint32_t> &items) {
-    if (m.name.empty() || hoisted.count(&m) != 0) {
+void Adapter::emitDeclItem(const Symbol &member, std::vector<uint32_t> &items) {
+    if (member.name.empty() || hoisted.contains(&member)) {
         return;
     }
-    if (m.kind == SymbolKind::Variable && (m.as<VariableSymbol>().getType().isFloating() ||
-                                           m.as<VariableSymbol>().getType().isString())) {
-        failf(ODIN3_ERR_PARSE, locOf(m.location),
+    if (member.kind == SymbolKind::Variable &&
+        (member.as<VariableSymbol>().getType().isFloating() ||
+         member.as<VariableSymbol>().getType().isString())) {
+        failf(ODIN3_ERR_PARSE, locOf(member.location),
               "variable '%s' of real, realtime or string type is not supported",
-              std::string(m.name).c_str());
+              std::string(member.name).c_str());
         return;
     }
-    items.push_back(emitNetOrVar(m));
+    items.push_back(emitNetOrVar(member));
 }
 
 /* A module instance: the child body becomes a MODULE and one INSTANTIATION names it. */
 void Adapter::emitInstanceItem(const InstanceSymbol &inst, std::vector<uint32_t> &items) {
     queueBody(inst.body);
-    std::vector<const Symbol *> one = {&inst};
+    const std::vector<const Symbol *> one = {&inst};
     items.push_back(
         emitInstantiation(moduleNameFor(inst.body), one, &inst.body, locOf(inst.location), 0));
 }
@@ -1932,15 +2000,15 @@ void Adapter::emitInstanceArrayItem(const InstanceArraySymbol &arr, uint32_t loc
     }
     const InstanceSymbol &first = arr.elements[0]->as<InstanceSymbol>();
     queueBody(first.body);
-    std::vector<const Symbol *> elems(arr.elements.begin(), arr.elements.end());
+    const std::vector<const Symbol *> elems(arr.elements.begin(), arr.elements.end());
     items.push_back(emitInstantiation(moduleNameFor(first.body), elems, &first.body, loc, 0));
 }
 
 /* A procedural block: an INITIAL, else an ALWAYS with its procedure kind. */
 void Adapter::emitBlockItem(const ProceduralBlockSymbol &pb, uint32_t loc,
                             std::vector<uint32_t> &items) {
-    uint32_t made = pb.procedureKind == ProceduralBlockKind::Initial ? emitInitial(pb, loc, 0)
-                                                                     : emitAlways(pb, loc, 0);
+    const uint32_t made = pb.procedureKind == ProceduralBlockKind::Initial ? emitInitial(pb, loc, 0)
+                                                                           : emitAlways(pb, loc, 0);
     if (made != 0) {
         items.push_back(made);
     }
@@ -1948,25 +2016,26 @@ void Adapter::emitBlockItem(const ProceduralBlockSymbol &pb, uint32_t loc,
 
 /* The variables a block or for loop hoisted to module scope, declared once each. */
 void Adapter::emitHoisted(std::vector<uint32_t> &items) {
-    for (const VariableSymbol *v : module_hoisted) {
-        uint32_t hloc = locOf(v->location);
+    for (const VariableSymbol *var : module_hoisted) {
+        const uint32_t hloc = locOf(var->location);
         std::vector<uint32_t> unpacked;
-        uint32_t range = declRanges(v->getType(), unpacked, hloc, hloc);
-        uint32_t hname = intern(hoisted[v]);
+        const uint32_t range = declRanges(var->getType(), unpacked, hloc, hloc);
+        const uint32_t hname = intern(hoisted[var]);
         std::vector<uint32_t> dkids = {0};
         dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
-        uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, hloc, hloc, hname, 0}, dkids);
-        uint32_t sub =
-            isIntegerVar(v->getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
-        uint32_t hflags = v->getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+        const uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, hloc, hloc, hname, 0}, dkids);
+        const uint32_t sub =
+            isIntegerVar(var->getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
+        const uint32_t hflags =
+            var->getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
         items.push_back(node({ODIN3_AST_VAR_DECL, sub, hflags, hloc, hloc, 0, 0},
                              std::vector<uint32_t>{range, declr}));
     }
 }
 
 std::string Adapter::moduleNameFor(const InstanceBodySymbol &body) {
-    const auto it = std::find_if(plans.begin(), plans.end(), [&body](const ModulePlan &p) {
-        return p.body->hasSameType(body);
+    const auto it = std::find_if(plans.begin(), plans.end(), [&body](const ModulePlan &plan) {
+        return plan.body->hasSameType(body);
     });
     return it != plans.end() ? it->name : std::string(body.getDefinition().name);
 }
@@ -1990,27 +2059,31 @@ odin3_status Adapter::run(const RootSymbol &root, const char *top) {
     taken.insert(std::string(topInst->getDefinition().name));
     queueBody(topInst->body);
     std::vector<uint32_t> moduleNodes;
-    for (size_t i = 0; i < plans.size(); i++) {
-        ModulePlan plan = plans[i];
-        uint32_t made = emitModule(plan);
-        plans[i].node = made;
+    /* A worklist: emitModule() queues the child bodies it meets, so plans grows while this runs
+     * and only an index (not an iterator) stays valid across reallocation. */
+    size_t next = 0;
+    while (next < plans.size()) {
+        const ModulePlan plan = plans[next];
+        const uint32_t made = emitModule(plan);
+        plans[next].node = made;
         moduleNodes.push_back(made);
         if (st != ODIN3_OK) {
             return st;
         }
+        next++;
     }
-    std::string topName(plans[0].name);
-    if (top != NULL && top[0] != '\0' && topName != top) {
+    const std::string topName(plans[0].name);
+    if (top != nullptr && top[0] != '\0' && topName != top) {
         failf(ODIN3_ERR_PARSE, 0, "top '%s' not found", top);
         return st;
     }
-    uint32_t name = intern(topName);
-    uint32_t unit = node({ODIN3_AST_UNIT, 0, 0, 0, 0, name, 0}, moduleNodes);
+    const uint32_t name = intern(topName);
+    const uint32_t unit = node({ODIN3_AST_UNIT, 0, 0, 0, 0, name, 0}, moduleNodes);
     (void)unit;
     if (st != ODIN3_OK) {
         return st;
     }
-    odin3_status rc = odin3_ast_finish(ast);
+    const odin3_status rc = odin3_ast_finish(ast);
     if (rc != ODIN3_OK) {
         return rc;
     }
@@ -2024,12 +2097,13 @@ odin3_status Adapter::run(const RootSymbol &root, const char *top) {
 
 /* True when the read's inputs are usable; otherwise logs why. */
 bool validArguments(const odin3_design *design, uint32_t run, const odin3_sv_options *opts) {
-    if (design == NULL || run == 0 || opts == NULL || opts->paths == NULL || opts->npaths == 0) {
+    if (design == nullptr || run == 0 || opts == nullptr || opts->paths == nullptr ||
+        opts->npaths == 0) {
         (void)odin3_log_write(ODIN3_LOG_ERROR, "read_slang: invalid argument");
         return false;
     }
     for (uint32_t i = 0; i < opts->npaths; i++) {
-        if (opts->paths[i] == NULL || opts->paths[i][0] == '\0') {
+        if (opts->paths[i] == nullptr || opts->paths[i][0] == '\0') {
             (void)odin3_log_write(ODIN3_LOG_ERROR, "read_slang: invalid path argument");
             return false;
         }
@@ -2045,19 +2119,19 @@ bool validArguments(const odin3_design *design, uint32_t run, const odin3_sv_opt
 /* The project's include directories and macro definitions as slang's preprocessor options. */
 void fillPreprocessor(const odin3_sv_options &opts, parsing::PreprocessorOptions &pp) {
     for (uint32_t i = 0; i < opts.nincdirs; i++) {
-        if (opts.incdirs[i] != NULL) {
+        if (opts.incdirs[i] != nullptr) {
             pp.additionalIncludePaths.emplace_back(opts.incdirs[i]);
         }
     }
     for (uint32_t i = 0; i < opts.ndefines; i++) {
         const odin3_sv_define &def = opts.defines[i];
-        if (def.name == NULL) {
+        if (def.name == nullptr) {
             continue;
         }
         /* "NAME=VALUE"; a define with no value is an empty body, as in the project record. */
         std::string pre(def.name);
         pre += '=';
-        if (def.has_value && def.value != NULL) {
+        if (def.has_value && def.value != nullptr) {
             pre += def.value;
         }
         pp.predefines.push_back(std::move(pre));
@@ -2087,14 +2161,14 @@ bool addTrees(Compilation &comp, const odin3_sv_options &opts, SourceManager &sl
 bool reportDiagnostics(DiagnosticEngine &diag, TextDiagnosticClient &client, Compilation &comp) {
     diag.issue(comp.getAllDiagnostics());
     bool errors = false;
-    for (const Diagnostic &d : comp.getAllDiagnostics()) {
-        if (diag.getSeverity(d.code, d.location) >= DiagnosticSeverity::Error) {
+    for (const Diagnostic &diagnostic : comp.getAllDiagnostics()) {
+        if (diag.getSeverity(diagnostic.code, diagnostic.location) >= DiagnosticSeverity::Error) {
             errors = true;
         }
     }
-    std::string rendered = client.getString();
+    const std::string rendered = client.getString();
     std::string line;
-    for (char ch : rendered) {
+    for (const char ch : rendered) {
         if (ch != '\n') {
             line.push_back(ch);
             continue;
@@ -2113,12 +2187,12 @@ bool reportDiagnostics(DiagnosticEngine &diag, TextDiagnosticClient &client, Com
 /* Runs the adapter over the elaborated tree and drives stage 2 on the store it builds. */
 odin3_status writeStore(odin3_design *design, uint32_t run, SourceManager &slsm,
                         const odin3_sv_options &opts, const RootSymbol &root) {
-    odin3_srcman *sm = NULL;
+    odin3_srcman *sm = nullptr;
     odin3_status rc = odin3_design_get_srcman(design, &sm);
     if (rc != ODIN3_OK) {
         return rc;
     }
-    odin3_ast *ast = NULL;
+    odin3_ast *ast = nullptr;
     rc = odin3_design_new_ast(design, ODIN3_AST_FORM_ELABORATED, run, &ast);
     if (rc != ODIN3_OK) {
         return rc;
@@ -2143,7 +2217,7 @@ odin3_read_slang(odin3_design *design, uint32_t run, const odin3_sv_options *opt
 
     CompilationOptions options;
     options.flags |= CompilationFlags::DisableInstanceCaching;
-    if (opts->top != NULL && opts->top[0] != '\0') {
+    if (opts->top != nullptr && opts->top[0] != '\0') {
         options.topModules.emplace(opts->top);
     }
     parsing::PreprocessorOptions ppOptions;
