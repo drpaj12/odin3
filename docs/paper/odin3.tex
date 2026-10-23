@@ -1,8 +1,10 @@
 % Odin III paper draft. IEEEtran conference class; compiles with pdfLaTeX (Overleaf) and BibTeX.
+% Companion files: odin3_blind.tex is this same paper anonymized for double-blind review and is
+% the version submitted to the conference; this non-blind copy is used if the paper is accepted.
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
 % from the repository's docs (DESIGN.md, IR.md, PHASE0-7.md, specs/, RELEASE-NOTES-1.0.md, CHANGELOG.md, and ADR D10 and D11 for the v1.0 scope) and git log as of
-% v1.0.0 (tagged 2026-10-21; the cost is as of the v1.0 close); gaps are marked with \todo{}. The M2 QoR ratios come from the vtr-qor table
+% v1.0.0 (tagged 2026-10-21; the cost is as of the v1.0 close). The M2 QoR ratios come from the vtr-qor table
 % 20261020-1642-M2 (published to odin3-golden, qor/3c9a4d23b27d/M2), the cost from
 % docs/log_cost_of_tokens_and_time-v1.0.md (the frozen v1.0 count).
 % Structure: Part I (Sections I-VI, then the references) is the 8-page FCCM paper; Part II
@@ -53,13 +55,13 @@ Verilog Synthesis for FPGAs - again\\Built by the DarkFactory and Leads to Yggdr
 
 \author{\IEEEauthorblockN{Peter Jamieson}
 \IEEEauthorblockA{Electrical and Computer Engineering, Miami University\\
-\todo{Oxford, OH, USA}\\
-\todo{jamiespa@miamioh.edu}}}
+Oxford, OH, USA\\
+jamiespa@miamioh.edu}}
 
 \maketitle
 
 \begin{abstract}
-I wrote Odin in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build Odin~III, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. Odin~III (MIT license) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, behind a versioned C ABI for plugins and AI tools. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the Yggdrasil III ecosystem, now made possible by this approach.
+I wrote Odin in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build Odin~III, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. Odin~III (MIT license) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, and, in v1.1.0, a SystemVerilog front end over the slang library whose gate flow runs 144 of the 156 VerilogEval references, behind a versioned C ABI for plugins and AI tools. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the Yggdrasil III ecosystem, now made possible by this approach.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -91,7 +93,7 @@ The approach has limits, and I state them first. It was not a lights-out factory
 
 The community may object to such a process. It may also ask a harder question: if a guided Dark Factory with oracles can rebuild a tool like this, could a reverse-engineering process let open-source tools rip out the human-years of engineering behind today's EDA tool landscape? (To the companies, I would suggest moving to a cloud service model as soon as possible.) My goal is narrower: to run experiments I couldn't do with Yosys, and with Odin~III I can now, and the ideas I hoped my students could pursue were limited by inflexibilities in the toolflow.
 
-I call this new suite Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}). Odin~III is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for VTR out), and every path passes through its one provenance IR, which is why I see it as the final frontier of the Odin line (at least for me). The oracles (Yosys, Parmys, Odin~II, VTR's golden results, and ABC) stand as a small forest beside the trunk, to compare against. In the canopy are Wyrd~III (the experiment runner and GUI); Bifrost~III (the simulation bridge); Midgard~III, a port of my verilogTown Verilog teaching game~\cite{verilogtown2017}, which Wyrd~III connects to; and Loki~III (reverse engineering), which continues the netlist-to-RTL work of Faruque et al.~\cite{faruque2025gatebreaker}; The Norns~III, the placement experiment of Gharibian et al.~\cite{gharibian2010finding,gharibian2013analyzing}, redone with provenance (Sec.~\ref{sec:provenance-problem}). All the code is available at \url{https://github.com/drpaj12/YggdrasilIII}.
+I call this new suite Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}). Odin~III is the trunk: its steps run from the roots (Verilog and netlists in) to the crown (BLIF for VTR out), and every path passes through its one provenance IR, which is why I see it as the final frontier of the Odin line (at least for me). The oracles (Yosys, Parmys, Odin~II, VTR's golden results, and ABC) stand as a small forest beside the trunk, to compare against. In the canopy are Wyrd~III (the experiment runner and GUI); Bifrost~III (the simulation bridge); Midgard~III, a port of my verilogTown Verilog teaching game~\cite{verilogtown2017}, which Wyrd~III connects to; and Loki~III (reverse engineering), which continues the netlist-to-RTL work of Faruque et al.~\cite{faruque2025gatebreaker} with an LLM-free L0-L2 flow (provenance datasets, a Bayesian signal-role classifier, clustering and graph-network reconstruction), now measured against the baseline's own metrics; The Norns~III, the placement experiment of Gharibian et al.~\cite{gharibian2010finding,gharibian2013analyzing}, redone with provenance (Sec.~\ref{sec:provenance-problem}). All the code is available at \url{https://github.com/drpaj12/YggdrasilIII}.
 
 \begin{figure*}[t]
 \centering
@@ -249,6 +251,7 @@ The benchmarks are the VTR~7.0 designs on \code{k6\_frac\_N10\_frac\_chain\_mem3
 Table~\ref{tab:m2} gives the M2 run: Odin~III's netlist of every one of the 15 designs routed in VPR. The geomean ratios against Parmys are 1.041 for LUTs, 1.012 for CLBs, 1.000 for memories, 0.985 for minimum channel width, 0.986 for critical-path delay, and 1.034 for routed wirelength, inside the 1.20 gate, and no design exceeds the per-design bound of 1.50 on a gated metric. The one LUT outlier is \code{blob\_merge} (1.78$\times$), whose CLB ratio is only 1.04; \code{raygentop}, at 1.42$\times$ in the earlier run, is now 1.03. An earlier run showed \code{mkPktMerge} and \code{boundtop} packing no memory blocks, a real bug found by the oracle comparison: VTR's ABC step lost RAMs whose outputs drove primary outputs directly, and plain \code{opt} turned \code{x} multiplexer data into constants. The fix adds a port buffer and uses Parmys's \code{opt -full} after \code{flatten}, and \code{vtr-qor} now flags any lost hard block. Both designs pack all their memories (15 and 1, equal to Parmys). With its linked ABC (leg O), Odin~III also routes \code{arm\_core} in 148\,s. No O-leg QoR table was run for v1.0: Phase~3 closed on the existing M2 and M3 data, because the front end to elaboration is the priority (PHASE3 decision 58).
 
 \subsection{Verification evidence}
+\label{sec:verify-evidence}
 
 \begin{figure*}[t]
 \centering
@@ -266,6 +269,8 @@ Each stage is checked by a tool separate from the code, against an oracle, under
 \emph{Functional check against the source.} \code{fcheck} runs VTR's own random check, which builds the RTL and the netlist with Verilator and drives both with 50,000 random vectors. Odin~III's O-leg netlists pass on 12 of the 15 designs; the other 3 (\code{raygentop}, \code{boundtop}, \code{stereovision0}) are untested, not Odin~III bugs. The same check fails the Parmys netlist on 8 of the 15, among them through the defect D2b below.
 
 \emph{Determinism.} Rerunning the exit flow gives byte-identical netlists on 15 of 15 designs.
+
+\emph{The VerilogEval corpus.} v1.1.0 pins all 156 VerilogEval references in a corpus test: 144 elaborate through the SystemVerilog front end and the cmos6 gate flow, and 12 are refused with a pinned reason (two explicit casts, eight inferred latches, which the cmos6 library has no cell for, and two compound bit-select assignments). A 20-design equivalence sample compares the gated netlists with Yosys's techmapped output through ABC's combinational equivalence check; all 20 are equivalent.
 
 \subsection{Defects found in the Parmys flow}
 \label{sec:parmys-bugs}
@@ -318,6 +323,26 @@ Total & 63,540 & 15.11\,G \\
 Every sub-project followed one path: a specification with numbered decisions, a critique by a fresh read-only agent, an implementation plan, tasks for implementer agents with disjoint files, a review of every task and branch before a pull request opens, and a merge only on a green CI gate (clang-tidy, cppcheck, complexity limits, sanitizers). A controller agent owns git and dispatches the others. I approve the specifications and design rules; elsewhere the agents proceed on their own recommendations, logging each as a default I may override.
 
 Cost is logged from the agents' transcripts (Table~\ref{tab:cost}). To the v1.0 close, 317.6\,h of wall-clock time, 211.4\,h of it active, 63,540 requests used 15.1 billion tokens, 95\% of them prompt-cache reads and 65.8 million of them output, across 16 main sessions and 880 subagent runs; 226 pull requests merged. Subagents used 82\% of the tokens and the controller sessions 18\%. My own part was about 414 messages (about 9,400 words): the specification, the decisions, and the reviews. Active time passed 20\,h on six of the 14 days because agents worked through the night (Part~II, Sec.~\ref{sec:time-agents}). The work ran on a Claude Max subscription; controller sessions may also run on DeepSeek's API, but no DeepSeek window fell before v1.0.
+
+After v1.0 the suite work continued on the same process. The add-on window, 2026-10-22 to 2026-10-23 and still open as this is written, used one Claude controller session and 100 subagent runs (Table~\ref{tab:cost2}): 351.7\,M tokens in all, 337.3\,M of the controller's 339.7\,M as prompt-cache reads. Fifteen Odin~III and 25 Loki~III pull requests merged in the window. One DeepSeek controller window also ran; its cost is not logged here.
+
+\begin{table}[t]
+\caption{Agent cost of the post-v1.0 window, 2026-10-22 to 2026-10-23 (add-on to Table~\ref{tab:cost}; the window is still open)}
+\label{tab:cost2}
+\centering
+\footnotesize
+\begin{tabular}{@{}lrr@{}}
+\toprule
+Model & Runs & Tokens \\
+\midrule
+Claude Opus 5.5 (controller) & 1 session & 339.7\,M \\
+Claude Sonnet 5.5 (subagents) & 100 & 12.0\,M \\
+DeepSeek (controller) & 1 session & not logged \\
+\midrule
+Total &  & 351.7\,M \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % ------------------------------------------------------------------------------------------
 \section{Discussion: What the Process Suggests for CAD Research}
@@ -1671,8 +1696,7 @@ a guess is checked by proof, not by simulation: \code{cone\_check} says equivale
 unproven, and that is a strong term in the update. Third, a confirmed guess is committed as a
 new level of an ordinary Odin III design (\code{submod}, \code{raise}), so the result can be
 written, drawn and traced back to the gates, and the next round runs on that level. Loki~III
-targets exactly the three items that Gate-Breaker leaves as future work. None of this is built
-or measured yet, so I make no claim about how it compares in accuracy.
+targets exactly the three items that Gate-Breaker leaves as future work. It is now built, and the first measurements exist. On the renamed-instance check, L0 is naming-neutral: it labels every netlist object with neutral \code{n}$k$ names, so renaming a design's wires and instances changes nothing in the provenance dataset, as it should. L1's recovery on renamed floors is the honest baseline: macro-F1 0.021 on the calibrated f2 floor (expected calibration error 0.083) and 0.019 on f1; much of the miss is grouping and footprint geometry, not localisation. The Gate-Breaker comparison ran the paper's harness and metrics on the simple benchmarks (three Q1 and seventeen Q2 designs, one run, K=10, with the only model available on the host, Claude Opus, whose CLI exposes none of the paper's sampling parameters): success rate 0.933 on Q1 and 0.829 on Q2, success@10 1.000 in both quartiles, AST similarity 0.576 and 0.444, CFG similarity 1.000 and 0.736, and 169 of 174 extracted candidates passed a 120-cycle differential simulation. The later CFG probe found the experiment's feature-vector padding differs from a common-width node kernel, so the AST and CFG columns will be recomputed in the VerilogEval rerun. The deviations from the paper are logged in the experiment notes: the benchmark set is the fallback micro set rather than VerilogEval, the model is not one of the paper's four, and the validation is differential vectors rather than the VerilogEval testbenches, so the numbers are a first replication, not a model comparison.
 
 \subsection{Open problems}
 \label{sec:re-open}
@@ -2215,8 +2239,21 @@ simulation API: open a design, set inputs by port, step one clock, read outputs 
 and write a VCD whose signal names come from provenance. Version 1.0.4 is unmap, the inverse of
 partial mapping: VTR hard cells return to \code{\$add}, \code{\$mul} and \code{\$mem} with
 provenance. Version 1.0.5 adds two options that Loki~III's L1 needs: \code{raise -const} and vector
-ports for \code{submod}. Each release is tagged only on my go. The SystemVerilog and VHDL front
-ends (ADR D11) and FF feature matching (4.6) come later.
+ports for \code{submod}. Each release is tagged only on my go. Version 1.1.0 adds the SystemVerilog
+front end (ADR D13, ABI 6): a vendored slang~v12 with a C++ shim that rebuilds Odin III's AST
+through the C ABI, leaving the core untouched (Fig.~\ref{fig:sv}). The gate path runs
+\code{abc --gates cmos6} and \code{dfflibmap cmos6} over the elaborated design, and
+\code{write\_verilog} writes the structural gate netlist back as structural Verilog, the synthesis
+path from SystemVerilog with no VTR required. The VerilogEval corpus test pins all 156 references
+(Part~I, Sec.~\ref{sec:verify-evidence}), and a clang-tidy C++ profile covers the adapter in CI.
+VHDL (ADR D11) and FF feature matching (4.6) still come later.
+
+\begin{figure}[t]
+\centering
+\odinfit{\columnwidth}{\input{IMAGE/fig_sv}}
+\caption{The v1.1.0 SystemVerilog path: slang parses and elaborates, the C++ shim rebuilds Odin III's AST through the C ABI, and the existing gate flow writes the structural Verilog back out.}
+\label{fig:sv}
+\end{figure}
 
 \emph{Wyrd~III} takes its name from wyrd, fate, which the Norns weave at the well under the tree. It
 (\url{https://github.com/drpaj12/wyrd}) is a GUI wrapper around Odin III and an experiment
@@ -2236,11 +2273,19 @@ errors shown in the game at file and line. It reuses the original images and lev
 MIT licence.
 
 \emph{Loki~III} (\url{https://github.com/drpaj12/loki}) is the reverse-engineering tool for
-structural netlists (Sec.~\ref{sec:re}). L0 is a provenance ground-truth dataset made from the
-benchmarks. L1 is a Bayesian hypothesis flow: pattern detectors give likelihoods, \code{cone\_check}
-proofs confirm them, and \code{raise} and \code{submod} move the design up the hierarchy. L2 adds
-graph export, clustering (k-means and affinity propagation) and graphlet signatures, counted
-with ORCA as a separate process (GraphCrunch is cited only). There is no LLM step for now. Loki~III targets the future work of
+structural netlists (Sec.~\ref{sec:re}). L0 makes the provenance ground-truth datasets from the
+benchmarks; a queued change carries \code{cell\_type} into every graph label, so hard blocks that
+are already reverse engineered stay visible in the reconstruction. L1 is the Bayesian hypothesis
+flow: pattern detectors give likelihoods, \code{cone\_check} proofs confirm them, and \code{raise}
+and \code{submod} move the design up the hierarchy. L2 is built end to end: graph export
+(edgelist, GraphML, PyTorch Geometric), region and partition records, clustering (k-means,
+affinity propagation, spectral, Louvain), a global-signal classifier from the L1 roles, structural
+features (Weisfeiler-Leman colours, NPN signatures, graphlet signatures through ORCA, GraphCrunch
+cited only), and GNN training (SAGE, GCN) with a 1-WL baseline. On the real micros the honest
+result is that a node-only GNN loses to the 1-WL baseline (macro-F1 0.2413 against 0.2711) and
+beats it once node, graphlet, WL and NPN features combine (0.3545 against 0.2711). There is no
+LLM step. The first measurements, the renamed-instance check and the Gate-Breaker replication,
+are in Sec.~\ref{sec:re-gb}. Loki~III targets the future work of
 Gate-Breaker itself: clustering for bus naming, separating datapath from control, and
 partitioning. A Trojan detection step comes later.
 

@@ -1,0 +1,25 @@
+% The v1.1.0 SystemVerilog path: slang -> AST through the C ABI -> the unchanged core and gate
+% flow -> structural Verilog. Drawn in the shared palette; see IMAGE/odin3-tikz-styles.tex.
+\begin{tikzpicture}[odin]
+  % top row: the adapter (dashed = external / new in v1.1.0)
+  \node[box, external] (src) {SystemVerilog\\\odinsub{156 refs}};
+  \node[box, external, right=3.5mm of src] (slang) {slang v12\\\odinsub{parse, elaborate}};
+  \node[box, external, right=3.5mm of slang] (shim) {C++ shim\\\odinsub{AST via C ABI}};
+  % bottom row: the unchanged core and gate flow
+  \node[box, neutral, below=5mm of shim] (ir) {Odin III IR\\\odinsub{elaboration}};
+  \node[box, neutral, left=3.5mm of ir] (gates) {cmos6 gates\\\odinsub{abc, dfflibmap}};
+  \node[box, neutral, left=3.5mm of gates] (out) {structural Verilog\\\odinsub{write\_verilog}};
+  % regions
+  \begin{scope}[on background layer]
+    \node[region, fit=(src) (slang) (shim)] (adapter) {};
+    \node[bluregion, fit=(ir) (gates) (out)] (core) {};
+  \end{scope}
+  \node[regionlabel, above=0.5mm of adapter] {v1.1.0 adapter (vendored)};
+  \node[regionlabel, below=0.5mm of core] {the core and its gate flow (unchanged)};
+  % flow
+  \draw[flow] (src) -- (slang);
+  \draw[flow] (slang) -- (shim);
+  \draw[flow] (shim.south) -- (ir.north);
+  \draw[flow] (ir) -- (gates);
+  \draw[flow] (gates) -- (out);
+\end{tikzpicture}

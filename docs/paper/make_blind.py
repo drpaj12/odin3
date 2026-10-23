@@ -47,8 +47,8 @@ if "Part~II" in src:
 # authors and URLs
 sub("""\\author{\\IEEEauthorblockN{Peter Jamieson}
 \\IEEEauthorblockA{Electrical and Computer Engineering, Miami University\\\\
-\\todo{Oxford, OH, USA}\\\\
-\\todo{jamiespa@miamioh.edu}}}""",
+Oxford, OH, USA\\\\
+jamiespa@miamioh.edu}}""",
 """\\author{\\IEEEauthorblockN{Anonymous Author(s)}
 \\IEEEauthorblockA{Affiliation withheld for double-blind review}}""")
 sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a proper compiler front end:""",
@@ -100,6 +100,8 @@ for bad in ("drpaj12", "Jamieson", "Miami", "Odin~III", "Odin III", "verilogTown
         sys.exit("leak: " + body[i - 60:i + 40])
 hdr = ("% Double-blind 8-page version for FCCM (Part I only), made from odin3.tex by a script: authors,\n"
        "% self-citations (blind.bib), repository URLs, the tool and suite names (placeholders " + NAME + ", AnonSuite, ...) withheld;\n"
-       "% figures from IMAGE/blind/. On acceptance use odin3.tex.\n")
+       "% figures from IMAGE/blind/. On acceptance use odin3.tex.\n"
+       "% Companion file: odin3.tex is the same paper with authors and names restored; this blind\n"
+       "% copy is the version submitted to the conference, and the non-blind copy is used on acceptance.\n")
 open("odin3_blind.tex", "w").write(hdr + src)
 print("ok", figs)
