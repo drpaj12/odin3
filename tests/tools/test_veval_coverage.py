@@ -1,10 +1,12 @@
 """Tests for tools/veval/veval-coverage.
 
 The classification is exercised on the exact CLI log shapes (a located ``read_slang:`` error, a
-pass error without a location, a sanitizer report and a signal). ``check_manifest`` runs a fake
-odin3 that writes the BLIF the tool expects and then behaves per ``VVEVAL_FAKE``: ``good`` exits
-0, ``refuse:TEXT`` errors, ``crash`` aborts. That proves a previously-ok design regressing to a
-refusal or a crash fails the corpus check, and that a changed refusal message or class fails it.
+pass error without a location, a sanitizer report, a signal and a timeout). ``check_manifest``
+runs a fake odin3 that writes the BLIF the tool expects and then behaves per ``VVEVAL_FAKE``:
+``good`` exits 0, ``refuse:TEXT`` errors, ``crash`` aborts. That proves a previously-ok design
+regressing to a refusal or a crash fails the corpus check, and that a changed refusal message or
+class fails it. ``_equiv_one`` is pinned to compare both the gate BLIF the flow wrote and the
+RTL BLIF.
 """
 
 from __future__ import annotations
@@ -43,6 +45,17 @@ sys.exit(2)
 
 def located(message: str) -> str:
     return f"odin3: error: read_slang: /refs/Prob001_zero_ref.sv:4:9: {message}\n"
+
+
+RECORDING_EQUIV = """#!{python}
+import pathlib, sys
+
+record = pathlib.Path({record!r})
+calls = record.read_text().splitlines() if record.exists() else []
+with record.open("a") as f:
+    f.write(" ".join(sys.argv[1:]) + "\\n")
+sys.exit(1 if calls else 0)
+"""
 
 
 class ClassifyTest(unittest.TestCase):
@@ -96,6 +109,11 @@ class ClassifyTest(unittest.TestCase):
 
     def test_nonzero_without_diagnostic_is_a_crash(self) -> None:
         self.assertEqual(veval_coverage.classify(3, "").kind, "crash")
+
+    def test_a_timeout_is_reported_as_a_timeout_not_a_signal(self) -> None:
+        verdict = veval_coverage.classify(None, "odin3: error: timed out after 120 s\n")
+        self.assertEqual(verdict.kind, "crash")
+        self.assertEqual(verdict.detail, "timed out after 120 s")
 
     def test_pass_summary_does_not_hide_the_diagnostic(self) -> None:
         stderr = (
@@ -277,6 +295,59 @@ class WriteManifestTest(unittest.TestCase):
                     ),
                 ],
             )
+
+
+class RunOdin3Test(unittest.TestCase):
+    def test_a_timeout_returns_no_exit_code_and_its_text(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "slow"
+            path.write_text(f"#!{sys.executable}\nimport time\ntime.sleep(5)\n")
+            path.chmod(path.stat().st_mode | stat.S_IXUSR)
+            returncode, stderr = veval_coverage.run_odin3(path, "read_verilog x", 1)
+        self.assertIsNone(returncode)
+        self.assertEqual(stderr, "odin3: error: timed out after 1 s")
+
+
+class EquivOneTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.work = Path(self.tmp.name)
+        self.ref = self.work / "Prob001_zero_ref.sv"
+        self.ref.write_text("module RefModule; endmodule\n")
+        self.gate = self.work / "Prob001_zero_ref.blif"
+        self.odin3 = self.script("odin3", FAKE_ODIN3.format(python=sys.executable))
+        self.yosys = self.script("yosys", f"#!{sys.executable}\nimport sys\nsys.exit(0)\n")
+        self.calls = self.work / "calls.txt"
+        self.equiv = self.script(
+            "equiv", RECORDING_EQUIV.format(python=sys.executable, record=str(self.calls))
+        )
+
+    def script(self, name: str, text: str) -> Path:
+        path = self.work / name
+        path.write_text(text)
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        return path
+
+    def test_the_gate_blif_is_compared_after_the_rtl_blif(self) -> None:
+        self.gate.write_text(".model RefModule\n.end\n")
+        passed, detail = veval_coverage._equiv_one(
+            self.odin3, self.yosys, self.equiv, self.ref, self.work, 30
+        )
+        recorded = self.calls.read_text().splitlines()
+        # The fake equiv-check passes the first (RTL) leg and fails the second (gate) leg.
+        self.assertFalse(passed)
+        self.assertEqual(detail, "gate BLIF differs from Yosys: not equivalent")
+        self.assertEqual(len(recorded), 2)
+        self.assertTrue(recorded[0].startswith(str(self.work / "Prob001_zero_ref.odin.blif")))
+        self.assertTrue(recorded[1].startswith(str(self.gate)))
+
+    def test_a_missing_gate_blif_fails(self) -> None:
+        passed, detail = veval_coverage._equiv_one(
+            self.odin3, self.yosys, self.equiv, self.ref, self.work, 30
+        )
+        self.assertFalse(passed)
+        self.assertIn("no gate BLIF", detail)
 
 
 if __name__ == "__main__":

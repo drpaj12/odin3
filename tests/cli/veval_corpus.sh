@@ -7,7 +7,9 @@
 # and pinned message (tools/veval/veval-coverage --manifest).
 #
 # With ODIN3_YOSYS set, the smallest VVEVAL_EQUIV_SAMPLE (default 20) ok designs are also
-# equivalent to Yosys's read_verilog -sv + techmap BLIF, as tests/cli/slang_flow.sh does.
+# equivalent to Yosys's read_verilog -sv + techmap BLIF, as tests/cli/slang_flow.sh does: their
+# gate BLIF (the corpus artifact) and their RTL BLIF. Without ODIN3_YOSYS the sample is skipped
+# and the skip is printed.
 #
 # usage: tests/cli/veval_corpus.sh ODIN3 SOURCE_DIR
 set -euo pipefail
@@ -24,5 +26,7 @@ args=(--odin3 "$odin3" --refs "$corpus/refs" --lib "$src/lib/cmos6.o3lib" --work
       --manifest "$corpus/manifest.tsv")
 if [[ -n ${ODIN3_YOSYS:-} ]]; then
     args+=(--equiv-sample "${VVEVAL_EQUIV_SAMPLE:-20}" --yosys "$ODIN3_YOSYS")
+else
+    echo "veval_corpus: skipped: no Yosys oracle (set ODIN3_YOSYS to compare the gate BLIFs)" >&2
 fi
 "$src/tools/veval/veval-coverage" "${args[@]}"

@@ -1117,7 +1117,8 @@ if(BUILD_TESTING)
         endif()
         # v1.1.0 corpus: every VerilogEval reference through the SV gate flow against the pinned
         # outcomes in tests/cli/veval/manifest.tsv (tools/veval/veval-coverage). With Yosys
-        # found, the smallest 20 ok designs must also be equivalent to its techmapped BLIF.
+        # found, the smallest 20 ok designs' gate BLIFs (the corpus artifact) and RTL BLIFs must
+        # also be equivalent to its techmapped BLIF.
         add_test(NAME cli_veval_corpus
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/veval_corpus.sh $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR})

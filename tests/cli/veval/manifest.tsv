@@ -1,6 +1,8 @@
 # VerilogEval corpus outcomes (tools/veval/veval-coverage --manifest-out).
 # design<TAB>ok | refused:<class><TAB>pinned refusal message
 # A crash is a bug: there is no expected-crash row.
+# Rows marked "expected to flip" are refused for a construct a reader or library change
+# adds; those marker comments are hand-maintained, so --manifest-out writes the rows only.
 Prob001_zero_ref.sv	ok
 Prob002_m2014_q4i_ref.sv	ok
 Prob003_step_one_ref.sv	ok
@@ -28,6 +30,7 @@ Prob024_hadd_ref.sv	ok
 Prob025_reduction_ref.sv	ok
 Prob026_alwaysblock1_ref.sv	ok
 Prob027_fadd_ref.sv	ok
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob028_m2014_q4a_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_P_ 'q.dlatch_p0' (high, INIT 3)
 Prob029_m2014_q4g_ref.sv	ok
 Prob030_popcount255_ref.sv	ok
@@ -82,10 +85,12 @@ Prob078_dualedge_ref.sv	ok
 Prob079_fsm3onehot_ref.sv	ok
 Prob080_timer_ref.sv	ok
 Prob081_7458_ref.sv	ok
+# Expected to flip to ok when issue #264 (compound assignment to a bit-select) is read.
 Prob082_lfsr32_ref.sv	refused:other	expression kind 26 is not supported
 Prob083_mt2015_q4b_ref.sv	ok
 Prob084_ece241_2013_q12_ref.sv	ok
 Prob085_shift4_ref.sv	ok
+# Expected to flip to ok when issue #264 (compound assignment to a bit-select) is read.
 Prob086_lfsr5_ref.sv	refused:other	expression kind 26 is not supported
 Prob087_gates_ref.sv	ok
 Prob088_ece241_2014_q5b_ref.sv	ok
@@ -95,7 +100,9 @@ Prob091_2012_q2b_ref.sv	ok
 Prob092_gatesv100_ref.sv	ok
 Prob093_ece241_2014_q3_ref.sv	ok
 Prob094_gatesv_ref.sv	ok
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob095_review2015_fsmshift_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob096_review2015_fsmseq_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob097_mux9to1v_ref.sv	ok
 Prob098_circuit7_ref.sv	ok
@@ -137,6 +144,7 @@ Prob133_2014_q3fsm_ref.sv	ok
 Prob134_2014_q3c_ref.sv	ok
 Prob135_m2014_q6b_ref.sv	ok
 Prob136_m2014_q6_ref.sv	ok
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob137_fsm_serial_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob138_2012_q2fsm_ref.sv	ok
 Prob139_2013_q2bfsm_ref.sv	ok
@@ -145,15 +153,19 @@ Prob141_count_clock_ref.sv	ok
 Prob142_lemmings2_ref.sv	ok
 Prob143_fsm_onehot_ref.sv	ok
 Prob144_conwaylife_ref.sv	ok
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob145_circuit8_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_P_ 'p.dlatch_p0' (high, INIT 3)
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob146_fsm_serialdata_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob147_circuit10_ref.sv	ok
 Prob148_2013_q2afsm_ref.sv	ok
 Prob149_ece241_2013_q4_ref.sv	ok
 Prob150_review2015_fsmonehot_ref.sv	ok
 Prob151_review2015_fsm_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob152_lemmings3_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob153_gshare_ref.sv	ok
 Prob154_fsm_ps2data_ref.sv	ok
+# Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob155_lemmings4_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob156_review2015_fancytimer_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported

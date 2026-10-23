@@ -22,10 +22,13 @@ Two modes share the same run and classification:
 
 ``--equiv-sample N --yosys YOSYS`` additionally checks up to N ``ok`` designs (smallest first)
 against the Yosys oracle's techmapped BLIF with ``tools/equiv-check``, as
-``tests/cli/slang_flow.sh`` does.
+``tests/cli/slang_flow.sh`` does. Both the gate BLIF the flow wrote (the corpus artifact) and
+the un-gated RTL BLIF are compared, so a gate-mapping regression that still writes a netlist
+fails.
 
-Exit 0 all expected, 1 a crash (coverage mode) or a mismatch (manifest mode), 2 usage or input
-error. See ``tests/cli/veval_corpus.sh`` for the CTest entry.
+Exit 0 all expected, 1 a crash, a mismatch or an input error (an empty reference directory, a
+malformed manifest, a crash to pin), 2 a usage error (a bad option or a missing odin3, techlib
+or equiv-check). See ``tests/cli/veval_corpus.sh`` for the CTest entry.
 """
 
 from __future__ import annotations
@@ -133,10 +136,16 @@ def refusal_class(error: str) -> str:
     return "other"
 
 
-def classify(returncode: int, stderr: str) -> Verdict:
-    """Classify one run: ok, refused (with class and message) or crash (with detail)."""
+def classify(returncode: int | None, stderr: str) -> Verdict:
+    """Classify one run: ok, refused (with class and message) or crash (with detail).
+
+    ``returncode`` is the process exit code, or None for a timeout (``run_odin3``'s marker);
+    a negative value is the signal that killed the process.
+    """
     if any(marker in stderr for marker in _CRASH_MARKERS):
         return Verdict("crash", detail=diagnostic(stderr) or "sanitizer report")
+    if returncode is None:
+        return Verdict("crash", detail=diagnostic(stderr) or "timed out")
     if returncode < 0:
         return Verdict("crash", detail=f"killed by signal {-returncode}")
     error = diagnostic(stderr)
@@ -152,8 +161,8 @@ def quote(path: Path | str) -> str:
     return '"' + str(path).replace('"', '\\"') + '"'
 
 
-def run_odin3(odin3: Path, script: str, timeout: float) -> tuple[int, str]:
-    """Run odin3 with one -p script; return (exit code, stderr)."""
+def run_odin3(odin3: Path, script: str, timeout: float) -> tuple[int | None, str]:
+    """Run odin3 with one -p script; return (exit code, stderr), None for a timeout."""
     try:
         done = subprocess.run(
             [str(odin3), "--top", TOP, "-p", script],
@@ -163,7 +172,7 @@ def run_odin3(odin3: Path, script: str, timeout: float) -> tuple[int, str]:
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return -1, f"odin3: error: timed out after {timeout:.0f} s"
+        return None, f"odin3: error: timed out after {timeout:.0f} s"
     return done.returncode, done.stderr
 
 
@@ -180,8 +189,8 @@ def run_flow(odin3: Path, ref: Path, lib: Path, out: Path, timeout: float) -> Ve
     return verdict
 
 
-def run_rtl_blif(odin3: Path, ref: Path, out: Path, timeout: float) -> tuple[int, str]:
-    """The un-gated BLIF the Yosys oracle compares (read_verilog; proc; opt; lower)."""
+def run_rtl_blif(odin3: Path, ref: Path, out: Path, timeout: float) -> tuple[int | None, str]:
+    """The un-gated BLIF (read_verilog; proc; opt; lower) the RTL leg compares."""
     script = (
         f"read_verilog {quote(ref)}; proc; opt; lower; "
         f"write_blif --gates-as-names {quote(out)}"
@@ -352,11 +361,19 @@ def check_manifest(
 def _equiv_one(
     odin3: Path, yosys: Path, equiv: Path, ref: Path, work: Path, timeout: float
 ) -> tuple[bool, str]:
-    """One design: Odin III RTL BLIF vs Yosys's techmapped BLIF, through equiv-check."""
+    """One design against the Yosys oracle: its gate BLIF and its RTL BLIF.
+
+    The gate BLIF is the corpus artifact the manifest pins; ``run_flow`` already wrote it to
+    work/<stem>.blif, so a gate-mapping regression that still writes a netlist fails here. The
+    RTL BLIF is the second leg: when it differs, the front end or a pre-gate pass is the cause.
+    """
     stem = ref.name[: -len(".sv")]
-    odin_blif = work / (stem + ".odin.blif")
+    rtl_blif = work / (stem + ".odin.blif")
+    gate_blif = work / (stem + ".blif")
     yosys_blif = work / (stem + ".yosys.blif")
-    returncode, stderr = run_rtl_blif(odin3, ref, odin_blif, timeout)
+    if not gate_blif.is_file() or gate_blif.stat().st_size == 0:
+        return False, f"the flow wrote no gate BLIF at {gate_blif}"
+    returncode, stderr = run_rtl_blif(odin3, ref, rtl_blif, timeout)
     if returncode != 0:
         return False, f"odin3 RTL BLIF failed: {diagnostic(stderr)}"
     script = (
@@ -375,19 +392,21 @@ def _equiv_one(
         return False, "Yosys timed out"
     if oracle.returncode != 0:
         return False, f"Yosys failed: {diagnostic(oracle.stderr)}"
-    try:
-        checked = subprocess.run(
-            [str(equiv), str(odin_blif), str(yosys_blif)],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            check=False,
-        )
-    except subprocess.TimeoutExpired:
-        return False, "equiv-check timed out"
-    if checked.returncode != 0:
-        return False, (diagnostic(checked.stdout + checked.stderr) or "not equivalent")
-    return True, "equivalent to Yosys"
+    for leg, blif in (("RTL", rtl_blif), ("gate", gate_blif)):
+        try:
+            checked = subprocess.run(
+                [str(equiv), str(blif), str(yosys_blif)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"equiv-check timed out on the {leg} BLIF"
+        if checked.returncode != 0:
+            detail = diagnostic(checked.stdout + checked.stderr) or "not equivalent"
+            return False, f"{leg} BLIF differs from Yosys: {detail}"
+    return True, "RTL and gate BLIFs equivalent to Yosys"
 
 
 def equiv_sample(
