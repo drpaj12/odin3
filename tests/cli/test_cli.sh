@@ -41,7 +41,7 @@
 # pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
 # pm_mem_rden (4.4 R-10: a read port with an enable that is not constant 1 maps to the RAM with the enable emulated in logic and one located warning per memory; equiv-check proves the BLIF equal to the same design with the RAM block and the emulation written out by hand, and a changed reference is not equivalent).
-# pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning).
+# pm_soft_blocks (4.2 D18: on an arch without the model, --vtr-compat builds an explicit single_port_ram, dual_port_ram or multiply instance as soft logic with a located warning, equiv-check equal to the RTL written with arrays; without the flag the unresolved-module error; on k6 no warning; #262: on an arch with the 1-bit adder, an `adder #(W)` instance reads the adder soft body under --vtr-compat, with a located warning, and the plain read still errors).
 # pm_mem_arch (4.4: the RAM depth limit comes from the arch record, an arch without RAM leaves the memory to lower, and `partial_map --mem-width arch` slices to the arch's widest mode with one warning).
 # dfflibmap (gatemap Task 9: dfflibmap generic_gates maps one .latch of each kind onto DFFP, DFFN, DLATCHP and DLATCHN; netlist-compare equal to tests/golden/dfflibmap/expected.blif; cmos6 has no latch: a named error; cmos6 on input_neg.blif shares one INV between two falling-edge flip-flops, equal to expected_neg.blif).
 # The project cases run from the project's directory (tests/cli/project), so the paths given are
@@ -968,6 +968,19 @@ pm_soft_blocks)
     cp "$fixtures"/../../../lib/soft_primitives/*.v "$work/soft/"
     ODIN3_SOFT_PRIMITIVES_DIR=$work/soft "$odin3" -p "read_arch $arch; read_verilog --vtr-compat $d; $flow" >"$work/out" 2>"$work/err" ||
         fail "the env override did not work"
+    # #262: the arch HAS the 1-bit `adder` model and the design passes `adder #(W)`. --vtr-compat
+    # reads the primitive's soft body (the parameterized form Parmys supplies) as a library unit
+    # and warns at the instance; a plain read keeps the hard cell's too-many-values error. The two
+    # designs are the Loki L0 repros (work/loki-rename-exp).
+    adder_arch=$fixtures/../../unit/data/arch/adder_chain.xml
+    for design in micro/adder_hard_block micro/hard_adder_cin_propagation; do
+        "$odin3" -p "read_arch $adder_arch; read_verilog --vtr-compat $mic/$design.v; $flow; write_blif --vtr $work/out.blif" \
+            >"$work/out" 2>"$work/err" || fail "$design: the soft body was not read (#262)"
+        grep -q "${design##*/}.v:[0-9]*:[0-9]*: warning: instance of 'adder' uses the library unit 'adder'" "$work/err" ||
+            fail "$design: no located warning naming the soft body"
+        expect_fail "too many parameter values for cell type 'adder'" -p \
+            "read_arch $adder_arch; read_verilog $mic/$design.v"
+    done
     ;;
 pm_mem_rden)
     mm=$fixtures/../../micro_pm

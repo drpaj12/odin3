@@ -350,11 +350,11 @@ static odin3_status read_all(odin3_rv *rv, const odin3_rv_opts *opts) {
 
 odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts *opts,
                                       odin3_ast **out) {
-    return odin3_read_verilog_files_soft(design, opts, 0, out);
+    return odin3_read_verilog_files_soft(design, opts, 0, false, out);
 }
 
 odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_opts *opts,
-                                           uint32_t soft_mask, odin3_ast **out) {
+                                           uint32_t soft_mask, bool vtr_compat, odin3_ast **out) {
     if (out != NULL) {
         *out = NULL;
     }
@@ -366,6 +366,7 @@ odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_
     odin3_rv rv;
     odin3_status st = rv_open(&rv, design, opts);
     rv.soft_mask = soft_mask;
+    rv.vtr_compat = vtr_compat;
     st = st != ODIN3_OK ? st : read_all(&rv, opts);
     st = st != ODIN3_OK ? st : seal(&rv, start);
     if (st == ODIN3_OK) {
@@ -677,10 +678,12 @@ static odin3_status hand_over(odin3_pass_ctx *ctx, odin3_ast *ast, const rv_args
 
 /* D18: the primitives the arch record has no model of, which --vtr-compat builds as soft logic
  * (soft_blocks.h); 0 outside --vtr-compat, --lib and --parse-only. */
+static bool soft_read(const rv_args *args) {
+    return args->elab.vtr_compat && !args->lib && !args->parse_only;
+}
+
 static uint32_t soft_blocks_of(const odin3_design *design, const rv_args *args) {
-    return args->elab.vtr_compat && !args->lib && !args->parse_only
-               ? odin3_soft_blocks_missing(design)
-               : 0U;
+    return soft_read(args) ? odin3_soft_blocks_missing(design) : 0U;
 }
 
 /* -name-map: loads the map into names and points the elaboration options at it. */
@@ -834,11 +837,12 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     if (st == ODIN3_OK && svs.len > 0) {
         st = read_sv(design, ctx, &parsed, &svs);
     } else if (st == ODIN3_OK) {
+        const bool vtr = soft_read(&parsed);
         uint32_t soft = soft_blocks_of(design, &parsed);
         st = open_names(&parsed, &names);
         if (st == ODIN3_OK) {
             odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
-            st = odin3_read_verilog_files_soft(design, &opts, soft, &ast);
+            st = odin3_read_verilog_files_soft(design, &opts, soft, vtr, &ast);
         }
         st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
         if (parsed.elab.names != NULL) {

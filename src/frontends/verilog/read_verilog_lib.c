@@ -9,11 +9,13 @@
 #include "ast/srcman.h"
 #include "frontends/project/paths.h"
 #include "frontends/project/project.h"
+#include "frontends/verilog/elab1.h"
 #include "frontends/verilog/lexer_support.h"
 #include "frontends/verilog/parser.h"
 #include "frontends/verilog/preproc.h"
 #include "frontends/verilog/read_verilog.h"
 #include "frontends/verilog/soft_blocks.h"
+#include "ir/celltype.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
@@ -58,18 +60,32 @@ static odin3_status define(odin3_rv *rv, odin3_ast_id node, bool library) {
     return odin3_u64map_put(rv->defined, (odin3_kv){name, bits});
 }
 
-/* An INSTANTIATION: its module name is wanted (once, at its first instantiation). */
+/* Whether the `#()` of INSTANTIATION node fits the registered cell type of that name; true when
+ * no cell type has the name (nothing the instance could fail to fit, #262). */
+static bool fits_cell(const odin3_rv *rv, odin3_ast_id node, uint32_t name) {
+    odin3_celltype_id id;
+    if (!odin3_celltype_find(rv->design, name, &id)) {
+        return true;
+    }
+    return odin3_elab1_params_fit(rv->ast, rv->design, node, odin3_celltype_get(rv->design, id));
+}
+
+/* An INSTANTIATION: its module name is wanted (once, at its first instantiation), with whether
+ * any instance's `#()` does not fit the registered cell type of that name. */
 static odin3_status add_wanted(odin3_rv *rv, odin3_ast_id node) {
     uint32_t name = odin3_ast_name(rv->ast, node);
-    if (odin3_u64map_get(rv->wanted_set, name, NULL)) {
+    uint64_t index = 0;
+    if (odin3_u64map_get(rv->wanted_set, name, &index)) {
+        odin3_rv_want *want = odin3_vec_at(&rv->wanted, (size_t)(index - 1));
+        want->overflows_cell = want->overflows_cell || !fits_cell(rv, node, name);
         return ODIN3_OK;
     }
     odin3_rv_want *slot = odin3_vec_push(&rv->wanted);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *slot = (odin3_rv_want){name, odin3_ast_loc(rv->ast, node)};
-    odin3_status st = odin3_u64map_put(rv->wanted_set, (odin3_kv){name, 1});
+    *slot = (odin3_rv_want){name, odin3_ast_loc(rv->ast, node), !fits_cell(rv, node, name)};
+    odin3_status st = odin3_u64map_put(rv->wanted_set, (odin3_kv){name, (uint64_t)rv->wanted.len});
     if (st != ODIN3_OK) {
         odin3_vec_pop(&rv->wanted);
     }
@@ -106,44 +122,79 @@ static odin3_status read_library(odin3_rv *rv, const odin3_pp_source *src) {
     return st != ODIN3_OK ? st : sweep(rv, true);
 }
 
+/* The source of primitive name's body in dir, for read_library: its path interned and the library
+ * "work", as the D18 body has always been read. */
+static odin3_status soft_source(odin3_rv *rv, const char *name, const char *dir, odin3_loc at,
+                                odin3_pp_source *src) {
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    *src = (odin3_pp_source){0, 0, 0, at};
+    odin3_status st = odin3_strbuf_appendf(&path, "%s/%s.v", dir, name);
+    st = st != ODIN3_OK ? st
+                        : odin3_design_intern(rv->design, odin3_bytes_cstr("work"), &src->library);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_design_intern(rv->design, (odin3_bytes){path.data, path.len}, &src->given);
+    src->resolved = src->given;
+    odin3_strbuf_free(&path);
+    return st;
+}
+
+/* The D18 warning at the first instance of a primitive the architecture has no model of (the
+ * #262 path has none here: odin3_elab1_prefer_unit warns at each instance that does not fit). */
+static void soft_warn(odin3_rv *rv, const odin3_rv_want *want, const char *name, bool missing) {
+    if (missing) {
+        odin3_vl_report(&rv->vl, ODIN3_LOG_WARN, want->at,
+                        "the architecture has no '%s' model; --vtr-compat builds this instance as "
+                        "soft logic, as Parmys does",
+                        name);
+    }
+}
+
+/* Reads a soft body from src; the #262 body (missing false) is marked a library unit so
+ * odin3_elab1_prefer_unit keeps the hard cell for the instances whose `#()` fits it. */
+static odin3_status read_soft_body(odin3_rv *rv, const odin3_pp_source *src, bool missing) {
+    uint32_t first = odin3_ast_root_count(rv->ast);
+    odin3_status st = read_library(rv, src);
+    return st == ODIN3_OK && !missing
+               ? odin3_ast_mark_units(rv->ast, first, odin3_ast_root_count(rv->ast),
+                                      ODIN3_UNIT_LIB | ODIN3_UNIT_VTR_COMPAT)
+               : st;
+}
+
 /* D18 (soft_blocks.h): an instance of a primitive the arch has no model of, with --vtr-compat,
- * is built from lib/soft_primitives/<name>.v, read as a library unit; the instance is warned. */
+ * is built from lib/soft_primitives/<name>.v, read as a library unit; the instance is warned.
+ * #262: the same body is read when the arch has the model but an instance's `#()` does not fit the
+ * hard cell (an `adder #(W)` on the 1-bit adder): the cell cannot take the instance, and the soft
+ * body is the parameterized form Parmys supplies. The body is then marked a library unit so
+ * odin3_elab1_prefer_unit keeps the cell for the instances that do fit it. */
 static odin3_status read_soft_block(odin3_rv *rv, const odin3_rv_want *want) {
     const char *name = text_of(rv, want->name);
     char dir[SOFT_DIR_CAP];
     char tried[SOFT_DIR_CAP];
-    bool found = odin3_soft_blocks_dir(dir, tried);
+    const bool found = odin3_soft_blocks_dir(dir, tried);
     for (uint32_t i = 0; i < SOFT_BLOCK_COUNT; i++) {
-        if (((rv->soft_mask >> i) & 1U) == 0 || strcmp(name, odin3_soft_block_name(i)) != 0) {
+        const bool missing = ((rv->soft_mask >> i) & 1U) != 0;
+        const bool overflows = rv->vtr_compat && want->overflows_cell;
+        if ((!missing && !overflows) || strcmp(name, odin3_soft_block_name(i)) != 0) {
             continue;
         }
         if (!found) {
             odin3_vl_report(
                 &rv->vl, ODIN3_LOG_ERROR, want->at,
-                "--vtr-compat needs the soft body of '%s' (the architecture has no such "
-                "model) but no soft_primitives directory was found; tried %s "
-                "(set ODIN3_SOFT_PRIMITIVES_DIR)",
-                name, tried);
+                "--vtr-compat needs the soft body of '%s' (%s) but no soft_primitives directory "
+                "was found; tried %s (set ODIN3_SOFT_PRIMITIVES_DIR)",
+                name,
+                missing ? "the architecture has no such model"
+                        : "its parameters do not fit the hard cell",
+                tried);
             return ODIN3_OK; /* counted as an error by the run: the read fails */
         }
-        odin3_strbuf path;
-        odin3_strbuf_init(&path);
-        odin3_pp_source src = {0, 0, 0, want->at};
-        odin3_status st = odin3_strbuf_appendf(&path, "%s/%s.v", dir, name);
-        st = st != ODIN3_OK
-                 ? st
-                 : odin3_design_intern(rv->design, odin3_bytes_cstr("work"), &src.library);
-        st = st != ODIN3_OK
-                 ? st
-                 : odin3_design_intern(rv->design, (odin3_bytes){path.data, path.len}, &src.given);
-        src.resolved = src.given;
-        odin3_strbuf_free(&path);
+        odin3_pp_source src;
+        odin3_status st = soft_source(rv, name, dir, want->at, &src);
         if (st == ODIN3_OK) {
-            odin3_vl_report(&rv->vl, ODIN3_LOG_WARN, want->at,
-                            "the architecture has no '%s' model; --vtr-compat builds this "
-                            "instance as soft logic, as Parmys does",
-                            name);
-            st = read_library(rv, &src);
+            soft_warn(rv, want, name, missing);
+            st = read_soft_body(rv, &src, missing);
         }
         return st;
     }

@@ -54,9 +54,11 @@ typedef struct odin3_rv_opts {
  */
 /* odin3_read_verilog_files with soft_mask (soft_blocks.h): the primitives built as soft logic by
  * this read; each such module, when no design unit defines it, is read once from its soft body and
- * warned once, at its first instance. */
+ * warned once, at its first instance. vtr_compat: the read's --vtr-compat (odin3_rv.vtr_compat),
+ * which also reads a soft body for an instance of such a primitive whose `#()` does not fit the
+ * registered hard cell of that name (an `adder #(W)` on the 1-bit cell, #262). */
 odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_opts *opts,
-                                           uint32_t soft_mask, odin3_ast **out);
+                                           uint32_t soft_mask, bool vtr_compat, odin3_ast **out);
 
 odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts *opts,
                                       odin3_ast **out);
@@ -66,18 +68,21 @@ odin3_status odin3_read_verilog_files(odin3_design *design, const odin3_rv_opts 
 /* What a name is known as (odin3_rv.defined values, bits). */
 enum { ODIN3_RV_DESIGN = 1, ODIN3_RV_LIBRARY = 2, ODIN3_RV_UDP = 4 };
 
-/* An instantiated module name and the loc of its first instantiation (odin3_rv.wanted). */
+/* An instantiated module name, the loc of its first instantiation (odin3_rv.wanted) and whether
+ * any of its instances' `#()` does not fit the registered cell type of that name (the reader then
+ * reads the primitive's soft body under --vtr-compat, #262). */
 typedef struct odin3_rv_want {
     uint32_t name;
     odin3_loc at;
+    bool overflows_cell;
 } odin3_rv_want;
 
 /*
  * One read run: the design, the store being built, the preprocessor, the parser's run context,
  * the finished project record (NULL: none) and the name sets: defined (module or UDP name →
- * ODIN3_RV_* bits), wanted (odin3_rv_want, in order of first instantiation) with its set
- * wanted_set, libread (resolved paths of the library files read). swept is the first node ID
- * not yet swept for names; bytes the stream bytes parsed; ndesign the design UNITs' count;
+ * ODIN3_RV_* bits), wanted (odin3_rv_want, in order of first instantiation; wanted_set maps a name
+ * to the entry's index + 1), libread (resolved paths of the library files read). swept is the first
+ * node ID not yet swept for names; bytes the stream bytes parsed; ndesign the design UNITs' count;
  * libfiles_read: every -v file has been read.
  */
 typedef struct odin3_rv {
@@ -95,6 +100,7 @@ typedef struct odin3_rv {
     uint32_t ndesign;
     bool libfiles_read;
     uint32_t soft_mask; /* soft_blocks.h: primitives built as soft logic here */
+    bool vtr_compat;    /* the read's --vtr-compat: the soft-body fallback of a full hard cell */
     bool keep; /* odin3_rv_read keeps each preprocessed stream in rv->ast (design files of --lib) */
 } odin3_rv;
 

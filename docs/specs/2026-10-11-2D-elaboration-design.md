@@ -824,13 +824,16 @@ black boxes): a library unit has a body and is fully elaborated where it is inst
   1. every value fits a parameter of the cell (no `#()`; ordered values no more than the cell's
      parameters; every named parameter one of the cell's): the **hard cell**, with one info line per
      name (`instance of 'adder' uses the hard cell 'adder': its parameters fit the cell, so the
-     library unit of that name (read with --lib) is not used`). The 1-bit `adder u(...)` therefore
-     stays the hard block the BLIF goldens instantiate;
+     unit of that name is not used`). The 1-bit `adder u(...)` therefore stays the hard block the
+     BLIF goldens instantiate;
   2. otherwise (`adder #(4)`, `adder #(.WIDTH(4))`) the **library unit**, with the warning `instance of
-     'adder' uses the library unit 'adder' (read with --lib), not the hard cell of that name: its
-     parameters do not fit the cell`, once per `INSTANTIATION`.
+     'adder' uses the library unit 'adder' of that name, not the hard cell: its parameters do not
+     fit the cell`, once per `INSTANTIATION`.
   The decision reads only the parameter list (not port names or widths). A design that wants one
   meaning everywhere reads no `--lib` file defining the name, or no tech library defining the cell.
+  The same rule settles the reader's `--vtr-compat` soft body (#262): `read_verilog` reads
+  `lib/soft_primitives/<name>.v` when an instance's `#()` does not fit the registered model's cell,
+  so the overflowing instances take that parameterized unit and the fitting ones keep the cell.
   The unit's modules take the `$2` suffix on a clash with the cell type (EL-9), so
   `odin3_module_create` never sees the name; a shadowing unit cannot be the `--top` (`unknown_top:
   'adder' is a library unit with the name of a registered cell type, so it cannot be the top;

@@ -1,5 +1,6 @@
 // Soft body of the VTR primitive `adder` (Odin III's own behavioural description, MIT). Read only
-// when the architecture record has no `adder` model (4.2 D18).
+// when the architecture record has no `adder` model, or an instance's `#()` does not fit the 1-bit
+// hard cell of that name (4.2 D18, #262).
 module adder #(
     parameter WIDTH = 1
 ) (

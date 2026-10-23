@@ -360,6 +360,33 @@ static void test_no_lib_read_keeps_error(void) {
     TEST_ASSERT_TRUE(et_count_with(&rs, ODIN3_LOG_ERROR, "too many parameter values") > 0);
 }
 
+/* #262: under --vtr-compat an instance whose #() does not fit the hard cell reads the primitive's
+ * soft body (lib/soft_primitives/adder.v, the parameterized form Parmys supplies), marked as a
+ * library unit so the elaboration warns at the instance and the cell is not used. */
+static void test_vtr_compat_soft_body_when_params_do_not_fit(void) {
+    et_src srcs[] = {{"t.v", "module top (input [3:0] a, b, input c, output [3:0] s, output o);\n"
+                             "  adder #(4) u (.a(a), .b(b), .cin(c), .sumout(s), .cout(o));\n"
+                             "endmodule\n"}};
+    setup_files(srcs, 1, TECHLIB);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--vtr-compat t.v"), et_log(&rs));
+    TEST_ASSERT_NOT_NULL_MESSAGE(module_like("adder"), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, cells_of("adder"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_WARN, "library unit 'adder'"),
+                                     et_log(&rs));
+}
+
+/* A fitting instance reads no soft body: the hard cell stays, silently (no #262 fallback). */
+static void test_vtr_compat_keeps_hard_cell_without_overflow(void) {
+    et_src srcs[] = {{"t.v", "module top (input a, b, c, output s, output o);\n"
+                             "  adder u (.a(a), .b(b), .cin(c), .sumout(s), .cout(o));\n"
+                             "endmodule\n"}};
+    setup_files(srcs, 1, TECHLIB);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--vtr-compat t.v"), et_log(&rs));
+    TEST_ASSERT_NULL(module_like("adder"));
+    TEST_ASSERT_EQUAL_UINT32(1, cells_of("adder"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.warnings, et_log(&rs));
+}
+
 /* I1 (PR 2D-7b review): a library unit is preprocessed under the macros of the read that made
  * it. The design file defines WIDE before it instantiates `sub`; the --lib read never saw WIDE,
  * so the unit it kept is the #else one (named `sub`), not the #ifdef one (`sub_wide`). */
@@ -414,6 +441,8 @@ static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     X(test_hard_cell_kept_when_params_fit)                                                         \
     X(test_named_parameter_not_on_hard_cell)                                                       \
     X(test_no_lib_read_keeps_error)                                                                \
+    X(test_vtr_compat_soft_body_when_params_do_not_fit)                                            \
+    X(test_vtr_compat_keeps_hard_cell_without_overflow)                                            \
     X(test_lib_unit_keeps_its_own_macros)                                                          \
     X(test_lib_unit_sees_macro_of_unitless_lib_file)
 

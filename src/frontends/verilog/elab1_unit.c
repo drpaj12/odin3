@@ -39,12 +39,13 @@ static bool cell_has_param(const odin3_celltype_def *type, const char *text) {
 
 /* Whether the `#()` of INSTANTIATION item fits the cell type's parameters. A mixed list is left
  * to the parameter code, which reports it whichever target wins. */
-static bool params_fit(const odin3_elab1 *e1, odin3_ast_id item, const odin3_celltype_def *type) {
-    const odin3_ast *ast = e1->parsed;
+bool odin3_elab1_params_fit(const odin3_ast *ast, const odin3_design *design, odin3_ast_id item,
+                            const odin3_celltype_def *type) {
     odin3_ast_span entries = odin3_ast_children(ast, odin3_ast_child(ast, item, 0));
+    const odin3_strtab *strs = odin3_design_strtab(design);
     for (uint32_t i = 0; i < entries.n; i++) {
         uint32_t name = odin3_ast_name(ast, entries.ids[i]);
-        if (name == 0 ? i >= type->n_params : !cell_has_param(type, odin3_elab1_str(e1, name))) {
+        if (name == 0 ? i >= type->n_params : !cell_has_param(type, odin3_strtab_get(strs, name))) {
             return false;
         }
     }
@@ -75,10 +76,10 @@ void odin3_elab1_prefer_unit(odin3_elab1 *e1, odin3_ast_id item, odin3_elab_res 
         return;
     }
     const odin3_celltype_def *type = odin3_celltype_get(e1->design, type_id);
-    if (!params_fit(e1, item, type)) {
+    if (!odin3_elab1_params_fit(e1->parsed, e1->design, item, type)) {
         odin3_elab1_warn_once(e1, item,
-                              "instance of '%s' uses the library unit '%s' (read with --lib), not "
-                              "the hard cell of that name: its parameters do not fit the cell",
+                              "instance of '%s' uses the library unit '%s' of that name, not the "
+                              "hard cell: its parameters do not fit the cell",
                               type->name, type->name);
         return;
     }
@@ -87,7 +88,7 @@ void odin3_elab1_prefer_unit(odin3_elab1 *e1, odin3_ast_id item, odin3_elab_res 
     if (first_cell_note(e1, name)) {
         odin3_elab1_info(e1, odin3_ast_loc(e1->parsed, item),
                          "instance of '%s' uses the hard cell '%s': its parameters fit the cell, "
-                         "so the library unit of that name (read with --lib) is not used",
+                         "so the unit of that name is not used",
                          type->name, type->name);
     }
 }
