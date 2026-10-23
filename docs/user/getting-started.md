@@ -5,8 +5,10 @@ are cut to the lines that matter.
 
 ## Build
 
-You need CMake 3.25 or later, Ninja, a C compiler (gcc or clang), `bison`, `flex` and
-`libreadline-dev`. The ABC logic optimiser is a git submodule and is built with Odin III.
+You need CMake 3.28 or later (the default `ODIN3_WITH_SLANG=ON` build needs it; configure
+with `-DODIN3_WITH_SLANG=OFF` to build the core with CMake 3.25), Ninja, a C compiler (gcc or
+clang), `bison`, `flex` and `libreadline-dev`. The ABC logic optimiser is a git submodule and
+is built with Odin III.
 
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git
@@ -24,7 +26,8 @@ odin3 --version
 ```
 
 ```text
-odin3 1.0.0 (ABI 5)
+odin3 1.1.0 (ABI 6)
+SystemVerilog via slang (adapters/slang, third_party/slang)
 linked ABC a3001b72edc5de22442e942165487fddf150e3d0 (adapters/abc/NOTICE)
 ```
 

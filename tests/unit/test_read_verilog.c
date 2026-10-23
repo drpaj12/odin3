@@ -34,6 +34,9 @@
 #ifndef ODIN3_PROJECT_FIXTURES
 #error "ODIN3_PROJECT_FIXTURES must name tests/golden/projects"
 #endif
+#ifndef ODIN3_LIB_DIR
+#error "ODIN3_LIB_DIR must name lib"
+#endif
 
 #define D ODIN3_RV_DATA
 #define C ODIN3_PROJECT_FIXTURES
@@ -242,13 +245,13 @@ static void test_no_verilog_files(void) {
                "read_verilog: no Verilog files\n");
 }
 
-/* A SystemVerilog file of the record: unsupported_language naming it, at its project word. */
+/* A project mixing Verilog and SystemVerilog: v1.1.0 reads the two languages through different
+ * front ends and refuses the mixed read (the adapter's own reads are test_read_slang's). */
 static void test_unsupported_language(void) {
     enter(D "/sv");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "p.o3proj"));
     expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only"),
-               "p.o3proj:3:20: error: unsupported_language: no SystemVerilog reader yet: "
-               "'src/b.sv'\n");
+               "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet\n");
     TEST_ASSERT_EQUAL_INT(1, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
 }
@@ -702,6 +705,20 @@ static void test_oom_sweep(void) {
     (void)oom_sweep(&elab);
 }
 
+/* v1.1.0: an instance of a registered bit-granularity cell type (a library gate, read_techlib)
+ * binds to that cell type, so write_verilog's gate-cell netlists read back (the SV roundtrip). */
+static void test_bit_cell_type_instance(void) {
+    enter(tmp);
+    put_tmp("g.v", odin3_bytes_cstr("module g (input wire a, output wire y);\n"
+                                    "  BUF u_buf (.A(a), .Y(y));\n"
+                                    "endmodule\n"));
+    char lib[PATH_BUF];
+    (void)snprintf(lib, sizeof lib, "%s/cmos6.o3lib", ODIN3_LIB_DIR);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_techlib", lib));
+    expect_log(ODIN3_OK, run("read_verilog", "g.v"), "");
+    expect_log(ODIN3_OK, run("stats", ""), "module g: cell BUF 1\n");
+}
+
 /* The store's accessor: an index at or past the root count is ignored. */
 static void test_library_units_from_accessor(void) {
     odin3_ast *ast = NULL;
@@ -749,6 +766,7 @@ int main(void) {
     RUN_TEST(test_error_cap_mixed);
     RUN_TEST(test_diag_paths_resolved);
     RUN_TEST(test_check_runs);
+    RUN_TEST(test_bit_cell_type_instance);
     RUN_TEST(test_oom_sweep);
     RUN_TEST(test_library_units_from_accessor);
     return UNITY_END();

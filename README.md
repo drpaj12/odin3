@@ -1,13 +1,13 @@
 # Odin III
 
 An open-source (MIT) HDL elaboration and front-end synthesis framework for FPGA CAD research, the
-successor to Odin (FPL 2005) and Odin II (FCCM 2010). It reads Verilog-2005, plus BLIF, Yosys
-JSON, structural gate-level Verilog and VPR architecture files, into one hierarchical,
-provenance-tracked IR. It does architecture-driven partial mapping, links ABC for soft logic, and
+successor to Odin (FPL 2005) and Odin II (FCCM 2010). It reads SystemVerilog (via the vendored
+slang adapter), Verilog-2005, plus BLIF, Yosys JSON, structural gate-level Verilog and VPR
+architecture files, into one hierarchical, provenance-tracked IR. It does architecture-driven partial mapping, links ABC for soft logic, and
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-**Status: version 1.0.0; next: v1.1.0 (SystemVerilog via vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.1.0 (SystemVerilog via the vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [`docs/RELEASE-NOTES-1.0.md`](docs/RELEASE-NOTES-1.0.md). Changes:
 [`CHANGELOG.md`](CHANGELOG.md). Design: [`docs/DESIGN.md`](docs/DESIGN.md).
 
@@ -31,8 +31,8 @@ Start at the Yggdrasil III hub; every manual links to the others.
 
 ## Install
 
-From source (Ubuntu 24.04, native or WSL2; CMake 3.25 or later, Ninja, gcc or clang, `bison`,
-`flex`, `libreadline-dev`):
+From source (Ubuntu 24.04, native or WSL2; CMake 3.28 or later for the default
+`ODIN3_WITH_SLANG=ON` build, Ninja, gcc or clang, `bison`, `flex`, `libreadline-dev`):
 
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git && cd odin3

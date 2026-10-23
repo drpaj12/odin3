@@ -153,8 +153,8 @@ static uint32_t sink_of_type(odin3_ref net, const char *type) {
 
 /* 2D's additions (process counts, value kind PROC, the pass processes slot) stay v4 (ruling I1),
  * and so do 3D's (the pass-run accessors; spec Q4, plan point (d)). */
-static void test_abi_version_is_5(void) {
-    TEST_ASSERT_EQUAL_UINT32(5, odin3_abi_version());
+static void test_abi_version_is_6(void) {
+    TEST_ASSERT_EQUAL_UINT32(6, odin3_abi_version());
 }
 
 /* A BLIF design has no processes; a module ID past the design's is refused (2D Task 6). */
@@ -806,7 +806,7 @@ static void test_logging(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_abi_version_is_5);
+    RUN_TEST(test_abi_version_is_6);
     RUN_TEST(test_module_proc_count);
     RUN_TEST(test_design_modules_and_top);
     RUN_TEST(test_design_null_and_bad_arguments);

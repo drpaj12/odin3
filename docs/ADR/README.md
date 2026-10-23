@@ -19,6 +19,7 @@ beyond the spec's literal wording.
 | [D10](D10.md) | v1.0 scope (2026-10-19) | Accepted | 2026-10-19 | Phase 4 = VTR archs plus Altera via LPM; Phase 5 delayed; Phase 6 removed; amends D5, D6; touches D2. Phase numbering superseded by D11. |
 | [D11](D11.md) | v1.0 phase plan (2026-10-19) | Accepted | 2026-10-19 | 4 = VTR archs + FSM; 5 = outputs and read-back (LPM light, Verilog/JSON/BLIF read-back with HDL locations); 6 = analysis flow and provenance gate; 7 = release; old 5/6 after v1.0. |
 | [D12](D12.md) | Phase 7 = release; CIRCT writer dropped (2026-10-21) | Accepted | 2026-10-21 | 7.3 flow script + user docs, 7.4 RE core support (submod, design copy, cone_check, raise), 7.6 source + pip release; no API stability promise; amends D7. |
+| [D13](D13.md) | v1.1.0 scope: vendored slang SV adapter (2026-10-22) | Accepted | 2026-10-22 | slang v12.0 vendored; `adapters/slang` emits the elaborated Odin AST; ABI v6 reader seam; structural Verilog roundtrip; `docs/DESIGN.md` §4.2/§12.1. |
 
 Format: Nygard style (Context, Decision, Consequences, Related, Revisit if). Phase-0 decisions
 in `docs/PHASE0.md` §A.2 are cited from the ADRs they touch and are not ADRs themselves.

@@ -4,12 +4,18 @@
  * Uses only the public ABI (odin3.h): it links libodin3, so plugins it loads
  * register into the same pass registry. With ODIN3_HAVE_ABC it also links the
  * linked-ABC adapter (libodin3_abc.so, odin3_abc.h) and registers its engine at
- * start-up, before any --plugin (3D spec §4.3).
+ * start-up, before any --plugin (3D spec §4.3). With ODIN3_HAVE_SLANG it links
+ * the SystemVerilog adapter (libodin3_slang.so, odin3_slang.h) and registers its
+ * odin3_read_slang as the read_verilog pass's SV reader (DESIGN §4.2, ABI v6).
  */
 #include "odin3/odin3.h"
 
 #ifdef ODIN3_HAVE_ABC
 #include "odin3_abc.h"
+#endif
+
+#ifdef ODIN3_HAVE_SLANG
+#include "odin3_slang.h"
 #endif
 
 #include <stdbool.h>
@@ -144,6 +150,9 @@ static int bad_value(const char *option, const char *value, const char *why) {
 /* --version: the version and ABI lines, then the linked ABC's commit when it is registered. */
 static void print_version(const cli_state *state) {
     (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+#ifdef ODIN3_HAVE_SLANG
+    (void)printf("SystemVerilog via slang (adapters/slang, third_party/slang)\n");
+#endif
 #ifdef ODIN3_HAVE_ABC
     if (state->linked_abc) {
         (void)printf("linked ABC %s (adapters/abc/NOTICE)\n", ODIN3_ABC_COMMIT_STR);
@@ -167,6 +176,25 @@ static bool init_linked_abc(void) {
     }
     char msg[MSG_BUF];
     (void)snprintf(msg, sizeof msg, "linked ABC unavailable: %s", odin3_status_string(status));
+    (void)odin3_log_write(ODIN3_LOG_WARN, msg);
+#endif
+    return false;
+}
+
+/*
+ * Registers the linked SystemVerilog reader (DESIGN §4.2): read_verilog hands .sv files to it.
+ * A failure is the warning "SystemVerilog reader unavailable: <status>", and reads of .sv files
+ * then fail with "no SystemVerilog reader registered". True when registered.
+ */
+static bool init_linked_slang(void) {
+#ifdef ODIN3_HAVE_SLANG
+    odin3_status status = odin3_sv_reader_register(odin3_read_slang);
+    if (status == ODIN3_OK) {
+        return true;
+    }
+    char msg[MSG_BUF];
+    (void)snprintf(msg, sizeof msg, "SystemVerilog reader unavailable: %s",
+                   odin3_status_string(status));
     (void)odin3_log_write(ODIN3_LOG_WARN, msg);
 #endif
     return false;
@@ -454,6 +482,7 @@ static bool apply_string_options(const cli_state *state) {
 int main(int argc, char **argv) {
     cli_state state = {0};
     state.linked_abc = init_linked_abc();
+    (void)init_linked_slang();
     for (int i = 1; i < argc; i++) {
         int rc = scan_one(argv, argc, &i, &state);
         if (rc != EXIT_OK) {

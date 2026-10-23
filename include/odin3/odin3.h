@@ -23,6 +23,8 @@
  *   ODIN3_ABC_ENGINE_VERSION 2.
  * ABI v5 (cont., v1.0.3 S1): simulations (odin3_simulation_*): open a top, find signals, set
  *   inputs, step, read values, reset, close; passes are refused while a simulation is open.
+ * ABI v6 (v1.1.0 SystemVerilog): odin3_sv_reader_register, the seam the read_verilog pass drives
+ *   for a .sv file through the slang adapter (adapters/slang/odin3_slang.h, DESIGN §4.2).
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -47,13 +49,13 @@ extern "C" {
 #endif
 
 #define ODIN3_VERSION_MAJOR 1
-#define ODIN3_VERSION_MINOR 0
+#define ODIN3_VERSION_MINOR 1
 #define ODIN3_VERSION_PATCH 0
 
 /* ODIN3_CDEF_BEGIN */
 
 /* Incremented on every incompatible change to this header. */
-enum { ODIN3_ABI_VERSION = 5 };
+enum { ODIN3_ABI_VERSION = 6 };
 
 /* Result of every fallible Odin III function. ODIN3_OK is always 0. */
 typedef enum odin3_status {
@@ -1662,6 +1664,63 @@ odin3_status odin3_ast_build_intern(odin3_ast *ast, const char *str, uint32_t *n
  * readers work before and after.
  */
 odin3_status odin3_ast_finish(odin3_ast *ast);
+
+/* --- the SystemVerilog reader seam (ABI v6, v1.1.0; DESIGN §4.2) ----------------------------- */
+
+/*
+ * One macro a SystemVerilog read defines (a project record's `define): name is the macro name;
+ * with has_value the body is value (possibly ""), without it the body is empty (`define name
+ * with nothing after it). Both strings are NUL-terminated and borrowed: valid during the read.
+ */
+typedef struct odin3_sv_define {
+    const char *name;
+    const char *value;
+    bool has_value;
+    uint8_t reserved_pad;
+} odin3_sv_define;
+
+/*
+ * A SystemVerilog read's inputs and options: the resolved source paths in listing order, the top
+ * module name (NULL or "" = choose automatically), the project record's include search
+ * directories and macro definitions (in project order), and the read's elaboration options.
+ * read_verilog fills one for every SystemVerilog read (the arrays empty when the record has
+ * none). The pointers are borrowed for the duration of the read call only.
+ */
+typedef struct odin3_sv_options {
+    const char *const *paths;
+    uint32_t npaths;
+    const char *top;
+    const char *const *incdirs;
+    uint32_t nincdirs;
+    const odin3_sv_define *defines;
+    uint32_t ndefines;
+    odin3_elab_options elab;
+} odin3_sv_options;
+
+/*
+ * The body of a SystemVerilog reader, as the read_verilog pass drives it for a design whose
+ * source files are .sv/.svh (or a project's SYSTEMVERILOG entries): design is the design the read
+ * runs on, run the pass run read_verilog opened (the AST store the reader makes carries it, so the
+ * IR's SOURCE records point at it) and opts the read's inputs (the resolved paths, the top) and
+ * options (the project's include directories and defines, so a project's `include and `ifdef
+ * resolve as they do for Verilog; and its elaboration options). A reader creates the elaborated
+ * AST store itself (odin3_design_new_ast with ODIN3_AST_FORM_ELABORATED and run), fills it
+ * through the builders above, seals it with odin3_ast_finish and drives stage 2 with
+ * odin3_ast_elaborate. It returns ODIN3_OK, a located ODIN3_ERR_PARSE for source errors (the
+ * design is then fit only for destruction, as after any failed read) or another odin3_status.
+ * The adapter at adapters/slang exports the one function of this shape, odin3_read_slang; the
+ * core never links it (it is C++; the core stays C17).
+ */
+typedef odin3_status (*odin3_sv_read_fn)(odin3_design *design, uint32_t run,
+                                         const odin3_sv_options *opts);
+
+/*
+ * Makes read the process's SystemVerilog reader for later reads (the CLI registers the slang
+ * adapter's odin3_read_slang at start-up). Process-wide, not thread-safe, final: a second call
+ * with a different function is ODIN3_ERR_INVALID_ARG ("sv reader already registered"), and so is
+ * a NULL one; every call fails only with ODIN3_ERR_INVALID_ARG.
+ */
+odin3_status odin3_sv_reader_register(odin3_sv_read_fn read);
 
 /* --- source manager -------------------------------------------------------------------------- */
 

@@ -1,0 +1,14 @@
+tests/golden/slang — the v1.1.0 SystemVerilog adapter's gate golden
+
+alwaysblock2.blif is the gate-mapped netlist of
+tests/unit/data/slang/verilog-eval/Prob058_alwaysblock2_ref.sv through
+
+  read_techlib lib/cmos6.o3lib
+  read_verilog Prob058_alwaysblock2_ref.sv        (the slang adapter)
+  proc; opt; lower; abc --gates cmos6; dfflibmap cmos6
+  write_blif --gates-as-names alwaysblock2.blif
+
+run by tests/cli/slang_flow.sh (CTest cli_slang_flow), which also proves the structural Verilog
+of every fixture reads back equivalent. The BLIF is deterministic for the ABC pin (a3001b72) and
+cmos6; it records that the adapter, the gate flow and the writer together do not drift. The
+fixture is NVIDIA verilog-eval's (MIT; see tests/unit/data/slang/verilog-eval/NOTICE).

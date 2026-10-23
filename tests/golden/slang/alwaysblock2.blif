@@ -1,0 +1,22 @@
+.model RefModule
+.inputs clk a b
+.outputs out_assign out_always_comb out_always_ff
+.names $n6 out_always_ff
+1 1
+.names a $n7
+0 1
+.names b $n7 $n8
+11 0
+.names b $n9
+0 1
+.names $n9 a $n10
+11 0
+.names $n8 $n10 out_assign
+11 0
+.names out_assign $n11
+1 1
+.latch $n11 $n6 re clk 2
+.cname out_always_ff.dff_p0
+.names out_assign out_always_comb
+1 1
+.end

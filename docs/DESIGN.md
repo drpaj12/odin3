@@ -1,6 +1,6 @@
 # Odin III — Design Specification (v0.2 skeleton)
 
-Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13); v1.1.0 scope set 2026-10-22 (D12: vendored SV slang adapter §4.2 + structural Verilog netlist writer). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
+Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13); v1.1.0 scope set 2026-10-22 (D13: vendored SV slang adapter §4.2 + structural Verilog netlist writer). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
 
 ## 1. Purpose and positioning
 
@@ -277,11 +277,25 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 - Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
 - Comments kept in a side table keyed by location (not a red/green tree).
 
-### 4.2 SystemVerilog (slang adapter) (v1.1.0, D10)
+### 4.2 SystemVerilog (slang adapter) (v1.1.0, D13)
 
-Not built in v1.0; planned for v1.1.0. slang is vendored into Odin III (third_party/slang/) and the SV-to-structural-Verilog netlist writer joins it in v1.1.0, so SV designs elaborate and synthesize to structural Verilog netlists inside Odin III alone. See §12.1 for the mechanism.
+**Built in v1.1.0** (2026-10-23): slang is vendored into Odin III (`third_party/slang/`, v12.0 with its
+three dependencies; `third_party/slang/VENDORING.md` and `BUILDING.md`), `adapters/slang/` is the
+shim, and SV designs elaborate and synthesize to structural Verilog netlists inside Odin III
+alone. See §12.1 for the mechanism and `docs/V1.1.0.md` for what was built and the adapter's
+agent defaults.
 
 - slang is C++20 and MIT. `adapters/slang/` is a small C++ shim that links slang, walks its *elaborated* AST (post-parameter, post-generate), and emits the Odin III AST through the C ABI (`odin3_ast_*` builders). It exports exactly one C function, `odin3_read_slang(...)`, and is built as a separate shared library so the core stays pure C. slang handles packages, interfaces (flattened), structs, enums, `always_ff/comb/latch`, `logic`.
+- The CLI registers the adapter with `odin3_sv_reader_register` (ABI v6); `read_verilog` routes a
+  project's SYSTEMVERILOG design files, or direct `.sv`/`.svh` paths, to it. A read mixing Verilog
+  and SystemVerilog files, `--lib`, `--parse-only`, `-icells`, `-netlist` and `--vtr-compat`
+  are refused for SystemVerilog in v1.1.0; the project's include directories and defines
+  reach slang's preprocessor (`odin3_sv_options`).
+- The SV-to-structural-Verilog path is the existing gate flow: `proc; opt; lower; abc --gates L;
+  dfflibmap L; write_verilog` writes the mapped netlist as library gate cell instances
+  (BUF/INV/NAND2/NOR2/DFF family with netlist-visible names); the owned Verilog front end reads
+  such a netlist back, binding an instance of a registered bit-granularity cell type to that cell
+  type (`src/frontends/verilog/elab1_lookup.c`).
 - Source locations copied verbatim.
 
 ### 4.3 VHDL (GHDL subprocess) (deferred, D10)
@@ -420,10 +434,10 @@ graph sandwich, GNNs, placement study) are also after v1.0; they read Phase 6's 
 
 **Old Phase 5, after v1.0** (reason: Verilog is close to good enough). How each step would be done:
 
-- 5.1 slang adapter: a C++ shim in `adapters/slang/` links slang, walks its elaborated AST
-  (post-parameter, post-generate) into the `odin3_ast_*` builders, exports exactly one C function
-  (`odin3_read_slang`), and is built as a separate shared library so the core stays pure C
-  (§4.2).
+- 5.1 slang adapter (**built in v1.1.0**, `docs/V1.1.0.md`): a C++ shim in `adapters/slang/` links
+  slang, walks its elaborated AST (post-parameter, post-generate) into the `odin3_ast_*` builders,
+  exports exactly one C function (`odin3_read_slang`), and is built as a separate shared library
+  so the core stays pure C (§4.2).
 - 5.2 GHDL path: run `ghdl --synth --out=verilog` per design unit, then our Verilog front end,
   with a provenance name map from GHDL's names back to VHDL lines. Fallback if `--out=verilog`
   coverage is short (§13 Q2): link libghdl in a separately licensed optional module (§4.3).

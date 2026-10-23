@@ -1,0 +1,3 @@
+# incdir: the project's include directory must reach the slang adapter.
+incdir inc
+file systemverilog inc_top.sv

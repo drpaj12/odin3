@@ -1,0 +1,3 @@
+# define: the project's macro definition must reach the slang adapter.
+define WIDTH=4
+file systemverilog def_top.sv

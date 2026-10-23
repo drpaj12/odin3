@@ -1,0 +1,86 @@
+# ~~~
+# SPDX-FileCopyrightText: Michael Popoloski
+# SPDX-License-Identifier: MIT
+# ~~~
+
+[project]
+name = "pyslang"
+version = "12.0.0"
+description = "Python bindings for slang, a library for compiling SystemVerilog"
+readme = { file = "README.md", content-type = "text/markdown" }
+authors = [{ name = "Mike Popoloski" }]
+keywords = ["slang", "verilog", "systemverilog", "parsing", "compiler", "eda"]
+license = { file = "LICENSE" }
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: Unix",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Electronic Design Automation (EDA)",
+    "Topic :: Software Development :: Compilers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.11"
+dependencies = ["nanobind-backend >= 1.0"]
+
+[project.urls]
+Homepage = "https://sv-lang.com/"
+Documentation = "https://sv-lang.com/pyslang/"
+Repository = "https://github.com/MikePopoloski/slang"
+Issues = "https://github.com/MikePopoloski/slang/issues"
+Changelog = "https://github.com/MikePopoloski/slang/blob/master/CHANGELOG.md"
+
+[project.optional-dependencies]
+test = ["pytest", "pyright"]
+
+[build-system]
+# nanobind-backend is needed at build time so that nanobind's stub generator can
+# import the (split-mode) extension while producing pyslang.pyi.
+requires = [
+    "nanobind >= 3.0.1,<4",
+    "nanobind-backend >= 1.0",
+    "scikit-build-core",
+]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.source-dir = "."
+install.components = ["pylib"]
+sdist.exclude = [".github", "./build", "./install", "./tests", "./tools"]
+wheel.packages = ["pyslang/pyslang"]
+wheel.install-dir = "pyslang"
+wheel.license-files = ["LICENSE"]
+# Split-mode extensions target the stable ABI; tag the wheel as cp311-abi3 so a
+# single wheel per platform covers Python 3.11+.
+wheel.py-api = "cp311"
+
+[tool.scikit-build.cmake.define]
+SLANG_INCLUDE_TESTS = "OFF"
+SLANG_INCLUDE_TOOLS = "OFF"
+SLANG_INCLUDE_PYLIB = "ON"
+
+[tool.cibuildwheel]
+archs = ["auto64"]
+manylinux-x86_64-image = "manylinux_2_28"
+manylinux-aarch64-image = "manylinux_2_28"
+# A single abi3 build per platform covers all newer Python versions.
+build = "cp311-*"
+skip = ["*musllinux*"]
+build-verbosity = 1
+test-command = "pytest {project}/pyslang/tests"
+test-extras = ["test"]
+test-skip = ["*universal2:arm64"]
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+testpaths = ["pyslang/tests"]
+
+[dependency-groups]
+dev = ["pytest>=9.0.3"]

@@ -1,0 +1,7 @@
+/* The adapter exports exactly one C function (DESIGN §4.2). */
+{
+    global:
+        odin3_read_slang;
+    local:
+        *;
+};

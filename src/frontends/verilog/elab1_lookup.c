@@ -433,7 +433,10 @@ static odin3_elab_res resolve_outside(odin3_elab1 *e1, uint32_t name) {
     odin3_celltype_id type;
     if (odin3_celltype_find(e1->design, name, &type)) {
         odin3_granularity gran = odin3_celltype_get(e1->design, type)->gran;
-        if (gran == ODIN3_GRAN_HARD || gran == ODIN3_GRAN_BLACKBOX) {
+        /* A bit-granularity cell is a library gate (read_techlib; gatemap spec 9 G-7): an
+         * instance of its name in a structural netlist binds to it, so write_verilog's output
+         * reads back through this front end (v1.1.0 roundtrip). */
+        if (gran == ODIN3_GRAN_HARD || gran == ODIN3_GRAN_BLACKBOX || gran == ODIN3_GRAN_BIT) {
             res.kind = ODIN3_RES_CELLTYPE;
             res.type = type;
             return res;
