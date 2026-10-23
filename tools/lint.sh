@@ -114,13 +114,15 @@ else
 fi
 
 # ---- 2. clang-tidy ---------------------------------------------------------------------------
-# adapters/slang/*.cpp is not in this list: its walker is recursive over slang's AST (not the IR,
-# where DESIGN 15.1 forbids recursion), so misc-no-recursion would fail on it, and the C profile
-# in .clang-tidy also trips C++-only checks. Tidying it needs a C++ profile Peter approves.
+# The C17 core (and the C ABC adapter) runs the profile in the root .clang-tidy. The SystemVerilog
+# adapter runs the C++ profile in adapters/slang/.clang-tidy (DESIGN 15.2): inheriting the root
+# file, it re-enables the checks that are C++-only there and documents every suppression with its
+# reason. clang-tidy finds that file by itself for sources below adapters/slang/.
 tidy_step() {
-    local files
+    local files cxx_files
     read_list files 'src/*.c' 'plugins/*.c' 'tests/unit/*.c' 'adapters/abc/*.c'
-    if [ "${#files[@]}" -eq 0 ]; then
+    read_list cxx_files 'adapters/slang/*.cpp' 'adapters/slang/*.hpp'
+    if [ "${#files[@]}" -eq 0 ] && [ "${#cxx_files[@]}" -eq 0 ]; then
         record clang-tidy PASS
         return
     fi
@@ -130,13 +132,23 @@ tidy_step() {
         record clang-tidy FAIL
         return
     fi
-    # ABC is on, so the ABC adapter (adapters/abc/, 3D §4.1) and its test have compile commands;
-    # nothing is built here. A build/lint configured before the adapter existed is reconfigured.
-    if [ ! -f build/lint/compile_commands.json ] ||
+    # ABC and slang are on, so the ABC adapter (adapters/abc/, 3D §4.1) and the SystemVerilog
+    # adapter (adapters/slang/, DESIGN 4.2) have compile commands; nothing is built here. A
+    # build/lint configured before either adapter existed is reconfigured.
+    local need_cfg=0
+    if [ ! -f build/lint/compile_commands.json ]; then
+        need_cfg=1
+    elif [ "${#files[@]}" -gt 0 ] &&
         ! grep -q '/adapters/abc/' build/lint/compile_commands.json; then
+        need_cfg=1
+    elif [ "${#cxx_files[@]}" -gt 0 ] &&
+        ! grep -q '/adapters/slang/' build/lint/compile_commands.json; then
+        need_cfg=1
+    fi
+    if [ "$need_cfg" -eq 1 ]; then
         echo "==> configuring build/lint for clang-tidy"
         local cfg_log="$LOG_DIR/tidy-configure.log"
-        if ! cmake -S . -B build/lint -G Ninja -DODIN3_WITH_ABC=ON \
+        if ! cmake -S . -B build/lint -G Ninja -DODIN3_WITH_ABC=ON -DODIN3_WITH_SLANG=ON \
             -DCMAKE_EXPORT_COMPILE_COMMANDS=ON >"$cfg_log" 2>&1; then
             sed 's/^/    /' "$cfg_log" >&2
             record clang-tidy FAIL
@@ -153,13 +165,30 @@ tidy_step() {
         record clang-tidy FAIL
         return
     fi
+    # slang's diagnostic and syntax headers are generated into the build tree by its codegen
+    # rules; shim.cpp does not parse without them. Asking for three of their outputs runs those
+    # two rules (a second or two) and compiles none of slang.
+    if [ "${#cxx_files[@]}" -gt 0 ]; then
+        local slang_gen_log="$LOG_DIR/tidy-slang-generate.log"
+        if ! cmake --build build/lint --target \
+            third_party/slang/source/slang/diagnostics/GeneralDiags.h \
+            third_party/slang/source/slang/syntax/AllSyntax.h \
+            third_party/slang/source/slang/parsing/TokenKind.h >"$slang_gen_log" 2>&1; then
+            echo "==> clang-tidy" >&2
+            sed 's/^/    /' "$slang_gen_log" >&2
+            record clang-tidy FAIL
+            return
+        fi
+    fi
     # clang-tidy 18 has no ExcludeHeaderFilterRegex, and third_party/unity/src/ would match a
     # relative "src/" pattern, so the header filter is anchored on the absolute repo root here
-    # (overriding the looser HeaderFilterRegex in .clang-tidy).
+    # (overriding the looser HeaderFilterRegex in .clang-tidy). adapters/slang/ is in it so the
+    # C++ profile's own header is checked; third_party/slang/ stays out.
     local root_re
     root_re=$(printf '%s' "$ROOT" | sed 's/[][\.^$*+?(){}|]/\\&/g')
     run_tool clang-tidy clang-tidy -p build/lint --quiet \
-        "--header-filter=^${root_re}/(include|src|plugins|tests/unit|adapters/abc)/" "${files[@]}"
+        "--header-filter=^${root_re}/(include|src|plugins|tests/unit|adapters/abc|adapters/slang)/" \
+        "${files[@]}" "${cxx_files[@]}"
 }
 if [ "$run_tidy" -eq 1 ]; then
     tidy_step

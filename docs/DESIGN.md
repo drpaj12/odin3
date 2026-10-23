@@ -498,7 +498,7 @@ The goal is code an agent can write and a human can review in one pass: small fu
 |---|---|---|
 | clang-format | LLVM base, 100 cols, 4-space indent; applied by a Claude Code `PostToolUse` hook and checked with `--dry-run -Werror` | yes |
 | rules | `tools/check_rules.py` (exit/abort/goto per §15.1) + `-Wvla` | yes |
-| clang-tidy | `bugprone-*`, `cert-*`, `misc-*`, `performance-*`, `readability-*` (including `readability-function-size`, `readability-function-cognitive-complexity`), `modernize-*` **off** (C, not C++) | yes |
+| clang-tidy | C17 core: `bugprone-*`, `cert-*`, `misc-*`, `performance-*`, `readability-*` (including `readability-function-size`, `readability-function-cognitive-complexity`), `modernize-*` **off** (C, not C++). `adapters/slang/` runs the C++ profile in `adapters/slang/.clang-tidy`: the same families with the C++-only checks re-enabled, a modernize subset, and a written reason per suppressed check | yes |
 | cppcheck | `--enable=warning,style,performance,portability --error-exitcode=1` | yes |
 | lizard | `-C 15` (cyclomatic complexity), `-L 60` (lines per function), `-a 5` (parameters) over `src/` | yes |
 | ASan + UBSan | `debug` CMake preset; all unit and micro tests run under it in CI | yes |
