@@ -173,6 +173,28 @@ static bool has_signed_decl(const odin3_ast *ast, bool var) {
     return false;
 }
 
+/* True when the store has at least one node of kind and every one has a nonzero loc (the
+ * provenance claim for INSTANCE and CONNECTION). */
+static bool all_have_loc(const odin3_ast *ast, uint32_t kind) {
+    uint32_t end = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_node_end(ast, &end));
+    uint32_t seen = 0;
+    for (uint32_t node = 1; node < end; node++) {
+        uint32_t k = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_kind(ast, node, &k));
+        if (k != kind) {
+            continue;
+        }
+        seen++;
+        uint32_t loc = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_loc(ast, node, &loc));
+        if (loc == 0) {
+            return false;
+        }
+    }
+    return seen > 0;
+}
+
 /* True when a DECLARATOR (a port's or a net's name) has this name. */
 static bool has_declarator(const odin3_ast *ast, const char *name) {
     uint32_t end = 0;
@@ -261,6 +283,9 @@ static void test_sv_package(void) {
     TEST_ASSERT_EQUAL_UINT32(10, count_kind(ast, ODIN3_AST_PORT_DECL, -1));
     TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_ALWAYS, ODIN3_AST_ALWAYS_ALWAYS_FF));
     TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_CASE, -1));
+    /* INSTANCE and CONNECTION nodes carry their own source location (review Low). */
+    TEST_ASSERT_TRUE(all_have_loc(ast, ODIN3_AST_INSTANCE));
+    TEST_ASSERT_TRUE(all_have_loc(ast, ODIN3_AST_CONNECTION));
     TEST_ASSERT_GREATER_THAN_UINT32(0, count_kind(ast, ODIN3_AST_NUMBER, -1));
     /* The package's wildcard import and its constants are folded: no dependency on package
      * names remains (no IDENT named OP_ADD or W). */
@@ -359,6 +384,48 @@ static void test_sv_missing_file(void) {
     expect_read_error(D "/no_such_file.sv", ODIN3_ERR_IO, "cannot read");
 }
 
+/* tri/wand/wor declarations keep their net kind (review Low). */
+static void test_sv_net_types(void) {
+    fresh_design();
+    char files[SV_PATH_MAX];
+    (void)snprintf(files, sizeof files, "%s/sv_nettypes.sv", D);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "nettypes"}));
+    const odin3_ast *ast = elaborated_store();
+    TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WAND));
+    TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WOR));
+}
+
+/* A module named m$2 does not swallow the generated name of m's second parameterization
+ * (review Low): the four MODULEs are uniquely named and m$3 is one of them. */
+static void test_sv_specialization_names(void) {
+    fresh_design();
+    char files[SV_PATH_MAX];
+    (void)snprintf(files, sizeof files, "%s/sv_special.sv", D);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "top"}));
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(4, count);
+    bool seen_m3 = false;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t module = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_at(design, i, &module));
+        const char *name = NULL;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(design, module, &name));
+        TEST_ASSERT_NOT_NULL(name);
+        if (strcmp(name, "m$3") == 0) {
+            seen_m3 = true;
+        }
+        for (uint32_t j = 0; j < i; j++) {
+            uint32_t other = 0;
+            const char *other_name = NULL;
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_at(design, j, &other));
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(design, other, &other_name));
+            TEST_ASSERT_TRUE_MESSAGE(strcmp(name, other_name) != 0, name);
+        }
+    }
+    TEST_ASSERT_TRUE(seen_m3);
+}
+
 /* A project's include directories and defines reach slang (review Medium): each project reads
  * through read_project + read_verilog; the include source read without its project fails. */
 static void test_sv_project_config(void) {
@@ -431,6 +498,8 @@ int main(void) {
     RUN_TEST(test_sv_diagnostics);
     RUN_TEST(test_sv_refused_cast);
     RUN_TEST(test_sv_missing_file);
+    RUN_TEST(test_sv_net_types);
+    RUN_TEST(test_sv_specialization_names);
     RUN_TEST(test_sv_project_config);
     RUN_TEST(test_sv_refused_constructs);
     RUN_TEST(test_read_slang_arguments);

@@ -92,6 +92,50 @@ const char *checkName(UniquePriorityCheck check) {
     }
 }
 
+/* The Odin NET_DECL sub for a slang net type; false for a kind with no Odin net declaration. */
+bool netSub(const NetType &netType, uint32_t &sub) {
+    switch (netType.netKind) {
+    case NetType::Wire:
+        sub = ODIN3_AST_NET_DECL_WIRE;
+        return true;
+    case NetType::Tri:
+        sub = ODIN3_AST_NET_DECL_TRI;
+        return true;
+    case NetType::WAnd:
+        sub = ODIN3_AST_NET_DECL_WAND;
+        return true;
+    case NetType::WOr:
+        sub = ODIN3_AST_NET_DECL_WOR;
+        return true;
+    case NetType::TriAnd:
+        sub = ODIN3_AST_NET_DECL_TRIAND;
+        return true;
+    case NetType::TriOr:
+        sub = ODIN3_AST_NET_DECL_TRIOR;
+        return true;
+    case NetType::Tri0:
+        sub = ODIN3_AST_NET_DECL_TRI0;
+        return true;
+    case NetType::Tri1:
+        sub = ODIN3_AST_NET_DECL_TRI1;
+        return true;
+    case NetType::TriReg:
+        sub = ODIN3_AST_NET_DECL_TRIREG;
+        return true;
+    case NetType::UWire:
+        sub = ODIN3_AST_NET_DECL_UWIRE;
+        return true;
+    case NetType::Supply0:
+        sub = ODIN3_AST_NET_DECL_SUPPLY0;
+        return true;
+    case NetType::Supply1:
+        sub = ODIN3_AST_NET_DECL_SUPPLY1;
+        return true;
+    default:
+        return false;
+    }
+}
+
 /* One AST node's fields, so node() takes two parameters (the code standard's limit is five). */
 struct NodeFields {
     uint32_t kind;
@@ -108,6 +152,13 @@ struct ModulePlan {
     const InstanceBodySymbol *body;
     std::string name;
     uint32_t node = 0;
+};
+
+/* A port connection's parent expression and its source range (loc/end 0 when unconnected). */
+struct ConnectionValue {
+    uint32_t value = 0;
+    uint32_t loc = 0;
+    uint32_t end = 0;
 };
 
 /* One flattened module port (an interface port yields one per modport signal). */
@@ -225,6 +276,7 @@ class Adapter {
     uint32_t emitPort(const PortInfo &p, uint32_t loc, uint32_t end);
     uint32_t emitParamDecl(const ParameterSymbol &p, uint32_t loc, uint32_t end);
     uint32_t emitNetOrVar(const Symbol &sym, bool force_net = false);
+    bool netAttributesOk(const NetSymbol &net, uint32_t loc);
     uint32_t emitInterfaces(const InstanceBodySymbol &body);
     uint32_t emitInstance(const InstanceSymbol &inst, uint32_t loc, uint32_t end);
     uint32_t emitInstantiation(const std::string &moduleName,
@@ -233,11 +285,12 @@ class Adapter {
     std::vector<uint32_t> emitConnections(const InstanceBodySymbol &body,
                                           const InstanceSymbol *inst,
                                           const std::vector<PortInfo> &portList, uint32_t loc);
-    uint32_t
+    ConnectionValue
     portConnectionValue(const PortInfo &p, const InstanceSymbol *inst,
                         const std::unordered_map<std::string_view, const PortConnection *> &byName,
                         uint32_t loc);
-    uint32_t ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst, uint32_t loc);
+    ConnectionValue ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst,
+                                         uint32_t loc);
     uint32_t emitAlways(const ProceduralBlockSymbol &pb, uint32_t loc, uint32_t end);
     uint32_t emitInitial(const ProceduralBlockSymbol &pb, uint32_t loc, uint32_t end);
     uint32_t emitContinuous(const ContinuousAssignSymbol &ca, uint32_t loc, uint32_t end);
@@ -1295,6 +1348,23 @@ uint32_t Adapter::stmtTimed(const TimedStatement &ts, uint32_t loc, uint32_t end
                 {timing(ts.timing, loc, end), stmt(ts.stmt)});
 }
 
+/* Refuses a net's drive strength, charge strength or delay with a located error; false when
+ * one is present. */
+bool Adapter::netAttributesOk(const NetSymbol &net, uint32_t loc) {
+    auto strength = net.getDriveStrength();
+    if (strength.first.has_value() || strength.second.has_value()) {
+        failf(ODIN3_ERR_PARSE, loc, "a drive strength on net '%s' is not supported",
+              std::string(net.name).c_str());
+        return false;
+    }
+    if (net.getChargeStrength().has_value() || net.getDelay() != nullptr) {
+        failf(ODIN3_ERR_PARSE, loc, "a charge strength or delay on net '%s' is not supported",
+              std::string(net.name).c_str());
+        return false;
+    }
+    return true;
+}
+
 /* --- modules and items --------------------------------------------------------------------- */
 
 std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
@@ -1416,11 +1486,12 @@ void Adapter::queueBody(const InstanceBodySymbol &body) {
     std::string base(body.getDefinition().name);
     if (plans.empty()) {
         plan.name = base; /* the top keeps its definition's name (EL-9) */
-    } else if (taken.insert(base).second) {
-        plan.name = base;
     } else {
-        plan.name = base + "$" + std::to_string(next_special++);
-        taken.insert(plan.name);
+        /* Loop until the name is free: a module literally named base$2 may be queued already. */
+        plan.name = base;
+        while (taken.count(plan.name) != 0) {
+            plan.name = base + "$" + std::to_string(next_special++);
+        }
     }
     taken.insert(plan.name);
     plans.push_back(plan);
@@ -1483,16 +1554,15 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
     uint32_t end = 0;
     bool is_net = sym.kind == SymbolKind::Net || force_net;
     const ValueSymbol &v = sym.as<ValueSymbol>();
+    uint32_t net_sub = ODIN3_AST_NET_DECL_WIRE;
     if (sym.kind == SymbolKind::Net) {
         const NetSymbol &net = sym.as<NetSymbol>();
-        auto strength = net.getDriveStrength();
-        if (strength.first.has_value() || strength.second.has_value()) {
-            failf(ODIN3_ERR_PARSE, loc, "a drive strength on net '%s' is not supported",
-                  std::string(net.name).c_str());
+        if (!netAttributesOk(net, loc)) {
             return 0;
         }
-        if (net.getChargeStrength().has_value() || net.getDelay() != nullptr) {
-            failf(ODIN3_ERR_PARSE, loc, "a charge strength or delay on net '%s' is not supported",
+        if (!netSub(net.netType, net_sub)) {
+            failf(ODIN3_ERR_PARSE, loc,
+                  "net '%s' of a net type the Odin AST has no declaration for is not supported",
                   std::string(net.name).c_str());
             return 0;
         }
@@ -1509,7 +1579,7 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
     uint32_t declr = node({ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0}, dkids);
     if (is_net) {
         uint32_t flags = v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_NET_DECL_SIGNED : 0U;
-        return node({ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WIRE, flags, loc, end, 0, 0},
+        return node({ODIN3_AST_NET_DECL, net_sub, flags, loc, end, 0, 0},
                     std::vector<uint32_t>{0, range, 0, declr});
     }
     uint32_t sub = isIntegerVar(v.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
@@ -1593,42 +1663,49 @@ std::vector<uint32_t> Adapter::emitConnections(const InstanceBodySymbol &body,
     }
     std::vector<uint32_t> conns;
     for (const PortInfo &p : portList) {
-        uint32_t value = portConnectionValue(p, inst, byName, loc);
+        ConnectionValue conn = portConnectionValue(p, inst, byName, loc);
         uint32_t name = intern(p.name);
-        conns.push_back(node({ODIN3_AST_CONNECTION, 0, 0, 0, 0, name, 0}, {value}));
+        conns.push_back(
+            node({ODIN3_AST_CONNECTION, 0, 0, conn.loc, conn.end, name, 0}, {conn.value}));
     }
     (void)body;
     return conns;
 }
 
-/* The parent expression of one child port connection (0 when it is unconnected). */
-uint32_t Adapter::portConnectionValue(
+/* The parent expression and source range of one child port connection (an unconnected port
+ * has neither). */
+ConnectionValue Adapter::portConnectionValue(
     const PortInfo &p, const InstanceSymbol *inst,
     const std::unordered_map<std::string_view, const PortConnection *> &byName, uint32_t loc) {
     if (p.is_interface) {
-        return inst != nullptr ? ifaceConnectionValue(p, *inst, loc) : 0;
+        return inst != nullptr ? ifaceConnectionValue(p, *inst, loc) : ConnectionValue{};
     }
+    ConnectionValue out;
     if (inst == nullptr || p.port == nullptr) {
-        return 0;
+        return out;
     }
     auto it = byName.find(p.port->name);
     if (it == byName.end() || it->second->getExpression() == nullptr) {
-        return 0;
+        return out;
     }
     const Expression *ce = it->second->getExpression();
+    out.loc = locOf(ce->sourceRange.start());
+    out.end = endOf(ce->sourceRange);
     /* An output or inout connection is an assignment-like expression; its left side is the
      * connection's lvalue. */
     if (ce->kind == ExpressionKind::Assignment) {
         ce = &ce->as<AssignmentExpression>().left();
     }
-    return expr(*ce);
+    out.value = expr(*ce);
+    return out;
 }
 
 /* A child's interface-port connection: the flattened "<iface instance>.<signal>" net. */
-uint32_t Adapter::ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst,
-                                       uint32_t loc) {
+ConnectionValue Adapter::ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &inst,
+                                              uint32_t loc) {
+    ConnectionValue out;
     if (p.iface == nullptr) {
-        return 0;
+        return out;
     }
     for (const PortConnection *c : inst.getPortConnections()) {
         if (c->port.kind != SymbolKind::InterfacePort || c->port.name != p.iface->name) {
@@ -1637,10 +1714,11 @@ uint32_t Adapter::ifaceConnectionValue(const PortInfo &p, const InstanceSymbol &
         auto ifaceConn = c->getIfaceConn();
         if (ifaceConn.first != nullptr && ifaceConn.first->kind == SymbolKind::Instance) {
             std::string name = std::string(ifaceConn.first->name) + "." + p.iface_signal;
-            return ident(name, loc, 0);
+            out.loc = locOf(ifaceConn.first->location);
+            out.value = ident(name, loc, 0);
         }
     }
-    return 0;
+    return out;
 }
 
 uint32_t Adapter::emitInstantiation(const std::string &moduleName,
@@ -1681,7 +1759,8 @@ uint32_t Adapter::emitInstantiation(const std::string &moduleName,
         uint32_t name = intern(std::string(inst.name));
         std::vector<uint32_t> kids = {0};
         kids.insert(kids.end(), conns.begin(), conns.end());
-        instances.push_back(node({ODIN3_AST_INSTANCE, 0, 0, 0, 0, name, 0}, kids));
+        instances.push_back(
+            node({ODIN3_AST_INSTANCE, 0, 0, locOf(inst.location), 0, name, 0}, kids));
     }
     uint32_t id = intern(moduleName);
     std::vector<uint32_t> kids = {params};
