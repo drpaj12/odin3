@@ -395,6 +395,38 @@ static void test_sv_net_types(void) {
     TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WOR));
 }
 
+/* The name of module `index` (0-based, creation order). */
+static const char *module_name_at(uint32_t index) {
+    uint32_t module = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_at(design, index, &module));
+    const char *name = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(design, module, &name));
+    TEST_ASSERT_NOT_NULL(name);
+    return name;
+}
+
+/* True when some module has this name. */
+static bool has_module_named(const char *want) {
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    for (uint32_t i = 0; i < count; i++) {
+        if (strcmp(module_name_at(i), want) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Every pair of module names differs. */
+static void expect_unique_module_names(uint32_t count) {
+    for (uint32_t i = 1; i < count; i++) {
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT_TRUE_MESSAGE(strcmp(module_name_at(i), module_name_at(j)) != 0,
+                                     module_name_at(i));
+        }
+    }
+}
+
 /* A module named m$2 does not swallow the generated name of m's second parameterization
  * (review Low): the four MODULEs are uniquely named and m$3 is one of them. */
 static void test_sv_specialization_names(void) {
@@ -405,25 +437,8 @@ static void test_sv_specialization_names(void) {
     uint32_t count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
     TEST_ASSERT_EQUAL_UINT32(4, count);
-    bool seen_m3 = false;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t module = 0;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_at(design, i, &module));
-        const char *name = NULL;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(design, module, &name));
-        TEST_ASSERT_NOT_NULL(name);
-        if (strcmp(name, "m$3") == 0) {
-            seen_m3 = true;
-        }
-        for (uint32_t j = 0; j < i; j++) {
-            uint32_t other = 0;
-            const char *other_name = NULL;
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_at(design, j, &other));
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_name(design, other, &other_name));
-            TEST_ASSERT_TRUE_MESSAGE(strcmp(name, other_name) != 0, name);
-        }
-    }
-    TEST_ASSERT_TRUE(seen_m3);
+    TEST_ASSERT_TRUE(has_module_named("m$3"));
+    expect_unique_module_names(count);
 }
 
 /* A project's include directories and defines reach slang (review Medium): each project reads
