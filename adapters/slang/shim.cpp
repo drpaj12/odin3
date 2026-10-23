@@ -93,6 +93,7 @@ struct PortInfo {
     const PortSymbol* port = nullptr;
     const InterfacePortSymbol* iface = nullptr;
     std::string iface_signal; /* for an interface port: the signal name in the interface */
+    SourceLocation loc;       /* the port's or modport signal's declaration */
 };
 
 class Adapter {
@@ -144,6 +145,7 @@ private:
     uint32_t assignStmt(const Expression &e, bool nonblocking);
     uint32_t blockStmt(const BlockStatement &b);
     uint32_t timing(const TimingControl &t, uint32_t loc, uint32_t end);
+    uint32_t eventExpr(const SignalEventControl &se, uint32_t loc, uint32_t end);
 
     /* --- modules and items --- */
     std::vector<PortInfo> ports(const InstanceBodySymbol &body);
@@ -831,14 +833,7 @@ uint32_t Adapter::timing(const TimingControl &t, uint32_t loc, uint32_t end) {
     switch (t.kind) {
         case TimingControlKind::SignalEvent: {
             const auto &se = t.as<SignalEventControl>();
-            uint32_t sub = ODIN3_AST_EVENT_EXPR_NONE;
-            if (se.edge == EdgeKind::PosEdge) {
-                sub = ODIN3_AST_EVENT_EXPR_POSEDGE;
-            }
-            else if (se.edge == EdgeKind::NegEdge) {
-                sub = ODIN3_AST_EVENT_EXPR_NEGEDGE;
-            }
-            uint32_t event = node(ODIN3_AST_EVENT_EXPR, sub, 0, loc, end, 0, 0, {expr(se.expr)});
+            uint32_t event = eventExpr(se, loc, end);
             return node(ODIN3_AST_EVENT_CONTROL, 0, 0, loc, end, 0, 0,
                         std::vector<uint32_t>{0, event});
         }
@@ -846,7 +841,12 @@ uint32_t Adapter::timing(const TimingControl &t, uint32_t loc, uint32_t end) {
             const auto &el = t.as<EventListControl>();
             std::vector<uint32_t> events = {0};
             for (const TimingControl *ev : el.events) {
-                events.push_back(timing(*ev, loc, end));
+                if (ev->kind == TimingControlKind::SignalEvent) {
+                    events.push_back(eventExpr(ev->as<SignalEventControl>(), loc, end));
+                }
+                else {
+                    failf(ODIN3_ERR_PARSE, loc, "this event list entry is not supported");
+                }
             }
             return node(ODIN3_AST_EVENT_CONTROL, 0, 0, loc, end, 0, 0, events);
         }
@@ -857,6 +857,17 @@ uint32_t Adapter::timing(const TimingControl &t, uint32_t loc, uint32_t end) {
             failf(ODIN3_ERR_PARSE, loc, "this timing control is not supported in an always");
             return 0;
     }
+}
+
+uint32_t Adapter::eventExpr(const SignalEventControl &se, uint32_t loc, uint32_t end) {
+    uint32_t sub = ODIN3_AST_EVENT_EXPR_NONE;
+    if (se.edge == EdgeKind::PosEdge) {
+        sub = ODIN3_AST_EVENT_EXPR_POSEDGE;
+    }
+    else if (se.edge == EdgeKind::NegEdge) {
+        sub = ODIN3_AST_EVENT_EXPR_NEGEDGE;
+    }
+    return node(ODIN3_AST_EVENT_EXPR, sub, 0, loc, end, 0, 0, {expr(se.expr)});
 }
 
 uint32_t Adapter::blockStmt(const BlockStatement &b) {
@@ -1107,6 +1118,7 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
             info.dir = p.direction;
             info.port = &p;
             info.internal = p.internalSymbol;
+            info.loc = p.location;
             if (p.internalSymbol != nullptr) {
                 const Symbol &in = *p.internalSymbol;
                 if (in.kind == SymbolKind::Variable) {
@@ -1142,6 +1154,7 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
                     info.is_interface = true;
                     info.iface = &ip;
                     info.internal = mp.internalSymbol;
+                    info.loc = mp.location;
                     if (mp.internalSymbol != nullptr &&
                         ValueSymbol::isKind(mp.internalSymbol->kind)) {
                         info.type = &mp.internalSymbol->as<ValueSymbol>().getType();
@@ -1162,6 +1175,7 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
                     info.iface = &ip;
                     info.internal = &m;
                     info.type = &m.as<ValueSymbol>().getType();
+                    info.loc = m.location;
                     out.push_back(info);
                 }
             }
@@ -1220,7 +1234,11 @@ uint32_t Adapter::emitPort(const PortInfo &p, uint32_t loc, uint32_t end) {
         sub = ODIN3_AST_PORT_DECL_INOUT;
     }
     uint32_t name = intern(p.name);
-    std::vector<uint32_t> dkids = {0};
+    uint32_t init = 0;
+    if (p.port != nullptr && p.port->getInitializer() != nullptr) {
+        init = expr(*p.port->getInitializer());
+    }
+    std::vector<uint32_t> dkids = {init};
     dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
     uint32_t declr = node(ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0, dkids);
     return node(ODIN3_AST_PORT_DECL, sub, flags, loc, end, 0, 0,
@@ -1443,17 +1461,17 @@ std::vector<uint32_t> Adapter::emitInterfaceAssigns(const InstanceSymbol &ifaceI
 
 uint32_t Adapter::emitModule(ModulePlan plan) {
     const InstanceBodySymbol &body = *plan.body;
-    uint32_t loc = locOf(body.parentInstance != nullptr ? body.parentInstance->location
-                                                        : body.location);
-    if (body.parentInstance == nullptr) {
+    uint32_t loc = locOf(body.getDefinition().location);
+    if (loc == 0) {
         loc = locOf(body.location);
     }
-    uint32_t end = loc;
+    uint32_t end = 0;
     collectModuleNames(body);
     std::vector<PortInfo> portList = ports(body);
     std::vector<uint32_t> portDecls;
     for (const PortInfo &p : portList) {
-        portDecls.push_back(emitPort(p, loc, end));
+        uint32_t ploc = locOf(p.loc);
+        portDecls.push_back(emitPort(p, ploc != 0 ? ploc : loc, 0));
     }
     uint32_t portList_node = listNode(portDecls, loc, end);
     std::vector<uint32_t> paramDecls;
@@ -1653,6 +1671,11 @@ odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, u
             (void)odin3_log_write(ODIN3_LOG_ERROR, "read_slang: invalid path argument");
             return ODIN3_ERR_INVALID_ARG;
         }
+    }
+    if (opts != NULL && opts->auto_blackbox) {
+        (void)odin3_log_write(ODIN3_LOG_ERROR,
+                              "read_slang: --auto-blackbox is not supported for SystemVerilog");
+        return ODIN3_ERR_INVALID_ARG;
     }
 
     SourceManager slsm;

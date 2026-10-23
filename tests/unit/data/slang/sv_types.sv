@@ -37,13 +37,15 @@ module dut (
         endcase
     end
 
-    always_ff @(posedge clk) begin
-        if (rst)
+    always_ff @(posedge clk or negedge rst) begin
+        if (!rst)
             state <= IDLE;
         else
             state <= next_state;
-        q <= p.lo ^ p.hi;
     end
+
+    always_ff @(posedge clk)
+        q <= p.lo ^ p.hi;
 
     always_latch begin
         if (a[0])

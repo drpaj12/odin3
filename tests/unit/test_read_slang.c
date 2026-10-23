@@ -44,11 +44,16 @@ static void fresh_design(void) {
     TEST_ASSERT_NOT_NULL(design);
 }
 
-/* Runs read_verilog on the files (space separated) with top and returns its status. */
-static odin3_status read_sv(const char *files, const char *top) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(top));
-    odin3_status st = odin3_design_run_pass(design, "read_verilog", files);
-    return st;
+/* One SystemVerilog read: the files (space separated) and the top. */
+struct sv_case {
+    const char *files;
+    const char *top;
+};
+
+/* Runs read_verilog for the case and returns its status. */
+static odin3_status read_sv(struct sv_case one) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(one.top));
+    return odin3_design_run_pass(design, "read_verilog", one.files);
 }
 
 static uint32_t top_module(void) {
@@ -72,9 +77,31 @@ static const odin3_ast *elaborated_store(void) {
     return ast;
 }
 
-/* Counts the nodes of kind (and sub, when sub >= 0) in the elaborated store; checks every node's
- * range decodes and loc <= end within one buffer (AST-2's invariant). */
-static uint32_t count_kind(const odin3_ast *ast, uint32_t kind, int sub) {
+/* AST-2's range invariant of one node: a nonzero loc and end decode, and loc <= end when both
+ * lie in one buffer. */
+static void check_node_range(const odin3_ast *ast, odin3_srcman *sm, uint32_t node) {
+    uint32_t loc = 0;
+    uint32_t end = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_loc(ast, node, &loc));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_end(ast, node, &end));
+    odin3_srcpos pos = {0};
+    odin3_srcpos epos = {0};
+    if (loc != 0) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_get_position(sm, loc, &pos));
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, pos.buffer);
+        TEST_ASSERT_GREATER_THAN_UINT32(0, pos.line);
+    }
+    if (end != 0) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_get_position(sm, end, &epos));
+    }
+    if (loc != 0 && end != 0 && pos.buffer == epos.buffer) {
+        TEST_ASSERT_LESS_OR_EQUAL_UINT32(end, loc);
+    }
+}
+
+/* Counts the nodes of kind (and sub, when sub >= 0) in the elaborated store, checking every
+ * node's source range on the way (AST-2). */
+static uint32_t count_kind(const odin3_ast *ast, uint32_t kind, int want_sub) {
     odin3_srcman *sm = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_srcman(design, &sm));
     TEST_ASSERT_NOT_NULL(sm);
@@ -84,29 +111,11 @@ static uint32_t count_kind(const odin3_ast *ast, uint32_t kind, int sub) {
     uint32_t found = 0;
     for (uint32_t node = 1; node < end; node++) {
         uint32_t k = 0;
-        uint32_t s = 0;
-        uint32_t loc = 0;
-        uint32_t node_end = 0;
+        uint32_t sub = 0;
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_kind(ast, node, &k));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_sub(ast, node, &s));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_loc(ast, node, &loc));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_end(ast, node, &node_end));
-        if (loc != 0) {
-            odin3_srcpos pos = {0};
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_get_position(sm, loc, &pos));
-            TEST_ASSERT_NOT_EQUAL_UINT32(0, pos.buffer);
-            TEST_ASSERT_GREATER_THAN_UINT32(0, pos.line);
-        }
-        if (node_end != 0) {
-            odin3_srcpos pos = {0};
-            odin3_srcpos epos = {0};
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_srcman_get_position(sm, node_end, &epos));
-            if (loc != 0 && odin3_srcman_get_position(sm, loc, &pos) == ODIN3_OK &&
-                pos.buffer == epos.buffer) {
-                TEST_ASSERT_LESS_OR_EQUAL_UINT32(node_end, loc);
-            }
-        }
-        if (k == kind && (sub < 0 || s == (uint32_t)sub)) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_sub(ast, node, &sub));
+        check_node_range(ast, sm, node);
+        if (k == kind && (want_sub < 0 || sub == (uint32_t)want_sub)) {
             found++;
         }
     }
@@ -183,7 +192,7 @@ static void test_sv_package(void) {
                    "%s/../../../golden/projects/sv_package/src/alu.sv "
                    "%s/../../../golden/projects/sv_package/src/top.sv",
                    D, D, D);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv(files, "top"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "top"}));
     uint32_t count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
     TEST_ASSERT_EQUAL_UINT32(2, count);
@@ -218,40 +227,49 @@ static void test_sv_types(void) {
     fresh_design();
     char files[SV_PATH_MAX];
     (void)snprintf(files, sizeof files, "%s/sv_types.sv", D);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv(files, "dut"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "dut"}));
     uint32_t count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
     TEST_ASSERT_EQUAL_UINT32(1, count);
     const odin3_ast *ast = elaborated_store();
     TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_ALWAYS, ODIN3_AST_ALWAYS_ALWAYS_COMB));
-    TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_ALWAYS, ODIN3_AST_ALWAYS_ALWAYS_FF));
+    TEST_ASSERT_EQUAL_UINT32(2, count_kind(ast, ODIN3_AST_ALWAYS, ODIN3_AST_ALWAYS_ALWAYS_FF));
     TEST_ASSERT_EQUAL_UINT32(1, count_kind(ast, ODIN3_AST_ALWAYS, ODIN3_AST_ALWAYS_ALWAYS_LATCH));
     /* Packed-struct member accesses are bit selects and the memory is unpacked. */
     TEST_ASSERT_GREATER_THAN_UINT32(0, count_kind(ast, ODIN3_AST_SELECT, ODIN3_AST_SELECT_PART));
-    /* The latching memory write keeps a $proc (three processes: comb, ff, latch). */
+    /* The latching memory write keeps a $proc (four processes: comb, two always_ff, latch). */
     uint32_t top = top_module();
     uint32_t procs = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_get_proc_count(design, top, &procs));
-    TEST_ASSERT_EQUAL_UINT32(3, procs);
+    TEST_ASSERT_EQUAL_UINT32(4, procs);
     expect_provenance();
+}
+
+/* Each name is one DECLARATOR of the store. */
+static void expect_declarators(const odin3_ast *ast, const char *const *names, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        TEST_ASSERT_TRUE(has_declarator(ast, names[i]));
+    }
+}
+
+/* The interface port of leaf is flattened to "<port>.<signal>" ports, and the interface
+ * instance in top to "<instance>.<signal>" nets (the declarations carry those names). */
+static void expect_interface_names(const odin3_ast *ast) {
+    static const char *const k_names[] = {"s.data", "s.valid", "bus.data", "bus.valid"};
+    expect_declarators(ast, k_names, sizeof k_names / sizeof k_names[0]);
 }
 
 static void test_sv_interface(void) {
     fresh_design();
     char files[SV_PATH_MAX];
     (void)snprintf(files, sizeof files, "%s/sv_iface.sv", D);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv(files, "top"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "top"}));
     uint32_t count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
     TEST_ASSERT_EQUAL_UINT32(2, count);
     const odin3_ast *ast = elaborated_store();
-    /* The interface port of leaf is flattened to "<port>.<signal>" ports, and the interface
-     * instance in top to "<instance>.<signal>" nets (the declarations carry those names). */
-    TEST_ASSERT_TRUE(has_declarator(ast, "s.data"));
-    TEST_ASSERT_TRUE(has_declarator(ast, "s.valid"));
-    TEST_ASSERT_TRUE(has_declarator(ast, "bus.data"));
-    TEST_ASSERT_TRUE(has_declarator(ast, "bus.valid"));
-    /* No generate survive elaboration (slang expanded them). */
+    expect_interface_names(ast);
+    /* No generate survives elaboration (slang expanded it). */
     TEST_ASSERT_EQUAL_UINT32(0, count_kind(ast, ODIN3_AST_GEN_BLOCK, -1));
     TEST_ASSERT_EQUAL_UINT32(0, count_kind(ast, ODIN3_AST_GENERATE, -1));
     expect_provenance();
