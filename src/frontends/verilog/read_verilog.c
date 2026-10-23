@@ -711,6 +711,55 @@ static const char *sv_top_name(const odin3_design *design) {
     return NULL;
 }
 
+/* The SystemVerilog read's options: the project's include directories and defines (so a
+ * project's `include and `ifdef reach slang as they reach the Verilog preprocessor) and the
+ * elaboration options. The two arrays are allocated for the call and returned through dirs/defs
+ * for the caller to free. */
+static odin3_status sv_options_of(const odin3_design *design, const rv_args *args,
+                                  const char ***dirs, odin3_sv_define **defs,
+                                  odin3_sv_options *opts) {
+    *dirs = NULL;
+    *defs = NULL;
+    memset(opts, 0, sizeof *opts);
+    opts->elab.nolatches = args->elab.nolatches;
+    opts->elab.nomem2reg = args->elab.nomem2reg;
+    opts->elab.auto_blackbox = args->elab.auto_blackbox;
+    const odin3_project *proj = finished_record(design);
+    if (proj == NULL) {
+        return ODIN3_OK;
+    }
+    if (proj->incdirs.len > 0) {
+        const char **d = odin3_util_malloc(proj->incdirs.len * sizeof *d);
+        if (d == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        for (size_t i = 0; i < proj->incdirs.len; i++) {
+            const odin3_proj_path *dir = odin3_vec_cat(&proj->incdirs, i);
+            d[i] = text_of(design, dir->resolved);
+        }
+        *dirs = d;
+        opts->incdirs = d;
+        opts->nincdirs = (uint32_t)proj->incdirs.len;
+    }
+    if (proj->defines.len > 0) {
+        odin3_sv_define *d = odin3_util_malloc(proj->defines.len * sizeof *d);
+        if (d == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        for (size_t i = 0; i < proj->defines.len; i++) {
+            const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
+            d[i].name = text_of(design, def->name);
+            d[i].value = def->has_value ? text_of(design, def->value) : "";
+            d[i].has_value = def->has_value;
+            d[i].reserved_pad = 0;
+        }
+        *defs = d;
+        opts->defines = d;
+        opts->ndefines = (uint32_t)proj->defines.len;
+    }
+    return ODIN3_OK;
+}
+
 /* The SystemVerilog branch of the read: the registered reader (the slang adapter, CLI start-up)
  * builds and elaborates the store itself, in this pass's run. */
 static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_args *args,
@@ -718,6 +767,14 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     if (args->parse_only || args->lib) {
         odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet",
                   args->parse_only ? "--parse-only" : "--lib");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    /* -icells, -netlist and --vtr-compat shape the Verilog front end; refusing them keeps the
+     * read honest instead of ignoring them. */
+    if (args->elab.icells || args->elab.netlist || args->elab.vtr_compat) {
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet",
+                  args->elab.netlist ? "-netlist"
+                                     : (args->elab.icells ? "-icells" : "--vtr-compat"));
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_sv_read_fn read = odin3_sv_reader_get();
@@ -734,12 +791,15 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
         const odin3_pp_source *src = odin3_vec_cat(svs, i);
         paths[i] = text_of(design, src->resolved);
     }
-    odin3_elab_options opts = {0};
-    opts.nolatches = args->elab.nolatches;
-    opts.nomem2reg = args->elab.nomem2reg;
-    opts.auto_blackbox = args->elab.auto_blackbox;
-    odin3_status st =
-        read(design, ctx->run.v, paths, (uint32_t)svs->len, sv_top_name(design), &opts);
+    const char **dirs = NULL;
+    odin3_sv_define *defs = NULL;
+    odin3_sv_options opts;
+    odin3_status st = sv_options_of(design, args, &dirs, &defs, &opts);
+    if (st == ODIN3_OK) {
+        st = read(design, ctx->run.v, paths, (uint32_t)svs->len, sv_top_name(design), &opts);
+    }
+    odin3_util_free(defs);
+    odin3_util_free(dirs);
     odin3_util_free((void *)paths);
     return st;
 }

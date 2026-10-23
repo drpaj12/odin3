@@ -359,6 +359,29 @@ static void test_sv_missing_file(void) {
     expect_read_error(D "/no_such_file.sv", ODIN3_ERR_IO, "cannot read");
 }
 
+/* A project's include directories and defines reach slang (review Medium): each project reads
+ * through read_project + read_verilog; the include source read without its project fails. */
+static void test_sv_project_config(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_design_run_pass(design, "read_project", D "/project/incdir.o3proj"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_verilog", ""));
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_design_run_pass(design, "read_project", D "/project/define.o3proj"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_verilog", ""));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+
+    /* Without the project's incdir the include does not resolve: a located include error. */
+    expect_read_error(D "/project/inc_top.sv", ODIN3_ERR_PARSE, "defs.svh");
+}
+
 /* The constructs the docs list as refused are refused, each with its own located message. */
 static void test_sv_refused_constructs(void) {
     expect_read_error(D "/sv_refused_unique.sv", ODIN3_ERR_PARSE, "'unique case' is not supported");
@@ -382,7 +405,7 @@ static void test_read_slang_arguments(void) {
     fresh_design();
     const char *paths[1] = {"/nonexistent.sv"};
     const char *empty[1] = {""};
-    odin3_elab_options auto_bb = {.auto_blackbox = true};
+    odin3_sv_options auto_bb = {.elab = {.auto_blackbox = true}};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(NULL, 1, paths, 1, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 0, paths, 1, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, NULL, 1, NULL, NULL));
@@ -404,6 +427,7 @@ int main(void) {
     RUN_TEST(test_sv_diagnostics);
     RUN_TEST(test_sv_refused_cast);
     RUN_TEST(test_sv_missing_file);
+    RUN_TEST(test_sv_project_config);
     RUN_TEST(test_sv_refused_constructs);
     RUN_TEST(test_read_slang_arguments);
     return UNITY_END();

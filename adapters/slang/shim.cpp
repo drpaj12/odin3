@@ -49,6 +49,7 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang/diagnostics/DiagnosticEngine.h"
 #include "slang/diagnostics/TextDiagnosticClient.h"
+#include "slang/parsing/Preprocessor.h"
 #include "slang/syntax/SyntaxTree.h"
 #include "slang/text/SourceManager.h"
 #include "slang/util/Bag.h"
@@ -1730,7 +1731,7 @@ odin3_status Adapter::run(const RootSymbol &root, const char *top) {
 
 extern "C" __attribute__((visibility("default"))) odin3_status
 odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, uint32_t npaths,
-                 const char *top, const odin3_elab_options *opts) {
+                 const char *top, const odin3_sv_options *opts) {
     if (design == NULL || run == 0 || paths == NULL || npaths == 0) {
         (void)odin3_log_write(ODIN3_LOG_ERROR, "read_slang: invalid argument");
         return ODIN3_ERR_INVALID_ARG;
@@ -1741,7 +1742,7 @@ odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, u
             return ODIN3_ERR_INVALID_ARG;
         }
     }
-    if (opts != NULL && opts->auto_blackbox) {
+    if (opts != NULL && opts->elab.auto_blackbox) {
         (void)odin3_log_write(ODIN3_LOG_ERROR,
                               "read_slang: --auto-blackbox is not supported for SystemVerilog");
         return ODIN3_ERR_INVALID_ARG;
@@ -1758,9 +1759,33 @@ odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, u
     if (top != NULL && top[0] != '\0') {
         options.topModules.emplace(top);
     }
+    /* The project's include directories and macro definitions reach slang's preprocessor. */
+    Bag ppBag;
+    parsing::PreprocessorOptions ppOptions;
+    if (opts != NULL) {
+        for (uint32_t i = 0; i < opts->nincdirs; i++) {
+            if (opts->incdirs[i] != NULL) {
+                ppOptions.additionalIncludePaths.emplace_back(opts->incdirs[i]);
+            }
+        }
+        for (uint32_t i = 0; i < opts->ndefines; i++) {
+            const odin3_sv_define &def = opts->defines[i];
+            if (def.name == NULL) {
+                continue;
+            }
+            /* "NAME=VALUE"; a define with no value is an empty body, as in the project record. */
+            std::string pre(def.name);
+            pre += '=';
+            if (def.has_value && def.value != NULL) {
+                pre += def.value;
+            }
+            ppOptions.predefines.push_back(std::move(pre));
+        }
+    }
+    ppBag.set(ppOptions);
     Compilation comp(options);
     for (uint32_t i = 0; i < npaths; i++) {
-        auto tree = syntax::SyntaxTree::fromFile(paths[i], slsm);
+        auto tree = syntax::SyntaxTree::fromFile(paths[i], slsm, ppBag);
         if (!tree) {
             char msg[NAME_BUF];
             (void)snprintf(msg, sizeof msg, "read_slang: cannot read '%s'", paths[i]);
@@ -1814,7 +1839,7 @@ odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, u
         return rc;
     }
     odin3_elab_options defaults = {};
-    Adapter adapter(design, ast, sm, slsm, opts != NULL ? *opts : defaults);
+    Adapter adapter(design, ast, sm, slsm, opts != NULL ? opts->elab : defaults);
     rc = adapter.run(root, top);
     if (rc != ODIN3_OK) {
         return rc;

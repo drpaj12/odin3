@@ -288,7 +288,9 @@ agent defaults.
 - slang is C++20 and MIT. `adapters/slang/` is a small C++ shim that links slang, walks its *elaborated* AST (post-parameter, post-generate), and emits the Odin III AST through the C ABI (`odin3_ast_*` builders). It exports exactly one C function, `odin3_read_slang(...)`, and is built as a separate shared library so the core stays pure C. slang handles packages, interfaces (flattened), structs, enums, `always_ff/comb/latch`, `logic`.
 - The CLI registers the adapter with `odin3_sv_reader_register` (ABI v6); `read_verilog` routes a
   project's SYSTEMVERILOG design files, or direct `.sv`/`.svh` paths, to it. A read mixing Verilog
-  and SystemVerilog files, `--lib` and `--parse-only` are refused for SystemVerilog in v1.1.0.
+  and SystemVerilog files, `--lib`, `--parse-only`, `-icells`, `-netlist` and `--vtr-compat`
+  are refused for SystemVerilog in v1.1.0; the project's include directories and defines
+  reach slang's preprocessor (`odin3_sv_options`).
 - The SV-to-structural-Verilog path is the existing gate flow: `proc; opt; lower; abc --gates L;
   dfflibmap L; write_verilog` writes the mapped netlist as library gate cell instances
   (BUF/INV/NAND2/NOR2/DFF family with netlist-visible names); the owned Verilog front end reads

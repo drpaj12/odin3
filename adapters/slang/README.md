@@ -53,8 +53,9 @@ Defaults taken while implementing, all visible here and in the lane's `## Result
   `unique/priority`, intra-assignment timing, delays/strength, real/realtime/string variables,
   assertions, processes/final, `ref` ports, interface-port pass-through (a parent port connected
   to a child interface port), and `--auto-blackbox`.
-- `--lib`, `--parse-only` and mixed Verilog/SystemVerilog reads are refused for SystemVerilog;
-  `read_verilog -icells`/`-netlist` are not applied on the SV path.
+- `--lib`, `--parse-only`, `-icells`, `-netlist`, `--vtr-compat` and mixed
+  Verilog/SystemVerilog reads are refused for SystemVerilog. A project's include directories
+  and defines do reach slang's preprocessor (`odin3_sv_options`).
 - A library gate instance read back from structural Verilog binds to a registered
   bit-granularity cell type (`src/frontends/verilog/elab1_lookup.c`, `resolve_outside`): this is
   what makes `write_verilog`'s gate-cell netlists (BUF/INV/NAND2/NOR2/DFF) readable by Odin III

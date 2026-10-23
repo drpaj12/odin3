@@ -1668,12 +1668,41 @@ odin3_status odin3_ast_finish(odin3_ast *ast);
 /* --- the SystemVerilog reader seam (ABI v6, v1.1.0; DESIGN §4.2) ----------------------------- */
 
 /*
+ * One macro a SystemVerilog read defines (a project record's `define): name is the macro name;
+ * with has_value the body is value (possibly ""), without it the body is empty (`define name
+ * with nothing after it). Both strings are NUL-terminated and borrowed: valid during the read.
+ */
+typedef struct odin3_sv_define {
+    const char *name;
+    const char *value;
+    bool has_value;
+    uint8_t reserved_pad;
+} odin3_sv_define;
+
+/*
+ * A SystemVerilog read's options: the project record's include search directories and macro
+ * definitions, in project order, and the read's elaboration options. read_verilog fills one for
+ * every SystemVerilog read (the arrays empty when the record has none); a NULL options pointer
+ * means "no project data, the default elaboration options". The pointers are borrowed for the
+ * duration of the read call only.
+ */
+typedef struct odin3_sv_options {
+    const char *const *incdirs;
+    uint32_t nincdirs;
+    const odin3_sv_define *defines;
+    uint32_t ndefines;
+    odin3_elab_options elab;
+} odin3_sv_options;
+
+/*
  * The body of a SystemVerilog reader, as the read_verilog pass drives it for a design whose
  * source files are .sv/.svh (or a project's SYSTEMVERILOG entries): design is the design the read
  * runs on, run the pass run read_verilog opened (the AST store the reader makes carries it, so the
  * IR's SOURCE records point at it), paths the resolved source paths in listing order, top the
  * top module name (CLI --top, else the project top; NULL or "" = choose automatically) and opts
- * the read's elaboration options (may be NULL: the defaults). A reader creates the elaborated AST
+ * the read's options: the project's include directories and defines (so a project's `include and
+ * `ifdef resolve as they do for Verilog) and its elaboration options; NULL means no project data
+ * and the defaults. A reader creates the elaborated AST
  * store itself (odin3_design_new_ast with ODIN3_AST_FORM_ELABORATED and run), fills it through
  * the builders above, seals it with odin3_ast_finish and drives stage 2 with
  * odin3_ast_elaborate. It returns ODIN3_OK, a located ODIN3_ERR_PARSE for source errors (the
@@ -1683,7 +1712,7 @@ odin3_status odin3_ast_finish(odin3_ast *ast);
  */
 typedef odin3_status (*odin3_sv_read_fn)(odin3_design *design, uint32_t run,
                                          const char *const *paths, uint32_t npaths, const char *top,
-                                         const odin3_elab_options *opts);
+                                         const odin3_sv_options *opts);
 
 /*
  * Makes read the process's SystemVerilog reader for later reads (the CLI registers the slang
