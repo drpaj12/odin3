@@ -74,6 +74,16 @@ namespace {
 
 constexpr int NAME_BUF = 512;
 
+/* The spelling of a unique/priority check, for the refusal message. */
+const char *checkName(UniquePriorityCheck check) {
+    switch (check) {
+        case UniquePriorityCheck::Unique: return "unique";
+        case UniquePriorityCheck::Unique0: return "unique0";
+        case UniquePriorityCheck::Priority: return "priority";
+        default: return "";
+    }
+}
+
 /* A module plan: the slang instance body and the Odin module name it becomes. */
 struct ModulePlan {
     const InstanceBodySymbol* body;
@@ -925,6 +935,10 @@ uint32_t Adapter::assignStmt(const Expression &e, bool nonblocking) {
     uint32_t end = endOf(e.sourceRange);
     if (e.kind == ExpressionKind::Assignment) {
         const auto &ae = e.as<AssignmentExpression>();
+        if (ae.timingControl != nullptr) {
+            failf(ODIN3_ERR_PARSE, loc, "an intra-assignment timing control is not supported");
+            return 0;
+        }
         uint32_t lhs = expr(ae.left());
         uint32_t rhs = expr(ae.right());
         if (ae.isCompound()) {
@@ -1021,6 +1035,10 @@ uint32_t Adapter::stmt(const Statement &s) {
         }
         case StatementKind::Conditional: {
             const auto &cs = s.as<ConditionalStatement>();
+            if (cs.check != UniquePriorityCheck::None) {
+                failf(ODIN3_ERR_PARSE, loc, "'%s if' is not supported", checkName(cs.check));
+                return 0;
+            }
             if (cs.conditions.size() != 1 || cs.conditions[0].pattern != nullptr) {
                 failf(ODIN3_ERR_PARSE, loc, "if with a pattern or several conditions is not "
                       "supported");
@@ -1033,6 +1051,10 @@ uint32_t Adapter::stmt(const Statement &s) {
         }
         case StatementKind::Case: {
             const auto &cs = s.as<CaseStatement>();
+            if (cs.check != UniquePriorityCheck::None) {
+                failf(ODIN3_ERR_PARSE, loc, "'%s case' is not supported", checkName(cs.check));
+                return 0;
+            }
             uint32_t sub = ODIN3_AST_CASE_CASE;
             if (cs.condition == CaseStatementCondition::WildcardXOrZ) {
                 sub = ODIN3_AST_CASE_CASEX;
@@ -1121,6 +1143,11 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
     for (const Symbol *port : body.getPortList()) {
         if (port->kind == SymbolKind::Port) {
             const PortSymbol &p = port->as<PortSymbol>();
+            if (p.direction == ArgumentDirection::Ref) {
+                failf(ODIN3_ERR_PARSE, locOf(p.location), "ref port '%s' is not supported",
+                      std::string(p.name).c_str());
+                continue;
+            }
             PortInfo info;
             info.name = std::string(p.name);
             info.type = &p.getType();
@@ -1156,6 +1183,12 @@ std::vector<PortInfo> Adapter::ports(const InstanceBodySymbol &body) {
                         continue;
                     }
                     const ModportPortSymbol &mp = m.as<ModportPortSymbol>();
+                    if (mp.direction == ArgumentDirection::Ref) {
+                        failf(ODIN3_ERR_PARSE, locOf(mp.location),
+                              "ref modport port '%s' is not supported",
+                              std::string(mp.name).c_str());
+                        continue;
+                    }
                     PortInfo info;
                     info.name = std::string(ip.name) + "." + std::string(mp.name);
                     info.iface_signal = std::string(mp.name);
@@ -1239,7 +1272,7 @@ uint32_t Adapter::emitPort(const PortInfo &p, uint32_t loc, uint32_t end) {
     if (p.dir == ArgumentDirection::Out) {
         sub = ODIN3_AST_PORT_DECL_OUTPUT;
     }
-    else if (p.dir == ArgumentDirection::InOut || p.dir == ArgumentDirection::Ref) {
+    else if (p.dir == ArgumentDirection::InOut) {
         sub = ODIN3_AST_PORT_DECL_INOUT;
     }
     uint32_t name = intern(p.name);
@@ -1279,6 +1312,20 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
     uint32_t end = 0;
     bool is_net = sym.kind == SymbolKind::Net || force_net;
     const ValueSymbol &v = sym.as<ValueSymbol>();
+    if (sym.kind == SymbolKind::Net) {
+        const NetSymbol &net = sym.as<NetSymbol>();
+        auto strength = net.getDriveStrength();
+        if (strength.first.has_value() || strength.second.has_value()) {
+            failf(ODIN3_ERR_PARSE, loc, "a drive strength on net '%s' is not supported",
+                  std::string(net.name).c_str());
+            return 0;
+        }
+        if (net.getChargeStrength().has_value() || net.getDelay() != nullptr) {
+            failf(ODIN3_ERR_PARSE, loc, "a charge strength or delay on net '%s' is not supported",
+                  std::string(net.name).c_str());
+            return 0;
+        }
+    }
     std::vector<uint32_t> unpacked;
     uint32_t range = declRanges(v.getType(), unpacked, loc, end);
     uint32_t name = intern(symName(v));
@@ -1302,6 +1349,15 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
 }
 
 uint32_t Adapter::emitContinuous(const ContinuousAssignSymbol &ca, uint32_t loc, uint32_t end) {
+    auto strength = ca.getDriveStrength();
+    if (strength.first.has_value() || strength.second.has_value()) {
+        failf(ODIN3_ERR_PARSE, loc, "a drive strength on a continuous assignment is not supported");
+        return 0;
+    }
+    if (ca.getDelay() != nullptr) {
+        failf(ODIN3_ERR_PARSE, loc, "a delay on a continuous assignment is not supported");
+        return 0;
+    }
     const Expression &e = ca.getAssignment();
     if (e.kind != ExpressionKind::Assignment) {
         failf(ODIN3_ERR_PARSE, loc, "a continuous assignment that is not an assignment");

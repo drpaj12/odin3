@@ -359,6 +359,18 @@ static void test_sv_missing_file(void) {
     expect_read_error(D "/no_such_file.sv", ODIN3_ERR_IO, "cannot read");
 }
 
+/* The constructs the docs list as refused are refused, each with its own located message. */
+static void test_sv_refused_constructs(void) {
+    expect_read_error(D "/sv_refused_unique.sv", ODIN3_ERR_PARSE, "'unique case' is not supported");
+    expect_read_error(D "/sv_refused_priority.sv", ODIN3_ERR_PARSE,
+                      "'priority if' is not supported");
+    expect_read_error(D "/sv_refused_timing.sv", ODIN3_ERR_PARSE,
+                      "intra-assignment timing control is not supported");
+    expect_read_error(D "/sv_refused_strength.sv", ODIN3_ERR_PARSE,
+                      "drive strength on a continuous assignment is not supported");
+    expect_read_error(D "/sv_refused_ref.sv", ODIN3_ERR_PARSE, "ref port 'x' is not supported");
+}
+
 static void test_reader_is_final(void) {
     /* Registering a second reader is refused (the seam is process-wide and final). */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_sv_reader_register(odin3_read_slang));
@@ -392,6 +404,7 @@ int main(void) {
     RUN_TEST(test_sv_diagnostics);
     RUN_TEST(test_sv_refused_cast);
     RUN_TEST(test_sv_missing_file);
+    RUN_TEST(test_sv_refused_constructs);
     RUN_TEST(test_read_slang_arguments);
     return UNITY_END();
 }
