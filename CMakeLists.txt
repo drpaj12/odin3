@@ -1100,12 +1100,21 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
     if(ODIN3_WITH_SLANG AND ODIN3_WITH_ABC)
-        # v1.1.0 end-to-end: SV -> gate flow -> structural Verilog -> read back -> equivalent;
-        # with Yosys on PATH, also equivalent to Yosys's techmapped BLIF (tests/cli/slang_flow.sh).
+        # v1.1.0 end-to-end: SV -> gate flow -> structural Verilog -> read back -> equivalent,
+        # and equivalent to the Yosys oracle's techmapped BLIF (tests/cli/slang_flow.sh). The
+        # oracle is required by the script; the workspace Yosys (0.69) or VTR's 0.55 is used when
+        # found here, else `yosys` on PATH.
+        find_program(ODIN3_SV_YOSYS yosys
+            HINTS $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing/build/bin
+                  $ENV{HOME}/odin3-ws/external/yosys/build)
         add_test(NAME cli_slang_flow
             COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/slang_flow.sh $<TARGET_FILE:odin3>
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check ${PROJECT_SOURCE_DIR})
         set_tests_properties(cli_slang_flow PROPERTIES LABELS unit TIMEOUT 600)
+        if(ODIN3_SV_YOSYS)
+            set_tests_properties(cli_slang_flow PROPERTIES
+                ENVIRONMENT "ODIN3_YOSYS=${ODIN3_SV_YOSYS}")
+        endif()
     endif()
     add_test(NAME cli_dfflibmap_golden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh dfflibmap $<TARGET_FILE:odin3>

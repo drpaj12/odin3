@@ -64,30 +64,42 @@ flow sv_package top "$src/tests/golden/projects/sv_package/src/pkg/alu_pkg.sv" \
 grep -lEq '^  (BUF|INV|NAND2|NOR2|DFF) ' "$work"/*.v >/dev/null ||
     fail "no design produced a library gate instance"
 # Golden: the gate-mapped BLIF of alwaysblock2 is byte-identical to the committed golden.
-if [[ -f $golden/alwaysblock2.blif ]]; then
-    "$src/tools/netlist-compare/netlist-compare" "$work/Prob058_alwaysblock2.blif" \
-        "$golden/alwaysblock2.blif" >/dev/null ||
-        fail "alwaysblock2: the gate BLIF differs from tests/golden/slang/alwaysblock2.blif"
-    echo "slang_flow: alwaysblock2: gate BLIF equals the golden"
-fi
+[[ -f $golden/alwaysblock2.blif ]] ||
+    fail "alwaysblock2: tests/golden/slang/alwaysblock2.blif is missing"
+"$src/tools/netlist-compare/netlist-compare" "$work/Prob058_alwaysblock2.blif" \
+    "$golden/alwaysblock2.blif" >/dev/null ||
+    fail "alwaysblock2: the gate BLIF differs from tests/golden/slang/alwaysblock2.blif"
+echo "slang_flow: alwaysblock2: gate BLIF equals the golden"
 
-# Yosys oracle: the RTL BLIF is equivalent to Yosys 0.55's techmapped BLIF for the five refs.
-if command -v yosys >/dev/null 2>&1; then
-    for ref in Prob004_vector2 Prob055_conditional Prob058_alwaysblock2 Prob100_fsm3comb \
-        Prob023_vector100r; do
-        "$odin3" --top RefModule -p \
-            "read_verilog $data/verilog-eval/${ref}_ref.sv; proc; opt; lower; write_blif --gates-as-names $work/$ref.rtl.blif" \
-            >"$work/$ref.rtl.log" 2>&1 || { cat "$work/$ref.rtl.log" >&2; fail "$ref: RTL BLIF failed"; }
-        yosys -q -p "read_verilog -sv $data/verilog-eval/${ref}_ref.sv; hierarchy -top RefModule; proc; opt; techmap; opt; write_blif $work/$ref.yosys.blif" \
-            >"$work/$ref.yosys.log" 2>&1 || { cat "$work/$ref.yosys.log" >&2; fail "$ref: Yosys failed"; }
-        text2=$("$equiv" "$work/$ref.rtl.blif" "$work/$ref.yosys.blif" 2>&1) ||
-            fail "$ref: differs from Yosys: $local_text"
-        case "$text2" in
-        *equivalent*) ;;
-        *) fail "$ref: differs from Yosys: $local_text" ;;
-        esac
-        echo "slang_flow: $ref: equivalent to Yosys"
-    done
-else
-    echo "slang_flow: yosys not found; the Yosys comparison is skipped"
-fi
+# Yosys oracle: the RTL BLIF is equivalent to Yosys's techmapped BLIF for the five refs and for
+# the signed-declaration fixture (an unsigned reading of `logic signed s` folds `s < 0` to gnd and
+# differs from Yosys). The oracle is required (ODIN3_YOSYS names it; CMake sets it from
+# find_program, else `yosys` on PATH): a missing Yosys fails the gate instead of skipping the
+# comparison silently. Any Yosys with read_verilog -sv and techmap works; the refs are equivalent
+# under 0.55 and 0.69+.
+yosys_bin=${ODIN3_YOSYS:-yosys}
+command -v "$yosys_bin" >/dev/null 2>&1 ||
+    fail "the Yosys oracle is missing: set ODIN3_YOSYS or put yosys on PATH"
+for entry in \
+    "$data/verilog-eval/Prob004_vector2_ref.sv|RefModule" \
+    "$data/verilog-eval/Prob055_conditional_ref.sv|RefModule" \
+    "$data/verilog-eval/Prob058_alwaysblock2_ref.sv|RefModule" \
+    "$data/verilog-eval/Prob100_fsm3comb_ref.sv|RefModule" \
+    "$data/verilog-eval/Prob023_vector100r_ref.sv|RefModule" \
+    "$data/sv_signed.sv|signed_cmp"; do
+    file=${entry%|*}
+    top=${entry#*|}
+    ref=$(basename "$file" .sv)
+    "$odin3" --top "$top" -p \
+        "read_verilog $file; proc; opt; lower; write_blif --gates-as-names $work/$ref.rtl.blif" \
+        >"$work/$ref.rtl.log" 2>&1 || { cat "$work/$ref.rtl.log" >&2; fail "$ref: RTL BLIF failed"; }
+    "$yosys_bin" -q -p "read_verilog -sv $file; hierarchy -top $top; proc; opt; techmap; opt; write_blif $work/$ref.yosys.blif" \
+        >"$work/$ref.yosys.log" 2>&1 || { cat "$work/$ref.yosys.log" >&2; fail "$ref: Yosys failed"; }
+    text2=$("$equiv" "$work/$ref.rtl.blif" "$work/$ref.yosys.blif" 2>&1) ||
+        fail "$ref: differs from Yosys: $text2"
+    case "$text2" in
+    *equivalent*) ;;
+    *) fail "$ref: differs from Yosys: $text2" ;;
+    esac
+    echo "slang_flow: $ref: equivalent to Yosys"
+done
