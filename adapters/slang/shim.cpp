@@ -770,6 +770,13 @@ uint32_t Adapter::exprRaw(const Expression &e) {
         }
         case ExpressionKind::Conversion: {
             const auto &cv = e.as<ConversionExpression>();
+            if (!cv.isImplicit()) {
+                /* An explicit cast (sized, signed, streaming) carries a width or sign the Odin
+                 * AST has no node for; dropping it would change the value silently. */
+                failf(ODIN3_ERR_PARSE, loc, "an explicit %d-bit cast is not supported",
+                      (int)cv.type->getBitWidth());
+                return 0;
+            }
             uint32_t sub = expr(cv.operand());
             bool from_signed = cv.operand().type->isSigned();
             bool to_signed = cv.type->isSigned();
@@ -895,7 +902,9 @@ uint32_t Adapter::blockStmt(const BlockStatement &b) {
                                       intern(full), 0, dkids);
                 uint32_t sub = isIntegerVar(v.getType()) ? ODIN3_AST_VAR_DECL_INTEGER
                                                          : ODIN3_AST_VAR_DECL_REG;
-                locals.push_back(node(ODIN3_AST_VAR_DECL, sub, 0, loc, end, 0, 0,
+                uint32_t flags =
+                    v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+                locals.push_back(node(ODIN3_AST_VAR_DECL, sub, flags, loc, end, 0, 0,
                                       std::vector<uint32_t>{range, declr}));
                 (void)decl;
                 next_block++;
@@ -1281,11 +1290,14 @@ uint32_t Adapter::emitNetOrVar(const Symbol &sym, bool force_net) {
     dkids.insert(dkids.end(), unpacked.begin(), unpacked.end());
     uint32_t declr = node(ODIN3_AST_DECLARATOR, 0, 0, loc, end, name, 0, dkids);
     if (is_net) {
-        return node(ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WIRE, 0, loc, end, 0, 0,
+        uint32_t flags =
+            v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_NET_DECL_SIGNED : 0U;
+        return node(ODIN3_AST_NET_DECL, ODIN3_AST_NET_DECL_WIRE, flags, loc, end, 0, 0,
                     std::vector<uint32_t>{0, range, 0, declr});
     }
     uint32_t sub = isIntegerVar(v.getType()) ? ODIN3_AST_VAR_DECL_INTEGER : ODIN3_AST_VAR_DECL_REG;
-    return node(ODIN3_AST_VAR_DECL, sub, 0, loc, end, 0, 0,
+    uint32_t flags = v.getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+    return node(ODIN3_AST_VAR_DECL, sub, flags, loc, end, 0, 0,
                 std::vector<uint32_t>{range, declr});
 }
 
@@ -1584,7 +1596,8 @@ uint32_t Adapter::emitModule(ModulePlan plan) {
         uint32_t declr = node(ODIN3_AST_DECLARATOR, 0, 0, hloc, hloc, hname, 0, dkids);
         uint32_t sub = isIntegerVar(v->getType()) ? ODIN3_AST_VAR_DECL_INTEGER
                                                   : ODIN3_AST_VAR_DECL_REG;
-        items.push_back(node(ODIN3_AST_VAR_DECL, sub, 0, hloc, hloc, 0, 0,
+        uint32_t hflags = v->getType().isSigned() ? (uint32_t)ODIN3_AST_F_VAR_DECL_SIGNED : 0U;
+        items.push_back(node(ODIN3_AST_VAR_DECL, sub, hflags, hloc, hloc, 0, 0,
                              std::vector<uint32_t>{range, declr}));
     }
     uint32_t name = intern(plan.name);
@@ -1702,6 +1715,9 @@ odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths, u
     }
 
     const RootSymbol &root = comp.getRoot();
+    /* Issue every diagnostic into our no-color client; without this the client's text is empty
+     * and a syntax, include or semantic error would be reported with no message at all. */
+    diag.issue(comp.getAllDiagnostics());
     bool errors = false;
     for (const Diagnostic &d : comp.getAllDiagnostics()) {
         if (diag.getSeverity(d.code, d.location) >= DiagnosticSeverity::Error) {

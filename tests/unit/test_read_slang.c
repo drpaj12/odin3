@@ -50,6 +50,38 @@ struct sv_case {
     const char *top;
 };
 
+/* Captures the log so a failing read's message can be checked. */
+struct log_capture {
+    char text[4096];
+    size_t len;
+};
+
+static void capture_log(odin3_log_level level, const char *msg, void *user) {
+    (void)level;
+    struct log_capture *cap = user;
+    size_t n = strlen(msg);
+    if (cap->len + n + 2 >= sizeof cap->text) {
+        return;
+    }
+    memcpy(cap->text + cap->len, msg, n);
+    cap->len += n;
+    cap->text[cap->len++] = '\n';
+    cap->text[cap->len] = '\0';
+}
+
+/* A read that must fail with want_status, whose log text must contain needle (a located
+ * message: file:line and the diagnostic's text). */
+static void expect_read_error(const char *files, odin3_status want_status, const char *needle) {
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    struct log_capture cap = {0};
+    odin3_log_set_sink(capture_log, &cap);
+    odin3_status st = odin3_design_run_pass(design, "read_verilog", files);
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(want_status, st);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(cap.text, needle), cap.text);
+}
+
 /* Runs read_verilog for the case and returns its status. */
 static odin3_status read_sv(struct sv_case one) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(one.top));
@@ -120,6 +152,25 @@ static uint32_t count_kind(const odin3_ast *ast, uint32_t kind, int want_sub) {
         }
     }
     return found;
+}
+
+/* True when some NET_DECL (var: false) or VAR_DECL (var: true) carries SIGNED. */
+static bool has_signed_decl(const odin3_ast *ast, bool var) {
+    uint32_t end = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_node_end(ast, &end));
+    for (uint32_t node = 1; node < end; node++) {
+        uint32_t kind = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_kind(ast, node, &kind));
+        if (kind != (var ? ODIN3_AST_VAR_DECL : ODIN3_AST_NET_DECL)) {
+            continue;
+        }
+        uint32_t flags = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_get_flags(ast, node, &flags));
+        if ((flags & ODIN3_AST_F_NET_DECL_SIGNED) != 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /* True when a DECLARATOR (a port's or a net's name) has this name. */
@@ -275,6 +326,39 @@ static void test_sv_interface(void) {
     expect_provenance();
 }
 
+static void test_sv_signed(void) {
+    fresh_design();
+    char files[SV_PATH_MAX];
+    (void)snprintf(files, sizeof files, "%s/sv_signed.sv", D);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_sv((struct sv_case){files, "signed_cmp"}));
+    const odin3_ast *ast = elaborated_store();
+    /* The module's own `wire signed` and `logic signed` keep SIGNED (not only the ports). */
+    TEST_ASSERT_TRUE(has_signed_decl(ast, false));
+    TEST_ASSERT_TRUE(has_signed_decl(ast, true));
+}
+
+/* A syntax error reaches the log as located text (file:line and the message), not as a bare
+ * ODIN3_ERR_PARSE. */
+static void test_sv_diagnostics(void) {
+    char files[SV_PATH_MAX];
+    (void)snprintf(files, sizeof files, "%s/sv_bad_syntax.sv", D);
+    expect_read_error(files, ODIN3_ERR_PARSE, "sv_bad_syntax.sv:");
+    expect_read_error(files, ODIN3_ERR_PARSE, "expected expression");
+}
+
+/* An explicit cast has no Odin AST node: the adapter refuses it with a located error rather
+ * than emitting the untruncated operand. */
+static void test_sv_refused_cast(void) {
+    char files[SV_PATH_MAX];
+    (void)snprintf(files, sizeof files, "%s/sv_bad_cast.sv", D);
+    expect_read_error(files, ODIN3_ERR_PARSE, "sv_bad_cast.sv:");
+    expect_read_error(files, ODIN3_ERR_PARSE, "explicit 4-bit cast is not supported");
+}
+
+static void test_sv_missing_file(void) {
+    expect_read_error(D "/no_such_file.sv", ODIN3_ERR_IO, "cannot read");
+}
+
 static void test_reader_is_final(void) {
     /* Registering a second reader is refused (the seam is process-wide and final). */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_sv_reader_register(odin3_read_slang));
@@ -282,11 +366,18 @@ static void test_reader_is_final(void) {
 }
 
 static void test_read_slang_arguments(void) {
+    /* A live design, so each call reaches its own check instead of the NULL-design one. */
+    fresh_design();
     const char *paths[1] = {"/nonexistent.sv"};
+    const char *empty[1] = {""};
+    odin3_elab_options auto_bb = {.auto_blackbox = true};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(NULL, 1, paths, 1, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 0, paths, 1, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, NULL, 1, NULL, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, paths, 0, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, empty, 1, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_read_slang(design, 1, paths, 1, NULL, &auto_bb));
 }
 
 int main(void) {
@@ -297,6 +388,10 @@ int main(void) {
     RUN_TEST(test_sv_package);
     RUN_TEST(test_sv_types);
     RUN_TEST(test_sv_interface);
+    RUN_TEST(test_sv_signed);
+    RUN_TEST(test_sv_diagnostics);
+    RUN_TEST(test_sv_refused_cast);
+    RUN_TEST(test_sv_missing_file);
     RUN_TEST(test_read_slang_arguments);
     return UNITY_END();
 }
