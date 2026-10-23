@@ -59,12 +59,12 @@ struct log_capture {
 static void capture_log(odin3_log_level level, const char *msg, void *user) {
     (void)level;
     struct log_capture *cap = user;
-    size_t n = strlen(msg);
-    if (cap->len + n + 2 >= sizeof cap->text) {
+    size_t msg_len = strlen(msg);
+    if (cap->len + msg_len + 2 >= sizeof cap->text) {
         return;
     }
-    memcpy(cap->text + cap->len, msg, n);
-    cap->len += n;
+    memcpy(cap->text + cap->len, msg, msg_len);
+    cap->len += msg_len;
     cap->text[cap->len++] = '\n';
     cap->text[cap->len] = '\0';
 }
@@ -405,14 +405,18 @@ static void test_read_slang_arguments(void) {
     fresh_design();
     const char *paths[1] = {"/nonexistent.sv"};
     const char *empty[1] = {""};
-    odin3_sv_options auto_bb = {.elab = {.auto_blackbox = true}};
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(NULL, 1, paths, 1, NULL, NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 0, paths, 1, NULL, NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, NULL, 1, NULL, NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, paths, 0, NULL, NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, empty, 1, NULL, NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_read_slang(design, 1, paths, 1, NULL, &auto_bb));
+    odin3_sv_options ok = {.paths = paths, .npaths = 1};
+    odin3_sv_options no_paths = {.npaths = 1};
+    odin3_sv_options no_count = {.paths = paths, .npaths = 0};
+    odin3_sv_options empty_path = {.paths = empty, .npaths = 1};
+    odin3_sv_options auto_bb = {.paths = paths, .npaths = 1, .elab = {.auto_blackbox = true}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(NULL, 1, &ok));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 0, &ok));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, &no_paths));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, &no_count));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, &empty_path));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_read_slang(design, 1, &auto_bb));
 }
 
 int main(void) {

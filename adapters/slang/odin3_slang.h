@@ -19,21 +19,21 @@ extern "C" {
 #endif
 
 /*
- * Reads paths[0 .. npaths) as one SystemVerilog compilation, elaborates it with slang and writes
- * the Odin III elaborated AST into the store of pass run `run`, then runs stage 2 on it
- * (odin3_ast_elaborate). top is the top module name or NULL/"" for automatic selection (exactly
- * one uninstantiated module must then exist). opts are the read's options: the project's include
- * directories and defines (slang's preprocessor gets them, so `include and `ifdef resolve as they
- * do for Verilog) and the elaboration options; NULL means no project data and the defaults.
+ * Reads opts->paths[0 .. opts->npaths) as one SystemVerilog compilation, elaborates it with slang
+ * and writes the Odin III elaborated AST into the store of pass run `run`, then runs stage 2 on it
+ * (odin3_ast_elaborate). opts->top is the top module name or NULL/"" for automatic selection
+ * (exactly one uninstantiated module must then exist). opts->incdirs/defines are the project's
+ * include directories and defines (slang's preprocessor gets them, so `include and `ifdef resolve
+ * as they do for Verilog) and opts->elab are the elaboration options.
  *
  * Ownership: every IR object and string the call makes lives in design; the store is handed to
  * the design and never destroyed by the adapter. Failures: a source or elaboration error is a
  * located ODIN3_ERR_PARSE (the design is then fit only for destruction, as after a failed read);
- * ODIN3_ERR_INVALID_ARG for a NULL design/paths as odin3.h says; ODIN3_ERR_NO_MEMORY. Temporary
- * state (slang's compilation, the adapter's maps) is freed before returning, on every path.
+ * ODIN3_ERR_INVALID_ARG for a NULL design/opts/paths as odin3.h says; ODIN3_ERR_NO_MEMORY.
+ * Temporary state (slang's compilation, the adapter's maps) is freed before returning, on every
+ * path.
  */
-odin3_status odin3_read_slang(odin3_design *design, uint32_t run, const char *const *paths,
-                              uint32_t npaths, const char *top, const odin3_sv_options *opts);
+odin3_status odin3_read_slang(odin3_design *design, uint32_t run, const odin3_sv_options *opts);
 
 #ifdef __cplusplus
 }

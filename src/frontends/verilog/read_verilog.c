@@ -729,32 +729,34 @@ static odin3_status sv_options_of(const odin3_design *design, const rv_args *arg
         return ODIN3_OK;
     }
     if (proj->incdirs.len > 0) {
-        const char **d = odin3_util_malloc(proj->incdirs.len * sizeof *d);
-        if (d == NULL) {
+        const char **dir_list =
+            (const char **)odin3_util_malloc(proj->incdirs.len * sizeof *dir_list);
+        if (dir_list == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         for (size_t i = 0; i < proj->incdirs.len; i++) {
             const odin3_proj_path *dir = odin3_vec_cat(&proj->incdirs, i);
-            d[i] = text_of(design, dir->resolved);
+            dir_list[i] = text_of(design, dir->resolved);
         }
-        *dirs = d;
-        opts->incdirs = d;
+        *dirs = dir_list;
+        opts->incdirs = dir_list;
         opts->nincdirs = (uint32_t)proj->incdirs.len;
     }
     if (proj->defines.len > 0) {
-        odin3_sv_define *d = odin3_util_malloc(proj->defines.len * sizeof *d);
-        if (d == NULL) {
+        odin3_sv_define *def_list =
+            (odin3_sv_define *)odin3_util_malloc(proj->defines.len * sizeof *def_list);
+        if (def_list == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         for (size_t i = 0; i < proj->defines.len; i++) {
             const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
-            d[i].name = text_of(design, def->name);
-            d[i].value = def->has_value ? text_of(design, def->value) : "";
-            d[i].has_value = def->has_value;
-            d[i].reserved_pad = 0;
+            def_list[i].name = text_of(design, def->name);
+            def_list[i].value = def->has_value ? text_of(design, def->value) : "";
+            def_list[i].has_value = def->has_value;
+            def_list[i].reserved_pad = 0;
         }
-        *defs = d;
-        opts->defines = d;
+        *defs = def_list;
+        opts->defines = def_list;
         opts->ndefines = (uint32_t)proj->defines.len;
     }
     return ODIN3_OK;
@@ -772,9 +774,13 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     /* -icells, -netlist and --vtr-compat shape the Verilog front end; refusing them keeps the
      * read honest instead of ignoring them. */
     if (args->elab.icells || args->elab.netlist || args->elab.vtr_compat) {
-        odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet",
-                  args->elab.netlist ? "-netlist"
-                                     : (args->elab.icells ? "-icells" : "--vtr-compat"));
+        const char *flag = "--vtr-compat";
+        if (args->elab.netlist) {
+            flag = "-netlist";
+        } else if (args->elab.icells) {
+            flag = "-icells";
+        }
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet", flag);
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_sv_read_fn read = odin3_sv_reader_get();
@@ -796,10 +802,13 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     odin3_sv_options opts;
     odin3_status st = sv_options_of(design, args, &dirs, &defs, &opts);
     if (st == ODIN3_OK) {
-        st = read(design, ctx->run.v, paths, (uint32_t)svs->len, sv_top_name(design), &opts);
+        opts.paths = paths;
+        opts.npaths = (uint32_t)svs->len;
+        opts.top = sv_top_name(design);
+        st = read(design, ctx->run.v, &opts);
     }
     odin3_util_free(defs);
-    odin3_util_free(dirs);
+    odin3_util_free((void *)dirs);
     odin3_util_free((void *)paths);
     return st;
 }

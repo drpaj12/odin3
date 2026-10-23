@@ -106,7 +106,7 @@ else
 fi
 
 # ---- 1. clang-format -------------------------------------------------------------------------
-read_list c_h_files '*.c' '*.h'
+read_list c_h_files '*.c' '*.h' '*.cpp' '*.hpp'
 if [ "${#c_h_files[@]}" -eq 0 ]; then
     record clang-format PASS
 else
@@ -114,6 +114,9 @@ else
 fi
 
 # ---- 2. clang-tidy ---------------------------------------------------------------------------
+# adapters/slang/*.cpp is not in this list: its walker is recursive over slang's AST (not the IR,
+# where DESIGN 15.1 forbids recursion), so misc-no-recursion would fail on it, and the C profile
+# in .clang-tidy also trips C++-only checks. Tidying it needs a C++ profile Peter approves.
 tidy_step() {
     local files
     read_list files 'src/*.c' 'plugins/*.c' 'tests/unit/*.c' 'adapters/abc/*.c'
@@ -167,16 +170,25 @@ fi
 # ---- 3. cppcheck -----------------------------------------------------------------------------
 read_list cpp_files 'src/*.c' 'src/*.h' 'plugins/*.c' 'plugins/*.h' 'adapters/abc/*.c' \
     'adapters/abc/*.h'
-if [ "${#cpp_files[@]}" -eq 0 ]; then
+read_list cxx_files 'adapters/slang/*.cpp' 'adapters/slang/*.hpp'
+if [ "${#cpp_files[@]}" -eq 0 ] && [ "${#cxx_files[@]}" -eq 0 ]; then
     record cppcheck PASS
 else
-    run_tool cppcheck cppcheck -q --enable=warning,style,performance,portability \
-        --error-exitcode=1 --std=c11 --inline-suppr -I include -I src "${cpp_files[@]}"
+    if [ "${#cpp_files[@]}" -gt 0 ]; then
+        run_tool cppcheck cppcheck -q --enable=warning,style,performance,portability \
+            --error-exitcode=1 --std=c11 --inline-suppr -I include -I src "${cpp_files[@]}"
+    fi
+    # The C++ adapter (adapters/slang, DESIGN 4.2) under the C++ standard; the slang headers are
+    # not included (cppcheck reads the translation unit on its own).
+    if [ "${#cxx_files[@]}" -gt 0 ]; then
+        run_tool cppcheck-cxx cppcheck -q --enable=warning,style,performance,portability \
+            --error-exitcode=1 --std=c++20 --inline-suppr -I include -I src "${cxx_files[@]}"
+    fi
 fi
 
 # ---- 4. lizard -------------------------------------------------------------------------------
 lizard_dirs=()
-for d in src adapters/abc; do
+for d in src adapters/abc adapters/slang; do
     if [ -d "$d" ]; then
         lizard_dirs+=("$d/")
     fi
