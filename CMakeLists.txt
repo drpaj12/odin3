@@ -1115,6 +1115,17 @@ if(BUILD_TESTING)
             set_tests_properties(cli_slang_flow PROPERTIES
                 ENVIRONMENT "ODIN3_YOSYS=${ODIN3_SV_YOSYS}")
         endif()
+        # v1.1.0 corpus: every VerilogEval reference through the SV gate flow against the pinned
+        # outcomes in tests/cli/veval/manifest.tsv (tools/veval/veval-coverage). With Yosys
+        # found, the smallest 20 ok designs must also be equivalent to its techmapped BLIF.
+        add_test(NAME cli_veval_corpus
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/veval_corpus.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR})
+        set_tests_properties(cli_veval_corpus PROPERTIES LABELS unit TIMEOUT 1200)
+        if(ODIN3_SV_YOSYS)
+            set_tests_properties(cli_veval_corpus PROPERTIES
+                ENVIRONMENT "ODIN3_YOSYS=${ODIN3_SV_YOSYS}")
+        endif()
     endif()
     add_test(NAME cli_dfflibmap_golden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh dfflibmap $<TARGET_FILE:odin3>

@@ -1,0 +1,159 @@
+# VerilogEval corpus outcomes (tools/veval/veval-coverage --manifest-out).
+# design<TAB>ok | refused:<class><TAB>pinned refusal message
+# A crash is a bug: there is no expected-crash row.
+Prob001_zero_ref.sv	ok
+Prob002_m2014_q4i_ref.sv	ok
+Prob003_step_one_ref.sv	ok
+Prob004_vector2_ref.sv	ok
+Prob005_notgate_ref.sv	ok
+Prob006_vectorr_ref.sv	ok
+Prob007_wire_ref.sv	ok
+Prob008_m2014_q4h_ref.sv	ok
+Prob009_popcount3_ref.sv	ok
+Prob010_mt2015_q4a_ref.sv	ok
+Prob011_norgate_ref.sv	ok
+Prob012_xnorgate_ref.sv	ok
+Prob013_m2014_q4e_ref.sv	ok
+Prob014_andgate_ref.sv	ok
+Prob015_vector1_ref.sv	ok
+Prob016_m2014_q4j_ref.sv	ok
+Prob017_mux2to1v_ref.sv	ok
+Prob018_mux256to1_ref.sv	ok
+Prob019_m2014_q4f_ref.sv	ok
+Prob020_mt2015_eq2_ref.sv	ok
+Prob021_mux256to1v_ref.sv	ok
+Prob022_mux2to1_ref.sv	ok
+Prob023_vector100r_ref.sv	ok
+Prob024_hadd_ref.sv	ok
+Prob025_reduction_ref.sv	ok
+Prob026_alwaysblock1_ref.sv	ok
+Prob027_fadd_ref.sv	ok
+Prob028_m2014_q4a_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_P_ 'q.dlatch_p0' (high, INIT 3)
+Prob029_m2014_q4g_ref.sv	ok
+Prob030_popcount255_ref.sv	ok
+Prob031_dff_ref.sv	ok
+Prob032_vector0_ref.sv	ok
+Prob033_ece241_2014_q1c_ref.sv	ok
+Prob034_dff8_ref.sv	ok
+Prob035_count1to10_ref.sv	ok
+Prob036_ringer_ref.sv	ok
+Prob037_review2015_count1k_ref.sv	ok
+Prob038_count15_ref.sv	ok
+Prob039_always_if_ref.sv	ok
+Prob040_count10_ref.sv	ok
+Prob041_dff8r_ref.sv	ok
+Prob042_vector4_ref.sv	ok
+Prob043_vector5_ref.sv	ok
+Prob044_vectorgates_ref.sv	ok
+Prob045_edgedetect2_ref.sv	ok
+Prob046_dff8p_ref.sv	ok
+Prob047_dff8ar_ref.sv	ok
+Prob048_m2014_q4c_ref.sv	ok
+Prob049_m2014_q4b_ref.sv	ok
+Prob050_kmap1_ref.sv	ok
+Prob051_gates4_ref.sv	ok
+Prob052_gates100_ref.sv	ok
+Prob053_m2014_q4d_ref.sv	ok
+Prob054_edgedetect_ref.sv	ok
+Prob055_conditional_ref.sv	ok
+Prob056_ece241_2013_q7_ref.sv	ok
+Prob057_kmap2_ref.sv	ok
+Prob058_alwaysblock2_ref.sv	ok
+Prob059_wire4_ref.sv	ok
+Prob060_m2014_q4k_ref.sv	ok
+Prob061_2014_q4a_ref.sv	ok
+Prob062_bugs_mux2_ref.sv	ok
+Prob063_review2015_shiftcount_ref.sv	ok
+Prob064_vector3_ref.sv	ok
+Prob065_7420_ref.sv	ok
+Prob066_edgecapture_ref.sv	ok
+Prob067_countslow_ref.sv	ok
+Prob068_countbcd_ref.sv	ok
+Prob069_truthtable1_ref.sv	ok
+Prob070_ece241_2013_q2_ref.sv	ok
+Prob071_always_casez_ref.sv	ok
+Prob072_thermostat_ref.sv	ok
+Prob073_dff16e_ref.sv	ok
+Prob074_ece241_2014_q4_ref.sv	ok
+Prob075_counter_2bc_ref.sv	ok
+Prob076_always_case_ref.sv	ok
+Prob077_wire_decl_ref.sv	ok
+Prob078_dualedge_ref.sv	ok
+Prob079_fsm3onehot_ref.sv	ok
+Prob080_timer_ref.sv	ok
+Prob081_7458_ref.sv	ok
+Prob082_lfsr32_ref.sv	refused:other	expression kind 26 is not supported
+Prob083_mt2015_q4b_ref.sv	ok
+Prob084_ece241_2013_q12_ref.sv	ok
+Prob085_shift4_ref.sv	ok
+Prob086_lfsr5_ref.sv	refused:other	expression kind 26 is not supported
+Prob087_gates_ref.sv	ok
+Prob088_ece241_2014_q5b_ref.sv	ok
+Prob089_ece241_2014_q5a_ref.sv	ok
+Prob090_circuit1_ref.sv	ok
+Prob091_2012_q2b_ref.sv	ok
+Prob092_gatesv100_ref.sv	ok
+Prob093_ece241_2014_q3_ref.sv	ok
+Prob094_gatesv_ref.sv	ok
+Prob095_review2015_fsmshift_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob096_review2015_fsmseq_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob097_mux9to1v_ref.sv	ok
+Prob098_circuit7_ref.sv	ok
+Prob099_m2014_q6c_ref.sv	ok
+Prob100_fsm3comb_ref.sv	ok
+Prob101_circuit4_ref.sv	ok
+Prob102_circuit3_ref.sv	ok
+Prob103_circuit2_ref.sv	ok
+Prob104_mt2015_muxdff_ref.sv	ok
+Prob105_rotate100_ref.sv	ok
+Prob106_always_nolatches_ref.sv	ok
+Prob107_fsm1s_ref.sv	ok
+Prob108_rule90_ref.sv	ok
+Prob109_fsm1_ref.sv	ok
+Prob110_fsm2_ref.sv	ok
+Prob111_fsm2s_ref.sv	ok
+Prob112_always_case2_ref.sv	ok
+Prob113_2012_q1g_ref.sv	ok
+Prob114_bugs_case_ref.sv	ok
+Prob115_shift18_ref.sv	ok
+Prob116_m2014_q3_ref.sv	ok
+Prob117_circuit9_ref.sv	ok
+Prob118_history_shift_ref.sv	ok
+Prob119_fsm3_ref.sv	ok
+Prob120_fsm3s_ref.sv	ok
+Prob121_2014_q3bfsm_ref.sv	ok
+Prob122_kmap4_ref.sv	ok
+Prob123_bugs_addsubz_ref.sv	ok
+Prob124_rule110_ref.sv	ok
+Prob125_kmap3_ref.sv	ok
+Prob126_circuit6_ref.sv	ok
+Prob127_lemmings1_ref.sv	ok
+Prob128_fsm_ps2_ref.sv	ok
+Prob129_ece241_2013_q8_ref.sv	ok
+Prob130_circuit5_ref.sv	ok
+Prob131_mt2015_q4_ref.sv	ok
+Prob132_always_if2_ref.sv	ok
+Prob133_2014_q3fsm_ref.sv	ok
+Prob134_2014_q3c_ref.sv	ok
+Prob135_m2014_q6b_ref.sv	ok
+Prob136_m2014_q6_ref.sv	ok
+Prob137_fsm_serial_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob138_2012_q2fsm_ref.sv	ok
+Prob139_2013_q2bfsm_ref.sv	ok
+Prob140_fsm_hdlc_ref.sv	ok
+Prob141_count_clock_ref.sv	ok
+Prob142_lemmings2_ref.sv	ok
+Prob143_fsm_onehot_ref.sv	ok
+Prob144_conwaylife_ref.sv	ok
+Prob145_circuit8_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_P_ 'p.dlatch_p0' (high, INIT 3)
+Prob146_fsm_serialdata_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob147_circuit10_ref.sv	ok
+Prob148_2013_q2afsm_ref.sv	ok
+Prob149_ece241_2013_q4_ref.sv	ok
+Prob150_review2015_fsmonehot_ref.sv	ok
+Prob151_review2015_fsm_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported
+Prob152_lemmings3_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob153_gshare_ref.sv	ok
+Prob154_fsm_ps2data_ref.sv	ok
+Prob155_lemmings4_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
+Prob156_review2015_fancytimer_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported

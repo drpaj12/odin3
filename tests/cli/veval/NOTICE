@@ -1,0 +1,28 @@
+The 156 ProbNNN_*_ref.sv files under refs/ are the SystemVerilog references of
+NVIDIA's verilog-eval dataset, dataset_spec-to-rtl (MIT License, Copyright (c) 2023-2024 NVIDIA
+Research Projects; see https://github.com/NVlabs/verilog-eval). They are copied from the dataset
+(the repository's pre-commit hook drops the trailing blank line at end of file) and are the
+v1.1.0 SystemVerilog front end's coverage corpus: manifest.tsv pins each design's expected
+outcome through the SV gate flow, and tests/cli/veval_corpus.sh checks it in ctest.
+
+MIT License
+
+Copyright (c) 2023-2024 NVIDIA Research Projects
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
