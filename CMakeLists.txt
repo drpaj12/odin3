@@ -1639,6 +1639,7 @@ if(BUILD_TESTING)
     # that need the preprocessor (macros, includes).
     odin3_add_unit_test(test_read_verilog)
     target_compile_definitions(test_read_verilog PRIVATE
+        ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib"
         ODIN3_RV_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/verilog/read"
         ODIN3_PROJECT_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/projects")
     odin3_add_pp_test(test_verilog_lexer_pp)
