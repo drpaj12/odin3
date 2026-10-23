@@ -8,6 +8,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- SystemVerilog (v1.1.0, `docs/V1.1.0.md`; DESIGN §4.2/§12.1): slang v12.0 is vendored in
+  `third_party/slang` with fmt, boost.regex and tomlplusplus (offline build), and `adapters/slang`
+  is the C++20 shim that emits the elaborated Odin AST; `read_verilog` routes `.sv`/`.svh` and a
+  project's SYSTEMVERILOG files to it, and the gate flow's `write_verilog` writes the mapped
+  netlist as structural Verilog of library gate cells, which `read_verilog` reads back (an
+  instance of a registered bit-granularity cell type binds to it).
 - Gate mapping (v1.0.2, `docs/V1.0.2.md`): `abc --gates L` maps soft logic onto the gate cells of
   an `.o3lib` library read with `read_techlib`, `dfflibmap L` maps bit flip-flops and latches onto
   its state cells, and `write_blif --gates-as-names` writes gate cells as `.names` and library
@@ -22,6 +28,8 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Changed
 
+- ABI 6 (v1.1.0): `odin3_sv_reader_register` and `odin3_sv_read_fn`, the seam the CLI uses to make
+  the slang adapter the read_verilog pass's SystemVerilog reader. Version is 1.1.0.
 - ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.
   No API stability promise (docs/PHASE7.md decision 4).
 
