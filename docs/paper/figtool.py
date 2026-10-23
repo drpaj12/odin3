@@ -21,9 +21,12 @@ FIGURES = ["pipeline", "project", "elab_seam", "proc", "util", "ir_model", "prov
 
 def overleaf_files() -> list[str]:
     """What the paper needs on Overleaf: the source, the bibliography, the shared TikZ styles,
-    every TikZ figure, and the PDF converted from the one SVG figure."""
+    every TikZ figure, the PDF converted from the one SVG figure, and the blind-review set
+    (odin3_blind.tex, blind.bib, the blinded figure copies and the script that makes them)."""
     figs = sorted(f for f in glob.glob("IMAGE/fig_*.tex"))
-    return ["odin3.tex", "joined.bib", "IMAGE/odin3-tikz-styles.tex", *figs, "IMAGE/fig_ast.pdf"]
+    blind_figs = sorted(f for f in glob.glob("IMAGE/blind/fig_*.tex"))
+    return ["odin3.tex", "odin3_blind.tex", "joined.bib", "blind.bib", "make_blind.py",
+            "IMAGE/odin3-tikz-styles.tex", *figs, *blind_figs, "IMAGE/fig_ast.pdf"]
 
 
 def make_zip(out: str) -> None:
