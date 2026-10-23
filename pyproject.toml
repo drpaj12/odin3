@@ -18,7 +18,7 @@ odin3-flow = "odin3._entry:flow_main"
 # The wheel is built by CMake (CMakeLists.txt, SKBUILD branch): libodin3.so, the odin3 CLI and the
 # binding (plugins/python/odin3.py, installed as odin3/__init__.py) go into the odin3 package.
 minimum-version = "build-system.requires"
-cmake.version = ">=3.25"
+cmake.version = ">=3.28"
 cmake.build-type = "Release"
 build.targets = ["libodin3", "odin3", "odin3_abc_exe"]
 wheel.packages = []

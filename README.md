@@ -31,8 +31,8 @@ Start at the Yggdrasil III hub; every manual links to the others.
 
 ## Install
 
-From source (Ubuntu 24.04, native or WSL2; CMake 3.25 or later, Ninja, gcc or clang, `bison`,
-`flex`, `libreadline-dev`):
+From source (Ubuntu 24.04, native or WSL2; CMake 3.28 or later for the default
+`ODIN3_WITH_SLANG=ON` build, Ninja, gcc or clang, `bison`, `flex`, `libreadline-dev`):
 
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git && cd odin3
