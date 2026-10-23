@@ -77,7 +77,7 @@ stage pip-tools minenv "$work/buildvenv/bin/python" -m pip install --quiet \
 stage wheel-build minenv "$work/buildvenv/bin/python" -m build --wheel --no-isolation \
     --outdir "$work/dist" "$clone"
 # The version and platform tag the release notes state.
-wheel="$work/dist/odin3-1.0.0-py3-none-linux_x86_64.whl"
+wheel="$work/dist/odin3-1.1.0-py3-none-linux_x86_64.whl"
 [ -f "$wheel" ] || { echo "clean-check: no $(basename "$wheel")" >&2; failed=1; exit 1; }
 stage venv-install minenv python3 -m venv "$work/installvenv"
 stage wheel-install minenv "$work/installvenv/bin/python" -m pip install --quiet "$wheel"

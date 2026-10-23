@@ -150,15 +150,15 @@ static int bad_value(const char *option, const char *value, const char *why) {
 /* --version: the version and ABI lines, then the linked ABC's commit when it is registered. */
 static void print_version(const cli_state *state) {
     (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+#ifdef ODIN3_HAVE_SLANG
+    (void)printf("SystemVerilog via slang (adapters/slang, third_party/slang)\n");
+#endif
 #ifdef ODIN3_HAVE_ABC
     if (state->linked_abc) {
         (void)printf("linked ABC %s (adapters/abc/NOTICE)\n", ODIN3_ABC_COMMIT_STR);
     }
 #else
     (void)state;
-#endif
-#ifdef ODIN3_HAVE_SLANG
-    (void)printf("SystemVerilog via slang (adapters/slang, third_party/slang)\n");
 #endif
 }
 

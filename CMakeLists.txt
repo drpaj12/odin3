@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(odin3 VERSION 1.0.0 LANGUAGES C)
+project(odin3 VERSION 1.1.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
@@ -700,6 +700,10 @@ endif()
 # built from the vendored source and its vendored dependencies (fmt, boost::regex, tomlplusplus),
 # so the build needs no network: the FETCHCONTENT_SOURCE_DIR_* variables replace slang's fetches.
 if(ODIN3_WITH_SLANG)
+    if(CMAKE_VERSION VERSION_LESS 3.28)
+        message(FATAL_ERROR "third_party/slang needs CMake >= 3.28; configure with "
+                            "-DODIN3_WITH_SLANG=OFF to build without SystemVerilog")
+    endif()
     enable_language(CXX)
     set(CMAKE_CXX_STANDARD 20)
     set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -2298,10 +2302,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(abc_adapter_exports_refuses_libodin3 PROPERTIES LABELS unit)
     endif()
 
-    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4); gate mapping makes it v5.
+    # The ABI stays v4 through 2D (ruling I1) and 3D (spec Q4); gate mapping made it v5 and
+    # v1.1.0's SystemVerilog reader seam makes it v6.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 5\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 6\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)

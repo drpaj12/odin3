@@ -95,13 +95,17 @@ jobs:
         if: matrix.cc == 'clang'
         run: |
           cmake -S . -B build/fuzz -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_BUILD_TYPE=Debug \
-            -DODIN3_FUZZ=ON -DODIN3_WITH_ABC=OFF
+            -DODIN3_FUZZ=ON -DODIN3_WITH_ABC=OFF -DODIN3_WITH_SLANG=OFF
           cmake --build build/fuzz --target fuzz_pp fuzz_verilog fuzz_abc_script fuzz_elab fuzz_opt fuzz_abc_splice fuzz_lower
           ctest --test-dir build/fuzz -L fuzz --output-on-failure
       - name: Release configure and build (ABC already covered by the debug build)
         run: |
           cmake --preset release -DODIN3_WITH_ABC=OFF
           cmake --build --preset release
+      - name: SystemVerilog adapter built (v1.1.0, DESIGN 4.2)
+        run: |
+          test -f build/debug/libodin3_slang.so
+          test -f build/release/libodin3_slang.so
       - name: ccache statistics
         if: always()
         run: ccache --show-stats

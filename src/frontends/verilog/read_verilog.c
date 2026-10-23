@@ -568,33 +568,52 @@ static bool unsupported(odin3_design *design, const odin3_proj_file *file, bool 
     return true;
 }
 
+/* VHDL has no reader at all: unsupported_language at the declaration's word. */
+static bool unsupported_vhdl(odin3_design *design, const odin3_proj_file *file) {
+    if (file->lang != ODIN3_LANG_VHDL) {
+        return false;
+    }
+    bool resolved = odin3_design_diag_paths(design) == ODIN3_SRCFMT_RESOLVED;
+    odin3_diag(design, ODIN3_LOG_ERROR, file->path.at,
+               "unsupported_language: no VHDL reader yet: '%s'",
+               text_of(design, resolved ? file->path.resolved : file->path.given));
+    return true;
+}
+
+/* One Verilog or SystemVerilog design file appended to srcs or svs; another language (a BLIF,
+ * JSON or arch file) is not this pass's to read and adds nothing. */
+static odin3_status split_source(const odin3_proj_file *file, odin3_vec *srcs, odin3_vec *svs) {
+    if (file->lang != ODIN3_LANG_VERILOG && file->lang != ODIN3_LANG_SYSTEMVERILOG) {
+        return ODIN3_OK;
+    }
+    odin3_vec *into = file->lang == ODIN3_LANG_SYSTEMVERILOG ? svs : srcs;
+    odin3_pp_source *src = odin3_vec_push(into);
+    if (src == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *src = (odin3_pp_source){file->path.given, file->path.resolved, file->library, file->path.at};
+    return ODIN3_OK;
+}
+
 /* The record's design files in listing order (PRJ-16), split into Verilog (srcs) and
  * SystemVerilog (svs); VHDL and -v files of another language are unsupported_language. */
 static odin3_status record_sources(odin3_design *design, const odin3_project *proj, odin3_vec *srcs,
                                    odin3_vec *svs) {
     uint32_t bad = 0;
-    for (size_t i = 0; i < proj->files.len; i++) {
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < proj->files.len; i++) {
         const odin3_proj_file *file = odin3_vec_cat(&proj->files, i);
-        if (file->lang == ODIN3_LANG_VHDL) {
-            bool resolved = odin3_design_diag_paths(design) == ODIN3_SRCFMT_RESOLVED;
-            odin3_diag(design, ODIN3_LOG_ERROR, file->path.at,
-                       "unsupported_language: no VHDL reader yet: '%s'",
-                       text_of(design, resolved ? file->path.resolved : file->path.given));
-            bad++;
-            continue;
+        bool vhdl = unsupported_vhdl(design, file);
+        bad += vhdl ? 1U : 0U;
+        if (!vhdl) {
+            st = split_source(file, srcs, svs);
         }
-        if (file->lang != ODIN3_LANG_VERILOG && file->lang != ODIN3_LANG_SYSTEMVERILOG) {
-            continue; /* a BLIF/JSON/arch file: not this pass's to read */
-        }
-        odin3_pp_source *src = odin3_vec_push(file->lang == ODIN3_LANG_SYSTEMVERILOG ? svs : srcs);
-        if (src == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        *src =
-            (odin3_pp_source){file->path.given, file->path.resolved, file->library, file->path.at};
     }
     for (size_t i = 0; i < proj->libfiles.len; i++) {
         bad += unsupported(design, odin3_vec_cat(&proj->libfiles, i), true) ? 1 : 0;
+    }
+    if (st != ODIN3_OK) {
+        return st;
     }
     if (bad > 0) {
         return ODIN3_ERR_PARSE;
@@ -707,7 +726,7 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
                   "read_verilog: no SystemVerilog reader registered (the slang adapter)");
         return ODIN3_ERR_INVALID_ARG;
     }
-    const char **paths = odin3_util_malloc(svs->len * sizeof *paths);
+    const char **paths = (const char **)odin3_util_malloc(svs->len * sizeof *paths);
     if (paths == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -721,7 +740,7 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     opts.auto_blackbox = args->elab.auto_blackbox;
     odin3_status st =
         read(design, ctx->run.v, paths, (uint32_t)svs->len, sv_top_name(design), &opts);
-    odin3_util_free(paths);
+    odin3_util_free((void *)paths);
     return st;
 }
 
