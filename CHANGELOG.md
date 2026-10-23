@@ -38,6 +38,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   does not fit the registered hard cell of a VTR primitive (`adder #(W)` on the 1-bit `adder`),
   so the micros `adder_hard_block` and `hard_adder_cin_propagation` parse; an instance that fits
   keeps the hard cell, with the existing info line (`#262`).
+- The SystemVerilog adapter lowers compound assignments, a bit-select target included
+  (`q_next[21] ^= q[0];`), and names the kind in its unsupported-expression diagnostic instead
+  of printing the enum number; VerilogEval Prob082/086 pass (`#264`).
 
 ## [1.1.0] - 2026-10-23
 

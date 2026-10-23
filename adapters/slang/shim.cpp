@@ -236,6 +236,9 @@ class Adapter {
     uint32_t memberSelect(const Expression &base, const Symbol &member, uint32_t loc, uint32_t end);
 
     /* --- expressions and statements --- */
+    /* The left side a compound assignment's LValueReferenceExpression stands for while its right
+     * side is lowered (NULL outside one: the kind is then refused by name). */
+    const Expression *lvalueRef = nullptr;
     uint32_t expr(const Expression &ex);
     uint32_t exprRaw(const Expression &ex);
     bool exprLeaf(const Expression &ex, uint32_t &out);
@@ -824,6 +827,13 @@ bool binaryCode(BinaryOperator op, uint32_t &code) {
     return true;
 }
 
+/* True when the adapter has an Odin node for op (a compound assignment's operator, which the
+ * right side's tree applies). */
+bool binarySupported(BinaryOperator op) {
+    uint32_t code = 0;
+    return binaryCode(op, code);
+}
+
 /* True for the increment and decrement operators (statements, not expressions). */
 bool isIncDec(UnaryOperator op) {
     return op == UnaryOperator::Preincrement || op == UnaryOperator::Postincrement ||
@@ -835,8 +845,9 @@ uint32_t Adapter::exprRaw(const Expression &ex) {
     if (exprLeaf(ex, made) || exprOper(ex, made)) {
         return made;
     }
-    failf(ODIN3_ERR_PARSE, locOf(ex.sourceRange.start()), "expression kind %d is not supported",
-          (int)ex.kind);
+    const std::string kind(toString(ex.kind));
+    failf(ODIN3_ERR_PARSE, locOf(ex.sourceRange.start()), "expression kind '%s' is not supported",
+          kind.c_str());
     return 0;
 }
 
@@ -862,6 +873,17 @@ bool Adapter::exprLeaf(const Expression &ex, uint32_t &out) {
     case ExpressionKind::UnbasedUnsizedIntegerLiteral:
     case ExpressionKind::StringLiteral:
         out = exprLiteral(ex, loc, end);
+        return true;
+    case ExpressionKind::LValueReference:
+        /* The placeholder slang puts where the left side of a compound assignment is read
+         * (AssignmentExpression::fromComponents): lower it as that left side. */
+        if (lvalueRef != nullptr) {
+            out = expr(*lvalueRef);
+        } else {
+            failf(ODIN3_ERR_PARSE, loc,
+                  "an lvalue reference (the left side of a compound assignment) is not supported "
+                  "here");
+        }
         return true;
     default:
         return false;
@@ -1190,15 +1212,22 @@ uint32_t Adapter::assignExpression(const AssignmentExpression &ae) {
         return 0;
     }
     const uint32_t lhs = expr(ae.left());
-    uint32_t rhs = expr(ae.right());
+    uint32_t rhs = 0;
     if (ae.isCompound()) {
-        uint32_t op = 0;
-        if (!ae.op.has_value() || !binaryCode(*ae.op, op)) {
+        if (!ae.op.has_value() || !binarySupported(*ae.op)) {
             failf(ODIN3_ERR_PARSE, loc, "this compound assignment is not supported");
             return 0;
         }
-        const uint32_t again = expr(ae.left());
-        rhs = binary(op, again, rhs, loc, end);
+        /* slang writes a compound assignment's value as `<lhs> op <rhs>`, its left side an
+         * LValueReferenceExpression placeholder: lower the right side with the placeholder bound
+         * to the lhs expression, so the operator is applied once and the value assigned is the
+         * operation's, not `lhs op (lhs op rhs)`. */
+        const Expression *saved = lvalueRef;
+        lvalueRef = &ae.left();
+        rhs = expr(ae.right());
+        lvalueRef = saved;
+    } else {
+        rhs = expr(ae.right());
     }
     const uint32_t kind =
         ae.isNonBlocking() ? ODIN3_AST_NONBLOCKING_ASSIGN : ODIN3_AST_BLOCKING_ASSIGN;
