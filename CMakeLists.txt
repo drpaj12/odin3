@@ -747,6 +747,10 @@ if(ODIN3_WITH_SLANG)
     target_link_libraries(odin3 PRIVATE odin3_slang)
     target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/adapters/slang)
     target_compile_definitions(odin3 PRIVATE ODIN3_HAVE_SLANG)
+    # The adapter's objects can leave the C++ UBSan runtime undefined (vptr checks; clang does not
+    # pack it into a shared library), and the C driver does not link it. Every target linking
+    # odin3_slang therefore links with the C++ driver.
+    set_target_properties(odin3 PROPERTIES LINKER_LANGUAGE CXX)
     set_target_properties(odin3_slang PROPERTIES INSTALL_RPATH "$ORIGIN")
     install(TARGETS odin3_slang LIBRARY DESTINATION ${_odin3_lib_dir})
 endif()
@@ -1545,6 +1549,8 @@ if(BUILD_TESTING)
         target_compile_definitions(test_read_slang PRIVATE
             ODIN3_SV_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/slang")
         target_link_libraries(test_read_slang PRIVATE libodin3 odin3_slang unity odin3_flags)
+        # Same reason as odin3 above: the adapter's link can leave the C++ UBSan runtime to us.
+        set_target_properties(test_read_slang PROPERTIES LINKER_LANGUAGE CXX)
         add_test(NAME test_read_slang COMMAND test_read_slang)
         set_tests_properties(test_read_slang PROPERTIES LABELS unit)
     endif()
