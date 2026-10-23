@@ -1,0 +1,5 @@
+The five ProbNNN_*_ref.sv files here are SystemVerilog references copied from
+NVIDIA's verilog-eval dataset, dataset_spec-to-rtl (one trailing newline added at end of file) (MIT License, Copyright (c) 2023-2024 NVIDIA
+Research Projects; see https://github.com/NVlabs/verilog-eval). They exercise always_comb,
+always @(posedge), always @(*), case, parameters, a ternary, concatenation and a for loop with
+$bits, and are the v1.1.0 adapter's end-to-end (tests/cli/slang_flow.sh) fixtures.
