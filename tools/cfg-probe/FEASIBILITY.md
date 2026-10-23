@@ -43,7 +43,7 @@ and final. **Recommended follow-up:** add this as `Odin3.register_sv_adapter()` 
 
 ## 2. The CFG and the metric (what the prototype implements)
 
-`tools/cfg-probe/odin3_cfg.py`, ~330 lines, standard library only (cffi via the binding). One CFG
+`tools/cfg-probe/odin3_cfg.py`, ~540 lines including its docstring, standard library only (cffi via the binding). One CFG
 per module:
 
 | node | meaning |
@@ -120,7 +120,7 @@ Exists, reused as is:
 
 To build (no C/C++ change, no new Odin release):
 
-1. `Odin3.register_sv_adapter()` in `plugins/python/odin3.py`: ~20 lines + a unit test (lifted
+1. `Odin3.register_sv_adapter()` in `plugins/python/odin3.py`: ~25 lines + a unit test (lifted
    from `register_sv_adapter()` here).
 2. Algorithm 2 AST similarity over the same store: depth-3 unique subtree sets, identifier
    normalisation by kind (`PORT_DECL` sub input/output/inout, `VAR_DECL`/`NET_DECL` declarators,
