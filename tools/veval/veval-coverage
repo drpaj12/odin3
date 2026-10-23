@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# veval-coverage: the VerilogEval refs through Odin III's SystemVerilog gate flow, classified
+# as ok / refused (class + pinned message) / crash, and checked against a pinned manifest.
+# See veval_coverage.py for the classes, the manifest format and the exit codes.
+set -euo pipefail
+exec python3 "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/veval_coverage.py" "$@"
