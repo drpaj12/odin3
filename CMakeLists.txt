@@ -3196,6 +3196,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # CFG probe (Gate-Breaker Algorithm 3 over the AST): Verilog and SystemVerilog (through the
+    # slang adapter) on the micros and a VerilogEval ref; tools/cfg-probe/odin3_cfg.py.
+    if(ODIN3_WITH_SLANG)
+        add_test(NAME python_cfg_probe
+            COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                    ${ODIN3_PLUGIN_PYTHON} tools/cfg-probe/test_odin3_cfg.py -v
+            WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+        set_tests_properties(python_cfg_probe PROPERTIES
+            LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    endif()
     # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
     add_test(NAME python_copy
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
