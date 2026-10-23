@@ -1,6 +1,6 @@
 # Odin III — Design Specification (v0.2 skeleton)
 
-Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13); v1.1.0 scope set 2026-10-22 (D12: vendored SV slang adapter §4.2 + structural Verilog netlist writer). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
+Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13); v1.1.0 scope set 2026-10-22 (D13: vendored SV slang adapter §4.2 + structural Verilog netlist writer). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
 
 ## 1. Purpose and positioning
 
@@ -277,7 +277,7 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 - Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
 - Comments kept in a side table keyed by location (not a red/green tree).
 
-### 4.2 SystemVerilog (slang adapter) (v1.1.0, D10)
+### 4.2 SystemVerilog (slang adapter) (v1.1.0, D13)
 
 **Built in v1.1.0** (2026-10-23): slang is vendored into Odin III (`third_party/slang/`, v12.0 with its
 three dependencies; `third_party/slang/VENDORING.md` and `BUILDING.md`), `adapters/slang/` is the

@@ -1,7 +1,7 @@
 # third_party/slang — vendoring note
 
 This directory is the SystemVerilog front end's language library for Odin III v1.1.0
-(`docs/DESIGN.md` §4.2, §12.1; ADR D12). It is **source-vendored**: the files are committed here,
+(`docs/DESIGN.md` §4.2, §12.1; ADR D13). It is **source-vendored**: the files are committed here,
 not a git submodule, so a plain checkout builds with no network and no sibling repository.
 
 ## Upstream
@@ -12,6 +12,11 @@ not a git submodule, so a plain checkout builds with no network and no sibling r
 | `third_party/slang/third_party/fmt/` | https://github.com/fmtlib/fmt | 12.2.0 | `1be298e1bd68957e4cd352e1f676f00e07dcfb57` |
 | `third_party/slang/third_party/boost_regex/` | https://github.com/MikePopoloski/regex (boost.regex, standalone) | boost-1.91.0 | `2b3ac0834f31086c6e3c0e0ceb8516e427d5c39d` |
 | `third_party/slang/third_party/tomlplusplus/` | https://github.com/marzer/tomlplusplus | v3.4.0 | `30172438cee64926dc41fdd9c11fb3ba5b2ba9de` |
+
+Every vendored tree keeps its upstream license file: `third_party/slang/LICENSE` (MIT), `fmt/LICENSE`
+(MIT), `tomlplusplus/LICENSE` (MIT) and `boost_regex/LICENSE_1_0.txt` (Boost Software License 1.0;
+the standalone boost.regex tree's headers and `readme.txt` name that file but the upstream
+snapshot does not ship it, so the BSL-1.0 text is committed beside them here).
 
 The source was copied from the populated Yosys submodule at
 `external/yosys/libs/slang` (slang v12.0, commit `545f88b2`). The brief named sv-elab commit
