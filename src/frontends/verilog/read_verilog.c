@@ -9,6 +9,8 @@
 #include "frontends/verilog/read_verilog.h"
 #include "frontends/name_resolve.h"
 
+#include "api/sv.h"
+
 #include "ast/ast.h"
 #include "ast/check.h"
 #include "ast/kinds.h"
@@ -28,6 +30,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "util/alloc.h"
 #include "util/clock.h"
 #include "util/hash.h"
 #include "util/log.h"
@@ -525,77 +528,95 @@ static odin3_status working_dir(odin3_strbuf *buf) {
     return ODIN3_ERR_IO;
 }
 
-static odin3_status direct_sources(odin3_design *design, const odin3_vec *words, odin3_vec *srcs) {
+/* True for a path whose extension names SystemVerilog (DESIGN §4.0: .sv and .svh). */
+static bool is_sv_path(odin3_bytes word) {
+    const char *text = word.ptr;
+    return (word.len >= 3 && memcmp(text + word.len - 3, ".sv", 3) == 0) ||
+           (word.len >= 4 && memcmp(text + word.len - 4, ".svh", 4) == 0);
+}
+
+static odin3_status direct_sources(odin3_design *design, const odin3_vec *words, odin3_vec *srcs,
+                                   odin3_vec *svs) {
     odin3_strbuf cwd;
     odin3_strbuf_init(&cwd);
     odin3_status st = working_dir(&cwd);
     for (size_t i = 0; st == ODIN3_OK && i < words->len; i++) {
-        odin3_pp_source *src = odin3_vec_push(srcs);
+        odin3_bytes word = *(const odin3_bytes *)odin3_vec_cat(words, i);
+        odin3_pp_source *src = odin3_vec_push(is_sv_path(word) ? svs : srcs);
         st = src == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
         if (st == ODIN3_OK) {
             *src = (odin3_pp_source){0};
-            st =
-                direct_source(design, cwd.data, *(const odin3_bytes *)odin3_vec_cat(words, i), src);
+            st = direct_source(design, cwd.data, word, src);
         }
     }
     odin3_strbuf_free(&cwd);
     return st;
 }
 
-/* A SystemVerilog or VHDL file of the record (2B §8): unsupported_language at its project word,
- * naming it in the design's diagnostic-path style. True when file is one. */
-static bool unsupported(odin3_design *design, const odin3_proj_file *file) {
-    if (file->lang != ODIN3_LANG_SYSTEMVERILOG && file->lang != ODIN3_LANG_VHDL) {
+/* True for a project file a read must refuse: VHDL always, and SystemVerilog in a -v library
+ * (the slang reader takes design files only for now). */
+static bool unsupported(odin3_design *design, const odin3_proj_file *file, bool library) {
+    bool sv_lib = library && file->lang == ODIN3_LANG_SYSTEMVERILOG;
+    if (file->lang != ODIN3_LANG_VHDL && !sv_lib) {
         return false;
     }
     bool resolved = odin3_design_diag_paths(design) == ODIN3_SRCFMT_RESOLVED;
     odin3_diag(design, ODIN3_LOG_ERROR, file->path.at,
-               "unsupported_language: no %s reader yet: '%s'",
+               "unsupported_language: no %s reader for a library file yet: '%s'",
                file->lang == ODIN3_LANG_VHDL ? "VHDL" : "SystemVerilog",
                text_of(design, resolved ? file->path.resolved : file->path.given));
     return true;
 }
 
-/* The record's Verilog design files in listing order (PRJ-16); its other HDL files and -v files
- * of another language are unsupported_language. */
-static odin3_status record_sources(odin3_design *design, const odin3_project *proj,
-                                   odin3_vec *srcs) {
+/* The record's design files in listing order (PRJ-16), split into Verilog (srcs) and
+ * SystemVerilog (svs); VHDL and -v files of another language are unsupported_language. */
+static odin3_status record_sources(odin3_design *design, const odin3_project *proj, odin3_vec *srcs,
+                                   odin3_vec *svs) {
     uint32_t bad = 0;
     for (size_t i = 0; i < proj->files.len; i++) {
         const odin3_proj_file *file = odin3_vec_cat(&proj->files, i);
-        bad += unsupported(design, file) ? 1 : 0;
-        odin3_pp_source *src = file->lang == ODIN3_LANG_VERILOG ? odin3_vec_push(srcs) : NULL;
-        if (file->lang == ODIN3_LANG_VERILOG && src == NULL) {
+        if (file->lang == ODIN3_LANG_VHDL) {
+            bool resolved = odin3_design_diag_paths(design) == ODIN3_SRCFMT_RESOLVED;
+            odin3_diag(design, ODIN3_LOG_ERROR, file->path.at,
+                       "unsupported_language: no VHDL reader yet: '%s'",
+                       text_of(design, resolved ? file->path.resolved : file->path.given));
+            bad++;
+            continue;
+        }
+        if (file->lang != ODIN3_LANG_VERILOG && file->lang != ODIN3_LANG_SYSTEMVERILOG) {
+            continue; /* a BLIF/JSON/arch file: not this pass's to read */
+        }
+        odin3_pp_source *src = odin3_vec_push(file->lang == ODIN3_LANG_SYSTEMVERILOG ? svs : srcs);
+        if (src == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        if (src != NULL) {
-            *src = (odin3_pp_source){file->path.given, file->path.resolved, file->library,
-                                     file->path.at};
-        }
+        *src =
+            (odin3_pp_source){file->path.given, file->path.resolved, file->library, file->path.at};
     }
     for (size_t i = 0; i < proj->libfiles.len; i++) {
-        bad += unsupported(design, odin3_vec_cat(&proj->libfiles, i)) ? 1 : 0;
+        bad += unsupported(design, odin3_vec_cat(&proj->libfiles, i), true) ? 1 : 0;
     }
     if (bad > 0) {
         return ODIN3_ERR_PARSE;
     }
-    if (srcs->len == 0) {
+    if (srcs->len == 0 && svs->len == 0) {
         odin3_log(ODIN3_LOG_ERROR, "read_verilog: no Verilog files");
         return ODIN3_ERR_INVALID_ARG;
     }
     return ODIN3_OK;
 }
 
-static odin3_status collect_sources(odin3_design *design, const rv_args *args, odin3_vec *srcs) {
+static odin3_status collect_sources(odin3_design *design, const rv_args *args, odin3_vec *srcs,
+                                    odin3_vec *svs) {
     if (args->files.len > 0) {
-        return direct_sources(design, &args->files, srcs);
+        return direct_sources(design, &args->files, srcs, svs);
     }
     const odin3_project *proj = finished_record(design);
     if (proj == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "read_verilog: no project read");
         return ODIN3_ERR_INVALID_ARG;
     }
-    return record_sources(design, proj, srcs);
+    return record_sources(design, proj, srcs, svs);
 }
 
 /* --- the pass: step 8 ------------------------------------------------------------------------ */
@@ -657,6 +678,53 @@ static odin3_status open_names(rv_args *args, odin3_name_resolver *names) {
     return st;
 }
 
+/* The top module name for a SystemVerilog read: the CLI's --top (it wins, DESIGN §4.0), else the
+ * project's top; NULL when neither names one (the adapter then requires exactly one). */
+static const char *sv_top_name(const odin3_design *design) {
+    odin3_pass_options opts = odin3_pass_get_options();
+    if (opts.top != NULL && opts.top[0] != '\0') {
+        return opts.top;
+    }
+    const odin3_project *proj = finished_record(design);
+    if (proj != NULL && proj->finished && proj->top != 0) {
+        return text_of(design, proj->top);
+    }
+    return NULL;
+}
+
+/* The SystemVerilog branch of the read: the registered reader (the slang adapter, CLI start-up)
+ * builds and elaborates the store itself, in this pass's run. */
+static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_args *args,
+                            const odin3_vec *svs) {
+    if (args->parse_only || args->lib) {
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet",
+                  args->parse_only ? "--parse-only" : "--lib");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_sv_read_fn read = odin3_sv_reader_get();
+    if (read == NULL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: no SystemVerilog reader registered (the slang adapter)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const char **paths = odin3_util_malloc(svs->len * sizeof *paths);
+    if (paths == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < svs->len; i++) {
+        const odin3_pp_source *src = odin3_vec_cat(svs, i);
+        paths[i] = text_of(design, src->resolved);
+    }
+    odin3_elab_options opts = {0};
+    opts.nolatches = args->elab.nolatches;
+    opts.nomem2reg = args->elab.nomem2reg;
+    opts.auto_blackbox = args->elab.auto_blackbox;
+    odin3_status st =
+        read(design, ctx->run.v, paths, (uint32_t)svs->len, sv_top_name(design), &opts);
+    odin3_util_free(paths);
+    return st;
+}
+
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
@@ -664,20 +732,32 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_vec_init(&parsed.files, sizeof(odin3_bytes));
     odin3_vec srcs;
     odin3_vec_init(&srcs, sizeof(odin3_pp_source));
+    odin3_vec svs;
+    odin3_vec_init(&svs, sizeof(odin3_pp_source));
     odin3_status st = parse_args(args, &parsed);
-    st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs);
-    uint32_t soft = soft_blocks_of(design, &parsed);
-    odin3_name_resolver names;
-    st = st != ODIN3_OK ? st : open_names(&parsed, &names);
+    st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs, &svs);
+    if (st == ODIN3_OK && svs.len > 0 && srcs.len > 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet");
+        st = ODIN3_ERR_PARSE;
+    }
     odin3_ast *ast = NULL;
-    if (st == ODIN3_OK) {
-        odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
-        st = odin3_read_verilog_files_soft(design, &opts, soft, &ast);
+    odin3_name_resolver names;
+    if (st == ODIN3_OK && svs.len > 0) {
+        st = read_sv(design, ctx, &parsed, &svs);
+    } else if (st == ODIN3_OK) {
+        uint32_t soft = soft_blocks_of(design, &parsed);
+        st = open_names(&parsed, &names);
+        if (st == ODIN3_OK) {
+            odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
+            st = odin3_read_verilog_files_soft(design, &opts, soft, &ast);
+        }
+        st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
+        if (parsed.elab.names != NULL) {
+            odin3_name_resolver_close(&names);
+        }
     }
-    st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
-    if (parsed.elab.names != NULL) {
-        odin3_name_resolver_close(&names);
-    }
+    odin3_vec_free(&svs);
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
     return st;
@@ -689,7 +769,9 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
-    "libraries; --parse-only keeps it (write_verilog_ast prints it), otherwise elaboration (2D) "
+    "libraries (the project's SystemVerilog files, or files ending in .sv/.svh, go through the "
+    "registered SystemVerilog reader, the slang adapter); --parse-only keeps it (write_verilog_ast "
+    "prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
     "memories unless forced, --auto-blackbox makes an undefined module a black box, --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "

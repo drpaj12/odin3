@@ -4,6 +4,8 @@ project(odin3 VERSION 1.0.0 LANGUAGES C)
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
        ON)
+option(ODIN3_WITH_SLANG "Build third_party/slang and the SystemVerilog adapter (v1.1.0, DESIGN 4.2)"
+       ON)
 option(ODIN3_SANITIZE "Build Odin III targets with ASan + UBSan" OFF)
 option(ODIN3_WERROR "Treat warnings as errors in Odin III targets" ON)
 # libFuzzer harnesses (tests/fuzz): clang only, in a build directory of their own
@@ -50,6 +52,7 @@ endif()
 # exports only what carries ODIN3_EXPORT. To add a module, append its .c file to this list.
 add_library(odin3_core OBJECT
     src/api/version.c
+    src/api/sv.c
     src/api/plugin.c
     src/api/common.c
     src/api/design.c
@@ -692,6 +695,58 @@ if(ODIN3_WITH_ABC)
     target_compile_definitions(odin3 PRIVATE ${_abc_adapter_defs})
 endif()
 
+# --- third_party/slang and the SystemVerilog adapter (v1.1.0, DESIGN 4.2) -------------------
+# slang is C++20 and static; the adapter is the only C++ outside third_party/ (D8'). Both are
+# built from the vendored source and its vendored dependencies (fmt, boost::regex, tomlplusplus),
+# so the build needs no network: the FETCHCONTENT_SOURCE_DIR_* variables replace slang's fetches.
+if(ODIN3_WITH_SLANG)
+    enable_language(CXX)
+    set(CMAKE_CXX_STANDARD 20)
+    set(CMAKE_CXX_STANDARD_REQUIRED ON)
+    set(CMAKE_CXX_EXTENSIONS OFF)
+    set(SLANG_INCLUDE_TOOLS OFF CACHE BOOL "" FORCE)
+    set(SLANG_INCLUDE_TESTS OFF CACHE BOOL "" FORCE)
+    set(SLANG_INCLUDE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(SLANG_USE_MIMALLOC OFF CACHE BOOL "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_FMT "${PROJECT_SOURCE_DIR}/third_party/slang/third_party/fmt"
+        CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_BOOST_REGEX
+        "${PROJECT_SOURCE_DIR}/third_party/slang/third_party/boost_regex" CACHE PATH "" FORCE)
+    set(FETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS
+        "${PROJECT_SOURCE_DIR}/third_party/slang/third_party/tomlplusplus" CACHE PATH "" FORCE)
+    add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
+    set_target_properties(slang_slang PROPERTIES POSITION_INDEPENDENT_CODE ON)
+
+    # The adapter's flags: C++ with the core's warning set where it applies; the sanitizers on
+    # the adapter's own objects and its link (its libodin3 dependency may be sanitised).
+    add_library(odin3_cxx_flags INTERFACE)
+    # -Wshadow and -Wconversion are left off here: slang's public headers (not system headers)
+    # trigger both pervasively; the adapter's own code is reviewed against the core standard.
+    target_compile_options(odin3_cxx_flags INTERFACE -Wall -Wextra -Wpedantic -Werror)
+    if(ODIN3_SANITIZE)
+        target_compile_options(odin3_cxx_flags INTERFACE
+            -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
+        target_link_options(odin3_cxx_flags INTERFACE -fsanitize=address,undefined)
+    endif()
+
+    add_library(odin3_slang SHARED adapters/slang/shim.cpp)
+    set_target_properties(odin3_slang PROPERTIES
+        OUTPUT_NAME odin3_slang
+        CXX_VISIBILITY_PRESET hidden
+        LINK_DEPENDS ${PROJECT_SOURCE_DIR}/adapters/slang/exports.map)
+    target_include_directories(odin3_slang PRIVATE ${PROJECT_SOURCE_DIR}/adapters/slang)
+    target_link_libraries(odin3_slang PRIVATE libodin3 slang::slang odin3_cxx_flags)
+    target_link_options(odin3_slang PRIVATE
+        -Wl,--exclude-libs,ALL
+        -Wl,--version-script=${PROJECT_SOURCE_DIR}/adapters/slang/exports.map)
+    # The CLI links the adapter and registers odin3_read_slang as the read_verilog SV reader.
+    target_link_libraries(odin3 PRIVATE odin3_slang)
+    target_include_directories(odin3 PRIVATE ${PROJECT_SOURCE_DIR}/adapters/slang)
+    target_compile_definitions(odin3 PRIVATE ODIN3_HAVE_SLANG)
+    set_target_properties(odin3_slang PROPERTIES INSTALL_RPATH "$ORIGIN")
+    install(TARGETS odin3_slang LIBRARY DESTINATION ${_odin3_lib_dir})
+endif()
+
 # --- odin3-write: writer driver (used by tools/writer-check/writer-check) -------------------
 add_executable(odin3-write tools/writer-check/odin3-write.c)
 target_include_directories(odin3-write PRIVATE ${PROJECT_SOURCE_DIR}/src)
@@ -1036,6 +1091,14 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_pm_alias PROPERTIES LABELS unit)
+    if(ODIN3_WITH_SLANG AND ODIN3_WITH_ABC)
+        # v1.1.0 end-to-end: SV -> gate flow -> structural Verilog -> read back -> equivalent;
+        # with Yosys on PATH, also equivalent to Yosys's techmapped BLIF (tests/cli/slang_flow.sh).
+        add_test(NAME cli_slang_flow
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/slang_flow.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check ${PROJECT_SOURCE_DIR})
+        set_tests_properties(cli_slang_flow PROPERTIES LABELS unit TIMEOUT 600)
+    endif()
     add_test(NAME cli_dfflibmap_golden
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh dfflibmap $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
@@ -1469,6 +1532,18 @@ if(BUILD_TESTING)
         endif()
         set_tests_properties(${_abc_test} PROPERTIES TIMEOUT 1800)
     endforeach()
+    # v1.1.0 (DESIGN §4.2): the SystemVerilog adapter. The test links the shared libodin3 and
+    # libodin3_slang.so (not odin3_core as the other unit tests do) so it exercises the same two
+    # libraries the CLI links; the adapter's AST invariants are checked through the public ABI.
+    if(ODIN3_WITH_SLANG)
+        add_executable(test_read_slang tests/unit/test_read_slang.c)
+        target_include_directories(test_read_slang PRIVATE ${PROJECT_SOURCE_DIR}/adapters/slang)
+        target_compile_definitions(test_read_slang PRIVATE
+            ODIN3_SV_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/slang")
+        target_link_libraries(test_read_slang PRIVATE libodin3 odin3_slang unity odin3_flags)
+        add_test(NAME test_read_slang COMMAND test_read_slang)
+        set_tests_properties(test_read_slang PROPERTIES LABELS unit)
+    endif()
     odin3_add_unit_test(test_ast_srcman)
     odin3_add_unit_test(test_ast_abi_internal)
     odin3_add_unit_test(test_ast_build)

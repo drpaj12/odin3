@@ -242,13 +242,13 @@ static void test_no_verilog_files(void) {
                "read_verilog: no Verilog files\n");
 }
 
-/* A SystemVerilog file of the record: unsupported_language naming it, at its project word. */
+/* A project mixing Verilog and SystemVerilog: v1.1.0 reads the two languages through different
+ * front ends and refuses the mixed read (the adapter's own reads are test_read_slang's). */
 static void test_unsupported_language(void) {
     enter(D "/sv");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("read_project", "p.o3proj"));
     expect_log(ODIN3_ERR_PARSE, run("read_verilog", "--parse-only"),
-               "p.o3proj:3:20: error: unsupported_language: no SystemVerilog reader yet: "
-               "'src/b.sv'\n");
+               "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet\n");
     TEST_ASSERT_EQUAL_INT(1, errors);
     TEST_ASSERT_EQUAL_UINT32(0, odin3_design_ast_count(design));
 }
