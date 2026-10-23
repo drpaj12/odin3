@@ -7,7 +7,7 @@ provenance-tracked IR. It does architecture-driven partial mapping, links ABC fo
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-**Status: version 1.0.0.** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.0.0; next: v1.1.0 (SystemVerilog via vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [`docs/RELEASE-NOTES-1.0.md`](docs/RELEASE-NOTES-1.0.md). Changes:
 [`CHANGELOG.md`](CHANGELOG.md). Design: [`docs/DESIGN.md`](docs/DESIGN.md).
 

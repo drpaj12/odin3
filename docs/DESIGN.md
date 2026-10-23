@@ -1,6 +1,6 @@
 # Odin III — Design Specification (v0.2 skeleton)
 
-Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
+Status: draft, 2026-10-08; v1.0 scope amended 2026-10-19 (D10: §7, §8, §12, §12.1, §13); v1.1.0 scope set 2026-10-22 (D12: vendored SV slang adapter §4.2 + structural Verilog netlist writer). Decisions recorded here are the starting point; sections marked **OPEN** need a decision before the phase that depends on them. v0.2: language changed to structured C with a C-ABI plugin boundary (D8′); §15 code standard added.
 
 ## 1. Purpose and positioning
 
@@ -277,16 +277,16 @@ so `file:line` queries stay unambiguous when two libraries hold files of the sam
 - Elaboration: parameters/localparam/defparam, `generate` (if/for/case), functions and (synthesizable) tasks, integer/genvar, signed semantics per IEEE 1364-2005 §5, implicit nets (warn), Quartus-dialect tolerance.
 - Comments kept in a side table keyed by location (not a red/green tree).
 
-### 4.2 SystemVerilog (slang adapter) (deferred, D10)
+### 4.2 SystemVerilog (slang adapter) (v1.1.0, D10)
 
-Not built in v1.0; how it would be done is in §12.1.
+Not built in v1.0; planned for v1.1.0. slang is vendored into Odin III (third_party/slang/) and the SV-to-structural-Verilog netlist writer joins it in v1.1.0, so SV designs elaborate and synthesize to structural Verilog netlists inside Odin III alone. See §12.1 for the mechanism.
 
 - slang is C++20 and MIT. `adapters/slang/` is a small C++ shim that links slang, walks its *elaborated* AST (post-parameter, post-generate), and emits the Odin III AST through the C ABI (`odin3_ast_*` builders). It exports exactly one C function, `odin3_read_slang(...)`, and is built as a separate shared library so the core stays pure C. slang handles packages, interfaces (flattened), structs, enums, `always_ff/comb/latch`, `logic`.
 - Source locations copied verbatim.
 
 ### 4.3 VHDL (GHDL subprocess) (deferred, D10)
 
-Not built in v1.0; how it would be done is in §12.1.
+Not built in v1.0; planned for v1.1.0. slang is vendored into Odin III (third_party/slang/) and the SV-to-structural-Verilog netlist writer joins it in v1.1.0, so SV designs elaborate and synthesize to structural Verilog netlists inside Odin III alone. See §12.1 for the mechanism.
 
 - `ghdl --synth --out=verilog` per design unit → Odin III Verilog front end. GHDL's generated names are stable enough to keep provenance to the VHDL line via a name map GHDL emits. **OPEN:** confirm GHDL's `--out=verilog` coverage on the VTR benchmark set once converted.
 
