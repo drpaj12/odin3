@@ -88,7 +88,7 @@ stage wheel-import minenv "$work/installvenv/bin/python" -c \
 # The installed CLI and flow script, run from outside the clone.
 mkdir -p "$work/outside"
 stage installed-version bash -c "cd '$work/outside' && env -i HOME='$work/home' \
-    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 1\.0\.0 '"
+    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 1\.1\.0 '"
 stage installed-flow bash -c "cd '$work/outside' && env -i HOME='$work/home' \
     PATH='$prefix/bin:/usr/bin:/bin' '$prefix/share/odin3/tools/flow/odin3-flow' \
     --no-vpr --out '$work/outside/enc' '$clone/tests/micro/verilog/micro/bm_DL_2_4_encoder.v'"
