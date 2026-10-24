@@ -6,8 +6,26 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-24
+
+Release notes: [docs/V1.1.0.md](docs/V1.1.0.md). ADR D13; spec `docs/DESIGN.md` §4.2/§12.1.
+The patch versions v1.0.1 to v1.0.5 were never released on their own; their changes ship here and
+keep their version notes.
+
 ### Added
 
+- SystemVerilog (v1.1.0, `docs/V1.1.0.md`; DESIGN §4.2/§12.1): slang v12.0 is vendored in
+  `third_party/slang` with fmt, boost.regex and tomlplusplus (offline build), and `adapters/slang`
+  is the C++20 shim that emits the elaborated Odin AST; `read_verilog` routes `.sv`/`.svh` and a
+  project's SYSTEMVERILOG files to it, and the gate flow's `write_verilog` writes the mapped
+  netlist as structural Verilog of library gate cells, which `read_verilog` reads back (an
+  instance of a registered bit-granularity cell type binds to it).
+- Simulation API (v1.0.3, ABI 5, `docs/specs/2026-10-21-s1-sim-api-design.md`): `odin3_simulation_*`
+  in the C ABI and a `Simulation` class in the Python binding step a design one clock at a time;
+  `sim --vectors-in` replays an input vector file and `sim --vcd` writes VCD waveforms.
+- VerilogEval corpus test `cli_veval_corpus` and `tools/veval/veval-coverage`: 146 of the 156
+  references go through the SystemVerilog front end and the cmos6 gate flow, 10 are refused with a
+  pinned reason (#265).
 - `unmap` pass (v1.0.4, `docs/specs/2026-10-21-unmap-design.md`): the inverse of `partial_map`; turns the
   VTR hard cells `adder`, `multiply`, `single_port_ram` and `dual_port_ram` back into `$add`/`$sub`,
   `$mul` and `$mem` with provenance, regrouping carry chains, split multipliers and sliced RAMs;
@@ -26,12 +44,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Changed
 
+- ABI 6 (v1.1.0): `odin3_sv_reader_register` and `odin3_sv_read_fn`, the seam the CLI uses to make
+  the slang adapter the read_verilog pass's SystemVerilog reader. Version is 1.1.0.
 - ABI 5: the ABC engine table gains load_genlib and get_cells (gate mapping); ODIN3_ABC_ENGINE_VERSION 2.
   No API stability promise (docs/PHASE7.md decision 4).
 
 ### Fixed
 
-- `odin3_flow` retries the VPR route at fixed wider channel widths when the final route at 1.3 x
+- `odin3_flow` retries the VPR route (v1.0.1) at fixed wider channel widths when the final route at 1.3 x
   the minimum width fails after a finished minimum-width search (tiny devices such as
   `bm_DL_2_4_encoder` on k6); `summary.json` gets `route_retry`.
 - `read_verilog --vtr-compat` reads `lib/soft_primitives/<name>.v` for an instance whose `#()`
@@ -42,23 +62,6 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   (`q_next[21] ^= q[0];`), and names the kind in its unsupported-expression diagnostic instead
   of printing the enum number; VerilogEval Prob082/086 pass (`#264`).
 
-## [1.1.0] - 2026-10-23
-
-Release notes: [docs/V1.1.0.md](docs/V1.1.0.md). ADR D13; spec `docs/DESIGN.md` §4.2/§12.1.
-
-### Added
-
-- SystemVerilog (v1.1.0, `docs/V1.1.0.md`; DESIGN §4.2/§12.1): slang v12.0 is vendored in
-  `third_party/slang` with fmt, boost.regex and tomlplusplus (offline build), and `adapters/slang`
-  is the C++20 shim that emits the elaborated Odin AST; `read_verilog` routes `.sv`/`.svh` and a
-  project's SYSTEMVERILOG files to it, and the gate flow's `write_verilog` writes the mapped
-  netlist as structural Verilog of library gate cells, which `read_verilog` reads back (an
-  instance of a registered bit-granularity cell type binds to it).
-
-### Changed
-
-- ABI 6 (v1.1.0): `odin3_sv_reader_register` and `odin3_sv_read_fn`, the seam the CLI uses to make
-  the slang adapter the read_verilog pass's SystemVerilog reader. Version is 1.1.0.
 ## [1.0.0] - 2026-10-21
 
 First release. Source tarball with submodules, `cmake --install`, and a pip wheel
