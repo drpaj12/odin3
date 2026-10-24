@@ -112,13 +112,16 @@ ADRs, IR, passes, oracles, phase checklists.
 
 ## Where things are going
 
-Version 1.0.0 is released (tag `v1.0.0`, 2026-10-21; Phases 0 to 7 closed, see the `docs/PHASE*.md`
-logs and `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to
+Version 1.1.0 is the latest release (tag `v1.1.0`, 2026-10-24, notes `docs/V1.1.0.md`; it rolls up
+v1.0.1 to v1.0.5 and adds SystemVerilog). Version 1.0.0 (tag `v1.0.0`, 2026-10-21) closed Phases 0
+to 7 (`docs/PHASE*.md`, `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to
 <https://drpaj12.github.io/odin3/>. After v1.0, new tools live in their own repos and use Odin III
 as a pip package without changing the core: Wyrd III (GUI and experiment runner,
 github.com/drpaj12/wyrd) and Loki III (reverse engineering, github.com/drpaj12/loki). The suite is
 Yggdrasil III: Odin III is the trunk; Wyrd III, Loki III, Midgard III (the Verilog Town game),
 Bifrost III (the simulation bridge) and Leman Russ III branch from it. Core changes after v1.0 are
 patch releases, each with its own spec, plan and log `docs/V1.0.<n>.md`: v1.0.1 route retry,
-v1.0.2 gate mapping, v1.0.3 S1 simulation API, v1.0.4 unmap, v1.0.5 core options for Loki III.
-Tags only on Peter's go. SystemVerilog and VHDL front ends (ADR D11) are later.
+v1.0.2 gate mapping, v1.0.3 S1 simulation API, v1.0.4 unmap, v1.0.5 core options for Loki III;
+none was released alone, all ship in v1.1.0 with the SystemVerilog front end (slang). Tags only on
+Peter's go. A VHDL front end (ADR D11) is later. The hub (YggdrasilIII) tags matching suite
+snapshots (v1.1.0 pins this release).
