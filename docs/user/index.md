@@ -8,6 +8,12 @@ output keeps a pointer to the HDL text it came from.
 This manual follows the layout of the VTR documentation: a getting-started page, an overview of
 the flow with one diagram per stage, then the references.
 
+Beyond the manual: the [v1.1.0 release log](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.0.md)
+(SystemVerilog and the VerilogEval run), the [paper](https://github.com/drpaj12/odin3/tree/main/docs/paper),
+and the [token, model and time cost](https://github.com/drpaj12/odin3/blob/main/docs/log_cost_of_tokens_and_time.md)
+of building Odin III. The other Yggdrasil III pieces are linked in the sidebar; setting up the whole
+suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilIII/getting-started.html).
+
 ```{toctree}
 :maxdepth: 2
 
