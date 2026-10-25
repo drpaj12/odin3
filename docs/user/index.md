@@ -24,6 +24,7 @@ passes
 inputs
 outputs
 analysis
+timing-attribution
 python-api
 re-workflow
 ```

@@ -119,6 +119,24 @@ Rules:
   each with its own state. `Design.close()` closes its simulations first, and a design and its
   simulations may be garbage-collected in any order.
 
+## Critical-path attribution
+
+`odin3.timing_attribution(flow_dir, paths=None)` returns the attribution of the critical path of
+an `odin3-flow --timing-attr` run: the dict that `timing/attribution.json` holds (`schema_version`
+1; fields in {doc}`timing-attribution`). `paths` keeps the first N setup paths of the VPR report.
+It raises `RuntimeError` when an input is missing or inconsistent (the flow ran without
+`--timing-attr`, the VPR report is gone, the two BLIFs do not line up).
+
+```python
+import odin3
+report = odin3.timing_attribution("out/design")
+print(report["timing"]["fmax_mhz"])
+for span in report["critical_path"]["spans"]:
+    print(span["span"], f"{span['delay_ns']:.3f} ns", span["words"])
+```
+
+It does not call the shared library: it reads the files the flow wrote (the package still imports `cffi`).
+
 ## Plugins
 
 A shared-object plugin is loaded with `odin3 --plugin FILE` (C ABI, repeatable) or from Python

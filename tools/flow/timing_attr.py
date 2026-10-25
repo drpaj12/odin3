@@ -40,6 +40,7 @@ _PROV = re.compile(r"^(?P<hier>.*?)/(?P<net>[^/]+)@(?P<file>.*):(?P<line>\d+)$")
 _BUS = re.compile(r"^(?P<word>.+)\[(?P<bit>\d+)\]$")
 _ASSIGN = re.compile(r"^\s*(?:assign\s+)?(?:(?:reg|wire)\s+)?(?:\[[^\]]*\]\s*)?([A-Za-z_]\w*)"
                      r"\s*(?:\[[^\]]*\]\s*)?<?=(?!=)")
+_GENERATED = re.compile(r"^\$n(\d+)$")
 _SPAN = re.compile(r"^(?P<file>.*):(?P<line>\d+)\.(?P<col>\d+)-\d+\.\d+$")
 
 
@@ -157,6 +158,14 @@ class JsonIndex:
     top: str
     bits: dict[str, list[int | str]] = field(default_factory=dict)
     drivers: dict[int, tuple[str, str | None]] = field(default_factory=dict)
+    bit_names: dict[int, tuple[str, int | None]] = field(default_factory=dict)
+
+    def net_word(self, atom: str) -> tuple[str, int | None] | None:
+        """(word, bit) of the source wire that holds net ``atom`` when that is a generated name
+        ``$n<ID>``: the JSON writer numbers a net's bit ``ID + 1`` (src/backends/json/emit.c),
+        so the wire bit with that number is the same net."""
+        m = _GENERATED.match(atom)
+        return self.bit_names.get(int(m.group(1)) + 1) if m else None
 
     def lookup(self, name: str) -> tuple[str, str] | None:
         """(span text ``file:line.col-line.col``, hier) of the driver of net ``name``."""
@@ -186,6 +195,11 @@ def load_json_index(path: Path, top: str | None) -> JsonIndex | None:
     index = JsonIndex(name)
     for net, data in module.get("netnames", {}).items():
         index.bits[net] = list(data.get("bits", []))
+        if net.startswith("$"):
+            continue
+        for position, bit in enumerate(data.get("bits", [])):
+            if isinstance(bit, int):
+                index.bit_names.setdefault(bit, (net, position if len(data["bits"]) > 1 else None))
     for cell in module.get("cells", {}).values():
         srcs = str(cell.get("attributes", {}).get("src", "")).split("|")
         hier = cell.get("odin3_prov", {}).get("hier") or None
@@ -220,6 +234,9 @@ class Resolver:
         if hit is not None:
             hier, net, file, line = hit
             word, bit = split_word(net)
+            named = self.index.net_word(net) if self.index and word is None else None
+            if named is not None:
+                word, bit = named
             return Origin(MATCHED, atom, hier, word, bit, file, line, via="provenance-name")
         found = self.index.lookup(atom) if self.index else None
         if found is not None:

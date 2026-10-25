@@ -163,6 +163,24 @@ class Joining(unittest.TestCase):
         self.assertEqual(ta.assigned_word("always @(posedge clk)"), None)
         self.assertIsNone(ta.assigned_word(None))
 
+    def test_word_of_generated_net_from_json(self) -> None:
+        tmp = scratch(self, "ot-tjson-")
+        module = {"netnames": {"count": {"bits": [5, 6, 7]}, "ok": {"bits": [9]},
+                               "$auto": {"bits": [11]}},
+                  "cells": {"$c1": {"attributes": {"src": "f.v:3.1-3.9"},
+                                    "port_directions": {"Y": "output"},
+                                    "connections": {"Y": [6]}}}}
+        (tmp / "n.json").write_text(json.dumps({"modules": {"top": module}}))
+        index = ta.load_json_index(tmp / "n.json", "top")
+        assert index is not None
+        self.assertEqual(index.net_word("$n6"), ("count", 2))  # bit id 7 is net 6, third bit
+        self.assertEqual(index.net_word("$n8"), ("ok", None))
+        self.assertIsNone(index.net_word("$n10"))  # only a generated name: no word
+        self.assertIsNone(index.net_word("count"))
+        self.assertEqual(index.lookup("count[0]"), None)  # bit 5 has no driver cell
+        self.assertEqual(index.lookup("count[1]"), ("f.v:3.1-3.9", "top"))
+        self.assertIsNone(ta.load_json_index(tmp / "none.json", "top"))
+
     def test_source_text(self) -> None:
         tmp = scratch(self, "ot-tsrc-")
         (tmp / "a.v").write_text("module a;\n   x <= y;\nendmodule\n")
