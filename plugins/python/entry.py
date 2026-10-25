@@ -1,7 +1,8 @@
 """Console entry points of the odin3 wheel (installed as odin3/_entry.py).
 
 ``odin3`` runs the bundled CLI (odin3/bin/odin3); ``odin3-flow`` runs the flow driver
-(odin3/data/tools/flow/odin3_flow.py) on the bundled data (odin3/data/{lib,tools}).
+(odin3/data/tools/flow/odin3_flow.py) on the bundled data (odin3/data/{lib,tools}); ``odin3-timing``
+runs the critical-path attribution (odin3/data/tools/flow/timing_attr.py).
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ def odin3_main() -> None:
     """Replace this process by the bundled odin3 CLI, same arguments."""
     cli = PACKAGE_DIR / "bin" / "odin3"
     os.execv(cli, [str(cli), *sys.argv[1:]])
+
+
+def timing_main() -> int:
+    """Run timing_attr.main (``odin3-timing``) from the bundled flow data."""
+    sys.path[:0] = [str(DATA / "tools" / "flow")]
+    return int(importlib.import_module("timing_attr").main())
 
 
 def flow_main() -> int:

@@ -2,7 +2,8 @@
 section 2.1).
 
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
-        [--family NAME] [--vpr | --no-vpr] [--analysis] [--odin3 PATH] [--out DIR]
+        [--family NAME] [--vpr | --no-vpr] [--analysis] [--timing-attr] [--timing-paths N]
+        [--odin3 PATH] [--out DIR]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
 copied) writes ``odin3/<top>.blif``. Target ``lpm``: the 5.1 LPM script (tools/flow/lpm.script)
@@ -29,6 +30,7 @@ from pathlib import Path
 
 import qor_legs
 import qor_parse
+import timing_attr
 from qor_heavy import HeavyError
 
 HERE = Path(__file__).resolve().parent
@@ -41,6 +43,7 @@ STEP_TIMEOUT_S = 3600
 DOT_MAX_NODES = 100000
 NOT_HARD = ("clb", "io", "EMPTY", "inpad", "outpad")  # packer block types that are not hard blocks
 TARGETS = ("vtr", "lpm")
+VPR_DEFAULT_PATHS = timing_attr.DEFAULT_PATHS  # --timing_report_npaths when VPR is not told
 _MODULE = re.compile(r"^\s*module\s+\\?([A-Za-z_][A-Za-z0-9_$]*)", re.M)
 _HARD_BLOCKS = re.compile(r"^Netlist (\w+) blocks:\s*(\d+)", re.M)
 _COMMENT = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
@@ -61,6 +64,8 @@ class FlowArgs:
     analysis: bool
     odin3: Path
     out: Path
+    timing_attr: bool = False  # --timing-attr: attribute the critical path to the HDL
+    timing_paths: int = VPR_DEFAULT_PATHS  # setup paths VPR reports (and the tool attributes)
 
 
 @dataclass(frozen=True)
@@ -76,6 +81,7 @@ class FlowResult:
     ok: bool
     steps: list[StepResult] = field(default_factory=list)
     summary: dict[str, object] = field(default_factory=dict)
+    vpr_run_dir: Path | None = None  # the VPR run directory of the routed result
 
 
 def find_tops(designs: Sequence[Path]) -> list[str]:
@@ -286,13 +292,17 @@ def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_
             width: int | None, timeout: int | None = None
             ) -> tuple[qor_legs.LegContext, StepResult, float]:
     """One ``run_vtr_flow.py -start vpr`` in ``job_dir``; ``width`` fixes ``--route_chan_width``
-    (VTR then skips the minimum-width search). ``timeout`` defaults to the stage timeout + 60 s."""
+    (VTR then skips the minimum-width search). ``timeout`` defaults to the stage timeout + 60 s.
+    ``--timing-paths N`` adds ``--timing_report_npaths N`` (a report option) when N is not VPR's
+    default."""
     ctx = qor_legs.LegContext(vtr_root, vtr_root / ".venv" / "bin" / "python", arch, args.odin3,
                               resource_root(), job_dir, k, "A")
     job_dir.mkdir(parents=True, exist_ok=True)
     shutil.copy(blif, job_dir / blif.name)  # build_commands reads <job_dir>/<design>.blif
     cmd = qor_legs.build_commands("O", blif.stem, ctx)[1]
-    argv = [*cmd.argv, "--route_chan_width", str(width)] if width is not None else cmd.argv
+    argv = [*cmd.argv, "--route_chan_width", str(width)] if width is not None else list(cmd.argv)
+    if args.timing_attr and args.timing_paths != VPR_DEFAULT_PATHS:
+        argv += ["--timing_report_npaths", str(args.timing_paths)]
     started = time.time()
     step = run_step("vpr", argv, job_dir, {**os.environ, **dict(cmd.env)},
                     timeout if timeout is not None else qor_legs.stage_timeout("A") + 60)
@@ -345,6 +355,7 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
                          f"{', '.join(str(w) for w in skipped)}\n")
             step.log.write_text(step.log.read_text() + note)
             return
+    result.vpr_run_dir = ctx.job_dir / "run"
     try:
         result.summary.update(parse_vpr(ctx, blif, started))
     except (HeavyError, OSError) as exc:
@@ -389,6 +400,43 @@ def analysis_step(top: str, adir: Path, odin3_log: Path, result: FlowResult) -> 
     result.steps.append(StepResult("analysis", not bad, log, time.monotonic() - start))
 
 
+def timing_script(k: int, tdir: Path) -> str:
+    """The writes that give the timing attribution its provenance, appended to the script: the
+    same netlist as BLIF with provenance names (same blocks, same order as the BLIF VPR reads) and
+    ``write_json --odin3``. Both only read the netlist: the BLIF VPR reads is unchanged."""
+    return (f"; write_blif --vtr --lut-k {k} --name-style provenance "
+            f"{quote(tdir / timing_attr.PROV_BLIF_NAME)}; "
+            f"write_json --odin3 {quote(tdir / timing_attr.NETLIST_JSON_NAME)}")
+
+
+def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: FlowResult) -> None:
+    """Attribute the critical path of the VPR run in ``run_dir``: ``timing/inputs.json``,
+    ``attribution.json`` and ``summary.txt``. A failure is a failed step."""
+    start = time.monotonic()
+    tdir = args.out / timing_attr.TIMING_DIR
+    log = tdir / "timing.log"
+    inputs = {"top": top, "blif": os.path.relpath(blif, args.out),
+              "prov_blif": f"{timing_attr.TIMING_DIR}/{timing_attr.PROV_BLIF_NAME}",
+              "netlist_json": f"{timing_attr.TIMING_DIR}/{timing_attr.NETLIST_JSON_NAME}",
+              "vpr_run_dir": os.path.relpath(run_dir, args.out),
+              "paths_requested": args.timing_paths}
+    (tdir / timing_attr.INPUTS_NAME).write_text(json.dumps(inputs, indent=1) + "\n")
+    try:
+        report = timing_attr.attribute_flow_dir(args.out, args.timing_paths)
+        timing_attr.write_outputs(report, tdir)
+        log.write_text("ok\n")
+        cov, crit = report["coverage"], report["critical_path"]
+        result.summary["timing_attr"] = {
+            "paths": report["timing"]["paths_parsed"], "matched_share": cov["matched_share"],
+            "critical_spans": [s["span"] for s in crit["spans"] if s["span"]],
+        }
+        ok = True
+    except (timing_attr.AttributionError, OSError, ValueError) as exc:
+        log.write_text(f"{exc}\n")
+        ok = False
+    result.steps.append(StepResult("timing", ok, log, time.monotonic() - start))
+
+
 def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     """Target ``vtr``: the odin3 step, then VPR when asked. The BLIF, or None on a failure."""
     step_dir = args.out / "odin3"
@@ -401,6 +449,9 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
         script += analysis_script(top, adir)
+    if args.timing_attr:
+        (args.out / timing_attr.TIMING_DIR).mkdir(parents=True, exist_ok=True)
+        script += timing_script(k, args.out / timing_attr.TIMING_DIR)
     step = run_step("odin3", odin3_command(args, top, script), step_dir)
     result.steps.append(step)
     if not step.ok:
@@ -413,6 +464,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
             return None
     if args.vpr:
         vpr_step(args, blif, k, result)
+        if args.timing_attr and result.steps[-1].ok and result.vpr_run_dir is not None:
+            timing_step(args, top, blif, result.vpr_run_dir, result)
     return blif if result.steps[-1].ok else None
 
 
@@ -441,6 +494,10 @@ def run_flow(args: FlowArgs) -> FlowResult:
             raise UsageError(f"no such design file: {design}")
     if args.analysis and args.target != "vtr":
         raise UsageError("--analysis applies to --target vtr only (levelize needs bits)")
+    if args.timing_attr and (args.target != "vtr" or not args.vpr):
+        raise UsageError("--timing-attr needs --target vtr and VPR (--vpr, VTR_ROOT)")
+    if args.timing_paths < 1:
+        raise UsageError("--timing-paths needs a positive number")
     if not args.odin3.is_file():
         raise UsageError(f"no odin3 binary at {args.odin3}: build it, put it on PATH or give "
                          f"--odin3")
@@ -507,6 +564,12 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                          "--target vtr only")
     ap.add_argument("--analysis", action="store_true",
                     help="also write the dot, JSON, levelize and locs files; needs --target vtr")
+    ap.add_argument("--timing-attr", action="store_true",
+                    help="attribute the critical path to HDL statements, modules and words "
+                         "(timing/attribution.json and summary.txt); needs VPR")
+    ap.add_argument("--timing-paths", type=int, default=None, metavar="N",
+                    help=f"setup paths to report and attribute (default {VPR_DEFAULT_PATHS}); "
+                         f"implies --timing-attr")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -519,8 +582,11 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
         out = Path("odin3_out") / resolve_top(ns.designs, ns.top)
     vpr = resolve_vpr(ns.vpr, ns.target)
     arch = ns.arch.resolve() if ns.arch else None
+    attr = ns.timing_attr or ns.timing_paths is not None
+    paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
-                    ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve())
+                    ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
+                    attr, paths)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

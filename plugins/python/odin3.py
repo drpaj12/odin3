@@ -37,9 +37,11 @@ call raises Odin3Error carrying its odin3_status; the library has already logged
 
 from __future__ import annotations
 
+import importlib
 import logging
 import os
 import re
+import sys
 import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -1023,3 +1025,22 @@ class AstNode:
         count = int(self._get("odin3_ast_get_nchild"))
         kids = (int(self._get("odin3_ast_get_child", "uint32_t", i)) for i in range(count))
         return [AstNode(self.tree, kid) for kid in kids if kid]
+
+
+def timing_attribution(flow_dir: str | Path, paths: int | None = None) -> dict[str, Any]:
+    """Attribute the critical path of an ``odin3-flow --timing-attr`` run to HDL statements,
+    modules and words (docs/user/timing-attribution.md). ``flow_dir`` is the flow's output
+    directory; ``paths`` keeps the first N setup paths of the VPR report (default: all). Returns
+    the dict that ``timing/attribution.json`` holds (``schema_version`` 1). Raises
+    ``RuntimeError`` (``timing_attr.AttributionError``) when an input is missing or inconsistent
+    (the flow was run without ``--timing-attr``, the VPR report is gone, the two BLIFs do not
+    line up)."""
+    here = Path(__file__).resolve().parent
+    for flow in (here / "data" / "tools" / "flow", here.parents[1] / "tools" / "flow"):
+        if (flow / "timing_attr.py").is_file():
+            if str(flow) not in sys.path:
+                sys.path.insert(0, str(flow))
+            report: dict[str, Any] = importlib.import_module("timing_attr").attribute_flow_dir(
+                Path(flow_dir), paths)
+            return report
+    raise RuntimeError("timing_attr.py not found: the install has no tools/flow data")
