@@ -8,7 +8,7 @@ writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for 
 object in the output can be traced to the HDL text it came from.
 
 **Status: version 1.1.1 (SystemVerilog via the vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
-Release notes: [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
+Release notes: [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
