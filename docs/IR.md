@@ -572,7 +572,7 @@ This replaces spec §5.3's `origin` field and D9's "pointers in-process": a reco
 are the origin, and everything is reached by ID or hash (spec §5.3 and D9 amended).
 
 **IR-13 Passes do not build records by hand.** A pass runs with a pass context that knows its
-run; `odin3_prov_begin_op(ctx)` starts an operation and
+run; `odin3_prov_begin_op_class(ctx, cls)` starts an operation and declares its class (IR-12a) and
 `odin3_prov_derive(ctx, odin3_prov_list parents, &id)` makes its record. Identity for
 hash-consing: every field including `run` and `op` for `DERIVED`; every field except `op` for
 `SOURCE`/`IMPORTED`, so one origin in one run is one record. Creating any node, net or wire
@@ -581,6 +581,37 @@ created without lineage. Readers use `odin3_prov_source` / `odin3_prov_imported`
 restores locations a writer printed (5.4, `odin3_hdl_restore`) makes one `DERIVED` record per
 object, parents = the restored `SOURCE` then the reader's own record (the `SOURCE` alone when the
 reader has none).
+
+**IR-12a Op classes (V1.2.0 Task 2; docs/V1.2.0.md 3.1, ADR D14).** The class of an operation is
+declared by the pass, not inferred. A design-global op-class table (`src/ir/opclass.{h,c}`, the design
+pointer `opclass`; copied by `odin3_design_clone`, counted by `odin3_design_bytes_reserved`) holds a
+**default class** for each `(run, op)` and an optional **override** for a DERIVED record. A class
+(`odin3_opclass`) is: `dir` (`refine`: one parent, many pieces share the record; `rewrite`: 1:1 or a
+regrouping that blends nothing; `coarsen`: N distinct records to one; `context`: flatten, the
+record adds the instance; `origin` is SOURCE or IMPORTED and is never declared), `from_level` and
+`to_level` (V1.2.0 section 2), `bulk` (abc's over-budget and unanchored-objects record) and
+`context_tail` (how many parents at the end of the parent list are context parents; 0 unless `dir`
+is `context`). No field of `odin3_prov_record` changes and no ID changes; the class does not enter
+record identity.
+
+- `odin3_prov_begin_op_class(ctx, cls)` starts an operation whose default is `cls`. It cannot fail:
+  an out-of-memory in the table is held and the next derive returns `ODIN3_ERR_NO_MEMORY`; an
+  invalid class is reported by rule 13.
+- `odin3_prov_begin_op_lazy(ctx)` starts an operation whose class is not known until its first
+  derive (opt's `rb_prov` and `new_prov`): the first `odin3_prov_derive_class` with a class
+  declares the default.
+- `odin3_prov_derive_class(ctx, parents, hier, cls, &id)`: `cls` NULL takes the operation's
+  default; non-NULL is this record's class, stored as an override only when it differs from the
+  default (a mixed operation: opt's FF visits, where one derive is a rewrite and another a
+  coarsen). `odin3_prov_derive` and `odin3_prov_derive_hier` take the default.
+- `odin3_prov_begin_op(ctx)` (no class) stays for tests and `src/ir/`; the lint rule
+  (`tools/check_rules.py`) rejects it in `src/`, `plugins/` and `adapters/`. A DERIVED record made
+  in such an operation has no class and fails rule 13.
+- Storage: runs `{run, first_op, last_op, class}` (16 bytes, a new row only when the class
+  changes between consecutive declared operations of a run) and overrides `{record, class}`
+  (8 bytes, sorted by record: a record is overridden only when it is made, so the IDs arrive in order).
+- A derive over one distinct record repeated is the 1:1 record of a rewrite; `odin3_kit_derive_coarsen`
+  therefore uses the default for it, so that hash-consing never gives one record two classes.
 
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the
@@ -663,6 +694,12 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.
+12. (Reserved for the construct table, V1.2.0 Task 3.)
+13. **E** (full check, once per design) Op classes (IR-12a): every DERIVED record has a class (its
+    override, else the default of its `(run, op)`); each class has a direction other than `origin`,
+    `from`/`to` levels in range and set, a `context_tail` that is 0 unless the direction is
+    `context` and at most the record's parent count, and a `context` record has a parent; the table
+    did not receive an invalid class; no record was derived with two classes.
 
 `ODIN3_ERR_CHECK` is added to `odin3_status` in `odin3.h` (an ABI change: ABI version 0 → 1,
 done in 1B).
@@ -730,6 +767,10 @@ information, and provenance across ABC (IR-12).
 Under PHASE3 #30 (3A spec, the one IR addition Peter approved): `odin3_prov_derive_hier` (IR-12),
 `odin3_prov_derive` with a caller-chosen `hier` string, which `flatten` uses to record the instance
 path. Additive: no field, rule, ABI export or check rule changes.
+
+Under V1.2.0 Task 2 (Peter 2026-10-25, ADR D14): IR-12a, the op-class table, `odin3_prov_begin_op_class`,
+`odin3_prov_begin_op_lazy`, `odin3_prov_derive_class` and check rule 13. Additive: no record field, ID,
+ABI export or cell type changes.
 
 Under PHASE3 #37: check rule 7 also tests that a record's `hier` is 0 or a string-table ID. No
 other check rule, field or ABI change; the path's shape is not checked.
