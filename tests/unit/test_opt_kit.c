@@ -693,7 +693,7 @@ static void test_prov_parents(void) {
     odin3_node_id parents[2] = {node_named("r"), node_named("g")};
     odin3_kit_begin_rewrite(&fx.oc);
     odin3_prov_id prov = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_prov(&fx.oc, parents, 2, &prov));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_prov(&fx.oc, parents, 2, NULL, &prov));
     odin3_prov_list list = odin3_prov_parents(fx.res.design, prov);
     TEST_ASSERT_EQUAL_UINT32(2, list.count);
     TEST_ASSERT_EQUAL_UINT32(odin3_node_prov(fx.module, parents[0]).v, list.ids[0].v);

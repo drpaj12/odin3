@@ -40,7 +40,8 @@ typedef struct override_row {
 struct odin3_opclass_table {
     odin3_vec ranges;    /* range_row, sorted by (run, first), disjoint */
     odin3_vec overrides; /* override_row, sorted by record */
-    bool failed;
+    bool failed;         /* an invalid class was declared (programming error; check rule 13) */
+    bool pending;        /* a begin ran out of memory: the next derive reports it */
     uint32_t conflicts;
     uint32_t first_conflict;
 };
@@ -232,6 +233,20 @@ uint32_t odin3_opclass_override_count(const odin3_opclass_table *table) {
 
 void odin3_opclass_note_failure(odin3_opclass_table *table) {
     table->failed = true;
+}
+
+void odin3_opclass_set_pending(odin3_opclass_table *table, bool pending) {
+    table->pending = pending;
+}
+
+bool odin3_opclass_take_pending(odin3_opclass_table *table) {
+    bool was = table->pending;
+    table->pending = false;
+    return was;
+}
+
+odin3_status odin3_opclass_reserve_override(odin3_opclass_table *table) {
+    return odin3_vec_reserve(&table->overrides, table->overrides.len + 1U);
 }
 
 void odin3_opclass_note_conflict(odin3_opclass_table *table, odin3_prov_id record) {

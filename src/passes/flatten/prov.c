@@ -78,9 +78,11 @@ odin3_status odin3_flatten_derive(odin3_flatten_ctx *fc, odin3_prov_id orig, odi
     const odin3_prov_record *rec = orig.v != 0 ? odin3_prov_get(fc->design, orig) : NULL;
     uint32_t hier = 0;
     odin3_status st = hier_for(fc, rec != NULL ? rec->hier : 0, &hier);
-    return st == ODIN3_OK
-               ? odin3_prov_derive_hier(fc->pass, (odin3_prov_list){parents, count}, hier, out)
-               : st;
+    odin3_opclass cls = {ODIN3_DIR_CONTEXT, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD, false,
+                         fc->inst_prov.v != 0 ? 1U : 0U}; /* the instance record is the tail */
+    return st == ODIN3_OK ? odin3_prov_derive_class(fc->pass, (odin3_prov_list){parents, count},
+                                                    hier, &cls, out)
+                          : st;
 }
 
 static void first_leaf(void *user, odin3_prov_id leaf) {

@@ -886,8 +886,8 @@ static odin3_status class_prov(merge_state *ms, odin3_node_id surv, const classe
     }
     *out = (odin3_prov_id){0};
     if (st == ODIN3_OK && provs.len > 0) {
-        st = odin3_prov_derive(ms->oc->pass, (odin3_prov_list){provs.data, (uint32_t)provs.len},
-                               out);
+        st = odin3_kit_derive_coarsen(
+            ms->oc, (odin3_prov_list){provs.data, (uint32_t)provs.len}, out);
     }
     odin3_vec_free(&provs);
     return st;

@@ -92,6 +92,10 @@ bool odin3_opclass_default(const odin3_opclass_table *table, odin3_passrun_id ru
 odin3_status odin3_opclass_override(odin3_opclass_table *table, odin3_prov_id record,
                                     const odin3_opclass *cls);
 
+/* Makes room for one more override so that odin3_opclass_override cannot then run out of memory.
+ * NO_MEMORY. */
+odin3_status odin3_opclass_reserve_override(odin3_opclass_table *table);
+
 /* The override of record: true and *out set, false when it has none. */
 bool odin3_opclass_override_of(const odin3_opclass_table *table, odin3_prov_id record,
                                odin3_opclass *out);
@@ -105,12 +109,15 @@ uint32_t odin3_opclass_row_count(const odin3_opclass_table *table);
 uint32_t odin3_opclass_override_count(const odin3_opclass_table *table);
 
 /*
- * Problems the table saw while the passes ran, reported by check rule 13 because the derive path
- * itself cannot fail on them (no output may change): a table that ran out of memory or got an
- * invalid class (failed), and derives of one record that declared two classes (conflicts; the
- * first such record is kept).
+ * Problems the table saw while the passes ran. A begin cannot fail (it returns nothing): an out of
+ * memory there is held (pending) and the next derive returns NO_MEMORY, through the pass's own
+ * error path. An invalid class, and derives of one record that declared two classes (conflicts;
+ * the first such record is kept), are programming errors that no output depends on: check rule 13
+ * reports them.
  */
 void odin3_opclass_note_failure(odin3_opclass_table *table);
+void odin3_opclass_set_pending(odin3_opclass_table *table, bool pending);
+bool odin3_opclass_take_pending(odin3_opclass_table *table);
 void odin3_opclass_note_conflict(odin3_opclass_table *table, odin3_prov_id record);
 bool odin3_opclass_failed(const odin3_opclass_table *table);
 uint32_t odin3_opclass_conflicts(const odin3_opclass_table *table, odin3_prov_id *first);

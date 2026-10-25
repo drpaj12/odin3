@@ -34,6 +34,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The shared inverter record: derived over every flop that uses it, so N to 1 (IR-12a). */
+static const odin3_opclass inverter_class = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                             false, 0};
+
 /* Ports of the four source types: C or E, D, Q. */
 enum { SRC_CLOCK, SRC_DATA, SRC_Q };
 
@@ -286,7 +290,7 @@ static odin3_status inverter_prov(dlm_ctx *dc, uint64_t key, odin3_prov_id *out)
     if (st == ODIN3_OK && parents.len == 1) {
         *out = *(const odin3_prov_id *)odin3_vec_cat(&parents, 0);
     } else if (st == ODIN3_OK) {
-        odin3_prov_begin_op(dc->pass);
+        odin3_prov_begin_op_class(dc->pass, &inverter_class);
         st = odin3_prov_derive(dc->pass, (odin3_prov_list){parents.data, (uint32_t)parents.len},
                                out);
     }

@@ -4,6 +4,9 @@
 #include "ir/design.h"
 #include "util/log.h"
 
+const odin3_opclass odin3_hdl_restore_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD,
+                                               ODIN3_LEVEL_WORD, false, 0};
+
 /* The design's locations for the first count parsed ones. */
 static odin3_status intern_locs(odin3_design *design, const odin3_hdl_restore_req *req,
                                 uint32_t count, odin3_srcloc *out) {

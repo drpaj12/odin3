@@ -16,6 +16,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The class of a hard-mapping operation: a cell rewritten as a hard cell (IR-12a). */
+static const odin3_opclass hardmap_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                            false, 0};
+
 /* The design budget is checked every this many created pins (H-9). */
 enum { HM_BUDGET_PINS = 1 << 16, HM_MAX_PORTS = 16, HM_MAX_NAME_TRIES = 1 << 20 };
 
@@ -218,7 +222,7 @@ odin3_status hm_begin_cell(hm_ctx *hc, odin3_node_id src) {
     odin3_vec_clear(&hc->made_nodes);
     odin3_vec_clear(&hc->made_nets);
     odin3_vec_clear(&hc->doomed);
-    odin3_prov_begin_op(hc->pass);
+    odin3_prov_begin_op_class(hc->pass, &hardmap_class);
     odin3_prov_id parent = odin3_node_prov(hc->module, src);
     if (parent.v == 0) {
         return ODIN3_OK;

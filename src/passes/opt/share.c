@@ -684,7 +684,8 @@ static odin3_status group_prov(sh_state *ss, odin3_prov_id *prov) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *tail = ss->mux_node;
-    odin3_status st = odin3_kit_prov(ss->oc, ss->byid.data, (uint32_t)ss->byid.len, prov);
+    odin3_status st = odin3_kit_prov(ss->oc, ss->byid.data, (uint32_t)ss->byid.len,
+                                     &odin3_kit_class_coarsen, prov);
     odin3_vec_pop(&ss->byid);
     return st;
 }

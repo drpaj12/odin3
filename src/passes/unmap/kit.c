@@ -16,6 +16,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The class of an unmap operation: the same logic regrouped, not blended (IR-12a). */
+static const odin3_opclass unmap_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 enum { UM_MAX_PORTS = 16, UM_TEXT_CAP = 256, UM_MSG_CAP = 1024 };
 
 /* --- net classes (N-1, N-2) ---------------------------------------------------------------- */
@@ -260,7 +264,7 @@ static odin3_status make_prov(um_ctx *uc, const odin3_vec *sorted, odin3_prov_id
         }
     }
     if (st == ODIN3_OK && parents.len > 0) {
-        odin3_prov_begin_op(uc->pass);
+        odin3_prov_begin_op_class(uc->pass, &unmap_class);
         st = odin3_prov_derive(uc->pass, (odin3_prov_list){parents.data, (uint32_t)parents.len},
                                out);
     }

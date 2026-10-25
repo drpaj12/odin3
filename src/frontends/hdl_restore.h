@@ -19,6 +19,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The class of the one operation that makes restored records: a rewrite (IR-12a). */
+extern const odin3_opclass odin3_hdl_restore_class;
+
 /* What to restore: the parsed locations of one object (their files are views, which the call
  * interns), the record the reader would have made (0: none), and the hierarchy path (a strtab ID
  * of the design, 0: none) that goes on both records. */

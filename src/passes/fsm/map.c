@@ -557,7 +557,8 @@ static odin3_status make_prov(odin3_fsm_mapper *mp) {
         }
     }
     odin3_kit_begin_rewrite(&mp->oc);
-    st = st == ODIN3_OK ? odin3_kit_prov(&mp->oc, parents.data, (uint32_t)parents.len, &mp->prov)
+    st = st == ODIN3_OK ? odin3_kit_prov(&mp->oc, parents.data, (uint32_t)parents.len,
+                                         &odin3_kit_class_coarsen, &mp->prov)
                         : st;
     odin3_vec_free(&parents);
     return st;

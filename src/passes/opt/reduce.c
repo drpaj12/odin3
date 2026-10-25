@@ -795,7 +795,7 @@ static void mux_params(const rd_state *rs, odin3_node_id node, size_t width, odi
 /* The new narrower cell, made but not yet wired to the readers (the build of the rewrite). */
 static odin3_status bits_make(rd_state *rs, odin3_node_id old, odin3_node_id *out) {
     odin3_prov_id prov = {0};
-    odin3_status st = odin3_kit_prov(rs->oc, &old, 1, &prov);
+    odin3_status st = odin3_kit_prov(rs->oc, &old, 1, NULL, &prov);
     st = st == ODIN3_OK ? bits_inputs(rs) : st;
     if (st != ODIN3_OK) {
         return st;
@@ -1031,7 +1031,7 @@ static odin3_status pmux_rewrite(rd_state *rs, odin3_node_id node) {
     odin3_kit_begin_rewrite(rs->oc);
     odin3_prov_id prov = {0};
     const size_t width = rs->an.len;
-    odin3_status st = odin3_kit_prov(rs->oc, &node, 1, &prov);
+    odin3_status st = odin3_kit_prov(rs->oc, &node, 1, NULL, &prov);
     st = st == ODIN3_OK ? groups_order(rs, rs->sn.len) : st;
     st = st == ODIN3_OK ? groups_build(rs, width, prov) : st;
     st = st == ODIN3_OK ? pmux_rebuild(rs, node, width, prov) : st;

@@ -786,9 +786,10 @@ static odin3_status new_prov(odin3_opt_ctx *oc, const odin3_ffdata *ff, odin3_pr
         return ODIN3_OK;
     }
     if (oc->pass->op == 0) {
-        odin3_prov_begin_op(oc->pass);
+        odin3_prov_begin_op_lazy(oc->pass);
     }
-    return odin3_prov_derive(oc->pass, (odin3_prov_list){&ff->prov, 1}, out);
+    return odin3_prov_derive_class(oc->pass, (odin3_prov_list){&ff->prov, 1}, 0,
+                                   &odin3_kit_class_rewrite, out);
 }
 
 static odin3_status emit_cell(odin3_opt_ctx *oc, odin3_ffdata *ff, odin3_celltype_id type,

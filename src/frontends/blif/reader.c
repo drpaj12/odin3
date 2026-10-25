@@ -5,6 +5,7 @@
 #include "frontends/blif/param_text.h"
 #include "frontends/blif/reader_locs.h"
 #include "frontends/blif/reader_names.h"
+#include "frontends/hdl_restore.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -786,7 +787,9 @@ static odin3_status build_all(blif_reader *rd) {
     rd->line = 1;
     odin3_status st = begin_run(rd);
     if (st == ODIN3_OK && rd->locs != NULL) {
-        odin3_prov_begin_op(&rd->ctx); /* the one operation of every restored record (D-1) */
+        odin3_prov_begin_op_class(
+            &rd->ctx,
+            &odin3_hdl_restore_class); /* the one operation of every restored record (D-1) */
     }
     if (st == ODIN3_OK && rd->models.len > 0 && rd_model(rd, 0)->blackbox) {
         st = rd_error(rd, rd_model(rd, 0)->line, "the first model must be a module (the top)");
