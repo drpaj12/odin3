@@ -7,7 +7,7 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-**Status: version 1.1.0 (SystemVerilog via the vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.1.1 (SystemVerilog via the vendored slang adapter, structural Verilog netlists).** User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
@@ -45,11 +45,11 @@ From source (Ubuntu 24.04, native or WSL2; CMake 3.28 or later for the default
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git && cd odin3
 cmake --preset release && cmake --build --preset release
-cmake --install build/release --prefix "$HOME/odin3-1.1.0"
+cmake --install build/release --prefix "$HOME/odin3-1.1.1"
 ```
 
 Or the Python wheel from the GitHub release (bundles `libodin3`, ABC, the `odin3` CLI and
-`odin3-flow`): `pip install odin3-1.1.0-py3-none-linux_x86_64.whl`.
+`odin3-flow`): `pip install odin3-1.1.1-py3-none-linux_x86_64.whl`.
 
 Then follow the manual's getting-started page: one command, `odin3-flow`, takes a Verilog design
 to a routed VPR result (with `VTR_ROOT` set) or to LPM Verilog.
