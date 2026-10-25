@@ -586,7 +586,7 @@ static void opclass_shape(check_ctx *ctx, uint32_t id, const odin3_prov_record *
 static void check_opclasses(check_ctx *ctx) {
     const odin3_opclass_table *table = ctx->design->opclass;
     if (odin3_opclass_failed(table)) {
-        violation(ctx, R13, "the op-class table ran out of memory or got an invalid class");
+        violation(ctx, R13, "the op-class table got an invalid class or lost an override");
     }
     odin3_prov_id first = {0};
     uint32_t conflicts = odin3_opclass_conflicts(table, &first);

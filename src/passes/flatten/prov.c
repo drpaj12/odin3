@@ -8,6 +8,7 @@
 #include "ir/module.h"
 #include "util/log.h"
 
+#include <assert.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -66,6 +67,7 @@ odin3_status odin3_flatten_derive(odin3_flatten_ctx *fc, odin3_prov_id orig, odi
     odin3_prov_id parents[2];
     uint32_t count = 0;
     *out = (odin3_prov_id){0};
+    assert(orig.v == 0 || orig.v != fc->inst_prov.v); /* else the parents repeat one record */
     if (orig.v != 0) {
         parents[count++] = orig;
     }

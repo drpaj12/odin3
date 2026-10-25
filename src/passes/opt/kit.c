@@ -1091,7 +1091,7 @@ odin3_status odin3_kit_prov(const odin3_opt_ctx *oc, const odin3_node_id *parent
         }
     }
     odin3_status st = ODIN3_OK;
-    if (kept > 0 && cls == &odin3_kit_class_coarsen) {
+    if (kept > 0 && cls != NULL && odin3_opclass_equal(cls, &odin3_kit_class_coarsen)) {
         st = odin3_kit_derive_coarsen(oc, (odin3_prov_list){ids, kept}, out);
     } else if (kept > 0) {
         st = odin3_prov_derive_class(oc->pass, (odin3_prov_list){ids, kept}, 0, cls, out);

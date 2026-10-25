@@ -256,6 +256,7 @@ static odin3_status run_append(odin3_design *design, odin3_passrun_row row, odin
         return ODIN3_ERR_NO_MEMORY;
     }
     *slot = row;
+    odin3_opclass_set_pending(design->opclass, false); /* an owed begin OOM belongs to its run */
     ctx->design = design;
     ctx->run.v = (uint32_t)(store->runs.len - 1);
     ctx->op = 0;
@@ -306,9 +307,8 @@ void odin3_prov_begin_op_class(odin3_pass_ctx *ctx, const odin3_opclass *cls) {
         odin3_opclass_set_pending(table, true); /* the next derive returns NO_MEMORY */
     } else if (st != ODIN3_OK) {
         odin3_opclass_note_failure(table); /* an invalid class: check rule 13 */
-    } else {
-        odin3_opclass_set_pending(table, false);
     }
+    /* A success leaves `pending` alone: an earlier begin's out of memory is still owed. */
 }
 
 /* The row of run, NULL for a NULL design or run 0 or unknown. */
@@ -721,7 +721,9 @@ static odin3_status classify_prepare(const odin3_pass_ctx *ctx, const odin3_opcl
 }
 
 /*
- * Records the class of the record a derive returned (IR-12a). `created`: the derive made the
+ * Records the class of the record a derive returned (IR-12a). Run and op are part of a DERIVED
+ * record's identity, so a hash-consed record returned here was made in this very (run, op): its
+ * class is compared with the same default, and a second class is a real conflict. `created`: the derive made the
  * record. Cannot fail (classify_prepare made room): a conflict is noted for check rule 13.
  */
 static void classify(const odin3_pass_ctx *ctx, odin3_prov_id rec, bool created,
@@ -742,9 +744,9 @@ static void classify(const odin3_pass_ctx *ctx, odin3_prov_id rec, bool created,
             odin3_opclass_note_conflict(table, rec);
         }
     } else if (created && !odin3_opclass_equal(&def, want)) {
-        odin3_status st = odin3_opclass_override(table, rec, want);
-        assert(st == ODIN3_OK);
-        (void)st;
+        if (odin3_opclass_override(table, rec, want) != ODIN3_OK) {
+            odin3_opclass_note_failure(table); /* not reachable after classify_prepare; rule 13 */
+        }
     }
 }
 

@@ -111,7 +111,8 @@ uint32_t odin3_opclass_override_count(const odin3_opclass_table *table);
 /*
  * Problems the table saw while the passes ran. A begin cannot fail (it returns nothing): an out of
  * memory there is held (pending) and the next derive returns NO_MEMORY, through the pass's own
- * error path. An invalid class, and derives of one record that declared two classes (conflicts;
+ * error path; a successful begin keeps it, and odin3_pass_run_begin clears it (it is per run).
+ * An invalid class, and derives of one record that declared two classes (conflicts;
  * the first such record is kept), are programming errors that no output depends on: check rule 13
  * reports them.
  */

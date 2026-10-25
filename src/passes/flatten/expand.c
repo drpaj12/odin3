@@ -322,6 +322,8 @@ static odin3_status expand_one(odin3_flatten_ctx *fc, const flat_work *item) {
         log_kept(fc, inst);
         return ODIN3_OK;
     }
+    /* The default tail (1 iff the instance record exists) must equal the tail of every derive in
+     * the operation (flatten/prov.c, same condition). */
     odin3_prov_begin_op_class(fc->pass, &(odin3_opclass){ODIN3_DIR_CONTEXT, ODIN3_LEVEL_WORD,
                                                          ODIN3_LEVEL_WORD, false,
                                                          item->prov.v != 0 ? 1U : 0U});

@@ -270,6 +270,17 @@ static odin3_status make_inverter(dlm_ctx *dc, odin3_module *mod, odin3_net_id c
     return ODIN3_OK;
 }
 
+/* True when parents (odin3_prov_id) is not empty and holds one distinct record, however often
+ * repeated (a derive over it is the 1:1 record, as in odin3_kit_derive_coarsen). */
+static bool one_distinct(const odin3_vec *parents) {
+    const odin3_prov_id *ids = parents->data;
+    bool same = parents->len > 0;
+    for (size_t i = 1; i < parents->len; i++) {
+        same = same && ids[i].v == ids[0].v;
+    }
+    return same;
+}
+
 /* The provenance of the inverter of clock key: the one flip-flop's, or a DERIVED record (one
  * operation) with the provenance of every flip-flop that uses it as parents. */
 static odin3_status inverter_prov(dlm_ctx *dc, uint64_t key, odin3_prov_id *out) {
@@ -287,7 +298,7 @@ static odin3_status inverter_prov(dlm_ctx *dc, uint64_t key, odin3_prov_id *out)
             *slot = user->prov;
         }
     }
-    if (st == ODIN3_OK && parents.len == 1) {
+    if (st == ODIN3_OK && one_distinct(&parents)) {
         *out = *(const odin3_prov_id *)odin3_vec_cat(&parents, 0);
     } else if (st == ODIN3_OK) {
         odin3_prov_begin_op_class(dc->pass, &inverter_class);

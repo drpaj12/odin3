@@ -94,9 +94,23 @@ def _abort_refused(line: str, lineno: int, trap_lines: set[int]) -> bool:
     return bool(calls) and not (lineno in trap_lines and set(calls) == {"__builtin_trap"})
 
 
+_ROOTS = ("src", "adapters", "plugins")
+
+
+def _repo_path(path: str) -> PurePosixPath:
+    """path as PurePosixPath relative to the repository: './x' loses its dot, and an absolute
+    path starts at its first src, adapters or plugins component."""
+    posix = PurePosixPath(path)
+    if posix.is_absolute():
+        for i, part in enumerate(posix.parts):
+            if part in _ROOTS:
+                return PurePosixPath(*posix.parts[i:])
+    return posix
+
+
 def _c_violations(path: str, text: str) -> list[str]:
     """The exit/abort/goto rules (every file) and the assert rule (adapters/abc/)."""
-    posix = PurePosixPath(path)
+    posix = _repo_path(path)
     in_cli = posix.parts[:2] == ("src", "cli")
     is_check = posix.parts[:2] == ("src", "ir") and posix.name.startswith("check")
     in_abc_adapter = posix.parts[:2] == ("adapters", "abc")

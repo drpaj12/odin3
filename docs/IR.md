@@ -610,8 +610,9 @@ record identity.
 - Storage: runs `{run, first_op, last_op, class}` (16 bytes, a new row only when the class
   changes between consecutive declared operations of a run) and overrides `{record, class}`
   (8 bytes, sorted by record: a record is overridden only when it is made, so the IDs arrive in order).
-- A derive over one distinct record repeated is the 1:1 record of a rewrite; `odin3_kit_derive_coarsen`
-  therefore uses the default for it, so that hash-consing never gives one record two classes.
+- "N nodes, 1 distinct construct = rewrite" (agent default, 2026-10-25): a derive over one distinct
+  record repeated is the 1:1 record of a rewrite; `odin3_kit_derive_coarsen` (and dfflibmap's inverter
+  record) therefore use the default for it, so that hash-consing never gives one record two classes.
 
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the
@@ -694,7 +695,7 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.
-12. (Reserved for the construct table, V1.2.0 Task 3.)
+12. (Rule 12 reserved: the construct table, V1.2.0 Task 3; check.c has the number, no check yet.)
 13. **E** (full check, once per design) Op classes (IR-12a): every DERIVED record has a class (its
     override, else the default of its `(run, op)`); each class has a direction other than `origin`,
     `from`/`to` levels in range and set, a `context_tail` that is 0 unless the direction is
