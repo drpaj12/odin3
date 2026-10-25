@@ -35,7 +35,8 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     design->strtab = odin3_strtab_create();
     if (design->arena == NULL || design->strtab == NULL ||
         odin3_celltype_table_init(design) != ODIN3_OK ||
-        odin3_module_table_init(design) != ODIN3_OK || odin3_prov_store_init(design) != ODIN3_OK) {
+        odin3_module_table_init(design) != ODIN3_OK || odin3_prov_store_init(design) != ODIN3_OK ||
+        (design->opclass = odin3_opclass_create()) == NULL) {
         odin3_design_destroy(design);
         return NULL;
     }
@@ -47,10 +48,13 @@ static odin3_status clone_into(odin3_design *dst, const odin3_design *src) {
     dst->arena = odin3_arena_create(0);
     dst->strtab = odin3_strtab_clone(src->strtab);
     if (dst->arena == NULL || dst->strtab == NULL || odin3_module_table_init(dst) != ODIN3_OK ||
-        odin3_prov_store_init(dst) != ODIN3_OK) {
+        odin3_prov_store_init(dst) != ODIN3_OK || (dst->opclass = odin3_opclass_create()) == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st = odin3_prov_store_clone(dst, src);
+    odin3_status st = odin3_opclass_copy(dst->opclass, src->opclass);
+    if (st == ODIN3_OK) {
+        st = odin3_prov_store_clone(dst, src);
+    }
     if (st == ODIN3_OK && src->srcman != NULL) {
         dst->srcman = odin3_srcman_clone(src->srcman, dst->strtab);
         st = dst->srcman != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
@@ -101,6 +105,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     odin3_project_destroy(design->project);
     odin3_arch_destroy(design->arch);
     odin3_srcman_destroy(design->srcman);
+    odin3_opclass_destroy(design->opclass);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
     odin3_celltype_table_free(design);
@@ -137,7 +142,8 @@ uint64_t odin3_design_bytes_reserved(const odin3_design *design) {
         return 0;
     }
     uint64_t bytes = sizeof *design;
-    bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design);
+    bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design) +
+             odin3_opclass_bytes_reserved(design->opclass);
     bytes += design->srcman != NULL ? odin3_srcman_bytes_reserved(design->srcman) : 0;
     bytes += odin3_arena_bytes_reserved(design->arena) + vec_bytes(&design->celltypes) +
              (design->types != NULL ? odin3_arena_bytes_reserved(design->types->arena) : 0) +

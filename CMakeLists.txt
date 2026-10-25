@@ -284,6 +284,7 @@ add_library(odin3_core OBJECT
     src/ir/wire.c
     src/ir/attr.c
     src/ir/prov.c
+    src/ir/opclass.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -967,6 +968,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_wire)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
+    odin3_add_unit_test(test_opclass)
     odin3_add_unit_test(test_ir_compact)
     odin3_add_unit_test(test_ir_module)
     odin3_add_unit_test(test_ir_proc)
