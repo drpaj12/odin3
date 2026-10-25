@@ -56,8 +56,8 @@ typedef struct odin3_opclass {
  * unless dir is CONTEXT. */
 bool odin3_opclass_valid(const odin3_opclass *cls);
 
-/* True when a and b are the same class in every field. */
-bool odin3_opclass_equal(const odin3_opclass *a, const odin3_opclass *b);
+/* True when lhs and rhs are the same class in every field. */
+bool odin3_opclass_equal(const odin3_opclass *lhs, const odin3_opclass *rhs);
 
 /* The table: opaque; the design owns one (design.c creates, copies and frees it). */
 typedef struct odin3_opclass_table odin3_opclass_table;

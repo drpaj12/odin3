@@ -57,9 +57,10 @@ bool odin3_opclass_valid(const odin3_opclass *cls) {
     return cls->context_tail == 0 || cls->dir == ODIN3_DIR_CONTEXT;
 }
 
-bool odin3_opclass_equal(const odin3_opclass *a, const odin3_opclass *b) {
-    return a->dir == b->dir && a->from_level == b->from_level && a->to_level == b->to_level &&
-           a->bulk == b->bulk && a->context_tail == b->context_tail;
+bool odin3_opclass_equal(const odin3_opclass *lhs, const odin3_opclass *rhs) {
+    return lhs->dir == rhs->dir && lhs->from_level == rhs->from_level &&
+           lhs->to_level == rhs->to_level && lhs->bulk == rhs->bulk &&
+           lhs->context_tail == rhs->context_tail;
 }
 
 static uint32_t pack(const odin3_opclass *cls) {

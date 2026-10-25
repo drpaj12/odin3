@@ -33,10 +33,10 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     odin3_vec_init(&design->asts, sizeof(odin3_ast *));
     design->arena = odin3_arena_create(0);
     design->strtab = odin3_strtab_create();
-    if (design->arena == NULL || design->strtab == NULL ||
+    design->opclass = odin3_opclass_create();
+    if (design->arena == NULL || design->strtab == NULL || design->opclass == NULL ||
         odin3_celltype_table_init(design) != ODIN3_OK ||
-        odin3_module_table_init(design) != ODIN3_OK || odin3_prov_store_init(design) != ODIN3_OK ||
-        (design->opclass = odin3_opclass_create()) == NULL) {
+        odin3_module_table_init(design) != ODIN3_OK || odin3_prov_store_init(design) != ODIN3_OK) {
         odin3_design_destroy(design);
         return NULL;
     }
@@ -47,8 +47,9 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
 static odin3_status clone_into(odin3_design *dst, const odin3_design *src) {
     dst->arena = odin3_arena_create(0);
     dst->strtab = odin3_strtab_clone(src->strtab);
-    if (dst->arena == NULL || dst->strtab == NULL || odin3_module_table_init(dst) != ODIN3_OK ||
-        odin3_prov_store_init(dst) != ODIN3_OK || (dst->opclass = odin3_opclass_create()) == NULL) {
+    dst->opclass = odin3_opclass_create();
+    if (dst->arena == NULL || dst->strtab == NULL || dst->opclass == NULL ||
+        odin3_module_table_init(dst) != ODIN3_OK || odin3_prov_store_init(dst) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = odin3_opclass_copy(dst->opclass, src->opclass);

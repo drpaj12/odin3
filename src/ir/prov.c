@@ -729,7 +729,10 @@ static void classify(const odin3_pass_ctx *ctx, odin3_prov_id rec, bool created,
     odin3_opclass_table *table = ctx->design->opclass;
     odin3_opclass def = {ODIN3_DIR_ORIGIN, ODIN3_LEVEL_NONE, ODIN3_LEVEL_NONE, false, 0};
     bool has_def = odin3_opclass_default(table, ctx->run, ctx->op, &def);
-    const odin3_opclass *want = cls != NULL ? cls : (has_def ? &def : NULL);
+    const odin3_opclass *want = cls;
+    if (want == NULL && has_def) {
+        want = &def;
+    }
     if (want == NULL) {
         return;
     }

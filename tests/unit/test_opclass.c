@@ -90,49 +90,97 @@ static odin3_status check_full(void) {
     return odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE});
 }
 
-static void test_valid_and_equal(void) {
+/* --- helpers: one assertion site each, so a test reads as a list of facts ------------------- */
+
+static void expect_default(odin3_passrun_id run, uint32_t op, const odin3_opclass *want) {
+    odin3_opclass got;
+    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, run, op, &got));
+    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, want));
+}
+
+static void expect_no_default(odin3_passrun_id run, uint32_t op) {
+    odin3_opclass got;
+    TEST_ASSERT_FALSE(odin3_opclass_default(design->opclass, run, op, &got));
+}
+
+static void expect_class_in(const odin3_design *where, odin3_prov_id rec, const odin3_pass_ctx *ctx,
+                            const odin3_opclass *want) {
+    odin3_opclass got;
+    TEST_ASSERT_TRUE(odin3_opclass_of(where->opclass, rec, ctx->run, ctx->op, &got));
+    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, want));
+}
+
+static void expect_class_of(odin3_prov_id rec, const odin3_pass_ctx *ctx,
+                            const odin3_opclass *want) {
+    expect_class_in(design, rec, ctx, want);
+}
+
+static void expect_declare(odin3_passrun_id run, uint32_t op, const odin3_opclass *cls,
+                           odin3_status want) {
+    TEST_ASSERT_EQUAL_INT(want, odin3_opclass_declare(design->opclass, run, op, cls));
+}
+
+static void expect_rows(uint32_t want) {
+    TEST_ASSERT_EQUAL_UINT32(want, odin3_opclass_row_count(design->opclass));
+}
+
+static void expect_overrides(uint32_t want) {
+    TEST_ASSERT_EQUAL_UINT32(want, odin3_opclass_override_count(design->opclass));
+}
+
+static void expect_check(odin3_status want, const char *log_part) {
+    TEST_ASSERT_EQUAL_INT(want, check_full());
+    if (log_part != NULL) {
+        TEST_ASSERT_NOT_NULL(strstr(last_error, log_part));
+    }
+}
+
+static void expect_invalid(odin3_prov_dir dir, odin3_level from, odin3_level to, uint8_t tail) {
+    odin3_opclass cls = {dir, from, to, false, tail};
+    TEST_ASSERT_FALSE(odin3_opclass_valid(&cls));
+}
+
+/* --- tests --------------------------------------------------------------------------------- */
+
+static void test_valid(void) {
     TEST_ASSERT_TRUE(odin3_opclass_valid(&REFINE));
     TEST_ASSERT_TRUE(odin3_opclass_valid(&CONTEXT1));
     TEST_ASSERT_FALSE(odin3_opclass_valid(NULL));
-    odin3_opclass bad = REFINE;
-    bad.dir = ODIN3_DIR_ORIGIN;
-    TEST_ASSERT_FALSE(odin3_opclass_valid(&bad));
-    bad = REFINE;
-    bad.from_level = ODIN3_LEVEL_NONE;
-    TEST_ASSERT_FALSE(odin3_opclass_valid(&bad));
-    bad = REFINE;
-    bad.to_level = (odin3_level)(ODIN3_LEVEL_SITE + 1);
-    TEST_ASSERT_FALSE(odin3_opclass_valid(&bad));
-    bad = REFINE;
-    bad.context_tail = 1; /* a tail only on a context class */
-    TEST_ASSERT_FALSE(odin3_opclass_valid(&bad));
+}
+
+static void test_equal(void) {
     TEST_ASSERT_TRUE(odin3_opclass_equal(&REFINE, &REFINE));
     TEST_ASSERT_FALSE(odin3_opclass_equal(&REFINE, &REWRITE));
     TEST_ASSERT_FALSE(odin3_opclass_equal(&COARSEN, &BULK));
 }
 
+static void test_invalid_classes(void) {
+    expect_invalid(ODIN3_DIR_ORIGIN, ODIN3_LEVEL_WORD, ODIN3_LEVEL_GATE, 0);
+    expect_invalid(ODIN3_DIR_REFINE, ODIN3_LEVEL_NONE, ODIN3_LEVEL_GATE, 0);
+    expect_invalid(ODIN3_DIR_REFINE, ODIN3_LEVEL_WORD, (odin3_level)(ODIN3_LEVEL_SITE + 1), 0);
+    expect_invalid(ODIN3_DIR_REFINE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_GATE,
+                   1); /* tail: context only */
+    expect_invalid((odin3_prov_dir)(ODIN3_DIR_CONTEXT + 1), ODIN3_LEVEL_WORD, ODIN3_LEVEL_GATE, 0);
+}
+
 static void test_declare_default(void) {
     odin3_pass_ctx ctx = run_named("lower");
     odin3_prov_begin_op_class(&ctx, &REFINE);
-    odin3_opclass got;
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REFINE));
-    TEST_ASSERT_FALSE(odin3_opclass_default(design->opclass, ctx.run, ctx.op + 1, &got));
-    TEST_ASSERT_FALSE(
-        odin3_opclass_default(design->opclass, (odin3_passrun_id){ctx.run.v + 1}, 1, &got));
+    expect_default(ctx.run, ctx.op, &REFINE);
+    expect_no_default(ctx.run, ctx.op + 1);
+    expect_no_default((odin3_passrun_id){ctx.run.v + 1}, 1);
+}
+
+static void test_declare_rules(void) {
+    odin3_pass_ctx ctx = run_named("lower");
     odin3_opclass tail = CONTEXT1;
     tail.context_tail = TAIL_BIG;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opclass_declare(design->opclass, ctx.run, 7, &tail));
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, 7, &got));
-    TEST_ASSERT_EQUAL_UINT8(TAIL_BIG, got.context_tail);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_opclass_declare(design->opclass, ctx.run, 7, &tail));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_opclass_declare(design->opclass, ctx.run, 7, &REWRITE));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_opclass_declare(design->opclass, ctx.run, 0, &REWRITE));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_ERR_INVALID_ARG,
-        odin3_opclass_declare(design->opclass, (odin3_passrun_id){0}, 3, &REWRITE));
+    expect_declare(ctx.run, 7, &tail, ODIN3_OK);
+    expect_declare(ctx.run, 7, &tail, ODIN3_OK); /* the same class again */
+    expect_declare(ctx.run, 7, &REWRITE, ODIN3_ERR_INVALID_ARG);
+    expect_declare(ctx.run, 0, &REWRITE, ODIN3_ERR_INVALID_ARG);
+    expect_declare((odin3_passrun_id){0}, 3, &REWRITE, ODIN3_ERR_INVALID_ARG);
+    expect_default(ctx.run, 7, &tail);
 }
 
 /* Rows are per change of class, not per operation: a run of N rewrites is one row. */
@@ -141,25 +189,35 @@ static void test_run_length_rows(void) {
     for (uint32_t i = 0; i < MANY_OPS; i++) {
         odin3_prov_begin_op_class(&ctx, &REWRITE);
     }
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_opclass_row_count(design->opclass));
+    expect_rows(1);
     odin3_prov_begin_op_class(&ctx, &COARSEN);
     odin3_prov_begin_op_class(&ctx, &COARSEN);
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_opclass_row_count(design->opclass));
+    expect_rows(2);
     odin3_prov_begin_op_class(&ctx, &REWRITE);
-    TEST_ASSERT_EQUAL_UINT32(3, odin3_opclass_row_count(design->opclass));
-    odin3_opclass got;
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, 1, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, MANY_OPS, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, MANY_OPS + 1, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &COARSEN));
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, MANY_OPS + 3, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
-    /* another run starts its own row */
+    expect_rows(3);
+}
+
+static void test_run_length_lookup(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    for (uint32_t i = 0; i < MANY_OPS; i++) {
+        odin3_prov_begin_op_class(&ctx, &REWRITE);
+    }
+    odin3_prov_begin_op_class(&ctx, &COARSEN);
+    odin3_prov_begin_op_class(&ctx, &COARSEN);
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    expect_default(ctx.run, 1, &REWRITE);
+    expect_default(ctx.run, MANY_OPS, &REWRITE);
+    expect_default(ctx.run, MANY_OPS + 1, &COARSEN);
+    expect_default(ctx.run, MANY_OPS + 2, &COARSEN);
+    expect_default(ctx.run, MANY_OPS + 3, &REWRITE);
+}
+
+static void test_another_run_starts_its_own_row(void) {
+    odin3_pass_ctx first = run_named("opt");
+    odin3_prov_begin_op_class(&first, &REWRITE);
     odin3_pass_ctx other = run_named("lower");
     odin3_prov_begin_op_class(&other, &REWRITE);
-    TEST_ASSERT_EQUAL_UINT32(4, odin3_opclass_row_count(design->opclass));
+    expect_rows(2);
 }
 
 /* An undeclared begin in the middle of a run breaks the range: the next declared op is a new row.
@@ -169,44 +227,45 @@ static void test_undeclared_op_breaks_range(void) {
     odin3_prov_begin_op_class(&ctx, &REWRITE);
     odin3_prov_begin_op_lazy(&ctx);
     odin3_prov_begin_op_class(&ctx, &REWRITE);
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_opclass_row_count(design->opclass));
-    odin3_opclass got;
-    TEST_ASSERT_FALSE(odin3_opclass_default(design->opclass, ctx.run, 2, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, 3, &got));
+    expect_rows(2);
+    expect_no_default(ctx.run, 2);
+    expect_default(ctx.run, 3, &REWRITE);
 }
 
-static void test_default_and_override(void) {
+static void test_default_derives_need_no_override(void) {
     odin3_pass_ctx ctx = run_named("opt");
     odin3_prov_id src = leaf(&ctx, 1);
     odin3_prov_begin_op_class(&ctx, &REWRITE);
     odin3_prov_id plain = derive_class(&ctx, src, NULL);
     odin3_prov_id same = derive_class(&ctx, src, &REWRITE); /* the same record, same class */
     TEST_ASSERT_EQUAL_UINT32(plain.v, same.v);
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_opclass_override_count(design->opclass));
-    odin3_prov_id src2 = leaf(&ctx, 2);
-    odin3_prov_id merged = derive_class(&ctx, src2, &COARSEN);
-    TEST_ASSERT_EQUAL_UINT32(1, odin3_opclass_override_count(design->opclass));
+    expect_overrides(0);
+    expect_class_of(plain, &ctx, &REWRITE);
+}
+
+static void test_override_differs_from_default(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    odin3_prov_id plain = derive_class(&ctx, leaf(&ctx, 1), NULL);
+    odin3_prov_id merged = derive_class(&ctx, leaf(&ctx, 2), &COARSEN);
+    expect_overrides(1);
+    expect_class_of(merged, &ctx, &COARSEN);
+    expect_class_of(plain, &ctx, &REWRITE);
     odin3_opclass got;
-    TEST_ASSERT_TRUE(odin3_opclass_of(design->opclass, merged, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &COARSEN));
-    TEST_ASSERT_TRUE(odin3_opclass_of(design->opclass, plain, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
     TEST_ASSERT_FALSE(odin3_opclass_override_of(design->opclass, plain, &got));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+    expect_check(ODIN3_OK, NULL);
 }
 
 static void test_lazy_begin_first_derive_is_default(void) {
     odin3_pass_ctx ctx = run_named("opt");
     odin3_prov_id src = leaf(&ctx, 1);
     odin3_prov_begin_op_lazy(&ctx);
-    odin3_opclass got;
-    TEST_ASSERT_FALSE(odin3_opclass_default(design->opclass, ctx.run, ctx.op, &got));
+    expect_no_default(ctx.run, ctx.op);
     odin3_prov_id first = derive_class(&ctx, src, &REWRITE);
-    TEST_ASSERT_TRUE(odin3_opclass_default(design->opclass, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
-    TEST_ASSERT_EQUAL_UINT32(0, odin3_opclass_override_count(design->opclass));
+    expect_default(ctx.run, ctx.op, &REWRITE);
+    expect_overrides(0);
     TEST_ASSERT_TRUE(odin3_prov_valid(first));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+    expect_check(ODIN3_OK, NULL);
 }
 
 static void test_missing_declaration_fails_rule_13(void) {
@@ -215,20 +274,24 @@ static void test_missing_declaration_fails_rule_13(void) {
     odin3_prov_begin_op(&ctx); /* no class */
     odin3_prov_id rec = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&src, 1}, &rec));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, check_full());
+    expect_check(ODIN3_ERR_CHECK, "has no class");
     TEST_ASSERT_NOT_NULL(strstr(last_error, "rule 13"));
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "has no class"));
-    /* FAST skips rule 13 */
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        odin3_check_design(design, (odin3_check_opts){ODIN3_CHECK_FAST, ODIN3_VIEW_NONE}));
+}
+
+static void test_fast_check_skips_rule_13(void) {
+    odin3_pass_ctx ctx = run_named("legacy");
+    odin3_prov_id src = leaf(&ctx, 1);
+    odin3_prov_begin_op(&ctx);
+    (void)derive_class(&ctx, src, NULL);
+    odin3_check_opts fast = {ODIN3_CHECK_FAST, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(design, fast));
 }
 
 static void test_origin_only_ops_need_no_class(void) {
     odin3_pass_ctx ctx = run_named("read");
     odin3_prov_begin_op(&ctx);
     (void)leaf(&ctx, 1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+    expect_check(ODIN3_OK, NULL);
 }
 
 static void test_two_classes_for_one_record_fails_rule_13(void) {
@@ -238,11 +301,10 @@ static void test_two_classes_for_one_record_fails_rule_13(void) {
     (void)derive_class(&ctx, src, NULL);
     (void)derive_class(&ctx, src, &COARSEN); /* the same record, another class */
     TEST_ASSERT_EQUAL_UINT32(1, odin3_opclass_conflicts(design->opclass, &(odin3_prov_id){0}));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, check_full());
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "second class"));
+    expect_check(ODIN3_ERR_CHECK, "second class");
 }
 
-static void test_context_tail_rules(void) {
+static void test_context_tail_legal_shapes(void) {
     odin3_pass_ctx ctx = run_named("flatten");
     odin3_prov_id orig = leaf(&ctx, 1);
     odin3_prov_id inst = leaf(&ctx, 2);
@@ -252,13 +314,17 @@ static void test_context_tail_rules(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_prov_derive_class(&ctx, (odin3_prov_list){both, 2}, 0, NULL, &rec));
     (void)derive_class(&ctx, inst, NULL); /* {inst} alone: tail 1, no data parent, legal */
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+    expect_check(ODIN3_OK, NULL);
+}
+
+static void test_context_tail_past_parents_fails_rule_13(void) {
+    odin3_pass_ctx ctx = run_named("flatten");
+    odin3_prov_begin_op_class(&ctx, &CONTEXT1);
     odin3_opclass long_tail = CONTEXT1;
-    long_tail.context_tail = 3; /* more than its two parents */
+    long_tail.context_tail = 3; /* more than its one parent */
     odin3_prov_id bad = derive_class(&ctx, leaf(&ctx, 3), &long_tail);
     TEST_ASSERT_TRUE(odin3_prov_valid(bad));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, check_full());
-    TEST_ASSERT_NOT_NULL(strstr(last_error, "context tail"));
+    expect_check(ODIN3_ERR_CHECK, "context tail");
 }
 
 static void test_invalid_class_is_rejected_and_noted(void) {
@@ -271,7 +337,7 @@ static void test_invalid_class_is_rejected_and_noted(void) {
     odin3_prov_id out = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_prov_derive_class(&ctx, (odin3_prov_list){&src, 1}, 0, &bad, &out));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, check_full());
+    expect_check(ODIN3_ERR_CHECK, "invalid class");
 }
 
 static void test_bulk_flag_kept(void) {
@@ -281,7 +347,7 @@ static void test_bulk_flag_kept(void) {
     odin3_opclass got;
     TEST_ASSERT_TRUE(odin3_opclass_of(design->opclass, rec, ctx.run, ctx.op, &got));
     TEST_ASSERT_TRUE(got.bulk);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+    expect_check(ODIN3_OK, NULL);
 }
 
 static void test_copy_with_design(void) {
@@ -291,22 +357,24 @@ static void test_copy_with_design(void) {
     odin3_prov_id over = derive_class(&ctx, leaf(&ctx, 2), &COARSEN);
     odin3_design *copy = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_clone(design, &copy));
-    TEST_ASSERT_NOT_NULL(copy->opclass);
-    TEST_ASSERT_TRUE(copy->opclass != design->opclass);
+    expect_class_in(copy, plain, &ctx, &REWRITE);
+    expect_class_in(copy, over, &ctx, &COARSEN);
     TEST_ASSERT_EQUAL_UINT32(odin3_opclass_row_count(design->opclass),
                              odin3_opclass_row_count(copy->opclass));
-    odin3_opclass got;
-    TEST_ASSERT_TRUE(odin3_opclass_of(copy->opclass, plain, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &REWRITE));
-    TEST_ASSERT_TRUE(odin3_opclass_of(copy->opclass, over, ctx.run, ctx.op, &got));
-    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, &COARSEN));
-    /* the copy is independent */
+    odin3_design_destroy(copy);
+}
+
+static void test_copy_is_independent(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    odin3_design *copy = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_clone(design, &copy));
     odin3_pass_ctx more = {copy, ctx.run, ctx.op};
     odin3_prov_begin_op_class(&more, &COARSEN);
     TEST_ASSERT_EQUAL_UINT32(odin3_opclass_row_count(design->opclass) + 1,
                              odin3_opclass_row_count(copy->opclass));
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_check_design(copy, (odin3_check_opts){ODIN3_CHECK_FULL, ODIN3_VIEW_NONE}));
+    odin3_check_opts opts = {ODIN3_CHECK_FULL, ODIN3_VIEW_NONE};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_check_design(copy, opts));
     odin3_design_destroy(copy);
 }
 
@@ -363,19 +431,28 @@ static void test_oom_in_override_fails_before_the_record(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_valid_and_equal);
+    RUN_TEST(test_valid);
+    RUN_TEST(test_equal);
+    RUN_TEST(test_invalid_classes);
     RUN_TEST(test_declare_default);
+    RUN_TEST(test_declare_rules);
     RUN_TEST(test_run_length_rows);
+    RUN_TEST(test_run_length_lookup);
+    RUN_TEST(test_another_run_starts_its_own_row);
     RUN_TEST(test_undeclared_op_breaks_range);
-    RUN_TEST(test_default_and_override);
+    RUN_TEST(test_default_derives_need_no_override);
+    RUN_TEST(test_override_differs_from_default);
     RUN_TEST(test_lazy_begin_first_derive_is_default);
     RUN_TEST(test_missing_declaration_fails_rule_13);
+    RUN_TEST(test_fast_check_skips_rule_13);
     RUN_TEST(test_origin_only_ops_need_no_class);
     RUN_TEST(test_two_classes_for_one_record_fails_rule_13);
-    RUN_TEST(test_context_tail_rules);
+    RUN_TEST(test_context_tail_legal_shapes);
+    RUN_TEST(test_context_tail_past_parents_fails_rule_13);
     RUN_TEST(test_invalid_class_is_rejected_and_noted);
     RUN_TEST(test_bulk_flag_kept);
     RUN_TEST(test_copy_with_design);
+    RUN_TEST(test_copy_is_independent);
     RUN_TEST(test_bytes_reserved_counts_table);
     RUN_TEST(test_oom_in_begin_fails_the_next_derive);
     RUN_TEST(test_oom_in_override_fails_before_the_record);

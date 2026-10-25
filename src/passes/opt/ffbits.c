@@ -453,8 +453,8 @@ static odin3_status node_prov(ffbits_state *fs, uint32_t node, odin3_prov_id *ou
         st = push_prov(&provs, inc[k].prov);
     }
     if (st == ODIN3_OK && provs.len > 0) {
-        st = odin3_kit_derive_coarsen(
-            fs->oc, (odin3_prov_list){provs.data, (uint32_t)provs.len}, out);
+        st = odin3_kit_derive_coarsen(fs->oc, (odin3_prov_list){provs.data, (uint32_t)provs.len},
+                                      out);
     }
     odin3_vec_free(&provs);
     return st;
