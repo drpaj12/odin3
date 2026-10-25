@@ -9,6 +9,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "opclass_expect.h"
 #include "passes/builtin.h"
 #include "passes/dfflibmap/dfflibmap.h"
 #include "proc_build.h"
@@ -417,6 +418,9 @@ static void test_pass_copies_attributes(void) {
 }
 
 /* The inverter record of the clock net: DERIVED with exactly the parents a and b. */
+static const odin3_opclass OPX_COARSEN = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 static void test_pass_inverter_provenance_union(void) {
     build(TOP_PORTS "  attribute \\src \"a.v:1.1-1.5\"\n"
                     "  cell $_DFF_N_ \\a\n    parameter \\INIT 3\n    connect \\C \\clk\n"
@@ -436,6 +440,7 @@ static void test_pass_inverter_provenance_union(void) {
     TEST_ASSERT_EQUAL_UINT32(pa.v, parents.ids[0].v);
     TEST_ASSERT_EQUAL_UINT32(pb.v, parents.ids[1].v);
     TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_net_prov(g_res.module, port_net(inv, "Y")).v);
+    opx_record(g_res.design, prov, &OPX_COARSEN);
     /* The flip-flops keep their own records. */
     TEST_ASSERT_EQUAL_UINT32(pa.v, odin3_node_prov(g_res.module, node_named("a")).v);
     TEST_ASSERT_EQUAL_UINT32(pb.v, odin3_node_prov(g_res.module, node_named("b")).v);

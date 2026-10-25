@@ -11,6 +11,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "opclass_expect.h"
 #include "passes/manager.h"
 #include "unity.h"
 #include "util/log.h"
@@ -362,6 +363,9 @@ static void test_raise_all_or_nothing_across_modules(void) {
     TEST_ASSERT_EQUAL_UINT32(live, live_count());
 }
 
+static const odin3_opclass RAISE_CLASS = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 static void test_raise_provenance_union(void) {
     prove_adder();
     leaves before = all_sources();
@@ -371,6 +375,7 @@ static void test_raise_provenance_union(void) {
     odin3_prov_id prov = odin3_node_prov(top(), node);
     TEST_ASSERT_TRUE(prov.v != 0);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, odin3_prov_get(design, prov)->kind);
+    opx_all(design, "raise", &RAISE_CLASS);
     leaves after = all_sources();
     TEST_ASSERT_EQUAL_size_t(before.count, after.count);
     TEST_ASSERT_EQUAL_UINT32_ARRAY(before.ids, after.ids, before.count);

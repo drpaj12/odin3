@@ -17,6 +17,7 @@
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "ir/value.h"
+#include "opclass_expect.h"
 #include "passes/ffinit.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
@@ -634,6 +635,9 @@ static void test_share_pmux(void) {
 
 /* --- provenance ------------------------------------------------------------------------------- */
 
+static const odin3_opclass OPX_COARSEN = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 static void test_share_parents(void) {
     build(HEAD4 "  attribute \\src \"t.v:1.1\"\n" BIN(
         "$and", "and1", "0", "\\a", "\\b",
@@ -657,6 +661,7 @@ static void test_share_parents(void) {
     TEST_ASSERT_EQUAL_UINT32(first.v, got->parents.ids[0].v);
     TEST_ASSERT_EQUAL_UINT32(second.v, got->parents.ids[1].v);
     TEST_ASSERT_EQUAL_UINT32(old.v, got->parents.ids[2].v);
+    opx_record(fx.res.design, odin3_node_prov(fx.module, op), &OPX_COARSEN);
 }
 
 /* The $neg of an add/sub mix has the same record; the cell keeps the first cell's name. */

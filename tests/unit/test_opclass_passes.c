@@ -141,6 +141,97 @@ static void test_flatten_is_context_with_tail(void) {
     check_full();
 }
 
+/* Writes text to tmp_path (no read) and returns the path. */
+static const char *write_tmp(const char *text) {
+    char tmpl[] = "/tmp/odin3_opclass_XXXXXX";
+    (void)memcpy(tmp_path, tmpl, sizeof tmpl);
+    int fd = mkstemp(tmp_path);
+    TEST_ASSERT_TRUE(fd >= 0);
+    have_tmp = true;
+    TEST_ASSERT_EQUAL_INT((int)strlen(text), (int)write(fd, text, strlen(text)));
+    (void)close(fd);
+    return tmp_path;
+}
+
+static const char *const ARITH =
+    "module m(input [15:0] a, input [15:0] b, input [7:0] c, input [7:0] d, "
+    "output [16:0] s, output [15:0] p);\n"
+    "  assign s = a + b;\n  assign p = c * d;\nendmodule\n";
+
+static void arith_flow(const char *lib) {
+    run("read_techlib", lib);
+    read_text(ARITH);
+    run("proc", "");
+    run("opt", "");
+}
+
+static void test_hardmap_is_rewrite(void) {
+    arith_flow("\"" LIB("vtr.o3lib") "\"");
+    run("hardmap", "");
+    opx_all(design, "hardmap", &REWRITE);
+    check_full();
+}
+
+static void test_lpmmap_is_rewrite(void) {
+    arith_flow("\"" LIB("lpm.o3lib") "\"");
+    run("lpmmap", "");
+    opx_all(design, "lpmmap", &REWRITE);
+    check_full();
+}
+
+static void test_fsm_map_has_rewrite_and_coarsen(void) {
+    read_file("--nolatches", ODIN3_SOURCE_DIR "/tests/fsm/moore_arst.v");
+    run("proc", "");
+    run("fsm", "");
+    TEST_ASSERT_TRUE(opx_count(design, "fsm", &COARSEN, true) > 0);
+    TEST_ASSERT_EQUAL_UINT32(opx_count(design, "fsm", &REWRITE, false),
+                             opx_count(design, "fsm", &COARSEN, true));
+    check_full();
+}
+
+/* A mux in front of D folds into the flop as an enable (dff_merge: coarsen over flop and mux). */
+static void test_dff_merge_is_coarsen(void) {
+    read_text("module m(input clk, input en, input [3:0] d, output reg [3:0] q);\n"
+              "  always @(posedge clk) if (en) q <= d;\n"
+              "endmodule\n");
+    run("proc", "");
+    run("opt", "");
+    TEST_ASSERT_TRUE(opx_count(design, "opt", &COARSEN, true) > 0);
+    TEST_ASSERT_EQUAL_UINT32(opx_count(design, "opt", &REWRITE, false),
+                             opx_count(design, "opt", &COARSEN, true));
+    check_full();
+}
+
+/* The three readers' restored locations are rewrite (one operation each). */
+static void test_readers_are_rewrite(void) {
+    const char *path = write_tmp(".model top\n.inputs a\n.outputs y\n.names a y\n1 1\n.cname g\n"
+                                 ".attr src \"a.v:3.1-4.2\"\n.end\n");
+    char args[ARGS_CAP];
+    (void)snprintf(args, sizeof args, "--hdl-locs \"%s\"", path);
+    run("read_blif", args);
+    opx_all(design, "read_blif", &REWRITE);
+}
+
+static void test_json_reader_is_rewrite(void) {
+    const char *path =
+        write_tmp("{\"modules\":{\"top\":{\"attributes\":{\"top\":1},\"ports\":{\"a\":{"
+                  "\"direction\":\"input\","
+                  "\"bits\":[2]},\"y\":{\"direction\":\"output\",\"bits\":[3]}},\"cells\":{\"g\":{"
+                  "\"hide_name\":0,\"type\":\"$_NOT_\",\"parameters\":{},\"attributes\":{\"src\":"
+                  "\"t.v:3.1-3.9\"},\"port_directions\":{\"A\":\"input\",\"Y\":\"output\"},"
+                  "\"connections\":{\"A\":[2],\"Y\":[3]}}},\"netnames\":{}}}}\n");
+    char args[ARGS_CAP];
+    (void)snprintf(args, sizeof args, "\"%s\"", path);
+    run("read_json", args);
+    opx_all(design, "read_json", &REWRITE);
+}
+
+static void test_netlist_reader_is_rewrite(void) {
+    (void)write_tmp("module m(input a, output y);\n  assign y = ~a; // t.v:3\nendmodule\n");
+    read_file("--nolatches -netlist", tmp_path);
+    opx_all(design, "read_verilog", &REWRITE);
+}
+
 static void test_unmap_is_rewrite(void) {
     run("read_techlib", "\"" LIB("vtr.o3lib") "\"");
     read_text(IF_ALWAYS);
@@ -160,5 +251,12 @@ int main(void) {
     RUN_TEST(test_opt_is_rewrite_and_merge_is_coarsen);
     RUN_TEST(test_flatten_is_context_with_tail);
     RUN_TEST(test_unmap_is_rewrite);
+    RUN_TEST(test_hardmap_is_rewrite);
+    RUN_TEST(test_lpmmap_is_rewrite);
+    RUN_TEST(test_fsm_map_has_rewrite_and_coarsen);
+    RUN_TEST(test_dff_merge_is_coarsen);
+    RUN_TEST(test_readers_are_rewrite);
+    RUN_TEST(test_json_reader_is_rewrite);
+    RUN_TEST(test_netlist_reader_is_rewrite);
     return UNITY_END();
 }

@@ -42,4 +42,18 @@ static inline void opx_all(const odin3_design *design, const char *pass, const o
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, opx_count(design, pass, cls, false), pass);
 }
 
+/* The record is DERIVED and its class (override, else its operation's default) is cls. */
+static inline void opx_record(const odin3_design *design, odin3_prov_id id,
+                              const odin3_opclass *cls) {
+    const odin3_prov_record *rec = odin3_prov_get(design, id);
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    odin3_opclass got;
+    TEST_ASSERT_TRUE(odin3_opclass_of(design->opclass, id, rec->run, rec->op, &got));
+    TEST_ASSERT_EQUAL_INT(cls->dir, got.dir);
+    TEST_ASSERT_EQUAL_INT(cls->from_level, got.from_level);
+    TEST_ASSERT_EQUAL_INT(cls->to_level, got.to_level);
+    TEST_ASSERT_TRUE(odin3_opclass_equal(&got, cls));
+}
+
 #endif

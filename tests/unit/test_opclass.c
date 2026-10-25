@@ -8,6 +8,7 @@
 #include "ir/ir_internal.h"
 #include "ir/opclass.h"
 #include "ir/prov.h"
+#include "passes/opt/kit.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -429,6 +430,60 @@ static void test_oom_in_override_fails_before_the_record(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
 }
 
+/* The copy of a non-empty table keeps its rows, overrides, failed flag and conflict count. */
+static void test_copy_keeps_failed_and_conflicts(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    odin3_prov_id over = derive_class(&ctx, leaf(&ctx, 1), &COARSEN);
+    odin3_opclass_note_failure(design->opclass);
+    odin3_opclass_note_conflict(design->opclass, over);
+    odin3_design *copy = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_clone(design, &copy));
+    TEST_ASSERT_TRUE(odin3_opclass_failed(copy->opclass));
+    odin3_prov_id first = {0};
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_opclass_conflicts(copy->opclass, &first));
+    TEST_ASSERT_EQUAL_UINT32(over.v, first.v);
+    TEST_ASSERT_EQUAL_UINT32(odin3_opclass_override_count(design->opclass),
+                             odin3_opclass_override_count(copy->opclass));
+    odin3_design_destroy(copy);
+}
+
+/* A begin's held out of memory survives a later successful begin and ends with its run. */
+static void test_pending_survives_a_good_begin_and_dies_with_the_run(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_opclass_set_pending(design->opclass, true);
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    TEST_ASSERT_TRUE(odin3_opclass_take_pending(design->opclass));
+    odin3_opclass_set_pending(design->opclass, true);
+    odin3_pass_ctx next = run_named("lower");
+    odin3_prov_begin_op_class(&next, &REFINE);
+    TEST_ASSERT_FALSE(odin3_opclass_take_pending(design->opclass));
+}
+
+/* odin3_kit_derive_coarsen: one record repeated is the op default (rewrite, no override); two
+ * distinct records are coarsen. */
+static void test_kit_derive_coarsen_repeated_record_takes_the_default(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_opt_ctx oc = {0};
+    oc.pass = &ctx;
+    odin3_kit_begin_rewrite(&oc);
+    odin3_prov_id one = leaf(&ctx, 1);
+    odin3_prov_id two = leaf(&ctx, 2);
+    odin3_prov_id same[3] = {one, one, one};
+    odin3_prov_id pair[2] = {one, two};
+    odin3_prov_id rep = {0};
+    odin3_prov_id mix = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_kit_derive_coarsen(&oc, (odin3_prov_list){same, 3}, &rep));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_opclass_override_count(design->opclass));
+    expect_class_in(design, rep, &ctx, &odin3_kit_class_rewrite);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_kit_derive_coarsen(&oc, (odin3_prov_list){pair, 2}, &mix));
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_opclass_override_count(design->opclass));
+    expect_class_in(design, mix, &ctx, &odin3_kit_class_coarsen);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid);
@@ -456,5 +511,8 @@ int main(void) {
     RUN_TEST(test_bytes_reserved_counts_table);
     RUN_TEST(test_oom_in_begin_fails_the_next_derive);
     RUN_TEST(test_oom_in_override_fails_before_the_record);
+    RUN_TEST(test_copy_keeps_failed_and_conflicts);
+    RUN_TEST(test_pending_survives_a_good_begin_and_dies_with_the_run);
+    RUN_TEST(test_kit_derive_coarsen_repeated_record_takes_the_default);
     return UNITY_END();
 }

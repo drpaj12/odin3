@@ -723,8 +723,9 @@ static odin3_status classify_prepare(const odin3_pass_ctx *ctx, const odin3_opcl
 /*
  * Records the class of the record a derive returned (IR-12a). Run and op are part of a DERIVED
  * record's identity, so a hash-consed record returned here was made in this very (run, op): its
- * class is compared with the same default, and a second class is a real conflict. `created`: the derive made the
- * record. Cannot fail (classify_prepare made room): a conflict is noted for check rule 13.
+ * class is compared with the same default, and a second class is a real conflict. `created`: the
+ * derive made the record. Cannot fail (classify_prepare made room): a conflict is noted for check
+ * rule 13.
  */
 static void classify(const odin3_pass_ctx *ctx, odin3_prov_id rec, bool created,
                      const odin3_opclass *cls) {

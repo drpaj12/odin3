@@ -11,6 +11,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "opclass_expect.h"
 #include "passes/ffinit.h"
 #include "passes/opt/kit.h"
 #include "passes/opt/opt.h"
@@ -288,6 +289,11 @@ static bool has_parent(odin3_prov_id rec, const odin3_prov_id *parent) {
     return false;
 }
 
+static const odin3_opclass OPX_COARSEN = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                          false, 0};
+static const odin3_opclass OPX_REWRITE = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 static void test_provenance(void) {
     build(HEAD "  wire width 2 output 8 \\y\n  wire width 2 output 9 \\z\n" DFFE(
         "f1", "1", "en", "{ \\a \\b }", "\\y") DFFE("f2", "1", "en", "{ \\b \\a }", "\\z") "end\n");
@@ -298,6 +304,26 @@ static void test_provenance(void) {
     TEST_ASSERT_TRUE(now.v != own.v);
     TEST_ASSERT_TRUE(has_parent(now, &own));
     TEST_ASSERT_TRUE(has_parent(now, &gone));
+    /* the fixture gives both flops one record: one distinct parent is a rewrite (agent default 5)
+     */
+    TEST_ASSERT_EQUAL_UINT32(own.v, gone.v);
+    opx_record(fx.res.design, now, &OPX_REWRITE);
+}
+
+/* Two flops with two records: the survivor's record is a coarsen (odin3_kit_derive_coarsen). */
+static void test_two_records_are_coarsen(void) {
+    build(HEAD "  wire width 2 output 8 \\y\n  wire width 2 output 9 \\z\n"
+               "  attribute \\src \"a.v:1.1\"\n" DFFE(
+                   "f1", "1", "en", "{ \\a \\b }",
+                   "\\y") "  attribute \\src \"b.v:2.1\"\n" DFFE("f2", "1", "en", "{ \\b \\a }",
+                                                                 "\\z") "end\n");
+    odin3_prov_id own = odin3_node_prov(fx.module, node_named("f1"));
+    odin3_prov_id gone = odin3_node_prov(fx.module, node_named("f2"));
+    TEST_ASSERT_TRUE(own.v != gone.v);
+    run_merge();
+    odin3_prov_id now = odin3_node_prov(fx.module, node_named("f1"));
+    TEST_ASSERT_TRUE(has_parent(now, &own) && has_parent(now, &gone));
+    opx_record(fx.res.design, now, &OPX_COARSEN);
 }
 
 static void test_partial_drop_keeps_word_cell(void) {
@@ -491,6 +517,7 @@ int main(void) {
     RUN_TEST(test_cascade);
     RUN_TEST(test_keep_node_survives);
     RUN_TEST(test_provenance);
+    RUN_TEST(test_two_records_are_coarsen);
     RUN_TEST(test_partial_drop_keeps_word_cell);
     RUN_TEST(test_opt_option);
     RUN_TEST(test_opt_loop_merges_bits);

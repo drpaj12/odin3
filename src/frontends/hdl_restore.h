@@ -45,8 +45,8 @@ typedef struct odin3_hdl_restored {
  * only parent is the SOURCE.
  * Records are hash-consed, so equal text on many objects is one SOURCE and one DERIVED per
  * distinct (source, base) pair. The caller begins one operation (odin3_prov_begin_op_class,
- * rewrite) per read run; this function never does. File strings are interned in the design's table. More than
- * ODIN3_HDL_LOC_MAX locations keep the first 8 and set out->capped.
+ * rewrite) per read run; this function never does. File strings are interned in the design's table.
+ * More than ODIN3_HDL_LOC_MAX locations keep the first 8 and set out->capped.
  *
  * INVALID_ARG (logged by the provenance store, or "hdl_restore: no operation begun" /
  * "hdl_restore: nothing to restore") for a NULL argument, no operation begun, n 0, or a base or
