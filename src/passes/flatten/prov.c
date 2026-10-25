@@ -8,7 +8,6 @@
 #include "ir/module.h"
 #include "util/log.h"
 
-#include <assert.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -67,7 +66,8 @@ odin3_status odin3_flatten_derive(odin3_flatten_ctx *fc, odin3_prov_id orig, odi
     odin3_prov_id parents[2];
     uint32_t count = 0;
     *out = (odin3_prov_id){0};
-    assert(orig.v == 0 || orig.v != fc->inst_prov.v); /* else the parents repeat one record */
+    /* orig == inst_prov happens (submod's instance record is its cells' record): the derive then
+     * dedups the parents to one record, and the tail (1) still counts it as the context parent. */
     if (orig.v != 0) {
         parents[count++] = orig;
     }
