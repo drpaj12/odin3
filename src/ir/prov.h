@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "ir/opclass.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
@@ -68,8 +69,27 @@ odin3_status odin3_pass_run_begin_args(odin3_design *design, uint32_t pass_name_
 odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
                                   odin3_pass_ctx *ctx);
 
-/* Starts the next operation of the run (++op): one per decompose or clump (IR-12). */
+/*
+ * Starts the next operation of the run (++op): one per decompose or clump (IR-12), with no
+ * declared class. For readers and front ends whose operations make only SOURCE or IMPORTED
+ * records, and for tests. A pass that derives uses odin3_prov_begin_op_class (lint rule).
+ */
 void odin3_prov_begin_op(odin3_pass_ctx *ctx);
+
+/*
+ * Starts the next operation of the run and declares cls as its default class (IR-12a): every
+ * odin3_prov_derive in it takes that class unless odin3_prov_derive_class overrides it. cls must
+ * satisfy odin3_opclass_valid. The call cannot fail: a bad class or out of memory is remembered in
+ * the table and reported by check rule 13.
+ */
+void odin3_prov_begin_op_class(odin3_pass_ctx *ctx, const odin3_opclass *cls);
+
+/*
+ * Starts the next operation of a lazy begin, whose pass knows the class only at its first derive
+ * (opt's rb_prov and new_prov): the operation has no default until the first
+ * odin3_prov_derive_class in it, whose class becomes the default.
+ */
+void odin3_prov_begin_op_lazy(odin3_pass_ctx *ctx);
 
 /* Where a SOURCE or IMPORTED record comes from: locations (copied), AST node, hierarchy path. */
 typedef struct odin3_prov_origin {
@@ -115,6 +135,19 @@ odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parent
  */
 odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list parents,
                                     uint32_t hier_str, odin3_prov_id *out);
+
+/*
+ * As odin3_prov_derive_hier, with the class of the record: cls NULL is the operation's default,
+ * non-NULL is this record's own class (stored as an override only when it differs from the
+ * default). On an operation with no default (odin3_prov_begin_op, or a lazy begin before its
+ * first class) a non-NULL cls becomes the default; a NULL cls leaves the record without a class,
+ * which check rule 13 reports. A record derived again (hash-consing) with another class is also
+ * reported by rule 13. Same errors as odin3_prov_derive_hier, and INVALID_ARG for a cls that
+ * odin3_opclass_valid rejects.
+ */
+odin3_status odin3_prov_derive_class(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                     uint32_t hier_str, const odin3_opclass *cls,
+                                     odin3_prov_id *out);
 
 /* A record as stored; arrays are owned by the design and never change. */
 typedef struct odin3_prov_record {

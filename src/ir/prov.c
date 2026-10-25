@@ -294,6 +294,17 @@ void odin3_prov_begin_op(odin3_pass_ctx *ctx) {
     ctx->op++;
 }
 
+void odin3_prov_begin_op_lazy(odin3_pass_ctx *ctx) {
+    odin3_prov_begin_op(ctx);
+}
+
+void odin3_prov_begin_op_class(odin3_pass_ctx *ctx, const odin3_opclass *cls) {
+    odin3_prov_begin_op(ctx);
+    if (odin3_opclass_declare(ctx->design->opclass, ctx->run, ctx->op, cls) != ODIN3_OK) {
+        odin3_opclass_note_failure(ctx->design->opclass);
+    }
+}
+
 /* The row of run, NULL for a NULL design or run 0 or unknown. */
 static const odin3_passrun_row *run_row(const odin3_design *design, odin3_passrun_id run) {
     const odin3_vec *runs = design != NULL ? &design->prov->runs : NULL;
@@ -657,8 +668,9 @@ static odin3_status parents_unique(odin3_prov_store *store, odin3_prov_list pare
     return ODIN3_OK;
 }
 
-odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list parents,
-                                    uint32_t hier_str, odin3_prov_id *out) {
+/* The derive of odin3_prov_derive_hier, without the class. */
+static odin3_status derive_record(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                  uint32_t hier_str, odin3_prov_id *out) {
     odin3_prov_store *store = ctx_store(ctx, "odin3_prov_derive_hier");
     if (store == NULL) {
         return ODIN3_ERR_INVALID_ARG;
@@ -681,6 +693,55 @@ odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list p
     }
     odin3_prov_record probe = {ODIN3_PROV_DERIVED, ctx->run, ctx->op, NULL, 0, 0, hier_str, unique};
     return record_intern(store, &probe, out);
+}
+
+/*
+ * Records the class of the record a derive returned (IR-12a). `created`: the derive made the
+ * record. Never fails the derive: the table notes a problem and check rule 13 reports it.
+ */
+static void classify(const odin3_pass_ctx *ctx, odin3_prov_id rec, bool created,
+                     const odin3_opclass *cls) {
+    odin3_opclass_table *table = ctx->design->opclass;
+    odin3_opclass def;
+    bool has_def = odin3_opclass_default(table, ctx->run, ctx->op, &def);
+    if (cls != NULL && !has_def) { /* a lazy begin: the first derive's class is the default */
+        if (odin3_opclass_declare(table, ctx->run, ctx->op, cls) != ODIN3_OK) {
+            odin3_opclass_note_failure(table);
+        }
+        return;
+    }
+    odin3_opclass have;
+    bool has_have = !created && odin3_opclass_of(table, rec, ctx->run, ctx->op, &have);
+    const odin3_opclass *want = cls != NULL ? cls : (has_def ? &def : NULL);
+    if (want == NULL) {
+        return;
+    }
+    if (has_have && !odin3_opclass_equal(&have, want)) {
+        odin3_opclass_note_conflict(table, rec);
+    } else if (created && has_def && !odin3_opclass_equal(&def, want) &&
+               odin3_opclass_override(table, rec, want) != ODIN3_OK) {
+        odin3_opclass_note_failure(table);
+    }
+}
+
+odin3_status odin3_prov_derive_class(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                     uint32_t hier_str, const odin3_opclass *cls,
+                                     odin3_prov_id *out) {
+    if (cls != NULL && !odin3_opclass_valid(cls)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_prov_derive_class: invalid class");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    uint32_t before = ctx != NULL && ctx->design != NULL ? odin3_prov_end(ctx->design) : 0;
+    odin3_status st = derive_record(ctx, parents, hier_str, out);
+    if (st == ODIN3_OK) {
+        classify(ctx, *out, out->v >= before, cls);
+    }
+    return st;
+}
+
+odin3_status odin3_prov_derive_hier(const odin3_pass_ctx *ctx, odin3_prov_list parents,
+                                    uint32_t hier_str, odin3_prov_id *out) {
+    return odin3_prov_derive_class(ctx, parents, hier_str, NULL, out);
 }
 
 odin3_status odin3_prov_derive(const odin3_pass_ctx *ctx, odin3_prov_list parents,

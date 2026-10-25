@@ -1,5 +1,5 @@
 /*
- * check.h — the IR invariant checker (IR §9): rules 1–11, fast and full.
+ * check.h — the IR invariant checker (IR §9): rules 1–13, fast and full.
  */
 #ifndef ODIN3_IR_CHECK_H
 #define ODIN3_IR_CHECK_H
@@ -8,7 +8,7 @@
 #include "ir/module.h"
 #include "odin3/odin3.h"
 
-/* FAST runs rules 1–5 and 11; FULL runs every rule (IR §9). */
+/* FAST runs rules 1–5 and 11; FULL runs every rule (12 and 13 once per design) (IR §9). */
 typedef enum odin3_check_level { ODIN3_CHECK_FAST, ODIN3_CHECK_FULL } odin3_check_level;
 
 /* The view to assert for rule 10 (IR-9); NONE skips the view check. */
@@ -40,7 +40,8 @@ odin3_status odin3_check_module(odin3_module *module, odin3_check_opts opts);
 
 /*
  * odin3_check_module for every module in creation order; FULL then checks the provenance records
- * once (rule 7: every run exists, every DERIVED record has parents with smaller IDs), logged as
+ * once (rule 7: every run exists, every DERIVED record has parents with smaller IDs; rule 13: every
+ * DERIVED record has a valid op class), logged as
  * "check: design: ...". ODIN3_ERR_CHECK when any module or record fails (every module is still
  * checked); ODIN3_ERR_NO_MEMORY as for a module; ODIN3_ERR_INVALID_ARG (logged) for a NULL design
  * or invalid options.
