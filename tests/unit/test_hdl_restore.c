@@ -23,6 +23,10 @@
 
 enum { MANY = 12, TEXT_MAX = 4096, PATH_MAX_LEN = 128 };
 
+/* The class of the operations these tests begin (IR-12a; rule 13 needs one per derive). */
+static const odin3_opclass test_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                         false, 0};
+
 static odin3_design *design;
 static odin3_pass_ctx run;
 
@@ -69,7 +73,7 @@ static odin3_hdl_restored restore(const odin3_hdl_restore_req *req) {
 static void test_record_shape(void) {
     odin3_prov_id base = netlist_prov();
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){base, &loc, 1, intern("top/u1")});
     const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
     TEST_ASSERT_NOT_NULL(rec);
@@ -90,7 +94,7 @@ static void test_record_shape(void) {
 static void test_hier_on_both(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
     uint32_t hier = intern("top/u1");
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, hier});
     const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
     TEST_ASSERT_EQUAL_UINT(hier, rec->hier);
@@ -100,7 +104,7 @@ static void test_hier_on_both(void) {
 /* No netlist record (base 0): still one DERIVED record, whose only parent is the SOURCE. */
 static void test_base_zero_has_source_parent(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){{0}, &loc, 1, 0});
     const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
@@ -113,7 +117,7 @@ static void test_equal_calls_one_record(void) {
     odin3_prov_id base = netlist_prov();
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
     odin3_hdl_loc other = hdl_loc("a.v", 8);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restore_req req = {base, &loc, 1, 0};
     odin3_hdl_restored first = restore(&req);
     odin3_hdl_restored second = restore(&req);
@@ -125,7 +129,7 @@ static void test_equal_calls_one_record(void) {
 /* The record names the object by its HDL leaf; odin3_hdl_locs returns what was restored. */
 static void test_hdl_view_of_restored(void) {
     odin3_hdl_loc locs[2] = {hdl_loc("a.v", 3), hdl_loc("b.v", 5)};
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), locs, 2, 0});
     odin3_hdl_ctx *ctx = odin3_hdl_ctx_create(design, "test");
     TEST_ASSERT_NOT_NULL(ctx);
@@ -151,7 +155,7 @@ static void test_cap(void) {
     for (uint32_t i = 0; i < MANY; i++) {
         locs[i] = hdl_loc("a.v", i + 1);
     }
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), locs, MANY, 0});
     TEST_ASSERT_TRUE(got.capped);
     const odin3_prov_record *rec = odin3_prov_get(design, got.prov);
@@ -178,7 +182,7 @@ static void test_invalid_arguments(void) {
     errors_seen = 0;
     odin3_log_set_sink(error_sink, NULL);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out)); /* op 0 */
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     req.n = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_hdl_restore(&run, &req, &out));
     req.n = 1;
@@ -196,7 +200,7 @@ static void test_invalid_arguments(void) {
  * the object from the HDL file and line. */
 static void test_check_and_forward_index(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), got.prov, &mid));
@@ -240,7 +244,7 @@ static odin3_prov_id source_at(odin3_pass_ctx *ctx, const char *file, uint32_t l
 static odin3_prov_id derived_over(odin3_pass_ctx *ctx, odin3_prov_id leaf, odin3_prov_id tail) {
     odin3_prov_id parents[2] = {leaf, tail};
     odin3_prov_id id = {0};
-    odin3_prov_begin_op(ctx);
+    odin3_prov_begin_op_class(ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_prov_derive(ctx, (odin3_prov_list){parents, tail.v != 0 ? 2U : 1U}, &id));
     return id;
@@ -291,12 +295,12 @@ static void test_memo_equals_walk_on_diamond(void) {
     odin3_prov_id top = {0};
     odin3_prov_id lp[2] = {leaf[0], leaf[1]};
     odin3_prov_id rp[2] = {leaf[2], leaf[1]};
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){lp, 2}, &left));
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){rp, 2}, &right));
     odin3_prov_id tp[2] = {left, right};
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){tp, 2}, &top));
     odin3_hdl_ctx *hdl = odin3_hdl_ctx_create(design, "test");
     TEST_ASSERT_NOT_NULL(hdl);
@@ -347,7 +351,7 @@ static char *read_whole(const char *path) {
 /* A design with a located module and net, an unlocated net, and the dump_locs output of it. */
 static char *dump_of_located_design(unsigned *bare_id) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), got.prov, &mid));
@@ -389,7 +393,7 @@ static void test_dump_locs_lines(void) {
 /* Review L4: a `|` or backslash in a name is escaped, so the fields stay unambiguous. */
 static void test_dump_locs_escapes_names(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("t"), got.prov, &mid));
@@ -433,7 +437,7 @@ static void add_typed_node(odin3_module *mod, const char *type_name, const char 
 /* A module "t" with located nodes of several types. */
 static void build_typed_design(void) {
     odin3_hdl_loc loc = hdl_loc("a.v", 7);
-    odin3_prov_begin_op(&run);
+    odin3_prov_begin_op_class(&run, &test_class);
     odin3_hdl_restored got = restore(&(odin3_hdl_restore_req){netlist_prov(), &loc, 1, 0});
     odin3_module_id mid = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("t"), got.prov, &mid));

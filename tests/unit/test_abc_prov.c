@@ -8,6 +8,8 @@
 #include "abc_fixture.h"
 #include "abc_stage.h"
 #include "ir/lut.h"
+#include "ir/opclass.h"
+#include "opclass_expect.h"
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
 #include "passes/abc/prov.h"
@@ -25,6 +27,12 @@
 #endif
 
 enum { MAX_LEAVES = 16, SWEEP_LIMIT = 4000 };
+
+/* IR-12a: abc coarsens gates into LUTs; its over-budget record is the same class with bulk. */
+static const odin3_opclass ABC_CLASS = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, false,
+                                        0};
+static const odin3_opclass ABC_BULK = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true,
+                                       0};
 
 static odin3_design *design;
 static odin3_module *mod;
@@ -245,6 +253,7 @@ static void test_register_input_and_flop(void) {
     odin3_prov_id s_ff = odin3_node_prov(mod, ff_at(21, clk, dat_d, out_q));
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     afx_check(design);
+    opx_all(design, "abc", &ABC_CLASS); /* every abc record is coarsen, gate to lut (IR-12a) */
     odin3_node_id flop = driver_of(port_net_of("q"));
     odin3_node_id src = driver_of(input_net(flop, 1));
     expect_parents(src, &s_and, 1);
@@ -310,6 +319,8 @@ static void test_coarse_mode(void) {
     odin3_abc_test_set_run_limits(&(odin3_abc_run_limits){0, 0, 0, 1});
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
     afx_check(design);
+    /* IR-12a: the over-budget record is the one bulk coarsen record of the run */
+    TEST_ASSERT_EQUAL_UINT32(1, opx_count(design, "abc", &ABC_BULK, true));
     TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_WARN,
                              "abc: module 'm', no flip-flops: provenance needs 6 parent edges "
                              "(budget 1); the run's LUTs share one record"));

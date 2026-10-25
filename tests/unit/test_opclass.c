@@ -321,15 +321,44 @@ static void test_bytes_reserved_counts_table(void) {
     TEST_ASSERT_EQUAL_size_t(0, odin3_opclass_bytes_reserved(NULL));
 }
 
-static void test_oom_in_begin_is_noted(void) {
+/* A begin that runs out of memory cannot report it: the next derive returns NO_MEMORY. */
+static void test_oom_in_begin_fails_the_next_derive(void) {
     odin3_pass_ctx ctx = run_named("opt");
+    odin3_prov_id src = leaf(&ctx, 1);
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
     odin3_util_set_alloc_fail_after(OOM_AFTER);
     for (uint32_t i = 0; i < 64; i++) { /* alternate so each op needs a row */
-        odin3_prov_begin_op_class(&ctx, i % 2 == 0 ? &REWRITE : &COARSEN);
+        odin3_prov_begin_op_class(&ctx, i % 2 == 0 ? &COARSEN : &REWRITE);
+        if (!odin3_opclass_take_pending(design->opclass)) {
+            continue;
+        }
+        odin3_opclass_set_pending(design->opclass, true);
+        odin3_prov_id out = {0};
+        uint32_t end = odin3_prov_end(design);
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY,
+                              odin3_prov_derive(&ctx, (odin3_prov_list){&src, 1}, &out));
+        TEST_ASSERT_EQUAL_UINT32(end, odin3_prov_end(design)); /* nothing was made */
+        odin3_util_set_alloc_fail_after(-1);
+        TEST_ASSERT_FALSE(odin3_opclass_failed(design->opclass));
+        return;
     }
+    TEST_FAIL_MESSAGE("no begin ran out of memory");
+}
+
+/* An override that cannot be stored fails the derive before it makes a record. */
+static void test_oom_in_override_fails_before_the_record(void) {
+    odin3_pass_ctx ctx = run_named("opt");
+    odin3_prov_id src = leaf(&ctx, 1);
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    odin3_util_set_alloc_fail_after(OOM_AFTER);
+    odin3_prov_id out = {0};
+    uint32_t end = odin3_prov_end(design);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_NO_MEMORY,
+        odin3_prov_derive_class(&ctx, (odin3_prov_list){&src, 1}, 0, &COARSEN, &out));
     odin3_util_set_alloc_fail_after(-1);
-    TEST_ASSERT_TRUE(odin3_opclass_failed(design->opclass));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, check_full());
+    TEST_ASSERT_EQUAL_UINT32(end, odin3_prov_end(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_full());
 }
 
 int main(void) {
@@ -348,6 +377,7 @@ int main(void) {
     RUN_TEST(test_bulk_flag_kept);
     RUN_TEST(test_copy_with_design);
     RUN_TEST(test_bytes_reserved_counts_table);
-    RUN_TEST(test_oom_in_begin_is_noted);
+    RUN_TEST(test_oom_in_begin_fails_the_next_derive);
+    RUN_TEST(test_oom_in_override_fails_before_the_record);
     return UNITY_END();
 }

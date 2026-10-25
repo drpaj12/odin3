@@ -27,6 +27,10 @@ enum {
     OOM_LIMIT = 100,
 };
 
+/* The class of the operations these tests begin (IR-12a; rule 13 needs one per derive). */
+static const odin3_opclass test_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                         false, 0};
+
 static odin3_design *design;
 static odin3_module *module;
 static odin3_prov_id prov;
@@ -279,7 +283,7 @@ static void test_fault_bad_prov(void) {
 /* Rule 7 on a record's hier: a derived record whose hier is a string of the design (a flatten-style
  * instance path) passes; a hier past the string table is an error from the design-level check. */
 static void test_hier_valid_passes(void) {
-    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_begin_op_class(&run_ctx, &test_class);
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive_hier(&run_ctx, (odin3_prov_list){&prov, 1},
                                                            intern("top/u1/gen[3]"), &derived));
@@ -289,7 +293,7 @@ static void test_hier_valid_passes(void) {
 }
 
 static void test_fault_bad_hier(void) {
-    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_begin_op_class(&run_ctx, &test_class);
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive_hier(&run_ctx, (odin3_prov_list){&prov, 1},
                                                            intern("top/u1"), &derived));
@@ -599,7 +603,7 @@ static void move_wire_bits(void) {
 
 /* node_replace with DERIVED provenance; delete then reuse a name; net delete and re-create. */
 static void replace_and_reuse(void) {
-    odin3_prov_begin_op(&run_ctx);
+    odin3_prov_begin_op_class(&run_ctx, &test_class);
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_prov_derive(&run_ctx, (odin3_prov_list){&prov, 1}, &derived));

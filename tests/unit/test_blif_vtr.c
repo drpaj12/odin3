@@ -46,6 +46,10 @@
 enum { PATH_BUF = 512, OOM_SWEEP = 20000, LINE_BUF = 256 };
 
 /* Two models: the top and a module the top does not instantiate. */
+/* The class of the operations these tests begin (IR-12a; rule 13 needs one per derive). */
+static const odin3_opclass test_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                         false, 0};
+
 static const char *const TWO_MODELS = ".model top\n"
                                       ".inputs a b\n"
                                       ".outputs y\n"
@@ -1035,7 +1039,7 @@ static void test_prov_names_derived_first_leaf(void) {
     odin3_pass_ctx ctx;
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("derive"), &ctx));
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_prov_derive(&ctx, (odin3_prov_list){parents, 2}, &derived));
     write_prov_chain(top, prov_net(top, "n", derived));
@@ -1913,7 +1917,7 @@ static void test_loc_derived(void) {
     odin3_prov_id leaf = {0};
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaf));
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&leaf, 1}, &derived));
     odin3_celltype_id type = {0};
     TEST_ASSERT_TRUE(odin3_celltype_find(tc.design, intern("$_DFF_N_"), &type));
@@ -3434,7 +3438,7 @@ static void test_prov_names_hier_only(void) {
     odin3_prov_id leaf = {0};
     odin3_prov_id derived = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaf));
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&leaf, 1}, &derived));
     write_prov_chain(top, prov_net(top, "n", derived));
     TEST_ASSERT_NOT_NULL_MESSAGE(strstr(out.data, ".names a n\n"), out.data);
@@ -3490,7 +3494,7 @@ static odin3_prov_id hdl_derived(const odin3_prov_id *parents, uint32_t count) {
     odin3_pass_ctx ctx;
     odin3_prov_id id = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(tc.design, intern("derive"), &ctx));
-    odin3_prov_begin_op(&ctx);
+    odin3_prov_begin_op_class(&ctx, &test_class);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_prov_derive(&ctx, (odin3_prov_list){parents, count}, &id));
     return id;
