@@ -1,0 +1,8 @@
+{
+ "top": "bm_DL_BCD_adder",
+ "blif": "odin3/bm_DL_BCD_adder.blif",
+ "prov_blif": "timing/prov.blif",
+ "netlist_json": "timing/netlist.odin3.json",
+ "vpr_run_dir": "vpr/run",
+ "paths_requested": 100
+}

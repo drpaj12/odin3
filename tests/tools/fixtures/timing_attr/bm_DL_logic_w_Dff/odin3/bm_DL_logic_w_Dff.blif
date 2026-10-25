@@ -1,0 +1,13 @@
+# Odin III 1.1.0 write_blif --vtr (K=6, names short)
+# abc: script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=1
+
+.model bm_DL_logic_w_Dff
+.inputs x1 x2 x3 Clock
+.outputs f g
+.names x1 x2 $n7
+11 1
+.names x3 f $n8
+00 0
+.latch $n7 f re Clock 2
+.latch $n8 g re Clock 2
+.end
