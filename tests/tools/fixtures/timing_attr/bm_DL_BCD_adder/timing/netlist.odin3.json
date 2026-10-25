@@ -1,0 +1,766 @@
+{
+  "creator": "Odin III",
+  "odin3_version": 1,
+  "modules": {
+    "bm_DL_BCD_adder": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "micro/bm_DL_BCD_adder.v:3.1-22.10"
+      },
+      "ports": {
+        "Cin": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "X": {
+          "direction": "input",
+          "bits": [ 3, 4, 5, 6 ]
+        },
+        "Y": {
+          "direction": "input",
+          "bits": [ 7, 8, 9, 10 ]
+        },
+        "S": {
+          "direction": "output",
+          "bits": [ 11, 79, 80, 81 ]
+        },
+        "Cout": {
+          "direction": "output",
+          "bits": [ 78 ]
+        },
+        "Z": {
+          "direction": "output",
+          "bits": [ 11, 12, 13, 14, 15 ]
+        }
+      },
+      "cells": {
+        "$c9": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:head",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "1" ],
+            "b": [ "0" ],
+            "cin": [ "0" ],
+            "cout": [ 54 ],
+            "sumout": [ 55 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c7.s0": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s0",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 3 ],
+            "b": [ 7 ],
+            "cin": [ 54 ],
+            "cout": [ 56 ],
+            "sumout": [ 16 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c7.s1": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s1",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 4 ],
+            "b": [ 8 ],
+            "cin": [ 56 ],
+            "cout": [ 57 ],
+            "sumout": [ 17 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c7.s2": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s2",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 5 ],
+            "b": [ 9 ],
+            "cin": [ 57 ],
+            "cout": [ 58 ],
+            "sumout": [ 18 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c7.s3": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s3",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 6 ],
+            "b": [ 10 ],
+            "cin": [ 58 ],
+            "cout": [ 59 ],
+            "sumout": [ 19 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c7.top": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:top",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "0" ],
+            "b": [ "0" ],
+            "cin": [ 59 ],
+            "cout": [ 60 ],
+            "sumout": [ 20 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+          }
+        },
+        "$c15": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:head",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "1" ],
+            "b": [ "0" ],
+            "cin": [ "0" ],
+            "cout": [ 61 ],
+            "sumout": [ 62 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.s0": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s0",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 16 ],
+            "b": [ 2 ],
+            "cin": [ 61 ],
+            "cout": [ 63 ],
+            "sumout": [ 11 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.s1": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s1",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 17 ],
+            "b": [ "0" ],
+            "cin": [ 63 ],
+            "cout": [ 64 ],
+            "sumout": [ 12 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.s2": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s2",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 18 ],
+            "b": [ "0" ],
+            "cin": [ 64 ],
+            "cout": [ 65 ],
+            "sumout": [ 13 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.s3": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s3",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 19 ],
+            "b": [ "0" ],
+            "cin": [ 65 ],
+            "cout": [ 66 ],
+            "sumout": [ 14 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.s4": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s4",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 20 ],
+            "b": [ "0" ],
+            "cin": [ 66 ],
+            "cout": [ 67 ],
+            "sumout": [ 15 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c8.top": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:top",
+            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "0" ],
+            "b": [ "0" ],
+            "cin": [ 67 ],
+            "cout": [ 68 ],
+            "sumout": [ 69 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+          }
+        },
+        "$c22": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:head",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "1" ],
+            "b": [ "0" ],
+            "cin": [ "0" ],
+            "cout": [ 70 ],
+            "sumout": [ 71 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c18.s0": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s0",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 12 ],
+            "b": [ "1" ],
+            "cin": [ 70 ],
+            "cout": [ 72 ],
+            "sumout": [ 50 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c18.s1": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s1",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 13 ],
+            "b": [ "1" ],
+            "cin": [ 72 ],
+            "cout": [ 73 ],
+            "sumout": [ 51 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c18.s2": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s2",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 14 ],
+            "b": [ "0" ],
+            "cin": [ 73 ],
+            "cout": [ 74 ],
+            "sumout": [ 52 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c18.s3": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s3",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 15 ],
+            "b": [ "0" ],
+            "cin": [ 74 ],
+            "cout": [ 75 ],
+            "sumout": [ 53 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c18.top": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:top",
+            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "0" ],
+            "b": [ "0" ],
+            "cin": [ 75 ],
+            "cout": [ 76 ],
+            "sumout": [ 77 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+          }
+        },
+        "$c28": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000101",
+            "LUT": "11110000111001001100110011001100"
+          },
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 15, 53, 13, 14 ],
+            "Y": [ 78 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+          }
+        },
+        "$c29": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100",
+            "LUT": "1110110000001100"
+          },
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 12, 14, 50 ],
+            "Y": [ 79 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+          }
+        },
+        "$c30": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100",
+            "LUT": "1110110000001100"
+          },
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 13, 14, 51 ],
+            "Y": [ 80 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+          }
+        },
+        "$c31": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000100",
+            "LUT": "1111000100000000"
+          },
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 12, 52, 14 ],
+            "Y": [ 81 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+          }
+        }
+      },
+      "netnames": {
+        "Cin": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:4.2-4.12"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:4.2-4.12" ]
+          }
+        },
+        "X": {
+          "hide_name": 0,
+          "bits": [ 3, 4, 5, 6 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:5.2-5.19"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:5.2-5.19" ]
+          }
+        },
+        "Y": {
+          "hide_name": 0,
+          "bits": [ 7, 8, 9, 10 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:5.2-5.19"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:5.2-5.19" ]
+          }
+        },
+        "S": {
+          "hide_name": 0,
+          "bits": [ 11, 79, 80, 81 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:6.2-6.17"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:6.2-6.17" ]
+          }
+        },
+        "Cout": {
+          "hide_name": 0,
+          "bits": [ 78 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:7.2-7.14"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:7.2-7.14" ]
+          }
+        },
+        "Z": {
+          "hide_name": 0,
+          "bits": [ 11, 12, 13, 14, 15 ],
+          "attributes": {
+            "src": "micro/bm_DL_BCD_adder.v:10.2-10.17"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "bm_DL_BCD_adder",
+            "hdl": [ "micro/bm_DL_BCD_adder.v:10.2-10.17" ]
+          }
+        }
+      },
+      "odin3_prov": {
+        "kind": "SOURCE",
+        "hier": "bm_DL_BCD_adder",
+        "hdl": [ "micro/bm_DL_BCD_adder.v:3.1-22.10" ]
+      }
+    }
+  }
+}

@@ -13,6 +13,7 @@ dependencies = ["cffi>=1.15"]
 [project.scripts]
 odin3 = "odin3._entry:odin3_main"
 odin3-flow = "odin3._entry:flow_main"
+odin3-timing = "odin3._entry:timing_main"
 
 [tool.scikit-build]
 # The wheel is built by CMake (CMakeLists.txt, SKBUILD branch): libodin3.so, the odin3 CLI and the

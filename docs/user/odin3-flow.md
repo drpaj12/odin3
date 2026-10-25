@@ -5,7 +5,8 @@ and, when VTR is available, VPR. It uses only the Python standard library.
 
 ```text
 odin3-flow design.v [more.v ...] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml]
-           [--family NAME] [--vpr | --no-vpr] [--analysis] [--odin3 PATH] [--out DIR]
+           [--family NAME] [--vpr | --no-vpr] [--analysis] [--timing-attr] [--timing-paths N]
+           [--odin3 PATH] [--out DIR]
 ```
 
 | Option | Meaning |
@@ -17,6 +18,8 @@ odin3-flow design.v [more.v ...] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml
 | `--family FAMILY` | LPM device family for `--target lpm` |
 | `--vpr`, `--no-vpr` | run VPR after Odin III; default on when `VTR_ROOT` is set; `vtr` target only |
 | `--analysis` | also write the dot, JSON, levelize and locations files; `vtr` target only |
+| `--timing-attr` | attribute the critical path to HDL statements, modules and words: writes `timing/attribution.json` and `timing/summary.txt` (see {doc}`timing-attribution`); needs `--target vtr` and VPR |
+| `--timing-paths N` | setup paths VPR reports and the attribution uses (default 100); implies `--timing-attr`. VPR gets `--timing_report_npaths N` only when N is not 100 |
 | `--odin3 PATH` | the `odin3` binary; default `odin3` on `PATH`, else `build/release/odin3` |
 | `--out DIR` | output directory; default `odin3_out/<top>` |
 
@@ -32,7 +35,11 @@ W=<relaxed> failed (VPR); routed at W=<W>` and adds `route_retry` (`min_chan_wid
 `failed_width`, `used_width`) to `summary.json`; `min_chan_width` stays the true minimum. If every
 width fails, the VPR step fails and its log lists the widths tried.
 
-Exit codes: 0 all steps passed, 1 a step failed, 2 usage error.
+Exit codes: 0 all steps passed, 1 a step failed (the `timing` step too), 2 usage error.
+
+`odin3-timing FLOW_DIR [--paths N] [--out DIR]` attributes a flow output directory that was made
+with `--timing-attr` without rerunning anything (same exit codes); {doc}`timing-attribution` has the
+outputs and the JSON schema.
 
 The `vtr` target reuses the Odin III script of the QoR flow (`tools/vtr-qor/qor_legs.py`), so the
 script here and the benchmark runs are one definition. The module can be imported as well:

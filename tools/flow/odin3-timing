@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# odin3-timing: attribute the critical path of an odin3-flow output directory (made with
+# --timing-attr) to HDL statements, modules and words. Exit codes: 0 ok; 1 attribution failed;
+# 2 usage error. See timing_attr.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/timing_attr.py" "$@"

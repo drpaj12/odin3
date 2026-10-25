@@ -6,6 +6,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Added
+
+- Critical-path attribution to HDL (v1.1.1, `docs/V1.1.1.md`, `docs/user/timing-attribution.md`):
+  `odin3-flow --timing-attr [--timing-paths N]` joins VPR's setup timing report to the Odin III
+  provenance and writes `timing/attribution.json` (schema_version 1) and `timing/summary.txt`
+  (which statements, modules and words set the critical path and Fmax); `odin3-timing FLOW_DIR`
+  does the same for an existing flow directory and `odin3.timing_attribution()` returns the data
+  to Python. Tools and Python only: the core, IR and ABI are unchanged.
+
 ## [1.1.0] - 2026-10-24
 
 Release notes: [docs/V1.1.0.md](docs/V1.1.0.md). ADR D13; spec `docs/DESIGN.md` §4.2/§12.1.

@@ -1,0 +1,63 @@
+# Odin III 1.1.0 write_blif --vtr (K=6, names short)
+# abc: script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=1
+
+.model bm_DL_BCD_adder
+.inputs Cin X[0] X[1] X[2] X[3] Y[0] Y[1] Y[2] Y[3]
+.outputs S[0] S[1] S[2] S[3] Cout Z[0] Z[1] Z[2] Z[3] Z[4]
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd cout=$n53 sumout=$n54
+.subckt adder a=X[0] b=Y[0] cin=$n53 cout=$n55 sumout=$n15
+.subckt adder a=X[1] b=Y[1] cin=$n55 cout=$n56 sumout=$n16
+.subckt adder a=X[2] b=Y[2] cin=$n56 cout=$n57 sumout=$n17
+.subckt adder a=X[3] b=Y[3] cin=$n57 cout=$n58 sumout=$n18
+.subckt adder a=gnd b=gnd cin=$n58 cout=$n59 sumout=$n19
+.subckt adder a=vcc b=gnd cin=gnd cout=$n60 sumout=$n61
+.subckt adder a=$n15 b=Cin cin=$n60 cout=$n62 sumout=$n10
+.subckt adder a=$n16 b=gnd cin=$n62 cout=$n63 sumout=$n11
+.subckt adder a=$n17 b=gnd cin=$n63 cout=$n64 sumout=$n12
+.subckt adder a=$n18 b=gnd cin=$n64 cout=$n65 sumout=$n13
+.subckt adder a=$n19 b=gnd cin=$n65 cout=$n66 sumout=$n14
+.subckt adder a=gnd b=gnd cin=$n66 cout=$n67 sumout=$n68
+.subckt adder a=vcc b=gnd cin=gnd cout=$n69 sumout=$n70
+.subckt adder a=$n11 b=vcc cin=$n69 cout=$n71 sumout=$n49
+.subckt adder a=$n12 b=vcc cin=$n71 cout=$n72 sumout=$n50
+.subckt adder a=$n13 b=gnd cin=$n72 cout=$n73 sumout=$n51
+.subckt adder a=$n14 b=gnd cin=$n73 cout=$n74 sumout=$n52
+.subckt adder a=gnd b=gnd cin=$n74 cout=$n75 sumout=$n76
+.names $n11 $n14 $n52 $n12 $n13 Cout
+-1--0 1
+--111 1
+1-1-1 1
+01-0- 1
+.names $n12 $n11 $n13 $n49 S[1]
+1-11 1
+-1-1 1
+-10- 1
+.names $n11 $n12 $n13 $n50 S[2]
+1-11 1
+-1-1 1
+-10- 1
+.names $n12 $n11 $n51 $n13 S[3]
+--11 1
+00-1 1
+.names $n10 S[0]
+1 1
+.names $n10 Z[0]
+1 1
+.names $n11 Z[1]
+1 1
+.names $n12 Z[2]
+1 1
+.names $n13 Z[3]
+1 1
+.names $n14 Z[4]
+1 1
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

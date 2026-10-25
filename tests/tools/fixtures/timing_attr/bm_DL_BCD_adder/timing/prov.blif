@@ -1,0 +1,168 @@
+# Odin III 1.1.0 write_blif --vtr (K=6, names provenance)
+# abc: script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=1
+
+.model bm_DL_BCD_adder
+.inputs Cin X[0] X[1] X[2] X[3] Y[0] Y[1] Y[2] Y[3]
+.outputs S[0] S[1] S[2] S[3] Cout Z[0] Z[1] Z[2] Z[3] Z[4]
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd \
+  cout=bm_DL_BCD_adder/$n53@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n54@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=X[0] b=Y[0] \
+  cin=bm_DL_BCD_adder/$n53@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n55@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n15@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=X[1] b=Y[1] \
+  cin=bm_DL_BCD_adder/$n55@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n56@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n16@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=X[2] b=Y[2] \
+  cin=bm_DL_BCD_adder/$n56@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n57@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n17@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=X[3] b=Y[3] \
+  cin=bm_DL_BCD_adder/$n57@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n58@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n18@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=gnd b=gnd \
+  cin=bm_DL_BCD_adder/$n58@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n59@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n19@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=vcc b=gnd cin=gnd \
+  cout=bm_DL_BCD_adder/$n60@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n61@micro/bm_DL_BCD_adder.v:15
+.subckt adder \
+  a=bm_DL_BCD_adder/$n15@micro/bm_DL_BCD_adder.v:15 \
+  b=Cin \
+  cin=bm_DL_BCD_adder/$n60@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n62@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n10@micro/bm_DL_BCD_adder.v:10
+.subckt adder \
+  a=bm_DL_BCD_adder/$n16@micro/bm_DL_BCD_adder.v:15 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n62@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n63@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10
+.subckt adder \
+  a=bm_DL_BCD_adder/$n17@micro/bm_DL_BCD_adder.v:15 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n63@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n64@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10
+.subckt adder \
+  a=bm_DL_BCD_adder/$n18@micro/bm_DL_BCD_adder.v:15 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n64@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n65@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10
+.subckt adder \
+  a=bm_DL_BCD_adder/$n19@micro/bm_DL_BCD_adder.v:15 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n65@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n66@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n14@micro/bm_DL_BCD_adder.v:10
+.subckt adder a=gnd b=gnd \
+  cin=bm_DL_BCD_adder/$n66@micro/bm_DL_BCD_adder.v:15 \
+  cout=bm_DL_BCD_adder/$n67@micro/bm_DL_BCD_adder.v:15 \
+  sumout=bm_DL_BCD_adder/$n68@micro/bm_DL_BCD_adder.v:15
+.subckt adder a=vcc b=gnd cin=gnd \
+  cout=bm_DL_BCD_adder/$n69@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n70@micro/bm_DL_BCD_adder.v:19
+.subckt adder \
+  a=bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  b=vcc \
+  cin=bm_DL_BCD_adder/$n69@micro/bm_DL_BCD_adder.v:19 \
+  cout=bm_DL_BCD_adder/$n71@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n49@micro/bm_DL_BCD_adder.v:19
+.subckt adder \
+  a=bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  b=vcc \
+  cin=bm_DL_BCD_adder/$n71@micro/bm_DL_BCD_adder.v:19 \
+  cout=bm_DL_BCD_adder/$n72@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n50@micro/bm_DL_BCD_adder.v:19
+.subckt adder \
+  a=bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n72@micro/bm_DL_BCD_adder.v:19 \
+  cout=bm_DL_BCD_adder/$n73@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n51@micro/bm_DL_BCD_adder.v:19
+.subckt adder \
+  a=bm_DL_BCD_adder/$n14@micro/bm_DL_BCD_adder.v:10 \
+  b=gnd \
+  cin=bm_DL_BCD_adder/$n73@micro/bm_DL_BCD_adder.v:19 \
+  cout=bm_DL_BCD_adder/$n74@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n52@micro/bm_DL_BCD_adder.v:19
+.subckt adder a=gnd b=gnd \
+  cin=bm_DL_BCD_adder/$n74@micro/bm_DL_BCD_adder.v:19 \
+  cout=bm_DL_BCD_adder/$n75@micro/bm_DL_BCD_adder.v:19 \
+  sumout=bm_DL_BCD_adder/$n76@micro/bm_DL_BCD_adder.v:19
+.names \
+  bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n14@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n52@micro/bm_DL_BCD_adder.v:19 \
+  bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  Cout
+-1--0 1
+--111 1
+1-1-1 1
+01-0- 1
+.names \
+  bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n49@micro/bm_DL_BCD_adder.v:19 \
+  S[1]
+1-11 1
+-1-1 1
+-10- 1
+.names \
+  bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n50@micro/bm_DL_BCD_adder.v:19 \
+  S[2]
+1-11 1
+-1-1 1
+-10- 1
+.names \
+  bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  bm_DL_BCD_adder/$n51@micro/bm_DL_BCD_adder.v:19 \
+  bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  S[3]
+--11 1
+00-1 1
+.names \
+  bm_DL_BCD_adder/$n10@micro/bm_DL_BCD_adder.v:10 \
+  S[0]
+1 1
+.names \
+  bm_DL_BCD_adder/$n10@micro/bm_DL_BCD_adder.v:10 \
+  Z[0]
+1 1
+.names \
+  bm_DL_BCD_adder/$n11@micro/bm_DL_BCD_adder.v:10 \
+  Z[1]
+1 1
+.names \
+  bm_DL_BCD_adder/$n12@micro/bm_DL_BCD_adder.v:10 \
+  Z[2]
+1 1
+.names \
+  bm_DL_BCD_adder/$n13@micro/bm_DL_BCD_adder.v:10 \
+  Z[3]
+1 1
+.names \
+  bm_DL_BCD_adder/$n14@micro/bm_DL_BCD_adder.v:10 \
+  Z[4]
+1 1
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end
