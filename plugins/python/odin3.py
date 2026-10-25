@@ -1032,9 +1032,9 @@ def timing_attribution(flow_dir: str | Path, paths: int | None = None) -> dict[s
     modules and words (docs/user/timing-attribution.md). ``flow_dir`` is the flow's output
     directory; ``paths`` keeps the first N setup paths of the VPR report (default: all). Returns
     the dict that ``timing/attribution.json`` holds (``schema_version`` 1). Raises
-    ``RuntimeError`` (``timing_attr.AttributionError``) when an input is missing or inconsistent
-    (the flow was run without ``--timing-attr``, the VPR report is gone, the two BLIFs do not
-    line up)."""
+    ``RuntimeError`` (``timing_attr.AttributionError``) when an input is missing, unreadable or
+    inconsistent (the flow was run without ``--timing-attr``, the VPR report is gone or cut off,
+    an input is not valid JSON or text, the two BLIFs do not line up) or ``paths`` is below 1."""
     here = Path(__file__).resolve().parent
     for flow in (here / "data" / "tools" / "flow", here.parents[1] / "tools" / "flow"):
         if (flow / "timing_attr.py").is_file():

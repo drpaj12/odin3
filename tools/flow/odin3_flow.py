@@ -419,7 +419,10 @@ def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: Flo
               "prov_blif": f"{timing_attr.TIMING_DIR}/{timing_attr.PROV_BLIF_NAME}",
               "netlist_json": f"{timing_attr.TIMING_DIR}/{timing_attr.NETLIST_JSON_NAME}",
               "vpr_run_dir": os.path.relpath(run_dir, args.out),
-              "paths_requested": args.timing_paths}
+              "paths_requested": args.timing_paths,
+              # where the provenance file names point: odin3 ran in odin3/ with these designs
+              "source_cwd": os.path.relpath(args.out / "odin3", args.out),
+              "designs": [str(d) for d in args.designs]}
     (tdir / timing_attr.INPUTS_NAME).write_text(json.dumps(inputs, indent=1) + "\n")
     try:
         report = timing_attr.attribute_flow_dir(args.out, args.timing_paths)

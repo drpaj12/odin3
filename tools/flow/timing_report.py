@@ -3,8 +3,10 @@
 The report lists the worst N setup paths of the routed design. Each path has a data-arrival
 section of rows ``<atom>.<port>[<bit>] (<block type>) [note]  <incr>  <path>`` between the
 ``Point`` header and the first ``data arrival time`` line, then a required-time section and a
-``slack`` line. ``parse_report`` returns the paths with their data-path rows (the launch clock
-network is skipped). Standard library only.
+``slack`` line (layout: libtatum's TimingReporter::report_timing_path). ``read_report`` returns the
+usable paths with their data-path rows (the launch clock network is skipped) and counts the paths
+it cannot use: a hold path (this reader explains setup timing), a path with no ``slack`` line (a
+cut-off report) or with no data rows. Standard library only.
 """
 
 from __future__ import annotations
@@ -150,17 +152,61 @@ def parse_lines(lines: Sequence[str]) -> list[TimingPath]:
     return paths
 
 
-def parse_report(path: Path) -> list[TimingPath]:
-    """Read the report at ``path``. ReportError when it is missing or holds no path."""
+@dataclass
+class Report:
+    """The paths of a report: ``paths`` are usable (setup type, data rows, a slack line);
+    ``skipped`` counts the others by reason (``hold``, ``no_slack``, ``no_rows``)."""
+
+    paths: list[TimingPath] = field(default_factory=list)
+    skipped: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def skipped_total(self) -> int:
+        return sum(self.skipped.values())
+
+
+def skip_reason(path: TimingPath) -> str | None:
+    """Why ``path`` cannot be attributed, None when it can. A hold path is not attributed (this
+    tool explains setup timing; VPR's setup report holds none); a path with no slack line is the
+    mark of a truncated report; a path with no data rows has nothing to join."""
+    if path.path_type.lower() == "hold":
+        return "hold"
+    if path.slack_ns is None:
+        return "no_slack"
+    return None if path.rows else "no_rows"
+
+
+def read_report(path: Path) -> Report:
+    """Read the report at ``path``. ReportError when it is missing, holds no ``#Path`` section,
+    has no ``slack`` line at all (cut off) or no usable path. Paths that cannot be used are
+    counted in ``skipped``, never dropped silently."""
     if not path.is_file():
         raise ReportError(f"no timing report at {path}")
     paths = parse_lines(path.read_text(errors="replace").splitlines())
     if not paths:
         raise ReportError(f"{path}: no '#Path' sections (not a VPR setup timing report)")
-    bad = [p.index for p in paths if not p.rows or p.slack_ns is None]
-    if bad and len(bad) == len(paths):
-        raise ReportError(f"{path}: no path has data rows and a slack line")
-    return [p for p in paths if p.rows and p.slack_ns is not None]
+    if all(p.slack_ns is None for p in paths):
+        raise ReportError(f"{path}: no 'slack' line (the report is cut off or not a VPR "
+                          f"setup timing report)")
+    report = Report()
+    for item in paths:
+        reason = skip_reason(item)
+        if reason is None:
+            report.paths.append(item)
+        else:
+            report.skipped[reason] = report.skipped.get(reason, 0) + 1
+    if not report.paths:
+        raise ReportError(f"{path}: no path is usable ({describe_skipped(report.skipped)})")
+    return report
+
+
+def describe_skipped(skipped: dict[str, int]) -> str:
+    return ", ".join(f"{n} {why}" for why, n in sorted(skipped.items())) or "none"
+
+
+def parse_report(path: Path) -> list[TimingPath]:
+    """The usable paths of the report at ``path`` (see ``read_report`` for the skipped ones)."""
+    return read_report(path).paths
 
 
 def final_cpd(texts: Sequence[str]) -> tuple[float, float | None] | None:

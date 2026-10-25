@@ -124,8 +124,9 @@ Rules:
 `odin3.timing_attribution(flow_dir, paths=None)` returns the attribution of the critical path of
 an `odin3-flow --timing-attr` run: the dict that `timing/attribution.json` holds (`schema_version`
 1; fields in {doc}`timing-attribution`). `paths` keeps the first N setup paths of the VPR report.
-It raises `RuntimeError` when an input is missing or inconsistent (the flow ran without
-`--timing-attr`, the VPR report is gone, the two BLIFs do not line up).
+It raises `RuntimeError` (a `timing_attr.AttributionError`) when an input is missing, unreadable
+or inconsistent (the flow ran without `--timing-attr`, the VPR report is gone or cut off, an input
+file is not valid JSON or text, the two BLIFs do not line up) and when `paths` is below 1.
 
 ```python
 import odin3

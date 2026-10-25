@@ -89,8 +89,13 @@ the clock constraint is not met; VPR's default constraint is 0, so slack is minu
 | Field | Meaning |
 |---|---|
 | `cpd_ns`, `fmax_mhz` | From VPR's `Final critical path delay` line (null when absent) |
-| `paths_requested` | `--timing-paths` (null for a flow dir that does not say) |
-| `paths_parsed` | Paths in `paths` (VPR reports fewer than requested on a small design) |
+| `paths_requested` | What the flow asked VPR to report (`--timing-paths`; null for a flow dir that does not say) |
+| `paths_limit` | The `--paths` / API `paths` override, null when none was given |
+| `paths_in_report` | Usable setup paths the VPR report holds (fewer than requested on a small design) |
+| `paths_kept` | Paths in `paths` (`paths_in_report`, cut to `paths_limit`) |
+| `paths_parsed` | The same number as `paths_kept`, kept for readers of the first layout |
+| `paths_skipped` | Report paths that were not attributed (never dropped silently; also in `summary.txt`) |
+| `paths_skipped_reasons` | `paths_skipped` by reason: `hold` (a hold path in the setup report: VPR's setup report has none, a foreign one is skipped), `no_slack` (no `slack` line: a truncated path), `no_rows` (no data rows) |
 | `worst_slack_ns` | Slack of path 1 |
 | `critical_data_delay_ns` | Sum of the attributed delays of path 1 (launch clock latency and setup time excluded) |
 
@@ -98,11 +103,13 @@ the clock constraint is not met; VPR's default constraint is 0, so slack is minu
 
 | Field | Meaning |
 |---|---|
-| `nodes`, `matched`, `port`, `unmatched` | Counts of path nodes (atoms on the paths; an atom on k paths counts k times) |
-| `matched_share`, `port_share`, `unmatched_share` | The three counts over `nodes` |
+| `nodes`, `matched`, `port`, `unmatched` | Counts of path nodes (atoms on the paths, I/O pads included; an atom on k paths counts k times) |
+| `matched_share`, `port_share`, `unmatched_share` | The three counts over `nodes`: pads are in the denominator, so `matched_share` is diluted by them |
+| `matched_share_excl_port` | `matched` over `matched + unmatched`: the share of non-pad nodes that reached a source location |
 | `critical_matched_delay_share`, `critical_port_delay_share`, `critical_unmatched_delay_share` | The same split by delay on the critical path |
 | `unmatched_atoms` | Up to 200 entries `{atom, block_type, nodes, paths}`, most frequent first |
 | `unmatched_atoms_total` | Number of distinct unmatched atoms |
+| `source_files`, `source_files_unreadable`, `source_files_unreadable_list` | Source files the spans point to, how many could not be read (their `text` and `assigned_word` are null) and their names |
 
 `critical_path` (path 1): `index`, `slack_ns`, `arrival_ns`, `required_ns`, `startpoint`,
 `endpoint`, `data_delay_ns` and `spans`, an ordered list of
@@ -113,26 +120,55 @@ the clock constraint is not met; VPR's default constraint is 0, so slack is minu
 | `kind` | `matched`, `port` or `unmatched` |
 | `file`, `line`, `module` | Where it came from; `module` is the module instance path |
 | `words` | Source names of the nets (a bus gives its word; a generated net gives the wire that holds it, if any) |
+| `words_via` | For each word, how it was found (see "word_via" below) |
 | `cell_delay_ns`, `net_delay_ns`, `delay_ns` | Cell delay, interconnect delay on the nets these atoms drive, and their sum |
 | `share` | `delay_ns` over `data_delay_ns` |
 | `atoms` | The VPR atoms collapsed into this entry |
 
 `spans`: one entry per source line on any attributed path, sorted by `critical_delay_ns`:
 `id` (`file:line`), `file`, `line`, `text` (the source line, null if the file cannot be read),
-`modules`, `words`, `assigned_word` (guessed from `text`, null if it is not an assignment),
+`modules`, `words`, `words_via`, `assigned_word` (guessed from `text`, null if it is not an assignment),
 `paths_through` (paths that contain it, each counted once), `worst_slack_ns`, `nodes`,
 `critical_delay_ns`, `critical_share`.
 
-`modules`: `module`, `words`, and the same statistics (`paths_through`, `worst_slack_ns`, `nodes`,
-`critical_delay_ns`, `critical_share`). `words`: `module`, `word`, `bits` (bit indices seen) and the
-same statistics.
+`modules`: `module`, `words`, `port_nodes` (how many of `nodes` are I/O pads) and the same
+statistics (`paths_through`, `worst_slack_ns`, `nodes`, `critical_delay_ns`, `critical_share`).
+`words`: `module`, `word`, `port`, `bits` (declared bit indices seen), `word_via` and the same
+statistics. A word seen on an I/O pad (`port` true) is a separate entry from the same name on an
+internal net.
+
+Which nodes each table counts (`nodes`, `paths_through` and the delays use exactly these):
+
+| Table | Nodes counted |
+|---|---|
+| `coverage` | all path nodes: `matched`, `port` and `unmatched` |
+| `spans` | `matched` nodes (the ones with a source location) |
+| `modules` | `matched` and `port` nodes (a pad belongs to the top module); `port_nodes` says how many |
+| `words` | `matched` and `port` nodes that have a word; pads in their own `port` entries |
+| `critical_path.spans` | every node of path 1; consecutive nodes of one span merge, a pad is `kind` `port` |
 
 `paths`: every parsed path: `index`, `slack_ns`, `arrival_ns`, `required_ns`, `startpoint`,
 `endpoint` and `nodes`, in path order, each with `atom` (VPR block name), `block_type` (`.names`,
 `.latch`, `adder`, `.input`, ...), `pins` (the pins of the atom the path uses), `cell_delay_ns`,
 `net_delay_in_ns` (interconnect delay of the net that arrived at this atom, from the previous
 one), `delay_ns` (its contribution: cell delay plus the delay on the net it drives), `category`,
-`span`, `module`, `word` and `bit`.
+`span`, `module`, `word`, `bit` and `word_via`.
+
+`word_via` (nodes, `words_via` of spans, `word_via` of words) is how the word was joined, so a
+consumer can tell a fact from a derived guess. It is `name` when the word is the name of the net in
+the provenance name or in the netlist JSON (a fact: `S[3]` is word `S`, bit 3), `pad` for the port
+of an I/O pad (a fact), and `json-id` when the net has only a generated name (`$n312`) and the
+word comes from the heuristic that the JSON writer numbers net `ID` as bit `ID + 1`: derived, and
+right only as far as that numbering holds. It is null when there is no word. `assigned_word` is a
+further guess, from the text of the line. A bit is the declared index (`offset` and `upto` of the
+JSON netname are applied). When several source names hold one net, the shortest name wins, then
+the smaller one; that choice is deterministic and has no other meaning.
+
+Layout: `schema_version` stays 1 because this round only added fields (`paths_limit`,
+`paths_in_report`, `paths_kept`, `paths_skipped`, `paths_skipped_reasons`,
+`coverage.matched_share_excl_port`, `coverage.source_files*`, `word_via`, `words_via`,
+`words[].port`, `modules[].port_nodes`); no field changed meaning. `paths_parsed` is kept and equals
+`paths_kept`.
 
 ## How the join works
 
@@ -153,7 +189,13 @@ is charged to the previous atom's statement (the net belongs to its driver).
 
 ## Limits
 
-- Setup paths only; hold paths are not attributed.
+- Setup paths only; a hold path in the setup report is skipped and counted in `paths_skipped`.
+  A report with no `slack` line at all (cut off) is an error; a truncated last path is skipped and
+  counted.
+- The source text is read from the file name the provenance carries. The flow records the design
+  paths and the directory odin3 ran in in `timing/inputs.json` (`designs`, `source_cwd`), and
+  `odin3-timing` looks there, never in the directory it is started from. A file it cannot read is
+  counted in `coverage.source_files_unreadable` and named in `summary.txt`.
 - Source locations are line-level: the provenance name carries a line, not a column, so a statement
   that spans several lines (an `always` block) is the line where its first location is. A register
   inside a clocked block is attributed to the `always` line, its logic to the assignments.

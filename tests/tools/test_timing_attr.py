@@ -6,10 +6,13 @@ ODIN3_CLI."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -28,6 +31,31 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 VTR_ROOT = os.environ.get("VTR_ROOT", "")
 ADDER, DFF = "bm_DL_BCD_adder", "bm_DL_logic_w_Dff"
 EPS = 1e-6
+
+
+VPR_PYTHON = Path(VTR_ROOT) / ".venv" / "bin" / "python" if VTR_ROOT else Path()
+
+
+def path_text(index: int, start: str = "g.Q[0] (.latch clocked by Clock)",
+              end: str = "out:g.outpad[0] (.output clocked by Clock)", kind: str = "setup",
+              rows: bool = True, slack: str | None = "slack (VIOLATED)  -1.451",
+              launch_clock: str = "Clock") -> list[str]:
+    """One path section in the layout of tatum's TimingReporter::report_timing_path
+    (libs/EXTERNAL/libtatum/libtatum/tatum/TimingReporter.cpp, read in VTR 9.x)."""
+    lines = [f"#Path {index}", f"Startpoint: {start}", f"Endpoint  : {end}",
+             f"Path Type : {kind}", "", "Point      Incr      Path", "-----",
+             f"clock {launch_clock} (rise edge)   0.000     0.000",
+             "clock source latency   0.000     0.000"]
+    if rows:
+        lines += ["g.clk[0] (.latch)   0.042     0.042",
+                  "g.Q[0] (.latch) [clock-to-output]   0.124     0.166",
+                  "out:g.outpad[0] (.output)   1.285     1.451"]
+    lines += ["data arrival time    1.451", "", "clock Clock (rise edge)   0.000     0.000",
+              "data required time    0.000", "-----", "data required time    0.000",
+              "data arrival time    -1.451", "-----"]
+    if slack:
+        lines.append(slack)
+    return lines + [""]
 
 
 def copy_fixture(case: unittest.TestCase, name: str) -> Path:
@@ -90,6 +118,103 @@ class ReportParser(unittest.TestCase):
         rows = tr.parse_lines(lines)[0].rows
         self.assertEqual([(r.atom, r.port, r.bit) for r in rows],
                          [("u1.x[3]", "inpad", 0), ("u1.y", "in", 2), ("u1.y", "out", 0)])
+
+
+def parse(*paths: list[str]) -> tr.Report:
+    """read_report on the inline path sections ``paths``."""
+    tmp = Path(tempfile.mkdtemp(prefix="ot-trep-"))
+    try:
+        (tmp / "r.rpt").write_text("\n".join(["#Timing report of worst 9 path(s)", ""]
+                                              + [ln for p in paths for ln in p]
+                                              + ["#End of timing report", ""]))
+        return tr.read_report(tmp / "r.rpt")
+    finally:
+        shutil.rmtree(tmp, True)
+
+
+class ReportSections(unittest.TestCase):
+    """The shapes of a report that are not a clean setup path (formats checked against
+    TimingReporter.cpp: report_timing_path prints Startpoint/Endpoint/Path Type, the Point table,
+    then the slack line; only constrained paths are reported, the unconstrained ones go to
+    report_unconstrained_*, a separate file)."""
+
+    def test_clean_report_has_nothing_skipped(self) -> None:
+        report = parse(path_text(1), path_text(2))
+        self.assertEqual((len(report.paths), report.skipped_total), (2, 0))
+
+    def test_truncated_last_path_is_counted(self) -> None:
+        cut = path_text(2)[:12]  # the file ends in the middle of the data rows
+        report = parse(path_text(1), cut)
+        self.assertEqual(len(report.paths), 1)
+        self.assertEqual(report.skipped, {"no_slack": 1})
+
+    def test_header_only_report_is_an_error(self) -> None:
+        tmp = scratch(self, "ot-trep-")
+        (tmp / "r.rpt").write_text("#Timing report of worst 0 path(s)\n# Unit scale: 1e-09\n"
+                                   "\n#End of timing report\n")
+        with self.assertRaises(tr.ReportError) as ctx:
+            tr.read_report(tmp / "r.rpt")
+        self.assertIn("no '#Path'", str(ctx.exception))
+
+    def test_no_slack_line_anywhere_is_an_error(self) -> None:
+        tmp = scratch(self, "ot-trep-")
+        (tmp / "r.rpt").write_text("\n".join(path_text(1, slack=None)))
+        with self.assertRaises(tr.ReportError) as ctx:
+            tr.read_report(tmp / "r.rpt")
+        self.assertIn("no 'slack' line", str(ctx.exception))
+
+    def test_path_without_data_rows_is_counted(self) -> None:
+        report = parse(path_text(1), path_text(2, rows=False))
+        self.assertEqual((len(report.paths), report.skipped), (1, {"no_rows": 1}))
+
+    def test_unconstrained_entries_are_not_paths(self) -> None:
+        # VPR writes the unconstrained start/endpoints to their own file as "<id> <type> <name>"
+        # lines with no '#Path': a setup report that holds only those is not a setup report
+        tmp = scratch(self, "ot-trep-")
+        (tmp / "u.rpt").write_text("#Unconstrained setup startpoint/endpoint report\n\n"
+                                   "12 SOURCE some_input\n13 SINK some_output\n"
+                                   "#End of unconstrained setup startpoint/endpoint report\n")
+        with self.assertRaises(tr.ReportError):
+            tr.read_report(tmp / "u.rpt")
+        # and a path section whose slack line is missing is skipped, not attributed as zero
+        report = parse(path_text(1), path_text(2, slack=None))
+        self.assertEqual(report.skipped, {"no_slack": 1})
+
+    def test_hold_path_in_setup_report_is_skipped_and_counted(self) -> None:
+        report = parse(path_text(1), path_text(2, kind="hold", slack="slack (MET)  0.050"))
+        self.assertEqual([p.index for p in report.paths], [1])
+        self.assertEqual(report.skipped, {"hold": 1})
+
+    def test_only_hold_paths_is_an_error(self) -> None:
+        with self.assertRaises(tr.ReportError) as ctx:
+            parse(path_text(1, kind="hold", slack="slack (MET)  0.050"))
+        self.assertIn("1 hold", str(ctx.exception))
+
+    def test_multi_clock_startpoints(self) -> None:
+        report = parse(
+            path_text(1, "a.Q[0] (.latch clocked by clkA)", "b.D[0] (.latch clocked by clkB)",
+                      launch_clock="clkA"),
+            path_text(2, "c.Q[0] (.latch clocked by clkB)", "d.D[0] (.latch clocked by clkA)",
+                      launch_clock="clkB"),
+            path_text(3, "x[0].inpad[0] (.input clocked by virtual_io_clock)",
+                      "out:y.outpad[0] (.output clocked by clkA)"))
+        self.assertEqual(len(report.paths), 3)
+        self.assertTrue(report.paths[0].startpoint.endswith("clocked by clkA)"))
+        self.assertTrue(report.paths[1].endpoint.endswith("clocked by clkA)"))
+        self.assertIn("virtual_io_clock", report.paths[2].startpoint)
+        for path in report.paths:  # the clock network rows are not data rows
+            self.assertEqual([r.atom for r in path.rows], ["g", "out:g"])
+
+    def test_skipped_are_reported_in_the_attribution(self) -> None:
+        flow_dir = copy_fixture(self, DFF)
+        rpt = flow_dir / "vpr" / "run" / "report_timing.setup.rpt"
+        rpt.write_text(rpt.read_text() + "\n".join(path_text(9, kind="hold")) + "\n"
+                       + "\n".join(path_text(10, slack=None)) + "\n")
+        report = ta.attribute_flow_dir(flow_dir)
+        t = report["timing"]
+        self.assertEqual((t["paths_skipped"], t["paths_skipped_reasons"]),
+                         (2, {"hold": 1, "no_slack": 1}))
+        self.assertIn("Skipped: 2 report paths", ta.summary_text(report))
 
 
 class Hops(unittest.TestCase):
@@ -181,14 +306,60 @@ class Joining(unittest.TestCase):
         self.assertEqual(index.lookup("count[1]"), ("f.v:3.1-3.9", "top"))
         self.assertIsNone(ta.load_json_index(tmp / "none.json", "top"))
 
-    def test_source_text(self) -> None:
+    def test_source_files(self) -> None:
         tmp = scratch(self, "ot-tsrc-")
         (tmp / "a.v").write_text("module a;\n   x <= y;\nendmodule\n")
-        cache: dict[str, list[str]] = {}
-        self.assertEqual(ta.source_text(str(tmp / "a.v"), 2, cache), "x <= y;")
-        self.assertIsNone(ta.source_text(str(tmp / "a.v"), 9, cache))
-        self.assertIsNone(ta.source_text(str(tmp / "none.v"), 1, cache))
+        sources = ta.SourceFiles()
+        self.assertEqual(sources.text(str(tmp / "a.v"), 2), "x <= y;")
+        self.assertIsNone(sources.text(str(tmp / "a.v"), 9))
+        self.assertEqual(sources.unreadable, set())  # a line out of range is not an unread file
+        self.assertIsNone(sources.text(str(tmp / "none.v"), 1))
+        self.assertEqual(sources.unreadable, {str(tmp / "none.v")})
 
+    def test_relative_source_names_use_the_recorded_roots_not_the_cwd(self) -> None:
+        tmp = scratch(self, "ot-tsrc-")
+        (tmp / "src").mkdir()
+        (tmp / "src" / "a.v").write_text("module a;\n   x <= y;\nendmodule\n")
+        (tmp / "run").mkdir()
+        (tmp / "run" / "b.v").write_text("one\ntwo\n")
+        sources = ta.SourceFiles([tmp / "run"], [tmp / "src" / "a.v"])
+        self.assertEqual(sources.text("b.v", 2), "two")  # under a root
+        self.assertEqual(sources.text("src/a.v", 2), "x <= y;")  # by suffix of a design path
+        self.assertEqual(sources.text("elsewhere/a.v", 1), "module a;")  # one design of that name
+        self.assertEqual(sources.text(str(tmp / "gone" / "a.v"), 1), "module a;")  # moved tree
+        self.assertIsNone(sources.text("nope.v", 1))
+        self.assertEqual(sources.unreadable, {"nope.v"})
+        here = Path.cwd()
+        os.chdir(tmp / "run")  # the process directory is not consulted
+        try:
+            self.assertIsNone(ta.SourceFiles().text("b.v", 1))
+        finally:
+            os.chdir(here)
+
+    def test_json_offsets_and_aliases(self) -> None:
+        tmp = scratch(self, "ot-tjson-")
+        cells = {f"$c{i}": {"attributes": {"src": f"f.v:{i}.1-{i}.9"},
+                            "port_directions": {"Y": "output"}, "connections": {"Y": [code]}}
+                 for i, code in enumerate((20, 21, 22, 30, 31), 1)}
+        module = {"netnames": {
+            "up": {"bits": [20, 21, 22], "offset": 4},               # up[4]=20 up[5]=21 up[6]=22
+            "down": {"bits": [30, 31], "offset": 2, "upto": 1},      # down[3]=30 down[2]=31
+            "z_long_alias": {"bits": [20]}, "a": {"bits": [21]}}, "cells": cells}
+        (tmp / "n.json").write_text(json.dumps({"modules": {"top": module}}))
+        index = ta.load_json_index(tmp / "n.json", "top")
+        assert index is not None
+        self.assertEqual(index.lookup("up[4]"), ("f.v:1.1-1.9", "top"))
+        self.assertEqual(index.lookup("up[6]"), ("f.v:3.1-3.9", "top"))
+        self.assertEqual(index.lookup("down[3]"), ("f.v:4.1-4.9", "top"))  # upto: msb first
+        self.assertEqual(index.lookup("down[2]"), ("f.v:5.1-5.9", "top"))
+        self.assertIsNone(index.lookup("up[0]"))  # below the offset
+        self.assertIsNone(index.lookup("up[7]"))  # above the word
+        self.assertIsNone(index.lookup("up"))  # several bits, which one is unknown
+        # one net, several names: the shortest name wins, then the smaller name
+        self.assertEqual(index.bit_names[20], ("up", 4))  # 'up' is shorter than 'z_long_alias'
+        self.assertEqual(index.bit_names[21], ("a", None))  # 'a' is shorter than 'up'
+        self.assertEqual(index.bit_names[22], ("up", 6))
+        self.assertEqual(index.bit_names[30], ("down", 3))
 
 class Attribution(unittest.TestCase):
     def test_adder_attribution(self) -> None:
@@ -222,12 +393,85 @@ class Attribution(unittest.TestCase):
         spans = {s["line"]: s for s in report["spans"]}
         self.assertEqual(spans[15]["paths_through"], 10)  # every path goes through Z = X+Y+Cin
         self.assertAlmostEqual(spans[15]["worst_slack_ns"], report["timing"]["worst_slack_ns"])
-        self.assertEqual(spans[15]["assigned_word"], None)  # text is not readable: path is relative
+        # the fixture's provenance names a relative path that exists nowhere here: the text is
+        # null AND the unreadable file is counted and shown, never silent
+        self.assertIsNone(spans[15]["text"])
+        cov = report["coverage"]
+        self.assertEqual((cov["source_files"], cov["source_files_unreadable"]), (1, 1))
+        self.assertEqual(cov["source_files_unreadable_list"], ["micro/bm_DL_BCD_adder.v"])
+        self.assertIn("Source text unavailable: 1 of 1", ta.summary_text(report))
         self.assertEqual(report["modules"][0]["module"], ADDER)
         words = {(w["word"]) for w in report["words"]}
         self.assertTrue({"X", "Cout"} <= words)
         shares = [s["critical_share"] for s in report["spans"]]
         self.assertLessEqual(sum(shares), 1.0 + EPS)
+
+    def test_source_resolved_from_the_inputs_from_any_cwd(self) -> None:
+        flow_dir = copy_fixture(self, DFF)
+        (flow_dir / "odin3" / "micro").mkdir()
+        (flow_dir / "odin3" / "micro" / "bm_DL_logic_w_Dff.v").write_text(
+            "\n" * 7 + "always @(posedge Clock)\n\n  f <= x1 & x2;\n  g <= f | x3;\n")
+        inputs = flow_dir / "timing" / "inputs.json"
+        data = json.loads(inputs.read_text())
+        data["source_cwd"] = "odin3"  # where odin3 ran: the provenance path is relative to it
+        inputs.write_text(json.dumps(data))
+        here, other = Path.cwd(), scratch(self, "ot-tcwd-")
+        os.chdir(other)
+        try:
+            report = ta.attribute_flow_dir(flow_dir)
+        finally:
+            os.chdir(here)
+        texts = {s["line"]: (s["text"], s["assigned_word"]) for s in report["spans"]}
+        self.assertEqual(texts[10], ("f <= x1 & x2;", "f"))
+        cov = report["coverage"]
+        self.assertEqual((cov["source_files"], cov["source_files_unreadable"]), (1, 0))
+        # the same flow dir, moved, with only the designs recorded by name
+        data["source_cwd"], data["designs"] = None, [str(flow_dir / "odin3" / "micro" /
+                                                         "bm_DL_logic_w_Dff.v")]
+        inputs.write_text(json.dumps(data))
+        again = ta.attribute_flow_dir(flow_dir)
+        self.assertEqual(again["coverage"]["source_files_unreadable"], 0)
+
+    def test_word_via_says_how_the_word_was_found(self) -> None:
+        report = ta.attribute_flow_dir(FIXTURES / ADDER)
+        nodes = [n for p in report["paths"] for n in p["nodes"]]
+        vias = {(n["category"], n["word_via"]) for n in nodes if n["word"]}
+        self.assertIn(("port", "pad"), vias)
+        self.assertTrue({v for _, v in vias} <= {"name", "json-id", "pad"})
+        self.assertTrue(all(n["word_via"] is None for n in nodes if not n["word"]))
+        last = [n for n in report["paths"][0]["nodes"] if n["atom"] == "Cout"][0]
+        self.assertEqual(last["word_via"], "name")
+        spans = {s["line"]: s for s in report["spans"]}
+        self.assertEqual(spans[16]["words_via"]["Cout"], ["name"])
+        for crit in report["critical_path"]["spans"]:
+            self.assertEqual(set(crit["words_via"]), set(crit["words"]))
+        for row in report["words"]:
+            self.assertTrue(row["word_via"])
+
+    def test_json_id_join_is_marked(self) -> None:
+        tmp = scratch(self, "ot-tjid-")
+        module = {"netnames": {"count": {"bits": [5, 6, 7]}}, "cells": {}}
+        (tmp / "n.json").write_text(json.dumps({"modules": {"top": module}}))
+        names = ta.NameMap({"$n6": ("top", "$n6", "f.v", 3), "$n1": ("top", "$n1", "f.v", 4),
+                            "q": ("top", "q[2]", "f.v", 5)})
+        resolver = ta.Resolver(names, ta.load_json_index(tmp / "n.json", "top"), "top")
+        joined = resolver.resolve("$n6", ".names")
+        self.assertEqual((joined.word, joined.bit, joined.word_via), ("count", 2, "json-id"))
+        self.assertEqual(resolver.resolve("$n1", ".names").word_via, "")  # no word, no method
+        self.assertEqual(resolver.resolve("q", ".names").word_via, "name")
+        self.assertEqual(resolver.resolve("out:q", ".output").word_via, "pad")
+
+    def test_pads_are_flagged_and_kept_apart_in_words(self) -> None:
+        report = ta.attribute_flow_dir(FIXTURES / ADDER)
+        cov = report["coverage"]
+        self.assertAlmostEqual(cov["matched_share_excl_port"],
+                               cov["matched"] / (cov["matched"] + cov["unmatched"]))
+        self.assertGreater(cov["port"], 0)
+        cout = [w for w in report["words"] if w["word"] == "Cout"]
+        self.assertEqual({w["port"] for w in cout}, {True, False})  # the pad and the LUT net
+        top = report["modules"][0]
+        self.assertGreater(top["port_nodes"], 0)
+        self.assertLess(top["port_nodes"], top["nodes"])
 
     def test_flop_design(self) -> None:
         report = ta.attribute_flow_dir(FIXTURES / DFF)
@@ -240,7 +484,38 @@ class Attribution(unittest.TestCase):
 
     def test_paths_limit(self) -> None:
         report = ta.attribute_flow_dir(FIXTURES / ADDER, paths=3)
-        self.assertEqual((report["timing"]["paths_parsed"], len(report["paths"])), (3, 3))
+        t = report["timing"]
+        self.assertEqual((t["paths_parsed"], len(report["paths"])), (3, 3))
+        self.assertEqual((t["paths_kept"], t["paths_limit"], t["paths_requested"]), (3, 3, 100))
+        self.assertEqual((t["paths_in_report"], t["paths_skipped"]), (10, 0))
+        full = ta.attribute_flow_dir(FIXTURES / ADDER)["timing"]
+        self.assertEqual((full["paths_kept"], full["paths_limit"]), (10, None))
+
+    def test_paths_below_one_are_refused(self) -> None:
+        for bad in (0, -1):
+            with self.assertRaises(ta.AttributionError):
+                ta.attribute_flow_dir(FIXTURES / DFF, paths=bad)
+
+    def test_unreadable_inputs_are_attribution_errors(self) -> None:
+        flow_dir = copy_fixture(self, DFF)
+        (flow_dir / "timing" / "inputs.json").write_text("{not json")
+        with self.assertRaises(ta.AttributionError) as ctx:
+            ta.attribute_flow_dir(flow_dir)
+        self.assertIn("cannot read an input", str(ctx.exception))
+        flow_dir = copy_fixture(self, DFF)
+        (flow_dir / "timing" / "netlist.odin3.json").write_text("[")
+        with self.assertRaises(ta.AttributionError):
+            ta.attribute_flow_dir(flow_dir)
+        flow_dir = copy_fixture(self, DFF)
+        (flow_dir / "timing" / "prov.blif").write_bytes(b"\xff\xfe\x00")  # not text
+        with self.assertRaises(ta.AttributionError):
+            ta.attribute_flow_dir(flow_dir)
+        flow_dir = copy_fixture(self, DFF)
+        rpt = flow_dir / "vpr" / "run" / "report_timing.setup.rpt"
+        rpt.unlink()
+        rpt.mkdir()  # a directory where the report should be: OSError, not a traceback
+        with self.assertRaises(ta.AttributionError):
+            ta.attribute_flow_dir(flow_dir)
 
     def test_unmatched_nodes_are_listed_never_dropped(self) -> None:
         flow_dir = copy_fixture(self, ADDER)
@@ -310,13 +585,23 @@ class Outputs(unittest.TestCase):
         self.assertEqual(set(report["paths"][0]),
                          {"index", "slack_ns", "arrival_ns", "required_ns", "startpoint",
                           "endpoint", "nodes"})
+        self.assertEqual(set(report["timing"]),
+                         {"cpd_ns", "fmax_mhz", "paths_requested", "paths_limit",
+                          "paths_in_report", "paths_kept", "paths_parsed", "paths_skipped",
+                          "paths_skipped_reasons", "worst_slack_ns", "critical_data_delay_ns"})
         self.assertEqual(set(report["paths"][0]["nodes"][0]),
                          {"atom", "block_type", "pins", "cell_delay_ns", "net_delay_in_ns",
-                          "delay_ns", "category", "span", "module", "word", "bit"})
+                          "delay_ns", "category", "span", "module", "word", "bit", "word_via"})
         self.assertEqual(set(report["spans"][0]),
                          {"id", "file", "line", "text", "modules", "words", "assigned_word",
                           "paths_through", "worst_slack_ns", "nodes", "critical_delay_ns",
-                          "critical_share"})
+                          "critical_share", "words_via"})
+        self.assertEqual(set(report["words"][0]),
+                         {"module", "word", "port", "bits", "word_via", "paths_through",
+                          "worst_slack_ns", "nodes", "critical_delay_ns", "critical_share"})
+        self.assertEqual(set(report["modules"][0]),
+                         {"module", "words", "port_nodes", "paths_through", "worst_slack_ns",
+                          "nodes", "critical_delay_ns", "critical_share"})
 
 
 class CommandLine(unittest.TestCase):
@@ -341,6 +626,14 @@ class CommandLine(unittest.TestCase):
         code, _, err = run_main(ta.main, [str(empty)])
         self.assertEqual(code, 1)
         self.assertIn("--timing-attr", err)
+
+    def test_unwritable_out_is_exit_1_not_a_traceback(self) -> None:
+        flow_dir = copy_fixture(self, DFF)
+        blocker = scratch(self, "ot-tcli-") / "file"
+        blocker.write_text("x")
+        code, _, err = run_main(ta.main, [str(flow_dir), "--out", str(blocker / "sub")])
+        self.assertEqual(code, 1)
+        self.assertIn("odin3-timing:", err)
 
     def test_usage_errors_are_exit_2(self) -> None:
         self.assertEqual(run_main(ta.main, ["/nonexistent/flow"])[0], 2)
@@ -404,19 +697,35 @@ class FlowOptions(unittest.TestCase):
 
 
 class PythonApi(unittest.TestCase):
+    """odin3.timing_attribution reads files only; it needs the module, not the shared library, so
+    the test stubs ``cffi`` when it is not installed."""
+
+    def load(self) -> object:
+        path = ROOT / "plugins" / "python" / "odin3.py"
+        stub = {} if "cffi" in sys.modules or importlib.util.find_spec("cffi") else {
+            "cffi": mock.MagicMock()}
+        with mock.patch.dict(sys.modules, stub):
+            spec = importlib.util.spec_from_file_location("odin3_under_test", path)
+            assert spec is not None and spec.loader is not None
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module  # dataclasses look the module up by name
+            self.addCleanup(sys.modules.pop, spec.name, None)
+            spec.loader.exec_module(module)
+        return module
+
     def test_timing_attribution(self) -> None:
-        try:
-            import odin3
-        except ImportError as exc:  # cffi missing
-            self.skipTest(str(exc))
-        report = odin3.timing_attribution(FIXTURES / DFF)
+        odin3 = self.load()
+        report = odin3.timing_attribution(FIXTURES / DFF)  # type: ignore[attr-defined]
         self.assertEqual(report, ta.attribute_flow_dir(FIXTURES / DFF))
         with self.assertRaises(RuntimeError):
-            odin3.timing_attribution(FIXTURES)
+            odin3.timing_attribution(FIXTURES)  # type: ignore[attr-defined]
+        with self.assertRaises(RuntimeError):  # a bad input is an AttributionError too
+            odin3.timing_attribution(FIXTURES / DFF, 0)  # type: ignore[attr-defined]
 
 
-@unittest.skipUnless(ODIN3 and VTR_ROOT and (Path(VTR_ROOT) / "build" / "vpr" / "vpr").is_file(),
-                     "needs ODIN3_CLI and a built VTR_ROOT")
+@unittest.skipUnless(
+    ODIN3 and VTR_ROOT and (Path(VTR_ROOT) / "build" / "vpr" / "vpr").is_file()
+    and VPR_PYTHON.is_file(), "needs ODIN3_CLI and a built VTR_ROOT with .venv/bin/python")
 class Integration(unittest.TestCase):
     MICRO = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_BCD_adder.v"
 
