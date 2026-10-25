@@ -9,7 +9,10 @@
   assert() is allowed anywhere: it compiles out of release builds (decision 2026-10-08, #6),
   except in adapters/abc/: the adapter links with --wrap=__assert_fail, which would report its own
   failures as ABC's, so it uses ODIN3_ADAPTER_ASSERT instead (3D spec §4.1);
-- goto only to the single `cleanup` label.
+- goto only to the single `cleanup` label;
+- odin3_prov_begin_op (the undeclared begin) only in src/ir/: a pass or reader under src/,
+  plugins/ or adapters/ begins an operation with odin3_prov_begin_op_class, or
+  odin3_prov_begin_op_lazy for a lazy begin (V1.2.0 3.1); tests and tests/bench are not scanned.
 
 Bison (.y) and Flex (.l) sources compile inside generated translation units that the rest of the
 gate never sees (2C spec §6), so more rules keep hand-written logic out of them:
@@ -48,6 +51,7 @@ _TOKENS = re.compile(
 )
 _EXIT = re.compile(r"\b(?:exit|_exit|_Exit|quick_exit)\b")
 _ABORT = re.compile(r"\babort\b|\b__builtin_trap\b|\braise\s*\(\s*SIGABRT\b")
+_RAW_BEGIN = re.compile(r"\bodin3_prov_begin_op\b")
 _GOTO = re.compile(r"\bgoto\s+(\w+)")
 _ASSERT = re.compile(r"\bassert\s*\(")
 # PHASE3 #28 (Peter's ruling (a), 2026-10-12): the ABC adapter's off-thread stop is the one trap
@@ -96,6 +100,7 @@ def _c_violations(path: str, text: str) -> list[str]:
     in_cli = posix.parts[:2] == ("src", "cli")
     is_check = posix.parts[:2] == ("src", "ir") and posix.name.startswith("check")
     in_abc_adapter = posix.parts[:2] == ("adapters", "abc")
+    in_ir = posix.parts[:2] == ("src", "ir")
     code = strip_comments_and_strings(text)
     trap_lines = _trap_lines(posix, code)
     found: list[str] = []
@@ -106,6 +111,11 @@ def _c_violations(path: str, text: str) -> list[str]:
             found.append(f"{path}:{lineno}: abort/trap is only allowed in src/ir/check*.c")
         if _ASSERT.search(line) and in_abc_adapter:
             found.append(f"{path}:{lineno}: use ODIN3_ADAPTER_ASSERT, not assert() (3D §4.1)")
+        if _RAW_BEGIN.search(line) and not in_ir:
+            found.append(
+                f"{path}:{lineno}: odin3_prov_begin_op is only for src/ir/; declare the class "
+                "with odin3_prov_begin_op_class (or odin3_prov_begin_op_lazy)"
+            )
         for match in _GOTO.finditer(line):
             if match.group(1) != "cleanup":
                 found.append(f"{path}:{lineno}: goto may only target the 'cleanup' label")

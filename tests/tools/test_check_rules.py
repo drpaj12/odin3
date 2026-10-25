@@ -50,6 +50,21 @@ class CheckRulesTest(unittest.TestCase):
     def test_exit_in_cli_is_allowed(self) -> None:
         self.assertEqual(self.check("src/cli/main.c", "void f(void) { exit(1); }\n"), [])
 
+    def test_raw_begin_op_only_in_ir(self) -> None:
+        raw = "void f(odin3_pass_ctx *c) { odin3_prov_begin_op(c); }\n"
+        self.assertEqual(len(self.check("src/passes/opt/kit.c", raw)), 1)
+        self.assertEqual(len(self.check("plugins/example_c/p.c", raw)), 1)
+        self.assertEqual(self.check("src/ir/prov.c", raw), [])
+
+    def test_declared_begin_ops_are_allowed(self) -> None:
+        text = (
+            "void f(odin3_pass_ctx *c) {\n"
+            "    odin3_prov_begin_op_class(c, &k);\n"
+            "    odin3_prov_begin_op_lazy(c);\n"
+            "}\n"
+        )
+        self.assertEqual(self.check("src/passes/opt/kit.c", text), [])
+
     def test_abort_only_in_check(self) -> None:
         text = "void f(void) { abort(); }\n"
         self.assertEqual(len(self.check("src/passes/opt.c", text)), 1)
