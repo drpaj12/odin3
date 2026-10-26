@@ -17,7 +17,22 @@ enum {
     HEX_DIGITS = 2,
     LINE_DIGITS_MAX = 10,
     DECIMAL = 10,
-    WIDTH_KEY_LEN = 6 /* strlen("width=") */
+    WIDTH_KEY_LEN = 6, /* strlen("width=") */
+    BYTE_VALUES = 256,
+    V1_HEADER_TOKENS = 3, /* after the version: hash=, width= ... */
+    V2_HEADER_TOKENS = 5, /* ... and prov=, ast= */
+    R_KIND = 1,
+    R_LEVEL = 2,
+    R_DIR = 3,
+    R_STEP = 4,
+    R_PARENTS = 5,
+    R_ORIGINS = 6,
+    R_CONS = 7,
+    R_FLAGS = 8,
+    C_PARENT = 3,
+    C_FILE = 4,
+    O_RECS = 7,
+    N_RECS = 3
 };
 
 /* The sort order of `kind` is its enum order, which must equal the byte order of the words. */
@@ -274,7 +289,7 @@ typedef struct nm_parser {
     odin3_name_map *map;
     const char *path;
     uint32_t lineno;
-    bool warned[256]; /* version 2: a type letter already warned about */
+    bool warned[BYTE_VALUES]; /* version 2: a type letter already warned about */
 } nm_parser;
 
 static void parse_error(const nm_parser *ps, const char *msg, odin3_bytes detail) {
@@ -365,7 +380,7 @@ static bool parse_ast_token(odin3_bytes tok, odin3_bytes *word) {
 static bool header_shape_ok(nm_parser *ps, const odin3_bytes tok[HEADER_TOKENS], size_t count,
                             uint32_t *width) {
     bool v2 = tok[0].len == 1 && ((const char *)tok[0].ptr)[0] == '0' + ODIN3_NAME_MAP_VERSION_2;
-    bool shape = count == (v2 ? 5U : 3U) &&
+    bool shape = count == (v2 ? (size_t)V2_HEADER_TOKENS : (size_t)V1_HEADER_TOKENS) &&
                  bytes_cmp(tok[1], odin3_bytes_cstr("hash=sha256")) == 0 &&
                  parse_width_token(tok[2], width);
     if (shape && v2) {
@@ -958,12 +973,21 @@ static void list_elem(void *ctx, odin3_bytes elem) {
     ref_elem(job->ck, elem, job->prefix, job->limit, job->before);
 }
 
+static uint32_t limit_of(const chk *ck, char prefix) {
+    switch (prefix) {
+    case 'r':
+        return ck->limit[LIM_R];
+    case 'c':
+        return ck->limit[LIM_C];
+    case 'f':
+        return ck->limit[LIM_F];
+    default:
+        return ck->limit[LIM_T];
+    }
+}
+
 static void check_list(chk *ck, odin3_bytes field, char prefix, bool before) {
-    uint32_t limit = ck->limit[prefix == 'r'   ? LIM_R
-                               : prefix == 'c' ? LIM_C
-                               : prefix == 'f' ? LIM_F
-                                               : LIM_T];
-    list_job job = {ck, prefix, limit, before};
+    list_job job = {ck, prefix, limit_of(ck, prefix), before};
     each_element(field, ',', list_elem, &job);
 }
 
@@ -1029,28 +1053,31 @@ static bool step_valid(const chk *ck, odin3_bytes step) {
 
 static void check_r(chk *ck, const odin3_nm_line *line) {
     const odin3_bytes *fld = line->f;
-    char kind = fld[1].len == 1 ? ((const char *)fld[1].ptr)[0] : '?';
-    if ((kind != 'S' && kind != 'I' && kind != 'D') || fld[2].len == 0 ||
-        !dir_valid(fld[3], kind) || !step_valid(ck, fld[4])) {
+    char kind = '?';
+    if (fld[R_KIND].len == 1) {
+        kind = ((const char *)fld[R_KIND].ptr)[0];
+    }
+    if ((kind != 'S' && kind != 'I' && kind != 'D') || fld[R_LEVEL].len == 0 ||
+        !dir_valid(fld[R_DIR], kind) || !step_valid(ck, fld[R_STEP])) {
         ck->res->bad_class++;
     }
-    check_list(ck, fld[5], 'r', true);
-    each_element(fld[6], '|', origin_elem, ck);
-    check_list(ck, fld[7], 'c', false);
-    each_element(fld[8], ',', flag_elem, ck);
+    check_list(ck, fld[R_PARENTS], 'r', true);
+    each_element(fld[R_ORIGINS], '|', origin_elem, ck);
+    check_list(ck, fld[R_CONS], 'c', false);
+    each_element(fld[R_FLAGS], ',', flag_elem, ck);
 }
 
 static void check_c(chk *ck, const odin3_nm_line *line) {
-    if (line->f[3].len > 0) {
-        ref_elem(ck, line->f[3], 'c', ck->limit[LIM_C], true);
+    if (line->f[C_PARENT].len > 0) {
+        ref_elem(ck, line->f[C_PARENT], 'c', ck->limit[LIM_C], true);
     }
-    if (line->f[4].len > 0) {
-        ref_elem(ck, line->f[4], 'f', ck->limit[LIM_F], false);
+    if (line->f[C_FILE].len > 0) {
+        ref_elem(ck, line->f[C_FILE], 'f', ck->limit[LIM_F], false);
     }
 }
 
 static void check_object(chk *ck, const odin3_nm_line *line) {
-    odin3_bytes recs = line->type == 'O' ? line->f[7] : line->f[3];
+    odin3_bytes recs = line->type == 'O' ? line->f[O_RECS] : line->f[N_RECS];
     uint32_t before = ck->res->bad_ref;
     check_list(ck, recs, 'r', false);
     if (ck->res->bad_ref != before) {

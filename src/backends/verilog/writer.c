@@ -825,9 +825,16 @@ static odin3_status add_kept(verilog_writer *wr, vw_obj kind, uint32_t id, odin3
             .prov = prov.v});
 }
 
+typedef struct vw_objid {
+    vw_obj kind;
+    uint32_t id;
+} vw_objid;
+
 /* The record of live object (kind, id) of the module being written, none for a dead one. */
-static odin3_prov_id live_prov(const verilog_writer *wr, vw_obj kind, uint32_t id) {
+static odin3_prov_id live_prov(const verilog_writer *wr, const vw_objid *obj) {
     const odin3_module *module = wr->mod.module;
+    vw_obj kind = obj->kind;
+    uint32_t id = obj->id;
     if (kind == OBJ_WIRE) {
         return odin3_wire_live(module, (odin3_wire_id){id})
                    ? odin3_wire_prov(module, (odin3_wire_id){id})
@@ -867,7 +874,7 @@ static odin3_status note_kept(verilog_writer *wr, size_t first) {
         for (uint32_t i = 1; st == ODIN3_OK && i < kind_end(wr, KINDS[k]); i++) {
             st = odin3_u64map_get(renamed, obj_key(KINDS[k], i), NULL)
                      ? ODIN3_OK
-                     : add_kept(wr, KINDS[k], i, live_prov(wr, KINDS[k], i));
+                     : add_kept(wr, KINDS[k], i, live_prov(wr, &(vw_objid){KINDS[k], i}));
         }
     }
     odin3_u64map_destroy(renamed);

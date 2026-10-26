@@ -1145,45 +1145,64 @@ static uint32_t pm_con_num(const pm *st, uint32_t index) {
     return ((const pm_con *)odin3_vec_cat(&st->cons, index))->num;
 }
 
+/* The resolved parent row of the construct entry `at`, 0 for the top of the chain. */
+static uint32_t pm_up_row(const pm *st, uint32_t at) {
+    const pm_con *ent = odin3_vec_cat(&st->cons, at);
+    return pm_resolve(st, odin3_construct_get(st->design, ent->row)->parent);
+}
+
+/* Appends to todo the entries from `index` up to the first numbered one, child first. */
+static odin3_status pm_collect_chain(pm *st, uint32_t index, odin3_vec *todo) {
+    uint32_t cur = index;
+    while (pm_con_num(st, cur) == 0) {
+        uint32_t *slot = odin3_vec_push(todo);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = cur;
+        uint32_t up = pm_up_row(st, cur);
+        if (up == 0) {
+            break;
+        }
+        odin3_status status = pm_canon(st, up, &cur);
+        if (status != ODIN3_OK) {
+            return status;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* Gives entry `at` the next number; its parent (if any) already has one. */
+static odin3_status pm_number_entry(pm *st, uint32_t at) {
+    uint32_t up = pm_up_row(st, at);
+    uint32_t parent_num = 0;
+    if (up != 0) {
+        uint32_t up_index = 0;
+        odin3_status status = pm_canon(st, up, &up_index);
+        if (status != ODIN3_OK) {
+            return status;
+        }
+        parent_num = pm_con_num(st, up_index);
+    }
+    uint32_t *order = odin3_vec_push(&st->con_order);
+    if (order == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *order = at;
+    pm_con *ent = odin3_vec_at(&st->cons, at);
+    ent->parent_num = parent_num;
+    ent->num = (uint32_t)st->con_order.len;
+    return ODIN3_OK;
+}
+
 /* Numbers the construct of the chain of `index` and, first, any ancestor without a number. The
  * ancestors are found on a stack, so a deep chain does not recurse. */
 static odin3_status pm_number_chain(pm *st, uint32_t index) {
     odin3_vec todo; /* indexes into cons, child first */
     odin3_vec_init(&todo, sizeof(uint32_t));
-    odin3_status status = ODIN3_OK;
-    for (uint32_t cur = index; status == ODIN3_OK && pm_con_num(st, cur) == 0;) {
-        uint32_t *slot = odin3_vec_push(&todo);
-        status = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-        if (slot == NULL) {
-            break;
-        }
-        *slot = cur;
-        uint32_t up =
-            pm_resolve(st, odin3_construct_get(st->design,
-                                               ((const pm_con *)odin3_vec_cat(&st->cons, cur))->row)
-                               ->parent);
-        if (up == 0) {
-            break;
-        }
-        status = pm_canon(st, up, &cur);
-    }
+    odin3_status status = pm_collect_chain(st, index, &todo);
     for (size_t i = todo.len; status == ODIN3_OK && i > 0; i--) {
-        uint32_t at = *(const uint32_t *)odin3_vec_cat(&todo, i - 1U);
-        uint32_t up = pm_resolve(
-            st, odin3_construct_get(st->design, ((const pm_con *)odin3_vec_cat(&st->cons, at))->row)
-                    ->parent);
-        uint32_t up_index = 0;
-        status = up != 0 ? pm_canon(st, up, &up_index) : ODIN3_OK;
-        uint32_t *order = status == ODIN3_OK ? odin3_vec_push(&st->con_order) : NULL;
-        if (status == ODIN3_OK && order == NULL) {
-            status = ODIN3_ERR_NO_MEMORY;
-        }
-        if (status == ODIN3_OK) {
-            *order = at;
-            pm_con *ent = odin3_vec_at(&st->cons, at);
-            ent->parent_num = up != 0 ? pm_con_num(st, up_index) : 0;
-            ent->num = (uint32_t)st->con_order.len;
-        }
+        status = pm_number_entry(st, *(const uint32_t *)odin3_vec_cat(&todo, i - 1U));
     }
     odin3_vec_free(&todo);
     return status;
@@ -1333,40 +1352,54 @@ static int cmp_u64_elem(const void *ctx, const void *lhs, const void *rhs) {
     return left < right ? -1 : 1;
 }
 
+/* Numbers `run` as the next T row when it has no number yet. */
+static odin3_status pm_note_run(pm *st, uint32_t run) {
+    if (odin3_u64map_get(st->run_num, run, NULL)) {
+        return ODIN3_OK;
+    }
+    uint32_t *slot = odin3_vec_push(&st->run_ids);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = run;
+    return odin3_u64map_put(st->run_num, (odin3_kv){run, st->run_ids.len});
+}
+
+/* The operation numbers of each T row: the distinct operations of its run, from 1, in ascending
+ * order of the original number. pairs holds (run << 32 | op), sorted. */
+static odin3_status pm_rank_ops(pm *st, const odin3_vec *pairs) {
+    uint64_t prev = 0;
+    uint32_t rank = 0;
+    for (size_t i = 0; i < pairs->len; i++) {
+        uint64_t key = *(const uint64_t *)odin3_vec_cat(pairs, i);
+        if (i > 0 && key == prev) {
+            continue;
+        }
+        bool same_run = i > 0 && (key >> KEY_SHIFT) == (prev >> KEY_SHIFT);
+        rank = same_run ? rank + 1U : 1U;
+        prev = key;
+        odin3_status status = odin3_u64map_put(st->op_rank, (odin3_kv){key, rank});
+        if (status != ODIN3_OK) {
+            return status;
+        }
+    }
+    return ODIN3_OK;
+}
+
 /* Numbers the pass runs by first reference and ranks the operations each T row names. */
 static odin3_status pm_runs(pm *st) {
     odin3_vec pairs;
     odin3_vec_init(&pairs, sizeof(uint64_t));
     odin3_status status = odin3_vec_reserve(&pairs, st->recs.len);
     for (size_t i = 0; status == ODIN3_OK && i < st->recs.len; i++) {
-        const odin3_prov_record *rec = odin3_prov_get(
-            st->design, (odin3_prov_id){((const pm_rec *)odin3_vec_cat(&st->recs, i))->id});
+        const pm_rec *pr = odin3_vec_cat(&st->recs, i);
+        const odin3_prov_record *rec = odin3_prov_get(st->design, (odin3_prov_id){pr->id});
         *(uint64_t *)odin3_vec_push(&pairs) = ((uint64_t)rec->run.v << KEY_SHIFT) | rec->op;
-        if (!odin3_u64map_get(st->run_num, rec->run.v, NULL)) {
-            uint32_t *slot = odin3_vec_push(&st->run_ids);
-            status = slot != NULL &&
-                             odin3_u64map_put(st->run_num,
-                                              (odin3_kv){rec->run.v, st->run_ids.len}) == ODIN3_OK
-                         ? ODIN3_OK
-                         : ODIN3_ERR_NO_MEMORY;
-            if (slot != NULL) {
-                *slot = rec->run.v;
-            }
-        }
+        status = pm_note_run(st, rec->run.v);
     }
     const elem_ctx sort = {sizeof(uint64_t), cmp_u64_elem, NULL};
     status = status == ODIN3_OK ? merge_sort(&pairs, &sort) : status;
-    uint64_t prev = 0;
-    uint32_t rank = 0;
-    for (size_t i = 0; status == ODIN3_OK && i < pairs.len; i++) {
-        uint64_t key = *(const uint64_t *)odin3_vec_cat(&pairs, i);
-        if (i > 0 && key == prev) {
-            continue;
-        }
-        rank = i > 0 && (key >> KEY_SHIFT) == (prev >> KEY_SHIFT) ? rank + 1U : 1U;
-        status = odin3_u64map_put(st->op_rank, (odin3_kv){key, rank});
-        prev = key;
-    }
+    status = status == ODIN3_OK ? pm_rank_ops(st, &pairs) : status;
     odin3_vec_free(&pairs);
     return status;
 }
@@ -1390,7 +1423,7 @@ static odin3_bytes str_of(const odin3_design *design, uint32_t id) {
 /* The scratch buffers of the line being written. */
 typedef struct line_bufs {
     odin3_strbuf parents, origins, cons, flags;
-    odin3_strbuf num[2]; /* decimal and `r<n>` style scratch fields */
+    odin3_strbuf num[3]; /* the id, the step and the dir/span scratch fields */
 } line_bufs;
 
 static void bufs_init(line_bufs *bufs) {
@@ -1400,6 +1433,7 @@ static void bufs_init(line_bufs *bufs) {
     odin3_strbuf_init(&bufs->flags);
     odin3_strbuf_init(&bufs->num[0]);
     odin3_strbuf_init(&bufs->num[1]);
+    odin3_strbuf_init(&bufs->num[2]);
 }
 
 static void bufs_free(line_bufs *bufs) {
@@ -1409,6 +1443,7 @@ static void bufs_free(line_bufs *bufs) {
     odin3_strbuf_free(&bufs->flags);
     odin3_strbuf_free(&bufs->num[0]);
     odin3_strbuf_free(&bufs->num[1]);
+    odin3_strbuf_free(&bufs->num[2]);
 }
 
 /* Appends `<sep>` (when buf is not empty) and then the formatted text. */
@@ -1519,61 +1554,72 @@ static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, 
                                                                             : status;
 }
 
-static char kind_letter(unsigned kind) {
-    return kind == (unsigned)ODIN3_PROV_SOURCE     ? 'S'
-           : kind == (unsigned)ODIN3_PROV_IMPORTED ? 'I'
-                                                   : 'D';
+static const char *kind_letter(unsigned kind) {
+    if (kind == (unsigned)ODIN3_PROV_SOURCE) {
+        return "S";
+    }
+    return kind == (unsigned)ODIN3_PROV_IMPORTED ? "I" : "D";
 }
 
-/* One R line. */
-static odin3_status emit_record(pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+/* The cons field: the members of J of a DERIVED record, else the construct of a SOURCE one. */
+static odin3_status build_cons_field(const pm *st, const pm_rec *pr, odin3_strbuf *out) {
+    if (pr->kind == (uint8_t)ODIN3_PROV_DERIVED) {
+        return build_cons(st, pr, out);
+    }
+    return pr->con != 0 ? append_item(out, ',', "c%u", pr->con) : ODIN3_OK;
+}
+
+/* The dir field: `<dir>:<from level>` for a DERIVED record, `origin` for the others. */
+static odin3_status build_dir(const pm_rec *pr, odin3_strbuf *out) {
+    if (pr->kind == (uint8_t)ODIN3_PROV_DERIVED) {
+        return odin3_strbuf_appendf(out, "%s:%s", DIR_WORDS[pr->dir], level_word(pr->from));
+    }
+    return odin3_strbuf_appendf(out, "origin");
+}
+
+/* The scratch fields of the R line of record number index + 1: id, step, dir and the lists. */
+static odin3_status fill_record_bufs(pm *st, size_t index, line_bufs *bufs) {
     const pm_rec *pr = odin3_vec_cat(&st->recs, index);
     const odin3_prov_record *rec = odin3_prov_get(st->design, (odin3_prov_id){pr->id});
-    char kind[2] = {kind_letter(pr->kind), '\0'};
-    bool derived = pr->kind == (uint8_t)ODIN3_PROV_DERIVED;
-    odin3_strbuf *ids = &bufs->num[0];
-    odin3_strbuf *step = &bufs->num[1];
-    odin3_strbuf_clear(ids);
-    odin3_strbuf_clear(step);
-    odin3_strbuf_clear(&bufs->parents);
-    odin3_strbuf_clear(&bufs->origins);
-    odin3_strbuf_clear(&bufs->cons);
-    odin3_strbuf_clear(&bufs->flags);
     uint64_t run = 0;
     uint64_t rank = 0;
     (void)odin3_u64map_get(st->run_num, rec->run.v, &run);
     (void)odin3_u64map_get(st->op_rank, ((uint64_t)rec->run.v << KEY_SHIFT) | rec->op, &rank);
-    odin3_status status = odin3_strbuf_appendf(ids, "r%u", (unsigned)(index + 1U));
+    odin3_strbuf *all[] = {&bufs->num[0],  &bufs->num[1], &bufs->num[2], &bufs->parents,
+                           &bufs->origins, &bufs->cons,   &bufs->flags};
+    for (size_t k = 0; k < sizeof all / sizeof all[0]; k++) {
+        odin3_strbuf_clear(all[k]);
+    }
+    odin3_status status = odin3_strbuf_appendf(&bufs->num[0], "r%u", (unsigned)(index + 1U));
     status = status == ODIN3_OK
-                 ? odin3_strbuf_appendf(step, "t%u.%u", (unsigned)run, (unsigned)rank)
+                 ? odin3_strbuf_appendf(&bufs->num[1], "t%u.%u", (unsigned)run, (unsigned)rank)
                  : status;
+    status = status == ODIN3_OK ? build_dir(pr, &bufs->num[2]) : status;
     status = status == ODIN3_OK ? build_parents(st, rec, &bufs->parents) : status;
-    status = status == ODIN3_OK && !derived ? build_origins(st, rec, &bufs->origins) : status;
-    if (status == ODIN3_OK) {
-        status = derived ? build_cons(st, pr, &bufs->cons)
-                         : (pr->con != 0 ? append_item(&bufs->cons, ',', "c%u", pr->con) : status);
+    if (status == ODIN3_OK && pr->kind != (uint8_t)ODIN3_PROV_DERIVED) {
+        status = build_origins(st, rec, &bufs->origins);
     }
-    status = status == ODIN3_OK ? build_flags(pr, rec, st, &bufs->flags) : status;
-    odin3_strbuf dir;
-    odin3_strbuf_init(&dir);
-    status = status == ODIN3_OK ? (derived ? odin3_strbuf_appendf(&dir, "%s:%s", DIR_WORDS[pr->dir],
-                                                                  level_word(pr->from))
-                                           : odin3_strbuf_appendf(&dir, "origin"))
-                                : status;
-    if (status == ODIN3_OK) {
-        const odin3_nm_field fields[] = {fld_raw(ids),
-                                         fld_plain(odin3_bytes_cstr(kind)),
-                                         fld_plain(odin3_bytes_cstr(level_word(pr->level))),
-                                         fld_plain((odin3_bytes){dir.data, dir.len}),
-                                         fld_raw(step),
-                                         fld_raw(&bufs->parents),
-                                         fld_raw(&bufs->origins),
-                                         fld_raw(&bufs->cons),
-                                         fld_raw(&bufs->flags)};
-        status = odin3_name_map_write_line_v2(out, 'R', fields, sizeof fields / sizeof fields[0]);
+    status = status == ODIN3_OK ? build_cons_field(st, pr, &bufs->cons) : status;
+    return status == ODIN3_OK ? build_flags(pr, rec, st, &bufs->flags) : status;
+}
+
+/* One R line. */
+static odin3_status emit_record(pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+    odin3_status status = fill_record_bufs(st, index, bufs);
+    if (status != ODIN3_OK) {
+        return status;
     }
-    odin3_strbuf_free(&dir);
-    return status;
+    const pm_rec *pr = odin3_vec_cat(&st->recs, index);
+    const odin3_nm_field fields[] = {fld_raw(&bufs->num[0]),
+                                     fld_plain(odin3_bytes_cstr(kind_letter(pr->kind))),
+                                     fld_plain(odin3_bytes_cstr(level_word(pr->level))),
+                                     fld_raw(&bufs->num[2]),
+                                     fld_raw(&bufs->num[1]),
+                                     fld_raw(&bufs->parents),
+                                     fld_raw(&bufs->origins),
+                                     fld_raw(&bufs->cons),
+                                     fld_raw(&bufs->flags)};
+    return odin3_name_map_write_line_v2(out, 'R', fields, sizeof fields / sizeof fields[0]);
 }
 
 /* The AST kind word of a construct row (the synthesized kinds have their own). */

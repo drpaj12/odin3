@@ -148,10 +148,16 @@ static odin3_prov_obj kept(const char *name, odin3_prov_id record) {
     return obj;
 }
 
-static odin3_status write_map(const odin3_prov_obj *objs, size_t n, odin3_construct_mode ast,
-                              odin3_strbuf *out) {
-    const odin3_prov_map_req req = {design, 10, ast};
-    return odin3_prov_map_text(&req, objs, n, out);
+/* The objects to write, their number and the AST layer. */
+typedef struct objlist {
+    const odin3_prov_obj *objs;
+    size_t count;
+    odin3_construct_mode ast;
+} objlist;
+
+static odin3_status write_map(const objlist *list, odin3_strbuf *out) {
+    const odin3_prov_map_req req = {design, 10, list->ast};
+    return odin3_prov_map_text(&req, list->objs, list->count, out);
 }
 
 typedef struct parsed {
@@ -162,7 +168,7 @@ typedef struct parsed {
 /* Writes the map of objs and parses it back; the parse must succeed and the check be clean. */
 static void roundtrip(parsed *out, const odin3_prov_obj *objs, size_t n, odin3_construct_mode ast) {
     odin3_strbuf_init(&out->text);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(objs, n, ast, &out->text));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(&(objlist){objs, n, ast}, &out->text));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&out->map));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_name_map_parse(&out->map, (odin3_bytes){out->text.data, out->text.len},
@@ -172,15 +178,15 @@ static void roundtrip(parsed *out, const odin3_prov_obj *objs, size_t n, odin3_c
     TEST_ASSERT_TRUE(odin3_name_check_v2_ok(&check));
 }
 
-static void parsed_free(parsed *p) {
-    odin3_name_map_free(&p->map);
-    odin3_strbuf_free(&p->text);
+static void parsed_free(parsed *res) {
+    odin3_name_map_free(&res->map);
+    odin3_strbuf_free(&res->text);
 }
 
 /* The n-th (1-based) line of a type, NULL when there is none. */
-static const odin3_nm_line *nth(const parsed *p, char type, uint32_t n) {
-    for (size_t i = 0; i < p->map.lines.len; i++) {
-        const odin3_nm_line *line = odin3_vec_cat(&p->map.lines, i);
+static const odin3_nm_line *nth(const parsed *res, char type, uint32_t n) {
+    for (size_t i = 0; i < res->map.lines.len; i++) {
+        const odin3_nm_line *line = odin3_vec_cat(&res->map.lines, i);
         if (line->type == type && --n == 0) {
             return line;
         }
@@ -188,27 +194,32 @@ static const odin3_nm_line *nth(const parsed *p, char type, uint32_t n) {
     return NULL;
 }
 
-static uint32_t count_of(const parsed *p, char type) {
+static uint32_t count_of(const parsed *res, char type) {
     uint32_t count = 0;
-    for (size_t i = 0; i < p->map.lines.len; i++) {
-        count += ((const odin3_nm_line *)odin3_vec_cat(&p->map.lines, i))->type == type ? 1U : 0U;
+    for (size_t i = 0; i < res->map.lines.len; i++) {
+        count += ((const odin3_nm_line *)odin3_vec_cat(&res->map.lines, i))->type == type ? 1U : 0U;
     }
     return count;
 }
 
 /* Field f of a line as a NUL-terminated string (a small ring of buffers). */
-static const char *fld(const odin3_nm_line *line, uint32_t f) {
+static const char *fld(const odin3_nm_line *line, uint32_t idx) {
     static char ring[8][256];
     static unsigned at = 0;
     char *buf = ring[at++ % 8];
     TEST_ASSERT_NOT_NULL(line);
-    TEST_ASSERT_TRUE(f < line->nfields);
-    size_t len = line->f[f].len < 255 ? line->f[f].len : 255;
+    TEST_ASSERT_TRUE(idx < line->nfields);
+    size_t len = line->f[idx].len < 255 ? line->f[idx].len : 255;
     if (len > 0) {
-        memcpy(buf, line->f[f].ptr, len);
+        memcpy(buf, line->f[idx].ptr, len);
     }
     buf[len] = '\0';
     return buf;
+}
+
+/* The number at the start of text. */
+static uint32_t num_of(const char *text) {
+    return (uint32_t)strtoul(text, NULL, 10);
 }
 
 /* True when the comma list field contains the word. */
@@ -227,18 +238,18 @@ static bool has_flag(const odin3_nm_line *line, const char *word) {
 }
 
 /* The R line whose record is the n-th numbered: the number of the record of `rec`. */
-static const odin3_nm_line *r_of_object(const parsed *p, uint32_t object_index) {
-    const odin3_nm_line *obj = nth(p, 'O', object_index);
+static const odin3_nm_line *r_of_object(const parsed *res, uint32_t object_index) {
+    const odin3_nm_line *obj = nth(res, 'O', object_index);
     TEST_ASSERT_NOT_NULL(obj);
     const char *recs = fld(obj, 7);
     TEST_ASSERT_EQUAL_CHAR('r', recs[0]);
-    return nth(p, 'R', (uint32_t)atoi(recs + 1));
+    return nth(res, 'R', num_of(recs + 1));
 }
 
 /* Writes one object over `record` and returns its R line in a parsed map. */
-static void one_object(parsed *p, odin3_prov_id record, odin3_construct_mode ast) {
+static void one_object(parsed *res, odin3_prov_id record, odin3_construct_mode ast) {
     odin3_prov_obj obj = object("one", record);
-    roundtrip(p, &obj, 1, ast);
+    roundtrip(res, &obj, 1, ast);
 }
 
 /* --- classes ---------------------------------------------------------------------------------- */
@@ -246,11 +257,11 @@ static void one_object(parsed *p, odin3_prov_id record, odin3_construct_mode ast
 static void test_origin_and_rewrite_and_refine_lines(void) {
     odin3_prov_id src = leaf_of(R_A1);
     odin3_prov_id rewrite = derive(&REWRITE, &src, 1);
-    parsed p;
-    one_object(&p, rewrite, ODIN3_CONSTRUCT_MODE_REFS);
-    TEST_ASSERT_EQUAL_UINT32(2, count_of(&p, 'R'));
-    const odin3_nm_line *leaf = nth(&p, 'R', 1);
-    const odin3_nm_line *derived = nth(&p, 'R', 2);
+    parsed res;
+    one_object(&res, rewrite, ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_EQUAL_UINT32(2, count_of(&res, 'R'));
+    const odin3_nm_line *leaf = nth(&res, 'R', 1);
+    const odin3_nm_line *derived = nth(&res, 'R', 2);
     TEST_ASSERT_EQUAL_STRING("r1", fld(leaf, 0));
     TEST_ASSERT_EQUAL_STRING("S", fld(leaf, 1));
     TEST_ASSERT_EQUAL_STRING("stmt", fld(leaf, 2));
@@ -265,21 +276,21 @@ static void test_origin_and_rewrite_and_refine_lines(void) {
     TEST_ASSERT_FALSE(has_flag(derived, "join"));
     TEST_ASSERT_EQUAL_STRING("t1.1", fld(leaf, 4));
     TEST_ASSERT_EQUAL_STRING("t1.2", fld(derived, 4));
-    parsed_free(&p);
+    parsed_free(&res);
     odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
-    one_object(&p, derive(&REFINE, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *refine = r_of_object(&p, 1);
+    one_object(&res, derive(&REFINE, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *refine = r_of_object(&res, 1);
     TEST_ASSERT_EQUAL_STRING("refine:stmt", fld(refine, 3));
     TEST_ASSERT_FALSE(has_flag(refine, "join")); /* the proc mux is no join */
     TEST_ASSERT_EQUAL_STRING("", fld(refine, 7));
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 static void test_coarsen_with_distinct_anchors_is_a_join(void) {
     odin3_prov_id two[2] = {leaf_of(R_B1), leaf_of(R_A1)};
-    parsed p;
-    one_object(&p, derive(&COARSEN, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *join = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&COARSEN, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *join = r_of_object(&res, 1);
     TEST_ASSERT_EQUAL_STRING("coarsen:gate", fld(join, 3));
     TEST_ASSERT_EQUAL_STRING("lut", fld(join, 2));
     TEST_ASSERT_TRUE(has_flag(join, "join"));
@@ -288,35 +299,35 @@ static void test_coarsen_with_distinct_anchors_is_a_join(void) {
     /* J lists the two statements in key order: a1 before b1, whatever the parent order */
     const char *cons = fld(join, 7);
     TEST_ASSERT_EQUAL_CHAR('c', cons[0]);
-    const odin3_nm_line *first = nth(&p, 'C', (uint32_t)atoi(cons + 1));
+    const odin3_nm_line *first = nth(&res, 'C', num_of(cons + 1));
     const char *comma = strchr(cons, ',');
     TEST_ASSERT_NOT_NULL(comma);
-    const odin3_nm_line *second = nth(&p, 'C', (uint32_t)atoi(comma + 2));
+    const odin3_nm_line *second = nth(&res, 'C', num_of(comma + 2));
     TEST_ASSERT_EQUAL_STRING("40.0-40.5", fld(first, 5));
     TEST_ASSERT_EQUAL_STRING("70.0-70.5", fld(second, 5));
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 static void test_coarsen_without_distinct_anchors_is_not_a_join(void) {
     odin3_prov_id two[2] = {leaf_of(R_E1), leaf_of(R_E2)}; /* two expressions of one statement */
-    parsed p;
-    one_object(&p, derive(&COARSEN, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *line = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&COARSEN, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *line = r_of_object(&res, 1);
     TEST_ASSERT_EQUAL_STRING("coarsen:gate", fld(line, 3));
     TEST_ASSERT_FALSE(has_flag(line, "join"));
     TEST_ASSERT_EQUAL_STRING("", fld(line, 7));
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 static void test_inherited_blend_is_not_a_new_join(void) {
     odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
     odin3_prov_id blend = derive(&COARSEN, two, 2);
     odin3_prov_id again[2] = {blend, leaf_of(R_E1)};
-    parsed p;
-    one_object(&p, derive(&COARSEN, again, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *line = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&COARSEN, again, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *line = r_of_object(&res, 1);
     TEST_ASSERT_FALSE(has_flag(line, "join"));
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 /* --- inlined calls and instances ------------------------------------------------------------- */
@@ -350,14 +361,25 @@ static void test_function_body_called_from_two_blocks_is_a_join(void) {
         odin3_prov_origin origin = {locs, 2, 930, 0};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaves[i]));
     }
-    parsed p;
-    one_object(&p, derive(&COARSEN, leaves, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *join = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&COARSEN, leaves, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *join = r_of_object(&res, 1);
     TEST_ASSERT_TRUE(has_flag(join, "join"));
-    const odin3_nm_line *call_leaf = nth(&p, 'R', 1);
+    const odin3_nm_line *call_leaf = nth(&res, 'R', 1);
     TEST_ASSERT_EQUAL_STRING("S", fld(call_leaf, 1));
     TEST_ASSERT_TRUE(strstr(fld(call_leaf, 8), "call=c") != NULL); /* a call-site record */
-    parsed_free(&p);
+    parsed_free(&res);
+}
+
+/* True when a context record (dir `context:`) carries ctx=1. */
+static bool context_record_has_ctx(const parsed *res) {
+    for (uint32_t k = 1; k <= count_of(res, 'R'); k++) {
+        const odin3_nm_line *line = nth(res, 'R', k);
+        if (strncmp(fld(line, 3), "context:", 8) == 0) {
+            return has_flag(line, "ctx=1");
+        }
+    }
+    return false;
 }
 
 static void test_instance_join_by_context_chain(void) {
@@ -370,54 +392,67 @@ static void test_instance_join_by_context_chain(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){pair1, 2}, &flat1));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){pair2, 2}, &flat2));
     odin3_prov_id both[2] = {flat1, flat2};
-    parsed p;
-    one_object(&p, derive(&COARSEN, both, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *merged = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&COARSEN, both, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *merged = r_of_object(&res, 1);
     TEST_ASSERT_TRUE(has_flag(merged, "join=instance"));
     TEST_ASSERT_FALSE(has_flag(merged, "join")); /* one anchor: the instances never enter J */
-    /* a context record: dir context, ctx=1 */
-    bool found = false;
-    for (uint32_t k = 1; k <= count_of(&p, 'R'); k++) {
-        const odin3_nm_line *line = nth(&p, 'R', k);
-        if (strncmp(fld(line, 3), "context:", 8) == 0) {
-            TEST_ASSERT_TRUE(has_flag(line, "ctx=1"));
-            found = true;
-        }
-    }
-    TEST_ASSERT_TRUE(found);
-    parsed_free(&p);
+    TEST_ASSERT_TRUE(context_record_has_ctx(&res));
+    parsed_free(&res);
 }
 
 /* --- bulk and the cap ------------------------------------------------------------------------- */
 
-static void test_bulk_and_cap(void) {
-    enum { WIDE = 20 };
-    odin3_prov_id parents[WIDE];
-    for (uint32_t i = 0; i < WIDE; i++) {
-        parents[i] = leaf_of(ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 10 * (R_FIRST_FREE + i), R_ALWAYS_B));
-    }
-    parsed p;
-    one_object(&p, derive(&BULK, parents, WIDE), ODIN3_CONSTRUCT_MODE_REFS);
-    const odin3_nm_line *line = r_of_object(&p, 1);
-    TEST_ASSERT_TRUE(has_flag(line, "join"));
-    TEST_ASSERT_TRUE(has_flag(line, "lossy=bulk"));
-    TEST_ASSERT_TRUE_MESSAGE(has_flag(line, "lossy=cap"), fld(line, 8));
-    TEST_ASSERT_TRUE(has_flag(line, "n=20"));
-    TEST_ASSERT_TRUE(has_flag(line, "bulk"));
-    uint32_t members = 1;
-    for (const char *at = fld(line, 7); *at != '\0'; at++) {
+/* How many constructs the cons list names. */
+static uint32_t list_members(const char *list) {
+    uint32_t members = list[0] == '\0' ? 0U : 1U;
+    for (const char *at = list; *at != '\0'; at++) {
         members += *at == ',' ? 1U : 0U;
     }
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_JOIN_CAP, members);
-    parsed_free(&p);
-    /* a small bulk run is bulk without the cap */
+    return members;
+}
+
+enum { WIDE = 20 };
+
+/* The record of a bulk operation over WIDE statements, each with a construct of its own. */
+static odin3_prov_id wide_bulk_record(void) {
+    odin3_prov_id parents[WIDE];
+    for (uint32_t i = 0; i < WIDE; i++) {
+        uint32_t row = ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 10 * (R_FIRST_FREE + i), R_ALWAYS_B);
+        parents[i] = leaf_of(row);
+    }
+    return derive(&BULK, parents, WIDE);
+}
+
+static void test_bulk_over_the_cap_has_the_flags(void) {
+    parsed res;
+    one_object(&res, wide_bulk_record(), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *line = r_of_object(&res, 1);
+    static const char *const WANT[] = {"join", "lossy=bulk", "lossy=cap", "n=20", "bulk"};
+    bool all = true;
+    for (size_t k = 0; k < sizeof WANT / sizeof WANT[0]; k++) {
+        all = all && has_flag(line, WANT[k]);
+    }
+    TEST_ASSERT_TRUE_MESSAGE(all, fld(line, 8));
+    parsed_free(&res);
+}
+
+static void test_bulk_over_the_cap_lists_sixteen(void) {
+    parsed res;
+    one_object(&res, wide_bulk_record(), ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_JOIN_CAP, list_members(fld(r_of_object(&res, 1), 7)));
+    parsed_free(&res);
+}
+
+static void test_small_bulk_run_has_no_cap(void) {
     odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
-    one_object(&p, derive(&BULK, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
-    line = r_of_object(&p, 1);
+    parsed res;
+    one_object(&res, derive(&BULK, two, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *line = r_of_object(&res, 1);
     TEST_ASSERT_TRUE(has_flag(line, "lossy=bulk"));
     TEST_ASSERT_FALSE(has_flag(line, "lossy=cap"));
     TEST_ASSERT_TRUE(has_flag(line, "n=2"));
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 /* --- numbering, determinism, modes ------------------------------------------------------------ */
@@ -426,21 +461,21 @@ static void test_numbering_parents_first_and_constructs_after_chains(void) {
     odin3_prov_id src = leaf_of(R_E1);
     odin3_prov_id mid = derive(&REWRITE, &src, 1);
     odin3_prov_id top = derive(&REWRITE, &mid, 1);
-    parsed p;
-    one_object(&p, top, ODIN3_CONSTRUCT_MODE_REFS);
-    TEST_ASSERT_EQUAL_UINT32(3, count_of(&p, 'R'));
-    TEST_ASSERT_EQUAL_STRING("", fld(nth(&p, 'R', 1), 5));
-    TEST_ASSERT_EQUAL_STRING("r1", fld(nth(&p, 'R', 2), 5));
-    TEST_ASSERT_EQUAL_STRING("r2", fld(nth(&p, 'R', 3), 5));
+    parsed res;
+    one_object(&res, top, ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_EQUAL_UINT32(3, count_of(&res, 'R'));
+    TEST_ASSERT_EQUAL_STRING("", fld(nth(&res, 'R', 1), 5));
+    TEST_ASSERT_EQUAL_STRING("r1", fld(nth(&res, 'R', 2), 5));
+    TEST_ASSERT_EQUAL_STRING("r2", fld(nth(&res, 'R', 3), 5));
     /* e1's chain: module, always A, a1, e1 -- the module first */
-    TEST_ASSERT_EQUAL_UINT32(4, count_of(&p, 'C'));
-    TEST_ASSERT_EQUAL_STRING("MODULE", fld(nth(&p, 'C', 1), 1));
-    TEST_ASSERT_EQUAL_STRING("", fld(nth(&p, 'C', 1), 3));
-    TEST_ASSERT_EQUAL_STRING("c1", fld(nth(&p, 'C', 2), 3));
-    TEST_ASSERT_EQUAL_STRING("c3", fld(nth(&p, 'C', 4), 3));
-    TEST_ASSERT_EQUAL_STRING("BINARY", fld(nth(&p, 'C', 4), 1));
-    TEST_ASSERT_EQUAL_STRING("c4", fld(nth(&p, 'R', 1), 7));
-    parsed_free(&p);
+    TEST_ASSERT_EQUAL_UINT32(4, count_of(&res, 'C'));
+    TEST_ASSERT_EQUAL_STRING("MODULE", fld(nth(&res, 'C', 1), 1));
+    TEST_ASSERT_EQUAL_STRING("", fld(nth(&res, 'C', 1), 3));
+    TEST_ASSERT_EQUAL_STRING("c1", fld(nth(&res, 'C', 2), 3));
+    TEST_ASSERT_EQUAL_STRING("c3", fld(nth(&res, 'C', 4), 3));
+    TEST_ASSERT_EQUAL_STRING("BINARY", fld(nth(&res, 'C', 4), 1));
+    TEST_ASSERT_EQUAL_STRING("c4", fld(nth(&res, 'R', 1), 7));
+    parsed_free(&res);
 }
 
 static void test_equal_designs_and_any_object_order_give_equal_bytes(void) {
@@ -452,18 +487,20 @@ static void test_equal_designs_and_any_object_order_give_equal_bytes(void) {
     odin3_strbuf second;
     odin3_strbuf_init(&first);
     odin3_strbuf_init(&second);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(objs, 3, ODIN3_CONSTRUCT_MODE_REFS, &first));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(reversed, 3, ODIN3_CONSTRUCT_MODE_REFS, &second));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          write_map(&(objlist){objs, 3, ODIN3_CONSTRUCT_MODE_REFS}, &first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          write_map(&(objlist){reversed, 3, ODIN3_CONSTRUCT_MODE_REFS}, &second));
     TEST_ASSERT_EQUAL_UINT32((uint32_t)first.len, (uint32_t)second.len);
     TEST_ASSERT_EQUAL_MEMORY(first.data, second.data, first.len);
     /* O lines (sorted by short name) before the N line */
-    parsed p;
-    roundtrip(&p, objs, 3, ODIN3_CONSTRUCT_MODE_REFS);
-    TEST_ASSERT_EQUAL_CHAR('O', ((const odin3_nm_line *)odin3_vec_cat(&p.map.lines, 0))->type);
-    TEST_ASSERT_EQUAL_CHAR('O', ((const odin3_nm_line *)odin3_vec_cat(&p.map.lines, 1))->type);
-    TEST_ASSERT_EQUAL_CHAR('N', ((const odin3_nm_line *)odin3_vec_cat(&p.map.lines, 2))->type);
-    TEST_ASSERT_TRUE(strcmp(fld(nth(&p, 'O', 1), 2), fld(nth(&p, 'O', 2), 2)) < 0);
-    parsed_free(&p);
+    parsed res;
+    roundtrip(&res, objs, 3, ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_EQUAL_CHAR('O', ((const odin3_nm_line *)odin3_vec_cat(&res.map.lines, 0))->type);
+    TEST_ASSERT_EQUAL_CHAR('O', ((const odin3_nm_line *)odin3_vec_cat(&res.map.lines, 1))->type);
+    TEST_ASSERT_EQUAL_CHAR('N', ((const odin3_nm_line *)odin3_vec_cat(&res.map.lines, 2))->type);
+    TEST_ASSERT_TRUE(strcmp(fld(nth(&res, 'O', 1), 2), fld(nth(&res, 'O', 2), 2)) < 0);
+    parsed_free(&res);
     odin3_strbuf_free(&first);
     odin3_strbuf_free(&second);
 }
@@ -471,24 +508,24 @@ static void test_equal_designs_and_any_object_order_give_equal_bytes(void) {
 static void test_modes_none_constructs_full(void) {
     odin3_prov_id src = leaf_of(R_E1);
     odin3_prov_obj obj = object("one", src);
-    parsed p;
-    roundtrip(&p, &obj, 1, ODIN3_CONSTRUCT_MODE_OFF);
-    TEST_ASSERT_EQUAL_UINT32(0, count_of(&p, 'C'));
-    TEST_ASSERT_EQUAL_UINT32(0, count_of(&p, 'F') - 1U); /* only the file of the origin */
-    TEST_ASSERT_EQUAL_STRING("", fld(nth(&p, 'R', 1), 7));
-    TEST_ASSERT_TRUE(strstr(p.text.data, "ast=none") != NULL);
-    parsed_free(&p);
-    roundtrip(&p, &obj, 1, ODIN3_CONSTRUCT_MODE_CONSTRUCTS);
-    TEST_ASSERT_TRUE(strstr(p.text.data, "ast=constructs") != NULL);
+    parsed res;
+    roundtrip(&res, &obj, 1, ODIN3_CONSTRUCT_MODE_OFF);
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(&res, 'C'));
+    TEST_ASSERT_EQUAL_UINT32(0, count_of(&res, 'F') - 1U); /* only the file of the origin */
+    TEST_ASSERT_EQUAL_STRING("", fld(nth(&res, 'R', 1), 7));
+    TEST_ASSERT_TRUE(strstr(res.text.data, "ast=none") != NULL);
+    parsed_free(&res);
+    roundtrip(&res, &obj, 1, ODIN3_CONSTRUCT_MODE_CONSTRUCTS);
+    TEST_ASSERT_TRUE(strstr(res.text.data, "ast=constructs") != NULL);
     /* the expression is resolved to its statement: module, always A, a1 */
-    TEST_ASSERT_EQUAL_UINT32(3, count_of(&p, 'C'));
-    TEST_ASSERT_EQUAL_STRING("stmt", fld(nth(&p, 'R', 1), 2));
-    TEST_ASSERT_EQUAL_STRING("c3", fld(nth(&p, 'R', 1), 7));
-    parsed_free(&p);
-    roundtrip(&p, &obj, 1, ODIN3_CONSTRUCT_MODE_FULL);
-    TEST_ASSERT_TRUE(strstr(p.text.data, "ast=full") != NULL);
-    TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE - 1U, count_of(&p, 'C')); /* every row of the table */
-    parsed_free(&p);
+    TEST_ASSERT_EQUAL_UINT32(3, count_of(&res, 'C'));
+    TEST_ASSERT_EQUAL_STRING("stmt", fld(nth(&res, 'R', 1), 2));
+    TEST_ASSERT_EQUAL_STRING("c3", fld(nth(&res, 'R', 1), 7));
+    parsed_free(&res);
+    roundtrip(&res, &obj, 1, ODIN3_CONSTRUCT_MODE_FULL);
+    TEST_ASSERT_TRUE(strstr(res.text.data, "ast=full") != NULL);
+    TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE - 1U, count_of(&res, 'C')); /* every row of the table */
+    parsed_free(&res);
 }
 
 /* --- escaping, malformed input, errors -------------------------------------------------------- */
@@ -501,15 +538,15 @@ static void test_escaping_of_list_separators_and_hier(void) {
                                                            intern("top/g[a,b|c\"]"), &out));
     odin3_prov_obj obj = object("one", out);
     obj.entry.module = odin3_bytes_cstr("mo,d|ule");
-    parsed p;
-    roundtrip(&p, &obj, 1, ODIN3_CONSTRUCT_MODE_REFS);
-    TEST_ASSERT_NULL(strstr(p.text.data, "mo,d"));
-    TEST_ASSERT_NOT_NULL(strstr(p.text.data, "mo%2Cd%7Cule"));
-    TEST_ASSERT_NOT_NULL(strstr(p.text.data, "hier=top/g[a%2Cb%7Cc\"]"));
-    const odin3_name_entry *entry = odin3_vec_cat(&p.map.entries, 0);
+    parsed res;
+    roundtrip(&res, &obj, 1, ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_NULL(strstr(res.text.data, "mo,d"));
+    TEST_ASSERT_NOT_NULL(strstr(res.text.data, "mo%2Cd%7Cule"));
+    TEST_ASSERT_NOT_NULL(strstr(res.text.data, "hier=top/g[a%2Cb%7Cc\"]"));
+    const odin3_name_entry *entry = odin3_vec_cat(&res.map.entries, 0);
     TEST_ASSERT_EQUAL_UINT32(8, (uint32_t)entry->module.len);
     TEST_ASSERT_EQUAL_MEMORY("mo,d|ule", entry->module.ptr, 8);
-    parsed_free(&p);
+    parsed_free(&res);
 }
 
 static void test_duplicate_objects_and_bad_records(void) {
@@ -518,10 +555,11 @@ static void test_duplicate_objects_and_bad_records(void) {
     odin3_strbuf out;
     odin3_strbuf_init(&out);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          write_map(dup, 2, ODIN3_CONSTRUCT_MODE_REFS, &out));
+                          write_map(&(objlist){dup, 2, ODIN3_CONSTRUCT_MODE_REFS}, &out));
     TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)out.len);
     odin3_prov_obj dupes[2] = {kept("same", src), kept("same", leaf_of(R_B1))};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(dupes, 2, ODIN3_CONSTRUCT_MODE_REFS, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          write_map(&(objlist){dupes, 2, ODIN3_CONSTRUCT_MODE_REFS}, &out));
     uint32_t lines = 0;
     for (const char *at = out.data; (at = strstr(at, "\nN\t")) != NULL; at++) {
         lines++;
@@ -530,10 +568,11 @@ static void test_duplicate_objects_and_bad_records(void) {
     odin3_strbuf_clear(&out);
     odin3_prov_obj bad = object("bad", (odin3_prov_id){odin3_prov_end(design) + 5});
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          write_map(&bad, 1, ODIN3_CONSTRUCT_MODE_REFS, &out));
+                          write_map(&(objlist){&bad, 1, ODIN3_CONSTRUCT_MODE_REFS}, &out));
     TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)out.len);
     odin3_prov_obj none = object("none", (odin3_prov_id){0}); /* an object with no record */
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, write_map(&none, 1, ODIN3_CONSTRUCT_MODE_REFS, &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          write_map(&(objlist){&none, 1, ODIN3_CONSTRUCT_MODE_REFS}, &out));
     TEST_ASSERT_NOT_NULL(strstr(out.data, "\n"));
     odin3_strbuf_free(&out);
 }
@@ -568,7 +607,7 @@ static void test_resolve_full_kept_allows_all_and_clips_the_bare_option(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, got); /* bare is refs, never more */
 }
 
-static void test_option_word(void) {
+static void test_option_words_are_the_three_modes(void) {
     odin3_prov_map_mode mode = ODIN3_PROV_MAP_NONE;
     TEST_ASSERT_TRUE(odin3_prov_map_word(odin3_bytes_cstr("refs"), &mode));
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_MAP_REFS, mode);
@@ -576,7 +615,10 @@ static void test_option_word(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_MAP_CONSTRUCTS, mode);
     TEST_ASSERT_TRUE(odin3_prov_map_word(odin3_bytes_cstr("full"), &mode));
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_MAP_FULL, mode);
-    mode = ODIN3_PROV_MAP_NONE;
+}
+
+static void test_other_option_words_are_not_modes(void) {
+    odin3_prov_map_mode mode = ODIN3_PROV_MAP_NONE;
     TEST_ASSERT_FALSE(odin3_prov_map_word(odin3_bytes_cstr("refsx"), &mode));
     TEST_ASSERT_FALSE(odin3_prov_map_word(odin3_bytes_cstr("--name-map"), &mode));
     TEST_ASSERT_FALSE(odin3_prov_map_word((odin3_bytes){NULL, 0}, &mode));
@@ -591,7 +633,9 @@ int main(void) {
     RUN_TEST(test_inherited_blend_is_not_a_new_join);
     RUN_TEST(test_function_body_called_from_two_blocks_is_a_join);
     RUN_TEST(test_instance_join_by_context_chain);
-    RUN_TEST(test_bulk_and_cap);
+    RUN_TEST(test_bulk_over_the_cap_has_the_flags);
+    RUN_TEST(test_bulk_over_the_cap_lists_sixteen);
+    RUN_TEST(test_small_bulk_run_has_no_cap);
     RUN_TEST(test_numbering_parents_first_and_constructs_after_chains);
     RUN_TEST(test_equal_designs_and_any_object_order_give_equal_bytes);
     RUN_TEST(test_modes_none_constructs_full);
@@ -599,6 +643,7 @@ int main(void) {
     RUN_TEST(test_duplicate_objects_and_bad_records);
     RUN_TEST(test_resolve_mode_is_at_most_what_the_read_kept);
     RUN_TEST(test_resolve_full_kept_allows_all_and_clips_the_bare_option);
-    RUN_TEST(test_option_word);
+    RUN_TEST(test_option_words_are_the_three_modes);
+    RUN_TEST(test_other_option_words_are_not_modes);
     return UNITY_END();
 }

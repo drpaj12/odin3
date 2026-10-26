@@ -776,6 +776,57 @@ static void parse_v2(odin3_name_map *map, const char *text) {
     TEST_ASSERT_EQUAL_UINT32(2, map->version);
 }
 
+/* Every O line of the version 2 map carries the record of its object. */
+static void expect_records_on_o_lines(const odin3_name_map *map, const char *pass) {
+    for (size_t k = 0; k < map->lines.len; k++) {
+        const odin3_nm_line *line = odin3_vec_cat(&map->lines, k);
+        if (line->type == 'O') {
+            TEST_ASSERT_TRUE_MESSAGE(line->f[7].len > 1, pass);
+            TEST_ASSERT_EQUAL_CHAR('r', ((const char *)line->f[7].ptr)[0]);
+        }
+    }
+}
+
+/* The O lines of the version 2 map are the version 1 lines: same short and full names, in order. */
+static void expect_same_names(const odin3_name_map *first, const odin3_name_map *second) {
+    TEST_ASSERT_EQUAL_UINT(first->entries.len, second->entries.len);
+    for (size_t k = 0; k < first->entries.len; k++) {
+        const odin3_name_entry *want = odin3_vec_cat(&first->entries, k);
+        const odin3_name_entry *got = odin3_vec_cat(&second->entries, k);
+        TEST_ASSERT_EQUAL_size_t(want->short_name.len, got->short_name.len);
+        TEST_ASSERT_EQUAL_MEMORY(want->short_name.ptr, got->short_name.ptr, want->short_name.len);
+        TEST_ASSERT_EQUAL_size_t(want->full.len, got->full.len);
+        TEST_ASSERT_EQUAL_MEMORY(want->full.ptr, got->full.ptr, want->full.len);
+    }
+}
+
+static void check_version_2_pair(const writer_case *wc, const written *one, const written *two) {
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(one->net, two->net, wc->pass); /* the netlist is unchanged */
+    TEST_ASSERT_EQUAL_INT(0, strncmp(one->map, "# odin3-names 1 ", 16));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        0, strncmp(two->map, "# odin3-names 2 hash=sha256 width=10 prov=1 ast=none\n", 53),
+        two->map);
+    odin3_name_map map;
+    parse_v2(&map, two->map);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(wc->entries, map.entries.len, two->map);
+    odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
+    TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_ok(&check), two->map);
+    TEST_ASSERT_TRUE(check.records > 0);
+    expect_records_on_o_lines(&map, wc->pass);
+    odin3_name_map first;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_name_map_parse(&first, odin3_bytes_cstr(one->map), "v1.names"));
+    expect_same_names(&first, &map);
+    odin3_name_map_free(&first);
+    odin3_name_map_free(&map);
+}
+
+static void reset_design(void) {
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+}
+
 static void test_prov_map_writes_version_2_beside_an_identical_netlist(void) {
     for (int i = 0; i < N_WRITERS; i++) {
         const writer_case *wc = &WRITERS[i];
@@ -785,46 +836,26 @@ static void test_prov_map_writes_version_2_beside_an_identical_netlist(void) {
             ODIN3_OK, write_hash_extra(wc, "v2", odin3_bytes_cstr("--prov-map")), log_text);
         written one = read_written(wc, "v1");
         written two = read_written(wc, "v2");
-        TEST_ASSERT_EQUAL_STRING_MESSAGE(one.net, two.net, wc->pass); /* the netlist is unchanged */
-        TEST_ASSERT_EQUAL_INT(0, strncmp(one.map, "# odin3-names 1 ", 16));
-        TEST_ASSERT_EQUAL_INT_MESSAGE(
-            0, strncmp(two.map, "# odin3-names 2 hash=sha256 width=10 prov=1 ast=none\n", 53),
-            two.map);
-        odin3_name_map map;
-        parse_v2(&map, two.map);
-        TEST_ASSERT_EQUAL_UINT_MESSAGE(wc->entries, map.entries.len, two.map);
-        odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
-        TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_ok(&check), two.map);
-        TEST_ASSERT_TRUE(check.records > 0);
-        /* complete: every O line carries the record of its object */
-        for (size_t k = 0; k < map.lines.len; k++) {
-            const odin3_nm_line *line = odin3_vec_cat(&map.lines, k);
-            if (line->type == 'O') {
-                TEST_ASSERT_TRUE_MESSAGE(line->f[7].len > 1, wc->pass);
-                TEST_ASSERT_EQUAL_CHAR('r', ((const char *)line->f[7].ptr)[0]);
-            }
-        }
-        /* the O lines are the version 1 lines: same seven fields, in the same order */
-        odin3_name_map first;
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&first));
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                              odin3_name_map_parse(&first, odin3_bytes_cstr(one.map), "v1.names"));
-        TEST_ASSERT_EQUAL_UINT(first.entries.len, map.entries.len);
-        for (size_t k = 0; k < first.entries.len; k++) {
-            const odin3_name_entry *want = odin3_vec_cat(&first.entries, k);
-            const odin3_name_entry *got = odin3_vec_cat(&map.entries, k);
-            TEST_ASSERT_EQUAL_size_t(want->short_name.len, got->short_name.len);
-            TEST_ASSERT_EQUAL_MEMORY(want->short_name.ptr, got->short_name.ptr,
-                                     want->short_name.len);
-            TEST_ASSERT_EQUAL_size_t(want->full.len, got->full.len);
-            TEST_ASSERT_EQUAL_MEMORY(want->full.ptr, got->full.ptr, want->full.len);
-        }
-        odin3_name_map_free(&first);
-        odin3_name_map_free(&map);
+        check_version_2_pair(wc, &one, &two);
         free_written(&one);
         free_written(&two);
-        odin3_design_destroy(design);
-        design = odin3_design_create();
+        reset_design();
+    }
+}
+
+static void expect_full_in(const odin3_name_entry *entry, const char *prov) {
+    char full[SMALL * 4];
+    TEST_ASSERT_TRUE(entry->full.len < sizeof full);
+    memcpy(full, entry->full.ptr, entry->full.len);
+    full[entry->full.len] = '\0';
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(prov, full), full);
+}
+
+/* Every `full` of the map is in the provenance-style netlist text. */
+static void expect_fulls_in(const odin3_name_map *map, const char *prov) {
+    TEST_ASSERT_TRUE(map->entries.len > 0);
+    for (size_t k = 0; k < map->entries.len; k++) {
+        expect_full_in(odin3_vec_cat(&map->entries, k), prov);
     }
 }
 
@@ -845,20 +876,11 @@ static void test_prov_map_full_equals_the_provenance_name(void) {
         char *prov = slurp(pname);
         odin3_name_map map;
         parse_v2(&map, hashed.map);
-        TEST_ASSERT_TRUE(map.entries.len > 0);
-        for (size_t k = 0; k < map.entries.len; k++) {
-            const odin3_name_entry *entry = odin3_vec_cat(&map.entries, k);
-            char full[SMALL * 4];
-            TEST_ASSERT_TRUE(entry->full.len < sizeof full);
-            memcpy(full, entry->full.ptr, entry->full.len);
-            full[entry->full.len] = '\0';
-            TEST_ASSERT_NOT_NULL_MESSAGE(strstr(prov, full), full);
-        }
+        expect_fulls_in(&map, prov);
         odin3_name_map_free(&map);
         odin3_util_free(prov);
         free_written(&hashed);
-        odin3_design_destroy(design);
-        design = odin3_design_create();
+        reset_design();
     }
 }
 
@@ -884,6 +906,15 @@ static void test_prov_map_needs_hash_names(void) {
     }
 }
 
+/* No file named base + ext (+ .names) exists. */
+static void expect_nothing_written(const writer_case *wc, const char *base) {
+    char name[SMALL];
+    (void)snprintf(name, sizeof name, "%s%s", base, wc->ext);
+    TEST_ASSERT_FALSE(exists(name));
+    (void)snprintf(name, sizeof name, "%s%s.names", base, wc->ext);
+    TEST_ASSERT_FALSE(exists(name));
+}
+
 static void test_prov_map_above_what_the_read_kept_is_refused(void) {
     for (int i = 0; i < N_WRITERS; i++) {
         const writer_case *wc = &WRITERS[i];
@@ -892,13 +923,8 @@ static void test_prov_map_above_what_the_read_kept_is_refused(void) {
         TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                               write_hash_extra(wc, "kept", odin3_bytes_cstr("--prov-map full")));
         TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "read_verilog --prov-ast full"), log_text);
-        char name[SMALL];
-        (void)snprintf(name, sizeof name, "kept%s", wc->ext);
-        TEST_ASSERT_FALSE(exists(name)); /* refused before anything is written */
-        (void)snprintf(name, sizeof name, "kept%s.names", wc->ext);
-        TEST_ASSERT_FALSE(exists(name));
-        odin3_design_destroy(design);
-        design = odin3_design_create();
+        expect_nothing_written(wc, "kept"); /* refused before anything is written */
+        reset_design();
     }
 }
 

@@ -72,7 +72,7 @@ static char *slurp(const char *path) {
 
 /* What one map showed. */
 typedef struct tally {
-    uint32_t maps, objects, no_record, no_construct, unreached;
+    uint32_t designs, skipped, maps, objects, no_record, no_construct;
 } tally;
 
 /* The number in `r12` (or the first of a list), 0 when not a record reference. */
@@ -88,47 +88,80 @@ static uint32_t ref_number(odin3_bytes text) {
     return num;
 }
 
-/* The R lines by number (1-based). */
-static const odin3_nm_line **r_lines(const odin3_name_map *map, uint32_t *count) {
-    const odin3_nm_line **by_num = odin3_util_calloc((map->lines.len + 2) * sizeof *by_num);
-    *count = 0;
-    for (size_t i = 0; i < map->lines.len; i++) {
-        const odin3_nm_line *line = odin3_vec_cat(&map->lines, i);
-        if (line->type == 'R') {
-            by_num[++*count] = line;
-        }
+/* One R line, so that a vec of them has a struct element type. */
+typedef struct rline {
+    const odin3_nm_line *line;
+} rline;
+
+/* The R lines of a map by number (index = number - 1) and the marks of one walk. */
+typedef struct rtable {
+    odin3_vec lines; /* rline */
+    odin3_vec seen;  /* uint8_t per line */
+} rtable;
+
+static void rtable_add(rtable *table, const odin3_nm_line *line) {
+    if (line->type != 'R') {
+        return;
     }
-    return by_num;
+    rline *slot = odin3_vec_push(&table->lines);
+    TEST_ASSERT_NOT_NULL(slot);
+    slot->line = line;
+    TEST_ASSERT_NOT_NULL(odin3_vec_push(&table->seen));
 }
 
-/* True when the chain of record `start` reaches an S record that has a construct. */
-static bool reaches_construct(const odin3_nm_line *const *by_num, uint32_t count, uint32_t start,
-                              uint8_t *seen) {
-    uint32_t stack[64];
-    uint32_t top = 0;
-    stack[top++] = start;
-    while (top > 0) {
-        uint32_t cur = stack[--top];
-        if (cur == 0 || cur > count || seen[cur] != 0) {
+static void rtable_make(rtable *table, const odin3_name_map *map) {
+    odin3_vec_init(&table->lines, sizeof(rline));
+    odin3_vec_init(&table->seen, sizeof(uint8_t));
+    for (size_t i = 0; i < map->lines.len; i++) {
+        rtable_add(table, odin3_vec_cat(&map->lines, i));
+    }
+}
+
+static void rtable_free(rtable *table) {
+    odin3_vec_free(&table->lines);
+    odin3_vec_free(&table->seen);
+}
+
+/* Pushes the parents of an R line (its comma list) on the stack. */
+static void push_parents(odin3_vec *stack, const odin3_nm_line *line) {
+    const char *parents = (const char *)line->f[5].ptr;
+    size_t len = line->f[5].len;
+    for (size_t at = 0; at < len;) {
+        size_t end = at;
+        while (end < len && parents[end] != ',') {
+            end++;
+        }
+        uint32_t *slot = odin3_vec_push(stack);
+        TEST_ASSERT_NOT_NULL(slot);
+        *slot = ref_number((odin3_bytes){parents + at, end - at});
+        at = end + 1;
+    }
+}
+
+/* True when the chain of record number `start` reaches an S record that has a construct. */
+static bool reaches_construct(rtable *table, uint32_t start) {
+    odin3_vec stack;
+    odin3_vec_init(&stack, sizeof(uint32_t));
+    memset(table->seen.data, 0, table->seen.len);
+    *(uint32_t *)odin3_vec_push(&stack) = start;
+    bool found = false;
+    while (!found && stack.len > 0) {
+        uint32_t cur = *(const uint32_t *)odin3_vec_cat(&stack, stack.len - 1U);
+        odin3_vec_pop(&stack);
+        uint8_t *mark =
+            cur >= 1 && cur <= table->lines.len ? odin3_vec_at(&table->seen, cur - 1U) : NULL;
+        if (mark == NULL || *mark != 0) {
             continue;
         }
-        seen[cur] = 1;
-        const odin3_nm_line *line = by_num[cur];
-        if (((const char *)line->f[1].ptr)[0] == 'S' && line->f[7].len > 0) {
-            return true;
-        }
-        const char *parents = (const char *)line->f[5].ptr;
-        size_t len = line->f[5].len;
-        for (size_t at = 0; at < len && top < 62;) {
-            size_t end = at;
-            while (end < len && parents[end] != ',') {
-                end++;
-            }
-            stack[top++] = ref_number((odin3_bytes){parents + at, end - at});
-            at = end + 1;
+        *mark = 1;
+        const odin3_nm_line *line = ((const rline *)odin3_vec_cat(&table->lines, cur - 1U))->line;
+        found = ((const char *)line->f[1].ptr)[0] == 'S' && line->f[7].len > 0;
+        if (!found) {
+            push_parents(&stack, line);
         }
     }
-    return false;
+    odin3_vec_free(&stack);
+    return found;
 }
 
 static void check_map(const char *path, tally *seen_all) {
@@ -141,9 +174,8 @@ static void check_map(const char *path, tally *seen_all) {
     TEST_ASSERT_EQUAL_UINT32(2, map.version);
     odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
     TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_ok(&check), path);
-    uint32_t count = 0;
-    const odin3_nm_line **by_num = r_lines(&map, &count);
-    uint8_t *seen = odin3_util_calloc((size_t)count + 2);
+    rtable table;
+    rtable_make(&table, &map);
     for (size_t i = 0; i < map.lines.len; i++) {
         const odin3_nm_line *line = odin3_vec_cat(&map.lines, i);
         if (line->type != 'O') {
@@ -151,18 +183,11 @@ static void check_map(const char *path, tally *seen_all) {
         }
         seen_all->objects++;
         uint32_t rec = ref_number(line->f[7]);
-        if (rec == 0) {
-            seen_all->no_record++;
-            continue;
-        }
-        memset(seen, 0, (size_t)count + 2);
-        if (!reaches_construct(by_num, count, rec, seen)) {
-            seen_all->no_construct++;
-        }
+        seen_all->no_record += rec == 0 ? 1U : 0U;
+        seen_all->no_construct += rec != 0 && !reaches_construct(&table, rec) ? 1U : 0U;
     }
     seen_all->maps++;
-    odin3_util_free(seen);
-    odin3_util_free((void *)by_num);
+    rtable_free(&table);
     odin3_name_map_free(&map);
     odin3_util_free(text);
 }
@@ -187,50 +212,56 @@ static bool is_verilog(const char *name) {
     return len > 2 && strcmp(name + len - 2, ".v") == 0;
 }
 
+/* Runs the script of one micro and checks the three maps it wrote; false when the flow refused. */
+static bool check_one_micro(const char *name, tally *total) {
+    char src[PATH_BUF];
+    char script[SCRIPT_BUF];
+    (void)snprintf(src, sizeof src, "%s/%s", ODIN3_PMM_MICRO, name);
+    script_of(src, script, sizeof script);
+    odin3_design *design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    first_error[0] = '\0';
+    odin3_status st = odin3_design_run_script(design, script, (odin3_script_src){"-p", 0});
+    odin3_design_destroy(design);
+    if (st != ODIN3_OK) {
+        return false; /* a micro the flow refuses (an ambiguous top, say) has no map to check */
+    }
+    const char *const maps[] = {"o.blif.names", "o.json.names", "o.v.names"};
+    for (size_t k = 0; k < sizeof maps / sizeof maps[0]; k++) {
+        char path[PATH_BUF + 64];
+        (void)snprintf(path, sizeof path, "%s/%s", dir, maps[k]);
+        check_map(path, total);
+    }
+    return true;
+}
+
+static void report_and_expect(const tally *total) {
+    (void)printf("prov_map_micro: %u designs, %u skipped, %u maps, %u objects, %u without a "
+                 "record, %u without a construct\n",
+                 total->designs, total->skipped, total->maps, total->objects, total->no_record,
+                 total->no_construct);
+    TEST_ASSERT_TRUE(total->designs >= 20);
+    TEST_ASSERT_EQUAL_UINT32(total->designs * 3U, total->maps);
+    TEST_ASSERT_EQUAL_UINT32(0, total->no_record);
+    TEST_ASSERT_EQUAL_UINT32(0, total->no_construct);
+}
+
 static void test_every_micro_map_is_well_formed_and_complete(void) {
     (void)snprintf(dir, sizeof dir, "%s/pmm.XXXXXX", ODIN3_PMM_ROOT);
     TEST_ASSERT_NOT_NULL(mkdtemp(dir));
     DIR *handle = opendir(ODIN3_PMM_MICRO);
     TEST_ASSERT_NOT_NULL(handle);
     tally total = {0};
-    uint32_t designs = 0;
-    uint32_t skipped = 0;
     for (struct dirent *entry = readdir(handle); entry != NULL; entry = readdir(handle)) {
         if (!is_verilog(entry->d_name)) {
             continue;
         }
-        char src[PATH_BUF];
-        char script[SCRIPT_BUF];
-        (void)snprintf(src, sizeof src, "%s/%s", ODIN3_PMM_MICRO, entry->d_name);
-        script_of(src, script, sizeof script);
-        odin3_design *design = odin3_design_create();
-        TEST_ASSERT_NOT_NULL(design);
-        first_error[0] = '\0';
-        odin3_status st = odin3_design_run_script(design, script, (odin3_script_src){"-p", 0});
-        odin3_design_destroy(design);
-        if (st != ODIN3_OK) {
-            skipped++; /* a micro the flow refuses (an ambiguous top, say) has no map to check */
-            continue;
-        }
-        designs++;
-        char path[PATH_BUF + 64];
-        const char *const maps[] = {"o.blif.names", "o.json.names", "o.v.names"};
-        for (size_t k = 0; k < sizeof maps / sizeof maps[0]; k++) {
-            (void)snprintf(path, sizeof path, "%s/%s", dir, maps[k]);
-            check_map(path, &total);
-        }
+        bool ok = check_one_micro(entry->d_name, &total);
+        total.designs += ok ? 1U : 0U;
+        total.skipped += ok ? 0U : 1U;
     }
     (void)closedir(handle);
-    printf("prov_map_micro: %u designs, %u skipped, %u maps, %u objects, %u without a record, %u "
-           "without a construct\n",
-           designs, skipped, total.maps, total.objects, total.no_record, total.no_construct);
-    if (designs < 20) {
-        fprintf(stderr, "first error: %s\n", first_error);
-    }
-    TEST_ASSERT_TRUE(designs >= 20);
-    TEST_ASSERT_EQUAL_UINT32(designs * 3U, total.maps);
-    TEST_ASSERT_EQUAL_UINT32(0, total.no_record);
-    TEST_ASSERT_EQUAL_UINT32(0, total.no_construct);
+    report_and_expect(&total);
 }
 
 int main(void) {
