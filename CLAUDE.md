@@ -112,8 +112,9 @@ ADRs, IR, passes, oracles, phase checklists.
 
 ## Where things are going
 
-Version 1.1.0 is the latest release (tag `v1.1.0`, 2026-10-24, notes `docs/V1.1.0.md`; it rolls up
-v1.0.1 to v1.0.5 and adds SystemVerilog). Version 1.0.0 (tag `v1.0.0`, 2026-10-21) closed Phases 0
+Version 1.1.1 is the latest release (tag `v1.1.1`, 2026-10-25, notes `docs/V1.1.1.md`: critical-path
+attribution to HDL, `odin3-timing`; ABI still 6). Version 1.1.0 (tag `v1.1.0`, 2026-10-24, notes
+`docs/V1.1.0.md`) rolled up v1.0.1 to v1.0.5 and added SystemVerilog. Version 1.0.0 (tag `v1.0.0`, 2026-10-21) closed Phases 0
 to 7 (`docs/PHASE*.md`, `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to
 <https://drpaj12.github.io/odin3/>. After v1.0, new tools live in their own repos and use Odin III
 as a pip package without changing the core: Wyrd III (GUI and experiment runner,
@@ -124,4 +125,4 @@ patch releases, each with its own spec, plan and log `docs/V1.0.<n>.md`: v1.0.1 
 v1.0.2 gate mapping, v1.0.3 S1 simulation API, v1.0.4 unmap, v1.0.5 core options for Loki III;
 none was released alone, all ship in v1.1.0 with the SystemVerilog front end (slang). Tags only on
 Peter's go. A VHDL front end (ADR D11) is later. The hub (YggdrasilIII) tags matching suite
-snapshots (v1.1.0 pins this release).
+snapshots (v1.1.1 pins this release).

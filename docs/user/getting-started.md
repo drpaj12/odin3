@@ -26,7 +26,7 @@ odin3 --version
 ```
 
 ```text
-odin3 1.1.0 (ABI 6)
+odin3 1.1.1 (ABI 6)
 SystemVerilog via slang (adapters/slang, third_party/slang)
 linked ABC a3001b72edc5de22442e942165487fddf150e3d0 (adapters/abc/NOTICE)
 ```

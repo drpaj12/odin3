@@ -6,6 +6,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-10-25
+
+Release notes: [docs/V1.1.1.md](docs/V1.1.1.md). Tools and Python only; the C core, IR and ABI (6) are
+unchanged since 1.1.0.
+
 ### Added
 
 - Critical-path attribution to HDL (v1.1.1, `docs/V1.1.1.md`, `docs/user/timing-attribution.md`):
@@ -14,6 +19,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   (which statements, modules and words set the critical path and Fmax); `odin3-timing FLOW_DIR`
   does the same for an existing flow directory and `odin3.timing_attribution()` returns the data
   to Python. Tools and Python only: the core, IR and ABI are unchanged.
+
+### Documentation
+
+- D14 provenance granularity DAG: ADR `docs/ADR/D14.md` and the v1.2.0 spec `docs/V1.2.0.md`
+  (design only, nothing built; #275).
 
 ## [1.1.0] - 2026-10-24
 
