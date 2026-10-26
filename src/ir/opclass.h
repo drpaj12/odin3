@@ -28,8 +28,8 @@ typedef struct odin3_opclass {
     uint8_t context_tail;
 } odin3_opclass;
 
-/* True when dir is not ORIGIN and in range, both levels are set and in range, and a tail is 0
- * unless dir is CONTEXT. */
+/* True when dir is not ORIGIN and in range, both levels are set and in range, bulk is set only
+ * for COARSEN, and a tail is 0 unless dir is CONTEXT. */
 bool odin3_opclass_valid(const odin3_opclass *cls);
 
 /* True when lhs and rhs are the same class in every field. */

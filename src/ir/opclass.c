@@ -54,6 +54,11 @@ bool odin3_opclass_valid(const odin3_opclass *cls) {
         cls->to_level == ODIN3_LEVEL_NONE || cls->to_level > ODIN3_LEVEL_SITE) {
         return false;
     }
+    /* bulk marks the abc over-budget records, which are coarsen (prov_export counts |J| only for
+     * a coarsen record); a context tail belongs to a context class. */
+    if (cls->bulk && cls->dir != ODIN3_DIR_COARSEN) {
+        return false;
+    }
     return cls->context_tail == 0 || cls->dir == ODIN3_DIR_CONTEXT;
 }
 

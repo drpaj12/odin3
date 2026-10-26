@@ -3,6 +3,7 @@
  */
 #include "odin3/odin3.h"
 #include "util/attr.h"
+#include "util/log.h"
 
 #include <dlfcn.h>
 #include <stddef.h>
@@ -27,5 +28,12 @@ ODIN3_EXPORT odin3_status odin3_plugin_load(const char *path) {
     memcpy((void *)&init, (const void *)&sym, sizeof init);
     /* Never unloaded once init has run, even when it fails: whatever it registered before failing
      * (passes, cell types and their hooks, user pointers) points into the shared object. */
-    return init((uint32_t)ODIN3_ABI_VERSION);
+    odin3_status st = init((uint32_t)ODIN3_ABI_VERSION);
+    if (st == ODIN3_ERR_ABI_MISMATCH) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_plugin_load: %s was built for another ABI than the host's (%u); rebuild "
+                  "it for ABI %u",
+                  path, (unsigned)ODIN3_ABI_VERSION, (unsigned)ODIN3_ABI_VERSION);
+    }
+    return st;
 }

@@ -154,6 +154,11 @@ static void test_kind_map_specific_levels(void) {
 }
 
 static void test_synthesized_kinds_are_classed(void) {
+    TEST_ASSERT_EQUAL_UINT32(0x80, ODIN3_CONSTRUCT_IF_THEN);
+    TEST_ASSERT_EQUAL_UINT32(0x81, ODIN3_CONSTRUCT_IF_ELSE);
+    TEST_ASSERT_EQUAL_UINT32(0x82, ODIN3_CONSTRUCT_CALL_SITE);
+    TEST_ASSERT_EQUAL_INT(ODIN3_KCLASS_UNKNOWN,
+                          odin3_construct_kind_class_of(ODIN3_AST_KIND_COUNT));
     TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_BRANCH, odin3_construct_kind_level(ODIN3_CONSTRUCT_IF_THEN));
     TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_BRANCH, odin3_construct_kind_level(ODIN3_CONSTRUCT_IF_ELSE));
     TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_EXPR, odin3_construct_kind_level(ODIN3_CONSTRUCT_CALL_SITE));

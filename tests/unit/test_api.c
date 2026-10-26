@@ -12,13 +12,16 @@
 #ifndef EXAMPLE_PLUGIN_PATH
 #error "EXAMPLE_PLUGIN_PATH must be defined by the build"
 #endif
+#ifndef ABI6_PLUGIN_PATH
+#error "ABI6_PLUGIN_PATH must be defined by the build"
+#endif
 
 void setUp(void) {
 }
 void tearDown(void) {
 }
 
-enum { VERSION_BUF_LEN = 32, PREFIX_LEN = 6 };
+enum { VERSION_BUF_LEN = 32, PREFIX_LEN = 6, LOG_BYTES = 512 };
 
 static void test_version_string_matches_macros(void) {
     char expected[VERSION_BUF_LEN];
@@ -72,8 +75,30 @@ static void test_plugin_load_example_plugin(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_plugin_load(EXAMPLE_PLUGIN_PATH));
 }
 
-/* A plugin built for ABI 6 (the number its host passes) is refused by the ABI 7 plugin. */
+static char last_log[LOG_BYTES];
+
+static void capture_log(odin3_log_level level, const char *msg, void *user) {
+    (void)level;
+    (void)user;
+    (void)snprintf(last_log, sizeof last_log, "%s", msg);
+}
+
+/* A plugin built for ABI 6 goes through the real load path and is refused with a clear message. */
 static void test_plugin_built_for_abi_6_is_refused(void) {
+    last_log[0] = '\0';
+    odin3_log_set_sink(capture_log, NULL);
+    odin3_status st = odin3_plugin_load(ABI6_PLUGIN_PATH);
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, st);
+    TEST_ASSERT_NOT_NULL(strstr(last_log, "odin3_plugin_load"));
+    char want[VERSION_BUF_LEN];
+    (void)snprintf(want, sizeof want, "rebuild it for ABI %d", (int)ODIN3_ABI_VERSION);
+    TEST_ASSERT_NOT_NULL(strstr(last_log, want));
+    TEST_ASSERT_NOT_NULL(strstr(last_log, "plugin_abi6"));
+}
+
+/* The example plugin refuses a host that passes another ABI number, in either direction. */
+static void test_plugin_init_refuses_other_abi_numbers(void) {
     void *handle = dlopen(EXAMPLE_PLUGIN_PATH, RTLD_LAZY);
     TEST_ASSERT_NOT_NULL(handle);
     odin3_status (*init)(uint32_t) = NULL;
@@ -97,5 +122,6 @@ int main(void) {
     RUN_TEST(test_plugin_without_init_is_plugin_error);
     RUN_TEST(test_plugin_load_example_plugin);
     RUN_TEST(test_plugin_built_for_abi_6_is_refused);
+    RUN_TEST(test_plugin_init_refuses_other_abi_numbers);
     return UNITY_END();
 }

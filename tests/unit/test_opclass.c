@@ -147,6 +147,10 @@ static void test_valid(void) {
     TEST_ASSERT_TRUE(odin3_opclass_valid(&REFINE));
     TEST_ASSERT_TRUE(odin3_opclass_valid(&CONTEXT1));
     TEST_ASSERT_FALSE(odin3_opclass_valid(NULL));
+    odin3_opclass bulk_refine = {ODIN3_DIR_REFINE, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
+    odin3_opclass bulk_coarsen = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
+    TEST_ASSERT_FALSE(odin3_opclass_valid(&bulk_refine)); /* bulk is coarsen only */
+    TEST_ASSERT_TRUE(odin3_opclass_valid(&bulk_coarsen));
 }
 
 static void test_equal(void) {

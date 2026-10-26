@@ -2129,8 +2129,13 @@ if(BUILD_TESTING)
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_api PRIVATE
-        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>")
-    add_dependencies(test_api example_plugin)
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>"
+        ABI6_PLUGIN_PATH="$<TARGET_FILE:plugin_abi6>")
+    # A plugin as an ABI 6 build left it: its init accepts host ABI 6 only (test_api).
+    add_library(plugin_abi6 MODULE tests/unit/plugin_abi6.c)
+    set_target_properties(plugin_abi6 PROPERTIES PREFIX "")
+    target_link_libraries(plugin_abi6 PRIVATE libodin3 odin3_flags)
+    add_dependencies(test_api example_plugin plugin_abi6)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
 

@@ -64,7 +64,7 @@ class ConstructDesignTest(unittest.TestCase):
         )
         self.assertEqual(int(lib.ODIN3_DIR_COARSEN), 3)
         self.assertEqual(int(lib.ODIN3_PROV_F_SPAN_ONLY), 16)
-        self.assertEqual(int(lib.ODIN3_CONSTRUCT_CALL_SITE), int(lib.ODIN3_AST_KIND_COUNT) + 2)
+        self.assertEqual(int(lib.ODIN3_CONSTRUCT_CALL_SITE), 0x82)
 
     def test_construct_table_rows(self) -> None:
         with self.design() as design:

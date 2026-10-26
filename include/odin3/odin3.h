@@ -902,7 +902,7 @@ typedef struct odin3_prov_info {
     uint32_t construct;               /* SOURCE: construct row, 0 none */
     uint32_t n_parents;
     uint32_t n_context; /* trailing context parents (flatten); 0 otherwise */
-    uint32_t n_joined;  /* |J| of V1.2.0 3.3, 0 when not a coarsen record */
+    uint32_t n_joined;  /* |J| of V1.2.0 3.3, 0 unless a coarsen record (bulk is coarsen) */
     const char *hier;   /* "" none */
 } odin3_prov_info;
 
@@ -919,7 +919,8 @@ typedef void (*odin3_construct_visit)(const odin3_construct *construct, uint32_t
  * ODIN3_ERR_NO_MEMORY before any visit or output; outputs unchanged on failure. The caller owns
  * every out struct; nothing is allocated for the caller. A visit runs after the walk, may call
  * reader functions and must not change the design. Strings (file, name, hier) are owned by the
- * design: never free them; they stay valid until the design is destroyed. Record IDs and
+ * design: never free them; they stay valid until the next IR mutation of the design or its
+ * destruction (the Strings rule above). Record IDs and
  * construct rows are never reused (records are never deleted; the table is append-only and
  * compact does not touch it).
  */
@@ -1136,11 +1137,16 @@ typedef enum odin3_ast_kind {
     ODIN3_AST_KIND_COUNT = 69 /* one past the last kind */
 } odin3_ast_kind;
 
-/* The kinds of the construct rows the AST has no node for (odin3_construct.kind). */
+/*
+ * The kinds of the construct rows the AST has no node for (odin3_construct.kind). Stable ABI:
+ * these are literal values above the AST kind range (a new AST kind never moves them), and a
+ * kind is one byte in a construct row, so they stay below 0x100. The kind is in the sort key of
+ * a join (V1.2.0 3.3), so a renumbering would reorder a join's rows.
+ */
 enum {
-    ODIN3_CONSTRUCT_IF_THEN = ODIN3_AST_KIND_COUNT,
-    ODIN3_CONSTRUCT_IF_ELSE = ODIN3_AST_KIND_COUNT + 1,
-    ODIN3_CONSTRUCT_CALL_SITE = ODIN3_AST_KIND_COUNT + 2
+    ODIN3_CONSTRUCT_IF_THEN = 0x80,
+    ODIN3_CONSTRUCT_IF_ELSE = 0x81,
+    ODIN3_CONSTRUCT_CALL_SITE = 0x82
 };
 
 /* The two subsets of the one AST format (AST-9); fixed when a store is created. */
