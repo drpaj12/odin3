@@ -2,6 +2,7 @@
 #include "ir/check.h"
 
 #include "ir/celltype.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
@@ -64,6 +65,7 @@ static const check_rule R9 = {RULE_PORTS, ODIN3_LOG_ERROR};
 static const check_rule R10 = {RULE_VIEW, ODIN3_LOG_ERROR};
 static const check_rule R11_E = {RULE_DANGLING, ODIN3_LOG_ERROR};
 static const check_rule R11_W = {RULE_DANGLING, ODIN3_LOG_WARN};
+static const check_rule R12 = {RULE_CONSTRUCT, ODIN3_LOG_ERROR};
 static const check_rule R13 = {RULE_OPCLASS, ODIN3_LOG_ERROR};
 
 /* One run of the checker over one module (or over the design's records). */
@@ -566,6 +568,83 @@ static void check_records(check_ctx *ctx) {
     }
 }
 
+/* --- rule 12: the construct table -------------------------------------------------------------- */
+
+/* A row's references: parent and call are earlier rows, run is a run, strings are strtab IDs. */
+static void construct_refs(check_ctx *ctx, uint32_t index, const odin3_construct_row *row) {
+    const odin3_design *design = ctx->design;
+    if (row->parent >= index || row->call >= index) {
+        violation(ctx, R12, "construct %u has parent %u or call %u, not an earlier row", index,
+                  row->parent, row->call);
+    }
+    if (row->run == 0 || row->run >= odin3_passrun_end(design)) {
+        violation(ctx, R12, "construct %u has run %u, which is not a run of the design", index,
+                  row->run);
+    }
+    size_t strings = odin3_strtab_count(odin3_design_strtab(design));
+    if (row->file >= strings || row->name >= strings) {
+        violation(ctx, R12, "construct %u has file %u or name %u, not strings of the design", index,
+                  row->file, row->name);
+    }
+}
+
+/* A row's kind and level agree by the total map (2.1) and its part matches the kind. */
+static void construct_shape(check_ctx *ctx, uint32_t index, const odin3_construct_row *row) {
+    odin3_level level = odin3_construct_kind_level(row->kind);
+    if (level == ODIN3_LEVEL_NONE || (uint32_t)level != row->level) {
+        violation(ctx, R12, "construct %u has kind %u and level %u, which the kind map refuses",
+                  index, (unsigned)row->kind, (unsigned)row->level);
+    }
+    uint32_t want = row->kind == ODIN3_CONSTRUCT_IF_THEN   ? ODIN3_CONSTRUCT_PART_THEN
+                    : row->kind == ODIN3_CONSTRUCT_IF_ELSE ? ODIN3_CONSTRUCT_PART_ELSE
+                                                           : ODIN3_CONSTRUCT_PART_NODE;
+    if (row->part != want) {
+        violation(ctx, R12, "construct %u has part %u, but its kind %u needs %u", index,
+                  (unsigned)row->part, (unsigned)row->kind, want);
+    }
+    const odin3_construct_row *parent = odin3_construct_get(ctx->design, row->parent);
+    if (want != ODIN3_CONSTRUCT_PART_NODE &&
+        (parent == NULL || parent->kind != ODIN3_AST_IF || parent->ast != row->ast ||
+         parent->run != row->run)) {
+        violation(ctx, R12, "arm construct %u does not hang under the IF row of its node", index);
+    }
+}
+
+/* Every SOURCE record with an AST node of a run whose snapshot kept all nodes resolves. */
+static void construct_complete(check_ctx *ctx) {
+    const odin3_design *design = ctx->design;
+    uint32_t end = odin3_prov_end(design);
+    for (uint32_t i = 1; i < end; i++) {
+        const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){i});
+        odin3_construct_mode mode = odin3_construct_run_mode(design, rec->run);
+        bool kept = mode == ODIN3_CONSTRUCT_MODE_REFS || mode == ODIN3_CONSTRUCT_MODE_FULL;
+        if (kept && rec->kind == ODIN3_PROV_SOURCE && rec->ast != 0 &&
+            !odin3_construct_has_node(design, rec->run, rec->ast) &&
+            !odin3_construct_is_miss(design, (odin3_prov_id){i})) {
+            violation(ctx, R12, "record %u (run %u) has node %u, which has no construct", i,
+                      rec->run.v, rec->ast);
+        }
+    }
+}
+
+/* Rule 12: rows reference earlier rows, runs and strings; kind and level agree; parts match; each
+ * key (run, ast, part, call) names exactly one row; the snapshot covered every SOURCE node. */
+static void check_constructs(check_ctx *ctx) {
+    const odin3_design *design = ctx->design;
+    uint32_t end = odin3_construct_end(design);
+    for (uint32_t i = 1; i < end; i++) {
+        const odin3_construct_row *row = odin3_construct_get(design, i);
+        construct_refs(ctx, i, row);
+        construct_shape(ctx, i, row);
+        if (odin3_construct_find(design, (odin3_passrun_id){row->run}, row->ast, row->part,
+                                 row->call) != i) {
+            violation(ctx, R12, "construct %u shares its key (run %u, node %u, part %u, call %u)",
+                      i, row->run, row->ast, (unsigned)row->part, row->call);
+        }
+    }
+    construct_complete(ctx);
+}
+
 /* --- rule 13: op classes ---------------------------------------------------------------------- */
 
 /* The class of a DERIVED record is valid for its parents (context tail, at least one parent). */
@@ -919,6 +998,7 @@ odin3_status odin3_check_design(odin3_design *design, odin3_check_opts opts) {
         ctx.design = design;
         ctx.where = "design";
         check_records(&ctx);
+        check_constructs(&ctx);
         check_opclasses(&ctx);
         summarize(&ctx);
         result = worse(result, ctx.failed ? ODIN3_ERR_CHECK : ODIN3_OK);

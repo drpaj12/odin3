@@ -23,7 +23,7 @@ python3 plugins/python/example_plugin.py
 ```
 
 ```text
-example_plugin.py: libodin3 1.1.1 (ABI 6)
+example_plugin.py: libodin3 1.1.1 (ABI 7)
 ```
 
 ## Walking the IR

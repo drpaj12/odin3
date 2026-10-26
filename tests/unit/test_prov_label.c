@@ -1,0 +1,481 @@
+/*
+ * test_prov_label.c — the ABI v7 record readers on hand-built graphs (V1.2.0 3.1, 3.3): class
+ * labels (dir, levels), construct, span-only, joins (distinct anchors, inherited blends, the
+ * instance rule, inlined calls, the cap, bulk), the sort order of J, chain and object readers.
+ */
+#include "backends/common/prov_export.h"
+#include "ir/construct.h"
+#include "ir/design.h"
+#include "ir/ids.h"
+#include "ir/ir_internal.h"
+#include "ir/module.h"
+#include "ir/prov.h"
+#include "unity.h"
+#include "util/log.h"
+#include "util/str.h"
+
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
+
+static odin3_design *design;
+static odin3_pass_ctx ctx;
+
+static const odin3_opclass REWRITE = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD, false,
+                                      0};
+static const odin3_opclass REFINE = {ODIN3_DIR_REFINE, ODIN3_LEVEL_STMT, ODIN3_LEVEL_WORD, false, 0};
+static const odin3_opclass COARSEN = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, false,
+                                      0};
+static const odin3_opclass BULK = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
+static const odin3_opclass CONTEXT1 = {ODIN3_DIR_CONTEXT, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD, false,
+                                       1};
+
+/* Row numbers of the shared table (build_table). */
+enum {
+    R_MOD = 1,
+    R_ALWAYS_A,
+    R_ALWAYS_B,
+    R_A1, /* statement in A; 2 expressions below it */
+    R_E1,
+    R_E2,
+    R_B1, /* statement in B */
+    R_IF, /* statement in A; then-arm; statement in the arm */
+    R_THEN,
+    R_IN_ARM,
+    R_INST1, /* two instances in the module */
+    R_INST2,
+    R_FIRST_FREE
+};
+
+static uint32_t intern(const char *name) {
+    uint32_t str = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr(name), &str));
+    return str;
+}
+
+static uint32_t add_row(uint32_t kind, uint32_t part, uint32_t ast, uint32_t parent) {
+    odin3_construct_row row = {0};
+    row.run = ctx.run.v;
+    row.ast = ast;
+    row.parent = parent;
+    row.part = (uint8_t)part;
+    row.kind = (uint8_t)kind;
+    row.level = (uint8_t)odin3_construct_kind_level(kind);
+    row.file = intern("a.v");
+    row.line = ast;
+    row.end_line = ast;
+    row.end_col = 5;
+    uint32_t index = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &row, &index));
+    return index;
+}
+
+/* The shared table; AST node n of row R_x is n = 10 * R_x, so a record's ast says its row. */
+static void build_table(void) {
+    TEST_ASSERT_EQUAL_UINT32(R_MOD, add_row(ODIN3_AST_MODULE, 0, 10, 0));
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_A, add_row(ODIN3_AST_ALWAYS, 0, 20, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_B, add_row(ODIN3_AST_ALWAYS, 0, 30, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_A1, add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 40, R_ALWAYS_A));
+    TEST_ASSERT_EQUAL_UINT32(R_E1, add_row(ODIN3_AST_BINARY, 0, 50, R_A1));
+    TEST_ASSERT_EQUAL_UINT32(R_E2, add_row(ODIN3_AST_BINARY, 0, 60, R_A1));
+    TEST_ASSERT_EQUAL_UINT32(R_B1, add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 70, R_ALWAYS_B));
+    TEST_ASSERT_EQUAL_UINT32(R_IF, add_row(ODIN3_AST_IF, 0, 80, R_ALWAYS_A));
+    TEST_ASSERT_EQUAL_UINT32(
+        R_THEN, add_row(ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_PART_THEN, 80, R_IF));
+    TEST_ASSERT_EQUAL_UINT32(R_IN_ARM, add_row(ODIN3_AST_NONBLOCKING_ASSIGN, 0, 100, R_THEN));
+    TEST_ASSERT_EQUAL_UINT32(R_INST1, add_row(ODIN3_AST_INSTANCE, 0, 110, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_INST2, add_row(ODIN3_AST_INSTANCE, 0, 120, R_MOD));
+}
+
+void setUp(void) {
+    odin3_log_set_sink(NULL, NULL);
+    design = odin3_design_create();
+    TEST_ASSERT_NOT_NULL(design);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("read_verilog"), &ctx));
+    build_table();
+}
+
+void tearDown(void) {
+    odin3_design_destroy(design);
+    design = NULL;
+}
+
+/* SOURCE record of the construct row `row` of the shared table (its ast is 10 * row, but for
+ * the rows past R_FIRST_FREE, which tests make with ast = 10 * row too). */
+static odin3_prov_id leaf_of(uint32_t row) {
+    odin3_srcloc loc = {intern("a.v"), row, 1, row, 5, 0};
+    odin3_prov_origin origin = {&loc, 1, 10 * row, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    return id;
+}
+
+static odin3_prov_id derive(const odin3_opclass *cls, const odin3_prov_id *parents, uint32_t n) {
+    odin3_prov_id out = {0};
+    odin3_prov_begin_op_class(&ctx, cls);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){parents, n}, &out));
+    return out;
+}
+
+static odin3_prov_info info_of(odin3_prov_id record) {
+    odin3_prov_info info;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_get_info(design, record.v, &info));
+    return info;
+}
+
+typedef struct collected {
+    uint32_t ids[64];
+    uint32_t count;
+} collected;
+
+static void collect(uint32_t id, void *user) {
+    collected *out = user;
+    TEST_ASSERT_TRUE(out->count < 64);
+    out->ids[out->count++] = id;
+}
+
+/* --- origin records -------------------------------------------------------------------------- */
+
+static void test_source_record(void) {
+    odin3_prov_info info = info_of(leaf_of(R_A1));
+    TEST_ASSERT_EQUAL_UINT32(0, info.kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_ORIGIN, info.dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_NONE, info.from_level);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_NONE, info.to_level);
+    TEST_ASSERT_EQUAL_UINT32(R_A1, info.construct);
+    TEST_ASSERT_EQUAL_UINT32(0, info.flags);
+    TEST_ASSERT_EQUAL_UINT32(0, info.n_parents);
+    TEST_ASSERT_EQUAL_UINT32(0, info.n_context);
+    TEST_ASSERT_EQUAL_UINT32(0, info.n_joined);
+    TEST_ASSERT_EQUAL_STRING("", info.hier);
+    TEST_ASSERT_EQUAL_UINT32(ctx.run.v, info.run);
+}
+
+static void test_leaf_without_construct_is_span_only(void) {
+    odin3_srcloc loc = {intern("a.v"), 3, 1, 3, 5, 0};
+    odin3_prov_origin none = {&loc, 1, 0, 0};
+    odin3_prov_id src = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &none, &src));
+    odin3_prov_info info = info_of(src);
+    TEST_ASSERT_EQUAL_UINT32(0, info.construct);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info.flags);
+    odin3_prov_id imp = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &none, &imp));
+    TEST_ASSERT_EQUAL_UINT32(1, info_of(imp).kind);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info_of(imp).flags);
+}
+
+static void test_record_out_of_range(void) {
+    odin3_prov_info info;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_get_info(design, 0, &info));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_get_info(design, odin3_prov_end(design), &info));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_get_info(NULL, 1, &info));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_get_info(design, 1, NULL));
+}
+
+/* --- class labels ---------------------------------------------------------------------------- */
+
+static void test_rewrite_and_refine_labels(void) {
+    odin3_prov_id src = leaf_of(R_A1);
+    odin3_prov_info rewrite = info_of(derive(&REWRITE, &src, 1));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_REWRITE, rewrite.dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_WORD, rewrite.from_level);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_WORD, rewrite.to_level);
+    TEST_ASSERT_EQUAL_UINT32(2, rewrite.kind);
+    TEST_ASSERT_EQUAL_UINT32(1, rewrite.n_parents);
+    TEST_ASSERT_EQUAL_UINT32(0, rewrite.flags);
+    odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
+    odin3_prov_info refine = info_of(derive(&REFINE, two, 2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_REFINE, refine.dir);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_STMT, refine.from_level);
+    TEST_ASSERT_EQUAL_UINT32(0, refine.flags & ODIN3_PROV_F_JOIN); /* the proc mux is no join */
+    TEST_ASSERT_EQUAL_UINT32(0, refine.n_joined);
+}
+
+static void test_hier_is_a_string_of_the_design(void) {
+    odin3_prov_id src = leaf_of(R_A1);
+    odin3_prov_id out = {0};
+    odin3_prov_begin_op_class(&ctx, &REWRITE);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_prov_derive_hier(&ctx, (odin3_prov_list){&src, 1}, intern("top/u1"), &out));
+    TEST_ASSERT_EQUAL_STRING("top/u1", info_of(out).hier);
+}
+
+/* --- joins ----------------------------------------------------------------------------------- */
+
+static void test_two_expressions_of_one_statement_are_no_join(void) {
+    odin3_prov_id two[2] = {leaf_of(R_E1), leaf_of(R_E2)};
+    odin3_prov_info info = info_of(derive(&COARSEN, two, 2));
+    TEST_ASSERT_EQUAL_UINT32(1, info.n_joined); /* one anchor: the statement */
+    TEST_ASSERT_EQUAL_UINT32(0, info.flags & ODIN3_PROV_F_JOIN);
+    collected rows = {{0}, 0};
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_joined(design, id.v, collect, &rows));
+    TEST_ASSERT_EQUAL_UINT32(1, rows.count);
+    TEST_ASSERT_EQUAL_UINT32(R_A1, rows.ids[0]);
+}
+
+static void test_two_blocks_are_a_join_in_key_order(void) {
+    odin3_prov_id two[2] = {leaf_of(R_B1), leaf_of(R_A1)}; /* stored B first */
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    odin3_prov_info info = info_of(id);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, info.flags);
+    TEST_ASSERT_EQUAL_UINT32(2, info.n_joined);
+    collected rows = {{0}, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_joined(design, id.v, collect, &rows));
+    TEST_ASSERT_EQUAL_UINT32(2, rows.count);
+    TEST_ASSERT_EQUAL_UINT32(R_A1, rows.ids[0]); /* module, always A < always B by span */
+    TEST_ASSERT_EQUAL_UINT32(R_B1, rows.ids[1]);
+}
+
+static void test_an_if_and_its_arm_are_no_join(void) {
+    odin3_prov_id two[2] = {leaf_of(R_IF), leaf_of(R_IN_ARM)};
+    odin3_prov_info info = info_of(derive(&COARSEN, two, 2));
+    TEST_ASSERT_EQUAL_UINT32(1, info.n_joined); /* the arm statement; the IF is its ancestor */
+    TEST_ASSERT_EQUAL_UINT32(0, info.flags & ODIN3_PROV_F_JOIN);
+    collected rows = {{0}, 0};
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_joined(design, id.v, collect, &rows));
+    TEST_ASSERT_EQUAL_UINT32(R_IN_ARM, rows.ids[0]);
+}
+
+static void test_a_blend_inherited_from_one_parent_is_no_new_join(void) {
+    odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
+    odin3_prov_id blend = derive(&COARSEN, two, 2);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, info_of(blend).flags);
+    odin3_prov_id again[2] = {blend, leaf_of(R_E1)}; /* e1 is below a1: same J */
+    odin3_prov_info same = info_of(derive(&COARSEN, again, 2));
+    TEST_ASSERT_EQUAL_UINT32(2, same.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(0, same.flags & ODIN3_PROV_F_JOIN);
+    odin3_prov_id wider[2] = {blend, leaf_of(R_IF)};
+    odin3_prov_info grown = info_of(derive(&COARSEN, wider, 2));
+    TEST_ASSERT_EQUAL_UINT32(3, grown.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, grown.flags & ODIN3_PROV_F_JOIN);
+}
+
+static void test_span_only_leaves_never_join(void) {
+    odin3_srcloc loc = {intern("a.v"), 3, 1, 3, 5, 0};
+    odin3_prov_origin none = {&loc, 1, 0, 0};
+    odin3_prov_id imp = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_imported(&ctx, &none, &imp));
+    odin3_prov_id two[2] = {leaf_of(R_A1), imp};
+    odin3_prov_info info = info_of(derive(&COARSEN, two, 2));
+    TEST_ASSERT_EQUAL_UINT32(1, info.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info.flags);
+}
+
+static void test_cap_and_bulk_flags(void) {
+    enum { WIDE = 20 };
+    odin3_prov_id parents[WIDE];
+    for (uint32_t i = 0; i < WIDE; i++) {
+        uint32_t row = add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 10 * (R_FIRST_FREE + i), R_ALWAYS_B);
+        parents[i] = leaf_of(row);
+    }
+    odin3_prov_id id = derive(&BULK, parents, WIDE);
+    odin3_prov_info info = info_of(id);
+    TEST_ASSERT_EQUAL_UINT32(WIDE, info.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN | ODIN3_PROV_F_LOSSY_CAP | ODIN3_PROV_F_LOSSY_BULK,
+                             info.flags);
+    collected rows = {{0}, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_joined(design, id.v, collect, &rows));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_JOIN_CAP, rows.count);
+    TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE, rows.ids[0]);
+    /* a small bulk run is still bulk */
+    odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN | ODIN3_PROV_F_LOSSY_BULK,
+                             info_of(derive(&BULK, two, 2)).flags);
+}
+
+/* --- instances ------------------------------------------------------------------------------- */
+
+static void test_context_records_and_the_instance_join(void) {
+    odin3_prov_id orig = leaf_of(R_A1);
+    odin3_prov_id pair1[2] = {orig, leaf_of(R_INST1)};
+    odin3_prov_id pair2[2] = {orig, leaf_of(R_INST2)};
+    odin3_prov_id flat1 = {0};
+    odin3_prov_id flat2 = {0};
+    odin3_prov_begin_op_class(&ctx, &CONTEXT1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){pair1, 2}, &flat1));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){pair2, 2}, &flat2));
+    odin3_prov_info ctx_info = info_of(flat1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_DIR_CONTEXT, ctx_info.dir);
+    TEST_ASSERT_EQUAL_UINT32(1, ctx_info.n_context);
+    TEST_ASSERT_EQUAL_UINT32(2, ctx_info.n_parents);
+    TEST_ASSERT_EQUAL_UINT32(0, ctx_info.flags);
+    odin3_prov_id both[2] = {flat1, flat2};
+    odin3_prov_info merged = info_of(derive(&COARSEN, both, 2));
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN_INSTANCE, merged.flags);
+    TEST_ASSERT_EQUAL_UINT32(1, merged.n_joined); /* the instances never enter J */
+    odin3_prov_id one[1] = {flat1};
+    TEST_ASSERT_EQUAL_UINT32(0, info_of(derive(&COARSEN, one, 1)).flags);
+}
+
+static void test_instance_alone_has_no_data_leaf(void) {
+    odin3_prov_id only_inst[1] = {leaf_of(R_INST1)};
+    odin3_prov_id flat = {0};
+    odin3_prov_begin_op_class(&ctx, &CONTEXT1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&ctx, (odin3_prov_list){only_inst, 1}, &flat));
+    odin3_prov_info info = info_of(flat);
+    TEST_ASSERT_EQUAL_UINT32(1, info.n_context);
+    TEST_ASSERT_EQUAL_UINT32(0, info.flags); /* no data leaf, so no span-only leaf either */
+    odin3_prov_id merged[2] = {flat, leaf_of(R_B1)};
+    odin3_prov_info coarse = info_of(derive(&COARSEN, merged, 2));
+    TEST_ASSERT_EQUAL_UINT32(1, coarse.n_joined);
+}
+
+/* --- inlined calls --------------------------------------------------------------------------- */
+
+static void test_a_body_called_from_two_blocks_is_a_join(void) {
+    uint32_t site_a = add_row(ODIN3_CONSTRUCT_CALL_SITE, 0, 900, R_A1);
+    uint32_t site_b = add_row(ODIN3_CONSTRUCT_CALL_SITE, 0, 910, R_B1);
+    uint32_t body = add_row(ODIN3_AST_FUNCTION_DECL, 0, 920, R_MOD);
+    uint32_t stmt = add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 930, body);
+    odin3_construct_row copy_fn = *odin3_construct_get(design, body);
+    copy_fn.next = 0;
+    odin3_construct_row copy_st = *odin3_construct_get(design, stmt);
+    copy_st.next = 0;
+    uint32_t sites[2] = {site_a, site_b};
+    odin3_prov_id leaves[2];
+    for (uint32_t i = 0; i < 2; i++) {
+        odin3_construct_row fn = copy_fn;
+        fn.parent = sites[i];
+        fn.call = sites[i];
+        uint32_t fn_row = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &fn, &fn_row));
+        odin3_construct_row st = copy_st;
+        st.parent = fn_row;
+        st.call = sites[i];
+        uint32_t st_row = 0;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &st, &st_row));
+        const odin3_construct_row *site = odin3_construct_get(design, sites[i]);
+        odin3_srcloc locs[2] = {{intern("a.v"), 930, 1, 930, 5, 0},
+                                {site->file, site->line, site->col, site->end_line, site->end_col, 0}};
+        odin3_prov_origin origin = {locs, 2, 930, 0};
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaves[i]));
+        TEST_ASSERT_EQUAL_UINT32(st_row, info_of(leaves[i]).construct);
+    }
+    TEST_ASSERT_TRUE(info_of(leaves[0]).construct != info_of(leaves[1]).construct);
+    odin3_prov_info joined = info_of(derive(&COARSEN, leaves, 2));
+    TEST_ASSERT_EQUAL_UINT32(2, joined.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, joined.flags);
+}
+
+/* --- parents, chain, objects ----------------------------------------------------------------- */
+
+static void test_visit_parents_in_stored_order(void) {
+    odin3_prov_id two[2] = {leaf_of(R_B1), leaf_of(R_A1)};
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    collected got = {{0}, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_parents(design, id.v, collect, &got));
+    TEST_ASSERT_EQUAL_UINT32(2, got.count);
+    TEST_ASSERT_EQUAL_UINT32(two[0].v, got.ids[0]);
+    TEST_ASSERT_EQUAL_UINT32(two[1].v, got.ids[1]);
+    got.count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_parents(design, two[0].v, collect, &got));
+    TEST_ASSERT_EQUAL_UINT32(0, got.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_parents(design, 0, collect, &got));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_parents(design, id.v, NULL, &got));
+}
+
+typedef struct chain_log {
+    uint32_t index[16];
+    uint32_t leaf[16];
+    odin3_level level[16];
+    uint32_t count;
+} chain_log;
+
+static void on_construct(const odin3_construct *c, uint32_t leaf, void *user) {
+    chain_log *log = user;
+    TEST_ASSERT_TRUE(log->count < 16);
+    log->index[log->count] = c->index;
+    log->leaf[log->count] = leaf;
+    log->level[log->count] = c->level;
+    log->count++;
+}
+
+static odin3_module *make_module(odin3_prov_id prov, odin3_module_id *id) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_create(design, intern("top"), prov, id));
+    return odin3_module_get(design, *id);
+}
+
+static void test_obj_prov_and_chain(void) {
+    odin3_prov_id two[2] = {leaf_of(R_E1), leaf_of(R_B1)};
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    odin3_module_id mid = {0};
+    odin3_module *module = make_module(id, &mid);
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, intern("n"), (odin3_prov_id){0}, &net));
+    uint32_t record = 99;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_MODULE, 0}, &record));
+    TEST_ASSERT_EQUAL_UINT32(id.v, record);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, net.v}, &record));
+    TEST_ASSERT_EQUAL_UINT32(0, record); /* no provenance */
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, 999}, &record));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_obj_get_prov(design, (odin3_obj){7, ODIN3_OBJ_NET, 1}, &record));
+    chain_log log = {{0}, {0}, {0}, 0};
+    odin3_obj module_obj = {mid.v, ODIN3_OBJ_MODULE, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_chain(design, module_obj, on_construct, &log));
+    /* leaf e1: e1, a1, always A, module; leaf b1: b1, always B (module already reported) */
+    TEST_ASSERT_EQUAL_UINT32(6, log.count);
+    TEST_ASSERT_EQUAL_UINT32(R_E1, log.index[0]);
+    TEST_ASSERT_EQUAL_UINT32(R_A1, log.index[1]);
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_A, log.index[2]);
+    TEST_ASSERT_EQUAL_UINT32(R_MOD, log.index[3]);
+    TEST_ASSERT_EQUAL_UINT32(R_B1, log.index[4]);
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_B, log.index[5]);
+    TEST_ASSERT_EQUAL_UINT32(two[0].v, log.leaf[3]);
+    TEST_ASSERT_EQUAL_UINT32(two[1].v, log.leaf[4]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_EXPR, log.level[0]);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_MODULE, log.level[3]);
+    log.count = 0;
+    odin3_obj net_obj = {mid.v, ODIN3_OBJ_NET, net.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_chain(design, net_obj, on_construct, &log));
+    TEST_ASSERT_EQUAL_UINT32(0, log.count);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_chain(design, module_obj, NULL, &log));
+}
+
+static void test_get_construct_copies_a_row(void) {
+    odin3_construct c;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_construct(design, R_THEN, &c));
+    TEST_ASSERT_EQUAL_UINT32(R_THEN, c.index);
+    TEST_ASSERT_EQUAL_UINT32(R_IF, c.parent);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_CONSTRUCT_IF_THEN, c.kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_BRANCH, c.level);
+    TEST_ASSERT_EQUAL_STRING("a.v", c.file);
+    TEST_ASSERT_EQUAL_STRING("", c.name);
+    TEST_ASSERT_EQUAL_UINT32(80, c.line);
+    TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE, odin3_design_construct_count(design));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 0, &c));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_get_construct(design, R_FIRST_FREE, &c));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 1, NULL));
+}
+
+int main(void) {
+    UNITY_BEGIN();
+    RUN_TEST(test_source_record);
+    RUN_TEST(test_leaf_without_construct_is_span_only);
+    RUN_TEST(test_record_out_of_range);
+    RUN_TEST(test_rewrite_and_refine_labels);
+    RUN_TEST(test_hier_is_a_string_of_the_design);
+    RUN_TEST(test_two_expressions_of_one_statement_are_no_join);
+    RUN_TEST(test_two_blocks_are_a_join_in_key_order);
+    RUN_TEST(test_an_if_and_its_arm_are_no_join);
+    RUN_TEST(test_a_blend_inherited_from_one_parent_is_no_new_join);
+    RUN_TEST(test_span_only_leaves_never_join);
+    RUN_TEST(test_cap_and_bulk_flags);
+    RUN_TEST(test_context_records_and_the_instance_join);
+    RUN_TEST(test_instance_alone_has_no_data_leaf);
+    RUN_TEST(test_a_body_called_from_two_blocks_is_a_join);
+    RUN_TEST(test_visit_parents_in_stored_order);
+    RUN_TEST(test_obj_prov_and_chain);
+    RUN_TEST(test_get_construct_copies_a_row);
+    return UNITY_END();
+}

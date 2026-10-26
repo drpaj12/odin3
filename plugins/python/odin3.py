@@ -118,6 +118,8 @@ class Odin3:
         self._source_cb = self.ffi.callback("odin3_source_visit", _on_source(self))
         self._object_cb = self.ffi.callback("odin3_prov_object_visit", _on_object(self))
         self._log_cb = self.ffi.callback("odin3_log_sink", _on_log(self))
+        self._u32_cb = self.ffi.callback("odin3_u32_visit", _on_u32(self))
+        self._construct_cb = self.ffi.callback("odin3_construct_visit", _on_construct(self))
         self._captures: list[Any] = []  # handles of the open capture_log blocks, innermost last
         self._library = Path(str(library or find_library()))
         self._register_abc(self._library)
@@ -237,6 +239,46 @@ def _on_object(odin3: Odin3) -> Any:
     return visit
 
 
+def _on_u32(odin3: Odin3) -> Any:
+    def visit(ident: int, user: Any) -> None:
+        odin3.ffi.from_handle(user).append(int(ident))
+
+    return visit
+
+
+def _on_construct(odin3: Odin3) -> Any:
+    def visit(construct: Any, leaf: int, user: Any) -> None:
+        odin3.ffi.from_handle(user).append((_construct_of(odin3, construct), int(leaf)))
+
+    return visit
+
+
+def _construct_kind(odin3: Odin3, kind: int) -> str:
+    """The AST kind name (BLOCKING_ASSIGN), or IF_THEN, IF_ELSE, CALL_SITE for a synthesized row."""
+    lib = odin3.lib
+    synthesized = {
+        int(lib.ODIN3_CONSTRUCT_IF_THEN): "IF_THEN",
+        int(lib.ODIN3_CONSTRUCT_IF_ELSE): "IF_ELSE",
+        int(lib.ODIN3_CONSTRUCT_CALL_SITE): "CALL_SITE",
+    }
+    return synthesized.get(int(kind)) or odin3.enum_name("odin3_ast_kind", kind).upper()
+
+
+def _construct_of(odin3: Odin3, construct: Any) -> Construct:
+    return Construct(
+        int(construct.index),
+        int(construct.parent),
+        _construct_kind(odin3, construct.kind),
+        odin3.enum_name("odin3_level", construct.level),
+        odin3.text(construct.file),
+        int(construct.line),
+        int(construct.col),
+        int(construct.end_line),
+        int(construct.end_col),
+        odin3.text(construct.name),
+    )
+
+
 def _on_log(odin3: Odin3) -> Any:
     def sink(level: int, msg: Any, user: Any) -> None:
         odin3.ffi.from_handle(user).append(LogRecord(int(level), odin3.text(msg)))
@@ -262,6 +304,60 @@ class Source(NamedTuple):
     col: int
     end_line: int
     end_col: int
+
+
+class Construct(NamedTuple):
+    """One construct of the design's construct table (odin3_construct): where in the HDL an object
+    comes from, at one granularity. kind is an AST kind name or IF_THEN, IF_ELSE, CALL_SITE; level
+    is module, instance, block, branch, stmt or expr; parent is the row of the enclosing construct
+    (0 for a module); row is its own row number (1-based). file and name are "" when unknown."""
+
+    row: int
+    parent: int
+    kind: str
+    level: str
+    file: str
+    line: int
+    col: int
+    end_line: int
+    end_col: int
+    name: str
+
+
+class ProvRecord(NamedTuple):
+    """One provenance record (odin3_prov_info) with its parents, construct and joined constructs.
+
+    kind is source, imported or derived; dir is origin, refine, rewrite, coarsen or context, and
+    from_level and to_level are the levels of a derived record's class (none otherwise); flags is a
+    frozenset of join, join_instance, lossy_bulk, lossy_cap, span_only (V1.2.0 3.3); parents are
+    record IDs in stored order, the last n_context of them context (instance) parents; construct is
+    a SOURCE record's construct; joined holds the constructs of J (at most 16, n_joined is the
+    total) of a coarsen record."""
+
+    record: int
+    kind: str
+    run: int
+    op: int
+    dir: str
+    from_level: str
+    to_level: str
+    flags: frozenset[str]
+    construct: Construct | None
+    parents: tuple[int, ...]
+    n_context: int
+    n_joined: int
+    joined: tuple[Construct, ...]
+    hier: str
+
+
+_PROV_KINDS = ("source", "imported", "derived")
+_PROV_FLAGS = (
+    (1, "join"),
+    (2, "join_instance"),
+    (4, "lossy_bulk"),
+    (8, "lossy_cap"),
+    (16, "span_only"),
+)
 
 
 IRObject = Union["Module", "Node", "Net", "Wire"]
@@ -410,6 +506,42 @@ class Design:
             if best is None or (run, form) > best[:2]:
                 best = (run, form, ptr)  # ELABORATED (2) > PARSED (1) within a run
         return Ast(self, best[2]) if best is not None else None
+
+    def construct_count(self) -> int:
+        """One past the last construct row: the table holds rows 1 .. count - 1 (ABI v7)."""
+        return int(self.odin3.lib.odin3_design_construct_count(self.ptr))
+
+    def construct(self, index: int) -> Construct:
+        """Construct row `index` (1 .. construct_count() - 1); Odin3Error when out of range."""
+        raw = self.get("odin3_design_get_construct", "odin3_construct", index)
+        return _construct_of(self.odin3, raw)
+
+    def prov_record(self, record: int) -> ProvRecord:
+        """The provenance record `record` with its parents, construct and joined constructs."""
+        info = self.get("odin3_prov_get_info", "odin3_prov_info", record)
+        odin3 = self.odin3
+        parents: list[int] = []
+        self.call("odin3_prov_visit_parents", record, odin3._u32_cb, odin3.ffi.new_handle(parents))
+        rows: list[int] = []
+        if int(info.n_joined) > 0:
+            self.call("odin3_prov_visit_joined", record, odin3._u32_cb, odin3.ffi.new_handle(rows))
+        flags = frozenset(name for bit, name in _PROV_FLAGS if int(info.flags) & bit)
+        return ProvRecord(
+            record,
+            _PROV_KINDS[int(info.kind)],
+            int(info.run),
+            int(info.op),
+            odin3.enum_name("odin3_prov_dir", info.dir),
+            odin3.enum_name("odin3_level", info.from_level),
+            odin3.enum_name("odin3_level", info.to_level),
+            flags,
+            self.construct(int(info.construct)) if int(info.construct) else None,
+            tuple(parents),
+            int(info.n_context),
+            int(info.n_joined),
+            tuple(self.construct(row) for row in rows),
+            odin3.text(info.hier),
+        )
 
     def objects_at(self, file: str, line: int) -> list[Found]:
         """Every object that comes from line `line` of file (odin3_prov_visit_objects)."""
@@ -655,6 +787,38 @@ class _Named:
             "odin3_prov_visit_sources", self.obj(), odin3._source_cb, odin3.ffi.new_handle(found)
         )
         return found
+
+    def provenance(self) -> list[ProvRecord]:
+        """The provenance records of the object (ABI v7): its naming record first, then every
+        record reachable through parents, depth-first in parent order, each once. Empty for an
+        object without provenance. Nothing is recomputed in Python: each record is
+        odin3_prov_get_info, odin3_prov_visit_parents and odin3_prov_visit_joined."""
+        design = self.design
+        first = int(design.get("odin3_obj_get_prov", "uint32_t", self.obj()))
+        records: list[ProvRecord] = []
+        seen: set[int] = set()
+        stack = [first] if first else []
+        while stack:
+            ident = stack.pop()
+            if ident in seen:
+                continue
+            seen.add(ident)
+            record = design.prov_record(ident)
+            records.append(record)
+            stack.extend(reversed(record.parents))
+        return records
+
+    def chain(self) -> list[Construct]:
+        """Where the object comes from in the HDL (odin3_prov_visit_chain): for each source leaf
+        in the order of sources(), its construct and then its ancestors up to the module; each
+        construct once, at its first reach. Empty when the design holds no construct table (read
+        with --prov-ast off, or from a netlist) or the object has no provenance."""
+        reached: list[tuple[Construct, int]] = []
+        odin3 = self.design.odin3
+        self.design.call(
+            "odin3_prov_visit_chain", self.obj(), odin3._construct_cb, odin3.ffi.new_handle(reached)
+        )
+        return [construct for construct, _leaf in reached]
 
     def attr(self, key: str) -> str | None:
         """The string attribute key, None when absent."""

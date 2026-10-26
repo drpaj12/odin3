@@ -971,6 +971,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_opclass)
+    odin3_add_unit_test(test_construct)
+    odin3_add_unit_test(test_construct_check)
+    odin3_add_unit_test(test_prov_label)
     odin3_add_unit_test(test_opclass_passes)
     target_compile_definitions(test_opclass_passes PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -2151,7 +2154,7 @@ if(BUILD_TESTING)
     # run information the core formats.
     add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
                 tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c
-                tests/unit/passrun_fixture_lib.c)
+                tests/unit/passrun_fixture_lib.c tests/unit/construct_fixture_lib.c)
     set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
     target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
                                                      ${PROJECT_SOURCE_DIR}/include)
@@ -2375,7 +2378,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # v1.1.0's SystemVerilog reader seam makes it v6.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 6\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 7\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)
@@ -3219,6 +3222,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_copy
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # V1.2.0 Task 3 (spec 4.3): the provenance readers of ABI v7 (Node.provenance, chain).
+    add_test(NAME python_prov
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_prov
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_prov PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
     add_test(NAME python_sim

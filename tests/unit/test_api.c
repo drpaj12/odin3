@@ -27,7 +27,7 @@ static void test_version_string_matches_macros(void) {
 
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
-    TEST_ASSERT_EQUAL_UINT32(6, odin3_abi_version()); /* v1.1.0: the SystemVerilog reader seam */
+    TEST_ASSERT_EQUAL_UINT32(7, odin3_abi_version()); /* v1.2.0: the provenance chain readers */
 }
 
 static void test_check_status_has_a_name(void) {
