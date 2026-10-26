@@ -147,6 +147,9 @@ static void test_valid(void) {
     TEST_ASSERT_TRUE(odin3_opclass_valid(&REFINE));
     TEST_ASSERT_TRUE(odin3_opclass_valid(&CONTEXT1));
     TEST_ASSERT_FALSE(odin3_opclass_valid(NULL));
+}
+
+static void test_bulk_is_coarsen_only(void) {
     odin3_opclass bulk_refine = {ODIN3_DIR_REFINE, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
     odin3_opclass bulk_coarsen = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
     TEST_ASSERT_FALSE(odin3_opclass_valid(&bulk_refine)); /* bulk is coarsen only */
@@ -491,6 +494,7 @@ static void test_kit_derive_coarsen_repeated_record_takes_the_default(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_valid);
+    RUN_TEST(test_bulk_is_coarsen_only);
     RUN_TEST(test_equal);
     RUN_TEST(test_invalid_classes);
     RUN_TEST(test_declare_default);

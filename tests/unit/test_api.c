@@ -92,7 +92,7 @@ static void test_plugin_built_for_abi_6_is_refused(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, st);
     TEST_ASSERT_NOT_NULL(strstr(last_log, "odin3_plugin_load"));
     char want[VERSION_BUF_LEN];
-    (void)snprintf(want, sizeof want, "rebuild it for ABI %d", (int)ODIN3_ABI_VERSION);
+    (void)snprintf(want, sizeof want, "rebuild it for ABI %d", ODIN3_ABI_VERSION);
     TEST_ASSERT_NOT_NULL(strstr(last_log, want));
     TEST_ASSERT_NOT_NULL(strstr(last_log, "plugin_abi6"));
 }

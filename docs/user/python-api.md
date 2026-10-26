@@ -71,7 +71,8 @@ Python):
   `end_line`, `end_col`, `name`) the object comes from: for each source leaf its statement, block and
   module, each construct once. It is empty for a design without a construct table: one read
   with `--prov-ast off` or from a netlist, and every design until the elaborator fills the table
-  (v1.2.0 Task 4).
+  (v1.2.0 Task 4). `chain_with_leaves()` gives the same constructs as `(construct, leaf)` pairs, where
+  `leaf` is the ID of the source record that reached the construct first.
 
 `design.construct_count()` and `design.construct(row)` read the table row by row.
 

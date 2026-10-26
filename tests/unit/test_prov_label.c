@@ -573,7 +573,14 @@ static void test_dead_and_compacted_objects(void) {
 /* --- identical chains, the cache, wide and deep graphs -------------------------------------- */
 
 /* A SOURCE record of AST node `ast`, at line `line` (hash-consing keeps equal ones apart). */
-static odin3_prov_id leaf_at(uint32_t ast, uint32_t line) {
+typedef struct leaf_args {
+    uint32_t ast;
+    uint32_t line;
+} leaf_args;
+
+static odin3_prov_id leaf_at(leaf_args args) {
+    uint32_t ast = args.ast;
+    uint32_t line = args.line;
     odin3_srcloc loc = {intern("a.v"), line, 1, line, 5, 0};
     odin3_prov_origin origin = {&loc, 1, ast, 0};
     odin3_prov_id id = {0};
@@ -597,7 +604,7 @@ static void test_rows_of_one_chain_are_one_construct(void) {
         row.ast = 9000 + i;
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &row, &twin[i]));
     }
-    odin3_prov_id pair[2] = {leaf_at(9000, 1), leaf_at(9001, 2)};
+    odin3_prov_id pair[2] = {leaf_at((leaf_args){9000, 1}), leaf_at((leaf_args){9001, 2})};
     odin3_prov_info same = info_of(derive(&COARSEN, pair, 2));
     TEST_ASSERT_EQUAL_UINT32(1, same.n_joined);
     TEST_ASSERT_EQUAL_UINT32(0, same.flags);
@@ -608,7 +615,7 @@ static void test_rows_of_one_chain_are_one_construct(void) {
     TEST_ASSERT_EQUAL_UINT32(2, wider.n_joined);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, wider.flags);
     /* the same set through a parent that holds the other twin is no new join */
-    odin3_prov_id other_twin[2] = {leaf_at(9001, 3), leaf_of(R_B1)};
+    odin3_prov_id other_twin[2] = {leaf_at((leaf_args){9001, 3}), leaf_of(R_B1)};
     odin3_prov_id base = derive(&COARSEN, other_twin, 2);
     odin3_prov_id again[2] = {base, pair[0]};
     odin3_prov_info inherited = info_of(derive(&COARSEN, again, 2));
@@ -617,7 +624,7 @@ static void test_rows_of_one_chain_are_one_construct(void) {
 }
 
 static void test_labels_follow_the_table_as_it_grows(void) {
-    odin3_prov_id late = leaf_at(7777, 4); /* no row yet: span-only */
+    odin3_prov_id late = leaf_at((leaf_args){7777, 4}); /* no row yet: span-only */
     odin3_prov_id two[2] = {late, leaf_of(R_A1)};
     odin3_prov_id merge = derive(&COARSEN, two, 2);
     TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info_of(late).flags);
@@ -653,10 +660,10 @@ static clock_t read_all_records(uint32_t first, uint32_t last) {
 static void test_a_deep_graph_is_read_in_linear_work(void) {
     enum { DEPTH = 30000, SECONDS = 15 };
     uint32_t ast = 10 * R_E1; /* every leaf anchors at the statement a1 */
-    odin3_prov_id head = leaf_at(ast, 1);
+    odin3_prov_id head = leaf_at((leaf_args){ast, 1});
     uint32_t first = head.v;
     for (uint32_t i = 0; i < DEPTH; i++) {
-        odin3_prov_id pair[2] = {head, leaf_at(ast, 2U + i)};
+        odin3_prov_id pair[2] = {head, leaf_at((leaf_args){ast, 2U + i})};
         head = derive(&COARSEN, pair, 2);
     }
     clock_t used = read_all_records(first, head.v);
@@ -673,11 +680,11 @@ static void test_a_wide_graph_is_read_in_linear_work(void) {
     odin3_prov_id *parents = calloc(WIDTH, sizeof *parents);
     TEST_ASSERT_NOT_NULL(parents);
     for (uint32_t i = 0; i < WIDTH; i++) {
-        parents[i] = leaf_at(ast, 1U + i);
+        parents[i] = leaf_at((leaf_args){ast, 1U + i});
     }
     odin3_prov_id mid[WIDTH / 1000];
     for (uint32_t k = 0; k < WIDTH / 1000; k++) {
-        mid[k] = derive(&COARSEN, parents + (k * 1000U), 1000);
+        mid[k] = derive(&COARSEN, parents + ((size_t)k * 1000U), 1000);
     }
     odin3_prov_id top = derive(&COARSEN, mid, WIDTH / 1000);
     clock_t used = read_all_records(parents[0].v, top.v);

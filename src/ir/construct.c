@@ -26,7 +26,7 @@
 enum { KIND_TRANSPARENT = 0xFE, KIND_SLOTS = ODIN3_CONSTRUCT_CALL_SITE + 1 };
 
 /* The synthesized kinds are pinned above the AST range and fit the row's one-byte kind (ABI 7). */
-_Static_assert((int)ODIN3_AST_KIND_COUNT <= (int)ODIN3_CONSTRUCT_IF_THEN,
+_Static_assert((unsigned)ODIN3_AST_KIND_COUNT <= (unsigned)ODIN3_CONSTRUCT_IF_THEN,
                "AST kinds reach the pinned rows");
 _Static_assert(ODIN3_CONSTRUCT_CALL_SITE <= UINT8_MAX, "a construct kind is one byte");
 

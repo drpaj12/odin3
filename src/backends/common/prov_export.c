@@ -550,6 +550,24 @@ static odin3_status parents_ready(const label_cache *cache, odin3_vec *todo,
     return ODIN3_OK;
 }
 
+/* Adds the anchors of one entry not yet in seen to merged. */
+static odin3_status merge_part(const label_cache *cache, const anchor_entry *part,
+                               odin3_u64map *seen, odin3_vec *merged) {
+    const uint32_t *list = entry_anchors(cache, part);
+    for (uint32_t i = 0; i < part->len; i++) {
+        uint64_t unused = 0;
+        if (odin3_u64map_get(seen, list[i], &unused)) {
+            continue;
+        }
+        uint32_t *slot = odin3_vec_push(merged);
+        if (slot == NULL || odin3_u64map_put(seen, (odin3_kv){list[i], 1}) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = list[i];
+    }
+    return ODIN3_OK;
+}
+
 /* The union of the anchors of the data parents into the pool; entry gets its range. */
 static odin3_status union_entry(label_cache *cache, const odin3_prov_record *rec, uint32_t data,
                                 anchor_entry *entry) {
@@ -559,17 +577,8 @@ static odin3_status union_entry(label_cache *cache, const odin3_prov_record *rec
     odin3_status st = seen != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     for (uint32_t k = 0; st == ODIN3_OK && k < data; k++) {
         const anchor_entry *part = entry_of(cache, rec->parents.ids[k].v);
-        const uint32_t *list = entry_anchors(cache, part);
         entry->flags |= part->flags & (E_SPAN_ONLY | E_HAS_CTX);
-        for (uint32_t i = 0; st == ODIN3_OK && i < part->len; i++) {
-            uint64_t unused = 0;
-            uint32_t *slot =
-                odin3_u64map_get(seen, list[i], &unused) ? NULL : odin3_vec_push(&merged);
-            if (slot != NULL) {
-                *slot = list[i];
-                st = odin3_u64map_put(seen, (odin3_kv){list[i], 1});
-            }
-        }
+        st = merge_part(cache, part, seen, &merged);
     }
     if (st == ODIN3_OK) {
         st = sort_u32(&merged);
@@ -699,15 +708,21 @@ static bool sets_equal(const odin3_design *design, const odin3_vec *lhs, const o
     return true;
 }
 
-/* True when a single data parent of rec has the same set J as the ordered set rows. */
+/* The ordered set J of a record, and whether a single data parent has the same one. */
+typedef struct same_probe {
+    const odin3_vec *rows;
+    bool same;
+} same_probe;
+
+/* Sets probe->same when a single data parent of rec has the same set J. */
 static odin3_status parent_has_same_set(const odin3_design *design, const label_cache *cache,
                                         const odin3_prov_record *rec, uint32_t data,
-                                        const odin3_vec *rows, bool *same) {
-    for (uint32_t k = 0; k < data && !*same; k++) {
+                                        same_probe *probe) {
+    for (uint32_t k = 0; k < data && !probe->same; k++) {
         odin3_vec theirs;
         odin3_vec_init(&theirs, sizeof(uint32_t));
         odin3_status st = entry_set(design, cache, entry_of(cache, rec->parents.ids[k].v), &theirs);
-        *same = st == ODIN3_OK && sets_equal(design, &theirs, rows);
+        probe->same = st == ODIN3_OK && sets_equal(design, &theirs, probe->rows);
         odin3_vec_free(&theirs);
         if (st != ODIN3_OK) {
             return st;
@@ -780,12 +795,12 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
     odin3_prov_info *info = &label->info;
     odin3_vec rows;
     odin3_vec_init(&rows, sizeof(uint32_t));
-    bool same = false;
+    same_probe probe = {&rows, false};
     bool instance = false;
     uint32_t data = rec->parents.count - info->n_context;
     odin3_status st = entry_set(design, cache, entry, &rows);
     if (st == ODIN3_OK) {
-        st = parent_has_same_set(design, cache, rec, data, &rows, &same);
+        st = parent_has_same_set(design, cache, rec, data, &probe);
     }
     if (st == ODIN3_OK) {
         st = instance_join_of(design, cache, info->record, &instance);
@@ -795,7 +810,7 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
         return st;
     }
     info->n_joined = (uint32_t)rows.len;
-    if (rows.len >= 2 && !same) {
+    if (rows.len >= 2 && !probe.same) {
         info->flags |= ODIN3_PROV_F_JOIN;
     }
     if (rows.len > ODIN3_PROV_JOIN_CAP) {

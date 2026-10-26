@@ -88,8 +88,8 @@ odin3_status odin3_construct_copy(odin3_construct_table *dst, const odin3_constr
  * run or ast of 0, a kind the map has no row for or a level that does not match it, a part that
  * does not match the kind (part 1 only for IF_THEN, 2 only for IF_ELSE), a parent or call that is
  * not an earlier row, a parent of a finer level than the row (odin3_construct_parent_fits), or a
- * key (run, ast, part, call) that exists; NO_MEMORY (also when the table is full: 2^32 - 2 rows). Nothing changes on
- * failure. That the parent of an arm row is its IF row is left to check rule 12.
+ * key (run, ast, part, call) that exists; NO_MEMORY (also when the table is full: 2^32 - 2 rows).
+ * Nothing changes on failure. That the parent of an arm row is its IF row is left to check rule 12.
  */
 odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row *row,
                                  uint32_t *index);
