@@ -17,7 +17,9 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static odin3_design *design;
 static odin3_pass_ctx ctx;
@@ -475,6 +477,123 @@ static void test_get_construct_copies_a_row(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 1, NULL));
 }
 
+/* --- identical chains, the cache, wide and deep graphs -------------------------------------- */
+
+/* A SOURCE record of AST node `ast`, at line `line` (hash-consing keeps equal ones apart). */
+static odin3_prov_id leaf_at(uint32_t ast, uint32_t line) {
+    odin3_srcloc loc = {intern("a.v"), line, 1, line, 5, 0};
+    odin3_prov_origin origin = {&loc, 1, ast, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    return id;
+}
+
+static void test_rows_of_one_chain_are_one_construct(void) {
+    /* two rows (two AST nodes) with the same file, span, kind and parent: one construct */
+    odin3_construct_row row = {0};
+    row.run = ctx.run.v;
+    row.parent = R_ALWAYS_B;
+    row.kind = ODIN3_AST_BLOCKING_ASSIGN;
+    row.level = (uint8_t)odin3_construct_kind_level(ODIN3_AST_BLOCKING_ASSIGN);
+    row.file = intern("a.v");
+    row.line = 900;
+    row.end_line = 900;
+    row.end_col = 5;
+    uint32_t twin[2] = {0, 0};
+    for (uint32_t i = 0; i < 2; i++) {
+        row.ast = 9000 + i;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &row, &twin[i]));
+    }
+    odin3_prov_id pair[2] = {leaf_at(9000, 1), leaf_at(9001, 2)};
+    odin3_prov_info same = info_of(derive(&COARSEN, pair, 2));
+    TEST_ASSERT_EQUAL_UINT32(1, same.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(0, same.flags);
+    /* a record over the twins and an other statement: a parent over the twins alone has J of
+     * one, so the join is new and J holds the twins once */
+    odin3_prov_id with_other[3] = {pair[0], pair[1], leaf_of(R_B1)};
+    odin3_prov_info wider = info_of(derive(&COARSEN, with_other, 3));
+    TEST_ASSERT_EQUAL_UINT32(2, wider.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, wider.flags);
+    /* the same set through a parent that holds the other twin is no new join */
+    odin3_prov_id other_twin[2] = {leaf_at(9001, 3), leaf_of(R_B1)};
+    odin3_prov_id base = derive(&COARSEN, other_twin, 2);
+    odin3_prov_id again[2] = {base, pair[0]};
+    odin3_prov_info inherited = info_of(derive(&COARSEN, again, 2));
+    TEST_ASSERT_EQUAL_UINT32(2, inherited.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(0, inherited.flags & ODIN3_PROV_F_JOIN);
+}
+
+static void test_labels_follow_the_table_as_it_grows(void) {
+    odin3_prov_id late = leaf_at(7777, 4); /* no row yet: span-only */
+    odin3_prov_id two[2] = {late, leaf_of(R_A1)};
+    odin3_prov_id merge = derive(&COARSEN, two, 2);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info_of(late).flags);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_SPAN_ONLY, info_of(merge).flags);
+    TEST_ASSERT_EQUAL_UINT32(1, info_of(merge).n_joined);
+    uint32_t row = ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 0, 7777, R_ALWAYS_B);
+    TEST_ASSERT_EQUAL_UINT32(row, info_of(late).construct);
+    TEST_ASSERT_EQUAL_UINT32(0, info_of(late).flags);
+    odin3_prov_info grown = info_of(merge);
+    TEST_ASSERT_EQUAL_UINT32(0, grown.flags & ODIN3_PROV_F_SPAN_ONLY);
+    TEST_ASSERT_EQUAL_UINT32(2, grown.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_PROV_F_JOIN, grown.flags & ODIN3_PROV_F_JOIN);
+    /* a clone starts with no cache and agrees */
+    odin3_design *copy = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_clone(design, &copy));
+    odin3_prov_info cloned;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_get_info(copy, merge.v, &cloned));
+    TEST_ASSERT_EQUAL_UINT32(grown.flags, cloned.flags);
+    TEST_ASSERT_EQUAL_UINT32(grown.n_joined, cloned.n_joined);
+    odin3_design_destroy(copy);
+}
+
+/* Reads every record of the graph, newest first, and returns the clock ticks it took. */
+static clock_t read_all_records(uint32_t first, uint32_t last) {
+    clock_t start = clock();
+    for (uint32_t record = last; record >= first; record--) {
+        odin3_prov_info info;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_get_info(design, record, &info));
+    }
+    return clock() - start;
+}
+
+static void test_a_deep_graph_is_read_in_linear_work(void) {
+    enum { DEPTH = 30000, SECONDS = 15 };
+    uint32_t ast = 10 * R_E1; /* every leaf anchors at the statement a1 */
+    odin3_prov_id head = leaf_at(ast, 1);
+    uint32_t first = head.v;
+    for (uint32_t i = 0; i < DEPTH; i++) {
+        odin3_prov_id pair[2] = {head, leaf_at(ast, 2U + i)};
+        head = derive(&COARSEN, pair, 2);
+    }
+    clock_t used = read_all_records(first, head.v);
+    TEST_ASSERT_TRUE_MESSAGE(used < (clock_t)SECONDS * CLOCKS_PER_SEC,
+                             "deep graph read too slowly");
+    odin3_prov_info top = info_of(head);
+    TEST_ASSERT_EQUAL_UINT32(1, top.n_joined);
+    TEST_ASSERT_EQUAL_UINT32(0, top.flags);
+}
+
+static void test_a_wide_graph_is_read_in_linear_work(void) {
+    enum { WIDTH = 20000, SECONDS = 15 };
+    uint32_t ast = 10 * R_E2;
+    odin3_prov_id *parents = calloc(WIDTH, sizeof *parents);
+    TEST_ASSERT_NOT_NULL(parents);
+    for (uint32_t i = 0; i < WIDTH; i++) {
+        parents[i] = leaf_at(ast, 1U + i);
+    }
+    odin3_prov_id mid[WIDTH / 1000];
+    for (uint32_t k = 0; k < WIDTH / 1000; k++) {
+        mid[k] = derive(&COARSEN, parents + (k * 1000U), 1000);
+    }
+    odin3_prov_id top = derive(&COARSEN, mid, WIDTH / 1000);
+    clock_t used = read_all_records(parents[0].v, top.v);
+    free(parents);
+    TEST_ASSERT_TRUE_MESSAGE(used < (clock_t)SECONDS * CLOCKS_PER_SEC,
+                             "wide graph read too slowly");
+    TEST_ASSERT_EQUAL_UINT32(1, info_of(top).n_joined);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_source_record);
@@ -494,5 +613,9 @@ int main(void) {
     RUN_TEST(test_visit_parents_in_stored_order);
     RUN_TEST(test_obj_prov_and_chain);
     RUN_TEST(test_get_construct_copies_a_row);
+    RUN_TEST(test_rows_of_one_chain_are_one_construct);
+    RUN_TEST(test_labels_follow_the_table_as_it_grows);
+    RUN_TEST(test_a_deep_graph_is_read_in_linear_work);
+    RUN_TEST(test_a_wide_graph_is_read_in_linear_work);
     return UNITY_END();
 }

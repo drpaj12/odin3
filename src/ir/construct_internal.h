@@ -17,11 +17,19 @@ typedef struct run_row {
     uint32_t mode;
 } run_row;
 
+/* The reader cache of odin3_construct_derived. */
+typedef struct derived_slot {
+    void *data;
+    void (*destroy)(void *);
+    uint32_t stamp[4];
+} derived_slot;
+
 struct odin3_construct_table {
     odin3_vec rows;      /* odin3_construct_row; row number n is index n - 1 */
     odin3_u64map *heads; /* (run << 32 | ast) -> row number of the newest row of that node */
     odin3_vec runs;      /* run_row, in the order marked */
     odin3_vec misses;    /* uint32_t record IDs, increasing */
+    derived_slot derived; /* not copied by odin3_construct_copy */
 };
 
 #endif

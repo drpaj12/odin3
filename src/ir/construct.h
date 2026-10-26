@@ -115,6 +115,19 @@ uint32_t odin3_construct_end(const odin3_design *design);
 /* Bytes the table holds (rows and index reserved). 0 for a NULL design. */
 size_t odin3_construct_bytes_reserved(const odin3_design *design);
 
+/*
+ * The one cache a reader keeps per design for data it derives from records, rows and operation
+ * classes (prov_export's anchor sets). Returns the cache made by create, or makes it. The cache is
+ * valid for one stamp: the end of the record store, of the construct table and the count of
+ * declared classes and overrides. Those only grow (records are never deleted or changed, rows and
+ * classes are appended), so an unchanged stamp means every derived value is still right; a new
+ * stamp frees the old cache with destroy and makes a new one. odin3_design_clone does not copy
+ * it. Readers fill it through a const design, like the visit marks of odin3_prov_sources; two
+ * threads must not read one design at once. NULL when create fails (out of memory) or on NULL.
+ */
+void *odin3_construct_derived(const odin3_design *design, void *(*create)(void),
+                              void (*destroy)(void *));
+
 /* True when some row of run has node ast with part 0 (a call-instance copy counts). */
 bool odin3_construct_has_node(const odin3_design *design, odin3_passrun_id run, uint32_t ast);
 

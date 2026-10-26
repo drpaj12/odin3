@@ -8,6 +8,7 @@
 #include "ir/construct_internal.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
+#include "ir/opclass.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
@@ -18,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* --- the kind map (V1.2.0 2.1) --------------------------------------------------------------- */
 
@@ -149,6 +151,9 @@ void odin3_construct_destroy(odin3_construct_table *table) {
     odin3_vec_free(&table->runs);
     odin3_vec_free(&table->misses);
     odin3_u64map_destroy(table->heads);
+    if (table->derived.data != NULL) {
+        table->derived.destroy(table->derived.data);
+    }
     odin3_util_free(table);
 }
 
@@ -163,6 +168,30 @@ odin3_status odin3_construct_copy(odin3_construct_table *dst, const odin3_constr
     odin3_u64map_destroy(dst->heads);
     dst->heads = heads;
     return ODIN3_OK;
+}
+
+void *odin3_construct_derived(const odin3_design *design, void *(*create)(void),
+                              void (*destroy)(void *)) {
+    if (design == NULL || create == NULL || destroy == NULL) {
+        return NULL;
+    }
+    derived_slot *slot = &design->construct->derived;
+    const uint32_t stamp[4] = {odin3_prov_end(design), odin3_construct_end(design),
+                               odin3_opclass_row_count(design->opclass),
+                               odin3_opclass_override_count(design->opclass)};
+    if (slot->data != NULL && memcmp(slot->stamp, stamp, sizeof stamp) == 0) {
+        return slot->data;
+    }
+    if (slot->data != NULL) {
+        slot->destroy(slot->data);
+        slot->data = NULL;
+    }
+    slot->data = create();
+    if (slot->data != NULL) {
+        slot->destroy = destroy;
+        memcpy(slot->stamp, stamp, sizeof stamp);
+    }
+    return slot->data;
 }
 
 enum { RUN_SHIFT = 32 };
