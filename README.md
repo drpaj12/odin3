@@ -48,6 +48,14 @@ cmake --preset release && cmake --build --preset release
 cmake --install build/release --prefix "$HOME/odin3-1.1.1"
 ```
 
+Or from the release's source tarball, which carries the ABC and Unity submodules and needs no git:
+
+```sh
+tar xzf odin3-1.1.1.tar.gz && cd odin3-1.1.1
+cmake --preset release && cmake --build --preset release
+cmake --install build/release --prefix "$HOME/odin3-1.1.1"
+```
+
 Or the Python wheel from the GitHub release (bundles `libodin3`, ABC, the `odin3` CLI and
 `odin3-flow`): `pip install odin3-1.1.1-py3-none-linux_x86_64.whl`.
 

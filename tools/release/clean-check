@@ -3,7 +3,11 @@
 # repository's HEAD into an empty temp directory, initialises the submodules, then under a minimal
 # environment (env -i, PATH=/usr/bin:/bin) does what a new user does: Release build, `cmake
 # --install` into a temp prefix, build the pip wheel and install it in a fresh venv, and run the
-# shell code blocks of docs/user/getting-started.md. Exit 0 only if every stage passes.
+# shell code blocks of docs/user/getting-started.md. Then the source tarball: make-tarball runs on
+# the clone, the tarball is unpacked into an empty directory (no git metadata) and, under the same
+# minimal environment, configured (release preset), built, tested with `ctest --preset release`
+# (the whole non-sweep suite, minus cli_slang_flow, which needs the Yosys oracle) and installed.
+# Exit 0 only if every stage passes.
 # Blocks that need VTR_ROOT or vpr are skipped and listed. Only committed files are tested
 # (the clone is of HEAD); the pip build tools come from the network. Never tags or uploads.
 #
@@ -114,4 +118,20 @@ for blk in "$work"/blocks.*.sh; do
         PATH=/usr/bin:/bin bash -e '$blk.run'"
 done
 [ "$nblocks" -gt 0 ] || { echo "clean-check: no bash blocks in $doc" >&2; failed=1; exit 1; }
-echo "clean-check: ok ($nblocks getting-started blocks)"
+
+# The source tarball, built from the clone, must configure, build, test and install on its own.
+stage tarball-make "$clone/tools/release/make-tarball" --out "$work/tarball"
+mkdir -p "$work/tarsrc"
+stage tarball-unpack tar -xzf "$work/tarball/odin3-1.1.1.tar.gz" -C "$work/tarsrc"
+tsrc="$work/tarsrc/odin3-1.1.1"
+[ ! -e "$tsrc/.git" ] || { echo "clean-check: tarball has .git" >&2; failed=1; exit 1; }
+# XDG_RUNTIME_DIR lets memcap's `systemd-run --user` reach the user manager under env -i.
+tarenv() { minenv ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} "$@"; }
+stage tarball-configure tarenv cmake -S "$tsrc" --preset release
+stage tarball-build tarenv cmake --build "$tsrc/build/release" -j4
+stage tarball-ctest tarenv ctest --test-dir "$tsrc/build/release" -j4 --timeout 600 \
+    --output-on-failure -LE 'sweep|sweep-xl' -E '^cli_slang_flow$'
+tprefix="$work/tarprefix"
+stage tarball-install tarenv cmake --install "$tsrc/build/release" --prefix "$tprefix"
+stage tarball-installed-version bash -c "'$tprefix/bin/odin3' --version | grep -q '^odin3 1\.1\.1 '"
+echo "clean-check: ok ($nblocks getting-started blocks, tarball build)"

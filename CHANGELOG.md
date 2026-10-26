@@ -6,6 +6,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Fixed
+
+- The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs
+  without git: `tools/release/make-tarball` writes `third_party/abc/.odin3-commit` and
+  `third_party/unity/.odin3-commit` (the submodule HEADs; generated, not committed) and
+  `cmake/abc_pin.cmake` reads the ABC stamp when there is no `.git`, still failing on a mismatch
+  with the pin. `tools/release/clean-check` gains tarball stages. This lifts the known limit in
+  the 1.1.0 and 1.1.1 release notes (`docs/V1.1.1.md`, kept as written).
+
 ## [1.1.1] - 2026-10-25
 
 Release notes: [docs/V1.1.1.md](docs/V1.1.1.md). Tools and Python only; the C core, IR and ABI (6) are

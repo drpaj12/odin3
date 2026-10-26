@@ -67,6 +67,8 @@ class InstallTreeTest(unittest.TestCase):
 
 
 class TarballTest(unittest.TestCase):
+    # make-tarball needs the git checkout; a source tarball (no .git) cannot make another one.
+    @unittest.skipUnless((helpers.REPO_ROOT / ".git").exists(), "not a git checkout (tarball)")
     def test_tarball_has_submodules(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = run([str(MAKE_TARBALL), "--out", tmp])
