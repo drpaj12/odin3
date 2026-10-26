@@ -177,6 +177,12 @@ size_t odin3_prov_bytes_reserved(const odin3_design *design);
 /* The parents of a record, in order; empty for a leaf or an unknown ID. */
 odin3_prov_list odin3_prov_parents(const odin3_design *design, odin3_prov_id id);
 
+/*
+ * The class of a DERIVED record (its override, else its operation's default): true and *out set;
+ * false for a SOURCE or IMPORTED record, an unknown ID, or a record with no class (check rule 13).
+ */
+bool odin3_prov_class_of(const odin3_design *design, odin3_prov_id id, odin3_opclass *out);
+
 /* The pass name (strtab ID) of a run, 0 for an unknown run; one past the last run ID. */
 uint32_t odin3_passrun_name(const odin3_design *design, odin3_passrun_id run);
 uint32_t odin3_passrun_end(const odin3_design *design);

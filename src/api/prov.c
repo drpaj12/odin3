@@ -4,6 +4,8 @@
  */
 #include "api/api.h"
 
+#include "backends/common/prov_export.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
@@ -12,6 +14,8 @@
 #include "util/attr.h"
 #include "util/hash.h"
 #include "util/str.h"
+#include "util/u64map.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -95,4 +99,172 @@ ODIN3_EXPORT odin3_status odin3_prov_visit_objects(const odin3_design *design, c
     }
     odin3_prov_index_destroy(ix);
     return ODIN3_OK;
+}
+
+/* --- ABI v7: construct table and chain (docs/V1.2.0.md 4.3) -------------------------------- */
+
+static void copy_construct(const odin3_design *design, uint32_t index,
+                           const odin3_construct_row *row, odin3_construct *out) {
+    *out = (odin3_construct){index,
+                             row->parent,
+                             row->kind,
+                             (odin3_level)row->level,
+                             odin3_api_str(design, row->file),
+                             row->line,
+                             row->col,
+                             row->end_line,
+                             row->end_col,
+                             odin3_api_str(design, row->name)};
+}
+
+ODIN3_EXPORT uint32_t odin3_design_construct_count(const odin3_design *design) {
+    return design != NULL ? odin3_construct_end(design) : 0;
+}
+
+ODIN3_EXPORT odin3_status odin3_design_get_construct(const odin3_design *design, uint32_t index,
+                                                     odin3_construct *out) {
+    const odin3_construct_row *row = odin3_construct_get(design, index);
+    if (row == NULL || out == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    copy_construct(design, index, row, out);
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_obj_get_prov(const odin3_design *design, odin3_obj obj,
+                                             uint32_t *record) {
+    odin3_objref ref = {ODIN3_OBJ_MODULE, 0};
+    const odin3_module *module = odin3_api_obj(design, obj, &ref);
+    if (module == NULL || record == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    *record = obj_prov(module, ref).v;
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_prov_get_info(const odin3_design *design, uint32_t record,
+                                              odin3_prov_info *out) {
+    if (design == NULL || out == NULL || odin3_prov_get(design, (odin3_prov_id){record}) == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    odin3_prov_label label;
+    odin3_prov_label_init(&label);
+    odin3_status st = odin3_prov_label_compute(design, record, &label);
+    if (st == ODIN3_OK) {
+        *out = label.info;
+    }
+    odin3_prov_label_free(&label);
+    return st;
+}
+
+ODIN3_EXPORT odin3_status odin3_prov_visit_parents(const odin3_design *design, uint32_t record,
+                                                   odin3_u32_visit visit, void *user) {
+    const odin3_prov_record *rec =
+        design != NULL ? odin3_prov_get(design, (odin3_prov_id){record}) : NULL;
+    if (rec == NULL || visit == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    for (uint32_t i = 0; i < rec->parents.count; i++) {
+        visit(rec->parents.ids[i].v, user);
+    }
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_prov_visit_joined(const odin3_design *design, uint32_t record,
+                                                  odin3_u32_visit visit, void *user) {
+    if (design == NULL || visit == NULL ||
+        odin3_prov_get(design, (odin3_prov_id){record}) == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    uint32_t rows[ODIN3_PROV_JOIN_CAP];
+    odin3_prov_label label;
+    odin3_prov_label_init(&label);
+    odin3_status st = odin3_prov_label_compute(design, record, &label);
+    uint32_t count = 0;
+    for (; st == ODIN3_OK && count < label.joined.len && count < ODIN3_PROV_JOIN_CAP; count++) {
+        rows[count] = *(const uint32_t *)odin3_vec_cat(&label.joined, count);
+    }
+    odin3_prov_label_free(&label);
+    for (uint32_t i = 0; i < count; i++) {
+        visit(rows[i], user);
+    }
+    return st;
+}
+
+/* A construct reached by the chain walk and the leaf that reached it first. */
+typedef struct chain_hit {
+    uint32_t row;
+    uint32_t leaf;
+} chain_hit;
+
+typedef struct chain_walk {
+    const odin3_design *design;
+    odin3_vec leaves; /* uint32_t record IDs, in visit order */
+    odin3_vec hits;   /* chain_hit */
+    odin3_u64map *reported;
+    odin3_status status;
+} chain_walk;
+
+static void chain_leaf(void *user, odin3_prov_id leaf) {
+    chain_walk *walk = user;
+    uint32_t *slot = walk->status == ODIN3_OK ? odin3_vec_push(&walk->leaves) : NULL;
+    if (slot == NULL) {
+        walk->status = ODIN3_ERR_NO_MEMORY;
+        return;
+    }
+    *slot = leaf.v;
+}
+
+/* Reports row and its ancestors (module last) not yet reported, each with leaf. */
+static odin3_status chain_up(chain_walk *walk, uint32_t row, uint32_t leaf) {
+    uint64_t seen = 0;
+    for (; row != 0; row = odin3_construct_get(walk->design, row)->parent) {
+        if (odin3_u64map_get(walk->reported, row, &seen)) {
+            continue;
+        }
+        chain_hit *hit = odin3_vec_push(&walk->hits);
+        if (hit == NULL || odin3_u64map_put(walk->reported, (odin3_kv){row, 1}) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *hit = (chain_hit){row, leaf};
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status chain_collect(chain_walk *walk, odin3_prov_id start) {
+    odin3_status st = odin3_prov_sources(walk->design, start, chain_leaf, walk);
+    st = st != ODIN3_OK ? st : walk->status;
+    for (size_t i = 0; st == ODIN3_OK && i < walk->leaves.len; i++) {
+        uint32_t leaf = *(const uint32_t *)odin3_vec_cat(&walk->leaves, i);
+        uint32_t row = odin3_construct_of_record(walk->design, (odin3_prov_id){leaf});
+        st = chain_up(walk, row, leaf);
+    }
+    return st;
+}
+
+ODIN3_EXPORT odin3_status odin3_prov_visit_chain(const odin3_design *design, odin3_obj obj,
+                                                 odin3_construct_visit visit, void *user) {
+    odin3_objref ref = {ODIN3_OBJ_MODULE, 0};
+    const odin3_module *module = odin3_api_obj(design, obj, &ref);
+    if (module == NULL || visit == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    odin3_prov_id prov = obj_prov(module, ref);
+    if (odin3_prov_get(design, prov) == NULL) {
+        return ODIN3_OK; /* no lineage: nothing to visit */
+    }
+    chain_walk walk = {.design = design, .reported = odin3_u64map_create(0)};
+    odin3_vec_init(&walk.leaves, sizeof(uint32_t));
+    odin3_vec_init(&walk.hits, sizeof(chain_hit));
+    odin3_status st = walk.reported != NULL ? chain_collect(&walk, prov) : ODIN3_ERR_NO_MEMORY;
+    for (size_t i = 0; st == ODIN3_OK && i < walk.hits.len; i++) {
+        const chain_hit *hit = odin3_vec_cat(&walk.hits, i);
+        odin3_construct found;
+        copy_construct(design, hit->row, odin3_construct_get(design, hit->row), &found);
+        visit(&found, hit->leaf, user);
+    }
+    odin3_vec_free(&walk.leaves);
+    odin3_vec_free(&walk.hits);
+    odin3_u64map_destroy(walk.reported);
+    return st;
 }
