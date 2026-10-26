@@ -125,22 +125,22 @@ def cmd_bytes(args: argparse.Namespace) -> int:
     else:
         off = Side(args.odin3, None, "off")
         pairs += [(off, Side(args.odin3, None, m)) for m in MODES[1:]]
-    with tempfile.TemporaryDirectory(prefix="ops-cc-", dir=args.out) as tmp:
-        work = Path(tmp)
-        jobs: list[tuple[Path, Side, Side, Path, int]] = []
-        for p, (base, other) in enumerate(pairs):
-            for i, design in enumerate(designs):
-                jobs.append((design, base, other, work / str(p), i))
-        bad = 0
-        with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-            for job, diffs in zip(jobs, pool.map(lambda j: compare_one(*j), jobs),
-                                   strict=True):
-                if diffs:
-                    bad += 1
-                    print(f"DIFF {job[0]} ({job[2].mode or 'new'}): {', '.join(diffs[:6])}")
-        files = sum(1 for p in work.rglob("*") if p.is_file())
-        print(f"{len(designs)} designs, {len(pairs)} comparison(s), {bad} with differences "
-              f"({files} files compared, both sides)")
+    # the run directory is left in place (the controller cleans /tmp/claude-1000)
+    work = Path(tempfile.mkdtemp(prefix="ops-cc-", dir=args.out))
+    jobs: list[tuple[Path, Side, Side, Path, int]] = []
+    for p, (base, other) in enumerate(pairs):
+        for i, design in enumerate(designs):
+            jobs.append((design, base, other, work / str(p), i))
+    bad = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        for job, diffs in zip(jobs, pool.map(lambda j: compare_one(*j), jobs),
+                               strict=True):
+            if diffs:
+                bad += 1
+                print(f"DIFF {job[0]} ({job[2].mode or 'new'}): {', '.join(diffs[:6])}")
+    files = sum(1 for p in work.rglob("*") if p.is_file())
+    print(f"{len(designs)} designs, {len(pairs)} comparison(s), {bad} with differences "
+          f"({files} files compared, both sides)")
     return 1 if bad else 0
 
 

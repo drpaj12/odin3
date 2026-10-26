@@ -107,6 +107,9 @@ static const char *escape_of(char ch) {
 
 /* Appends field with TAB, LF, `\` and `%` written as %09, %0A, %5C, %25. */
 static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
+    if (field.len == 0) {
+        return ODIN3_OK; /* an empty field may have a NULL pointer: no offset on it */
+    }
     const char *bytes = (const char *)field.ptr;
     size_t run = 0;
     for (size_t i = 0; i < field.len; i++) {
