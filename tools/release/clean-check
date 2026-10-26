@@ -125,8 +125,9 @@ mkdir -p "$work/tarsrc"
 stage tarball-unpack tar -xzf "$work/tarball/odin3-1.1.1.tar.gz" -C "$work/tarsrc"
 tsrc="$work/tarsrc/odin3-1.1.1"
 [ ! -e "$tsrc/.git" ] || { echo "clean-check: tarball has .git" >&2; failed=1; exit 1; }
-# XDG_RUNTIME_DIR lets memcap's `systemd-run --user` reach the user manager under env -i.
-tarenv() { minenv ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} "$@"; }
+# XDG_RUNTIME_DIR lets memcap's `systemd-run --user` reach the user manager under env -i. Fd 9 (the
+# heavy lock) is closed: the suite's own test_lock_descriptor_is_passed_on expects it closed.
+tarenv() { minenv ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} "$@" 9>&-; }
 stage tarball-configure tarenv cmake -S "$tsrc" --preset release
 stage tarball-build tarenv cmake --build "$tsrc/build/release" -j4
 stage tarball-ctest tarenv ctest --test-dir "$tsrc/build/release" -j4 --timeout 600 \
