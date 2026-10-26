@@ -166,8 +166,8 @@ static void test_shared_subtree_with_two_chains_is_a_miss(void) {
                           odin3_ast_create(design, ODIN3_AST_FORM_ELABORATED, run1, &store));
     uint32_t xn = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(store, odin3_bytes_cstr("x"), &xn));
-    odin3_ast_id x = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_IDENT, .name = xn}, NULL, 0);
-    odin3_ast_id lr[] = {x, {0}, x};
+    odin3_ast_id xid = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_IDENT, .name = xn}, NULL, 0);
+    odin3_ast_id lr[] = {xid, {0}, xid};
     odin3_ast_id assign = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_BLOCKING_ASSIGN}, lr, 3);
     odin3_ast_id body[] = {{0}, assign};
     odin3_ast_id blk1 = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_SEQ_BLOCK}, body, 2);

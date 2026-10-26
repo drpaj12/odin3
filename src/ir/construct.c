@@ -389,7 +389,10 @@ static int alias_cmp(const void *lhs, const void *rhs) {
     if (ea->run != eb->run) {
         return ea->run < eb->run ? -1 : 1;
     }
-    return ea->ast == eb->ast ? 0 : (ea->ast < eb->ast ? -1 : 1);
+    if (ea->ast != eb->ast) {
+        return ea->ast < eb->ast ? -1 : 1;
+    }
+    return 0;
 }
 
 odin3_status odin3_construct_aliases(const odin3_design *design, odin3_vec *out) {

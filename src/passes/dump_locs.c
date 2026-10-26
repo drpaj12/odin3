@@ -200,7 +200,7 @@ static odin3_status parse_args(odin3_bytes args, dump_args *out) {
             out->path = word;
         }
     }
-    return out->types && out->constructs ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
+    return ODIN3_OK;
 }
 
 /* --- --constructs: the construct table (V1.2.0 4.3) ------------------------------------------- */
@@ -239,11 +239,12 @@ static odin3_status append_span(odin3_strbuf *text, const char *file,
                                                  row->end_line, row->end_col);
 }
 
-static odin3_status dump_construct_row(const odin3_design *design, uint32_t i, odin3_strbuf *text) {
+static odin3_status dump_construct_row(const odin3_design *design, uint32_t idx,
+                                       odin3_strbuf *text) {
     const odin3_strtab *tab = odin3_design_strtab(design);
-    const odin3_construct_row *row = odin3_construct_get(design, i);
+    const odin3_construct_row *row = odin3_construct_get(design, idx);
     odin3_status st = odin3_strbuf_appendf(
-        text, "construct|%u|%s|%s|%u|%u|%u|%u|", i, construct_kind_name(row->kind),
+        text, "construct|%u|%s|%s|%u|%u|%u|%u|", idx, construct_kind_name(row->kind),
         k_level_names[row->level], (unsigned)row->part, row->parent, row->call, row->run);
     st = st != ODIN3_OK ? st : append_span(text, odin3_strtab_get(tab, row->file), row);
     st = st != ODIN3_OK ? st : append_escaped(text, odin3_strtab_get(tab, row->name));
@@ -298,7 +299,7 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     (void)ctx;
     (void)user;
     dump_args parsed;
-    if (parse_args(args, &parsed) != ODIN3_OK) {
+    if (parse_args(args, &parsed) != ODIN3_OK || (parsed.types && parsed.constructs)) {
         odin3_log(
             ODIN3_LOG_ERROR,
             "dump_locs: expects [--types | --constructs] [--] and at most one non-empty path");

@@ -152,9 +152,19 @@ static uint32_t fit_parent(snap *sn, uint32_t fi) {
     return pp;
 }
 
+/* Enters child under frame top, through an arm frame when top is an IF and slot is its then or
+ * else statement. */
+typedef struct edge {
+    uint32_t top;
+    uint32_t slot;
+    uint32_t child;
+} edge;
+
 /* The anchor of a node entered from frame top through child slot: the node and part of the
  * nearest levelled frame (the arm frame when the slot is an IF's then or else), 0 for none. */
-static uint32_t edge_anchor(snap *sn, uint32_t top, uint32_t slot) {
+static uint32_t edge_anchor(snap *sn, const edge *ed) {
+    const uint32_t top = ed->top;
+    const uint32_t slot = ed->slot;
     const frame *up = frame_at(sn, top);
     if (up->part == 0 && up->kind == ODIN3_AST_IF &&
         (slot == IF_THEN_SLOT || slot == IF_ELSE_SLOT)) {
@@ -356,14 +366,6 @@ static odin3_status visit(snap *sn, uint32_t fi) {
                : odin3_construct_alias(sn->design, sn->run, fr.node, frame_at(sn, target)->row);
 }
 
-/* Enters child under frame top, through an arm frame when top is an IF and slot is its then or
- * else statement. */
-typedef struct edge {
-    uint32_t top;
-    uint32_t slot;
-    uint32_t child;
-} edge;
-
 static odin3_status descend(snap *sn, const edge *ed) {
     const uint32_t top = ed->top;
     const uint32_t slot = ed->slot;
@@ -412,7 +414,7 @@ static odin3_status walk_root(snap *sn, uint32_t root) {
             st = descend(sn, &(edge){top, slot, child});
         } else {
             sn->shared++;
-            if (sn->anchor[child] != edge_anchor(sn, top, slot)) {
+            if (sn->anchor[child] != edge_anchor(sn, &(edge){top, slot, child})) {
                 sn->diverged++;
                 st = taint_subtree(sn, child);
             }
