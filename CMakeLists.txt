@@ -285,6 +285,7 @@ add_library(odin3_core OBJECT
     src/ir/attr.c
     src/ir/prov.c
     src/ir/opclass.c
+    src/ir/construct.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -452,6 +453,7 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_name.c
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
+    src/backends/common/prov_export.c
     src/frontends/hdl_restore.c
     src/frontends/name_resolve.c
     src/frontends/blif/reader_names.c

@@ -14,31 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The granularity of an object or construct, coarse to fine (V1.2.0 section 2). */
-typedef enum odin3_level {
-    ODIN3_LEVEL_NONE,
-    ODIN3_LEVEL_MODULE,
-    ODIN3_LEVEL_INSTANCE,
-    ODIN3_LEVEL_BLOCK,
-    ODIN3_LEVEL_BRANCH,
-    ODIN3_LEVEL_STMT,
-    ODIN3_LEVEL_EXPR,
-    ODIN3_LEVEL_WORD,
-    ODIN3_LEVEL_GATE,
-    ODIN3_LEVEL_LUT,
-    ODIN3_LEVEL_BLE,
-    ODIN3_LEVEL_CLB,
-    ODIN3_LEVEL_SITE
-} odin3_level;
-
-/* How a derived record relates to its parents. ORIGIN is SOURCE or IMPORTED: never declared. */
-typedef enum odin3_prov_dir {
-    ODIN3_DIR_ORIGIN,
-    ODIN3_DIR_REFINE,  /* one parent, many pieces share the record */
-    ODIN3_DIR_REWRITE, /* 1:1, or a regrouping that is not a blend */
-    ODIN3_DIR_COARSEN, /* N to 1 */
-    ODIN3_DIR_CONTEXT  /* the record adds the instance (flatten) */
-} odin3_prov_dir;
+/* odin3_level and odin3_prov_dir are public (odin3.h, ABI v7). */
 
 /*
  * A declared class. bulk: the over-budget or unanchored-objects record of abc. context_tail: how

@@ -25,6 +25,10 @@
  *   inputs, step, read values, reset, close; passes are refused while a simulation is open.
  * ABI v6 (v1.1.0 SystemVerilog): odin3_sv_reader_register, the seam the read_verilog pass drives
  *   for a .sv file through the slang adapter (adapters/slang/odin3_slang.h, DESIGN §4.2).
+ * ABI v7 (v1.2.0 provenance chain): odin3_level, odin3_prov_dir, the construct table readers
+ *   (odin3_design_construct_count, odin3_design_get_construct), odin3_obj_get_prov,
+ *   odin3_prov_get_info, odin3_prov_visit_parents, _joined and _chain. Plugins built for ABI 6
+ *   must be rebuilt: odin3_plugin_init refuses a host of another ABI number.
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -55,7 +59,7 @@ extern "C" {
 /* ODIN3_CDEF_BEGIN */
 
 /* Incremented on every incompatible change to this header. */
-enum { ODIN3_ABI_VERSION = 6 };
+enum { ODIN3_ABI_VERSION = 7 };
 
 /* Result of every fallible Odin III function. ODIN3_OK is always 0. */
 typedef enum odin3_status {
@@ -836,6 +840,140 @@ typedef void (*odin3_prov_object_visit)(const odin3_prov_object *found, void *us
 odin3_status odin3_prov_visit_objects(const odin3_design *design, const char *file, uint32_t line,
                                       odin3_prov_object_visit visit, void *user);
 
+/* --- ABI v7: the provenance chain (docs/V1.2.0.md 4.3, docs/ADR/D14.md) ---------------------- */
+
+/*
+ * The granularity of an object or a construct, coarse to fine (V1.2.0 section 2). An instance is a
+ * separate axis: it enters a chain only as flatten's context (odin3_prov_info.n_context).
+ */
+typedef enum odin3_level {
+    ODIN3_LEVEL_NONE,
+    ODIN3_LEVEL_MODULE,
+    ODIN3_LEVEL_INSTANCE,
+    ODIN3_LEVEL_BLOCK,
+    ODIN3_LEVEL_BRANCH,
+    ODIN3_LEVEL_STMT,
+    ODIN3_LEVEL_EXPR,
+    ODIN3_LEVEL_WORD,
+    ODIN3_LEVEL_GATE,
+    ODIN3_LEVEL_LUT,
+    ODIN3_LEVEL_BLE,
+    ODIN3_LEVEL_CLB,
+    ODIN3_LEVEL_SITE
+} odin3_level;
+
+/* How a DERIVED record relates to its parents (V1.2.0 3.1). ORIGIN is SOURCE or IMPORTED. */
+typedef enum odin3_prov_dir {
+    ODIN3_DIR_ORIGIN,
+    ODIN3_DIR_REFINE,  /* one parent, many pieces share the record */
+    ODIN3_DIR_REWRITE, /* 1:1, or a regrouping that is not a blend */
+    ODIN3_DIR_COARSEN, /* N to 1 */
+    ODIN3_DIR_CONTEXT  /* the record adds the instance (flatten) */
+} odin3_prov_dir;
+
+/* The flags of odin3_prov_info.flags. */
+enum {
+    ODIN3_PROV_F_JOIN = 1,          /* a join of distinct constructs (V1.2.0 3.3) */
+    ODIN3_PROV_F_JOIN_INSTANCE = 2, /* a join of instances of one construct */
+    ODIN3_PROV_F_LOSSY_BULK = 4,    /* the pass declared the operation bulk */
+    ODIN3_PROV_F_LOSSY_CAP = 8,     /* more than 16 joined constructs */
+    ODIN3_PROV_F_SPAN_ONLY = 16     /* a leaf with no construct (restored location, imported) */
+};
+
+/* One construct of the design's construct table: a copy, its strings owned by the design. */
+typedef struct odin3_construct {
+    uint32_t index;  /* row, 1-based, stable until the design is destroyed */
+    uint32_t parent; /* row of the parent construct, 0 for a module */
+    uint32_t kind;   /* odin3_ast_kind, or ODIN3_CONSTRUCT_IF_THEN, _IF_ELSE or _CALL_SITE */
+    odin3_level level;
+    const char *file; /* "" unknown */
+    uint32_t line, col, end_line, end_col;
+    const char *name; /* "" none */
+} odin3_construct;
+
+/* One provenance record: a copy, its string owned by the design. */
+typedef struct odin3_prov_info {
+    uint32_t record; /* 1-based record ID */
+    uint32_t kind;   /* 0 SOURCE, 1 IMPORTED, 2 DERIVED */
+    uint32_t run, op;
+    odin3_prov_dir dir;
+    odin3_level from_level, to_level; /* DERIVED; NONE otherwise */
+    uint32_t flags;                   /* ODIN3_PROV_F_* */
+    uint32_t construct;               /* SOURCE: construct row, 0 none */
+    uint32_t n_parents;
+    uint32_t n_context; /* trailing context parents (flatten); 0 otherwise */
+    uint32_t n_joined;  /* |J| of V1.2.0 3.3, 0 when not a coarsen record */
+    const char *hier;   /* "" none */
+} odin3_prov_info;
+
+/* Receives one ID (a record or a construct row) with the user pointer given. */
+typedef void (*odin3_u32_visit)(uint32_t id, void *user);
+
+/* Receives one construct (valid during the call only), and the SOURCE record that reached it. */
+typedef void (*odin3_construct_visit)(const odin3_construct *construct, uint32_t leaf_record,
+                                      void *user);
+
+/*
+ * Every function below follows the conventions of the readers above: ODIN3_ERR_INVALID_ARG
+ * (logged) for a NULL design, output pointer or visit, an object, record or row out of range;
+ * ODIN3_ERR_NO_MEMORY before any visit or output; outputs unchanged on failure. The caller owns
+ * every out struct; nothing is allocated for the caller. A visit runs after the walk, may call
+ * reader functions and must not change the design. Strings (file, name, hier) are owned by the
+ * design: never free them; they stay valid until the design is destroyed. Record IDs and
+ * construct rows are never reused (records are never deleted; the table is append-only and
+ * compact does not touch it).
+ */
+
+/*
+ * One past the last construct row: the table holds rows 1 .. count - 1, so a design without
+ * rows (read with --prov-ast off, from a netlist, or before the elaborator fills the table) has
+ * count 1. 0 for a NULL design. Cannot fail otherwise.
+ */
+uint32_t odin3_design_construct_count(const odin3_design *design);
+
+/* Copies construct row `index` (1 .. count - 1) into *out. ODIN3_ERR_INVALID_ARG for any other. */
+odin3_status odin3_design_get_construct(const odin3_design *design, uint32_t index,
+                                        odin3_construct *out);
+
+/*
+ * *record gets the provenance record that names obj (a node, net or wire, live or dead but not yet
+ * compacted, or a module), 0 for an object without provenance. An ID that compact has freed names
+ * no object: ODIN3_ERR_INVALID_ARG.
+ */
+odin3_status odin3_obj_get_prov(const odin3_design *design, odin3_obj obj, uint32_t *record);
+
+/*
+ * Copies what a record is into *out: kind, run and operation, its class (direction and levels,
+ * from the op-class table the passes declare into), its construct (SOURCE), its parent counts and
+ * the labels of V1.2.0 3.3 (join, join of instances, bulk, cap, span-only). The join is computed
+ * here from the record graph and the construct table, once, by the code the map writers share.
+ * ODIN3_ERR_INVALID_ARG for record 0 or one past the last.
+ */
+odin3_status odin3_prov_get_info(const odin3_design *design, uint32_t record,
+                                 odin3_prov_info *out);
+
+/* Visits the parents of `record` in stored order (a SOURCE or IMPORTED record has none). */
+odin3_status odin3_prov_visit_parents(const odin3_design *design, uint32_t record,
+                                      odin3_u32_visit visit, void *user);
+
+/*
+ * Visits the rows of the reduced set J of `record` (V1.2.0 3.3) in the sort order the map uses,
+ * at most 16 (odin3_prov_info.n_joined is the total); nothing for a record that is not a coarsen
+ * record. Each row is a construct row number.
+ */
+odin3_status odin3_prov_visit_joined(const odin3_design *design, uint32_t record,
+                                     odin3_u32_visit visit, void *user);
+
+/*
+ * Visits the chain of obj: for each SOURCE leaf in the depth-first parent order of
+ * odin3_prov_visit_sources (each record once), the leaf's construct and then its ancestors up to
+ * the module. Each construct is reported once, at its first reach, with the record of the leaf
+ * that reached it. A leaf without a construct is skipped. An object without provenance visits
+ * nothing.
+ */
+odin3_status odin3_prov_visit_chain(const odin3_design *design, odin3_obj obj,
+                                    odin3_construct_visit visit, void *user);
+
 /*
  * *count gets one past the last pass-run ID of the design's pass-run table (docs/IR.md IR-12):
  * runs are numbered 1 .. count - 1 in the order they began (every pass, reader and front end run
@@ -998,6 +1136,13 @@ typedef enum odin3_ast_kind {
     ODIN3_AST_MINTYPMAX = 68,
     ODIN3_AST_KIND_COUNT = 69 /* one past the last kind */
 } odin3_ast_kind;
+
+/* The kinds of the construct rows the AST has no node for (odin3_construct.kind). */
+enum {
+    ODIN3_CONSTRUCT_IF_THEN = ODIN3_AST_KIND_COUNT,
+    ODIN3_CONSTRUCT_IF_ELSE = ODIN3_AST_KIND_COUNT + 1,
+    ODIN3_CONSTRUCT_CALL_SITE = ODIN3_AST_KIND_COUNT + 2
+};
 
 /* The two subsets of the one AST format (AST-9); fixed when a store is created. */
 typedef enum odin3_ast_form {
