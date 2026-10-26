@@ -84,4 +84,11 @@ class TarballTest(unittest.TestCase):
                     any(n.startswith(f"odin3-1.1.1/{prefix}") and n.endswith(".c")
                         for n in names), prefix)
             self.assertIn("odin3-1.1.1/CMakeLists.txt", names)
+            with tarfile.open(tarball) as tar:
+                for sub in ("abc", "unity"):
+                    stamp = tar.extractfile(f"odin3-1.1.1/third_party/{sub}/.odin3-commit")
+                    assert stamp is not None
+                    sha = run(["git", "-C", str(helpers.REPO_ROOT / "third_party" / sub),
+                               "rev-parse", "HEAD"]).stdout.strip()
+                    self.assertEqual(stamp.read().decode().strip(), sha, sub)
             self.assertFalse(any("/.git/" in n or "/build/" in n for n in names))
