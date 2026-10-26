@@ -203,7 +203,7 @@ static uint32_t count_of(const parsed *res, char type) {
 }
 
 /* Field f of a line as a NUL-terminated string (a small ring of buffers). */
-static const char *fld(const odin3_nm_line *line, uint32_t idx) {
+__attribute__((noinline)) static const char *fld(const odin3_nm_line *line, uint32_t idx) {
     static char ring[8][256];
     static unsigned at = 0;
     char *buf = ring[at++ % 8];
