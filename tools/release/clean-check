@@ -59,6 +59,10 @@ stage() { # stage NAME CMD... : run with output in logs/NAME.log, tail it on fai
 }
 
 clone="$work/odin3"
+# The version every stage below expects, from the committed CMakeLists.txt (as make-tarball reads it).
+version="$(git -C "$root" show HEAD:CMakeLists.txt | sed -n 's/^project(odin3 VERSION \([0-9.]*\) .*/\1/p')"
+[ -n "$version" ] || { echo "clean-check: no version in CMakeLists.txt" >&2; exit 1; }
+vre="${version//./\\.}"
 stage clone git clone --quiet "$root" "$clone"
 # Submodules from the reference checkout when it has them (no network), else from GitHub.
 git -C "$clone" submodule init > /dev/null 2>&1
@@ -81,7 +85,7 @@ stage pip-tools minenv "$work/buildvenv/bin/python" -m pip install --quiet \
 stage wheel-build minenv "$work/buildvenv/bin/python" -m build --wheel --no-isolation \
     --outdir "$work/dist" "$clone"
 # The version and platform tag the release notes state.
-wheel="$work/dist/odin3-1.1.1-py3-none-linux_x86_64.whl"
+wheel="$work/dist/odin3-$version-py3-none-linux_x86_64.whl"
 [ -f "$wheel" ] || { echo "clean-check: no $(basename "$wheel")" >&2; failed=1; exit 1; }
 stage venv-install minenv python3 -m venv "$work/installvenv"
 stage wheel-install minenv "$work/installvenv/bin/python" -m pip install --quiet "$wheel"
@@ -92,7 +96,7 @@ stage wheel-import minenv "$work/installvenv/bin/python" -c \
 # The installed CLI and flow script, run from outside the clone.
 mkdir -p "$work/outside"
 stage installed-version bash -c "cd '$work/outside' && env -i HOME='$work/home' \
-    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 1\.1\.1 '"
+    PATH='$prefix/bin:/usr/bin:/bin' odin3 --version | grep -q '^odin3 $vre '"
 stage installed-flow bash -c "cd '$work/outside' && env -i HOME='$work/home' \
     PATH='$prefix/bin:/usr/bin:/bin' '$prefix/share/odin3/tools/flow/odin3-flow' \
     --no-vpr --out '$work/outside/enc' '$clone/tests/micro/verilog/micro/bm_DL_2_4_encoder.v'"
@@ -122,8 +126,8 @@ done
 # The source tarball, built from the clone, must configure, build, test and install on its own.
 stage tarball-make "$clone/tools/release/make-tarball" --out "$work/tarball"
 mkdir -p "$work/tarsrc"
-stage tarball-unpack tar -xzf "$work/tarball/odin3-1.1.1.tar.gz" -C "$work/tarsrc"
-tsrc="$work/tarsrc/odin3-1.1.1"
+stage tarball-unpack tar -xzf "$work/tarball/odin3-$version.tar.gz" -C "$work/tarsrc"
+tsrc="$work/tarsrc/odin3-$version"
 [ ! -e "$tsrc/.git" ] || { echo "clean-check: tarball has .git" >&2; failed=1; exit 1; }
 # XDG_RUNTIME_DIR lets memcap's `systemd-run --user` reach the user manager under env -i. Fd 9 (the
 # heavy lock) is closed: the suite's own test_lock_descriptor_is_passed_on expects it closed.
@@ -134,5 +138,5 @@ stage tarball-ctest tarenv ctest --test-dir "$tsrc/build/release" -j4 --timeout 
     --output-on-failure -LE 'sweep|sweep-xl' -E '^cli_slang_flow$'
 tprefix="$work/tarprefix"
 stage tarball-install tarenv cmake --install "$tsrc/build/release" --prefix "$tprefix"
-stage tarball-installed-version bash -c "'$tprefix/bin/odin3' --version | grep -q '^odin3 1\.1\.1 '"
+stage tarball-installed-version bash -c "'$tprefix/bin/odin3' --version | grep -q '^odin3 $vre '"
 echo "clean-check: ok ($nblocks getting-started blocks, tarball build)"
