@@ -499,7 +499,7 @@ once, via `util/idindex`). A record holds:
 | `run` | the pass run that created it (the pass-run table below: pass name, arguments, run information, run number); readers and front ends are runs too |
 | `op` | operation sequence number within that run (`DERIVED`: one per decompose/clump operation) |
 | `locs` | zero or more source locations `{file str, line, col, end_line, end_col, loc}`, one per node the record covers; `loc` is the **raw** source-manager location of the node (any buffer, 0 = none; 2A AST-2). `locs[1..]` never hold chain entries, which `odin3_srcman_chain` derives from `loc` |
-| `ast` | AST node ID in the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store is held (2A AST-15/16) |
+| `ast` | AST node ID in the elaborated (else parsed) store of the record's run, 0 = none, meaningful while that store is held (2A AST-15/16); resolved in the held store, else in the construct table (IR-12a) |
 | `hier` | str ID of the hierarchical path at creation, including generate scopes (`top/u1/gen[3]`) |
 | `parents` | zero or more prov IDs (`DERIVED` only) |
 
@@ -614,6 +614,25 @@ record identity.
   record repeated is the 1:1 record of a rewrite; `odin3_kit_derive_coarsen` (and dfflibmap's inverter
   record) therefore use the default for it, so that hash-consing never gives one record two classes.
 
+- **The construct table (V1.2.0 Task 3; docs/V1.2.0.md 2, 4.3).** A design-global table
+  (`src/ir/construct.{h,c}`, the design pointer `construct`; copied by `odin3_design_clone`, counted by
+  `odin3_design_bytes_reserved`) holds the AST constructs that SOURCE records point at, so the chain of
+  a record (statement, block, module, ...) survives the AST store. A row is `{run, ast, part, call,
+  level, kind, parent, file, line, col, end_line, end_col, name}` (48 bytes with the index link). Rows
+  are appended parents first and never removed or moved (`compact` does not touch the table; a row
+  number is stable for the life of the design). `part` is 0 for a node and 1 or 2 for the synthesized
+  `IF_THEN` and `IF_ELSE` arm rows of an `IF` (the key of every ordinary row is `(run, ast, 0, 0)`);
+  `call` is the row of a call-site row for a call-instance copy of a function body. The key `(run, ast,
+  part, call)` names one row: `odin3_construct_find`. The kind map of V1.2.0 2.1 is total
+  (`odin3_construct_kind_class_of`, tested against `odin3_ast_kind_name`): every kind has a level
+  (`module`, `instance`, `block`, `branch`, `stmt`, `expr`) or is transparent (`UNIT`, `DIRECTIVE`,
+  `LIST`, `ATTR`: no row). The table also holds which runs a snapshot covered (and its mode: `refs`,
+  `constructs`, `full`) and the records whose call site matched no row (`chain=span`). It is empty until
+  the elaborator fills it (Task 4); a design read with `--prov-ast off` or from a netlist has none.
+  A SOURCE record resolves to its row by `odin3_construct_of_record`. Check rule 12 tests it. The ABI
+  readers of it (v7) are in `odin3.h`; the join and the class labels they return are computed once, in
+  `src/backends/common/prov_export.c`, which the map writers (Task 5) share.
+
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the
 backward walk in parent order that has a location (5.4 W-2: an `IMPORTED` leaf, a netlist's own
@@ -668,7 +687,7 @@ readable-Verilog writer may sort by provenance.)
 
 `check` runs before and after every pass in Debug builds (spec §3, §10) and on demand. It
 reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new status). `check
---fast` runs rules 1–5 and 11; the full check runs all. Severity: **E** error, **W** warning.
+--fast` runs rules 1–5 and 11; the full check runs all (rules 12 and 13 once per design). Severity: **E** error, **W** warning.
 
 1. **E** Every live pin belongs to a live node, and its port/bit indices are within that node's
    type's ports and widths.
@@ -695,7 +714,15 @@ reports through `util/log` and returns `ODIN3_OK` or `ODIN3_ERR_CHECK` (new stat
 10. **E** View check, when a view is asserted (IR-9).
 11. **W** A pin left unconnected on a non-port node (dangling); **E** an unconnected `$port_out`
     pin. **E** A dead node with a live pin, or a dead pin with a net.
-12. (Rule 12 reserved: the construct table, V1.2.0 Task 3; check.c has the number, no check yet.)
+12. **E** (full check, once per design) The construct table (IR-12a): every row's `parent` and `call`
+    are rows with a smaller number; its `run` is a run of the design; its `kind` has a row in the kind
+    map and its `level` is that kind's level; its `part` is 0, except that an `IF_THEN` row has part 1
+    and an `IF_ELSE` row part 2 and each hangs under an `IF` row of the same run and node; `file` and
+    `name` are strings of the design; the key `(run, ast, part, call)` names exactly the row (no two
+    rows share a key); and **completeness**: in a run whose snapshot kept every referenced node
+    (`refs` or `full`) every SOURCE record with `ast` != 0 has a row, or is a recorded call-site
+    miss. A design with no snapshot (`ast=none`, `--prov-ast off`) is not checked for completeness;
+    the `constructs` mode keeps no expression rows and is not either.
 13. **E** (full check, once per design) Op classes (IR-12a): every DERIVED record has a class (its
     override, else the default of its `(run, op)`); each class has a direction other than `origin`,
     `from`/`to` levels in range and set, a `context_tail` that is 0 unless the direction is
@@ -772,6 +799,12 @@ path. Additive: no field, rule, ABI export or check rule changes.
 Under V1.2.0 Task 2 (Peter 2026-10-25, ADR D14): IR-12a, the op-class table, `odin3_prov_begin_op_class`,
 `odin3_prov_begin_op_lazy`, `odin3_prov_derive_class` and check rule 13. Additive: no record field, ID,
 ABI export or cell type changes.
+
+Under V1.2.0 Task 3 (Peter 2026-10-25, ADR D14): IR-12a, the construct table, ABI 7 (`odin3_level` and
+`odin3_prov_dir` public; `odin3_design_construct_count`, `odin3_design_get_construct`,
+`odin3_obj_get_prov`, `odin3_prov_get_info`, `odin3_prov_visit_parents`, `odin3_prov_visit_joined` and
+`odin3_prov_visit_chain`) and check rule 12. Additive: no record field, ID, attribute or op-registry
+entry changes. Plugins built for ABI 6 must be rebuilt.
 
 Under PHASE3 #37: check rule 7 also tests that a record's `hier` is 0 or a string-table ID. No
 other check rule, field or ABI change; the path's shape is not checked.
