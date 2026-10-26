@@ -2,6 +2,9 @@
 # make-tarball: the source release, with the ABC and Unity submodules (GitHub's archives leave
 # submodules out). Writes odin3-<version>.tar.gz and SHA256SUMS into --out (default: the current
 # directory). Needs the submodules checked out (git submodule update --init). Never tags or uploads.
+# The tarball has no git metadata, so it also carries a stamp file in each submodule holding that
+# submodule's HEAD sha (third_party/abc/.odin3-commit, third_party/unity/.odin3-commit); cmake/
+# abc_pin.cmake reads the ABC one. The stamps are generated here, never committed.
 #
 # Usage: tools/release/make-tarball [--out DIR]
 # Exit: 0 ok; 1 failed; 2 usage error.
@@ -26,10 +29,17 @@ mkdir -p "$out"
 out="$(cd "$out" && pwd)"
 name="odin3-$version"
 list="$(mktemp)"
-trap 'rm -f "$list"' EXIT
+stamps="$(mktemp -d)"
+trap 'rm -rf "$list" "$stamps"' EXIT
+for sub in third_party/abc third_party/unity; do
+    mkdir -p "$stamps/$sub"
+    git -C "$root/$sub" rev-parse HEAD > "$stamps/$sub/.odin3-commit"
+done
 git -C "$root" ls-files --recurse-submodules -z > "$list"
 mtime="$(git -C "$root" log -1 --format=%ct)"
 tar -C "$root" --null -T "$list" --transform "s,^,$name/," --sort=name --owner=0 --group=0 \
-    --numeric-owner --mtime="@$mtime" -cf - | gzip -n > "$out/$name.tar.gz"
+    --numeric-owner --mtime="@$mtime" -cf - \
+    -C "$stamps" third_party/abc/.odin3-commit third_party/unity/.odin3-commit \
+    | gzip -n > "$out/$name.tar.gz"
 (cd "$out" && sha256sum "$name.tar.gz" > SHA256SUMS)
 echo "make-tarball: $out/$name.tar.gz"
