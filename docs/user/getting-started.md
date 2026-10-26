@@ -17,6 +17,14 @@ cmake --preset release
 cmake --build --preset release
 ```
 
+From the release's source tarball (it has the ABC and Unity submodules, no git needed) the same
+build is:
+
+```sh
+tar xzf odin3-1.1.1.tar.gz && cd odin3-1.1.1
+cmake --preset release && cmake --build --preset release
+```
+
 The binary is `build/release/odin3`. Put its directory on `PATH` for the rest of this page, or
 pass `--odin3 build/release/odin3` to the flow script.
 

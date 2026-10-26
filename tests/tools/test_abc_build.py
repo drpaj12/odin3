@@ -65,6 +65,21 @@ class AbcPinTest(unittest.TestCase):
         self.assertIn("git -c protocol.file.allow=always submodule update", run.stderr)
         self.assertNotIn("is at ", run.stderr)
 
+    def test_stamp_without_git_is_the_head(self) -> None:
+        # A source tarball: no .git, a stamp written by make-tarball.
+        with tempfile.TemporaryDirectory() as src:
+            (Path(src) / ".odin3-commit").write_text(PIN + "\n", encoding="utf-8")
+            run = _pin_check(source=src)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertEqual(run.stderr, "")
+
+    def test_stamp_mismatch_stops(self) -> None:
+        with tempfile.TemporaryDirectory() as src:
+            (Path(src) / ".odin3-commit").write_text(ZERO + "\n", encoding="utf-8")
+            run = _pin_check(source=src)
+        self.assertNotEqual(run.returncode, 0, run.stdout + run.stderr)
+        self.assertIn(f"third_party/abc is at {ZERO}; ORACLES.md pins {PIN}", run.stderr)
+
     def test_pin_matches_oracles_md(self) -> None:
         oracles = (helpers.REPO_ROOT / "docs" / "ORACLES.md").read_text(encoding="utf-8")
         self.assertIn(f"`{PIN}`", oracles)
