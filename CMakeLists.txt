@@ -286,6 +286,7 @@ add_library(odin3_core OBJECT
     src/ir/prov.c
     src/ir/opclass.c
     src/ir/construct.c
+    src/ir/construct_snapshot.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -2437,6 +2438,22 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/unit/data/abc
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
         set_tests_properties(abc_equiv_micro PROPERTIES LABELS tools TIMEOUT 3600)
+        # V1.2.0 Task 4 (tools/construct-check): the construct snapshot. construct_golden: each design
+        # of tests/loc/constructs reads, passes `check` (rule 12) and dumps `dump_locs --constructs`
+        # equal to its .constructs golden. construct_bytes: every writer output of those designs and of
+        # the 60 smallest designs of both that directory and tests/micro/verilog/micro is identical under
+        # --prov-ast off, refs, constructs and full. The whole micro set against a build of main is
+        # `construct-check bytes --odin3-base` (label sweep, run by hand).
+        add_test(NAME construct_golden
+            COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/construct-check/construct_check.py
+                    golden --odin3 $<TARGET_FILE:odin3> ${PROJECT_SOURCE_DIR}/tests/loc/constructs)
+        set_tests_properties(construct_golden PROPERTIES LABELS tools TIMEOUT 600)
+        add_test(NAME construct_bytes
+            COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/construct-check/construct_check.py
+                    bytes --odin3 $<TARGET_FILE:odin3> --limit 60 --jobs 2
+                    ${PROJECT_SOURCE_DIR}/tests/loc/constructs
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro)
+        set_tests_properties(construct_bytes PROPERTIES LABELS tools TIMEOUT 1800)
         # Phase 7 (7.4a, spec 3.1 S-6): submod then flatten on every second logic cell of the BLIF
         # micros, equivalent to the input. Left out: pow.parmys (equiv-check cannot read $pow),
         # hand_body (an unnamed black box equiv-check cannot pair) and hand_writers (the JSON round

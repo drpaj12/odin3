@@ -17,10 +17,12 @@
 #include "frontends/elab/elab_test.h"
 #include "frontends/elab/netlist_locs.h"
 #include "frontends/elab/pg.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
+#include "passes/budget.h"
 #include "util/alloc.h"
 #include "util/clock.h"
 #include "util/hash.h"
@@ -890,6 +892,22 @@ static odin3_status end_status(const odin3_elab2 *e2) {
     return e2->errors > 0 || e2->stopped ? ODIN3_ERR_PARSE : ODIN3_OK;
 }
 
+/* V1.2.0 4.2, 4.3 item 4: the construct table of the run, in the mode the read asked for. A table
+ * that does not fit the design byte budget fails the read; there is no silent downgrade. */
+static odin3_status snapshot_constructs(odin3_pass_ctx *ctx, const odin3_ast *elab) {
+    odin3_status st =
+        odin3_construct_snapshot(ctx->design, elab, odin3_construct_read_mode(ctx->design));
+    if (st == ODIN3_OK && odin3_budget_check(ctx, ctx->design, 0) != ODIN3_OK) {
+        st = ODIN3_ERR_NO_MEMORY;
+    }
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: the construct table does not fit; read again with --prov-ast "
+                  "constructs or --prov-ast off");
+    }
+    return st;
+}
+
 odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3_elab_opts *opts) {
     double started = odin3_now_ms();
     odin3_elab2 *e2 = NULL;
@@ -900,6 +918,9 @@ odin3_status odin3_elab_stage2(odin3_pass_ctx *ctx, odin3_ast *elab, const odin3
     }
     if (st == ODIN3_OK) {
         st = finish(e2, started); /* never after an error: the top stays unset (EL-2) */
+    }
+    if (st == ODIN3_OK) {
+        st = snapshot_constructs(ctx, elab);
     }
     odin3_elab2_destroy(e2);
     return st;

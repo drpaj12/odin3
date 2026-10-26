@@ -25,6 +25,7 @@
 #include "frontends/verilog/read_verilog_test.h"
 #include "frontends/verilog/soft_blocks.h"
 #include "ir/check.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
@@ -387,6 +388,8 @@ typedef struct rv_args {
     odin3_elab_opts elab;
     odin3_vec files;
     odin3_bytes name_map; /* -name-map's file (H-6), ptr NULL when not given */
+    bool prov_set;        /* --prov-ast given */
+    odin3_construct_mode prov_ast;
 } rv_args;
 
 /* A flag word: true when it is one of the pass's flags (and sets it). */
@@ -456,6 +459,23 @@ static odin3_status take_name_map(odin3_bytes *rest, rv_args *out) {
     return ODIN3_OK;
 }
 
+/* --prov-ast refs|constructs|full|off (V1.2.0 4.2): what the construct table keeps. */
+static odin3_status take_prov_ast(odin3_bytes *rest, rv_args *out) {
+    static const char *const names[] = {"off", "refs", "constructs", "full"};
+    odin3_bytes mode = odin3_pass_arg_next(rest);
+    for (size_t i = 0; mode.ptr != NULL && !out->prov_set && i < 4; i++) {
+        if (odin3_pass_arg_is(mode, names[i])) {
+            out->prov_set = true;
+            out->prov_ast = (odin3_construct_mode)i;
+            return ODIN3_OK;
+        }
+    }
+    odin3_log(ODIN3_LOG_ERROR, out->prov_set ? "read_verilog: --prov-ast given twice"
+                                             : "read_verilog: --prov-ast expects refs, constructs, "
+                                               "full or off");
+    return ODIN3_ERR_INVALID_ARG;
+}
+
 /* A flag or -name-map <file>: *taken says the word was one. */
 static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *out, bool *taken) {
     *taken = true;
@@ -464,6 +484,9 @@ static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *ou
     }
     if (odin3_pass_arg_is(word, "-name-map") || odin3_pass_arg_is(word, "--name-map")) {
         return take_name_map(rest, out);
+    }
+    if (odin3_pass_arg_is(word, "--prov-ast")) {
+        return take_prov_ast(rest, out);
     }
     *taken = false;
     return ODIN3_OK;
@@ -826,6 +849,10 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_vec svs;
     odin3_vec_init(&svs, sizeof(odin3_pp_source));
     odin3_status st = parse_args(args, &parsed);
+    const odin3_construct_mode prov_before = odin3_construct_read_mode(design);
+    if (parsed.prov_set) {
+        odin3_construct_set_read_mode(design, parsed.prov_ast); /* restored below */
+    }
     st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs, &svs);
     if (st == ODIN3_OK && svs.len > 0 && srcs.len > 0) {
         odin3_log(ODIN3_LOG_ERROR,
@@ -849,6 +876,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
             odin3_name_resolver_close(&names);
         }
     }
+    odin3_construct_set_read_mode(design, prov_before);
     odin3_vec_free(&svs);
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
@@ -857,7 +885,8 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
-    "read_verilog [--parse-only] [--lib] [--nolatches] [--nomem2reg] [--auto-blackbox] "
+    "read_verilog [--parse-only] [--lib] [--prov-ast refs|constructs|full|off] [--nolatches] "
+    "[--nomem2reg] [--auto-blackbox] "
     "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
@@ -871,6 +900,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "
     "its records are IMPORTED, a `(* src = \"file:line\" *)` attribute, a trailing `// file:line` "
     "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; "
+    "--prov-ast keeps the construct table of the read (refs: the nodes provenance records point "
+    "at and their ancestors; constructs: without expressions; full: every node; off: none); "
     "-name-map "
     "(with -netlist) first replaces each hash net name the map (write_verilog --name-style hash) "
     "holds by its full name; --lib "

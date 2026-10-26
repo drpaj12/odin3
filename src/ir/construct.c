@@ -136,6 +136,7 @@ odin3_construct_table *odin3_construct_create(void) {
     odin3_vec_init(&table->runs, sizeof(run_row));
     odin3_vec_init(&table->misses, sizeof(uint32_t));
     table->heads = odin3_u64map_create(0);
+    table->read_mode = ODIN3_CONSTRUCT_MODE_DEFAULT;
     if (table->heads == NULL) {
         odin3_construct_destroy(table);
         return NULL;
@@ -363,6 +364,32 @@ uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id rec
         }
     }
     return found;
+}
+
+odin3_status odin3_construct_alias(odin3_design *design, odin3_passrun_id run, uint32_t ast,
+                                   uint32_t row) {
+    odin3_construct_table *table = design != NULL ? design->construct : NULL;
+    const odin3_construct_row *target = table != NULL ? row_cat(table, row) : NULL;
+    uint64_t have = 0;
+    if (run.v == 0 || ast == 0 || target == NULL || target->next != 0 ||
+        odin3_u64map_get(table->heads, node_key(run, ast), &have)) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_construct_alias: invalid node, row or alias exists");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_u64map_put(table->heads, (odin3_kv){node_key(run, ast), row}) == ODIN3_OK
+               ? ODIN3_OK
+               : ODIN3_ERR_NO_MEMORY;
+}
+
+void odin3_construct_set_read_mode(odin3_design *design, odin3_construct_mode mode) {
+    if (design != NULL && design->construct != NULL) {
+        design->construct->read_mode = mode;
+    }
+}
+
+odin3_construct_mode odin3_construct_read_mode(const odin3_design *design) {
+    return design != NULL && design->construct != NULL ? design->construct->read_mode
+                                                       : ODIN3_CONSTRUCT_MODE_DEFAULT;
 }
 
 odin3_status odin3_construct_mark_run(odin3_design *design, odin3_passrun_id run,

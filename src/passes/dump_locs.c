@@ -11,8 +11,10 @@
  * The tool that
  * measures a write and read back (tools/loc-check) runs it before and after and compares.
  */
+#include "ast/kinds.h"
 #include "backends/common/hdl_loc.h"
 #include "ir/celltype.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
@@ -156,13 +158,14 @@ static odin3_status write_stdout(const odin3_strbuf *text) {
 
 typedef struct dump_args {
     bool types;
+    bool constructs;  /* --constructs: the construct table instead of the objects */
     odin3_bytes path; /* ptr NULL: stdout */
 } dump_args;
 
 /* Reads `[--types] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated --types, an
  * empty or a second path. A literal `--` ends the options, so a path may start with `--`. */
 static odin3_status parse_args(odin3_bytes args, dump_args *out) {
-    *out = (dump_args){false, {NULL, 0}};
+    *out = (dump_args){false, false, {NULL, 0}};
     bool options = true;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
@@ -175,6 +178,13 @@ static odin3_status parse_args(odin3_bytes args, dump_args *out) {
                 return ODIN3_ERR_INVALID_ARG;
             }
             out->types = true;
+        } else if (options && word.len == strlen("--constructs") &&
+                   memcmp(word.ptr, "--constructs", word.len) == 0) {
+            if (out->constructs) {
+                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --constructs given twice");
+                return ODIN3_ERR_INVALID_ARG;
+            }
+            out->constructs = true;
         } else if (out->path.ptr != NULL || word.len == 0 ||
                    (options && word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
             return ODIN3_ERR_INVALID_ARG;
@@ -185,14 +195,65 @@ static odin3_status parse_args(odin3_bytes args, dump_args *out) {
     return ODIN3_OK;
 }
 
+/* --- --constructs: the construct table (V1.2.0 4.3) ------------------------------------------- */
+
+static const char *const k_level_names[] = {"none", "module", "instance", "block", "branch",
+                                            "stmt", "expr",   "word",     "gate",  "lut",
+                                            "ble",  "clb",    "site"};
+static const char *const k_mode_names[] = {"off", "refs", "constructs", "full"};
+
+static const char *construct_kind_name(uint32_t kind) {
+    switch (kind) {
+    case ODIN3_CONSTRUCT_IF_THEN:
+        return "IF_THEN";
+    case ODIN3_CONSTRUCT_IF_ELSE:
+        return "IF_ELSE";
+    case ODIN3_CONSTRUCT_CALL_SITE:
+        return "CALL_SITE";
+    default:
+        return odin3_ast_kind_name(kind);
+    }
+}
+
+/* The file name without its directory, so that a golden does not hold a machine's paths. */
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash != NULL ? slash + 1 : path;
+}
+
+/* `run|<run>|<mode>` per marked run, then `construct|row|kind|level|part|parent|call|run|span|name`
+ * per row (span file:line:col-end_line:end_col, file without directory). */
+static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *text) {
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t run = 1; st == ODIN3_OK && run < odin3_passrun_end(design); run++) {
+        odin3_construct_mode mode = odin3_construct_run_mode(design, (odin3_passrun_id){run});
+        st = mode == ODIN3_CONSTRUCT_MODE_OFF
+                 ? ODIN3_OK
+                 : odin3_strbuf_appendf(text, "run|%u|%s\n", run, k_mode_names[mode]);
+    }
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_construct_end(design); i++) {
+        const odin3_construct_row *row = odin3_construct_get(design, i);
+        st = odin3_strbuf_appendf(text, "construct|%u|%s|%s|%u|%u|%u|%u|%s:%u:%u-%u:%u|", i,
+                                  construct_kind_name(row->kind), k_level_names[row->level],
+                                  (unsigned)row->part, row->parent, row->call, row->run,
+                                  base_name(odin3_strtab_get(tab, row->file)), row->line, row->col,
+                                  row->end_line, row->end_col);
+        st = st != ODIN3_OK ? st : append_escaped(text, odin3_strtab_get(tab, row->name));
+        st = st != ODIN3_OK ? st : odin3_strbuf_append(text, odin3_bytes_cstr("\n"));
+    }
+    return st;
+}
+
 static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)ctx;
     (void)user;
     dump_args parsed;
     if (parse_args(args, &parsed) != ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "dump_locs: expects [--types] [--] and at most one non-empty path");
+        odin3_log(
+            ODIN3_LOG_ERROR,
+            "dump_locs: expects [--types] [--constructs] [--] and at most one non-empty path");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_bytes path = parsed.path;
@@ -205,7 +266,11 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     odin3_strbuf_init(&state.src);
     odin3_strbuf_init(&name);
     odin3_status st = state.hdl != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
+    if (st == ODIN3_OK && parsed.constructs) {
+        st = dump_constructs(design, &state.text);
+    }
+    for (uint32_t i = 1;
+         st == ODIN3_OK && !parsed.constructs && i < odin3_design_module_end(design); i++) {
         const odin3_module *module = odin3_module_get(design, (odin3_module_id){i});
         st = module != NULL ? dump_module(&state, module) : ODIN3_OK;
     }
@@ -224,11 +289,12 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 
 const odin3_pass_def odin3_pass_dump_locs = {
     "dump_locs",
-    "dump_locs [--types] [--] [<file>]: list every module, wire, net and node with its HDL "
+    "dump_locs [--types | --constructs] [--] [<file>]: list every module, wire, net and node with "
+    "its HDL "
     "locations, "
     "one "
     "`module|kind|name|SRC` line each, `node:TYPE` as the node kind with --types (stdout without a "
-    "file)",
+    "file); --constructs lists the construct table instead (run and construct lines)",
     dump_locs_run,
     NULL,
     false,
