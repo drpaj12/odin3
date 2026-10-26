@@ -4,7 +4,7 @@ Usage::
 
     construct-check golden --odin3 O [--write] [--no-sv] DIR
     construct-check escape --odin3 O
-    construct-check bytes  --odin3 O [--odin3-base B --base-lib DIR] [--list FILE] [--jobs N]
+    construct-check bytes  --odin3 O [--odin3-base B --base-lib DIR [--mode M]] [--list FILE] [--jobs N]
                            [--out DIR] [--limit N] [--no-sv] [--no-abc] <design.v or dir>...
 
 ``golden``: every ``.v`` and ``.sv`` file of DIR is read (``read_verilog --prov-ast M``), checked
@@ -140,7 +140,7 @@ def cmd_bytes(args: argparse.Namespace) -> int:
         designs = designs[: args.limit]
     pairs: list[tuple[Side, Side]] = []
     if args.odin3_base:
-        pairs.append((Side(args.odin3_base, args.base_lib, None), Side(args.odin3, None, "off")))
+        pairs.append((Side(args.odin3_base, args.base_lib, None), Side(args.odin3, None, args.mode)))
     else:
         off = Side(args.odin3, None, "off")
         pairs += [(off, Side(args.odin3, None, m)) for m in MODES[1:]]
@@ -299,6 +299,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b = sub.add_parser("bytes")
     b.add_argument("--odin3", required=True)
     b.add_argument("--odin3-base")
+    b.add_argument("--mode", default="off", choices=MODES,
+                   help="with --odin3-base: the --prov-ast mode of the new build (default off)")
     b.add_argument("--base-lib")
     b.add_argument("--jobs", type=int, default=4)
     b.add_argument("--limit", type=int, default=0)
