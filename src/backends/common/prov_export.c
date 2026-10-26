@@ -512,7 +512,11 @@ static odin3_status entry_add(label_cache *cache, uint32_t record, anchor_entry 
     return ODIN3_OK;
 }
 
+/* NULL for an empty entry: the pool may still be unallocated, and an offset on NULL is UB. */
 static const uint32_t *entry_anchors(const label_cache *cache, const anchor_entry *entry) {
+    if (entry->len == 0) {
+        return NULL;
+    }
     return (const uint32_t *)cache->pool.data + entry->off;
 }
 
