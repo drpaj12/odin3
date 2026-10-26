@@ -226,6 +226,14 @@ static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     bool hidden = renamed != NULL ? out->hide : name_hidden(out, name);
     if (renamed == NULL) {
         jw_record_key(out, text != NULL ? text : "");
+        jw_keyspec kept = {JW_KEY_NETNAME,
+                           false,
+                           text != NULL ? text : "",
+                           "",
+                           odin3_wire_prov(out->module, wire),
+                           ODIN3_NAME_WIRE,
+                           wire.v};
+        (void)jw_names_kept(out, &kept, kept.head);
     }
     jw_item(out, names);
     if (renamed != NULL) {
@@ -768,6 +776,33 @@ static odin3_status save_hashed(jw *state, const char *path, const char *name_ma
     return status;
 }
 
+/* False (logged) for a name style that is not one of the three. */
+static bool style_valid(odin3_json_name_style style) {
+    if (style == ODIN3_JSON_NAMES_SHORT || style == ODIN3_JSON_NAMES_PROVENANCE ||
+        style == ODIN3_JSON_NAMES_HASH) {
+        return true;
+    }
+    odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: unknown name style");
+    return false;
+}
+
+/* True (and logged) for --prov-map without hash names. */
+static bool prov_map_needs_hash(odin3_prov_map_mode mode, odin3_json_name_style style) {
+    if (mode == ODIN3_PROV_MAP_NONE || style == ODIN3_JSON_NAMES_HASH) {
+        return false;
+    }
+    odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: --prov-map needs --name-style hash");
+    return true;
+}
+
+/* --prov-map: turns the version 2 map on (and checks what the read kept). */
+static odin3_status enable_prov_map(jw *state, odin3_prov_map_mode mode) {
+    if (mode == ODIN3_PROV_MAP_NONE) {
+        return ODIN3_OK;
+    }
+    return odin3_hash_rows_prov_enable(&state->rows, state->design, mode, "write_json");
+}
+
 odin3_status odin3_json_write(const odin3_design *design, const char *path) {
     return odin3_json_write_with(design, path, NULL);
 }
@@ -779,9 +814,8 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_json_name_style style = opts != NULL ? opts->name_style : ODIN3_JSON_NAMES_SHORT;
-    if (style != ODIN3_JSON_NAMES_SHORT && style != ODIN3_JSON_NAMES_PROVENANCE &&
-        style != ODIN3_JSON_NAMES_HASH) {
-        odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: unknown name style");
+    odin3_prov_map_mode prov_map = opts != NULL ? opts->prov_map : ODIN3_PROV_MAP_NONE;
+    if (!style_valid(style) || prov_map_needs_hash(prov_map, style)) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
@@ -802,6 +836,7 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
     odin3_wattr_seen_init(&state.seen);
     state.hdl = odin3_hdl_ctx_create(design, "write_json");
     odin3_status status = state.hdl != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    status = status == ODIN3_OK ? enable_prov_map(&state, prov_map) : status;
     if (status == ODIN3_OK && style == ODIN3_JSON_NAMES_HASH) {
         status = save_hashed(&state, path, opts->name_map);
     } else if (status == ODIN3_OK) {

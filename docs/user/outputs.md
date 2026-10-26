@@ -22,6 +22,15 @@ A file name of `-` writes to standard output for the formats that say so in {doc
   translate in both directions, and `read_blif --name-map` or `read_json --name-map` puts the full
   names back on read.
 
+`--prov-map [refs|constructs|full]` (with `--name-style hash`, on `write_blif --vtr`,
+`write_json` and `write_verilog`) writes the name map in version 2: the same `O` lines, then one
+`R` line per provenance record behind the named objects (class, parents, source locations, the
+joins a merge or a LUT made), the `C` lines of the AST constructs they come from, and the `F` and
+`T` lines for the files and pass runs they name. The netlist is unchanged. The AST layer is at
+most what `read_verilog --prov-ast` kept; the command line keeps none by default, so give
+`--prov-ast refs` to the read, or the map has `ast=none` and no `C` lines. Without the option the
+map is version 1, byte for byte as before.
+
 ## HDL locations
 
 Every IR object carries provenance. Where the writer can express it, so does the file:

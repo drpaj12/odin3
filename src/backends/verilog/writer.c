@@ -628,7 +628,8 @@ static void note_hashed(verilog_writer *wr, const vw_named *obj) {
                        .module_name = odin3_bytes_cstr(wr->mod.name != NULL ? wr->mod.name : ""),
                        .kind = name_kind_of(obj->kind),
                        .key = obj_key(obj->kind, obj->id),
-                       .full = {wr->cand.data, wr->cand.len}});
+                       .full = {wr->cand.data, wr->cand.len},
+                       .prov = obj->prov.v});
     if (st != ODIN3_OK) {
         (void)vw_fail(wr, st);
     }
@@ -808,6 +809,71 @@ static void generate_names(verilog_writer *wr) {
     }
 }
 
+/* Records one object that keeps its name (an N line of the version 2 map). */
+static odin3_status add_kept(verilog_writer *wr, vw_obj kind, uint32_t id, odin3_prov_id prov) {
+    uint32_t name = name_of(wr, kind, id);
+    if (name == 0 || prov.v == 0) {
+        return ODIN3_OK;
+    }
+    return odin3_hash_rows_add_kept(
+        &wr->rows,
+        &(odin3_hash_kept_req){
+            .module = odin3_module_id_of(wr->mod.module).v,
+            .module_name = odin3_bytes_cstr(wr->mod.name != NULL ? wr->mod.name : ""),
+            .kind = name_kind_of(kind),
+            .name = {odin3_strtab_get(wr->mod.names, name), odin3_strtab_len(wr->mod.names, name)},
+            .prov = prov.v});
+}
+
+/* The record of live object (kind, id) of the module being written, none for a dead one. */
+static odin3_prov_id live_prov(const verilog_writer *wr, vw_obj kind, uint32_t id) {
+    const odin3_module *module = wr->mod.module;
+    if (kind == OBJ_WIRE) {
+        return odin3_wire_live(module, (odin3_wire_id){id})
+                   ? odin3_wire_prov(module, (odin3_wire_id){id})
+                   : (odin3_prov_id){0};
+    }
+    if (kind == OBJ_NET) {
+        return odin3_net_live(module, (odin3_net_id){id})
+                   ? odin3_net_prov(module, (odin3_net_id){id})
+                   : (odin3_prov_id){0};
+    }
+    return odin3_node_live(module, (odin3_node_id){id})
+               ? odin3_node_prov(module, (odin3_node_id){id})
+               : (odin3_prov_id){0};
+}
+
+static uint32_t kind_end(const verilog_writer *wr, vw_obj kind) {
+    const odin3_module *module = wr->mod.module;
+    if (kind == OBJ_WIRE) {
+        return odin3_module_wire_end(module);
+    }
+    return kind == OBJ_NET ? odin3_module_net_end(module) : odin3_module_node_end(module);
+}
+
+/* HASH with the version 2 map: every wire, net and cell of the module that keeps its name and has
+ * a record gets an N line; the objects the rows from `first` renamed got O lines. */
+static odin3_status note_kept(verilog_writer *wr, size_t first) {
+    if (!odin3_hash_rows_prov_on(&wr->rows)) {
+        return ODIN3_OK;
+    }
+    odin3_u64map *renamed = odin3_u64map_create(0);
+    odin3_status st = renamed != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    for (size_t i = first; st == ODIN3_OK && i < odin3_hash_rows_count(&wr->rows); i++) {
+        st = odin3_u64map_put(renamed, (odin3_kv){odin3_hash_rows_at(&wr->rows, i)->key, 1});
+    }
+    static const vw_obj KINDS[] = {OBJ_WIRE, OBJ_NET, OBJ_NODE};
+    for (size_t k = 0; st == ODIN3_OK && k < sizeof KINDS / sizeof KINDS[0]; k++) {
+        for (uint32_t i = 1; st == ODIN3_OK && i < kind_end(wr, KINDS[k]); i++) {
+            st = odin3_u64map_get(renamed, obj_key(KINDS[k], i), NULL)
+                     ? ODIN3_OK
+                     : add_kept(wr, KINDS[k], i, live_prov(wr, KINDS[k], i));
+        }
+    }
+    odin3_u64map_destroy(renamed);
+    return st;
+}
+
 static void end_module(verilog_writer *wr) {
     odin3_strtab_destroy(wr->mod.names);
     odin3_u64map_destroy(wr->mod.obj_names);
@@ -815,6 +881,20 @@ static void end_module(verilog_writer *wr) {
     odin3_util_free(wr->mod.refs);
     odin3_util_free(wr->mod.wire_port);
     wr->mod = (vw_module){0};
+}
+
+/* Claims the names of the module's objects (hash names resolved, then the generated names) and,
+ * with the version 2 map, records the objects that keep theirs. */
+static void name_objects(verilog_writer *wr) {
+    size_t first = odin3_hash_rows_count(&wr->rows);
+    claim_names(wr);
+    odin3_status st = wr->st == ODIN3_OK && wr->name_style == ODIN3_VERILOG_NAMES_HASH
+                          ? hash_apply(wr, first)
+                          : ODIN3_OK;
+    (void)(st != ODIN3_OK ? vw_fail(wr, st) : st);
+    generate_names(wr);
+    st = wr->st == ODIN3_OK ? note_kept(wr, first) : st;
+    (void)(st != ODIN3_OK ? vw_fail(wr, st) : st);
 }
 
 static odin3_status begin_module(verilog_writer *wr, const odin3_module *module) {
@@ -840,13 +920,7 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
         }
     }
     if (wr->st == ODIN3_OK) {
-        size_t first = odin3_hash_rows_count(&wr->rows);
-        claim_names(wr);
-        odin3_status st = wr->st == ODIN3_OK && wr->name_style == ODIN3_VERILOG_NAMES_HASH
-                              ? hash_apply(wr, first)
-                              : ODIN3_OK;
-        (void)(st != ODIN3_OK ? vw_fail(wr, st) : st);
-        generate_names(wr);
+        name_objects(wr);
     }
     return wr->st;
 }
@@ -2025,6 +2099,18 @@ static odin3_status open_outputs(verilog_writer *wr, const odin3_verilog_opts *o
     return st == ODIN3_OK ? wr_open(wr) : st;
 }
 
+/* --prov-map: only with hash names; turns the version 2 map on (and checks what the read kept). */
+static odin3_status enable_prov_map(verilog_writer *wr, const odin3_verilog_opts *opts) {
+    if (opts == NULL || opts->prov_map == ODIN3_PROV_MAP_NONE) {
+        return ODIN3_OK;
+    }
+    if (wr->name_style != ODIN3_VERILOG_NAMES_HASH) {
+        odin3_log(ODIN3_LOG_ERROR, "verilog_write: --prov-map needs --name-style hash");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_hash_rows_prov_enable(&wr->rows, wr->design, opts->prov_map, "write_verilog");
+}
+
 odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
                                  const odin3_verilog_opts *opts) {
     if (design == NULL || path == NULL ||
@@ -2040,6 +2126,7 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
     verilog_writer wr;
     odin3_status st = wr_init(&wr, design, path);
     wr.name_style = opts != NULL ? opts->name_style : ODIN3_VERILOG_NAMES_SHORT;
+    st = st == ODIN3_OK ? vw_fail(&wr, enable_prov_map(&wr, opts)) : st;
     odin3_hash_map_file map = {.open = false};
     st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {

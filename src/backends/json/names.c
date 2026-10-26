@@ -27,7 +27,26 @@ static odin3_status collect_row(jw *out, const jw_keyspec *spec, const char *key
                             odin3_strtab_len(out->strtab, odin3_module_name(out->module))},
             .kind = spec->obj_kind,
             .key = row_key(spec),
-            .full = odin3_bytes_cstr(key)});
+            .full = odin3_bytes_cstr(key),
+            .prov = spec->prov.v});
+}
+
+/* COLLECT, version 2 map: the object keeps `key` and has a record (an N line). */
+odin3_status jw_names_kept(jw *out, const jw_keyspec *spec, const char *key) {
+    if (out->names != JW_NAMES_COLLECT || out->status != ODIN3_OK) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_hash_rows_add_kept(
+        &out->rows,
+        &(odin3_hash_kept_req){
+            .module = odin3_module_id_of(out->module).v,
+            .module_name = {odin3_strtab_get(out->strtab, odin3_module_name(out->module)),
+                            odin3_strtab_len(out->strtab, odin3_module_name(out->module))},
+            .kind = spec->obj_kind,
+            .name = odin3_bytes_cstr(key),
+            .prov = spec->prov.v});
+    out->status = out->status == ODIN3_OK ? st : out->status;
+    return st;
 }
 
 /* APPLY: the next collected row's hash name, which must be this object's. */

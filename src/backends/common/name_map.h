@@ -11,6 +11,12 @@
  * `\` and `%` are written %09, %0A, %5C, %25, and a first byte `#` of the module (which would make
  * the line a comment) is written %23. This module writes, parses and checks that text; it
  * does no file I/O and touches no IR.
+ *
+ * Version 2 (V1.2.0 3.2) begins `# odin3-names 2 hash=sha256 width=N prov=1 ast=<mode>` and every
+ * later line starts with a one letter type and a TAB: O (an O line is the seven fields above, then
+ * recs and level), N, R, C, F, T, A. The escapes are the four above plus %2C and %7C (list fields
+ * are `,` and `|` separated, each element escaped on its own). This module writes the lines it is
+ * given and parses and checks them; the numbering and the join rules are prov_export.c's.
  */
 #ifndef ODIN3_BACKENDS_COMMON_NAME_MAP_H
 #define ODIN3_BACKENDS_COMMON_NAME_MAP_H
@@ -25,8 +31,10 @@
 
 enum {
     ODIN3_NAME_MAP_VERSION = 1,
+    ODIN3_NAME_MAP_VERSION_2 = 2,
     ODIN3_NAME_MAP_FIELDS = 7,
-    ODIN3_NAME_MAP_MAX_LINE = 1 << 20,   /* longest accepted line, bytes (longer: ignored) */
+    ODIN3_NM2_MAX_FIELDS = 12,         /* fields kept of a version 2 line (the rest are ignored) */
+    ODIN3_NAME_MAP_MAX_LINE = 1 << 20, /* longest accepted line, bytes (longer: ignored) */
     ODIN3_NAME_MAP_MAX_ENTRIES = 1 << 24 /* most entries a parse keeps (over: an error) */
 };
 
@@ -58,6 +66,18 @@ typedef struct odin3_name_ref {
     const odin3_name_entry *entry;
 } odin3_name_ref;
 
+/*
+ * A version 2 line as parsed, the fields still escaped (a list field is split at `,` or `|`
+ * first, then each element unescaped with odin3_name_map_unescape). type is the letter; f holds
+ * the fields after it. O lines are kept here too, beside their odin3_name_entry.
+ */
+typedef struct odin3_nm_line {
+    char type;
+    uint32_t lineno;
+    uint32_t nfields;
+    odin3_bytes f[ODIN3_NM2_MAX_FIELDS];
+} odin3_nm_line;
+
 /* A parsed map: entries sorted by (module, kind, short); every view lives until map_free. */
 typedef struct odin3_name_map {
     odin3_vec entries; /* odin3_name_entry */
@@ -65,6 +85,9 @@ typedef struct odin3_name_map {
     uint32_t width;          /* the header's width (H-4) */
     uint32_t ignored;        /* entry lines the parse warned about and dropped */
     odin3_name_ref *by_full; /* sorted by (module, kind, full): find_full */
+    uint32_t version;        /* 1 or 2 */
+    odin3_bytes ast;         /* version 2: the header's ast= word (refs, constructs, full, none) */
+    odin3_vec lines; /* version 2: odin3_nm_line, in file order, every type but the header */
 } odin3_name_map;
 
 /* ODIN3_ERR_NO_MEMORY when the arena cannot be created. */
@@ -95,6 +118,57 @@ odin3_status odin3_name_map_write(const odin3_name_entry *entries, uint32_t n, u
  * the entries are sorted by (module, kind, short).
  */
 odin3_status odin3_name_map_parse(odin3_name_map *map, odin3_bytes text, const char *path);
+
+/* --- version 2 -------------------------------------------------------------------------------- */
+
+/* One field of a version 2 line: raw text is written as is (a list whose elements the caller
+ * escaped with odin3_name_map_escape and joined with `,` or `|`), else it is escaped. */
+typedef struct odin3_nm_field {
+    odin3_bytes text;
+    bool raw;
+} odin3_nm_field;
+
+/* Appends text with TAB, LF, `\`, `%`, `,` and `|` escaped (the version 2 set). NO_MEMORY. */
+odin3_status odin3_name_map_escape(odin3_strbuf *out, odin3_bytes text);
+
+/*
+ * Appends the version 2 header (`# odin3-names 2 hash=sha256 width=<width> prov=1 ast=<ast>`).
+ * INVALID_ARG for a width outside 1..52 or an ast word that is not refs, constructs, full or none.
+ */
+odin3_status odin3_name_map_write_header_v2(odin3_strbuf *out, uint32_t width, const char *ast);
+
+/*
+ * Appends one version 2 line: the type letter, a TAB, the fields separated by TABs, LF.
+ * INVALID_ARG (logged) for a type letter that is not a letter, n of 0 or over
+ * ODIN3_NM2_MAX_FIELDS, or a line over ODIN3_NAME_MAP_MAX_LINE bytes; NO_MEMORY. On failure out is
+ * as it was.
+ */
+odin3_status odin3_name_map_write_line_v2(odin3_strbuf *out, char type,
+                                          const odin3_nm_field *fields, size_t n);
+
+/* The order of O and N objects: module, kind, short (byte order). Negative, zero, positive. */
+int odin3_name_entry_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rhs);
+
+/* Unescapes a version 2 element (all six escapes) into the map's arena. INVALID_ARG for a bad
+ * escape; NO_MEMORY. */
+odin3_status odin3_name_map_unescape(odin3_name_map *map, odin3_bytes field, odin3_bytes *out);
+
+/* What the version 2 check counts; a map that parsed and is well formed has every problem at 0. */
+typedef struct odin3_name_check_v2 {
+    uint32_t records, constructs, files, runs; /* R, C, F, T lines */
+    uint32_t objects;                          /* O and N lines */
+    uint32_t bad_id;                           /* an R, C, F or T id that is not its line number */
+    uint32_t bad_ref;                          /* an r, c, f or t reference that does not resolve */
+    uint32_t bad_order;                        /* a parent or construct parent not numbered first */
+    uint32_t bad_class;                        /* an R line with no valid kind, dir or step */
+    uint32_t no_record;                        /* an O or N line whose record is missing */
+} odin3_name_check_v2;
+
+/* Verifies the version 2 invariants of a parsed map (V1.2.0 3.5). A version 1 map gives zeros. */
+odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map);
+
+/* True when the problem counters of c are all zero. */
+bool odin3_name_check_v2_ok(const odin3_name_check_v2 *check);
 
 /* The entry with exactly this module, kind and short name (first of equals), or NULL. */
 const odin3_name_entry *odin3_name_map_find(const odin3_name_map *map, odin3_bytes module,

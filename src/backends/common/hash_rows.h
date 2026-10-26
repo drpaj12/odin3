@@ -13,6 +13,8 @@
 
 #include "backends/common/hash_name.h"
 #include "backends/common/name_map.h"
+#include "backends/common/prov_export.h"
+#include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/file.h"
 #include "util/str.h"
@@ -31,13 +33,27 @@ typedef struct odin3_hash_row {
     size_t module_name_off, module_name_len;
     size_t full_off, full_len;
     odin3_hash_name hash; /* set by odin3_hash_rows_resolve */
+    uint32_t prov;        /* the object's own provenance record, 0 none (the version 2 map) */
 } odin3_hash_row;
+
+/* An object that keeps its name and has a record: an N line of the version 2 map. */
+typedef struct odin3_hash_kept {
+    uint32_t module;
+    odin3_name_kind kind;
+    size_t module_name_off, module_name_len;
+    size_t name_off, name_len;
+    uint32_t prov;
+} odin3_hash_kept;
 
 /* The collection. Fields are private to hash_rows.c. */
 typedef struct odin3_hash_rows {
     odin3_vec rows; /* odin3_hash_row */
     odin3_strbuf text;
     uint32_t start; /* the starting width of the hash names; 0 = ODIN3_HASH_NAME_WIDTH */
+    odin3_vec kept; /* odin3_hash_kept: filled only when the version 2 map is on */
+    const odin3_design *design; /* the version 2 map: the design the records belong to */
+    odin3_construct_mode ast;   /* and the AST layer it holds */
+    bool prov_map;              /* write the version 2 map (odin3_hash_rows_prov_enable) */
 } odin3_hash_rows;
 
 /* What odin3_hash_rows_add records. */
@@ -47,7 +63,17 @@ typedef struct odin3_hash_row_req {
     odin3_name_kind kind;
     uint64_t key;
     odin3_bytes full; /* H-2: the provenance name, with the writer's uniqueness suffix */
+    uint32_t prov;    /* the object's own provenance record, 0 none */
 } odin3_hash_row_req;
+
+/* What odin3_hash_rows_add_kept records. */
+typedef struct odin3_hash_kept_req {
+    uint32_t module;
+    odin3_bytes module_name;
+    odin3_name_kind kind;
+    odin3_bytes name; /* the name the object has in the output */
+    uint32_t prov;
+} odin3_hash_kept_req;
 
 void odin3_hash_rows_init(odin3_hash_rows *rows);
 void odin3_hash_rows_free(odin3_hash_rows *rows);
@@ -63,6 +89,24 @@ void odin3_hash_rows_set_start(odin3_hash_rows *rows, uint32_t start);
 
 /* Appends a row (the texts are copied). ODIN3_ERR_NO_MEMORY; the collection is unchanged then. */
 odin3_status odin3_hash_rows_add(odin3_hash_rows *rows, const odin3_hash_row_req *req);
+
+/*
+ * Turns the version 2 map on (V1.2.0 3.5): odin3_hash_rows_map_text then writes version 2 for
+ * design, with the AST layer `requested` allows (odin3_prov_map_resolve). INVALID_ARG (logged
+ * with `who`) when the read kept less than an explicit mode needs. Not called: version 1.
+ */
+odin3_status odin3_hash_rows_prov_enable(odin3_hash_rows *rows, const odin3_design *design,
+                                         odin3_prov_map_mode requested, const char *who);
+
+/* True after a successful odin3_hash_rows_prov_enable. */
+bool odin3_hash_rows_prov_on(const odin3_hash_rows *rows);
+
+/*
+ * Records an object that keeps its name, for the N lines of the version 2 map. Does nothing
+ * unless the map is on and req->prov is not 0. ODIN3_ERR_NO_MEMORY; the collection is unchanged
+ * then.
+ */
+odin3_status odin3_hash_rows_add_kept(odin3_hash_rows *rows, const odin3_hash_kept_req *req);
 
 size_t odin3_hash_rows_count(const odin3_hash_rows *rows);
 const odin3_hash_row *odin3_hash_rows_at(const odin3_hash_rows *rows, size_t index);
@@ -91,7 +135,8 @@ odin3_status odin3_hash_rows_resolve(odin3_hash_rows *rows, const odin3_hash_res
  */
 odin3_status odin3_hash_rows_index(const odin3_hash_rows *rows, odin3_u64map **index);
 
-/* Appends the whole map text (header and sorted lines, H-4) of all rows to out. */
+/* Appends the whole map text (header and sorted lines, H-4) of all rows to out: version 1, or
+ * version 2 when odin3_hash_rows_prov_enable was called. */
 odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf *out);
 
 /* --- the map file ------------------------------------------------------------------------------

@@ -106,6 +106,9 @@ const char *jw_plain_key(jw *out, const jw_keyspec *spec);
 /* names.c: the renamed key of spec, or NULL when the mode is SHORT or the object has no HDL
  * location (then jw_plain_key applies). Recorded as written. */
 const char *jw_prov_key(jw *out, const jw_keyspec *spec);
+/* names.c: COLLECT with the version 2 map on: the object of spec keeps the key `key` and has a
+ * record, so it gets an N line. Does nothing in any other mode. */
+odin3_status jw_names_kept(jw *out, const jw_keyspec *spec, const char *key);
 /* names.c: COLLECT, at the end of a module: resolves the module's rows to hash names (H-3). */
 void jw_names_module_end(jw *out);
 /* names.c: APPLY, at the end of the design: every collected row must have been used. */

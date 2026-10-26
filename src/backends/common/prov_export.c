@@ -4,6 +4,8 @@
  */
 #include "backends/common/prov_export.h"
 
+#include "ast/kinds.h"
+#include "backends/common/name_map.h"
 #include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -857,4 +859,986 @@ odin3_status odin3_prov_label_compute(const odin3_design *design, uint32_t recor
     odin3_prov_label_free(label);
     *label = fresh;
     return ODIN3_OK;
+}
+
+/* --- the version 2 name map (3.2 to 3.5) ------------------------------------------------------ */
+
+static const char *const LEVEL_WORDS[] = {"none", "module", "instance", "block", "branch",
+                                          "stmt", "expr",   "word",     "gate",  "lut",
+                                          "ble",  "clb",    "site"};
+static const char *const DIR_WORDS[] = {"origin", "refine", "rewrite", "coarsen", "context"};
+static const char *const MODE_WORDS[] = {"none", "refs", "constructs", "full"}; /* by enum */
+static const char *const RANK_WORDS[] = {"none", "constructs", "refs", "full"}; /* by rank */
+enum {
+    LEVEL_WORD_COUNT = sizeof LEVEL_WORDS / sizeof LEVEL_WORDS[0],
+    MODE_RANK_MAX = 3,
+    MODE_RANK_REFS = 2,
+    ORIGIN_CAP = 8 /* ODIN3_HDL_LOC_MAX */
+};
+
+static const char *level_word(unsigned level) {
+    return level < (unsigned)LEVEL_WORD_COUNT ? LEVEL_WORDS[level] : "none";
+}
+
+/* 0 for no snapshot, then constructs < refs < full (a larger mode keeps everything a smaller one
+ * does). */
+static int mode_rank(odin3_construct_mode mode) {
+    switch (mode) {
+    case ODIN3_CONSTRUCT_MODE_CONSTRUCTS:
+        return 1;
+    case ODIN3_CONSTRUCT_MODE_REFS:
+        return MODE_RANK_REFS;
+    case ODIN3_CONSTRUCT_MODE_FULL:
+        return MODE_RANK_MAX;
+    default:
+        return 0;
+    }
+}
+
+static odin3_construct_mode mode_of_rank(int rank) {
+    static const odin3_construct_mode BY_RANK[] = {
+        ODIN3_CONSTRUCT_MODE_OFF, ODIN3_CONSTRUCT_MODE_CONSTRUCTS, ODIN3_CONSTRUCT_MODE_REFS,
+        ODIN3_CONSTRUCT_MODE_FULL};
+    return BY_RANK[rank];
+}
+
+static int requested_rank(odin3_prov_map_mode requested) {
+    switch (requested) {
+    case ODIN3_PROV_MAP_CONSTRUCTS:
+        return 1;
+    case ODIN3_PROV_MAP_FULL:
+        return MODE_RANK_MAX;
+    default:
+        return MODE_RANK_REFS; /* REFS, and ANY before it is clipped */
+    }
+}
+
+odin3_status odin3_prov_map_resolve(const odin3_design *design, odin3_prov_map_mode requested,
+                                    const char *who, odin3_construct_mode *effective) {
+    int kept = 0;
+    for (uint32_t run = 1; design != NULL && run < odin3_passrun_end(design); run++) {
+        int rank = mode_rank(odin3_construct_run_mode(design, (odin3_passrun_id){run}));
+        kept = rank > kept ? rank : kept;
+    }
+    if (design == NULL || requested == ODIN3_PROV_MAP_NONE) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: --prov-map: invalid argument", who);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    int want = requested_rank(requested);
+    if (requested == ODIN3_PROV_MAP_ANY) {
+        want = want < kept ? want : kept;
+    } else if (want > kept) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "%s: --prov-map %s needs more than the read kept (%s): read the design with "
+                  "`read_verilog --prov-ast %s`",
+                  who, RANK_WORDS[want], RANK_WORDS[kept], RANK_WORDS[want]);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *effective = mode_of_rank(want);
+    return ODIN3_OK;
+}
+
+/* One record as numbered: the labels the R line and the O lines need. */
+typedef struct pm_rec {
+    uint32_t id;       /* the record ID */
+    uint32_t flags;    /* ODIN3_PROV_F_* */
+    uint32_t n_joined; /* |J| */
+    uint32_t n_context;
+    uint32_t cons_off; /* the construct numbers of `cons`, in the cons pool */
+    uint32_t cons_len;
+    uint32_t con;  /* S: the number of its construct, 0 none */
+    uint32_t call; /* S: the number of its call row, 0 none */
+    uint8_t kind;  /* odin3_prov_kind */
+    uint8_t dir;
+    uint8_t from;
+    uint8_t level; /* the `level` field */
+} pm_rec;
+
+/* A construct as numbered: the first row seen with its chain, its number and its parent's. */
+typedef struct pm_con {
+    uint32_t row;
+    uint32_t num; /* 0 until numbered */
+    uint32_t parent_num;
+    uint32_t next; /* the next entry with the same chain hash, + 1 */
+} pm_con;
+
+typedef struct pm {
+    const odin3_prov_map_req *req;
+    const odin3_design *design;
+    odin3_vec recs;       /* pm_rec, in r order */
+    odin3_u64map *num_of; /* record ID -> r number */
+    odin3_vec cons;       /* pm_con */
+    odin3_vec con_order;  /* uint32_t: index into cons, in c order */
+    odin3_vec cons_pool;  /* uint32_t: construct numbers */
+    odin3_vec hashes;     /* uint64_t per construct row: the hash of its chain */
+    odin3_u64map *by_hash;
+    odin3_u64map *file_num; /* strtab ID -> f number */
+    odin3_vec file_ids;     /* uint32_t */
+    odin3_u64map *run_num;  /* run -> t number */
+    odin3_vec run_ids;      /* uint32_t */
+    odin3_u64map *op_rank;  /* run << 32 | op -> the op number in the T row */
+} pm;
+
+static void pm_free(pm *st) {
+    odin3_vec_free(&st->recs);
+    odin3_vec_free(&st->cons);
+    odin3_vec_free(&st->con_order);
+    odin3_vec_free(&st->cons_pool);
+    odin3_vec_free(&st->hashes);
+    odin3_vec_free(&st->file_ids);
+    odin3_vec_free(&st->run_ids);
+    odin3_u64map_destroy(st->num_of);
+    odin3_u64map_destroy(st->by_hash);
+    odin3_u64map_destroy(st->file_num);
+    odin3_u64map_destroy(st->run_num);
+    odin3_u64map_destroy(st->op_rank);
+}
+
+static odin3_status pm_init(pm *st, const odin3_prov_map_req *req) {
+    *st = (pm){.req = req, .design = req->design};
+    odin3_vec_init(&st->recs, sizeof(pm_rec));
+    odin3_vec_init(&st->cons, sizeof(pm_con));
+    odin3_vec_init(&st->con_order, sizeof(uint32_t));
+    odin3_vec_init(&st->cons_pool, sizeof(uint32_t));
+    odin3_vec_init(&st->hashes, sizeof(uint64_t));
+    odin3_vec_init(&st->file_ids, sizeof(uint32_t));
+    odin3_vec_init(&st->run_ids, sizeof(uint32_t));
+    st->num_of = odin3_u64map_create(0);
+    st->by_hash = odin3_u64map_create(0);
+    st->file_num = odin3_u64map_create(0);
+    st->run_num = odin3_u64map_create(0);
+    st->op_rank = odin3_u64map_create(0);
+    if (st->num_of == NULL || st->by_hash == NULL || st->file_num == NULL || st->run_num == NULL ||
+        st->op_rank == NULL) {
+        pm_free(st);
+        *st = (pm){0};
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+/* --- numbering the records (post-order over the parents) ------------------------------------- */
+
+typedef struct dfs_frame {
+    uint32_t rec;
+    uint32_t next; /* the next parent to visit */
+} dfs_frame;
+
+static odin3_status pm_push_dfs(odin3_vec *stack, uint32_t rec) {
+    dfs_frame *slot = odin3_vec_push(stack);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (dfs_frame){rec, 0};
+    return ODIN3_OK;
+}
+
+/* Gives rec the next number: appends its (not yet labelled) row. */
+static odin3_status pm_number(pm *st, uint32_t rec) {
+    pm_rec *slot = odin3_vec_push(&st->recs);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (pm_rec){.id = rec};
+    if (odin3_u64map_put(st->num_of, (odin3_kv){rec, st->recs.len}) != ODIN3_OK) {
+        odin3_vec_pop(&st->recs);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+/* Numbers root and every record behind it that has no number yet: visit(r) visits the parents of
+ * r in stored order, then numbers r. */
+static odin3_status pm_visit(pm *st, uint32_t root) {
+    odin3_vec stack;
+    odin3_vec_init(&stack, sizeof(dfs_frame));
+    odin3_status status =
+        odin3_u64map_get(st->num_of, root, NULL) ? ODIN3_OK : pm_push_dfs(&stack, root);
+    while (status == ODIN3_OK && stack.len > 0) {
+        dfs_frame *top = odin3_vec_at(&stack, stack.len - 1U);
+        const odin3_prov_record *rec = odin3_prov_get(st->design, (odin3_prov_id){top->rec});
+        if (top->next < rec->parents.count) {
+            uint32_t parent = rec->parents.ids[top->next++].v;
+            status =
+                odin3_u64map_get(st->num_of, parent, NULL) ? ODIN3_OK : pm_push_dfs(&stack, parent);
+            continue;
+        }
+        uint32_t done = top->rec;
+        odin3_vec_pop(&stack);
+        status = pm_number(st, done);
+    }
+    odin3_vec_free(&stack);
+    return status;
+}
+
+/* --- the constructs (numbered by chain identity, parents first) ------------------------------ */
+
+/* The row itself, or in `constructs` mode its nearest ancestor that is not an expression; 0 when
+ * the map holds no AST layer. */
+static uint32_t pm_resolve(const pm *st, uint32_t row) {
+    if (st->req->ast == ODIN3_CONSTRUCT_MODE_OFF) {
+        return 0;
+    }
+    while (row != 0 && st->req->ast == ODIN3_CONSTRUCT_MODE_CONSTRUCTS &&
+           odin3_construct_get(st->design, row)->level == (uint8_t)ODIN3_LEVEL_EXPR) {
+        row = odin3_construct_get(st->design, row)->parent;
+    }
+    return row;
+}
+
+static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
+static const uint64_t FNV_PRIME = 0x100000001b3ULL;
+
+static uint64_t mix(uint64_t hash, uint64_t word) {
+    return (hash ^ word) * FNV_PRIME;
+}
+
+/* The hash of every row's chain: its own key fields mixed into the parent's. Parents come first
+ * (check rule 12), so one pass in row order fills the table. */
+static odin3_status pm_hash_rows(pm *st) {
+    uint32_t end = odin3_construct_end(st->design);
+    odin3_status status = odin3_vec_reserve(&st->hashes, end);
+    for (uint32_t row = 0; status == ODIN3_OK && row < end; row++) {
+        uint64_t *slot = odin3_vec_push(&st->hashes);
+        const odin3_construct_row *cur = row != 0 ? odin3_construct_get(st->design, row) : NULL;
+        uint64_t hash = FNV_OFFSET;
+        if (cur != NULL) {
+            uint64_t up = cur->parent != 0 && cur->parent < row
+                              ? *(const uint64_t *)odin3_vec_cat(&st->hashes, cur->parent)
+                              : 0;
+            hash = mix(mix(mix(mix(mix(up, cur->file), cur->line), cur->col), cur->end_line),
+                       cur->end_col);
+            hash = mix(mix(mix(hash, cur->kind), cur->name), cur->part);
+        }
+        *slot = hash;
+    }
+    return status;
+}
+
+/* The entry of the chain of row, made (number 0) when there is none. */
+static odin3_status pm_canon(pm *st, uint32_t row, uint32_t *index) {
+    uint64_t hash = *(const uint64_t *)odin3_vec_cat(&st->hashes, row);
+    uint64_t head = 0;
+    (void)odin3_u64map_get(st->by_hash, hash, &head);
+    for (uint64_t at = head; at != 0;) {
+        const pm_con *ent = odin3_vec_cat(&st->cons, at - 1U);
+        if (same_chain(st->design, ent->row, row)) {
+            *index = (uint32_t)(at - 1U);
+            return ODIN3_OK;
+        }
+        at = ent->next;
+    }
+    pm_con *slot = odin3_vec_push(&st->cons);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (pm_con){.row = row, .next = (uint32_t)head};
+    *index = (uint32_t)st->cons.len - 1U;
+    if (odin3_u64map_put(st->by_hash, (odin3_kv){hash, st->cons.len}) != ODIN3_OK) {
+        odin3_vec_pop(&st->cons);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+static uint32_t pm_con_num(const pm *st, uint32_t index) {
+    return ((const pm_con *)odin3_vec_cat(&st->cons, index))->num;
+}
+
+/* Numbers the construct of the chain of `index` and, first, any ancestor without a number. The
+ * ancestors are found on a stack, so a deep chain does not recurse. */
+static odin3_status pm_number_chain(pm *st, uint32_t index) {
+    odin3_vec todo; /* indexes into cons, child first */
+    odin3_vec_init(&todo, sizeof(uint32_t));
+    odin3_status status = ODIN3_OK;
+    for (uint32_t cur = index; status == ODIN3_OK && pm_con_num(st, cur) == 0;) {
+        uint32_t *slot = odin3_vec_push(&todo);
+        status = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+        if (slot == NULL) {
+            break;
+        }
+        *slot = cur;
+        uint32_t up =
+            pm_resolve(st, odin3_construct_get(st->design,
+                                               ((const pm_con *)odin3_vec_cat(&st->cons, cur))->row)
+                               ->parent);
+        if (up == 0) {
+            break;
+        }
+        status = pm_canon(st, up, &cur);
+    }
+    for (size_t i = todo.len; status == ODIN3_OK && i > 0; i--) {
+        uint32_t at = *(const uint32_t *)odin3_vec_cat(&todo, i - 1U);
+        uint32_t up = pm_resolve(
+            st, odin3_construct_get(st->design, ((const pm_con *)odin3_vec_cat(&st->cons, at))->row)
+                    ->parent);
+        uint32_t up_index = 0;
+        status = up != 0 ? pm_canon(st, up, &up_index) : ODIN3_OK;
+        uint32_t *order = status == ODIN3_OK ? odin3_vec_push(&st->con_order) : NULL;
+        if (status == ODIN3_OK && order == NULL) {
+            status = ODIN3_ERR_NO_MEMORY;
+        }
+        if (status == ODIN3_OK) {
+            *order = at;
+            pm_con *ent = odin3_vec_at(&st->cons, at);
+            ent->parent_num = up != 0 ? pm_con_num(st, up_index) : 0;
+            ent->num = (uint32_t)st->con_order.len;
+        }
+    }
+    odin3_vec_free(&todo);
+    return status;
+}
+
+/* The number of the construct of row (after resolution), numbering it and its chain on first use;
+ * 0 for row 0 or when the map holds no AST layer. */
+static odin3_status pm_con_of_row(pm *st, uint32_t row, uint32_t *num) {
+    uint32_t use = pm_resolve(st, row);
+    uint32_t index = 0;
+    *num = 0;
+    if (use == 0) {
+        return ODIN3_OK;
+    }
+    odin3_status status = pm_canon(st, use, &index);
+    status = status == ODIN3_OK && pm_con_num(st, index) == 0 ? pm_number_chain(st, index) : status;
+    *num = status == ODIN3_OK ? pm_con_num(st, index) : 0;
+    return status;
+}
+
+/* --- labelling the records (phase A) ---------------------------------------------------------- */
+
+/* Appends the numbers of the first ODIN3_PROV_JOIN_CAP rows of J to the pool. */
+static odin3_status pm_take_cons(pm *st, const odin3_prov_label *label, pm_rec *out) {
+    uint32_t count = (uint32_t)label->joined.len;
+    count = count < ODIN3_PROV_JOIN_CAP ? count : (uint32_t)ODIN3_PROV_JOIN_CAP;
+    out->cons_off = (uint32_t)st->cons_pool.len;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t num = 0;
+        odin3_status status =
+            pm_con_of_row(st, *(const uint32_t *)odin3_vec_cat(&label->joined, i), &num);
+        uint32_t *slot = status == ODIN3_OK ? odin3_vec_push(&st->cons_pool) : NULL;
+        if (status != ODIN3_OK || slot == NULL) {
+            return status != ODIN3_OK ? status : ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = num;
+        out->cons_len++;
+    }
+    return ODIN3_OK;
+}
+
+/* A SOURCE record's construct and, for a call-instance row, the number of its call row. */
+static odin3_status pm_take_leaf(pm *st, const odin3_prov_label *label, pm_rec *out) {
+    odin3_status status = pm_con_of_row(st, label->info.construct, &out->con);
+    if (status == ODIN3_OK && label->info.construct != 0) {
+        uint32_t call = odin3_construct_get(st->design, label->info.construct)->call;
+        status = call != 0 ? pm_con_of_row(st, call, &out->call) : ODIN3_OK;
+    }
+    if (status == ODIN3_OK && out->con != 0) {
+        uint32_t row = pm_resolve(st, label->info.construct);
+        out->level = (uint8_t)odin3_construct_get(st->design, row)->level;
+    }
+    return status;
+}
+
+/* Fills the row of record `id` from its label. */
+static odin3_status pm_label(pm *st, uint32_t id, pm_rec *out) {
+    odin3_prov_label label;
+    odin3_prov_label_init(&label);
+    odin3_status status = odin3_prov_label_compute(st->design, id, &label);
+    if (status == ODIN3_OK) {
+        const odin3_prov_info *info = &label.info;
+        *out = (pm_rec){.id = id,
+                        .flags = info->flags,
+                        .n_joined = info->n_joined,
+                        .n_context = info->n_context,
+                        .kind = (uint8_t)info->kind,
+                        .dir = (uint8_t)info->dir,
+                        .from = (uint8_t)info->from_level,
+                        .level = (uint8_t)info->to_level};
+        if (info->kind == (uint32_t)ODIN3_PROV_DERIVED) {
+            bool listed = (info->flags & (ODIN3_PROV_F_JOIN | ODIN3_PROV_F_JOIN_INSTANCE |
+                                          ODIN3_PROV_F_LOSSY_BULK | ODIN3_PROV_F_LOSSY_CAP)) != 0;
+            status = listed ? pm_take_cons(st, &label, out) : ODIN3_OK;
+        } else {
+            status = pm_take_leaf(st, &label, out);
+        }
+    }
+    odin3_prov_label_free(&label);
+    return status;
+}
+
+/* Labels every numbered record in number order, which numbers the constructs as the algorithm of
+ * 3.2 item 4 scans the R lines. */
+static odin3_status pm_label_all(pm *st) {
+    odin3_status status = pm_hash_rows(st);
+    for (size_t i = 0; status == ODIN3_OK && i < st->recs.len; i++) {
+        pm_rec fresh;
+        status = pm_label(st, ((const pm_rec *)odin3_vec_cat(&st->recs, i))->id, &fresh);
+        if (status == ODIN3_OK) {
+            *(pm_rec *)odin3_vec_at(&st->recs, i) = fresh;
+        }
+    }
+    return status;
+}
+
+/* `full`: the rows no record reached, after the others, in the key order (parents first). */
+static odin3_status pm_add_all_rows(pm *st) {
+    if (st->req->ast != ODIN3_CONSTRUCT_MODE_FULL) {
+        return ODIN3_OK;
+    }
+    odin3_vec rows;
+    odin3_vec_init(&rows, sizeof(uint32_t));
+    uint32_t end = odin3_construct_end(st->design);
+    odin3_status status = odin3_vec_reserve(&rows, end);
+    for (uint32_t row = 1; status == ODIN3_OK && row < end; row++) {
+        *(uint32_t *)odin3_vec_push(&rows) = row;
+    }
+    status = status == ODIN3_OK ? order_rows(st->design, &rows) : status;
+    for (size_t i = 0; status == ODIN3_OK && i < rows.len; i++) {
+        uint32_t unused = 0;
+        status = pm_con_of_row(st, *(const uint32_t *)odin3_vec_cat(&rows, i), &unused);
+    }
+    odin3_vec_free(&rows);
+    return status;
+}
+
+/* --- files and pass runs (first reference, scanning the R lines) ------------------------------ */
+
+/* The f number of strtab string `id`, assigned on first use. */
+static odin3_status pm_file(pm *st, uint32_t id, uint32_t *num) {
+    uint64_t have = 0;
+    if (odin3_u64map_get(st->file_num, id, &have)) {
+        *num = (uint32_t)have;
+        return ODIN3_OK;
+    }
+    uint32_t *slot = odin3_vec_push(&st->file_ids);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = id;
+    *num = (uint32_t)st->file_ids.len;
+    if (odin3_u64map_put(st->file_num, (odin3_kv){id, *num}) != ODIN3_OK) {
+        odin3_vec_pop(&st->file_ids);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+static int cmp_u64_elem(const void *ctx, const void *lhs, const void *rhs) {
+    (void)ctx;
+    uint64_t left = *(const uint64_t *)lhs;
+    uint64_t right = *(const uint64_t *)rhs;
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
+}
+
+/* Numbers the pass runs by first reference and ranks the operations each T row names. */
+static odin3_status pm_runs(pm *st) {
+    odin3_vec pairs;
+    odin3_vec_init(&pairs, sizeof(uint64_t));
+    odin3_status status = odin3_vec_reserve(&pairs, st->recs.len);
+    for (size_t i = 0; status == ODIN3_OK && i < st->recs.len; i++) {
+        const odin3_prov_record *rec = odin3_prov_get(
+            st->design, (odin3_prov_id){((const pm_rec *)odin3_vec_cat(&st->recs, i))->id});
+        *(uint64_t *)odin3_vec_push(&pairs) = ((uint64_t)rec->run.v << KEY_SHIFT) | rec->op;
+        if (!odin3_u64map_get(st->run_num, rec->run.v, NULL)) {
+            uint32_t *slot = odin3_vec_push(&st->run_ids);
+            status = slot != NULL &&
+                             odin3_u64map_put(st->run_num,
+                                              (odin3_kv){rec->run.v, st->run_ids.len}) == ODIN3_OK
+                         ? ODIN3_OK
+                         : ODIN3_ERR_NO_MEMORY;
+            if (slot != NULL) {
+                *slot = rec->run.v;
+            }
+        }
+    }
+    const elem_ctx sort = {sizeof(uint64_t), cmp_u64_elem, NULL};
+    status = status == ODIN3_OK ? merge_sort(&pairs, &sort) : status;
+    uint64_t prev = 0;
+    uint32_t rank = 0;
+    for (size_t i = 0; status == ODIN3_OK && i < pairs.len; i++) {
+        uint64_t key = *(const uint64_t *)odin3_vec_cat(&pairs, i);
+        if (i > 0 && key == prev) {
+            continue;
+        }
+        rank = i > 0 && (key >> KEY_SHIFT) == (prev >> KEY_SHIFT) ? rank + 1U : 1U;
+        status = odin3_u64map_put(st->op_rank, (odin3_kv){key, rank});
+        prev = key;
+    }
+    odin3_vec_free(&pairs);
+    return status;
+}
+
+/* --- emitting the lines (phase B) ------------------------------------------------------------- */
+
+static odin3_nm_field fld_plain(odin3_bytes text) {
+    return (odin3_nm_field){text, false};
+}
+
+static odin3_nm_field fld_raw(const odin3_strbuf *buf) {
+    return (odin3_nm_field){{buf->data, buf->len}, true};
+}
+
+static odin3_bytes str_of(const odin3_design *design, uint32_t id) {
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    const char *text = id != 0 ? odin3_strtab_get(tab, id) : NULL;
+    return text != NULL ? (odin3_bytes){text, odin3_strtab_len(tab, id)} : (odin3_bytes){"", 0};
+}
+
+/* The scratch buffers of the line being written. */
+typedef struct line_bufs {
+    odin3_strbuf parents, origins, cons, flags;
+    odin3_strbuf num[2]; /* decimal and `r<n>` style scratch fields */
+} line_bufs;
+
+static void bufs_init(line_bufs *bufs) {
+    odin3_strbuf_init(&bufs->parents);
+    odin3_strbuf_init(&bufs->origins);
+    odin3_strbuf_init(&bufs->cons);
+    odin3_strbuf_init(&bufs->flags);
+    odin3_strbuf_init(&bufs->num[0]);
+    odin3_strbuf_init(&bufs->num[1]);
+}
+
+static void bufs_free(line_bufs *bufs) {
+    odin3_strbuf_free(&bufs->parents);
+    odin3_strbuf_free(&bufs->origins);
+    odin3_strbuf_free(&bufs->cons);
+    odin3_strbuf_free(&bufs->flags);
+    odin3_strbuf_free(&bufs->num[0]);
+    odin3_strbuf_free(&bufs->num[1]);
+}
+
+/* Appends `<sep>` (when buf is not empty) and then the formatted text. */
+static odin3_status append_item(odin3_strbuf *buf, char sep, const char *fmt, uint32_t value) {
+    odin3_status status = buf->len > 0 ? odin3_strbuf_appendf(buf, "%c", sep) : ODIN3_OK;
+    return status == ODIN3_OK ? odin3_strbuf_appendf(buf, fmt, (unsigned)value) : status;
+}
+
+/* parents: r<n>,r<n>,... in stored order. */
+static odin3_status build_parents(const pm *st, const odin3_prov_record *rec, odin3_strbuf *out) {
+    odin3_status status = ODIN3_OK;
+    for (uint32_t k = 0; status == ODIN3_OK && k < rec->parents.count; k++) {
+        uint64_t num = 0;
+        (void)odin3_u64map_get(st->num_of, rec->parents.ids[k].v, &num);
+        status = append_item(out, ',', "r%u", (uint32_t)num);
+    }
+    return status;
+}
+
+/* origins: f<n>:L.C-EL.EC joined by `|`, at most ORIGIN_CAP (`-` for a location with no file). */
+static odin3_status build_origins(pm *st, const odin3_prov_record *rec, odin3_strbuf *out) {
+    uint32_t count = rec->n_locs < ORIGIN_CAP ? rec->n_locs : (uint32_t)ORIGIN_CAP;
+    odin3_status status = ODIN3_OK;
+    for (uint32_t k = 0; status == ODIN3_OK && k < count; k++) {
+        const odin3_srcloc *loc = &rec->locs[k];
+        uint32_t num = 0;
+        status = loc->file != 0 ? pm_file(st, loc->file, &num) : ODIN3_OK;
+        status = status == ODIN3_OK && out->len > 0
+                     ? odin3_strbuf_append(out, odin3_bytes_cstr("|"))
+                     : status;
+        if (status == ODIN3_OK && num != 0) {
+            status = odin3_strbuf_appendf(out, "f%u", (unsigned)num);
+        } else if (status == ODIN3_OK) {
+            status = odin3_strbuf_append(out, odin3_bytes_cstr("-"));
+        }
+        status =
+            status == ODIN3_OK
+                ? odin3_strbuf_appendf(out, ":%u.%u-%u.%u", (unsigned)loc->line, (unsigned)loc->col,
+                                       (unsigned)loc->end_line, (unsigned)loc->end_col)
+                : status;
+    }
+    return status;
+}
+
+static odin3_status build_cons(const pm *st, const pm_rec *pr, odin3_strbuf *out) {
+    odin3_status status = ODIN3_OK;
+    for (uint32_t k = 0; status == ODIN3_OK && k < pr->cons_len; k++) {
+        uint32_t num = *(const uint32_t *)odin3_vec_cat(&st->cons_pool, pr->cons_off + k);
+        status = append_item(out, ',', "c%u", num);
+    }
+    return status;
+}
+
+/* One flag word, `,`-separated. */
+static odin3_status add_flag(odin3_strbuf *out, const char *text) {
+    odin3_status status = out->len > 0 ? odin3_strbuf_append(out, odin3_bytes_cstr(",")) : ODIN3_OK;
+    return status == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr(text)) : status;
+}
+
+/* One flag word with a number, `,`-separated. */
+static odin3_status add_flag_num(odin3_strbuf *out, const char *fmt, uint32_t value) {
+    odin3_status status = out->len > 0 ? odin3_strbuf_append(out, odin3_bytes_cstr(",")) : ODIN3_OK;
+    return status == ODIN3_OK ? odin3_strbuf_appendf(out, fmt, (unsigned)value) : status;
+}
+
+/* join, join=instance, lossy=bulk, lossy=cap and the total n=. */
+static odin3_status flags_join(const pm_rec *pr, odin3_strbuf *out) {
+    static const struct {
+        uint32_t bit;
+        const char *word;
+    } FIRST[] = {{ODIN3_PROV_F_JOIN, "join"},
+                 {ODIN3_PROV_F_JOIN_INSTANCE, "join=instance"},
+                 {ODIN3_PROV_F_LOSSY_BULK, "lossy=bulk"},
+                 {ODIN3_PROV_F_LOSSY_CAP, "lossy=cap"}};
+    odin3_status status = ODIN3_OK;
+    for (size_t k = 0; status == ODIN3_OK && k < sizeof FIRST / sizeof FIRST[0]; k++) {
+        status = (pr->flags & FIRST[k].bit) != 0 ? add_flag(out, FIRST[k].word) : status;
+    }
+    bool lossy = (pr->flags & (ODIN3_PROV_F_LOSSY_BULK | ODIN3_PROV_F_LOSSY_CAP)) != 0;
+    return status == ODIN3_OK && lossy ? add_flag_num(out, "n=%u", pr->n_joined) : status;
+}
+
+/* chain=span, capped and hier=<text>. */
+static odin3_status flags_origin(const pm_rec *pr, const odin3_prov_record *rec, const pm *st,
+                                 odin3_strbuf *out) {
+    odin3_status status =
+        (pr->flags & ODIN3_PROV_F_SPAN_ONLY) != 0 ? add_flag(out, "chain=span") : ODIN3_OK;
+    status = status == ODIN3_OK && rec->n_locs > ORIGIN_CAP ? add_flag(out, "capped") : status;
+    if (status == ODIN3_OK && rec->hier != 0) {
+        status = add_flag(out, "hier=");
+        status =
+            status == ODIN3_OK ? odin3_name_map_escape(out, str_of(st->design, rec->hier)) : status;
+    }
+    return status;
+}
+
+/* The flags of one record, in the order of 3.2: join, join=instance, lossy=bulk, lossy=cap,
+ * n=<total>, chain=span, capped, hier=<text>, call=c<n>, ctx=<n>, bulk. (`cell=<type>` is not
+ * written: a record does not know the type of the hard cell it made; agent default.) */
+static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, const pm *st,
+                                odin3_strbuf *out) {
+    odin3_status status = flags_join(pr, out);
+    status = status == ODIN3_OK ? flags_origin(pr, rec, st, out) : status;
+    status = status == ODIN3_OK && pr->call != 0 ? add_flag_num(out, "call=c%u", pr->call) : status;
+    status = status == ODIN3_OK && pr->n_context != 0 ? add_flag_num(out, "ctx=%u", pr->n_context)
+                                                      : status;
+    return status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0 ? add_flag(out, "bulk")
+                                                                            : status;
+}
+
+static char kind_letter(unsigned kind) {
+    return kind == (unsigned)ODIN3_PROV_SOURCE     ? 'S'
+           : kind == (unsigned)ODIN3_PROV_IMPORTED ? 'I'
+                                                   : 'D';
+}
+
+/* One R line. */
+static odin3_status emit_record(pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+    const pm_rec *pr = odin3_vec_cat(&st->recs, index);
+    const odin3_prov_record *rec = odin3_prov_get(st->design, (odin3_prov_id){pr->id});
+    char kind[2] = {kind_letter(pr->kind), '\0'};
+    bool derived = pr->kind == (uint8_t)ODIN3_PROV_DERIVED;
+    odin3_strbuf *ids = &bufs->num[0];
+    odin3_strbuf *step = &bufs->num[1];
+    odin3_strbuf_clear(ids);
+    odin3_strbuf_clear(step);
+    odin3_strbuf_clear(&bufs->parents);
+    odin3_strbuf_clear(&bufs->origins);
+    odin3_strbuf_clear(&bufs->cons);
+    odin3_strbuf_clear(&bufs->flags);
+    uint64_t run = 0;
+    uint64_t rank = 0;
+    (void)odin3_u64map_get(st->run_num, rec->run.v, &run);
+    (void)odin3_u64map_get(st->op_rank, ((uint64_t)rec->run.v << KEY_SHIFT) | rec->op, &rank);
+    odin3_status status = odin3_strbuf_appendf(ids, "r%u", (unsigned)(index + 1U));
+    status = status == ODIN3_OK
+                 ? odin3_strbuf_appendf(step, "t%u.%u", (unsigned)run, (unsigned)rank)
+                 : status;
+    status = status == ODIN3_OK ? build_parents(st, rec, &bufs->parents) : status;
+    status = status == ODIN3_OK && !derived ? build_origins(st, rec, &bufs->origins) : status;
+    if (status == ODIN3_OK) {
+        status = derived ? build_cons(st, pr, &bufs->cons)
+                         : (pr->con != 0 ? append_item(&bufs->cons, ',', "c%u", pr->con) : status);
+    }
+    status = status == ODIN3_OK ? build_flags(pr, rec, st, &bufs->flags) : status;
+    odin3_strbuf dir;
+    odin3_strbuf_init(&dir);
+    status = status == ODIN3_OK ? (derived ? odin3_strbuf_appendf(&dir, "%s:%s", DIR_WORDS[pr->dir],
+                                                                  level_word(pr->from))
+                                           : odin3_strbuf_appendf(&dir, "origin"))
+                                : status;
+    if (status == ODIN3_OK) {
+        const odin3_nm_field fields[] = {fld_raw(ids),
+                                         fld_plain(odin3_bytes_cstr(kind)),
+                                         fld_plain(odin3_bytes_cstr(level_word(pr->level))),
+                                         fld_plain((odin3_bytes){dir.data, dir.len}),
+                                         fld_raw(step),
+                                         fld_raw(&bufs->parents),
+                                         fld_raw(&bufs->origins),
+                                         fld_raw(&bufs->cons),
+                                         fld_raw(&bufs->flags)};
+        status = odin3_name_map_write_line_v2(out, 'R', fields, sizeof fields / sizeof fields[0]);
+    }
+    odin3_strbuf_free(&dir);
+    return status;
+}
+
+/* The AST kind word of a construct row (the synthesized kinds have their own). */
+static const char *kind_word(uint8_t kind) {
+    switch (kind) {
+    case ODIN3_CONSTRUCT_IF_THEN:
+        return "IF_THEN";
+    case ODIN3_CONSTRUCT_IF_ELSE:
+        return "IF_ELSE";
+    case ODIN3_CONSTRUCT_CALL_SITE:
+        return "CALL_SITE";
+    default:
+        return odin3_ast_kind_name(kind);
+    }
+}
+
+/* One C line (the c number is the position in the order). */
+static odin3_status emit_construct(pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+    const pm_con *ent =
+        odin3_vec_cat(&st->cons, *(const uint32_t *)odin3_vec_cat(&st->con_order, index));
+    const odin3_construct_row *row = odin3_construct_get(st->design, ent->row);
+    odin3_strbuf *ids = &bufs->num[0];
+    odin3_strbuf *span = &bufs->num[1];
+    odin3_strbuf_clear(ids);
+    odin3_strbuf_clear(span);
+    odin3_strbuf_clear(&bufs->parents);
+    odin3_strbuf_clear(&bufs->origins);
+    uint32_t file = 0;
+    odin3_status status = odin3_strbuf_appendf(ids, "c%u", (unsigned)(index + 1U));
+    status = status == ODIN3_OK && ent->parent_num != 0
+                 ? odin3_strbuf_appendf(&bufs->parents, "c%u", (unsigned)ent->parent_num)
+                 : status;
+    status = status == ODIN3_OK && row->file != 0 ? pm_file(st, row->file, &file) : status;
+    status = status == ODIN3_OK && file != 0
+                 ? odin3_strbuf_appendf(&bufs->origins, "f%u", (unsigned)file)
+                 : status;
+    status = status == ODIN3_OK ? odin3_strbuf_appendf(span, "%u.%u-%u.%u", (unsigned)row->line,
+                                                       (unsigned)row->col, (unsigned)row->end_line,
+                                                       (unsigned)row->end_col)
+                                : status;
+    if (status == ODIN3_OK) {
+        const odin3_nm_field fields[] = {fld_raw(ids),
+                                         fld_plain(odin3_bytes_cstr(kind_word(row->kind))),
+                                         fld_plain(odin3_bytes_cstr(level_word(row->level))),
+                                         fld_raw(&bufs->parents),
+                                         fld_raw(&bufs->origins),
+                                         fld_raw(span),
+                                         fld_plain(str_of(st->design, row->name))};
+        status = odin3_name_map_write_line_v2(out, 'C', fields, sizeof fields / sizeof fields[0]);
+    }
+    return status;
+}
+
+static odin3_status emit_file(const pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+    odin3_strbuf *ids = &bufs->num[0];
+    odin3_strbuf_clear(ids);
+    uint32_t id = *(const uint32_t *)odin3_vec_cat(&st->file_ids, index);
+    odin3_status status = odin3_strbuf_appendf(ids, "f%u", (unsigned)(index + 1U));
+    if (status == ODIN3_OK) {
+        const odin3_nm_field fields[] = {fld_raw(ids), fld_plain(str_of(st->design, id))};
+        status = odin3_name_map_write_line_v2(out, 'F', fields, sizeof fields / sizeof fields[0]);
+    }
+    return status;
+}
+
+static odin3_status emit_run(const pm *st, size_t index, line_bufs *bufs, odin3_strbuf *out) {
+    odin3_strbuf *ids = &bufs->num[0];
+    odin3_strbuf_clear(ids);
+    odin3_passrun_id run = {*(const uint32_t *)odin3_vec_cat(&st->run_ids, index)};
+    odin3_status status = odin3_strbuf_appendf(ids, "t%u", (unsigned)(index + 1U));
+    if (status == ODIN3_OK) {
+        const odin3_nm_field fields[] = {
+            fld_raw(ids), fld_plain(str_of(st->design, odin3_passrun_name(st->design, run))),
+            fld_plain(str_of(st->design, odin3_passrun_args(st->design, run))),
+            fld_plain(str_of(st->design, odin3_passrun_info(st->design, run)))};
+        status = odin3_name_map_write_line_v2(out, 'T', fields, sizeof fields / sizeof fields[0]);
+    }
+    return status;
+}
+
+/* --- the objects ------------------------------------------------------------------------------ */
+
+typedef struct obj_order {
+    const odin3_prov_obj *objs;
+} obj_order;
+
+/* O lines before N lines, then the key of 3.2 item 1, then the input order (stable). */
+static int cmp_obj_index(const void *ctx, const void *lhs, const void *rhs) {
+    const obj_order *order = ctx;
+    uint32_t left = *(const uint32_t *)lhs;
+    uint32_t right = *(const uint32_t *)rhs;
+    const odin3_prov_obj *first = &order->objs[left];
+    const odin3_prov_obj *second = &order->objs[right];
+    if (first->kept != second->kept) {
+        return first->kept ? 1 : -1;
+    }
+    int cmp = odin3_name_entry_cmp(&first->entry, &second->entry);
+    return cmp != 0 ? cmp : cmp_u32(left, right);
+}
+
+/* The indexes of objs in the order of the lines. Two O lines with one key are an error; a later N
+ * line with the key of an earlier one is dropped (agent default: the first name stays). */
+static odin3_status sort_objects(const odin3_prov_obj *objs, size_t count, odin3_vec *sorted) {
+    odin3_vec all;
+    odin3_vec_init(&all, sizeof(uint32_t));
+    odin3_status status = odin3_vec_reserve(&all, count);
+    for (size_t i = 0; status == ODIN3_OK && i < count; i++) {
+        *(uint32_t *)odin3_vec_push(&all) = (uint32_t)i;
+    }
+    const obj_order order = {objs};
+    const elem_ctx sort = {sizeof(uint32_t), cmp_obj_index, &order};
+    status = status == ODIN3_OK ? merge_sort(&all, &sort) : status;
+    for (size_t i = 0; status == ODIN3_OK && i < all.len; i++) {
+        uint32_t at = *(const uint32_t *)odin3_vec_cat(&all, i);
+        const odin3_prov_obj *cur = &objs[at];
+        bool dup = false;
+        if (i > 0) {
+            const odin3_prov_obj *prev = &objs[*(const uint32_t *)odin3_vec_cat(&all, i - 1U)];
+            dup = prev->kept == cur->kept && odin3_name_entry_cmp(&prev->entry, &cur->entry) == 0;
+        }
+        if (dup && !cur->kept) {
+            odin3_log(ODIN3_LOG_ERROR, "name map: two objects are named '%.*s' (module '%.*s')",
+                      (int)cur->entry.short_name.len, (const char *)cur->entry.short_name.ptr,
+                      (int)cur->entry.module.len, (const char *)cur->entry.module.ptr);
+            status = ODIN3_ERR_INVALID_ARG;
+        } else if (!dup) {
+            *(uint32_t *)odin3_vec_push(sorted) = at;
+        }
+    }
+    odin3_vec_free(&all);
+    return status;
+}
+
+/* One O or N line of an object whose record is numbered (or 0). */
+static odin3_status emit_object(const pm *st, const odin3_prov_obj *obj, line_bufs *bufs,
+                                odin3_strbuf *out) {
+    uint64_t num = 0;
+    if (obj->record != 0) {
+        (void)odin3_u64map_get(st->num_of, obj->record, &num);
+    }
+    const pm_rec *pr = num != 0 ? odin3_vec_cat(&st->recs, num - 1U) : NULL;
+    odin3_strbuf *recs = &bufs->num[0];
+    odin3_strbuf_clear(recs);
+    odin3_status status = num != 0 ? odin3_strbuf_appendf(recs, "r%u", (unsigned)num) : ODIN3_OK;
+    odin3_strbuf line;
+    odin3_strbuf_init(&line);
+    status =
+        status == ODIN3_OK ? odin3_strbuf_appendf(&line, "%u", (unsigned)obj->entry.line) : status;
+    if (status != ODIN3_OK) {
+        odin3_strbuf_free(&line);
+        return status;
+    }
+    const odin3_nm_field level =
+        fld_plain(odin3_bytes_cstr(level_word(pr != NULL ? pr->level : 0)));
+    const odin3_name_entry *ent = &obj->entry;
+    const odin3_nm_field o_fields[] = {fld_plain(ent->module),
+                                       fld_plain(odin3_bytes_cstr(odin3_name_kind_str(ent->kind))),
+                                       fld_plain(ent->short_name),
+                                       fld_plain(ent->full),
+                                       fld_plain(ent->hier),
+                                       fld_plain(ent->file),
+                                       fld_raw(&line),
+                                       fld_raw(recs),
+                                       level};
+    const odin3_nm_field n_fields[] = {fld_plain(ent->module),
+                                       fld_plain(odin3_bytes_cstr(odin3_name_kind_str(ent->kind))),
+                                       fld_plain(ent->short_name), fld_raw(recs), level};
+    status = obj->kept ? odin3_name_map_write_line_v2(out, 'N', n_fields,
+                                                      sizeof n_fields / sizeof n_fields[0])
+                       : odin3_name_map_write_line_v2(out, 'O', o_fields,
+                                                      sizeof o_fields / sizeof o_fields[0]);
+    odin3_strbuf_free(&line);
+    return status;
+}
+
+/* Numbers the records behind the objects, labels them and the constructs. */
+static odin3_status pm_prepare(pm *st, const odin3_prov_obj *objs, const odin3_vec *sorted) {
+    odin3_status status = ODIN3_OK;
+    for (size_t i = 0; status == ODIN3_OK && i < sorted->len; i++) {
+        uint32_t record = objs[*(const uint32_t *)odin3_vec_cat(sorted, i)].record;
+        status = record != 0 ? pm_visit(st, record) : ODIN3_OK;
+    }
+    status = status == ODIN3_OK ? pm_label_all(st) : status;
+    status = status == ODIN3_OK ? pm_add_all_rows(st) : status;
+    return status == ODIN3_OK ? pm_runs(st) : status;
+}
+
+/* The lines in file order; out is appended to. */
+static odin3_status pm_emit(pm *st, const odin3_prov_obj *objs, const odin3_vec *sorted,
+                            odin3_strbuf *out) {
+    line_bufs bufs;
+    bufs_init(&bufs);
+    odin3_status status =
+        odin3_name_map_write_header_v2(out, st->req->width, MODE_WORDS[st->req->ast]);
+    for (size_t i = 0; status == ODIN3_OK && i < sorted->len; i++) {
+        status = emit_object(st, &objs[*(const uint32_t *)odin3_vec_cat(sorted, i)], &bufs, out);
+    }
+    for (size_t i = 0; status == ODIN3_OK && i < st->recs.len; i++) {
+        status = emit_record(st, i, &bufs, out);
+    }
+    for (size_t i = 0; status == ODIN3_OK && i < st->con_order.len; i++) {
+        status = emit_construct(st, i, &bufs, out);
+    }
+    for (size_t i = 0; status == ODIN3_OK && i < st->file_ids.len; i++) {
+        status = emit_file(st, i, &bufs, out);
+    }
+    for (size_t i = 0; status == ODIN3_OK && i < st->run_ids.len; i++) {
+        status = emit_run(st, i, &bufs, out);
+    }
+    bufs_free(&bufs);
+    return status;
+}
+
+/* True when every record of the objects is a record of the design. */
+static bool records_valid(const odin3_design *design, const odin3_prov_obj *objs, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (objs[i].record != 0 &&
+            odin3_prov_get(design, (odin3_prov_id){objs[i].record}) == NULL) {
+            odin3_log(ODIN3_LOG_ERROR, "name map: record %u is not a record of the design",
+                      (unsigned)objs[i].record);
+            return false;
+        }
+    }
+    return true;
+}
+
+odin3_status odin3_prov_map_text(const odin3_prov_map_req *req, const odin3_prov_obj *objs,
+                                 size_t count, odin3_strbuf *out) {
+    if (req == NULL || req->design == NULL || out == NULL || (objs == NULL && count > 0) ||
+        !records_valid(req->design, objs, count)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    size_t start = out->len;
+    pm st;
+    odin3_vec sorted;
+    odin3_vec_init(&sorted, sizeof(uint32_t));
+    odin3_status status = pm_init(&st, req);
+    status = status == ODIN3_OK ? sort_objects(objs, count, &sorted) : status;
+    status = status == ODIN3_OK ? pm_prepare(&st, objs, &sorted) : status;
+    status = status == ODIN3_OK ? pm_emit(&st, objs, &sorted, out) : status;
+    if (status != ODIN3_OK && out->len != start) {
+        out->len = start;
+        if (out->data != NULL) {
+            out->data[start] = '\0';
+        }
+    }
+    odin3_vec_free(&sorted);
+    if (st.num_of != NULL) {
+        pm_free(&st);
+    }
+    return status;
+}
+
+bool odin3_prov_map_word(odin3_bytes word, odin3_prov_map_mode *mode) {
+    static const struct {
+        const char *word;
+        odin3_prov_map_mode mode;
+    } WORDS[] = {{"refs", ODIN3_PROV_MAP_REFS},
+                 {"constructs", ODIN3_PROV_MAP_CONSTRUCTS},
+                 {"full", ODIN3_PROV_MAP_FULL}};
+    for (size_t k = 0; word.ptr != NULL && k < sizeof WORDS / sizeof WORDS[0]; k++) {
+        if (word.len == strlen(WORDS[k].word) && memcmp(word.ptr, WORDS[k].word, word.len) == 0) {
+            *mode = WORDS[k].mode;
+            return true;
+        }
+    }
+    return false;
 }

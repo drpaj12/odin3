@@ -111,6 +111,17 @@ static odin3_status parse_focus(odin3_bytes value, write_args *out) {
     return st;
 }
 
+/* --prov-map and its optional value: refs, constructs or full (the next word, when it is one). */
+static void parse_prov_map(odin3_bytes *rest, write_args *out) {
+    odin3_bytes peek = *rest;
+    odin3_prov_map_mode mode = ODIN3_PROV_MAP_ANY;
+    if (odin3_prov_map_word(odin3_pass_arg_next(&peek), &mode)) {
+        *rest = peek;
+    }
+    out->verilog.prov_map = mode;
+    out->json.prov_map = mode;
+}
+
 /* write_verilog's and write_json's options: --name-style and --name-map. */
 static odin3_status parse_names_option(const char *pass, odin3_bytes *rest, odin3_bytes word,
                                        write_args *out) {
@@ -168,6 +179,10 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
         out->json.odin3_keys = true;
         return ODIN3_OK;
     }
+    if (names && odin3_pass_arg_is(word, "--prov-map")) {
+        parse_prov_map(rest, out);
+        return ODIN3_OK;
+    }
     if (names &&
         (odin3_pass_arg_is(word, "--name-style") || odin3_pass_arg_is(word, "--name-map"))) {
         return parse_names_option(pass, rest, word, out);
@@ -213,6 +228,10 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
         odin3_log(ODIN3_LOG_ERROR, "%s: --name-map needs --name-style hash", pass);
         return ODIN3_ERR_INVALID_ARG;
     }
+    if (parsed->json.prov_map != ODIN3_PROV_MAP_NONE && !hash) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: --prov-map needs --name-style hash", pass);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     const char *map = parsed->name_map.len > 0 ? parsed->name_map.data : NULL;
     parsed->verilog.name_map = map;
     parsed->json.name_map = map;
@@ -221,8 +240,8 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
 
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
-    write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL},
-                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false},
+    write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL, ODIN3_PROV_MAP_NONE},
+                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, ODIN3_PROV_MAP_NONE},
                          .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
@@ -282,10 +301,11 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",
-    "write_json <file> [--odin3] [--name-style short|provenance|hash [--name-map <file>]]: write "
-    "the "
-    "design as Yosys-schema JSON (file - is stdout); hash names write the name map to <file>.names "
-    "or --name-map; --odin3 adds odin3_version, and per module, cell and netname odin3_prov and "
+    "write_json <file> [--odin3] [--name-style short|provenance|hash [--name-map <file>]] "
+    "[--prov-map [refs|constructs|full]]: write the design as Yosys-schema JSON (file - is "
+    "stdout); hash names write the name map to <file>.names or --name-map; --prov-map (hash "
+    "names only) writes the version 2 map with the records and the AST layer; --odin3 adds "
+    "odin3_version, and per module, cell and netname odin3_prov and "
     "odin3_level",
     write_json_run,
     NULL,
@@ -293,9 +313,10 @@ const odin3_pass_def odin3_pass_write_json = {
     ODIN3_PASS_PROCESSES_REFUSE};
 const odin3_pass_def odin3_pass_write_verilog = {
     "write_verilog",
-    "write_verilog <file> [--name-style short|provenance|hash [--name-map <file>]]: write "
+    "write_verilog <file> [--name-style short|provenance|hash [--name-map <file>] "
+    "[--prov-map [refs|constructs|full]]]: write "
     "structural Verilog (file - is stdout); hash names write the name map to <file>.names or "
-    "--name-map",
+    "--name-map; --prov-map (hash names only) writes the version 2 map",
     write_verilog_run,
     NULL,
     false,
