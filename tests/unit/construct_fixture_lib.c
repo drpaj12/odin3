@@ -38,9 +38,9 @@ static odin3_status add_rows(fixture *fix) {
     static const struct {
         uint32_t kind;
         uint32_t parent;
-    } rows[ROWS] = {{ODIN3_AST_MODULE, 0},          {ODIN3_AST_ALWAYS, 1},
-                    {ODIN3_AST_ALWAYS, 1},          {ODIN3_AST_BLOCKING_ASSIGN, 2},
-                    {ODIN3_AST_BINARY, 4},          {ODIN3_AST_BLOCKING_ASSIGN, 3}};
+    } rows[ROWS] = {{ODIN3_AST_MODULE, 0}, {ODIN3_AST_ALWAYS, 1},
+                    {ODIN3_AST_ALWAYS, 1}, {ODIN3_AST_BLOCKING_ASSIGN, 2},
+                    {ODIN3_AST_BINARY, 4}, {ODIN3_AST_BLOCKING_ASSIGN, 3}};
     for (uint32_t i = 0; i < ROWS; i++) {
         odin3_construct_row row = {0};
         row.run = fix->ctx.run.v;
@@ -70,9 +70,10 @@ static odin3_prov_id leaf(fixture *fix, uint32_t row) {
     return odin3_prov_source(&fix->ctx, &origin, &id) == ODIN3_OK ? id : (odin3_prov_id){0};
 }
 
-static odin3_status add_objects(fixture *fix, odin3_prov_id join, odin3_prov_id src) {
+/* recs[0] names module top, recs[1] its node n. */
+static odin3_status add_objects(fixture *fix, const odin3_prov_id recs[2]) {
     odin3_module_id mid = {0};
-    odin3_status st = odin3_module_create(fix->design, intern(fix->design, "top"), join, &mid);
+    odin3_status st = odin3_module_create(fix->design, intern(fix->design, "top"), recs[0], &mid);
     odin3_celltype_id type = {0};
     odin3_node_id node = {0};
     odin3_net_id net = {0};
@@ -80,7 +81,7 @@ static odin3_status add_objects(fixture *fix, odin3_prov_id join, odin3_prov_id 
         st = ODIN3_ERR_INVALID_ARG;
     }
     odin3_module *module = st == ODIN3_OK ? odin3_module_get(fix->design, mid) : NULL;
-    odin3_node_spec spec = {type, intern(fix->design, "n"), src, NULL, 0};
+    odin3_node_spec spec = {type, intern(fix->design, "n"), recs[1], NULL, 0};
     if (st == ODIN3_OK) {
         st = odin3_node_create(module, &spec, &node);
     }
@@ -91,7 +92,8 @@ static odin3_status add_objects(fixture *fix, odin3_prov_id join, odin3_prov_id 
 }
 
 static odin3_status build(fixture *fix) {
-    odin3_status st = odin3_pass_run_begin(fix->design, intern(fix->design, "read_verilog"), &fix->ctx);
+    odin3_status st =
+        odin3_pass_run_begin(fix->design, intern(fix->design, "read_verilog"), &fix->ctx);
     fix->file = intern(fix->design, "t.v");
     if (st == ODIN3_OK) {
         st = add_rows(fix);
@@ -103,7 +105,8 @@ static odin3_status build(fixture *fix) {
         odin3_prov_begin_op_class(&fix->ctx, &cls);
         st = odin3_prov_derive(&fix->ctx, (odin3_prov_list){parents, 2}, &join);
     }
-    return st == ODIN3_OK ? add_objects(fix, join, parents[0]) : st;
+    const odin3_prov_id named[2] = {join, parents[0]};
+    return st == ODIN3_OK ? add_objects(fix, named) : st;
 }
 
 odin3_design *odin3_test_construct_design(void);

@@ -17,7 +17,11 @@
 #include <stdint.h>
 
 /* The part of a row: the node itself, or the synthesized then and else arm of an IF (2.2). */
-enum { ODIN3_CONSTRUCT_PART_NODE = 0, ODIN3_CONSTRUCT_PART_THEN = 1, ODIN3_CONSTRUCT_PART_ELSE = 2 };
+enum {
+    ODIN3_CONSTRUCT_PART_NODE = 0,
+    ODIN3_CONSTRUCT_PART_THEN = 1,
+    ODIN3_CONSTRUCT_PART_ELSE = 2
+};
 
 /*
  * One construct. Row numbers are 1-based; 0 means none. parent is a row number smaller than the
@@ -81,9 +85,17 @@ odin3_status odin3_construct_copy(odin3_construct_table *dst, const odin3_constr
 odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row *row,
                                  uint32_t *index);
 
-/* The row with key (run, ast, part, call), 0 when there is none. */
-uint32_t odin3_construct_find(const odin3_design *design, odin3_passrun_id run, uint32_t ast,
-                              uint32_t part, uint32_t call);
+/* The key of a row: the node of a run, the part of it and the call instance (0 for none). */
+typedef struct odin3_construct_key {
+    odin3_passrun_id run;
+    uint32_t ast;
+    uint32_t part;
+    uint32_t call;
+} odin3_construct_key;
+
+/* The row with this key, 0 when there is none. (V1.2.0 4.3 lists find(design, run, ast, part,
+ * call); the key is one argument so that no two adjacent arguments can be swapped.) */
+uint32_t odin3_construct_find(const odin3_design *design, const odin3_construct_key *key);
 
 /* The row numbered index, NULL for 0 or past the last. Valid until the next add. */
 const odin3_construct_row *odin3_construct_get(const odin3_design *design, uint32_t index);

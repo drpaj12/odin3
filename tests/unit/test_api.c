@@ -4,6 +4,8 @@
 #include "odin3/odin3.h"
 #include "unity.h"
 
+#include <dlfcn.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -70,6 +72,19 @@ static void test_plugin_load_example_plugin(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_plugin_load(EXAMPLE_PLUGIN_PATH));
 }
 
+/* A plugin built for ABI 6 (the number its host passes) is refused by the ABI 7 plugin. */
+static void test_plugin_built_for_abi_6_is_refused(void) {
+    void *handle = dlopen(EXAMPLE_PLUGIN_PATH, RTLD_LAZY);
+    TEST_ASSERT_NOT_NULL(handle);
+    odin3_status (*init)(uint32_t) = NULL;
+    void *symbol = dlsym(handle, "odin3_plugin_init");
+    TEST_ASSERT_NOT_NULL(symbol);
+    (void)memcpy((void *)&init, (const void *)&symbol, sizeof init);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, init(6));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, init((uint32_t)ODIN3_ABI_VERSION + 1U));
+    (void)dlclose(handle);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_version_string_matches_macros);
@@ -81,5 +96,6 @@ int main(void) {
     RUN_TEST(test_plugin_load_missing_file_is_io_error);
     RUN_TEST(test_plugin_without_init_is_plugin_error);
     RUN_TEST(test_plugin_load_example_plugin);
+    RUN_TEST(test_plugin_built_for_abi_6_is_refused);
     return UNITY_END();
 }

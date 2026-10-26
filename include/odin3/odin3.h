@@ -949,8 +949,7 @@ odin3_status odin3_obj_get_prov(const odin3_design *design, odin3_obj obj, uint3
  * here from the record graph and the construct table, once, by the code the map writers share.
  * ODIN3_ERR_INVALID_ARG for record 0 or one past the last.
  */
-odin3_status odin3_prov_get_info(const odin3_design *design, uint32_t record,
-                                 odin3_prov_info *out);
+odin3_status odin3_prov_get_info(const odin3_design *design, uint32_t record, odin3_prov_info *out);
 
 /* Visits the parents of `record` in stored order (a SOURCE or IMPORTED record has none). */
 odin3_status odin3_prov_visit_parents(const odin3_design *design, uint32_t record,

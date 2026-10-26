@@ -25,10 +25,10 @@ typedef struct run_row {
 } run_row;
 
 struct odin3_construct_table {
-    odin3_vec rows;   /* odin3_construct_row; row number n is index n - 1 */
+    odin3_vec rows;      /* odin3_construct_row; row number n is index n - 1 */
     odin3_u64map *heads; /* (run << 32 | ast) -> row number of the newest row of that node */
-    odin3_vec runs;   /* run_row, in the order marked */
-    odin3_vec misses; /* uint32_t record IDs, increasing */
+    odin3_vec runs;      /* run_row, in the order marked */
+    odin3_vec misses;    /* uint32_t record IDs, increasing */
 };
 
 /* --- the kind map (V1.2.0 2.1) --------------------------------------------------------------- */
@@ -172,8 +172,10 @@ odin3_status odin3_construct_copy(odin3_construct_table *dst, const odin3_constr
     return ODIN3_OK;
 }
 
-static uint64_t node_key(uint32_t run, uint32_t ast) {
-    return ((uint64_t)run << 32) | ast;
+enum { RUN_SHIFT = 32 };
+
+static uint64_t node_key(odin3_passrun_id run, uint32_t ast) {
+    return ((uint64_t)run.v << RUN_SHIFT) | ast;
 }
 
 static const odin3_construct_row *row_cat(const odin3_construct_table *table, uint32_t index) {
@@ -201,12 +203,12 @@ static const char *add_problem(const odin3_construct_table *table, const odin3_c
     return NULL;
 }
 
-/* The row number with key (run, ast, part, call) in the chain starting at head, 0 if none. */
-static uint32_t chain_find(const odin3_construct_table *table, uint32_t head, uint32_t part,
-                           uint32_t call) {
+/* The row number with this part and call in the chain starting at head, 0 if none. */
+static uint32_t chain_find(const odin3_construct_table *table, uint32_t head,
+                           const odin3_construct_key *key) {
     for (uint32_t at = head; at != 0;) {
         const odin3_construct_row *row = row_cat(table, at);
-        if (row->part == part && row->call == call) {
+        if (row->part == key->part && row->call == key->call) {
             return at;
         }
         at = row->next;
@@ -223,10 +225,11 @@ odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row
         odin3_log(ODIN3_LOG_ERROR, "odin3_construct_add: %s", why);
         return ODIN3_ERR_INVALID_ARG;
     }
-    uint64_t key = node_key(row->run, row->ast);
+    uint64_t key = node_key((odin3_passrun_id){row->run}, row->ast);
     uint64_t head = 0;
     (void)odin3_u64map_get(table->heads, key, &head);
-    if (chain_find(table, (uint32_t)head, row->part, row->call) != 0) {
+    odin3_construct_key own_key = {{row->run}, row->ast, row->part, row->call};
+    if (chain_find(table, (uint32_t)head, &own_key) != 0) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_construct_add: run %u node %u part %u call %u exists",
                   row->run, row->ast, (unsigned)row->part, row->call);
         return ODIN3_ERR_INVALID_ARG;
@@ -245,13 +248,13 @@ odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row
     return ODIN3_OK;
 }
 
-uint32_t odin3_construct_find(const odin3_design *design, odin3_passrun_id run, uint32_t ast,
-                              uint32_t part, uint32_t call) {
+uint32_t odin3_construct_find(const odin3_design *design, const odin3_construct_key *key) {
     uint64_t head = 0;
-    if (design == NULL || !odin3_u64map_get(design->construct->heads, node_key(run.v, ast), &head)) {
+    if (design == NULL || key == NULL ||
+        !odin3_u64map_get(design->construct->heads, node_key(key->run, key->ast), &head)) {
         return 0;
     }
-    return chain_find(design->construct, (uint32_t)head, part, call);
+    return chain_find(design->construct, (uint32_t)head, key);
 }
 
 const odin3_construct_row *odin3_construct_get(const odin3_design *design, uint32_t index) {
@@ -274,7 +277,7 @@ size_t odin3_construct_bytes_reserved(const odin3_design *design) {
 
 bool odin3_construct_has_node(const odin3_design *design, odin3_passrun_id run, uint32_t ast) {
     uint64_t head = 0;
-    if (design == NULL || !odin3_u64map_get(design->construct->heads, node_key(run.v, ast), &head)) {
+    if (design == NULL || !odin3_u64map_get(design->construct->heads, node_key(run, ast), &head)) {
         return false;
     }
     for (uint32_t at = (uint32_t)head; at != 0; at = row_cat(design->construct, at)->next) {
@@ -300,10 +303,11 @@ uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id rec
         return 0;
     }
     if (rec->n_locs < 2) {
-        return odin3_construct_find(design, rec->run, rec->ast, ODIN3_CONSTRUCT_PART_NODE, 0);
+        const odin3_construct_key key = {rec->run, rec->ast, ODIN3_CONSTRUCT_PART_NODE, 0};
+        return odin3_construct_find(design, &key);
     }
     uint64_t head = 0;
-    if (!odin3_u64map_get(design->construct->heads, node_key(rec->run.v, rec->ast), &head)) {
+    if (!odin3_u64map_get(design->construct->heads, node_key(rec->run, rec->ast), &head)) {
         return 0;
     }
     uint32_t found = 0;

@@ -568,7 +568,8 @@ static void check_records(check_ctx *ctx) {
     }
 }
 
-/* --- rule 12: the construct table -------------------------------------------------------------- */
+/* --- rule 12: the construct table --------------------------------------------------------------
+ */
 
 /* A row's references: parent and call are earlier rows, run is a run, strings are strtab IDs. */
 static void construct_refs(check_ctx *ctx, uint32_t index, const odin3_construct_row *row) {
@@ -595,17 +596,19 @@ static void construct_shape(check_ctx *ctx, uint32_t index, const odin3_construc
         violation(ctx, R12, "construct %u has kind %u and level %u, which the kind map refuses",
                   index, (unsigned)row->kind, (unsigned)row->level);
     }
-    uint32_t want = row->kind == ODIN3_CONSTRUCT_IF_THEN   ? ODIN3_CONSTRUCT_PART_THEN
-                    : row->kind == ODIN3_CONSTRUCT_IF_ELSE ? ODIN3_CONSTRUCT_PART_ELSE
-                                                           : ODIN3_CONSTRUCT_PART_NODE;
+    uint32_t want = ODIN3_CONSTRUCT_PART_NODE;
+    if (row->kind == ODIN3_CONSTRUCT_IF_THEN) {
+        want = ODIN3_CONSTRUCT_PART_THEN;
+    } else if (row->kind == ODIN3_CONSTRUCT_IF_ELSE) {
+        want = ODIN3_CONSTRUCT_PART_ELSE;
+    }
     if (row->part != want) {
         violation(ctx, R12, "construct %u has part %u, but its kind %u needs %u", index,
                   (unsigned)row->part, (unsigned)row->kind, want);
     }
     const odin3_construct_row *parent = odin3_construct_get(ctx->design, row->parent);
-    if (want != ODIN3_CONSTRUCT_PART_NODE &&
-        (parent == NULL || parent->kind != ODIN3_AST_IF || parent->ast != row->ast ||
-         parent->run != row->run)) {
+    if (want != ODIN3_CONSTRUCT_PART_NODE && (parent == NULL || parent->kind != ODIN3_AST_IF ||
+                                              parent->ast != row->ast || parent->run != row->run)) {
         violation(ctx, R12, "arm construct %u does not hang under the IF row of its node", index);
     }
 }
@@ -636,8 +639,8 @@ static void check_constructs(check_ctx *ctx) {
         const odin3_construct_row *row = odin3_construct_get(design, i);
         construct_refs(ctx, i, row);
         construct_shape(ctx, i, row);
-        if (odin3_construct_find(design, (odin3_passrun_id){row->run}, row->ast, row->part,
-                                 row->call) != i) {
+        const odin3_construct_key key = {{row->run}, row->ast, row->part, row->call};
+        if (odin3_construct_find(design, &key) != i) {
             violation(ctx, R12, "construct %u shares its key (run %u, node %u, part %u, call %u)",
                       i, row->run, row->ast, (unsigned)row->part, row->call);
         }

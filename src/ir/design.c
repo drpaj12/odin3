@@ -36,8 +36,7 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     design->opclass = odin3_opclass_create();
     design->construct = odin3_construct_create();
     if (design->arena == NULL || design->strtab == NULL || design->opclass == NULL ||
-        design->construct == NULL ||
-        odin3_celltype_table_init(design) != ODIN3_OK ||
+        design->construct == NULL || odin3_celltype_table_init(design) != ODIN3_OK ||
         odin3_module_table_init(design) != ODIN3_OK || odin3_prov_store_init(design) != ODIN3_OK) {
         odin3_design_destroy(design);
         return NULL;
@@ -45,21 +44,26 @@ ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     return design;
 }
 
+/* The side tables of a clone: the op-class and construct tables, created and copied. */
+static odin3_status clone_tables(odin3_design *dst, const odin3_design *src) {
+    dst->opclass = odin3_opclass_create();
+    dst->construct = odin3_construct_create();
+    if (dst->opclass == NULL || dst->construct == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = odin3_opclass_copy(dst->opclass, src->opclass);
+    return st == ODIN3_OK ? odin3_construct_copy(dst->construct, src->construct) : st;
+}
+
 /* Fills dst, a zeroed design with an empty AST list, from src. */
 static odin3_status clone_into(odin3_design *dst, const odin3_design *src) {
     dst->arena = odin3_arena_create(0);
     dst->strtab = odin3_strtab_clone(src->strtab);
-    dst->opclass = odin3_opclass_create();
-    dst->construct = odin3_construct_create();
-    if (dst->arena == NULL || dst->strtab == NULL || dst->opclass == NULL ||
-        dst->construct == NULL ||
-        odin3_module_table_init(dst) != ODIN3_OK || odin3_prov_store_init(dst) != ODIN3_OK) {
+    if (dst->arena == NULL || dst->strtab == NULL || odin3_module_table_init(dst) != ODIN3_OK ||
+        odin3_prov_store_init(dst) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st = odin3_opclass_copy(dst->opclass, src->opclass);
-    if (st == ODIN3_OK) {
-        st = odin3_construct_copy(dst->construct, src->construct);
-    }
+    odin3_status st = clone_tables(dst, src);
     if (st == ODIN3_OK) {
         st = odin3_prov_store_clone(dst, src);
     }
@@ -152,8 +156,7 @@ uint64_t odin3_design_bytes_reserved(const odin3_design *design) {
     }
     uint64_t bytes = sizeof *design;
     bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design) +
-             odin3_opclass_bytes_reserved(design->opclass) +
-             odin3_construct_bytes_reserved(design);
+             odin3_opclass_bytes_reserved(design->opclass) + odin3_construct_bytes_reserved(design);
     bytes += design->srcman != NULL ? odin3_srcman_bytes_reserved(design->srcman) : 0;
     bytes += odin3_arena_bytes_reserved(design->arena) + vec_bytes(&design->celltypes) +
              (design->types != NULL ? odin3_arena_bytes_reserved(design->types->arena) : 0) +

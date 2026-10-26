@@ -26,7 +26,7 @@ REQUIRE_CFFI = os.environ.get("ODIN3_REQUIRE_CFFI") == "1"
 PROC_LIB = os.environ.get("ODIN3_PROC_LIB")
 
 if TYPE_CHECKING or HAVE_CFFI:
-    from odin3 import Construct, Design, Odin3
+    from odin3 import Construct, Design, Odin3, Odin3Error
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VERILOG = REPO_ROOT / "tests" / "micro" / "verilog" / "full" / "ansiportlist_2.v"
@@ -75,9 +75,9 @@ class ConstructDesignTest(unittest.TestCase):
             stmt = design.construct(4)
             self.assertEqual((stmt.kind, stmt.level, stmt.parent, stmt.file, stmt.line),
                              ("BLOCKING_ASSIGN", "stmt", 2, "t.v", 40))
-            with self.assertRaises(Exception):
+            with self.assertRaises(Odin3Error):
                 design.construct(0)
-            with self.assertRaises(Exception):
+            with self.assertRaises(Odin3Error):
                 design.construct(7)
 
     def test_node_chain_leaf_to_module(self) -> None:

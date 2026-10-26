@@ -6,10 +6,10 @@
 #define ODIN3_IR_INTERNAL_H
 
 #include "ir/celltype.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
-#include "ir/construct.h"
 #include "ir/opclass.h"
 #include "ir/pinpool.h"
 #include "ir/prov.h"
@@ -113,9 +113,10 @@ typedef struct odin3_type_store {
 } odin3_type_store;
 
 struct odin3_design {
-    odin3_prov_store *prov;        /* provenance records, pass runs, tombstones */
-    odin3_opclass_table *opclass;  /* op-class table (IR-12a): class per (run, op) and record */
-    odin3_construct_table *construct; /* construct table (IR-12a): AST constructs of SOURCE records */
+    odin3_prov_store *prov;       /* provenance records, pass runs, tombstones */
+    odin3_opclass_table *opclass; /* op-class table (IR-12a): class per (run, op) and record */
+    odin3_construct_table
+        *construct;                /* construct table (IR-12a): AST constructs of SOURCE records */
     odin3_arena *arena;            /* local cell-type definitions (copied) */
     odin3_type_store *types;       /* shared cell-type arena (odin3_celltype_arena) */
     odin3_strtab *strtab;          /* design-global names and string values */

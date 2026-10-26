@@ -24,7 +24,8 @@ static odin3_pass_ctx ctx;
 
 static const odin3_opclass REWRITE = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD, false,
                                       0};
-static const odin3_opclass REFINE = {ODIN3_DIR_REFINE, ODIN3_LEVEL_STMT, ODIN3_LEVEL_WORD, false, 0};
+static const odin3_opclass REFINE = {ODIN3_DIR_REFINE, ODIN3_LEVEL_STMT, ODIN3_LEVEL_WORD, false,
+                                     0};
 static const odin3_opclass COARSEN = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, false,
                                       0};
 static const odin3_opclass BULK = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, true, 0};
@@ -54,17 +55,27 @@ static uint32_t intern(const char *name) {
     return str;
 }
 
-static uint32_t add_row(uint32_t kind, uint32_t part, uint32_t ast, uint32_t parent) {
+typedef struct row_args {
+    uint32_t kind;
+    uint32_t part;
+    uint32_t ast;
+    uint32_t parent;
+} row_args;
+
+/* ADD_ROW(kind, part, ast, parent): appends a row; level from the kind map; line = ast. */
+#define ADD_ROW(...) add_row((row_args){__VA_ARGS__})
+
+static uint32_t add_row(row_args args) {
     odin3_construct_row row = {0};
     row.run = ctx.run.v;
-    row.ast = ast;
-    row.parent = parent;
-    row.part = (uint8_t)part;
-    row.kind = (uint8_t)kind;
-    row.level = (uint8_t)odin3_construct_kind_level(kind);
+    row.ast = args.ast;
+    row.parent = args.parent;
+    row.part = (uint8_t)args.part;
+    row.kind = (uint8_t)args.kind;
+    row.level = (uint8_t)odin3_construct_kind_level(args.kind);
     row.file = intern("a.v");
-    row.line = ast;
-    row.end_line = ast;
+    row.line = args.ast;
+    row.end_line = args.ast;
     row.end_col = 5;
     uint32_t index = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &row, &index));
@@ -73,19 +84,19 @@ static uint32_t add_row(uint32_t kind, uint32_t part, uint32_t ast, uint32_t par
 
 /* The shared table; AST node n of row R_x is n = 10 * R_x, so a record's ast says its row. */
 static void build_table(void) {
-    TEST_ASSERT_EQUAL_UINT32(R_MOD, add_row(ODIN3_AST_MODULE, 0, 10, 0));
-    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_A, add_row(ODIN3_AST_ALWAYS, 0, 20, R_MOD));
-    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_B, add_row(ODIN3_AST_ALWAYS, 0, 30, R_MOD));
-    TEST_ASSERT_EQUAL_UINT32(R_A1, add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 40, R_ALWAYS_A));
-    TEST_ASSERT_EQUAL_UINT32(R_E1, add_row(ODIN3_AST_BINARY, 0, 50, R_A1));
-    TEST_ASSERT_EQUAL_UINT32(R_E2, add_row(ODIN3_AST_BINARY, 0, 60, R_A1));
-    TEST_ASSERT_EQUAL_UINT32(R_B1, add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 70, R_ALWAYS_B));
-    TEST_ASSERT_EQUAL_UINT32(R_IF, add_row(ODIN3_AST_IF, 0, 80, R_ALWAYS_A));
-    TEST_ASSERT_EQUAL_UINT32(
-        R_THEN, add_row(ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_PART_THEN, 80, R_IF));
-    TEST_ASSERT_EQUAL_UINT32(R_IN_ARM, add_row(ODIN3_AST_NONBLOCKING_ASSIGN, 0, 100, R_THEN));
-    TEST_ASSERT_EQUAL_UINT32(R_INST1, add_row(ODIN3_AST_INSTANCE, 0, 110, R_MOD));
-    TEST_ASSERT_EQUAL_UINT32(R_INST2, add_row(ODIN3_AST_INSTANCE, 0, 120, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_MOD, ADD_ROW(ODIN3_AST_MODULE, 0, 10, 0));
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_A, ADD_ROW(ODIN3_AST_ALWAYS, 0, 20, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_ALWAYS_B, ADD_ROW(ODIN3_AST_ALWAYS, 0, 30, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_A1, ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 0, 40, R_ALWAYS_A));
+    TEST_ASSERT_EQUAL_UINT32(R_E1, ADD_ROW(ODIN3_AST_BINARY, 0, 50, R_A1));
+    TEST_ASSERT_EQUAL_UINT32(R_E2, ADD_ROW(ODIN3_AST_BINARY, 0, 60, R_A1));
+    TEST_ASSERT_EQUAL_UINT32(R_B1, ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 0, 70, R_ALWAYS_B));
+    TEST_ASSERT_EQUAL_UINT32(R_IF, ADD_ROW(ODIN3_AST_IF, 0, 80, R_ALWAYS_A));
+    TEST_ASSERT_EQUAL_UINT32(R_THEN,
+                             ADD_ROW(ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_PART_THEN, 80, R_IF));
+    TEST_ASSERT_EQUAL_UINT32(R_IN_ARM, ADD_ROW(ODIN3_AST_NONBLOCKING_ASSIGN, 0, 100, R_THEN));
+    TEST_ASSERT_EQUAL_UINT32(R_INST1, ADD_ROW(ODIN3_AST_INSTANCE, 0, 110, R_MOD));
+    TEST_ASSERT_EQUAL_UINT32(R_INST2, ADD_ROW(ODIN3_AST_INSTANCE, 0, 120, R_MOD));
 }
 
 void setUp(void) {
@@ -270,7 +281,7 @@ static void test_cap_and_bulk_flags(void) {
     enum { WIDE = 20 };
     odin3_prov_id parents[WIDE];
     for (uint32_t i = 0; i < WIDE; i++) {
-        uint32_t row = add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 10 * (R_FIRST_FREE + i), R_ALWAYS_B);
+        uint32_t row = ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 0, 10 * (R_FIRST_FREE + i), R_ALWAYS_B);
         parents[i] = leaf_of(row);
     }
     odin3_prov_id id = derive(&BULK, parents, WIDE);
@@ -329,10 +340,10 @@ static void test_instance_alone_has_no_data_leaf(void) {
 /* --- inlined calls --------------------------------------------------------------------------- */
 
 static void test_a_body_called_from_two_blocks_is_a_join(void) {
-    uint32_t site_a = add_row(ODIN3_CONSTRUCT_CALL_SITE, 0, 900, R_A1);
-    uint32_t site_b = add_row(ODIN3_CONSTRUCT_CALL_SITE, 0, 910, R_B1);
-    uint32_t body = add_row(ODIN3_AST_FUNCTION_DECL, 0, 920, R_MOD);
-    uint32_t stmt = add_row(ODIN3_AST_BLOCKING_ASSIGN, 0, 930, body);
+    uint32_t site_a = ADD_ROW(ODIN3_CONSTRUCT_CALL_SITE, 0, 900, R_A1);
+    uint32_t site_b = ADD_ROW(ODIN3_CONSTRUCT_CALL_SITE, 0, 910, R_B1);
+    uint32_t body = ADD_ROW(ODIN3_AST_FUNCTION_DECL, 0, 920, R_MOD);
+    uint32_t stmt = ADD_ROW(ODIN3_AST_BLOCKING_ASSIGN, 0, 930, body);
     odin3_construct_row copy_fn = *odin3_construct_get(design, body);
     copy_fn.next = 0;
     odin3_construct_row copy_st = *odin3_construct_get(design, stmt);
@@ -351,8 +362,9 @@ static void test_a_body_called_from_two_blocks_is_a_join(void) {
         uint32_t st_row = 0;
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &st, &st_row));
         const odin3_construct_row *site = odin3_construct_get(design, sites[i]);
-        odin3_srcloc locs[2] = {{intern("a.v"), 930, 1, 930, 5, 0},
-                                {site->file, site->line, site->col, site->end_line, site->end_col, 0}};
+        odin3_srcloc locs[2] = {
+            {intern("a.v"), 930, 1, 930, 5, 0},
+            {site->file, site->line, site->col, site->end_line, site->end_col, 0}};
         odin3_prov_origin origin = {locs, 2, 930, 0};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &leaves[i]));
         TEST_ASSERT_EQUAL_UINT32(st_row, info_of(leaves[i]).construct);
@@ -376,8 +388,10 @@ static void test_visit_parents_in_stored_order(void) {
     got.count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_parents(design, two[0].v, collect, &got));
     TEST_ASSERT_EQUAL_UINT32(0, got.count);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_parents(design, 0, collect, &got));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_parents(design, id.v, NULL, &got));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_parents(design, 0, collect, &got));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_parents(design, id.v, NULL, &got));
 }
 
 typedef struct chain_log {
@@ -387,12 +401,12 @@ typedef struct chain_log {
     uint32_t count;
 } chain_log;
 
-static void on_construct(const odin3_construct *c, uint32_t leaf, void *user) {
+static void on_construct(const odin3_construct *found, uint32_t leaf, void *user) {
     chain_log *log = user;
     TEST_ASSERT_TRUE(log->count < 16);
-    log->index[log->count] = c->index;
+    log->index[log->count] = found->index;
     log->leaf[log->count] = leaf;
-    log->level[log->count] = c->level;
+    log->level[log->count] = found->level;
     log->count++;
 }
 
@@ -407,16 +421,18 @@ static void test_obj_prov_and_chain(void) {
     odin3_module_id mid = {0};
     odin3_module *module = make_module(id, &mid);
     odin3_net_id net = {0};
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(module, intern("n"), (odin3_prov_id){0}, &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_net_create(module, intern("n"), (odin3_prov_id){0}, &net));
     uint32_t record = 99;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_MODULE, 0}, &record));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_MODULE, 0}, &record));
     TEST_ASSERT_EQUAL_UINT32(id.v, record);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, net.v}, &record));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, net.v}, &record));
     TEST_ASSERT_EQUAL_UINT32(0, record); /* no provenance */
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, 999}, &record));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        odin3_obj_get_prov(design, (odin3_obj){mid.v, ODIN3_OBJ_NET, 999}, &record));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_obj_get_prov(design, (odin3_obj){7, ODIN3_OBJ_NET, 1}, &record));
     chain_log log = {{0}, {0}, {0}, 0};
@@ -438,23 +454,24 @@ static void test_obj_prov_and_chain(void) {
     odin3_obj net_obj = {mid.v, ODIN3_OBJ_NET, net.v};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_chain(design, net_obj, on_construct, &log));
     TEST_ASSERT_EQUAL_UINT32(0, log.count);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_chain(design, module_obj, NULL, &log));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_chain(design, module_obj, NULL, &log));
 }
 
 static void test_get_construct_copies_a_row(void) {
-    odin3_construct c;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_construct(design, R_THEN, &c));
-    TEST_ASSERT_EQUAL_UINT32(R_THEN, c.index);
-    TEST_ASSERT_EQUAL_UINT32(R_IF, c.parent);
-    TEST_ASSERT_EQUAL_UINT32(ODIN3_CONSTRUCT_IF_THEN, c.kind);
-    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_BRANCH, c.level);
-    TEST_ASSERT_EQUAL_STRING("a.v", c.file);
-    TEST_ASSERT_EQUAL_STRING("", c.name);
-    TEST_ASSERT_EQUAL_UINT32(80, c.line);
+    odin3_construct row;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_construct(design, R_THEN, &row));
+    TEST_ASSERT_EQUAL_UINT32(R_THEN, row.index);
+    TEST_ASSERT_EQUAL_UINT32(R_IF, row.parent);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_CONSTRUCT_IF_THEN, row.kind);
+    TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_BRANCH, row.level);
+    TEST_ASSERT_EQUAL_STRING("a.v", row.file);
+    TEST_ASSERT_EQUAL_STRING("", row.name);
+    TEST_ASSERT_EQUAL_UINT32(80, row.line);
     TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE, odin3_design_construct_count(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 0, &c));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 0, &row));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_design_get_construct(design, R_FIRST_FREE, &c));
+                          odin3_design_get_construct(design, R_FIRST_FREE, &row));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 1, NULL));
 }
 

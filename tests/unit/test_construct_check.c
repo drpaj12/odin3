@@ -38,17 +38,27 @@ static uint32_t intern(const char *name) {
     return str;
 }
 
-static uint32_t add(uint32_t kind, uint32_t part, uint32_t ast, uint32_t parent) {
+typedef struct row_args {
+    uint32_t kind;
+    uint32_t part;
+    uint32_t ast;
+    uint32_t parent;
+} row_args;
+
+/* ADD(kind, part, ast, parent): appends a row; level from the kind map; line = ast. */
+#define ADD(...) add((row_args){__VA_ARGS__})
+
+static uint32_t add(row_args args) {
     odin3_construct_row row = {0};
     row.run = run1.v;
-    row.ast = ast;
-    row.parent = parent;
-    row.part = (uint8_t)part;
-    row.kind = (uint8_t)kind;
-    row.level = (uint8_t)odin3_construct_kind_level(kind);
+    row.ast = args.ast;
+    row.parent = args.parent;
+    row.part = (uint8_t)args.part;
+    row.kind = (uint8_t)args.kind;
+    row.level = (uint8_t)odin3_construct_kind_level(args.kind);
     row.file = intern("a.v");
-    row.line = ast;
-    row.end_line = ast;
+    row.line = args.ast;
+    row.end_line = args.ast;
     uint32_t index = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_add(design, &row, &index));
     return index;
@@ -56,12 +66,12 @@ static uint32_t add(uint32_t kind, uint32_t part, uint32_t ast, uint32_t parent)
 
 /* module 1, always 2, if 3, then-arm 4, else-arm 5, assignment 6 under the then-arm. */
 static void build_table(void) {
-    uint32_t mod = add(ODIN3_AST_MODULE, 0, 3, 0);
-    uint32_t always = add(ODIN3_AST_ALWAYS, 0, 10, mod);
-    uint32_t iff = add(ODIN3_AST_IF, 0, 12, always);
-    uint32_t then_arm = add(ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_PART_THEN, 12, iff);
-    (void)add(ODIN3_CONSTRUCT_IF_ELSE, ODIN3_CONSTRUCT_PART_ELSE, 12, iff);
-    (void)add(ODIN3_AST_NONBLOCKING_ASSIGN, 0, 14, then_arm);
+    uint32_t mod = ADD(ODIN3_AST_MODULE, 0, 3, 0);
+    uint32_t always = ADD(ODIN3_AST_ALWAYS, 0, 10, mod);
+    uint32_t iff = ADD(ODIN3_AST_IF, 0, 12, always);
+    uint32_t then_arm = ADD(ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_PART_THEN, 12, iff);
+    (void)ADD(ODIN3_CONSTRUCT_IF_ELSE, ODIN3_CONSTRUCT_PART_ELSE, 12, iff);
+    (void)ADD(ODIN3_AST_NONBLOCKING_ASSIGN, 0, 14, then_arm);
 }
 
 void setUp(void) {
@@ -177,19 +187,22 @@ static odin3_prov_id source(uint32_t ast) {
 
 static void test_covered_source_records_pass(void) {
     (void)source(14);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL));
 }
 
 static void test_uncovered_source_record_fails(void) {
     (void)source(77);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
     expect_rule12("has no construct");
 }
 
 static void test_recorded_call_site_miss_passes(void) {
     odin3_prov_id miss = source(77);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_FULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_FULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_note_miss(design, miss));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL));
 }
@@ -208,7 +221,8 @@ static void test_constructs_mode_does_not_demand_expression_rows(void) {
 
 static void test_records_without_ast_are_not_demanded(void) {
     (void)source(0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL));
 }
 
