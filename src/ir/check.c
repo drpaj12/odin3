@@ -34,7 +34,9 @@ enum check_rule_num {
     RULE_PORTS,
     RULE_VIEW,
     RULE_DANGLING,
-    RULE_LAST = RULE_DANGLING
+    RULE_CONSTRUCT, /* 12: the construct table (V1.2.0 Task 3) */
+    RULE_OPCLASS,
+    RULE_LAST = RULE_OPCLASS
 };
 
 enum {
@@ -62,6 +64,7 @@ static const check_rule R9 = {RULE_PORTS, ODIN3_LOG_ERROR};
 static const check_rule R10 = {RULE_VIEW, ODIN3_LOG_ERROR};
 static const check_rule R11_E = {RULE_DANGLING, ODIN3_LOG_ERROR};
 static const check_rule R11_W = {RULE_DANGLING, ODIN3_LOG_WARN};
+static const check_rule R13 = {RULE_OPCLASS, ODIN3_LOG_ERROR};
 
 /* One run of the checker over one module (or over the design's records). */
 typedef struct check_ctx {
@@ -563,6 +566,50 @@ static void check_records(check_ctx *ctx) {
     }
 }
 
+/* --- rule 13: op classes ---------------------------------------------------------------------- */
+
+/* The class of a DERIVED record is valid for its parents (context tail, at least one parent). */
+static void opclass_shape(check_ctx *ctx, uint32_t id, const odin3_prov_record *rec,
+                          const odin3_opclass *cls) {
+    if (!odin3_opclass_valid(cls)) {
+        violation(ctx, R13, "record %u has a class with a bad direction, level or tail", id);
+    } else if (cls->context_tail > rec->parents.count) {
+        violation(ctx, R13, "record %u has context tail %u past its %u parents", id,
+                  (unsigned)cls->context_tail, rec->parents.count);
+    } else if (cls->dir == ODIN3_DIR_CONTEXT && rec->parents.count == 0) {
+        violation(ctx, R13, "context record %u has no parent", id);
+    }
+}
+
+/* Rule 13: every DERIVED record has a valid class (its override, else its operation's default);
+ * the table did not fail; no record was derived with two classes. */
+static void check_opclasses(check_ctx *ctx) {
+    const odin3_opclass_table *table = ctx->design->opclass;
+    if (odin3_opclass_failed(table)) {
+        violation(ctx, R13, "the op-class table got an invalid class or lost an override");
+    }
+    odin3_prov_id first = {0};
+    uint32_t conflicts = odin3_opclass_conflicts(table, &first);
+    if (conflicts > 0) {
+        violation(ctx, R13, "%u derives gave a record a second class (first: record %u)", conflicts,
+                  first.v);
+    }
+    uint32_t end = odin3_prov_end(ctx->design);
+    for (uint32_t i = 1; i < end; i++) {
+        const odin3_prov_record *rec = odin3_prov_get(ctx->design, (odin3_prov_id){i});
+        if (rec->kind != ODIN3_PROV_DERIVED) {
+            continue;
+        }
+        odin3_opclass cls;
+        if (odin3_opclass_of(table, (odin3_prov_id){i}, rec->run, rec->op, &cls)) {
+            opclass_shape(ctx, i, rec, &cls);
+        } else {
+            violation(ctx, R13, "derived record %u (run %u, op %u) has no class", i, rec->run.v,
+                      rec->op);
+        }
+    }
+}
+
 /* --- rule 8: wires, primaries and aliases ---------------------------------------------------- */
 
 /* A (wire, bit) membership a net records: the wire must hold the net there, once. */
@@ -872,6 +919,7 @@ odin3_status odin3_check_design(odin3_design *design, odin3_check_opts opts) {
         ctx.design = design;
         ctx.where = "design";
         check_records(&ctx);
+        check_opclasses(&ctx);
         summarize(&ctx);
         result = worse(result, ctx.failed ? ODIN3_ERR_CHECK : ODIN3_OK);
     }

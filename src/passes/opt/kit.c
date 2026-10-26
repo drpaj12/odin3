@@ -901,9 +901,9 @@ static odin3_status rb_prov(rebuild_job *job) {
         return ODIN3_OK;
     }
     if (job->oc->pass->op == 0) {
-        odin3_prov_begin_op(job->oc->pass);
+        odin3_prov_begin_op_lazy(job->oc->pass);
     }
-    return odin3_kit_prov(job->oc, &job->req->old_node, 1, &job->prov);
+    return odin3_kit_prov(job->oc, &job->req->old_node, 1, &odin3_kit_class_rewrite, &job->prov);
 }
 
 /* One attribute of the old node, gathered before any is set (odin3_attr_foreach's rule). */
@@ -1053,12 +1053,27 @@ odin3_status odin3_kit_rebuild_node(odin3_opt_ctx *oc, const odin3_kit_rebuild *
 
 enum { PROV_STACK = 8 };
 
+const odin3_opclass odin3_kit_class_rewrite = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD,
+                                               ODIN3_LEVEL_WORD, false, 0};
+const odin3_opclass odin3_kit_class_coarsen = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_WORD,
+                                               ODIN3_LEVEL_WORD, false, 0};
+
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc) {
-    odin3_prov_begin_op(oc->pass);
+    odin3_prov_begin_op_class(oc->pass, &odin3_kit_class_rewrite);
+}
+
+odin3_status odin3_kit_derive_coarsen(const odin3_opt_ctx *oc, odin3_prov_list parents,
+                                      odin3_prov_id *out) {
+    bool same = true; /* one distinct record is the 1:1 record of the rewrite: the default class */
+    for (uint32_t i = 1; i < parents.count; i++) {
+        same = same && parents.ids[i].v == parents.ids[0].v;
+    }
+    return odin3_prov_derive_class(oc->pass, parents, 0, same ? NULL : &odin3_kit_class_coarsen,
+                                   out);
 }
 
 odin3_status odin3_kit_prov(const odin3_opt_ctx *oc, const odin3_node_id *parents, uint32_t n,
-                            odin3_prov_id *out) {
+                            const odin3_opclass *cls, odin3_prov_id *out) {
     *out = (odin3_prov_id){0};
     if (n == 0) {
         return ODIN3_OK;
@@ -1075,8 +1090,12 @@ odin3_status odin3_kit_prov(const odin3_opt_ctx *oc, const odin3_node_id *parent
             ids[kept++] = prov;
         }
     }
-    odin3_status st =
-        kept > 0 ? odin3_prov_derive(oc->pass, (odin3_prov_list){ids, kept}, out) : ODIN3_OK;
+    odin3_status st = ODIN3_OK;
+    if (kept > 0 && cls != NULL && odin3_opclass_equal(cls, &odin3_kit_class_coarsen)) {
+        st = odin3_kit_derive_coarsen(oc, (odin3_prov_list){ids, kept}, out);
+    } else if (kept > 0) {
+        st = odin3_prov_derive_class(oc->pass, (odin3_prov_list){ids, kept}, 0, cls, out);
+    }
     if (ids != stack) {
         odin3_util_free(ids);
     }

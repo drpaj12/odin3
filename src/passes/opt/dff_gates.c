@@ -32,7 +32,7 @@ enum { MAX_GATE_PORTS = 4, MAX_GATE_PARAMS = 8 };
 static odin3_status state_prov(odin3_dff_state *ds, odin3_prov_id *out) {
     odin3_status st = ODIN3_OK;
     if (!ds->prov_ready) {
-        st = odin3_kit_prov(ds->oc, &ds->cell, 1, &ds->prov);
+        st = odin3_kit_prov(ds->oc, &ds->cell, 1, NULL, &ds->prov);
         ds->prov_ready = st == ODIN3_OK;
     }
     *out = ds->prov;

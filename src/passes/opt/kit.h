@@ -247,16 +247,31 @@ void odin3_kit_node_label(const odin3_opt_ctx *oc, odin3_node_id node, char *out
 void odin3_kit_name_label(const odin3_opt_ctx *oc, uint32_t name, odin3_node_id node, char *out,
                           size_t size);
 
-/* Begins the next provenance operation (odin3_prov_begin_op): one per rewrite (OP-15). */
+/* The classes opt declares (IR-12a): rewrite is every operation's default, coarsen the override of
+ * a derive over several records (N to 1). */
+extern const odin3_opclass odin3_kit_class_rewrite;
+extern const odin3_opclass odin3_kit_class_coarsen;
+
+/*
+ * odin3_prov_derive_class over parents with the coarsen class (IR-12a), unless the parents are one
+ * record repeated: N to 1 needs N distinct records, one is the 1:1 record of the rewrite (the
+ * operation's default), and hash-consing would give both derives the same record ID.
+ */
+odin3_status odin3_kit_derive_coarsen(const odin3_opt_ctx *oc, odin3_prov_list parents,
+                                      odin3_prov_id *out);
+
+/* Begins the next provenance operation (odin3_prov_begin_op_class, rewrite): one per rewrite
+ * (OP-15). */
 void odin3_kit_begin_rewrite(odin3_opt_ctx *oc);
 
 /*
  * *out = the DERIVED record of the current operation whose parents are the records of
  * parents[0 .. n), in order (OP-15); nodes without a record are left out, and *out is 0 when none
- * has one. INVALID_ARG as odin3_prov_derive (no operation begun); NO_MEMORY.
+ * has one. cls is this record's class (odin3_prov_derive_class), NULL for the operation's default.
+ * INVALID_ARG as odin3_prov_derive (no operation begun); NO_MEMORY.
  */
 odin3_status odin3_kit_prov(const odin3_opt_ctx *oc, const odin3_node_id *parents, uint32_t n,
-                            odin3_prov_id *out);
+                            const odin3_opclass *cls, odin3_prov_id *out);
 
 /*
  * Snapshot of Yosys opt_expr's invert map into oc->invert (sized to the net end, 0 = none): Y -> A

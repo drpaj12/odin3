@@ -19,6 +19,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* The class of the one operation that makes restored records: a rewrite (IR-12a). */
+extern const odin3_opclass odin3_hdl_restore_class;
+
 /* What to restore: the parsed locations of one object (their files are views, which the call
  * interns), the record the reader would have made (0: none), and the hierarchy path (a strtab ID
  * of the design, 0: none) that goes on both records. */
@@ -41,9 +44,9 @@ typedef struct odin3_hdl_restored {
  * operation; out->prov is the DERIVED record. With base 0 (the reader has no record of its own) its
  * only parent is the SOURCE.
  * Records are hash-consed, so equal text on many objects is one SOURCE and one DERIVED per
- * distinct (source, base) pair. The caller begins one operation (odin3_prov_begin_op) per read
- * run; this function never does. File strings are interned in the design's table. More than
- * ODIN3_HDL_LOC_MAX locations keep the first 8 and set out->capped.
+ * distinct (source, base) pair. The caller begins one operation (odin3_prov_begin_op_class,
+ * rewrite) per read run; this function never does. File strings are interned in the design's table.
+ * More than ODIN3_HDL_LOC_MAX locations keep the first 8 and set out->capped.
  *
  * INVALID_ARG (logged by the provenance store, or "hdl_restore: no operation begun" /
  * "hdl_restore: nothing to restore") for a NULL argument, no operation begun, n 0, or a base or

@@ -23,6 +23,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The class of the submod operation (IR-12a). */
+static const odin3_opclass submod_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                           false, 0};
+
 enum { SM_INT_TEXT = 32 };
 
 /* The state of one extraction. Per-ID vectors are indexed by the old module's IDs. */
@@ -301,7 +305,7 @@ static odin3_status first_parent(sm_run *run, odin3_prov_id *out) {
 static odin3_status make_prov(sm_run *run) {
     odin3_prov_id first = {0};
     run->prov = (odin3_prov_id){0};
-    odin3_prov_begin_op(run->pass);
+    odin3_prov_begin_op_class(run->pass, &submod_class);
     odin3_status st = first_parent(run, &first);
     return st == ODIN3_OK ? odin3_prov_derive(run->pass, (odin3_prov_list){&first, 1}, &run->prov)
                           : st;

@@ -315,7 +315,8 @@ static odin3_status group_prov(merge_job *job, const group *grp) {
     for (size_t k = 0; st == ODIN3_OK && k < nodes.len; k++) {
         st = push_node(&parents, (uint32_t) * (const uint64_t *)odin3_vec_cat(&nodes, k));
     }
-    st = st == ODIN3_OK ? odin3_kit_prov(ds->oc, parents.data, (uint32_t)parents.len, &ds->prov)
+    st = st == ODIN3_OK ? odin3_kit_prov(ds->oc, parents.data, (uint32_t)parents.len,
+                                         &odin3_kit_class_coarsen, &ds->prov)
                         : st;
     ds->prov_ready = st == ODIN3_OK;
     odin3_vec_free(&nodes);

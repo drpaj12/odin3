@@ -15,6 +15,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The class of an LPM-mapping operation: a cell rewritten as a hard cell (IR-12a). */
+static const odin3_opclass lpmmap_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                           false, 0};
+
 /* The design budget is checked every this many created pins (H-8). */
 enum {
     LM_BUDGET_PINS = 1 << 16,
@@ -182,7 +186,7 @@ odin3_status lm_begin_cell(lm_ctx *lc, odin3_node_id src) {
     odin3_vec_clear(&lc->made_nodes);
     odin3_vec_clear(&lc->made_nets);
     odin3_vec_clear(&lc->doomed);
-    odin3_prov_begin_op(lc->pass);
+    odin3_prov_begin_op_class(lc->pass, &lpmmap_class);
     odin3_prov_id parent = odin3_node_prov(lc->module, src);
     if (parent.v == 0) {
         return ODIN3_OK;

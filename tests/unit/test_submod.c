@@ -9,6 +9,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "opclass_expect.h"
 #include "passes/manager.h"
 #include "passes/submod/submod.h"
 #include "passes/submod/submod_int.h"
@@ -253,6 +254,9 @@ static void expect_attrs(const odin3_module *sub, odin3_node_id moved) {
     TEST_ASSERT_NULL(odin3_attr_get(sub, ref, intern("submod")));
 }
 
+static const odin3_opclass SUBMOD_CLASS = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD,
+                                           false, 0};
+
 static void test_submod_moves_prov_and_attrs(void) {
     read_blif(FOUR_GATES);
     odin3_node_id gate = driver_of(top(), "n2");
@@ -270,6 +274,7 @@ static void test_submod_moves_prov_and_attrs(void) {
     expect_attrs(sub, moved);
     expect_derived(odin3_module_prov(sub));
     expect_instance(sub);
+    opx_all(design, "submod", &SUBMOD_CLASS);
     check_clean();
 }
 

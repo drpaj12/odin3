@@ -190,9 +190,9 @@ odin3_status odin3_proc_prov(const odin3_proc_mctx *mctx, const odin3_pw *pw,
                              const odin3_prov_id *parents, uint32_t n, odin3_prov_id *out);
 
 /*
- * Starts the process's lowering: odin3_prov_begin_op, then pw->lowered = derive([pw->prov]) (plan
- * point (i)), the record steps B-D reuse ("one operation per process"; 0 when the node has no
- * record). ODIN3_ERR_NO_MEMORY.
+ * Starts the process's lowering: odin3_prov_begin_op_class (refine), then
+ * pw->lowered = derive([pw->prov]) (plan point (i)), the record steps B-D reuse ("one operation per
+ * process"; 0 when the node has no record). ODIN3_ERR_NO_MEMORY.
  */
 odin3_status odin3_proc_begin_lowering(odin3_proc_mctx *mctx, odin3_pw *pw);
 

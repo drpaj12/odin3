@@ -66,6 +66,8 @@ odin3_status odin3_flatten_derive(odin3_flatten_ctx *fc, odin3_prov_id orig, odi
     odin3_prov_id parents[2];
     uint32_t count = 0;
     *out = (odin3_prov_id){0};
+    /* orig == inst_prov happens (submod's instance record is its cells' record): the derive then
+     * dedups the parents to one record, and the tail (1) still counts it as the context parent. */
     if (orig.v != 0) {
         parents[count++] = orig;
     }
@@ -78,9 +80,11 @@ odin3_status odin3_flatten_derive(odin3_flatten_ctx *fc, odin3_prov_id orig, odi
     const odin3_prov_record *rec = orig.v != 0 ? odin3_prov_get(fc->design, orig) : NULL;
     uint32_t hier = 0;
     odin3_status st = hier_for(fc, rec != NULL ? rec->hier : 0, &hier);
-    return st == ODIN3_OK
-               ? odin3_prov_derive_hier(fc->pass, (odin3_prov_list){parents, count}, hier, out)
-               : st;
+    odin3_opclass cls = {ODIN3_DIR_CONTEXT, ODIN3_LEVEL_WORD, ODIN3_LEVEL_WORD, false,
+                         fc->inst_prov.v != 0 ? 1U : 0U}; /* the instance record is the tail */
+    return st == ODIN3_OK ? odin3_prov_derive_class(fc->pass, (odin3_prov_list){parents, count},
+                                                    hier, &cls, out)
+                          : st;
 }
 
 static void first_leaf(void *user, odin3_prov_id leaf) {

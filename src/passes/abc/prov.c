@@ -16,6 +16,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* The class of an abc operation: the old gates of a region coarsened into LUTs (IR-12a). */
+static const odin3_opclass abc_class = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, false,
+                                        0};
+/* The record of unanchored objects and the over-budget record: abc_class, bulk. */
+static const odin3_opclass abc_bulk_class = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT,
+                                             true, 0};
+
 enum {
     FIRST_OBJ = 2,
     TEXT_BYTES = 192,
@@ -446,7 +453,7 @@ odin3_status odin3_abc_coarse_record(odin3_abc_run *run, odin3_prov_id *out) {
     uint32_t rec = 0;
     odin3_status st = all_old_cells(run, &cells);
     if (st == ODIN3_OK) {
-        odin3_prov_begin_op(run->ctx);
+        odin3_prov_begin_op_class(run->ctx, &abc_bulk_class);
         st = derive_from_nodes(run, cells.data, cells.len, &rec);
     }
     odin3_vec_free(&cells);
@@ -479,7 +486,7 @@ static odin3_status anchor_records(pv *pw, odin3_vec *rec) {
         uint32_t to = u32_at(&pw->old_start, anc + 1U);
         uint32_t made = 0;
         if (to > from) {
-            odin3_prov_begin_op(pw->run->ctx);
+            odin3_prov_begin_op_class(pw->run->ctx, &abc_class);
             odin3_status st = derive_from_nodes(
                 pw->run, (const uint32_t *)pw->old_cells.data + from, to - from, &made);
             if (st != ODIN3_OK) {
@@ -538,7 +545,7 @@ static odin3_status lut_records(pv *pw, const odin3_vec *rec, odin3_vec *obj_pro
     odin3_vec_init(&members, sizeof(uint32_t));
     odin3_vec_init(&start, sizeof(uint32_t));
     odin3_status st = group_pairs(pw, &members, &start);
-    odin3_prov_begin_op(pw->run->ctx);
+    odin3_prov_begin_op_class(pw->run->ctx, &abc_class);
     for (uint32_t lut = 0; st == ODIN3_OK && lut < pw->res->n_luts; lut++) {
         uint32_t count = u32_at(&pw->memb, lut);
         odin3_prov_id parents[PARENT_STACK];

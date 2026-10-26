@@ -243,7 +243,7 @@ odin3_status odin3_expr_begin(odin3_expr_ctx *ec) {
     }
     odin3_kit_begin_rewrite(ec->oc);
     ec->began = true;
-    return odin3_kit_prov(ec->oc, &ec->node, 1, &ec->prov);
+    return odin3_kit_prov(ec->oc, &ec->node, 1, NULL, &ec->prov);
 }
 
 /* A spec turned into the kit's cell: parameters as values, one netvec per port. */

@@ -29,6 +29,10 @@
 #include <stdint.h>
 #include <string.h>
 
+/* The class of a process lowering: a statement refined into word cells (IR-12a). */
+static const odin3_opclass proc_class = {ODIN3_DIR_REFINE, ODIN3_LEVEL_STMT, ODIN3_LEVEL_WORD,
+                                         false, 0};
+
 /* The constant cell types and the constants they drive, indexed by bit & ~ODIN3_PW_CONST. */
 static const char *const k_const_types[ODIN3_PROC_N_CONST_NETS] = {"$_CONST0_", "$_CONST1_",
                                                                    "$_CONSTX_", "$_CONSTZ_"};
@@ -604,7 +608,7 @@ odin3_status odin3_proc_prov(const odin3_proc_mctx *mctx, const odin3_pw *pw,
 }
 
 odin3_status odin3_proc_begin_lowering(odin3_proc_mctx *mctx, odin3_pw *pw) {
-    odin3_prov_begin_op(mctx->ctx);
+    odin3_prov_begin_op_class(mctx->ctx, &proc_class);
     pw->lowered = (odin3_prov_id){0};
     if (pw->prov.v == 0) {
         return ODIN3_OK; /* a node without a record: nothing to derive from */

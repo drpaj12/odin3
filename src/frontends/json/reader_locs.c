@@ -65,7 +65,9 @@ static void note_bad(jr *rd, const odin3_json_node *src, const char *text, size_
 static odin3_status make_restored(jr *rd, const jr_restore_in *in, const odin3_hdl_loc *locs,
                                   uint32_t count, odin3_prov_id *out) {
     if (!rd->op_begun) {
-        odin3_prov_begin_op(&rd->ctx); /* the one operation of every restored record (D-1) */
+        odin3_prov_begin_op_class(
+            &rd->ctx,
+            &odin3_hdl_restore_class); /* the one operation of every restored record (D-1) */
         rd->op_begun = true;
     }
     odin3_hdl_restore_req req = {in->base, locs,

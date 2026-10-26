@@ -255,7 +255,7 @@ static void undo_build(wr_state *ws, const wr_rewrite *rw) {
  * last of them. */
 static odin3_status commit_build(wr_state *ws, wr_rewrite *rw) {
     odin3_kit_cell cell = *rw->cell;
-    odin3_status st = odin3_kit_prov(ws->oc, &rw->node, 1, &cell.prov);
+    odin3_status st = odin3_kit_prov(ws->oc, &rw->node, 1, NULL, &cell.prov);
     st = st == ODIN3_OK ? odin3_kit_new_cell(ws->oc, &cell, &rw->made) : st;
     if (st != ODIN3_OK) {
         rw->made = (odin3_node_id){0};

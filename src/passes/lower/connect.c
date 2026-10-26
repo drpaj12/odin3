@@ -17,6 +17,10 @@
 #include <stdint.h>
 #include <string.h>
 
+/* The class of a lowering operation: one word cell refined into gates (IR-12a). */
+static const odin3_opclass lower_class = {ODIN3_DIR_REFINE, ODIN3_LEVEL_WORD, ODIN3_LEVEL_GATE,
+                                          false, 0};
+
 odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     odin3_vec_clear(&lw->created);
     odin3_vec_clear(&lw->created_nets);
@@ -26,7 +30,7 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     lw->prefix_set = false;
     lw->prov = (odin3_prov_id){0};
     lw->keep_value = NULL;
-    odin3_prov_begin_op(lw->pass);
+    odin3_prov_begin_op_class(lw->pass, &lower_class);
     odin3_prov_id parent = odin3_node_prov(lw->module, node);
     if (odin3_prov_valid(parent)) {
         odin3_prov_list parents = {&parent, 1};

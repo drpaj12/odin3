@@ -21,6 +21,10 @@
 #include <stdio.h>
 #include <string.h>
 
+/* The class of a raise operation: gates coarsened into one word cell (IR-12a). */
+static const odin3_opclass raise_class = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_WORD,
+                                          false, 0};
+
 enum { NET_TOUCHED = 1, NET_BOUNDARY = 2 };
 
 /* One run on one module. */
@@ -201,7 +205,7 @@ static odin3_status make_prov(const rs_job *job, odin3_prov_id *out) {
         }
     }
     if (st == ODIN3_OK && parents.len > 0) {
-        odin3_prov_begin_op(job->ctx);
+        odin3_prov_begin_op_class(job->ctx, &raise_class);
         st = odin3_prov_derive(job->ctx, (odin3_prov_list){parents.data, (uint32_t)parents.len},
                                out);
     }

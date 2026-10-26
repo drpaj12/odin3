@@ -115,7 +115,7 @@ bool odin3_netlist_assign_comment(odin3_design *design, const odin3_ast *parsed,
 
 void odin3_netlist_begin(odin3_elab2 *e2) {
     if (e2->opts.netlist && e2->ctx->op == 0) {
-        odin3_prov_begin_op(e2->ctx);
+        odin3_prov_begin_op_class(e2->ctx, &odin3_hdl_restore_class);
     }
 }
 
