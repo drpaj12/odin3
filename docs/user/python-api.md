@@ -70,8 +70,9 @@ Python):
 - `chain()` is the list of `Construct`s (`row`, `parent`, `kind`, `level`, `file`, `line`, `col`,
   `end_line`, `end_col`, `name`) the object comes from: for each source leaf its statement, block and
   module, each construct once. It is empty for a design without a construct table: one read
-  with `--prov-ast off` or from a netlist, and every design until the elaborator fills the table
-  (v1.2.0 Task 4). `chain_with_leaves()` gives the same constructs as `(construct, leaf)` pairs, where
+  with `--prov-ast off` or from a netlist. A `Design` gives each `read_verilog` that names no
+  `--prov-ast` the mode `refs` (the CLI default is `off`; set `ODIN3_PROV_AST` or pass the option to
+  change it), so the chain is filled for a design read through `run_pass` or `run_script`. `chain_with_leaves()` gives the same constructs as `(construct, leaf)` pairs, where
   `leaf` is the ID of the source record that reached the construct first.
 
 `design.construct_count()` and `design.construct(row)` read the table row by row.
