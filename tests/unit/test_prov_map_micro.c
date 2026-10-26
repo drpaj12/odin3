@@ -165,6 +165,15 @@ static bool reaches_construct(rtable *table, uint32_t start) {
     return found;
 }
 
+/* Counts a refine record (the proc mux) and whether it is flagged as a join. */
+static void tally_refine(const odin3_nm_line *line, tally *seen_all) {
+    if (line->type != 'R' || line->f[3].len <= 7 || memcmp(line->f[3].ptr, "refine:", 7) != 0) {
+        return;
+    }
+    seen_all->refine_records++; /* the proc mux (a refine record) is never a join */
+    seen_all->refine_joins += line->f[8].len >= 4 && memcmp(line->f[8].ptr, "join", 4) == 0;
+}
+
 static void check_map(const char *path, tally *seen_all) {
     char *text = slurp(path);
     odin3_name_map map;
@@ -180,10 +189,7 @@ static void check_map(const char *path, tally *seen_all) {
     for (size_t i = 0; i < map.lines.len; i++) {
         const odin3_nm_line *line = odin3_vec_cat(&map.lines, i);
         seen_all->kept_lines += line->type == 'N' ? 1U : 0U;
-        if (line->type == 'R' && line->f[3].len > 7 && memcmp(line->f[3].ptr, "refine:", 7) == 0) {
-            seen_all->refine_records++; /* the proc mux (a refine record) is never a join */
-            seen_all->refine_joins += line->f[8].len >= 4 && memcmp(line->f[8].ptr, "join", 4) == 0;
-        }
+        tally_refine(line, seen_all);
         if (line->type != 'O') {
             continue;
         }

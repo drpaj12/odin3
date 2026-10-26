@@ -17,9 +17,9 @@ The export time is the pass time odin3 logs for ``write_blif``; the peak RSS is 
 set size``.  The files go to ``--workdir`` (a fresh directory; required with a run) and stay there.
 The table gives, per design, n, the number of objects (O and N lines) and R, C lines and bytes of
 the version 2 map, the bytes of the version 1 map, the export time (median) of each end, and the
-peak RSS (median) of each end.  ``--json`` keeps every raw run (written at the end); ``--jsonl`` appends each finished run as one
-JSON line at once, so a stop loses nothing; ``--from-json`` and ``--from-jsonl`` print the table
-of a raw file with no run.
+peak RSS (median) of each end.  ``--json`` keeps every raw run (written at the end); ``--jsonl``
+appends each finished run as one JSON line at once, so a stop loses nothing; ``--from-json`` and
+``--from-jsonl`` print the table of a raw file with no run.
 """
 
 from __future__ import annotations

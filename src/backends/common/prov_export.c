@@ -694,6 +694,26 @@ static odin3_status settle_pairs(odin3_vec *pairs, bool *multi) {
     return st;
 }
 
+/* Stores pairs (nothing when multi) as the ij entry of record. */
+static odin3_status ij_store(label_cache *cache, uint32_t record, const odin3_vec *pairs,
+                             bool multi) {
+    ij_entry entry = {(uint32_t)cache->ij_pool.len, multi ? 0U : (uint32_t)pairs->len, multi};
+    odin3_status st = odin3_vec_reserve(&cache->ij_pool, cache->ij_pool.len + entry.len);
+    for (size_t i = 0; st == ODIN3_OK && i < entry.len; i++) {
+        *(uint64_t *)odin3_vec_push(&cache->ij_pool) = *(const uint64_t *)odin3_vec_cat(pairs, i);
+    }
+    ij_entry *slot = st == ODIN3_OK ? odin3_vec_push(&cache->ij_entries) : NULL;
+    if (slot == NULL) {
+        return st == ODIN3_OK ? ODIN3_ERR_NO_MEMORY : st;
+    }
+    *slot = entry;
+    if (odin3_u64map_put(cache->ij_index, (odin3_kv){record, cache->ij_entries.len}) != ODIN3_OK) {
+        odin3_vec_pop(&cache->ij_entries);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
 /* Fills the ij entry of a record with a context record behind it, from its data parents'. */
 static odin3_status ij_fill(const odin3_design *design, label_cache *cache, uint32_t record) {
     const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){record});
@@ -708,22 +728,9 @@ static odin3_status ij_fill(const odin3_design *design, label_cache *cache, uint
     }
     st = st == ODIN3_OK && !multi ? prepend_tail(cache, rec, data, &pairs) : st;
     st = st == ODIN3_OK && !multi ? settle_pairs(&pairs, &multi) : st;
-    ij_entry entry = {(uint32_t)cache->ij_pool.len, multi ? 0U : (uint32_t)pairs.len, multi};
-    st = st == ODIN3_OK ? odin3_vec_reserve(&cache->ij_pool, cache->ij_pool.len + entry.len) : st;
-    for (size_t i = 0; st == ODIN3_OK && i < entry.len; i++) {
-        *(uint64_t *)odin3_vec_push(&cache->ij_pool) = *(const uint64_t *)odin3_vec_cat(&pairs, i);
-    }
+    st = st == ODIN3_OK ? ij_store(cache, record, &pairs, multi) : st;
     odin3_vec_free(&pairs);
-    ij_entry *slot = st == ODIN3_OK ? odin3_vec_push(&cache->ij_entries) : NULL;
-    if (slot == NULL) {
-        return st == ODIN3_OK ? ODIN3_ERR_NO_MEMORY : st;
-    }
-    *slot = entry;
-    if (odin3_u64map_put(cache->ij_index, (odin3_kv){record, cache->ij_entries.len}) != ODIN3_OK) {
-        odin3_vec_pop(&cache->ij_entries);
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    return ODIN3_OK;
+    return st;
 }
 
 /* Pushes the data parents of record that have a context record behind them and no ij entry. */

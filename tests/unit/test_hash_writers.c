@@ -1004,6 +1004,14 @@ static void test_prov_map_commit_failure_keeps_the_old_netlist(void) {
     }
 }
 
+static uint32_t count_type(const odin3_name_map *map, char type) {
+    uint32_t count = 0;
+    for (size_t k = 0; k < map->lines.len; k++) {
+        count += ((const odin3_nm_line *)odin3_vec_cat(&map->lines, k))->type == type ? 1U : 0U;
+    }
+    return count;
+}
+
 /* Each writer's version 2 map has N lines for the names it keeps (BLIF: nets only). */
 static void test_prov_map_has_n_lines_from_every_writer(void) {
     for (int i = 0; i < N_WRITERS; i++) {
@@ -1014,11 +1022,7 @@ static void test_prov_map_has_n_lines_from_every_writer(void) {
         written files = read_written(wc, "nl");
         odin3_name_map map;
         parse_v2(&map, files.map);
-        uint32_t kept = 0;
-        for (size_t k = 0; k < map.lines.len; k++) {
-            kept += ((const odin3_nm_line *)odin3_vec_cat(&map.lines, k))->type == 'N' ? 1U : 0U;
-        }
-        TEST_ASSERT_TRUE_MESSAGE(kept > 0, wc->pass);
+        TEST_ASSERT_TRUE_MESSAGE(count_type(&map, 'N') > 0, wc->pass);
         odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
         TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_report(&check, wc->pass), files.map);
         odin3_name_map_free(&map);

@@ -31,6 +31,11 @@ most what `read_verilog --prov-ast` kept; the command line keeps none by default
 `--prov-ast refs` to the read, or the map has `ast=none` and no `C` lines. Without the option the
 map is version 1, byte for byte as before.
 
+`--prov-map` is given once. A word right after it that is `refs`, `constructs` or `full` is read as
+the mode, so write a file of that name as `./refs`. A derived record whose operation has no
+operation class stops the export (the error names the record, run and operation); an export that
+fails writes neither the map nor the netlist.
+
 ## HDL locations
 
 Every IR object carries provenance. Where the writer can express it, so does the file:
