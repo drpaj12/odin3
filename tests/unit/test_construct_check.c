@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
+#include "ir/ir_test.h"
 #include "ir/prov.h"
 #include "unity.h"
 #include "util/log.h"
@@ -116,6 +117,14 @@ static void test_parent_must_be_earlier(void) {
 static void test_parent_after_the_row(void) {
     odin3_construct_test_row(design, 2)->parent = 6;
     expect_rule12("not an earlier row");
+}
+
+static void test_parent_must_not_be_finer(void) {
+    /* The IF row claims level expr: the arm (branch) and the always under it are coarser. */
+    odin3_construct_test_row(design, 3)->level = ODIN3_LEVEL_EXPR;
+    odin3_construct_test_row(design, 3)->parent = 1;
+    odin3_construct_test_row(design, 2)->parent = 3;
+    expect_rule12("finer level");
 }
 
 static void test_run_must_be_a_run(void) {
@@ -231,6 +240,7 @@ int main(void) {
     RUN_TEST(test_wellformed_table_passes);
     RUN_TEST(test_parent_must_be_earlier);
     RUN_TEST(test_parent_after_the_row);
+    RUN_TEST(test_parent_must_not_be_finer);
     RUN_TEST(test_run_must_be_a_run);
     RUN_TEST(test_level_must_match_kind);
     RUN_TEST(test_kind_out_of_range);

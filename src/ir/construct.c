@@ -5,6 +5,7 @@
  */
 #include "ir/construct.h"
 
+#include "ir/construct_internal.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
 #include "ir/prov.h"
@@ -17,19 +18,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-
-/* A run the snapshot covered. 8 bytes. */
-typedef struct run_row {
-    uint32_t run;
-    uint32_t mode;
-} run_row;
-
-struct odin3_construct_table {
-    odin3_vec rows;      /* odin3_construct_row; row number n is index n - 1 */
-    odin3_u64map *heads; /* (run << 32 | ast) -> row number of the newest row of that node */
-    odin3_vec runs;      /* run_row, in the order marked */
-    odin3_vec misses;    /* uint32_t record IDs, increasing */
-};
 
 /* --- the kind map (V1.2.0 2.1) --------------------------------------------------------------- */
 
@@ -187,6 +175,21 @@ static const odin3_construct_row *row_cat(const odin3_construct_table *table, ui
     return index != 0 && index <= table->rows.len ? odin3_vec_cat(&table->rows, index - 1U) : NULL;
 }
 
+bool odin3_construct_parent_fits(const odin3_construct_row *parent,
+                                 const odin3_construct_row *row) {
+    if (parent == NULL) {
+        return true; /* a root */
+    }
+    if (parent->level <= row->level) {
+        return true; /* the parent is the coarser (or the same) level */
+    }
+    /* The two finer parents: an arm or case item (branch) under its IF or CASE (stmt), and a
+     * call-instance copy of a function body under its call site (4.3). */
+    return (row->level == (uint8_t)ODIN3_LEVEL_BRANCH &&
+            parent->level == (uint8_t)ODIN3_LEVEL_STMT) ||
+           row->call != 0;
+}
+
 /* Why a row cannot be added; NULL when it can. */
 static const char *add_problem(const odin3_construct_table *table, const odin3_construct_row *row) {
     uint32_t own = (uint32_t)table->rows.len + 1U;
@@ -204,6 +207,9 @@ static const char *add_problem(const odin3_construct_table *table, const odin3_c
     }
     if (row->parent >= own || row->call >= own) {
         return "parent or call is not an earlier row";
+    }
+    if (!odin3_construct_parent_fits(row_cat(table, row->parent), row)) {
+        return "parent is a finer level than the row";
     }
     return NULL;
 }
@@ -239,8 +245,9 @@ odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row
                   row->run, row->ast, (unsigned)row->part, row->call);
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (odin3_vec_reserve(&table->rows, table->rows.len + 1U) != ODIN3_OK) {
-        return ODIN3_ERR_NO_MEMORY;
+    if (table->rows.len >= (size_t)UINT32_MAX - 1U ||
+        odin3_vec_reserve(&table->rows, table->rows.len + 1U) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY; /* row numbers (and the end, one past) are 32 bits */
     }
     uint32_t own = (uint32_t)table->rows.len + 1U;
     if (odin3_u64map_put(table->heads, (odin3_kv){key, own}) != ODIN3_OK) {
@@ -331,13 +338,21 @@ uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id rec
 
 odin3_status odin3_construct_mark_run(odin3_design *design, odin3_passrun_id run,
                                       odin3_construct_mode mode) {
-    if (design == NULL || run.v == 0 || mode == ODIN3_CONSTRUCT_MODE_OFF ||
-        mode > ODIN3_CONSTRUCT_MODE_FULL) {
+    if (design == NULL || run.v == 0 || run.v >= odin3_passrun_end(design) ||
+        mode == ODIN3_CONSTRUCT_MODE_OFF || mode > ODIN3_CONSTRUCT_MODE_FULL) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_construct_mark_run: invalid run or mode");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_construct_table *table = design->construct;
-    if (odin3_construct_run_mode(design, run) != ODIN3_CONSTRUCT_MODE_OFF) {
+    odin3_construct_mode have = odin3_construct_run_mode(design, run);
+    if (have != ODIN3_CONSTRUCT_MODE_OFF) {
+        if (have != mode) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "odin3_construct_mark_run: run %u is marked with mode %u, "
+                      "not %u",
+                      run.v, (unsigned)have, (unsigned)mode);
+            return ODIN3_ERR_INVALID_ARG;
+        }
         return ODIN3_OK;
     }
     run_row *slot = odin3_vec_push(&table->runs);
@@ -392,10 +407,4 @@ bool odin3_construct_is_miss(const odin3_design *design, odin3_prov_id record) {
         }
     }
     return false;
-}
-
-odin3_construct_row *odin3_construct_test_row(odin3_design *design, uint32_t index) {
-    return design != NULL && index != 0 && index <= design->construct->rows.len
-               ? odin3_vec_at(&design->construct->rows, index - 1U)
-               : NULL;
 }

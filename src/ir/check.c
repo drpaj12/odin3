@@ -607,6 +607,10 @@ static void construct_shape(check_ctx *ctx, uint32_t index, const odin3_construc
                   (unsigned)row->part, (unsigned)row->kind, want);
     }
     const odin3_construct_row *parent = odin3_construct_get(ctx->design, row->parent);
+    if (row->parent != 0 && parent != NULL && !odin3_construct_parent_fits(parent, row)) {
+        violation(ctx, R12, "construct %u (level %u) hangs under construct %u of a finer level %u",
+                  index, (unsigned)row->level, row->parent, (unsigned)parent->level);
+    }
     if (want != ODIN3_CONSTRUCT_PART_NODE && (parent == NULL || parent->kind != ODIN3_AST_IF ||
                                               parent->ast != row->ast || parent->run != row->run)) {
         violation(ctx, R12, "arm construct %u does not hang under the IF row of its node", index);

@@ -43,6 +43,14 @@ typedef struct odin3_construct_row {
     uint8_t kind;  /* odin3_ast_kind, or an ODIN3_CONSTRUCT_* value */
 } odin3_construct_row;
 
+/*
+ * True when row may hang under parent (NULL: no parent): the parent's level is the row's or
+ * coarser, or the row is a branch under a statement (an arm or case item under its IF or CASE) or a
+ * call-instance copy (call != 0) under its call site. The one rule of odin3_construct_add and
+ * check rule 12.
+ */
+bool odin3_construct_parent_fits(const odin3_construct_row *parent, const odin3_construct_row *row);
+
 /* What `--prov-ast` kept for a run (4.2). OFF: no snapshot ran. */
 typedef enum odin3_construct_mode {
     ODIN3_CONSTRUCT_MODE_OFF,
@@ -79,7 +87,8 @@ odin3_status odin3_construct_copy(odin3_construct_table *dst, const odin3_constr
  * Appends row (its next is ignored) and sets *index to its row number. INVALID_ARG (logged) for a
  * run or ast of 0, a kind the map has no row for or a level that does not match it, a part that
  * does not match the kind (part 1 only for IF_THEN, 2 only for IF_ELSE), a parent or call that is
- * not an earlier row, or a key (run, ast, part, call) that exists; NO_MEMORY. Nothing changes on
+ * not an earlier row, a parent of a finer level than the row (odin3_construct_parent_fits), or a
+ * key (run, ast, part, call) that exists; NO_MEMORY (also when the table is full: 2^32 - 2 rows). Nothing changes on
  * failure. That the parent of an arm row is its IF row is left to check rule 12.
  */
 odin3_status odin3_construct_add(odin3_design *design, const odin3_construct_row *row,
@@ -128,8 +137,5 @@ odin3_construct_mode odin3_construct_run_mode(const odin3_design *design, odin3_
  * Records must arrive in increasing order. INVALID_ARG otherwise; NO_MEMORY. */
 odin3_status odin3_construct_note_miss(odin3_design *design, odin3_prov_id record);
 bool odin3_construct_is_miss(const odin3_design *design, odin3_prov_id record);
-
-/* Test hook (check tests): the row as stored, writable. NULL for an index not a row. */
-odin3_construct_row *odin3_construct_test_row(odin3_design *design, uint32_t index);
 
 #endif

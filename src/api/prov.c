@@ -218,7 +218,11 @@ static void chain_leaf(void *user, odin3_prov_id leaf) {
 /* Reports row and its ancestors (module last) not yet reported, each with leaf. */
 static odin3_status chain_up(chain_walk *walk, uint32_t row, uint32_t leaf) {
     uint64_t seen = 0;
-    for (; row != 0; row = odin3_construct_get(walk->design, row)->parent) {
+    /* parent is an earlier row (construct_add, check rule 12): the walk ends at row 0; the bound
+     * keeps a corrupt table from looping. */
+    const odin3_construct_row *cur = odin3_construct_get(walk->design, row);
+    for (uint32_t steps = odin3_construct_end(walk->design); cur != NULL && steps > 0;
+         steps--, row = cur->parent, cur = odin3_construct_get(walk->design, row)) {
         if (odin3_u64map_get(walk->reported, row, &seen)) {
             continue;
         }

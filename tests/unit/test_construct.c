@@ -250,10 +250,13 @@ static void test_add_refusals(void) {
     bad_call.call = 9;
     expect_refused(bad_call);
     expect_refused(ROW(ODIN3_AST_ALWAYS, 0, mod, 2)); /* ast 0 */
+    uint32_t stmt = add(ROW(ODIN3_AST_BLOCKING_ASSIGN, 11, mod, 3));
+    expect_refused(ROW(ODIN3_AST_ALWAYS, 12, stmt, 4)); /* a block under a statement */
+    expect_refused(ROW(ODIN3_AST_MODULE, 13, stmt, 4)); /* a module under a statement */
     odin3_construct_row no_run = ROW(ODIN3_AST_ALWAYS, 10, mod, 2);
     no_run.run = 0;
     expect_refused(no_run);
-    TEST_ASSERT_EQUAL_UINT32(2, odin3_construct_end(design));
+    TEST_ASSERT_EQUAL_UINT32(3, odin3_construct_end(design));
 }
 
 static void test_add_null_arguments(void) {
@@ -311,8 +314,15 @@ static void test_runs_and_misses(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_FULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, odin3_construct_run_mode(design, run1));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_ERR_INVALID_ARG,
+        odin3_construct_mark_run(design, (odin3_passrun_id){999}, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_OFF,
+                          odin3_construct_run_mode(design, (odin3_passrun_id){999}));
     TEST_ASSERT_EQUAL_INT(
         ODIN3_ERR_INVALID_ARG,
         odin3_construct_mark_run(design, (odin3_passrun_id){0}, ODIN3_CONSTRUCT_MODE_REFS));
@@ -343,6 +353,8 @@ static void test_design_clone_copies_the_table(void) {
     TEST_ASSERT_EQUAL_UINT32(2, FIND(dup, run1, 10, 0, 0));
     TEST_ASSERT_EQUAL_UINT32(mod, odin3_construct_get(dup, 2)->parent);
     TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, odin3_construct_run_mode(dup, run1));
+    TEST_ASSERT_TRUE(odin3_construct_is_miss(dup, (odin3_prov_id){3}));
+    TEST_ASSERT_FALSE(odin3_construct_is_miss(dup, (odin3_prov_id){2}));
     TEST_ASSERT_TRUE(odin3_construct_is_miss(dup, (odin3_prov_id){3}));
     /* independent: a row added to the copy is not in the original */
     odin3_construct_row more = ROW(ODIN3_AST_INITIAL, 11, mod, 5);
