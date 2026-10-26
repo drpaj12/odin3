@@ -630,6 +630,9 @@ static odin3_status item_push(odin3_pg *pg, odin3_ast_id item, const pg_swctx *c
 }
 
 static void cmps_reverse(odin3_pg *pg, size_t base) {
+    if (pg->cmp_sigs.len - base < 2) {
+        return; /* nothing to swap; the pool may still be unallocated (NULL + 0 is UB) */
+    }
     odin3_sig *run = (odin3_sig *)pg->cmp_sigs.data + base;
     for (size_t lo = 0, hi = pg->cmp_sigs.len - base; lo + 1 < hi; lo++, hi--) {
         odin3_sig tmp = run[lo];

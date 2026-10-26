@@ -1,0 +1,6 @@
+design            n  off ms (sd, min)        refs ms (sd, min)       ratio  off MB  refs MB  delta MB  verdict
+LU32PEEng         7    87.6 (1.4, 85.8)        90.8 (1.6, 88.3)      1.037    30.5     30.6      0.12  PASS
+LU64PEEng         7   151.2 (3.4, 146.9)      150.9 (1.5, 149.7)     0.998    41.5     41.7      0.20  PASS
+arm_core          7    39.1 (1.5, 38.9)        41.8 (0.6, 41.4)      1.067    21.3     22.2      0.96  FAIL
+mcml              7   329.7 (2.7, 324.8)      339.3 (4.9, 333.4)     1.029    72.3     72.3      0.01  PASS
+mkDelayWorker32B  7    33.7 (1.2, 33.0)        35.5 (0.4, 34.5)      1.054    20.8     20.8      0.00  FAIL

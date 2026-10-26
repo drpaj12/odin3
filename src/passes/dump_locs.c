@@ -11,8 +11,10 @@
  * The tool that
  * measures a write and read back (tools/loc-check) runs it before and after and compares.
  */
+#include "ast/kinds.h"
 #include "backends/common/hdl_loc.h"
 #include "ir/celltype.h"
+#include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
@@ -21,6 +23,7 @@
 #include "passes/manager.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -156,25 +159,40 @@ static odin3_status write_stdout(const odin3_strbuf *text) {
 
 typedef struct dump_args {
     bool types;
+    bool constructs;  /* --constructs: the construct table instead of the objects */
     odin3_bytes path; /* ptr NULL: stdout */
 } dump_args;
 
-/* Reads `[--types] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated --types, an
- * empty or a second path. A literal `--` ends the options, so a path may start with `--`. */
+/* True when word is the option `name`, which sets *flag; a repeat sets *st to INVALID_ARG. */
+static bool take_flag(odin3_bytes word, const char *name, bool *flag, odin3_status *st) {
+    if (word.len != strlen(name) || memcmp(word.ptr, name, word.len) != 0) {
+        return false;
+    }
+    if (*flag) {
+        odin3_log(ODIN3_LOG_ERROR, "dump_locs: %s given twice", name);
+        *st = ODIN3_ERR_INVALID_ARG;
+    }
+    *flag = true;
+    return true;
+}
+
+/* Reads `[--types | --constructs] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated
+ * option, both --types and --constructs, an empty or a second path. A literal `--` ends the
+ * options, so a path may start with
+ * `--`. */
 static odin3_status parse_args(odin3_bytes args, dump_args *out) {
-    *out = (dump_args){false, {NULL, 0}};
+    *out = (dump_args){false, false, {NULL, 0}};
     bool options = true;
+    odin3_status st = ODIN3_OK;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         if (options && word.len == 2 && memcmp(word.ptr, "--", 2) == 0) {
             options = false;
-        } else if (options && word.len == strlen("--types") &&
-                   memcmp(word.ptr, "--types", word.len) == 0) {
-            if (out->types) {
-                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --types given twice");
-                return ODIN3_ERR_INVALID_ARG;
+        } else if (options && (take_flag(word, "--types", &out->types, &st) ||
+                               take_flag(word, "--constructs", &out->constructs, &st))) {
+            if (st != ODIN3_OK) {
+                return st;
             }
-            out->types = true;
         } else if (out->path.ptr != NULL || word.len == 0 ||
                    (options && word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
             return ODIN3_ERR_INVALID_ARG;
@@ -185,14 +203,106 @@ static odin3_status parse_args(odin3_bytes args, dump_args *out) {
     return ODIN3_OK;
 }
 
+/* --- --constructs: the construct table (V1.2.0 4.3) ------------------------------------------- */
+
+static const char *const k_level_names[] = {"none", "module", "instance", "block", "branch",
+                                            "stmt", "expr",   "word",     "gate",  "lut",
+                                            "ble",  "clb",    "site"};
+static const char *const k_mode_names[] = {"off", "refs", "constructs", "full"};
+
+static const char *construct_kind_name(uint32_t kind) {
+    switch (kind) {
+    case ODIN3_CONSTRUCT_IF_THEN:
+        return "IF_THEN";
+    case ODIN3_CONSTRUCT_IF_ELSE:
+        return "IF_ELSE";
+    case ODIN3_CONSTRUCT_CALL_SITE:
+        return "CALL_SITE";
+    default:
+        return odin3_ast_kind_name(kind);
+    }
+}
+
+/* The file name without its directory, so that a golden does not hold a machine's paths. */
+static const char *base_name(const char *path) {
+    const char *slash = strrchr(path, '/');
+    return slash != NULL ? slash + 1 : path;
+}
+
+/* The span `file:line:col-end_line:end_col` of a row; the file without its directory, escaped like
+ * the name field (a `|` in a file name must not end the field). */
+static odin3_status append_span(odin3_strbuf *text, const char *file,
+                                const odin3_construct_row *row) {
+    odin3_status st = append_escaped(text, base_name(file));
+    return st != ODIN3_OK ? st
+                          : odin3_strbuf_appendf(text, ":%u:%u-%u:%u|", row->line, row->col,
+                                                 row->end_line, row->end_col);
+}
+
+static odin3_status dump_construct_row(const odin3_design *design, uint32_t idx,
+                                       odin3_strbuf *text) {
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    const odin3_construct_row *row = odin3_construct_get(design, idx);
+    odin3_status st = odin3_strbuf_appendf(
+        text, "construct|%u|%s|%s|%u|%u|%u|%u|", idx, construct_kind_name(row->kind),
+        k_level_names[row->level], (unsigned)row->part, row->parent, row->call, row->run);
+    st = st != ODIN3_OK ? st : append_span(text, odin3_strtab_get(tab, row->file), row);
+    st = st != ODIN3_OK ? st : append_escaped(text, odin3_strtab_get(tab, row->name));
+    return st != ODIN3_OK ? st : odin3_strbuf_append(text, odin3_bytes_cstr("\n"));
+}
+
+/* `alias|run|ast|row` per node that resolves to the row of an ancestor (no row of its own). */
+static odin3_status dump_aliases(const odin3_design *design, odin3_strbuf *text) {
+    odin3_vec list;
+    odin3_vec_init(&list, sizeof(odin3_construct_alias_entry));
+    odin3_status st = odin3_construct_aliases(design, &list);
+    for (size_t i = 0; st == ODIN3_OK && i < list.len; i++) {
+        const odin3_construct_alias_entry *al = odin3_vec_cat(&list, i);
+        st = odin3_strbuf_appendf(text, "alias|%u|%u|%u\n", al->run, al->ast, al->row);
+    }
+    odin3_vec_free(&list);
+    return st;
+}
+
+/* `miss|<record>` per recorded miss (a SOURCE record that is a span-only leaf). */
+static odin3_status dump_misses(const odin3_design *design, odin3_strbuf *text) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t rec = 1; st == ODIN3_OK && rec < odin3_prov_end(design); rec++) {
+        if (odin3_construct_is_miss(design, (odin3_prov_id){rec})) {
+            st = odin3_strbuf_appendf(text, "miss|%u\n", rec);
+        }
+    }
+    return st;
+}
+
+/* `run|<run>|<mode>` per marked run, then `construct|row|kind|level|part|parent|call|run|span|name`
+ * per row (span file:line:col-end_line:end_col, file without directory), then `alias|run|ast|row`
+ * per alias (a node without a row of its own: `constructs` mode, transparent kinds), then
+ * `miss|record` per recorded miss. */
+static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *text) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t run = 1; st == ODIN3_OK && run < odin3_passrun_end(design); run++) {
+        odin3_construct_mode mode = odin3_construct_run_mode(design, (odin3_passrun_id){run});
+        st = mode == ODIN3_CONSTRUCT_MODE_OFF
+                 ? ODIN3_OK
+                 : odin3_strbuf_appendf(text, "run|%u|%s\n", run, k_mode_names[mode]);
+    }
+    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_construct_end(design); i++) {
+        st = dump_construct_row(design, i, text);
+    }
+    st = st != ODIN3_OK ? st : dump_aliases(design, text);
+    return st != ODIN3_OK ? st : dump_misses(design, text);
+}
+
 static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)ctx;
     (void)user;
     dump_args parsed;
-    if (parse_args(args, &parsed) != ODIN3_OK) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "dump_locs: expects [--types] [--] and at most one non-empty path");
+    if (parse_args(args, &parsed) != ODIN3_OK || (parsed.types && parsed.constructs)) {
+        odin3_log(
+            ODIN3_LOG_ERROR,
+            "dump_locs: expects [--types | --constructs] [--] and at most one non-empty path");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_bytes path = parsed.path;
@@ -205,7 +315,11 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     odin3_strbuf_init(&state.src);
     odin3_strbuf_init(&name);
     odin3_status st = state.hdl != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
+    if (st == ODIN3_OK && parsed.constructs) {
+        st = dump_constructs(design, &state.text);
+    }
+    for (uint32_t i = 1;
+         st == ODIN3_OK && !parsed.constructs && i < odin3_design_module_end(design); i++) {
         const odin3_module *module = odin3_module_get(design, (odin3_module_id){i});
         st = module != NULL ? dump_module(&state, module) : ODIN3_OK;
     }
@@ -224,11 +338,12 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 
 const odin3_pass_def odin3_pass_dump_locs = {
     "dump_locs",
-    "dump_locs [--types] [--] [<file>]: list every module, wire, net and node with its HDL "
+    "dump_locs [--types | --constructs] [--] [<file>]: list every module, wire, net and node with "
+    "its HDL "
     "locations, "
     "one "
     "`module|kind|name|SRC` line each, `node:TYPE` as the node kind with --types (stdout without a "
-    "file)",
+    "file); --constructs lists the construct table instead (run and construct lines)",
     dump_locs_run,
     NULL,
     false,

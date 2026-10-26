@@ -1,0 +1,14 @@
+run|1|refs
+construct|1|MODULE|module|0|0|0|1|sv_always.sv:1:8-0:0|sv_always
+construct|2|PORT_DECL|stmt|0|1|0|1|sv_always.sv:1:31-0:0|
+construct|3|PORT_DECL|stmt|0|1|0|1|sv_always.sv:1:48-0:0|
+construct|4|PORT_DECL|stmt|0|1|0|1|sv_always.sv:1:71-0:0|
+construct|5|PORT_DECL|stmt|0|1|0|1|sv_always.sv:1:93-0:0|
+construct|6|ALWAYS|block|0|1|0|1|sv_always.sv:2:3-0:0|
+construct|7|TIMING_STMT|stmt|0|6|0|1|sv_always.sv:2:13-7:6|
+construct|8|SEQ_BLOCK|stmt|0|7|0|1|sv_always.sv:3:5-6:14|
+construct|9|IF|stmt|0|8|0|1|sv_always.sv:3:5-6:14|
+construct|10|IF_THEN|branch|1|9|0|1|sv_always.sv:4:7-4:16|
+construct|11|NONBLOCKING_ASSIGN|stmt|0|10|0|1|sv_always.sv:4:7-4:16|
+construct|12|IF_ELSE|branch|2|9|0|1|sv_always.sv:6:7-6:13|
+construct|13|NONBLOCKING_ASSIGN|stmt|0|12|0|1|sv_always.sv:6:7-6:13|

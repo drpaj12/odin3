@@ -286,6 +286,7 @@ add_library(odin3_core OBJECT
     src/ir/prov.c
     src/ir/opclass.c
     src/ir/construct.c
+    src/ir/construct_snapshot.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -972,6 +973,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_opclass)
     odin3_add_unit_test(test_construct)
+    odin3_add_unit_test(test_construct_snapshot)
     odin3_add_unit_test(test_construct_check)
     odin3_add_unit_test(test_prov_label)
     odin3_add_unit_test(test_opclass_passes)
@@ -2409,6 +2411,37 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             set_tests_properties(cli_${_case} PROPERTIES LABELS unit)
         endforeach()
     endif()
+    # V1.2.0 Task 4 (tools/construct-check): the construct snapshot. construct_golden: each design
+    # of tests/loc/constructs reads, passes `check` (rule 12) and dumps `dump_locs --constructs`
+    # equal to its .constructs golden. construct_bytes: every writer output of those designs and of
+    # the 60 smallest designs of both that directory and tests/micro/verilog/micro is identical under
+    # --prov-ast off, refs, constructs and full. The whole micro set against a build of main is
+    # `construct-check bytes --odin3-base` (label sweep, run by hand).
+    find_package(Python3 3.10 COMPONENTS Interpreter REQUIRED)
+    # the SystemVerilog designs need slang; the bytes flow's abc step needs ABC
+    set(_cc_skip "")
+    if(NOT ODIN3_WITH_SLANG)
+        list(APPEND _cc_skip --no-sv)
+    endif()
+    set(_cc_bytes_skip ${_cc_skip})
+    if(NOT ODIN3_WITH_ABC)
+        list(APPEND _cc_bytes_skip --no-abc)
+    endif()
+    add_test(NAME construct_golden
+        COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/construct-check/construct_check.py
+                golden --odin3 $<TARGET_FILE:odin3> ${_cc_skip}
+                ${PROJECT_SOURCE_DIR}/tests/loc/constructs)
+    set_tests_properties(construct_golden PROPERTIES LABELS tools TIMEOUT 600)
+    add_test(NAME construct_escape
+        COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/construct-check/construct_check.py
+                escape --odin3 $<TARGET_FILE:odin3> --out ${PROJECT_BINARY_DIR})
+    set_tests_properties(construct_escape PROPERTIES LABELS tools TIMEOUT 120)
+    add_test(NAME construct_bytes
+        COMMAND ${Python3_EXECUTABLE} -I ${PROJECT_SOURCE_DIR}/tools/construct-check/construct_check.py
+                bytes --odin3 $<TARGET_FILE:odin3> --limit 60 --jobs 2 ${_cc_bytes_skip}
+                ${PROJECT_SOURCE_DIR}/tests/loc/constructs
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro)
+    set_tests_properties(construct_bytes PROPERTIES LABELS tools TIMEOUT 1800)
     if(ODIN3_WITH_ABC)
         # 3D Task 19: the abc pass from the command line (real ABC), the unconn gate and the
         # equivalence gate (abc-equiv over the goldens and the abc data BLIFs).

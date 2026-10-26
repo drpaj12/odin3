@@ -2,8 +2,9 @@
  * construct.h — the construct table (IR-12a; docs/V1.2.0.md 2, 4.3): the AST constructs that
  * SOURCE records point at, held by the design so a record's chain (statement, block, module, ...)
  * survives the AST store. Design-global, append-only, additive: no field of a record changes.
- * Rows are parents first. Task 4 fills the table from the elaborator; until then it is empty
- * unless a test adds rows.
+ * Rows are parents first. The elaborator fills the table at the end of stage 2
+ * (odin3_construct_snapshot, construct_snapshot.c); a design that was not read from source holds an
+ * empty table unless a test adds rows.
  */
 #ifndef ODIN3_IR_CONSTRUCT_H
 #define ODIN3_IR_CONSTRUCT_H
@@ -11,6 +12,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -58,6 +60,10 @@ typedef enum odin3_construct_mode {
     ODIN3_CONSTRUCT_MODE_CONSTRUCTS,
     ODIN3_CONSTRUCT_MODE_FULL
 } odin3_construct_mode;
+
+/* The mode of a read that gave no `--prov-ast` (OFF: the gate of V1.2.0 5.3 failed on two designs;
+ * see docs/V1.2.0.md, Task 4). */
+#define ODIN3_CONSTRUCT_MODE_DEFAULT ODIN3_CONSTRUCT_MODE_OFF
 
 /* The kind map (2.1). Every kind of odin3_ast_kind_name has exactly one entry. */
 typedef enum odin3_construct_kind_class {
@@ -132,9 +138,10 @@ void *odin3_construct_derived(const odin3_design *design, void *(*create)(void),
 bool odin3_construct_has_node(const odin3_design *design, odin3_passrun_id run, uint32_t ast);
 
 /*
- * The row of a SOURCE record: key (run, ast, 0, 0); for a call-site record (two or more
+ * The row of a SOURCE record: key (run, ast, 0, 0); for a call-site record (exactly two
  * locations) the call-instance row whose call row has exactly the span of the second location.
- * 0 for a record that is not SOURCE, has ast 0, or matches no row (a span-only leaf).
+ * 0 for a record that is not SOURCE, has ast 0, is a recorded miss, or matches no row (a span-only
+ * leaf).
  */
 uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id record);
 
@@ -150,5 +157,58 @@ odin3_construct_mode odin3_construct_run_mode(const odin3_design *design, odin3_
  * Records must arrive in increasing order. INVALID_ARG otherwise; NO_MEMORY. */
 odin3_status odin3_construct_note_miss(odin3_design *design, odin3_prov_id record);
 bool odin3_construct_is_miss(const odin3_design *design, odin3_prov_id record);
+
+/*
+ * Makes node ast of run resolve to row, the row of its nearest construct ancestor: a node that has
+ * no row of its own (an expression under `--prov-ast constructs`, a transparent kind) is found by
+ * odin3_construct_find and _of_record as that row. INVALID_ARG (logged) for a run or ast of 0, a
+ * row that does not exist or whose node has other rows already (only a node's first row can be
+ * aliased), or a node that already has a row or an alias; NO_MEMORY. Nothing changes on failure.
+ */
+odin3_status odin3_construct_alias(odin3_design *design, odin3_passrun_id run, uint32_t ast,
+                                   uint32_t row);
+
+/* One alias made by odin3_construct_alias: node ast of run resolves to row. */
+typedef struct odin3_construct_alias_entry {
+    uint32_t run;
+    uint32_t ast;
+    uint32_t row;
+} odin3_construct_alias_entry;
+
+/*
+ * Appends every alias of the table to out (a vec of odin3_construct_alias_entry made by the
+ * caller), sorted by (run, ast). INVALID_ARG for a NULL design or out; NO_MEMORY.
+ */
+odin3_status odin3_construct_aliases(const odin3_design *design, odin3_vec *out);
+
+/*
+ * The mode the next snapshot of this design takes when its caller gives none (read_verilog sets it
+ * from `--prov-ast` for the length of one read; the slang reader reaches stage 2 through
+ * odin3_ast_elaborate, which has no room for an option, so the mode travels here). A design starts
+ * with ODIN3_CONSTRUCT_MODE_DEFAULT; a clone starts again from it. The setter ignores a NULL
+ * design.
+ */
+void odin3_construct_set_read_mode(odin3_design *design, odin3_construct_mode mode);
+odin3_construct_mode odin3_construct_read_mode(const odin3_design *design);
+
+/*
+ * The snapshot (V1.2.0 4.3 item 4): from the ELABORATED store ast (its run is the run of the SOURCE
+ * records), builds the rows of `mode` by a root-down walk with true child edges, marks the run with
+ * mode and notes the call-site misses.
+ *   REFS         the nodes a SOURCE record of the run points at, and all their ancestors;
+ *   CONSTRUCTS   the same without expression rows (an expression resolves to its nearest construct
+ *                ancestor through odin3_construct_alias);
+ *   FULL         every node that has a kind row;
+ *   OFF          nothing: no rows, no mark, no cost.
+ * The arms of an IF are synthesized rows (2.2). A SOURCE record with two locations (the call-site
+ * form) gets a call-instance copy of the rows between its node and the function or task declaration
+ * under the CALL or TASK_CALL row of exactly the second location; a call site that matches no row
+ * or more than one is a recorded miss. Kinds that are transparent (2.1) have no row. Failures:
+ * INVALID_ARG (logged) for a NULL design or ast, a store that is not ELABORATED or whose run is not
+ * a run of the design, a run already marked with another mode; NO_MEMORY. A failure leaves the rows
+ * made so far (the read fails and the design is destroyed).
+ */
+odin3_status odin3_construct_snapshot(odin3_design *design, const odin3_ast *ast,
+                                      odin3_construct_mode mode);
 
 #endif

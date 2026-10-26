@@ -627,8 +627,10 @@ record identity.
   (`odin3_construct_kind_class_of`, tested against `odin3_ast_kind_name`): every kind has a level
   (`module`, `instance`, `block`, `branch`, `stmt`, `expr`) or is transparent (`UNIT`, `DIRECTIVE`,
   `LIST`, `ATTR`: no row). The table also holds which runs a snapshot covered (and its mode: `refs`,
-  `constructs`, `full`) and the records whose call site matched no row (`chain=span`). It is empty until
-  the elaborator fills it (Task 4); a design read with `--prov-ast off` or from a netlist has none.
+  `constructs`, `full`) and the records whose call site matched no row (`chain=span`). The
+  elaborator fills it at the end of stage 2 (`construct_snapshot.c`, Task 4) in the mode of
+  `read_verilog --prov-ast` (`refs`, `constructs`, `full`); a design read with `--prov-ast off` (the CLI
+  default) or from a netlist has none.
   A SOURCE record resolves to its row by `odin3_construct_of_record`. Check rule 12 tests it. The ABI
   readers of it (v7) are in `odin3.h`; the join and the class labels they return are computed once, in
   `src/backends/common/prov_export.c`, which the map writers (Task 5) share.

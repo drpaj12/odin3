@@ -289,6 +289,27 @@ def _on_log(odin3: Odin3) -> Any:
 _DEFAULT: list[Odin3] = []
 
 
+_PROV_AST_FLAG = " --prov-ast refs"
+_READ_VERILOG_CMD = re.compile(r"(^|[;\n])([ \t]*)read_verilog(?=[ \t;\n]|$)")
+
+
+def _with_prov_ast(args: str) -> str:
+    """The arguments of a read_verilog pass with `--prov-ast refs` added, unless they name a mode
+    or the user set ODIN3_PROV_AST (the environment is read, never written)."""
+    if "--prov-ast" in args or "ODIN3_PROV_AST" in os.environ:
+        return args
+    return _PROV_AST_FLAG.strip() + " " + args
+
+
+def _script_with_prov_ast(text: str) -> str:
+    """The script with every read_verilog command given `--prov-ast refs` (same exceptions)."""
+    if "--prov-ast" in text or "ODIN3_PROV_AST" in os.environ:
+        return text
+    return _READ_VERILOG_CMD.sub(
+        lambda m: f"{m.group(1)}{m.group(2)}read_verilog{_PROV_AST_FLAG}", text
+    )
+
+
 def default() -> Odin3:
     """The process's shared Odin3 (loaded on first use)."""
     if not _DEFAULT:
@@ -402,6 +423,10 @@ class Design:
         and destroys. MemoryError when a new design cannot be created, ValueError for a NULL
         handle."""
         self.odin3 = odin3 or default()
+        # The CLI keeps no construct table by default (V1.2.0 5.3); a Python design wants the chain
+        # of Node.chain(), so run_pass and run_script give a read_verilog that names no mode
+        # `--prov-ast refs`, per read; the process environment is never changed (a user's
+        # ODIN3_PROV_AST wins, as does an explicit --prov-ast).
         if handle is None:
             ptr = self.odin3.lib.odin3_design_create()
             if ptr == self.odin3.ffi.NULL:
@@ -467,6 +492,8 @@ class Design:
         After a failed pass the design is valid but may no longer compute what its input did:
         discard it (close it) rather than keep using or writing it.
         """
+        if name == "read_verilog":
+            args = _with_prov_ast(args)
         self.call("odin3_design_run_pass", name.encode(), args.encode())
 
     def run_script(self, text: str, origin: str = "python") -> None:
@@ -474,6 +501,7 @@ class Design:
 
         After a failed pass the design must be discarded, as for run_pass.
         """
+        text = _script_with_prov_ast(text)
         keep = self.odin3.ffi.new("char[]", origin.encode())  # alive during the call
         src = (keep, self.odin3.lib.ODIN3_SCRIPT_BY_COMMAND)
         self.call("odin3_design_run_script", text.encode(), src)

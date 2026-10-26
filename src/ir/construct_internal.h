@@ -30,6 +30,7 @@ struct odin3_construct_table {
     odin3_vec runs;       /* run_row, in the order marked */
     odin3_vec misses;     /* uint32_t record IDs, increasing */
     derived_slot derived; /* not copied by odin3_construct_copy */
+    odin3_construct_mode read_mode; /* odin3_construct_set_read_mode; not copied */
 };
 
 #endif

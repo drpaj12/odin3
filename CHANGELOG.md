@@ -14,6 +14,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `odin3_prov_visit_parents`, `odin3_prov_visit_joined`, `odin3_prov_visit_chain`; Python
   `provenance()` and `chain()` on every IR object. The table is empty until the elaborator fills it
   (V1.2.0 Task 4). Plugins built for ABI 6 must be rebuilt. No behaviour change in any pass or writer.
+- V1.2.0 Task 4 (`docs/V1.2.0.md` 4.2, 4.3): the construct snapshot at the end of `read_verilog` stage 2
+  (Verilog and SystemVerilog), `read_verilog --prov-ast refs|constructs|full|off` (default `off`: the
+  cost gate failed on two designs, `docs/V1.2.0-task4-gate.txt`; the Python `Design` and the
+  `ODIN3_PROV_AST` environment variable turn it on), `dump_locs --constructs`, `tools/construct-check`.
+  ABI stays 7. Every writer output is byte-identical (the whole micro set, 539 designs).
 
 ### Fixed
 

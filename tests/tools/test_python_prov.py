@@ -154,15 +154,28 @@ class ReadDesignTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.odin3.call("odin3_log_set_level", cls.odin3.lib.ODIN3_LOG_INFO)
 
+    @unittest.skipIf("ODIN3_PROV_AST" in os.environ, "ODIN3_PROV_AST is set by the caller")
+    def test_design_does_not_touch_environment(self) -> None:
+        with Design(self.odin3) as design:
+            design.run_pass("read_verilog", f'"{VERILOG}"')
+            self.assertNotIn("ODIN3_PROV_AST", os.environ)
+            self.assertGreater(design.construct_count(), 1)
+        with Design(self.odin3) as design:
+            design.run_script(f'read_verilog "{VERILOG}"; check')
+            self.assertNotIn("ODIN3_PROV_AST", os.environ)
+            self.assertGreater(design.construct_count(), 1)
+
     def test_records_after_proc_and_opt(self) -> None:
         with Design(self.odin3) as design:
             design.run_pass("read_verilog", f'"{VERILOG}"')
             design.run_pass("proc")
             design.run_pass("opt")
-            self.assertEqual(design.construct_count(), 1)
+            # Design() asks for --prov-ast refs (the CLI default is off), so the read made rows
+            self.assertGreater(design.construct_count(), 1)
             top = design.top()
             assert top is not None
             seen = 0
+            chained = 0
             for node in top.nodes():
                 records = node.provenance()
                 if not records:
@@ -172,14 +185,17 @@ class ReadDesignTest(unittest.TestCase):
                 self.assertTrue(sources)
                 leaves = [r for r in records if r.kind == "source"]
                 self.assertTrue(leaves)
-                self.assertEqual(leaves[0].construct, None)
-                self.assertEqual(node.chain(), [])
+                chain = node.chain()
+                if chain:
+                    chained += 1
+                    self.assertIn("module", [c.level for c in chain])
                 for record in records:
                     self.assertIn(record.dir, ("origin", "refine", "rewrite", "coarsen", "context"))
                     if record.kind == "derived":
                         self.assertNotEqual(record.dir, "origin")
                         self.assertNotEqual(record.to_level, "none")
             self.assertGreater(seen, 0)
+            self.assertGreater(chained, 0)
 
 
 if __name__ == "__main__":
