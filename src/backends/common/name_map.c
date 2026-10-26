@@ -368,7 +368,7 @@ static bool parse_ast_token(odin3_bytes tok, odin3_bytes *word) {
     odin3_bytes value = {(const char *)tok.ptr + key, tok.len - key};
     for (size_t k = 0; k < sizeof AST_WORDS / sizeof AST_WORDS[0]; k++) {
         if (bytes_cmp(value, odin3_bytes_cstr(AST_WORDS[k])) == 0) {
-            *word = value;
+            *word = odin3_bytes_cstr(AST_WORDS[k]); /* the static word, not the caller's text */
             return true;
         }
     }
@@ -1121,6 +1121,7 @@ odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map) {
     if (map->version != ODIN3_NAME_MAP_VERSION_2) {
         return res;
     }
+    res.ignored = map->ignored;
     count_lines(map, &ck);
     for (size_t i = 0; i < map->lines.len; i++) {
         const odin3_nm_line *line = (const odin3_nm_line *)odin3_vec_cat(&map->lines, i);
@@ -1140,4 +1141,26 @@ odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map) {
 bool odin3_name_check_v2_ok(const odin3_name_check_v2 *check) {
     return check->bad_id == 0 && check->bad_ref == 0 && check->bad_order == 0 &&
            check->bad_class == 0 && check->no_record == 0;
+}
+
+bool odin3_name_check_v2_report(const odin3_name_check_v2 *check, const char *who) {
+    const struct {
+        uint32_t count;
+        const char *what;
+    } problems[] = {{check->bad_id, "line(s) whose id is not their line number"},
+                    {check->bad_ref, "reference(s) that do not resolve"},
+                    {check->bad_order, "parent(s) not numbered before their child"},
+                    {check->bad_class, "R line(s) with no valid kind, dir or step"},
+                    {check->no_record, "O or N line(s) whose record is missing"}};
+    for (size_t k = 0; k < sizeof problems / sizeof problems[0]; k++) {
+        if (problems[k].count != 0) {
+            odin3_log(ODIN3_LOG_ERROR, "%s: name map check: %u %s", who != NULL ? who : "name map",
+                      (unsigned)problems[k].count, problems[k].what);
+        }
+    }
+    if (check->ignored != 0) {
+        odin3_log(ODIN3_LOG_WARN, "%s: name map check: %u line(s) ignored by the parse",
+                  who != NULL ? who : "name map", (unsigned)check->ignored);
+    }
+    return odin3_name_check_v2_ok(check);
 }

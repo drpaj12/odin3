@@ -881,6 +881,61 @@ static void test_v2_check_finds_each_problem(void) {
     TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_order);
 }
 
+/* The ast word of the header is the parser's own, not a view into the caller's text: free the text
+ * after the parse and read it (ASan flags a dangling view). */
+static void test_v2_ast_word_survives_the_callers_text(void) {
+    const char *const words[] = {"refs", "constructs", "full", "none"};
+    for (size_t i = 0; i < 4; i++) {
+        char *text = odin3_util_calloc(TEXT_BUF);
+        TEST_ASSERT_NOT_NULL(text);
+        (void)snprintf(text, TEXT_BUF, "# odin3-names 2 hash=sha256 width=10 prov=1 ast=%s\n",
+                       words[i]);
+        odin3_name_map map;
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+        odin3_util_free(text); /* the caller frees its buffer */
+        expect_bytes(map.ast, text_of(words[i]));
+        odin3_name_map_free(&map);
+    }
+}
+
+/* The check reports how many lines the parse ignored; a map with only ignored lines is still ok. */
+static void test_v2_check_counts_ignored_lines(void) {
+    static const char BODY[] = "Q\tq1\tx\nK\tk1\nF\tf1\tt.v\nT\tt1\tread_verilog\t\t\nR\tbad\n";
+    odin3_name_check_v2 check = check_of(BODY);
+    TEST_ASSERT_EQUAL_UINT32(3, check.ignored); /* Q, K, and the R line with too few fields */
+    TEST_ASSERT_TRUE(odin3_name_check_v2_ok(&check));
+    TEST_ASSERT_TRUE(odin3_name_check_v2_report(&check, "test"));
+}
+
+/* The writer refuses a line the parser would ignore (over ODIN3_NAME_MAP_MAX_LINE), and leaves
+ * the buffer as it was. */
+static void test_v2_writer_refuses_a_line_over_the_parser_cap(void) {
+    odin3_strbuf out;
+    odin3_strbuf_init(&out);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write_header_v2(&out, 10, "refs"));
+    size_t before = out.len;
+    size_t big = (size_t)ODIN3_NAME_MAP_MAX_LINE + 1U;
+    char *text = odin3_util_calloc(big + 1U);
+    TEST_ASSERT_NOT_NULL(text);
+    memset(text, 'x', big);
+    const odin3_nm_field fields[] = {{{text, big}, false}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_name_map_write_line_v2(&out, 'F', fields, 1));
+    TEST_ASSERT_EQUAL_size_t(before, out.len);
+    memset(text, 'x', (size_t)ODIN3_NAME_MAP_MAX_LINE - 8U); /* a line just inside the cap parses */
+    const odin3_nm_field fit[] = {{text_of("f1"), false},
+                                  {{text, (size_t)ODIN3_NAME_MAP_MAX_LINE - 8U}, false}};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_write_line_v2(&out, 'F', fit, 2));
+    odin3_name_map map;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&map));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_name_map_parse(&map, (odin3_bytes){out.data, out.len}, "cap.names"));
+    TEST_ASSERT_EQUAL_UINT32(0, map.ignored);
+    odin3_name_map_free(&map);
+    odin3_util_free(text);
+    odin3_strbuf_free(&out);
+}
+
 static void test_check_of_a_version_1_map_is_empty(void) {
     char text[TEXT_BUF];
     (void)snprintf(text, sizeof text, "%s%s", HEADER, GOOD1);
@@ -939,6 +994,9 @@ int main(void) {
     RUN_TEST(test_v2_unknown_type_warns_once_per_type);
     RUN_TEST(test_v2_header_errors);
     RUN_TEST(test_v2_check_finds_each_problem);
+    RUN_TEST(test_v2_ast_word_survives_the_callers_text);
+    RUN_TEST(test_v2_check_counts_ignored_lines);
+    RUN_TEST(test_v2_writer_refuses_a_line_over_the_parser_cap);
     RUN_TEST(test_check_of_a_version_1_map_is_empty);
     RUN_TEST(test_v2_line_writer_out_of_memory);
     return UNITY_END();

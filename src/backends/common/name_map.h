@@ -162,13 +162,18 @@ typedef struct odin3_name_check_v2 {
     uint32_t bad_order;                        /* a parent or construct parent not numbered first */
     uint32_t bad_class;                        /* an R line with no valid kind, dir or step */
     uint32_t no_record;                        /* an O or N line whose record is missing */
+    uint32_t ignored; /* lines the parse dropped (warned about); counted, not a problem here */
 } odin3_name_check_v2;
 
 /* Verifies the version 2 invariants of a parsed map (V1.2.0 3.5). A version 1 map gives zeros. */
 odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map);
 
-/* True when the problem counters of c are all zero. */
+/* True when the problem counters of c are all zero (`ignored` is not a problem counter). */
 bool odin3_name_check_v2_ok(const odin3_name_check_v2 *check);
+
+/* Logs an error naming each non-zero problem counter (and a warning for ignored lines) with `who`
+ * as the prefix; returns odin3_name_check_v2_ok(check). Silent for a map that is well formed. */
+bool odin3_name_check_v2_report(const odin3_name_check_v2 *check, const char *who);
 
 /* The entry with exactly this module, kind and short name (first of equals), or NULL. */
 const odin3_name_entry *odin3_name_map_find(const odin3_name_map *map, odin3_bytes module,

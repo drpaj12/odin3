@@ -3,9 +3,10 @@
 
 Usage::
 
-    export_gate.py --odin3 O [--repeats N] [--json OUT] [--techlib FILE] [--lock FILE]
-                   [--workdir DIR] <design.v>...
+    export_gate.py --odin3 O [--repeats N] [--json OUT] [--jsonl OUT] [--techlib FILE]
+                   [--lock FILE] [--workdir DIR] <design.v>...
     export_gate.py --from-json RAW.json
+    export_gate.py --from-jsonl RUNS.jsonl
 
 For each design, smallest first, N times (default 3), alternating the two ends of one flow
 (``v1`` and ``v2``): ``read_techlib TECHLIB; read_verilog --nolatches --vtr-compat --prov-ast refs
@@ -16,8 +17,9 @@ The export time is the pass time odin3 logs for ``write_blif``; the peak RSS is 
 set size``.  The files go to ``--workdir`` (a fresh directory; required with a run) and stay there.
 The table gives, per design, n, the number of objects (O and N lines) and R, C lines and bytes of
 the version 2 map, the bytes of the version 1 map, the export time (median) of each end, and the
-peak RSS (median) of each end.  ``--json`` keeps every raw run; ``--from-json`` prints the table of
-a raw file with no run.
+peak RSS (median) of each end.  ``--json`` keeps every raw run (written at the end); ``--jsonl`` appends each finished run as one
+JSON line at once, so a stop loses nothing; ``--from-json`` and ``--from-jsonl`` print the table
+of a raw file with no run.
 """
 
 from __future__ import annotations
@@ -102,6 +104,26 @@ def report(raw: Raw) -> None:
               f"{med(v2, 'mb'):>10.1f} {med(v2, 'mb') - med(v1, 'mb'):>9.1f}")
 
 
+def from_jsonl(path: Path) -> Raw:
+    """The raw runs of a JSON-lines file (one run per line: design, end, then the run's numbers)."""
+    raw: Raw = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        run = json.loads(line)
+        ends = raw.setdefault(run.pop("design"), {"v1": [], "v2": []})
+        ends[run.pop("end")].append(run)
+    return raw
+
+
+def append_run(path: Path, design: Path, end: str, run: dict[str, float]) -> None:
+    """Appends one finished run to the JSON-lines file and flushes it to disk."""
+    with path.open("a", encoding="utf-8") as out:
+        out.write(json.dumps({"design": design.name, "end": end, **run}) + "\n")
+        out.flush()
+        os.fsync(out.fileno())
+
+
 def measure(args: argparse.Namespace) -> Raw:
     designs = sorted((Path(d) for d in args.designs), key=lambda p: (p.stat().st_size, str(p)))
     techlib = Path(args.techlib or os.environ.get("ODIN3_TECHLIB") or DEFAULT_TECHLIB)
@@ -113,7 +135,10 @@ def measure(args: argparse.Namespace) -> Raw:
         ends: dict[str, list[dict[str, float]]] = {"v1": [], "v2": []}
         for _ in range(args.repeats):
             for end in ("v1", "v2"):
-                ends[end].append(one_run(args.odin3, design, end, env))
+                run = one_run(args.odin3, design, end, env)
+                ends[end].append(run)
+                if args.jsonl:
+                    append_run(Path(args.jsonl), design, end, run)
         raw[design.name] = ends
     return raw
 
@@ -123,20 +148,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--odin3")
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--json")
+    ap.add_argument("--jsonl")
+    ap.add_argument("--from-jsonl")
     ap.add_argument("--techlib")
     ap.add_argument("--lock")
     ap.add_argument("--workdir")
     ap.add_argument("--from-json")
     ap.add_argument("designs", nargs="*")
     args = ap.parse_args(argv)
-    if args.from_json:
-        raw: Raw = json.loads(Path(args.from_json).read_text())
+    if args.from_jsonl:
+        raw: Raw = from_jsonl(Path(args.from_jsonl))
+    elif args.from_json:
+        raw = json.loads(Path(args.from_json).read_text())
     elif args.odin3 and args.designs and args.workdir:
         raw = measure(args)
         if args.json:
             Path(args.json).write_text(json.dumps(raw, indent=1) + "\n")
     else:
-        ap.error("give --from-json, or --odin3, --workdir and designs")
+        ap.error("give --from-json, --from-jsonl, or --odin3, --workdir and designs")
     report(raw)
     return 0
 

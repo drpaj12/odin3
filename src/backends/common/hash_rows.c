@@ -112,8 +112,14 @@ const odin3_hash_row *odin3_hash_rows_at(const odin3_hash_rows *rows, size_t ind
     return odin3_vec_cat(&rows->rows, index);
 }
 
+/* text[off, off + len) of the rows' name text; an empty view (no pointer arithmetic) for len 0,
+ * because the text buffer is still NULL while no row was added and NULL + 0 is undefined. */
+static odin3_bytes text_at(const odin3_hash_rows *rows, size_t off, size_t len) {
+    return len == 0 ? (odin3_bytes){"", 0} : (odin3_bytes){rows->text.data + off, len};
+}
+
 odin3_bytes odin3_hash_rows_full(const odin3_hash_rows *rows, const odin3_hash_row *row) {
-    return (odin3_bytes){rows->text.data + row->full_off, row->full_len};
+    return text_at(rows, row->full_off, row->full_len);
 }
 
 /* Resolves the rows of kind `kind` (any kind when `all`) among rows[first..count). */
@@ -180,11 +186,10 @@ odin3_status odin3_hash_rows_index(const odin3_hash_rows *rows, odin3_u64map **i
 /* The map entry of a row; hier, file and line are the parts of the full name (empty and 0 when it
  * does not decode as one). */
 static odin3_name_entry entry_of(const odin3_hash_rows *rows, const odin3_hash_row *row) {
-    odin3_name_entry entry = {
-        .module = {rows->text.data + row->module_name_off, row->module_name_len},
-        .kind = row->kind,
-        .short_name = {row->hash.text, strlen(row->hash.text)},
-        .full = odin3_hash_rows_full(rows, row)};
+    odin3_name_entry entry = {.module = text_at(rows, row->module_name_off, row->module_name_len),
+                              .kind = row->kind,
+                              .short_name = {row->hash.text, strlen(row->hash.text)},
+                              .full = odin3_hash_rows_full(rows, row)};
     odin3_hdl_name parts;
     if (odin3_hdl_name_decode(entry.full, &parts)) {
         entry.hier = parts.hier;
@@ -206,9 +211,9 @@ static odin3_prov_obj *prov_objects(const odin3_hash_rows *rows, size_t *count) 
     for (size_t i = 0; objs != NULL && i < rows->kept.len; i++) {
         const odin3_hash_kept *kept = odin3_vec_cat(&rows->kept, i);
         objs[rows->rows.len + i] = (odin3_prov_obj){
-            .entry = {.module = {rows->text.data + kept->module_name_off, kept->module_name_len},
+            .entry = {.module = text_at(rows, kept->module_name_off, kept->module_name_len),
                       .kind = kept->kind,
-                      .short_name = {rows->text.data + kept->name_off, kept->name_len}},
+                      .short_name = text_at(rows, kept->name_off, kept->name_len)},
             .kept = true,
             .record = kept->prov};
     }

@@ -4,6 +4,7 @@
  * mux, bulk and the cap, the numbering, the AST layer modes, escaping and determinism.
  */
 #include "backends/common/hash_name.h"
+#include "backends/common/hdl_loc.h"
 #include "backends/common/name_map.h"
 #include "backends/common/prov_export.h"
 #include "ir/construct.h"
@@ -175,7 +176,7 @@ static void roundtrip(parsed *out, const odin3_prov_obj *objs, size_t n, odin3_c
                                        "test.names"));
     TEST_ASSERT_EQUAL_UINT32(0, out->map.ignored);
     odin3_name_check_v2 check = odin3_name_map_check_v2(&out->map);
-    TEST_ASSERT_TRUE(odin3_name_check_v2_ok(&check));
+    TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_report(&check, "roundtrip"), out->text.data);
 }
 
 static void parsed_free(parsed *res) {
@@ -399,6 +400,169 @@ static void test_instance_join_by_context_chain(void) {
     TEST_ASSERT_FALSE(has_flag(merged, "join")); /* one anchor: the instances never enter J */
     TEST_ASSERT_TRUE(context_record_has_ctx(&res));
     parsed_free(&res);
+}
+
+static odin3_prov_id wide_bulk_record(void);
+
+/* --- instance joins over several levels (memoised per record) -------------------------------- */
+
+static odin3_prov_id context_of(odin3_prov_id orig, uint32_t inst_row) {
+    odin3_prov_id pair[2] = {orig, leaf_of(inst_row)};
+    odin3_prov_id out = {0};
+    odin3_prov_begin_op_class(&ctx, &CONTEXT1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){pair, 2}, &out));
+    return out;
+}
+
+static void test_instance_join_found_through_nested_coarsen_records(void) {
+    odin3_prov_id orig = leaf_of(R_A1);
+    odin3_prov_id both[2] = {context_of(orig, R_INST1), context_of(orig, R_INST2)};
+    odin3_prov_id inner = derive(&COARSEN, both, 2);
+    odin3_prov_id outer_in[2] = {inner, leaf_of(R_B1)};
+    odin3_prov_id outer = derive(&COARSEN, outer_in, 2);
+    odin3_prov_id top_in[2] = {outer, leaf_of(R_E1)};
+    parsed res;
+    one_object(&res, derive(&COARSEN, top_in, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_TRUE(has_flag(r_of_object(&res, 1), "join=instance")); /* the top record */
+    for (uint32_t k = 1; k <= count_of(&res, 'R'); k++) {
+        const odin3_nm_line *line = nth(&res, 'R', k);
+        if (strncmp(fld(line, 3), "coarsen:", 8) == 0) {
+            TEST_ASSERT_TRUE(has_flag(line, "join=instance")); /* inner, outer and top alike */
+        }
+    }
+    parsed_free(&res);
+}
+
+static void test_one_context_chain_twice_is_no_instance_join(void) {
+    odin3_prov_id orig = leaf_of(R_A1);
+    odin3_prov_id both[2] = {context_of(orig, R_INST1), context_of(orig, R_INST1)};
+    parsed res;
+    one_object(&res, derive(&COARSEN, both, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    TEST_ASSERT_FALSE(has_flag(r_of_object(&res, 1), "join=instance"));
+    parsed_free(&res);
+}
+
+static void test_instance_join_not_found_when_chains_hold_different_anchors(void) {
+    odin3_prov_id left = context_of(leaf_of(R_A1), R_INST1);
+    odin3_prov_id right = context_of(leaf_of(R_B1), R_INST2);
+    odin3_prov_id both[2] = {left, right};
+    parsed res;
+    one_object(&res, derive(&COARSEN, both, 2), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *line = r_of_object(&res, 1);
+    TEST_ASSERT_FALSE(has_flag(line, "join=instance"));
+    TEST_ASSERT_TRUE(has_flag(line, "join")); /* two statements */
+    parsed_free(&res);
+}
+
+/* --- refusals and counts ---------------------------------------------------------------------- */
+
+static unsigned g_errors;
+static unsigned g_warnings;
+
+static void count_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)msg;
+    (void)user;
+    g_errors += level == ODIN3_LOG_ERROR ? 1U : 0U;
+    g_warnings += level == ODIN3_LOG_WARN ? 1U : 0U;
+}
+
+static void test_derived_record_without_a_class_is_refused_with_a_message(void) {
+    odin3_prov_id src = leaf_of(R_A1);
+    odin3_prov_id classless = {0};
+    odin3_prov_begin_op(&ctx); /* an operation with no class */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_prov_derive(&ctx, (odin3_prov_list){&src, 1}, &classless));
+    odin3_opclass cls;
+    TEST_ASSERT_FALSE(odin3_prov_class_of(design, classless, &cls));
+    odin3_prov_obj obj = object("nocls", classless);
+    odin3_strbuf out;
+    odin3_strbuf_init(&out);
+    g_errors = 0;
+    odin3_log_set_sink(count_sink, NULL);
+    odin3_status st = write_map(&(objlist){&obj, 1, ODIN3_CONSTRUCT_MODE_REFS}, &out);
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, st);
+    TEST_ASSERT_TRUE(g_errors >= 1);
+    TEST_ASSERT_EQUAL_UINT32(0, (uint32_t)out.len); /* no text, so no map that fails its check */
+    odin3_strbuf_free(&out);
+}
+
+static void test_dropped_kept_names_are_counted_in_a_warning(void) {
+    odin3_prov_id src = leaf_of(R_A1);
+    odin3_prov_obj dupes[3] = {kept("same", src), kept("same", src), kept("same", src)};
+    odin3_strbuf out;
+    odin3_strbuf_init(&out);
+    g_warnings = 0;
+    odin3_log_set_sink(count_sink, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          write_map(&(objlist){dupes, 3, ODIN3_CONSTRUCT_MODE_REFS}, &out));
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_UINT32(1, g_warnings); /* one warning for both drops */
+    odin3_strbuf_free(&out);
+}
+
+/* A SOURCE record with n distinct locations in file a.v. */
+static odin3_prov_id many_locs(uint32_t n) {
+    odin3_srcloc locs[12];
+    for (uint32_t i = 0; i < n; i++) {
+        locs[i] = (odin3_srcloc){intern("a.v"), 100 + i, 1, 100 + i, 5, 0};
+    }
+    odin3_prov_origin origin = {locs, n, 0, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    return id;
+}
+
+static uint32_t items_of(const char *list) {
+    uint32_t items = list[0] == '\0' ? 0U : 1U;
+    for (const char *at = list; *at != '\0'; at++) {
+        items += *at == '|' ? 1U : 0U;
+    }
+    return items;
+}
+
+static void test_capped_is_written_only_when_the_cap_bites(void) {
+    parsed res;
+    one_object(&res, many_locs(ODIN3_HDL_LOC_MAX), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *at_cap = r_of_object(&res, 1);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_HDL_LOC_MAX, items_of(fld(at_cap, 6)));
+    TEST_ASSERT_FALSE(has_flag(at_cap, "capped"));
+    parsed_free(&res);
+    one_object(&res, many_locs(ODIN3_HDL_LOC_MAX + 3U), ODIN3_CONSTRUCT_MODE_REFS);
+    const odin3_nm_line *over = r_of_object(&res, 1);
+    TEST_ASSERT_EQUAL_UINT32(ODIN3_HDL_LOC_MAX, items_of(fld(over, 6)));
+    TEST_ASSERT_TRUE(has_flag(over, "capped"));
+    parsed_free(&res);
+}
+
+/* --- every written map passes its own check, and a failing check is reported ------------------ */
+
+static void test_written_maps_pass_the_check_and_a_bad_one_is_reported(void) {
+    odin3_prov_id two[2] = {leaf_of(R_A1), leaf_of(R_B1)};
+    odin3_prov_obj objs[3] = {object("a", derive(&COARSEN, two, 2)),
+                              object("b", wide_bulk_record()), kept("c", leaf_of(R_E1))};
+    for (int ast = ODIN3_CONSTRUCT_MODE_OFF; ast <= ODIN3_CONSTRUCT_MODE_FULL; ast++) {
+        parsed res;
+        roundtrip(&res, objs, 3, (odin3_construct_mode)ast); /* parse + check inside */
+        odin3_name_check_v2 check = odin3_name_map_check_v2(&res.map);
+        TEST_ASSERT_TRUE(odin3_name_check_v2_report(&check, "test"));
+        TEST_ASSERT_EQUAL_UINT32(0, check.ignored);
+        parsed_free(&res);
+    }
+    /* a map with a reference past the last record fails, and the report says so */
+    const char *bad = "# odin3-names 2 hash=sha256 width=10 prov=1 ast=none\n"
+                      "R\tr1\tD\tword\trewrite:word\tt1.1\tr9\t\t\t\n"
+                      "T\tt1\tp\t\t\n";
+    odin3_name_map map;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&map));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_parse(&map, odin3_bytes_cstr(bad), "bad.names"));
+    odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
+    g_errors = 0;
+    odin3_log_set_sink(count_sink, NULL);
+    TEST_ASSERT_FALSE(odin3_name_check_v2_report(&check, "test"));
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_TRUE(g_errors >= 1);
+    odin3_name_map_free(&map);
 }
 
 /* --- bulk and the cap ------------------------------------------------------------------------- */
@@ -633,6 +797,13 @@ int main(void) {
     RUN_TEST(test_inherited_blend_is_not_a_new_join);
     RUN_TEST(test_function_body_called_from_two_blocks_is_a_join);
     RUN_TEST(test_instance_join_by_context_chain);
+    RUN_TEST(test_instance_join_found_through_nested_coarsen_records);
+    RUN_TEST(test_one_context_chain_twice_is_no_instance_join);
+    RUN_TEST(test_instance_join_not_found_when_chains_hold_different_anchors);
+    RUN_TEST(test_derived_record_without_a_class_is_refused_with_a_message);
+    RUN_TEST(test_dropped_kept_names_are_counted_in_a_warning);
+    RUN_TEST(test_capped_is_written_only_when_the_cap_bites);
+    RUN_TEST(test_written_maps_pass_the_check_and_a_bad_one_is_reported);
     RUN_TEST(test_bulk_over_the_cap_has_the_flags);
     RUN_TEST(test_bulk_over_the_cap_lists_sixteen);
     RUN_TEST(test_small_bulk_run_has_no_cap);

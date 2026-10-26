@@ -111,8 +111,14 @@ static odin3_status parse_focus(odin3_bytes value, write_args *out) {
     return st;
 }
 
-/* --prov-map and its optional value: refs, constructs or full (the next word, when it is one). */
-static void parse_prov_map(odin3_bytes *rest, write_args *out) {
+/* --prov-map and its optional value: refs, constructs or full (the next word, when it is one; a
+ * file with one of those names after --prov-map must be written ./refs). Given twice: INVALID_ARG.
+ */
+static odin3_status parse_prov_map(const char *pass, odin3_bytes *rest, write_args *out) {
+    if (out->json.prov_map != ODIN3_PROV_MAP_NONE) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: option '--prov-map' given twice", pass);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_bytes peek = *rest;
     odin3_prov_map_mode mode = ODIN3_PROV_MAP_ANY;
     if (odin3_prov_map_word(odin3_pass_arg_next(&peek), &mode)) {
@@ -120,6 +126,7 @@ static void parse_prov_map(odin3_bytes *rest, write_args *out) {
     }
     out->verilog.prov_map = mode;
     out->json.prov_map = mode;
+    return ODIN3_OK;
 }
 
 /* write_verilog's and write_json's options: --name-style and --name-map. */
@@ -180,8 +187,7 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
         return ODIN3_OK;
     }
     if (names && odin3_pass_arg_is(word, "--prov-map")) {
-        parse_prov_map(rest, out);
-        return ODIN3_OK;
+        return parse_prov_map(pass, rest, out);
     }
     if (names &&
         (odin3_pass_arg_is(word, "--name-style") || odin3_pass_arg_is(word, "--name-map"))) {

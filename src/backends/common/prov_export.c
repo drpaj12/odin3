@@ -5,6 +5,7 @@
 #include "backends/common/prov_export.h"
 
 #include "ast/kinds.h"
+#include "backends/common/hdl_loc.h"
 #include "backends/common/name_map.h"
 #include "ir/construct.h"
 #include "ir/design.h"
@@ -13,120 +14,23 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
+#include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
 #include "util/vec.h"
 
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-
-enum { SOURCE_KIND = 0, IMPORTED_KIND = 1, DERIVED_KIND = 2 };
-
-/* A pending record with the context chain it is reached with (chain 0: none). */
-typedef struct frame {
-    uint32_t rec;
-    uint32_t chain;
-} frame;
-
-/* A context chain: the parent chain and the context record appended (chain ID n is index n - 1). */
-typedef struct chain_node {
-    uint32_t parent;
-    uint32_t rec;
-} chain_node;
-
-/* A construct leaf: its row and the chain it was reached with. */
-typedef struct leaf_hit {
-    uint32_t row;
-    uint32_t chain;
-} leaf_hit;
-
-typedef struct walk_state {
-    const odin3_design *design;
-    odin3_vec stack;         /* frame */
-    odin3_vec chains;        /* chain_node */
-    odin3_vec leaves;        /* leaf_hit */
-    odin3_u64map *seen;      /* (record << 32 | chain) */
-    odin3_u64map *chain_ids; /* (parent chain << 32 | record) -> chain ID */
-    bool span_only;
-} walk_state;
 
 enum { KEY_SHIFT = 32 };
 
 /* One map key from a record and a chain (or a chain and a record). */
 static uint64_t pair_key(uint32_t high, uint32_t low) {
     return ((uint64_t)high << KEY_SHIFT) | low;
-}
-
-static void walk_free(walk_state *walk) {
-    odin3_vec_free(&walk->stack);
-    odin3_vec_free(&walk->chains);
-    odin3_vec_free(&walk->leaves);
-    odin3_u64map_destroy(walk->seen);
-    odin3_u64map_destroy(walk->chain_ids);
-    walk->seen = NULL;
-    walk->chain_ids = NULL;
-}
-
-static odin3_status walk_init(walk_state *walk, const odin3_design *design) {
-    *walk = (walk_state){.design = design};
-    odin3_vec_init(&walk->stack, sizeof(frame));
-    odin3_vec_init(&walk->chains, sizeof(chain_node));
-    odin3_vec_init(&walk->leaves, sizeof(leaf_hit));
-    walk->seen = odin3_u64map_create(0);
-    walk->chain_ids = odin3_u64map_create(0);
-    if (walk->seen == NULL || walk->chain_ids == NULL) {
-        walk_free(walk);
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    return ODIN3_OK;
-}
-
-/* The chain `parent` extended by context record rec: an existing ID, else a new one. */
-static odin3_status chain_extend(walk_state *walk, uint32_t parent, uint32_t rec, uint32_t *out) {
-    uint64_t have = 0;
-    if (odin3_u64map_get(walk->chain_ids, pair_key(parent, rec), &have)) {
-        *out = (uint32_t)have;
-        return ODIN3_OK;
-    }
-    chain_node *node = odin3_vec_push(&walk->chains);
-    if (node == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *node = (chain_node){parent, rec};
-    uint32_t id = (uint32_t)walk->chains.len;
-    if (odin3_u64map_put(walk->chain_ids, (odin3_kv){pair_key(parent, rec), id}) != ODIN3_OK) {
-        odin3_vec_pop(&walk->chains);
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *out = id;
-    return ODIN3_OK;
-}
-
-static odin3_status push_frame(walk_state *walk, uint32_t rec, uint32_t chain) {
-    frame *slot = odin3_vec_push(&walk->stack);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = (frame){rec, chain};
-    return ODIN3_OK;
-}
-
-/* A SOURCE or IMPORTED record reached: a construct leaf, or a span-only one. */
-static odin3_status take_leaf(walk_state *walk, frame fr) {
-    uint32_t row = odin3_construct_of_record(walk->design, (odin3_prov_id){fr.rec});
-    if (row == 0) {
-        walk->span_only = true;
-        return ODIN3_OK;
-    }
-    leaf_hit *hit = odin3_vec_push(&walk->leaves);
-    if (hit == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *hit = (leaf_hit){row, fr.chain};
-    return ODIN3_OK;
 }
 
 /* How many trailing parents of rec are context parents (the declared tail, clamped). */
@@ -136,53 +40,6 @@ static uint32_t tail_of(const odin3_design *design, odin3_prov_id id, uint32_t c
         return 0;
     }
     return cls.context_tail < count ? cls.context_tail : count;
-}
-
-/* A DERIVED record reached with chain: its tail extends the chain, its data parents are pushed. */
-static odin3_status expand_derived(walk_state *walk, uint32_t rec_id, const odin3_prov_record *rec,
-                                   uint32_t chain) {
-    uint32_t count = rec->parents.count;
-    uint32_t data = count - tail_of(walk->design, (odin3_prov_id){rec_id}, count);
-    uint32_t inner = chain;
-    for (uint32_t k = data; k < count; k++) {
-        odin3_status st = chain_extend(walk, inner, rec->parents.ids[k].v, &inner);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    for (uint32_t k = data; k > 0; k--) {
-        odin3_status st = push_frame(walk, rec->parents.ids[k - 1U].v, inner);
-        if (st != ODIN3_OK) {
-            return st;
-        }
-    }
-    return ODIN3_OK;
-}
-
-static odin3_status visit_frame(walk_state *walk, frame fr) {
-    const odin3_prov_record *rec = odin3_prov_get(walk->design, (odin3_prov_id){fr.rec});
-    if (rec->kind == ODIN3_PROV_DERIVED) {
-        return expand_derived(walk, fr.rec, rec, fr.chain);
-    }
-    return take_leaf(walk, fr);
-}
-
-/* Walks the data parents of record depth-first, filling the leaves and the span-only flag. */
-static odin3_status walk_record(walk_state *walk, uint32_t record) {
-    odin3_status st = push_frame(walk, record, 0);
-    while (st == ODIN3_OK && walk->stack.len > 0) {
-        frame fr = *(const frame *)odin3_vec_cat(&walk->stack, walk->stack.len - 1U);
-        odin3_vec_pop(&walk->stack);
-        uint64_t unused = 0;
-        if (odin3_u64map_get(walk->seen, pair_key(fr.rec, fr.chain), &unused)) {
-            continue;
-        }
-        st = odin3_u64map_put(walk->seen, (odin3_kv){pair_key(fr.rec, fr.chain), 1});
-        if (st == ODIN3_OK) {
-            st = visit_frame(walk, fr);
-        }
-    }
-    return st;
 }
 
 /* --- anchors and the reduced set ------------------------------------------------------------- */
@@ -304,27 +161,6 @@ static odin3_status reduce_rows(const odin3_design *design, odin3_vec *rows,
         st = sort_u32(rows);
     }
     odin3_u64map_destroy(covered);
-    return st;
-}
-
-/* True when an anchor is reached with two different chains. */
-static odin3_status find_instance_join(const walk_state *walk, bool *found) {
-    odin3_u64map *first = odin3_u64map_create(0);
-    if (first == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < walk->leaves.len && !*found; i++) {
-        const leaf_hit *hit = odin3_vec_cat(&walk->leaves, i);
-        uint32_t anchor = anchor_of(walk->design, hit->row);
-        uint64_t have = 0;
-        if (!odin3_u64map_get(first, anchor, &have)) {
-            st = odin3_u64map_put(first, (odin3_kv){anchor, (uint64_t)hit->chain + 1U});
-        } else {
-            *found = have != (uint64_t)hit->chain + 1U;
-        }
-    }
-    odin3_u64map_destroy(first);
     return st;
 }
 
@@ -455,10 +291,12 @@ static odin3_status order_rows(const odin3_design *design, odin3_vec *rows) {
  * of every SOURCE or IMPORTED leaf behind its data parents, in ascending row order, shared by a
  * record with one data parent. That set does not depend on the context chains a walk meets, so a
  * record's set is the union of its data parents' sets and one pass over the record graph fills
- * the sets of the whole sub-graph. Only the join of instances needs the chains; it is found by a
- * walk, once per coarsen record whose sub-graph holds a context record.
+ * the sets of the whole sub-graph. The join of instances needs the context chains: a record that
+ * has a context record in its sub-graph also gets the set of (anchor, chain) pairs behind it,
+ * built from its data parents' sets in the same bottom-up way and kept for the design, so no
+ * record's sub-graph is walked twice (a chain is a hash-consed list of context records).
  */
-enum { E_SPAN_ONLY = 1, E_HAS_CTX = 2, E_IJ_KNOWN = 4, E_IJ = 8 };
+enum { E_SPAN_ONLY = 1, E_HAS_CTX = 2 };
 
 typedef struct anchor_entry {
     uint32_t off;
@@ -466,17 +304,38 @@ typedef struct anchor_entry {
     uint32_t flags;
 } anchor_entry;
 
+/* The (anchor, chain) pairs behind a record with a context record in its sub-graph. multi: some
+ * anchor has two chains; the pairs are then not kept (every record above has it too). */
+typedef struct ij_entry {
+    uint32_t off;
+    uint32_t len;
+    bool multi;
+} ij_entry;
+
+/* Not thread safe: the cache of a design is filled lazily and without a lock; labels of one design
+ * must be computed from one thread at a time (the writers are single threaded). `busy` catches an
+ * overlapping use of an existing cache and fails it (logged) instead of racing. */
 typedef struct label_cache {
-    odin3_u64map *index; /* record -> entry number + 1 */
-    odin3_vec entries;   /* anchor_entry */
-    odin3_vec pool;      /* uint32_t anchors */
+    odin3_u64map *index;     /* record -> entry number + 1 */
+    odin3_vec entries;       /* anchor_entry */
+    odin3_vec pool;          /* uint32_t anchors */
+    odin3_u64map *ij_index;  /* record -> ij entry number + 1 */
+    odin3_vec ij_entries;    /* ij_entry */
+    odin3_vec ij_pool;       /* uint64_t: anchor << 32 | chain */
+    odin3_u64map *chain_ids; /* (first record << 32 | rest chain) -> chain ID (> 0; 0: empty) */
+    uint32_t chain_count;
+    atomic_flag busy;
 } label_cache;
 
 static void cache_destroy(void *data) {
     label_cache *cache = data;
     odin3_u64map_destroy(cache->index);
+    odin3_u64map_destroy(cache->ij_index);
+    odin3_u64map_destroy(cache->chain_ids);
     odin3_vec_free(&cache->entries);
     odin3_vec_free(&cache->pool);
+    odin3_vec_free(&cache->ij_entries);
+    odin3_vec_free(&cache->ij_pool);
     odin3_util_free(cache);
 }
 
@@ -487,8 +346,13 @@ static void *cache_create(void) {
     }
     odin3_vec_init(&cache->entries, sizeof(anchor_entry));
     odin3_vec_init(&cache->pool, sizeof(uint32_t));
+    atomic_flag_clear(&cache->busy);
+    odin3_vec_init(&cache->ij_entries, sizeof(ij_entry));
+    odin3_vec_init(&cache->ij_pool, sizeof(uint64_t));
     cache->index = odin3_u64map_create(0);
-    if (cache->index == NULL) {
+    cache->ij_index = odin3_u64map_create(0);
+    cache->chain_ids = odin3_u64map_create(0);
+    if (cache->index == NULL || cache->ij_index == NULL || cache->chain_ids == NULL) {
         cache_destroy(cache);
         return NULL;
     }
@@ -660,6 +524,14 @@ static odin3_status cache_fill(const odin3_design *design, label_cache *cache, u
 static odin3_status cache_entry(const odin3_design *design, uint32_t record, label_cache **cache,
                                 const anchor_entry **entry) {
     *cache = odin3_construct_derived(design, cache_create, cache_destroy);
+    if (*cache != NULL && atomic_flag_test_and_set(&(*cache)->busy)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "odin3_prov_label_compute: the label cache of this design is in use by another "
+                  "thread (labels of one design are computed from one thread at a time)");
+        *cache = NULL;
+        *entry = NULL;
+        return ODIN3_ERR_INVALID_ARG;
+    }
     odin3_status st = *cache != NULL ? cache_fill(design, *cache, record) : ODIN3_ERR_NO_MEMORY;
     *entry = st == ODIN3_OK ? entry_of(*cache, record) : NULL;
     return st;
@@ -737,28 +609,174 @@ static odin3_status parent_has_same_set(const odin3_design *design, const label_
     return ODIN3_OK;
 }
 
-/* Whether an anchor of the record's walk is reached with two chains; cached in the entry. */
+/* The chain of context record `first` followed by chain `rest`: an existing ID, else a new one. */
+static odin3_status chain_cons(label_cache *cache, uint32_t first, uint32_t rest, uint32_t *out) {
+    uint64_t have = 0;
+    uint64_t key = pair_key(first, rest);
+    if (!odin3_u64map_get(cache->chain_ids, key, &have)) {
+        have = ++cache->chain_count;
+        if (odin3_u64map_put(cache->chain_ids, (odin3_kv){key, have}) != ODIN3_OK) {
+            cache->chain_count--;
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    *out = (uint32_t)have;
+    return ODIN3_OK;
+}
+
+static int cmp_u64_pair(const void *ctx, const void *lhs, const void *rhs) {
+    (void)ctx;
+    uint64_t left = *(const uint64_t *)lhs;
+    uint64_t right = *(const uint64_t *)rhs;
+    if (left == right) {
+        return 0;
+    }
+    return left < right ? -1 : 1;
+}
+
+static const ij_entry *ij_of(const label_cache *cache, uint32_t record) {
+    uint64_t at = 0;
+    return odin3_u64map_get(cache->ij_index, record, &at)
+               ? odin3_vec_cat(&cache->ij_entries, at - 1U)
+               : NULL;
+}
+
+/* Appends the pairs behind data parent `parent` to pairs; *multi when it has two chains already. */
+static odin3_status add_parent_pairs(const label_cache *cache, uint32_t parent, odin3_vec *pairs,
+                                     bool *multi) {
+    const anchor_entry *pe = entry_of(cache, parent);
+    const ij_entry *ij = (pe->flags & E_HAS_CTX) != 0 ? ij_of(cache, parent) : NULL;
+    if (ij != NULL && ij->multi) {
+        *multi = true;
+        return ODIN3_OK;
+    }
+    size_t len = ij != NULL ? ij->len : pe->len;
+    odin3_status st = odin3_vec_reserve(pairs, pairs->len + len);
+    for (size_t i = 0; st == ODIN3_OK && i < len; i++) {
+        *(uint64_t *)odin3_vec_push(pairs) =
+            ij != NULL ? *(const uint64_t *)odin3_vec_cat(&cache->ij_pool, ij->off + i)
+                       : (uint64_t)entry_anchors(cache, pe)[i] << KEY_SHIFT;
+    }
+    return st;
+}
+
+/* Puts the context tail (parents data .. count - 1) in front of the chain of every pair. */
+static odin3_status prepend_tail(label_cache *cache, const odin3_prov_record *rec, uint32_t data,
+                                 odin3_vec *pairs) {
+    uint64_t *list = pairs->data;
+    for (size_t i = 0; i < pairs->len; i++) {
+        uint32_t chain = (uint32_t)list[i];
+        for (uint32_t k = rec->parents.count; k > data; k--) {
+            odin3_status st = chain_cons(cache, rec->parents.ids[k - 1U].v, chain, &chain);
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+        list[i] = (list[i] & ~(uint64_t)UINT32_MAX) | chain;
+    }
+    return ODIN3_OK;
+}
+
+/* Sorts pairs, drops equal ones, and sets *multi when an anchor is left with two chains. */
+static odin3_status settle_pairs(odin3_vec *pairs, bool *multi) {
+    const elem_ctx ec = {sizeof(uint64_t), cmp_u64_pair, NULL};
+    odin3_status st = merge_sort(pairs, &ec);
+    uint64_t *list = pairs->data;
+    size_t keep = 0;
+    for (size_t i = 0; st == ODIN3_OK && i < pairs->len; i++) {
+        if (keep > 0 && list[i] == list[keep - 1U]) {
+            continue;
+        }
+        *multi = *multi || (keep > 0 && (list[i] >> KEY_SHIFT) == (list[keep - 1U] >> KEY_SHIFT));
+        list[keep++] = list[i];
+    }
+    pairs->len = keep;
+    return st;
+}
+
+/* Fills the ij entry of a record with a context record behind it, from its data parents'. */
+static odin3_status ij_fill(const odin3_design *design, label_cache *cache, uint32_t record) {
+    const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){record});
+    uint32_t data =
+        rec->parents.count - tail_of(design, (odin3_prov_id){record}, rec->parents.count);
+    odin3_vec pairs;
+    odin3_vec_init(&pairs, sizeof(uint64_t));
+    bool multi = false;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = 0; st == ODIN3_OK && !multi && k < data; k++) {
+        st = add_parent_pairs(cache, rec->parents.ids[k].v, &pairs, &multi);
+    }
+    st = st == ODIN3_OK && !multi ? prepend_tail(cache, rec, data, &pairs) : st;
+    st = st == ODIN3_OK && !multi ? settle_pairs(&pairs, &multi) : st;
+    ij_entry entry = {(uint32_t)cache->ij_pool.len, multi ? 0U : (uint32_t)pairs.len, multi};
+    st = st == ODIN3_OK ? odin3_vec_reserve(&cache->ij_pool, cache->ij_pool.len + entry.len) : st;
+    for (size_t i = 0; st == ODIN3_OK && i < entry.len; i++) {
+        *(uint64_t *)odin3_vec_push(&cache->ij_pool) = *(const uint64_t *)odin3_vec_cat(&pairs, i);
+    }
+    odin3_vec_free(&pairs);
+    ij_entry *slot = st == ODIN3_OK ? odin3_vec_push(&cache->ij_entries) : NULL;
+    if (slot == NULL) {
+        return st == ODIN3_OK ? ODIN3_ERR_NO_MEMORY : st;
+    }
+    *slot = entry;
+    if (odin3_u64map_put(cache->ij_index, (odin3_kv){record, cache->ij_entries.len}) != ODIN3_OK) {
+        odin3_vec_pop(&cache->ij_entries);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+/* Pushes the data parents of record that have a context record behind them and no ij entry. */
+static odin3_status ij_parents_ready(const odin3_design *design, const label_cache *cache,
+                                     odin3_vec *todo, uint32_t record, bool *ready) {
+    const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){record});
+    uint32_t data =
+        rec->parents.count - tail_of(design, (odin3_prov_id){record}, rec->parents.count);
+    *ready = true;
+    for (uint32_t k = data; k > 0; k--) {
+        uint32_t parent = rec->parents.ids[k - 1U].v;
+        if ((entry_of(cache, parent)->flags & E_HAS_CTX) == 0 || ij_of(cache, parent) != NULL) {
+            continue;
+        }
+        uint32_t *slot = odin3_vec_push(todo);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = parent;
+        *ready = false;
+    }
+    return ODIN3_OK;
+}
+
+/* Whether an anchor behind the record is reached with two chains; the ij entries are cached. */
 static odin3_status instance_join_of(const odin3_design *design, label_cache *cache,
                                      uint32_t record, bool *found) {
-    uint64_t at = 0;
-    (void)odin3_u64map_get(cache->index, record, &at); /* filled by cache_entry */
-    anchor_entry *entry = odin3_vec_at(&cache->entries, at - 1U);
-    *found = (entry->flags & E_IJ) != 0;
-    if ((entry->flags & (E_IJ_KNOWN | E_HAS_CTX)) != E_HAS_CTX) {
-        return ODIN3_OK; /* known, or no context record behind it: one chain for everything */
+    *found = false;
+    if ((entry_of(cache, record)->flags & E_HAS_CTX) == 0) {
+        return ODIN3_OK; /* no context record behind it: one chain for everything */
     }
-    walk_state walk;
-    odin3_status st = walk_init(&walk, design);
-    if (st == ODIN3_OK) {
-        st = walk_record(&walk, record);
+    odin3_vec todo;
+    odin3_vec_init(&todo, sizeof(uint32_t));
+    uint32_t *first = odin3_vec_push(&todo);
+    odin3_status st = first != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    if (first != NULL) {
+        *first = record;
     }
-    if (st == ODIN3_OK) {
-        st = find_instance_join(&walk, found);
+    while (st == ODIN3_OK && todo.len > 0) {
+        uint32_t top = *(const uint32_t *)odin3_vec_cat(&todo, todo.len - 1U);
+        bool ready = true;
+        if (ij_of(cache, top) != NULL) {
+            odin3_vec_pop(&todo);
+            continue;
+        }
+        st = ij_parents_ready(design, cache, &todo, top, &ready);
+        if (st == ODIN3_OK && ready) {
+            odin3_vec_pop(&todo);
+            st = ij_fill(design, cache, top);
+        }
     }
-    walk_free(&walk);
-    if (st == ODIN3_OK) { /* the walk adds no entry: the pointer still holds */
-        entry->flags |= E_IJ_KNOWN | (*found ? (uint32_t)E_IJ : 0U);
-    }
+    odin3_vec_free(&todo);
+    *found = st == ODIN3_OK && ij_of(cache, record)->multi;
     return st;
 }
 
@@ -791,7 +809,6 @@ static void fill_class(const odin3_design *design, uint32_t record, const odin3_
     info->from_level = cls.from_level;
     info->to_level = cls.to_level;
     info->n_context = tail_of(design, (odin3_prov_id){record}, rec->parents.count);
-    info->flags = cls.bulk ? ODIN3_PROV_F_LOSSY_BULK : 0U;
 }
 
 /* The join labels of a coarsen record from its set J; fills label->joined. */
@@ -821,6 +838,10 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
     }
     if (rows.len > ODIN3_PROV_JOIN_CAP) {
         info->flags |= ODIN3_PROV_F_LOSSY_CAP;
+    }
+    odin3_opclass cls;
+    if (odin3_prov_class_of(design, (odin3_prov_id){info->record}, &cls) && cls.bulk) {
+        info->flags |= ODIN3_PROV_F_LOSSY_BULK; /* with the other lossy flags: one place */
     }
     if (instance) {
         info->flags |= ODIN3_PROV_F_JOIN_INSTANCE;
@@ -852,6 +873,9 @@ odin3_status odin3_prov_label_compute(const odin3_design *design, uint32_t recor
     if (st == ODIN3_OK && fresh.info.dir == ODIN3_DIR_COARSEN) {
         st = label_join(design, cache, rec, entry, &fresh);
     }
+    if (cache != NULL) {
+        atomic_flag_clear(&cache->busy);
+    }
     if (st != ODIN3_OK) {
         odin3_prov_label_free(&fresh);
         return st;
@@ -873,7 +897,7 @@ enum {
     LEVEL_WORD_COUNT = sizeof LEVEL_WORDS / sizeof LEVEL_WORDS[0],
     MODE_RANK_MAX = 3,
     MODE_RANK_REFS = 2,
-    ORIGIN_CAP = 8 /* ODIN3_HDL_LOC_MAX */
+    ORIGIN_CAP = ODIN3_HDL_LOC_MAX /* one constant: the locations a record keeps */
 };
 
 static const char *level_word(unsigned level) {
@@ -1234,6 +1258,9 @@ static odin3_status pm_take_cons(pm *st, const odin3_prov_label *label, pm_rec *
         uint32_t num = 0;
         odin3_status status =
             pm_con_of_row(st, *(const uint32_t *)odin3_vec_cat(&label->joined, i), &num);
+        if (status == ODIN3_OK && num == 0) {
+            continue; /* ast=none: no construct is numbered, and `c0` would not resolve */
+        }
         uint32_t *slot = status == ODIN3_OK ? odin3_vec_push(&st->cons_pool) : NULL;
         if (status != ODIN3_OK || slot == NULL) {
             return status != ODIN3_OK ? status : ODIN3_ERR_NO_MEMORY;
@@ -1263,6 +1290,16 @@ static odin3_status pm_label(pm *st, uint32_t id, pm_rec *out) {
     odin3_prov_label label;
     odin3_prov_label_init(&label);
     odin3_status status = odin3_prov_label_compute(st->design, id, &label);
+    if (status == ODIN3_OK && label.info.kind == (uint32_t)ODIN3_PROV_DERIVED &&
+        label.info.dir == ODIN3_DIR_ORIGIN) {
+        /* A derived record with no operation class has no direction: the map would fail its own
+         * check (`origin:` is for S and I records only), so the writer stops. */
+        odin3_log(ODIN3_LOG_ERROR,
+                  "name map: record %u (run %u, op %u) is derived but its operation has no class; "
+                  "register a class for the operation before exporting a provenance map",
+                  (unsigned)id, (unsigned)label.info.run, (unsigned)label.info.op);
+        status = ODIN3_ERR_INVALID_ARG;
+    }
     if (status == ODIN3_OK) {
         const odin3_prov_info *info = &label.info;
         *out = (pm_rec){.id = id,
@@ -1729,6 +1766,7 @@ static odin3_status sort_objects(const odin3_prov_obj *objs, size_t count, odin3
     for (size_t i = 0; status == ODIN3_OK && i < count; i++) {
         *(uint32_t *)odin3_vec_push(&all) = (uint32_t)i;
     }
+    size_t dropped = 0;
     const obj_order order = {objs};
     const elem_ctx sort = {sizeof(uint32_t), cmp_obj_index, &order};
     status = status == ODIN3_OK ? merge_sort(&all, &sort) : status;
@@ -1747,7 +1785,15 @@ static odin3_status sort_objects(const odin3_prov_obj *objs, size_t count, odin3
             status = ODIN3_ERR_INVALID_ARG;
         } else if (!dup) {
             *(uint32_t *)odin3_vec_push(sorted) = at;
+        } else {
+            dropped++;
         }
+    }
+    if (dropped > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "name map: %zu kept name(s) repeat a name already in the map and get no N line "
+                  "(the first stays)",
+                  dropped);
     }
     odin3_vec_free(&all);
     return status;
@@ -1856,15 +1902,26 @@ odin3_status odin3_prov_map_text(const odin3_prov_map_req *req, const odin3_prov
     pm st;
     odin3_vec sorted;
     odin3_vec_init(&sorted, sizeof(uint32_t));
+    double t_start = odin3_now_ms();
     odin3_status status = pm_init(&st, req);
     status = status == ODIN3_OK ? sort_objects(objs, count, &sorted) : status;
+    double t_sorted = odin3_now_ms();
     status = status == ODIN3_OK ? pm_prepare(&st, objs, &sorted) : status;
+    double t_prepared = odin3_now_ms();
     status = status == ODIN3_OK ? pm_emit(&st, objs, &sorted, out) : status;
+    odin3_log(ODIN3_LOG_INFO, "name map: sort %.1f ms, number and label %.1f ms, emit %.1f ms",
+              t_sorted - t_start, t_prepared - t_sorted, odin3_now_ms() - t_prepared);
     if (status != ODIN3_OK && out->len != start) {
         out->len = start;
         if (out->data != NULL) {
             out->data[start] = '\0';
         }
+    }
+    if (status == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "name map: %zu object(s), %zu record(s); defaults: BLIF N lines are nets only, "
+                  "cell= not written, %u locations and %u joined rows at most",
+                  count, st.recs.len, (unsigned)ORIGIN_CAP, (unsigned)ODIN3_PROV_JOIN_CAP);
     }
     odin3_vec_free(&sorted);
     if (st.num_of != NULL) {

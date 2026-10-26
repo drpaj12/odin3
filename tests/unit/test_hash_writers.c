@@ -948,6 +948,85 @@ static void test_prov_map_option_word_is_optional(void) {
     }
 }
 
+/* --prov-map given twice is refused by all three writers; nothing is written. */
+static void test_prov_map_twice_is_refused(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_ERR_INVALID_ARG,
+            write_hash_extra(wc, "twice", odin3_bytes_cstr("--prov-map refs --prov-map")));
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "given twice"), log_text);
+        expect_nothing_written(wc, "twice");
+        reset_design();
+    }
+}
+
+/* An output in a directory that does not exist: the write fails and leaves no netlist and no map.
+ */
+static void test_prov_map_write_failure_leaves_nothing(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_NOT_EQUAL_INT(
+            ODIN3_OK, run(wc->pass, fmt_args("%s --name-style hash --prov-map %s/nodir/x%s",
+                                             wc->flags, dir, wc->ext)));
+        char name[SMALL];
+        (void)snprintf(name, sizeof name, "nodir/x%s", wc->ext);
+        TEST_ASSERT_FALSE(exists(name));
+        (void)snprintf(name, sizeof name, "nodir/x%s.names", wc->ext);
+        TEST_ASSERT_FALSE(exists(name));
+        reset_design();
+    }
+}
+
+/* A map that cannot be renamed into place fails the write; the existing netlist stays and no
+ * version 2 map appears (the same rule as version 1, with --prov-map). */
+static void test_prov_map_commit_failure_keeps_the_old_netlist(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        char outname[SMALL];
+        char path[PATH_BUF];
+        char extra[PATH_BUF];
+        (void)snprintf(outname, sizeof outname, "oldv2%s", wc->ext);
+        put_file(outname, odin3_bytes_cstr("OLD\n"));
+        path_of("mapdir2", path);
+        TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0700));
+        (void)snprintf(extra, sizeof extra, "--prov-map --name-map %.400s", path);
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, write_hash_extra(wc, "oldv2", odin3_bytes_cstr(extra)));
+        char *net = slurp(outname);
+        TEST_ASSERT_EQUAL_STRING("OLD\n", net);
+        odin3_util_free(net);
+        TEST_ASSERT_EQUAL_INT(0, rmdir(path));
+        reset_design();
+    }
+}
+
+/* Each writer's version 2 map has N lines for the names it keeps (BLIF: nets only). */
+static void test_prov_map_has_n_lines_from_every_writer(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, write_hash_extra(wc, "nl", odin3_bytes_cstr("--prov-map")), log_text);
+        written files = read_written(wc, "nl");
+        odin3_name_map map;
+        parse_v2(&map, files.map);
+        uint32_t kept = 0;
+        for (size_t k = 0; k < map.lines.len; k++) {
+            kept += ((const odin3_nm_line *)odin3_vec_cat(&map.lines, k))->type == 'N' ? 1U : 0U;
+        }
+        TEST_ASSERT_TRUE_MESSAGE(kept > 0, wc->pass);
+        odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
+        TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_report(&check, wc->pass), files.map);
+        odin3_name_map_free(&map);
+        free_written(&files);
+        reset_design();
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_blif_hash);
@@ -975,5 +1054,9 @@ int main(void) {
     RUN_TEST(test_prov_map_needs_hash_names);
     RUN_TEST(test_prov_map_above_what_the_read_kept_is_refused);
     RUN_TEST(test_prov_map_option_word_is_optional);
+    RUN_TEST(test_prov_map_twice_is_refused);
+    RUN_TEST(test_prov_map_write_failure_leaves_nothing);
+    RUN_TEST(test_prov_map_commit_failure_keeps_the_old_netlist);
+    RUN_TEST(test_prov_map_has_n_lines_from_every_writer);
     return UNITY_END();
 }

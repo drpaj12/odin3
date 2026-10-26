@@ -73,6 +73,7 @@ static char *slurp(const char *path) {
 /* What one map showed. */
 typedef struct tally {
     uint32_t designs, skipped, maps, objects, no_record, no_construct;
+    uint32_t kept_lines, refine_records, refine_joins, byte_diffs, netlists;
 } tally;
 
 /* The number in `r12` (or the first of a list), 0 when not a record reference. */
@@ -178,6 +179,11 @@ static void check_map(const char *path, tally *seen_all) {
     rtable_make(&table, &map);
     for (size_t i = 0; i < map.lines.len; i++) {
         const odin3_nm_line *line = odin3_vec_cat(&map.lines, i);
+        seen_all->kept_lines += line->type == 'N' ? 1U : 0U;
+        if (line->type == 'R' && line->f[3].len > 7 && memcmp(line->f[3].ptr, "refine:", 7) == 0) {
+            seen_all->refine_records++; /* the proc mux (a refine record) is never a join */
+            seen_all->refine_joins += line->f[8].len >= 4 && memcmp(line->f[8].ptr, "join", 4) == 0;
+        }
         if (line->type != 'O') {
             continue;
         }
@@ -202,8 +208,11 @@ static void script_of(const char *src, char *out, size_t size) {
 #endif
                        " write_blif --vtr --name-style hash --prov-map %s/o.blif;"
                        " write_json --name-style hash --prov-map %s/o.json;"
-                       " write_verilog --name-style hash --prov-map %s/o.v",
-                       ODIN3_PMM_LIB, src, dir, dir, dir);
+                       " write_verilog --name-style hash --prov-map %s/o.v;"
+                       " write_blif --vtr --name-style hash %s/p.blif;"
+                       " write_json --name-style hash %s/p.json;"
+                       " write_verilog --name-style hash %s/p.v",
+                       ODIN3_PMM_LIB, src, dir, dir, dir, dir, dir, dir);
     TEST_ASSERT_TRUE(len > 0 && (size_t)len < size);
 }
 
@@ -211,6 +220,8 @@ static bool is_verilog(const char *name) {
     size_t len = strlen(name);
     return len > 2 && strcmp(name + len - 2, ".v") == 0;
 }
+
+static void compare_netlists(tally *total);
 
 /* Runs the script of one micro and checks the three maps it wrote; false when the flow refused. */
 static bool check_one_micro(const char *name, tally *total) {
@@ -232,7 +243,25 @@ static bool check_one_micro(const char *name, tally *total) {
         (void)snprintf(path, sizeof path, "%s/%s", dir, maps[k]);
         check_map(path, total);
     }
+    compare_netlists(total);
     return true;
+}
+
+/* The netlist written with --prov-map equals the one written without it, byte for byte. */
+static void compare_netlists(tally *total) {
+    const char *const pairs[][2] = {{"o.blif", "p.blif"}, {"o.json", "p.json"}, {"o.v", "p.v"}};
+    for (size_t k = 0; k < sizeof pairs / sizeof pairs[0]; k++) {
+        char left[PATH_BUF + 64];
+        char right[PATH_BUF + 64];
+        (void)snprintf(left, sizeof left, "%s/%s", dir, pairs[k][0]);
+        (void)snprintf(right, sizeof right, "%s/%s", dir, pairs[k][1]);
+        char *one = slurp(left);
+        char *two = slurp(right);
+        total->byte_diffs += strcmp(one, two) != 0 ? 1U : 0U;
+        total->netlists++;
+        odin3_util_free(one);
+        odin3_util_free(two);
+    }
 }
 
 static void report_and_expect(const tally *total) {
@@ -240,10 +269,19 @@ static void report_and_expect(const tally *total) {
                  "record, %u without a construct\n",
                  total->designs, total->skipped, total->maps, total->objects, total->no_record,
                  total->no_construct);
+    (void)printf("prov_map_micro: %u N lines, %u refine records (%u with join), %u netlists, %u "
+                 "differ with and without --prov-map\n",
+                 total->kept_lines, total->refine_records, total->refine_joins, total->netlists,
+                 total->byte_diffs);
     TEST_ASSERT_TRUE(total->designs >= 20);
     TEST_ASSERT_EQUAL_UINT32(total->designs * 3U, total->maps);
     TEST_ASSERT_EQUAL_UINT32(0, total->no_record);
     TEST_ASSERT_EQUAL_UINT32(0, total->no_construct);
+    TEST_ASSERT_EQUAL_UINT32(total->designs * 3U, total->netlists);
+    TEST_ASSERT_EQUAL_UINT32(0, total->byte_diffs);
+    TEST_ASSERT_TRUE(total->kept_lines > 0);     /* N lines from all three writers' maps */
+    TEST_ASSERT_TRUE(total->refine_records > 0); /* a real proc mux among the micros */
+    TEST_ASSERT_EQUAL_UINT32(0, total->refine_joins);
 }
 
 static void test_every_micro_map_is_well_formed_and_complete(void) {
