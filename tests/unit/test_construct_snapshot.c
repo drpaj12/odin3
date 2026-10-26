@@ -10,6 +10,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/prov.h"
+#include "odin3/odin3.h"
 #include "unity.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -138,6 +139,59 @@ static void test_snapshot_of_an_empty_store_marks_the_run_and_off_does_not(void)
     odin3_ast_destroy(store);
 }
 
+/* --- a store that shares a subtree --------------------------------------------------------- */
+
+static odin3_ast_id make(odin3_ast *store, const odin3_ast_spec *spec, const odin3_ast_id *kids,
+                         uint32_t count) {
+    odin3_ast_id out = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_make(store, spec, kids, count, &out));
+    return out;
+}
+
+static odin3_prov_id source_of(uint32_t ast) {
+    odin3_pass_ctx ctx = {design, run1, 0};
+    odin3_srcloc loc = {1, ast, 1, ast, 2, 0};
+    odin3_prov_origin origin = {&loc, 1, ast, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    return id;
+}
+
+/* module m { always s1 { a }; always s2 { a } } with the assignment a reached through both blocks.
+ * The first parent's chain is kept for the rows, but a record of a (or of a node under it) is a
+ * recorded miss: its chain would be wrong from the second block. A record of s1 is not. */
+static void test_shared_subtree_with_two_chains_is_a_miss(void) {
+    odin3_ast *store = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_ast_create(design, ODIN3_AST_FORM_ELABORATED, run1, &store));
+    uint32_t xn = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(store, odin3_bytes_cstr("x"), &xn));
+    odin3_ast_id x = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_IDENT, .name = xn}, NULL, 0);
+    odin3_ast_id lr[] = {x, {0}, x};
+    odin3_ast_id assign = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_BLOCKING_ASSIGN}, lr, 3);
+    odin3_ast_id body[] = {{0}, assign};
+    odin3_ast_id blk1 = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_SEQ_BLOCK}, body, 2);
+    odin3_ast_id blk2 = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_SEQ_BLOCK}, body, 2);
+    odin3_ast_id al1 = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_ALWAYS}, &blk1, 1);
+    odin3_ast_id al2 = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_ALWAYS}, &blk2, 1);
+    uint32_t mn = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_ast_intern(store, odin3_bytes_cstr("m"), &mn));
+    odin3_ast_id items[] = {{0}, {0}, al1, al2};
+    odin3_ast_id mod =
+        make(store, &(odin3_ast_spec){.kind = ODIN3_AST_MODULE, .name = mn}, items, 4);
+    odin3_ast_id unit = make(store, &(odin3_ast_spec){.kind = ODIN3_AST_UNIT, .name = mn}, &mod, 1);
+    (void)unit;
+    odin3_prov_id rec_assign = source_of(assign.v);
+    odin3_prov_id rec_blk = source_of(blk1.v);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_snapshot(design, store, ODIN3_CONSTRUCT_MODE_REFS));
+    TEST_ASSERT_TRUE(odin3_construct_is_miss(design, rec_assign));
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_construct_of_record(design, rec_assign));
+    TEST_ASSERT_FALSE(odin3_construct_is_miss(design, rec_blk));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_construct_of_record(design, rec_blk));
+    odin3_ast_destroy(store);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_read_mode_defaults_and_sets);
@@ -146,5 +200,6 @@ int main(void) {
     RUN_TEST(test_alias_refuses_a_row_that_is_not_the_first_of_its_node);
     RUN_TEST(test_snapshot_refusals);
     RUN_TEST(test_snapshot_of_an_empty_store_marks_the_run_and_off_does_not);
+    RUN_TEST(test_shared_subtree_with_two_chains_is_a_miss);
     return UNITY_END();
 }

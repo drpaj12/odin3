@@ -617,14 +617,15 @@ static void construct_shape(check_ctx *ctx, uint32_t index, const odin3_construc
     }
 }
 
-/* Every SOURCE record with an AST node of a run whose snapshot kept all nodes resolves. */
+/* Every SOURCE record with an AST node of a run with a snapshot resolves to a row, an alias (the
+ * constructs mode) or is a recorded miss. */
 static void construct_complete(check_ctx *ctx) {
     const odin3_design *design = ctx->design;
     uint32_t end = odin3_prov_end(design);
     for (uint32_t i = 1; i < end; i++) {
         const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){i});
         odin3_construct_mode mode = odin3_construct_run_mode(design, rec->run);
-        bool kept = mode == ODIN3_CONSTRUCT_MODE_REFS || mode == ODIN3_CONSTRUCT_MODE_FULL;
+        bool kept = mode != ODIN3_CONSTRUCT_MODE_OFF; /* constructs: a row, an alias or a miss */
         if (kept && rec->kind == ODIN3_PROV_SOURCE && rec->ast != 0 &&
             !odin3_construct_has_node(design, rec->run, rec->ast) &&
             !odin3_construct_is_miss(design, (odin3_prov_id){i})) {

@@ -221,10 +221,27 @@ static void test_no_snapshot_means_nothing_is_checked(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL)); /* ast=none: vacuous */
 }
 
-static void test_constructs_mode_does_not_demand_expression_rows(void) {
+/* constructs mode: a record resolves to a row, an alias or a recorded miss (V1.2.0 4.2). */
+static void test_constructs_mode_demands_a_row_an_alias_or_a_miss(void) {
     (void)source(77);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_CONSTRUCTS));
+    expect_rule12("has no construct");
+}
+
+static void test_constructs_mode_alias_passes(void) {
+    (void)source(77);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_alias(design, run1, 77, 2));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_CONSTRUCTS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL));
+}
+
+static void test_constructs_mode_miss_passes(void) {
+    odin3_prov_id miss = source(77);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_construct_mark_run(design, run1, ODIN3_CONSTRUCT_MODE_CONSTRUCTS));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_construct_note_miss(design, miss));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, check_level(ODIN3_CHECK_FULL));
 }
 
@@ -256,7 +273,9 @@ int main(void) {
     RUN_TEST(test_uncovered_source_record_fails);
     RUN_TEST(test_recorded_call_site_miss_passes);
     RUN_TEST(test_no_snapshot_means_nothing_is_checked);
-    RUN_TEST(test_constructs_mode_does_not_demand_expression_rows);
+    RUN_TEST(test_constructs_mode_demands_a_row_an_alias_or_a_miss);
+    RUN_TEST(test_constructs_mode_alias_passes);
+    RUN_TEST(test_constructs_mode_miss_passes);
     RUN_TEST(test_records_without_ast_are_not_demanded);
     return UNITY_END();
 }

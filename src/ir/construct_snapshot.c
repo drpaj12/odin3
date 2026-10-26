@@ -11,10 +11,17 @@
  * A parent of a finer level than the row (an INSTANTIATION under a GEN_BLOCK) is skipped for the
  * next ancestor that fits (odin3_construct_parent_fits).
  *
- * Call-site form (1.1): a SOURCE record with two locations whose second is the span of a CALL or
- * TASK_CALL gets copies of the rows from its node up to the function or task declaration, under
- * the call's row, keyed by (run, ast, part, call). A span that matches no call or more than one
- * leaves the record a span-only leaf and a recorded miss.
+ * Call-site form (1.1): a SOURCE record with exactly two locations whose second is the span of a
+ * CALL or TASK_CALL gets copies of the rows from its node up to the function or task declaration,
+ * under the call's row, keyed by (run, ast, part, call). A span that matches no call or more than
+ * one leaves the record a span-only leaf and a recorded miss.
+ *
+ * The store shares some subtrees (a node with two parents). The walk enters a node once, so it
+ * keeps the chain of the first parent. A second parent whose nearest row differs from the first's
+ * makes every SOURCE record in that subtree ambiguous: it is a recorded miss (a span-only leaf),
+ * never a silently wrong chain (a call-site record keeps its own chain under its call). A SOURCE
+ * record whose node ends with neither a row nor an alias (a transparent node with no construct
+ * ancestor) is a recorded miss too, so rule 12 stays whole.
  */
 #include "ast/ast.h"
 #include "ast/srcman.h"
@@ -37,6 +44,8 @@ static const uint32_t NO_FRAME_ID = UINT32_MAX;
 enum {
     FLAG_MARKED = 1, /* a SOURCE record of the run points at the node */
     FLAG_SEEN = 2,   /* the walk reached the node */
+    FLAG_AMBIG = 4,  /* marked, and in a subtree a second parent shares with another chain */
+    FLAG_TAINT = 8,  /* the ambiguity walk reached the node */
     IF_THEN_SLOT = 1,
     IF_ELSE_SLOT = 2
 };
@@ -44,7 +53,7 @@ enum {
 typedef struct frame {
     uint32_t node; /* AST node; for an arm frame the IF */
     uint32_t idx;  /* next child slot */
-    uint32_t n;    /* child slots (1 for an arm frame) */
+    uint32_t n;    /* child slots (0 for an arm frame: its child is entered by descend) */
     uint32_t up;   /* nearest levelled ancestor frame, NO_FRAME_ID for none */
     uint32_t row;  /* the frame's row, 0 until emitted */
     uint32_t arm_child;
@@ -59,6 +68,7 @@ typedef struct pending {
     uint32_t ast;
     uint32_t site; /* index into sites */
     odin3_srcloc span;
+    bool missed; /* no call-instance copy was made */
 } pending;
 
 /* One distinct second-location span, and what the walk found at it. */
@@ -76,6 +86,10 @@ typedef struct snap {
     odin3_construct_mode mode;
     uint32_t nodes;
     uint8_t *flags;
+    uint32_t *anchor;  /* per node: the nearest row (node * 4 + part) of its first visit */
+    uint32_t shared;   /* edges to a node already reached */
+    uint32_t diverged; /* of those, edges whose nearest row differs from the first visit's */
+    odin3_vec taint;   /* uint32_t nodes of the ambiguity walk */
     odin3_vec frames;  /* frame */
     odin3_vec path;    /* uint32_t frame indices being emitted */
     odin3_vec sites;   /* site, sorted by span */
@@ -136,6 +150,54 @@ static uint32_t fit_parent(snap *sn, uint32_t fi) {
         pp = frame_at(sn, pp)->up;
     }
     return pp;
+}
+
+/* The anchor of a node entered from frame top through child slot: the node and part of the
+ * nearest levelled frame (the arm frame when the slot is an IF's then or else), 0 for none. */
+static uint32_t edge_anchor(snap *sn, uint32_t top, uint32_t slot) {
+    const frame *up = frame_at(sn, top);
+    if (up->part == 0 && up->kind == ODIN3_AST_IF &&
+        (slot == IF_THEN_SLOT || slot == IF_ELSE_SLOT)) {
+        return (up->node * 4U) +
+               (slot == IF_THEN_SLOT ? ODIN3_CONSTRUCT_PART_THEN : ODIN3_CONSTRUCT_PART_ELSE);
+    }
+    uint32_t at = up->level != 0 ? top : up->up;
+    return at == NO_FRAME_ID ? 0 : (frame_at(sn, at)->node * 4U) + frame_at(sn, at)->part;
+}
+
+/* Marked nodes in the subtree of root cannot be told apart by their first chain: flag them. Each
+ * node is entered once (FLAG_TAINT), so the walk is linear in the store. */
+static odin3_status taint_subtree(snap *sn, uint32_t root) {
+    sn->taint.len = 0;
+    uint32_t *slot = odin3_vec_push(&sn->taint);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = root;
+    while (sn->taint.len > 0) {
+        uint32_t node = *(const uint32_t *)odin3_vec_cat(&sn->taint, sn->taint.len - 1U);
+        sn->taint.len--;
+        if ((sn->flags[node] & FLAG_TAINT) != 0) {
+            continue;
+        }
+        sn->flags[node] |= FLAG_TAINT;
+        if ((sn->flags[node] & FLAG_MARKED) != 0) {
+            sn->flags[node] |= FLAG_AMBIG;
+        }
+        odin3_ast_id id = {node};
+        for (uint32_t k = 0; k < odin3_ast_nchild(sn->ast, id); k++) {
+            uint32_t child = odin3_ast_child(sn->ast, id, k).v;
+            if (child == 0 || child >= sn->nodes || (sn->flags[child] & FLAG_TAINT) != 0) {
+                continue;
+            }
+            slot = odin3_vec_push(&sn->taint);
+            if (slot == NULL) {
+                return ODIN3_ERR_NO_MEMORY;
+            }
+            *slot = child;
+        }
+    }
+    return ODIN3_OK;
 }
 
 /* --- rows ---------------------------------------------------------------------------------- */
@@ -270,6 +332,8 @@ static odin3_status note_call(snap *sn, uint32_t fi) {
 static odin3_status visit(snap *sn, uint32_t fi) {
     const frame fr = *frame_at(sn, fi);
     sn->flags[fr.node] |= FLAG_SEEN;
+    sn->anchor[fr.node] =
+        fr.up == NO_FRAME_ID ? 0 : (frame_at(sn, fr.up)->node * 4U) + frame_at(sn, fr.up)->part;
     bool marked = (sn->flags[fr.node] & FLAG_MARKED) != 0;
     bool own = fr.level != 0 && (sn->mode == ODIN3_CONSTRUCT_MODE_FULL ||
                                  (marked && (sn->mode != ODIN3_CONSTRUCT_MODE_CONSTRUCTS ||
@@ -310,7 +374,7 @@ static odin3_status descend(snap *sn, const edge *ed) {
     if (up.part == 0 && up.kind == ODIN3_AST_IF && (slot == IF_THEN_SLOT || slot == IF_ELSE_SLOT)) {
         frame arm = {
             .node = up.node,
-            .n = 1,
+            .n = 0,
             .arm_child = child,
             .part = slot == IF_THEN_SLOT ? ODIN3_CONSTRUCT_PART_THEN : ODIN3_CONSTRUCT_PART_ELSE,
             .kind = slot == IF_THEN_SLOT ? ODIN3_CONSTRUCT_IF_THEN : ODIN3_CONSTRUCT_IF_ELSE,
@@ -339,11 +403,19 @@ static odin3_status walk_root(snap *sn, uint32_t root) {
             continue;
         }
         uint32_t slot = fr->idx++;
-        uint32_t child = fr->part != 0 ? fr->arm_child
-                                       : odin3_ast_child(sn->ast, (odin3_ast_id){fr->node}, slot).v;
-        /* the store shares some subtrees: a node already reached keeps its first visit */
-        if (child != 0 && child < sn->nodes && (sn->flags[child] & FLAG_SEEN) == 0) {
+        uint32_t child = odin3_ast_child(sn->ast, (odin3_ast_id){fr->node}, slot).v;
+        /* a node already reached (a subtree two parents share) keeps its first visit */
+        if (child == 0 || child >= sn->nodes) {
+            continue;
+        }
+        if ((sn->flags[child] & FLAG_SEEN) == 0) {
             st = descend(sn, &(edge){top, slot, child});
+        } else {
+            sn->shared++;
+            if (sn->anchor[child] != edge_anchor(sn, top, slot)) {
+                sn->diverged++;
+                st = taint_subtree(sn, child);
+            }
         }
     }
     return st;
@@ -385,7 +457,7 @@ static odin3_status sweep(snap *sn) {
             continue;
         }
         sn->flags[rec->ast] |= FLAG_MARKED;
-        if (rec->n_locs < 2) {
+        if (rec->n_locs != 2) {
             continue;
         }
         pending *pp = odin3_vec_push(&sn->pending);
@@ -393,7 +465,7 @@ static odin3_status sweep(snap *sn) {
         if (pp == NULL || sp == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        *pp = (pending){i, rec->ast, 0, rec->locs[1]};
+        *pp = (pending){i, rec->ast, 0, rec->locs[1], false};
         *sp = (site){rec->locs[1], 0, 0};
     }
     if (sn->sites.len > 1) {
@@ -460,12 +532,12 @@ static odin3_status copy_chain(snap *sn, const call_copy *req, bool *copied) {
     return st;
 }
 
-/* The call-instance copies of every call-site record; the ones that cannot be resolved are noted
- * as misses, in record order. */
+/* The call-instance copies of every call-site record; a record that cannot be resolved is flagged
+ * (missed) for misses(). */
 static odin3_status call_instances(snap *sn) {
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < sn->pending.len; i++) {
-        const pending *pp = odin3_vec_cat(&sn->pending, i);
+        pending *pp = odin3_vec_at(&sn->pending, i);
         const site *hit = odin3_vec_cat(&sn->sites, pp->site);
         const odin3_construct_key key = {sn->run, pp->ast, ODIN3_CONSTRUCT_PART_NODE, 0};
         uint32_t leaf = odin3_construct_find(sn->design, &key);
@@ -474,10 +546,39 @@ static odin3_status call_instances(snap *sn) {
         if (hit->count == 1 && row != NULL && row->ast == pp->ast) {
             st = copy_chain(sn, &(call_copy){leaf, hit->row}, &copied);
         }
-        if (st == ODIN3_OK && !copied) {
-            st = odin3_construct_note_miss(sn->design, (odin3_prov_id){pp->record});
-        }
+        pp->missed = !copied;
     }
+    return st;
+}
+
+/* The recorded misses, in record order: a call-site record without its copy, a record in a
+ * subtree two chains share, and a record whose node ended with neither a row nor an alias. */
+static odin3_status misses(snap *sn) {
+    odin3_status st = ODIN3_OK;
+    size_t next = 0;
+    uint32_t end = odin3_prov_end(sn->design);
+    uint32_t ambiguous = 0;
+    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
+        const odin3_prov_record *rec = odin3_prov_get(sn->design, (odin3_prov_id){i});
+        if (rec->run.v != sn->run.v || rec->kind != ODIN3_PROV_SOURCE || rec->ast == 0 ||
+            rec->ast >= sn->nodes) {
+            continue;
+        }
+        bool missed = (sn->flags[rec->ast] & FLAG_AMBIG) != 0;
+        if (next < sn->pending.len &&
+            ((const pending *)odin3_vec_cat(&sn->pending, next))->record == i) {
+            /* a call-site record has its own chain under the call: the shared function body does
+             * not make it ambiguous */
+            missed = ((const pending *)odin3_vec_cat(&sn->pending, next))->missed;
+            next++;
+        }
+        ambiguous += missed ? 1U : 0U;
+        missed = missed || !odin3_construct_has_node(sn->design, sn->run, rec->ast);
+        st = missed ? odin3_construct_note_miss(sn->design, (odin3_prov_id){i}) : ODIN3_OK;
+    }
+    odin3_log(ODIN3_LOG_DEBUG,
+              "construct snapshot: %u shared edges, %u with another chain, %u ambiguous records",
+              sn->shared, sn->diverged, ambiguous);
     return st;
 }
 
@@ -485,6 +586,8 @@ static odin3_status call_instances(snap *sn) {
 
 static void snap_free(snap *sn) {
     odin3_util_free(sn->flags);
+    odin3_util_free(sn->anchor);
+    odin3_vec_free(&sn->taint);
     odin3_vec_free(&sn->frames);
     odin3_vec_free(&sn->path);
     odin3_vec_free(&sn->sites);
@@ -495,16 +598,19 @@ static void snap_free(snap *sn) {
 static odin3_status snap_open(snap *sn, odin3_design *design, const odin3_ast *ast,
                               odin3_construct_mode mode) {
     *sn = (snap){.design = design, .ast = ast, .run = odin3_ast_run(ast), .mode = mode};
+    odin3_vec_init(&sn->taint, sizeof(uint32_t));
     odin3_vec_init(&sn->frames, sizeof(frame));
     odin3_vec_init(&sn->path, sizeof(uint32_t));
     odin3_vec_init(&sn->sites, sizeof(site));
     odin3_vec_init(&sn->pending, sizeof(pending));
     odin3_vec_init(&sn->chain, sizeof(uint32_t));
     sn->nodes = odin3_ast_node_end(ast).v;
-    sn->flags = odin3_util_calloc(sn->nodes);
+    /* nodes + 1: an empty store (node_end 0) still gets a block, not a NULL that reads as OOM */
+    sn->flags = odin3_util_calloc((size_t)sn->nodes + 1U);
+    sn->anchor = odin3_util_calloc(((size_t)sn->nodes + 1U) * sizeof(uint32_t));
     odin3_srcman *sm = NULL;
-    odin3_status st =
-        sn->flags != NULL ? odin3_design_get_srcman(design, &sm) : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = sn->flags != NULL && sn->anchor != NULL ? odin3_design_get_srcman(design, &sm)
+                                                              : ODIN3_ERR_NO_MEMORY;
     sn->sm = sm;
     return st;
 }
@@ -516,6 +622,7 @@ static odin3_status snapshot_run(snap *sn) {
     }
     st = st != ODIN3_OK ? st : orphans(sn);
     st = st != ODIN3_OK ? st : call_instances(sn);
+    st = st != ODIN3_OK ? st : misses(sn);
     return st != ODIN3_OK ? st : odin3_construct_mark_run(sn->design, sn->run, sn->mode);
 }
 

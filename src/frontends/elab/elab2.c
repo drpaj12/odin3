@@ -897,7 +897,9 @@ static odin3_status end_status(const odin3_elab2 *e2) {
 static odin3_status snapshot_constructs(odin3_pass_ctx *ctx, const odin3_ast *elab) {
     odin3_status st =
         odin3_construct_snapshot(ctx->design, elab, odin3_construct_read_mode(ctx->design));
-    if (st == ODIN3_OK && odin3_budget_check(ctx, ctx->design, 0) != ODIN3_OK) {
+    /* mode off costs nothing (4.2): no table, so no new budget failure on a read that passed */
+    if (st == ODIN3_OK && odin3_construct_read_mode(ctx->design) != ODIN3_CONSTRUCT_MODE_OFF &&
+        odin3_budget_check(ctx, ctx->design, 0) != ODIN3_OK) {
         st = ODIN3_ERR_NO_MEMORY;
     }
     if (st == ODIN3_ERR_NO_MEMORY) {

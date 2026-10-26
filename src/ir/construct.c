@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- the kind map (V1.2.0 2.1) --------------------------------------------------------------- */
@@ -341,10 +342,11 @@ static bool call_span_is(const odin3_construct_table *table, uint32_t call,
 
 uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id record) {
     const odin3_prov_record *rec = design != NULL ? odin3_prov_get(design, record) : NULL;
-    if (rec == NULL || rec->kind != ODIN3_PROV_SOURCE || rec->ast == 0) {
-        return 0;
+    if (rec == NULL || rec->kind != ODIN3_PROV_SOURCE || rec->ast == 0 ||
+        odin3_construct_is_miss(design, record)) {
+        return 0; /* a recorded miss is a span-only leaf, even where the node has a row */
     }
-    if (rec->n_locs < 2) {
+    if (rec->n_locs != 2) {
         const odin3_construct_key key = {rec->run, rec->ast, ODIN3_CONSTRUCT_PART_NODE, 0};
         return odin3_construct_find(design, &key);
     }
@@ -379,6 +381,42 @@ odin3_status odin3_construct_alias(odin3_design *design, odin3_passrun_id run, u
     return odin3_u64map_put(table->heads, (odin3_kv){node_key(run, ast), row}) == ODIN3_OK
                ? ODIN3_OK
                : ODIN3_ERR_NO_MEMORY;
+}
+
+static int alias_cmp(const void *lhs, const void *rhs) {
+    const odin3_construct_alias_entry *ea = lhs;
+    const odin3_construct_alias_entry *eb = rhs;
+    if (ea->run != eb->run) {
+        return ea->run < eb->run ? -1 : 1;
+    }
+    return ea->ast == eb->ast ? 0 : (ea->ast < eb->ast ? -1 : 1);
+}
+
+odin3_status odin3_construct_aliases(const odin3_design *design, odin3_vec *out) {
+    if (design == NULL || design->construct == NULL || out == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    size_t first = out->len;
+    size_t cursor = 0;
+    odin3_kv entry;
+    while (odin3_u64map_next(design->construct->heads, &cursor, &entry)) {
+        const odin3_construct_row *row = row_cat(design->construct, (uint32_t)entry.value);
+        uint32_t ast = (uint32_t)(entry.key & UINT32_MAX);
+        if (row == NULL || row->ast == ast) {
+            continue;
+        }
+        odin3_construct_alias_entry *slot = odin3_vec_push(out);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = (odin3_construct_alias_entry){(uint32_t)(entry.key >> RUN_SHIFT), ast,
+                                              (uint32_t)entry.value};
+    }
+    if (out->len - first > 1) {
+        qsort((char *)out->data + (first * out->elem_size), out->len - first, out->elem_size,
+              alias_cmp);
+    }
+    return ODIN3_OK;
 }
 
 void odin3_construct_set_read_mode(odin3_design *design, odin3_construct_mode mode) {

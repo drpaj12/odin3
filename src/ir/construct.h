@@ -12,6 +12,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -137,9 +138,10 @@ void *odin3_construct_derived(const odin3_design *design, void *(*create)(void),
 bool odin3_construct_has_node(const odin3_design *design, odin3_passrun_id run, uint32_t ast);
 
 /*
- * The row of a SOURCE record: key (run, ast, 0, 0); for a call-site record (two or more
+ * The row of a SOURCE record: key (run, ast, 0, 0); for a call-site record (exactly two
  * locations) the call-instance row whose call row has exactly the span of the second location.
- * 0 for a record that is not SOURCE, has ast 0, or matches no row (a span-only leaf).
+ * 0 for a record that is not SOURCE, has ast 0, is a recorded miss, or matches no row (a span-only
+ * leaf).
  */
 uint32_t odin3_construct_of_record(const odin3_design *design, odin3_prov_id record);
 
@@ -165,6 +167,19 @@ bool odin3_construct_is_miss(const odin3_design *design, odin3_prov_id record);
  */
 odin3_status odin3_construct_alias(odin3_design *design, odin3_passrun_id run, uint32_t ast,
                                    uint32_t row);
+
+/* One alias made by odin3_construct_alias: node ast of run resolves to row. */
+typedef struct odin3_construct_alias_entry {
+    uint32_t run;
+    uint32_t ast;
+    uint32_t row;
+} odin3_construct_alias_entry;
+
+/*
+ * Appends every alias of the table to out (a vec of odin3_construct_alias_entry made by the
+ * caller), sorted by (run, ast). INVALID_ARG for a NULL design or out; NO_MEMORY.
+ */
+odin3_status odin3_construct_aliases(const odin3_design *design, odin3_vec *out);
 
 /*
  * The mode the next snapshot of this design takes when its caller gives none (read_verilog sets it
