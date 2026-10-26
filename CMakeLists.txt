@@ -285,6 +285,7 @@ add_library(odin3_core OBJECT
     src/ir/attr.c
     src/ir/prov.c
     src/ir/opclass.c
+    src/ir/construct.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -452,6 +453,7 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_name.c
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
+    src/backends/common/prov_export.c
     src/frontends/hdl_restore.c
     src/frontends/name_resolve.c
     src/frontends/blif/reader_names.c
@@ -969,6 +971,9 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_ir_prov)
     odin3_add_unit_test(test_ir_check)
     odin3_add_unit_test(test_opclass)
+    odin3_add_unit_test(test_construct)
+    odin3_add_unit_test(test_construct_check)
+    odin3_add_unit_test(test_prov_label)
     odin3_add_unit_test(test_opclass_passes)
     target_compile_definitions(test_opclass_passes PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -2124,8 +2129,13 @@ if(BUILD_TESTING)
     add_executable(test_api tests/unit/test_api.c)
     target_link_libraries(test_api PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_api PRIVATE
-        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>")
-    add_dependencies(test_api example_plugin)
+        EXAMPLE_PLUGIN_PATH="$<TARGET_FILE:example_plugin>"
+        ABI6_PLUGIN_PATH="$<TARGET_FILE:plugin_abi6>")
+    # A plugin as an ABI 6 build left it: its init accepts host ABI 6 only (test_api).
+    add_library(plugin_abi6 MODULE tests/unit/plugin_abi6.c)
+    set_target_properties(plugin_abi6 PROPERTIES PREFIX "")
+    target_link_libraries(plugin_abi6 PRIVATE libodin3 odin3_flags)
+    add_dependencies(test_api example_plugin plugin_abi6)
     add_test(NAME test_api COMMAND test_api)
     set_tests_properties(test_api PROPERTIES LABELS unit)
 
@@ -2149,7 +2159,7 @@ if(BUILD_TESTING)
     # run information the core formats.
     add_library(odin3_procfix SHARED $<TARGET_OBJECTS:odin3_core>
                 tests/unit/proc_fixture_lib.c tests/unit/proc_fixture_core.c
-                tests/unit/passrun_fixture_lib.c)
+                tests/unit/passrun_fixture_lib.c tests/unit/construct_fixture_lib.c)
     set_target_properties(odin3_procfix PROPERTIES C_VISIBILITY_PRESET hidden)
     target_include_directories(odin3_procfix PRIVATE ${PROJECT_SOURCE_DIR}/src
                                                      ${PROJECT_SOURCE_DIR}/include)
@@ -2373,7 +2383,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # v1.1.0's SystemVerilog reader seam makes it v6.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 6\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 7\\)")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)
@@ -3217,6 +3227,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_copy
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_copy PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # V1.2.0 Task 3 (spec 4.3): the provenance readers of ABI v7 (Node.provenance, chain).
+    add_test(NAME python_prov
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_prov
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_prov PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
     add_test(NAME python_sim

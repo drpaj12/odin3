@@ -2,6 +2,7 @@
 #include "ir/ir_test.h"
 
 #include "ir/celltype.h"
+#include "ir/construct_internal.h"
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
@@ -292,4 +293,10 @@ odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target ta
         return ODIN3_ERR_INVALID_ARG;
     }
     return ODIN3_OK;
+}
+
+struct odin3_construct_row *odin3_construct_test_row(odin3_design *design, uint32_t index) {
+    return design != NULL && index != 0 && index <= design->construct->rows.len
+               ? odin3_vec_at(&design->construct->rows, index - 1U)
+               : NULL;
 }

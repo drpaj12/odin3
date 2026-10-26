@@ -4,11 +4,16 @@
 #include "odin3/odin3.h"
 #include "unity.h"
 
+#include <dlfcn.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
 #ifndef EXAMPLE_PLUGIN_PATH
 #error "EXAMPLE_PLUGIN_PATH must be defined by the build"
+#endif
+#ifndef ABI6_PLUGIN_PATH
+#error "ABI6_PLUGIN_PATH must be defined by the build"
 #endif
 
 void setUp(void) {
@@ -16,7 +21,7 @@ void setUp(void) {
 void tearDown(void) {
 }
 
-enum { VERSION_BUF_LEN = 32, PREFIX_LEN = 6 };
+enum { VERSION_BUF_LEN = 32, PREFIX_LEN = 6, LOG_BYTES = 512 };
 
 static void test_version_string_matches_macros(void) {
     char expected[VERSION_BUF_LEN];
@@ -27,7 +32,7 @@ static void test_version_string_matches_macros(void) {
 
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
-    TEST_ASSERT_EQUAL_UINT32(6, odin3_abi_version()); /* v1.1.0: the SystemVerilog reader seam */
+    TEST_ASSERT_EQUAL_UINT32(7, odin3_abi_version()); /* v1.2.0: the provenance chain readers */
 }
 
 static void test_check_status_has_a_name(void) {
@@ -70,6 +75,41 @@ static void test_plugin_load_example_plugin(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_plugin_load(EXAMPLE_PLUGIN_PATH));
 }
 
+static char last_log[LOG_BYTES];
+
+static void capture_log(odin3_log_level level, const char *msg, void *user) {
+    (void)level;
+    (void)user;
+    (void)snprintf(last_log, sizeof last_log, "%s", msg);
+}
+
+/* A plugin built for ABI 6 goes through the real load path and is refused with a clear message. */
+static void test_plugin_built_for_abi_6_is_refused(void) {
+    last_log[0] = '\0';
+    odin3_log_set_sink(capture_log, NULL);
+    odin3_status st = odin3_plugin_load(ABI6_PLUGIN_PATH);
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, st);
+    TEST_ASSERT_NOT_NULL(strstr(last_log, "odin3_plugin_load"));
+    char want[VERSION_BUF_LEN];
+    (void)snprintf(want, sizeof want, "rebuild it for ABI %d", ODIN3_ABI_VERSION);
+    TEST_ASSERT_NOT_NULL(strstr(last_log, want));
+    TEST_ASSERT_NOT_NULL(strstr(last_log, "plugin_abi6"));
+}
+
+/* The example plugin refuses a host that passes another ABI number, in either direction. */
+static void test_plugin_init_refuses_other_abi_numbers(void) {
+    void *handle = dlopen(EXAMPLE_PLUGIN_PATH, RTLD_LAZY);
+    TEST_ASSERT_NOT_NULL(handle);
+    odin3_status (*init)(uint32_t) = NULL;
+    void *symbol = dlsym(handle, "odin3_plugin_init");
+    TEST_ASSERT_NOT_NULL(symbol);
+    (void)memcpy((void *)&init, (const void *)&symbol, sizeof init);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, init(6));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_ABI_MISMATCH, init((uint32_t)ODIN3_ABI_VERSION + 1U));
+    (void)dlclose(handle);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_version_string_matches_macros);
@@ -81,5 +121,7 @@ int main(void) {
     RUN_TEST(test_plugin_load_missing_file_is_io_error);
     RUN_TEST(test_plugin_without_init_is_plugin_error);
     RUN_TEST(test_plugin_load_example_plugin);
+    RUN_TEST(test_plugin_built_for_abi_6_is_refused);
+    RUN_TEST(test_plugin_init_refuses_other_abi_numbers);
     return UNITY_END();
 }

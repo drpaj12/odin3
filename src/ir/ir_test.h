@@ -52,4 +52,8 @@ typedef struct odin3_ir_test_target {
  */
 odin3_status odin3_ir_test_corrupt(odin3_module *module, odin3_ir_test_target target);
 
+/* The construct row as stored, writable (rule 12 tests). NULL for an index that is not a row. */
+struct odin3_construct_row;
+struct odin3_construct_row *odin3_construct_test_row(odin3_design *design, uint32_t index);
+
 #endif

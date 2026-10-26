@@ -23,7 +23,7 @@ python3 plugins/python/example_plugin.py
 ```
 
 ```text
-example_plugin.py: libodin3 1.1.1 (ABI 6)
+example_plugin.py: libodin3 1.1.1 (ABI 7)
 ```
 
 ## Walking the IR
@@ -54,6 +54,27 @@ $port_out [('tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v', 5)]
 $dff [('tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v', 8)]
 $dff [('tests/micro/verilog/micro/bm_DL_2_cascaded_flip_flops.v', 8)]
 ```
+
+### Provenance records and the chain (ABI 7)
+
+`sources()` gives the locations. `provenance()` and `chain()` (on every IR object: `Module`, `Node`,
+`Net`, `Wire`) give the structure behind them, from the C readers of ABI 7 (nothing is recomputed in
+Python):
+
+- `provenance()` is the list of `ProvRecord`s that name the object, its naming record first, then every
+  record reachable through the parents, depth-first in parent order, each once. A record has `kind`
+  (`source`, `imported`, `derived`), `dir` (`origin`, `refine`, `rewrite`, `coarsen`, `context`),
+  `from_level` and `to_level`, `flags` (a set of `join`, `join_instance`, `lossy_bulk`, `lossy_cap`,
+  `span_only`), its `parents`, its `construct`, and for a `coarsen` record the constructs it joins
+  (`joined`, at most 16, `n_joined` the total). The labels are those of the name map of V1.2.0 3.2.
+- `chain()` is the list of `Construct`s (`row`, `parent`, `kind`, `level`, `file`, `line`, `col`,
+  `end_line`, `end_col`, `name`) the object comes from: for each source leaf its statement, block and
+  module, each construct once. It is empty for a design without a construct table: one read
+  with `--prov-ast off` or from a netlist, and every design until the elaborator fills the table
+  (v1.2.0 Task 4). `chain_with_leaves()` gives the same constructs as `(construct, leaf)` pairs, where
+  `leaf` is the ID of the source record that reached the construct first.
+
+`design.construct_count()` and `design.construct(row)` read the table row by row.
 
 `Module` has `nodes()`, `nets()`, `wires()`, `ports()` and lookups by name; `Node` has `pins()`,
 `params()` and `type_name`; `Net` has `pins()` and `drivers()`. `design.objects_at(file, line)`
@@ -141,7 +162,9 @@ It does not call the shared library: it reads the files the flow wrote (the pack
 ## Plugins
 
 A shared-object plugin is loaded with `odin3 --plugin FILE` (C ABI, repeatable) or from Python
-with `Odin3.load_plugin(path)`. `plugins/python/example_plugin.py` is the smallest Python
+with `Odin3.load_plugin(path)`. A plugin is built against the ABI number of the header it includes (`ODIN3_ABI_VERSION`) and the library refuses one
+of another number (`ODIN3_ERR_ABI_MISMATCH`): **plugins built for ABI 6 must be rebuilt** for ABI 7 (no source change
+is needed; the ABI 7 additions are new functions). `plugins/python/example_plugin.py` is the smallest Python
 program over the binding.
 
 The `abc` and `cone_check` passes need the linked ABC engine, which the `odin3` command registers

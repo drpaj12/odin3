@@ -6,6 +6,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## [Unreleased]
 
+### Added
+
+- V1.2.0 Task 3 (`docs/V1.2.0.md` 4.3, `docs/ADR/D14.md`): the construct table (`docs/IR.md` IR-12a),
+  check rule 12, and ABI 7: `odin3_level` and `odin3_prov_dir` public, `odin3_design_construct_count`,
+  `odin3_design_get_construct`, `odin3_obj_get_prov`, `odin3_prov_get_info`,
+  `odin3_prov_visit_parents`, `odin3_prov_visit_joined`, `odin3_prov_visit_chain`; Python
+  `provenance()` and `chain()` on every IR object. The table is empty until the elaborator fills it
+  (V1.2.0 Task 4). Plugins built for ABI 6 must be rebuilt. No behaviour change in any pass or writer.
+
 ### Fixed
 
 - The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs

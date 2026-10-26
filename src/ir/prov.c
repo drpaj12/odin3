@@ -597,6 +597,12 @@ size_t odin3_prov_bytes_reserved(const odin3_design *design) {
            vec_bytes(&store->stack) + vec_bytes(&store->scratch);
 }
 
+bool odin3_prov_class_of(const odin3_design *design, odin3_prov_id id, odin3_opclass *out) {
+    const odin3_prov_record *rec = design != NULL ? record_cat(design->prov, id.v) : NULL;
+    return rec != NULL && rec->kind == ODIN3_PROV_DERIVED &&
+           odin3_opclass_of(design->opclass, id, rec->run, rec->op, out);
+}
+
 odin3_prov_list odin3_prov_parents(const odin3_design *design, odin3_prov_id id) {
     const odin3_prov_record *rec = record_cat(design->prov, id.v);
     odin3_prov_list none = {NULL, 0};
