@@ -52,3 +52,5 @@ construct|50|BINARY|expr|0|49|27|1|func_twice.v:7:15-7:20|
 construct|51|IF_ELSE|branch|2|47|27|1|func_twice.v:9:9-9:21|
 construct|52|BLOCKING_ASSIGN|stmt|0|51|27|1|func_twice.v:9:9-9:21|
 construct|53|BINARY|expr|0|52|27|1|func_twice.v:9:15-9:20|
+miss|11
+miss|22

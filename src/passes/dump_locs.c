@@ -23,6 +23,7 @@
 #include "passes/manager.h"
 #include "util/log.h"
 #include "util/str.h"
+#include "util/vec.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -176,7 +177,8 @@ static bool take_flag(odin3_bytes word, const char *name, bool *flag, odin3_stat
 }
 
 /* Reads `[--types | --constructs] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated
- * --types, an empty or a second path. A literal `--` ends the options, so a path may start with
+ * option, both --types and --constructs, an empty or a second path. A literal `--` ends the
+ * options, so a path may start with
  * `--`. */
 static odin3_status parse_args(odin3_bytes args, dump_args *out) {
     *out = (dump_args){false, false, {NULL, 0}};
@@ -198,7 +200,7 @@ static odin3_status parse_args(odin3_bytes args, dump_args *out) {
             out->path = word;
         }
     }
-    return ODIN3_OK;
+    return out->types && out->constructs ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
 }
 
 /* --- --constructs: the construct table (V1.2.0 4.3) ------------------------------------------- */
@@ -227,10 +229,56 @@ static const char *base_name(const char *path) {
     return slash != NULL ? slash + 1 : path;
 }
 
-/* `run|<run>|<mode>` per marked run, then `construct|row|kind|level|part|parent|call|run|span|name`
- * per row (span file:line:col-end_line:end_col, file without directory). */
-static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *text) {
+/* The span `file:line:col-end_line:end_col` of a row; the file without its directory, escaped like
+ * the name field (a `|` in a file name must not end the field). */
+static odin3_status append_span(odin3_strbuf *text, const char *file,
+                                const odin3_construct_row *row) {
+    odin3_status st = append_escaped(text, base_name(file));
+    return st != ODIN3_OK ? st
+                          : odin3_strbuf_appendf(text, ":%u:%u-%u:%u|", row->line, row->col,
+                                                 row->end_line, row->end_col);
+}
+
+static odin3_status dump_construct_row(const odin3_design *design, uint32_t i, odin3_strbuf *text) {
     const odin3_strtab *tab = odin3_design_strtab(design);
+    const odin3_construct_row *row = odin3_construct_get(design, i);
+    odin3_status st = odin3_strbuf_appendf(
+        text, "construct|%u|%s|%s|%u|%u|%u|%u|", i, construct_kind_name(row->kind),
+        k_level_names[row->level], (unsigned)row->part, row->parent, row->call, row->run);
+    st = st != ODIN3_OK ? st : append_span(text, odin3_strtab_get(tab, row->file), row);
+    st = st != ODIN3_OK ? st : append_escaped(text, odin3_strtab_get(tab, row->name));
+    return st != ODIN3_OK ? st : odin3_strbuf_append(text, odin3_bytes_cstr("\n"));
+}
+
+/* `alias|run|ast|row` per node that resolves to the row of an ancestor (no row of its own). */
+static odin3_status dump_aliases(const odin3_design *design, odin3_strbuf *text) {
+    odin3_vec list;
+    odin3_vec_init(&list, sizeof(odin3_construct_alias_entry));
+    odin3_status st = odin3_construct_aliases(design, &list);
+    for (size_t i = 0; st == ODIN3_OK && i < list.len; i++) {
+        const odin3_construct_alias_entry *al = odin3_vec_cat(&list, i);
+        st = odin3_strbuf_appendf(text, "alias|%u|%u|%u\n", al->run, al->ast, al->row);
+    }
+    odin3_vec_free(&list);
+    return st;
+}
+
+/* `miss|<record>` per recorded miss (a SOURCE record that is a span-only leaf). */
+static odin3_status dump_misses(const odin3_design *design, odin3_strbuf *text) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t rec = 1; st == ODIN3_OK && rec < odin3_prov_end(design); rec++) {
+        if (odin3_construct_is_miss(design, (odin3_prov_id){rec})) {
+            st = odin3_strbuf_appendf(text, "miss|%u\n", rec);
+        }
+    }
+    return st;
+}
+
+/* `run|<run>|<mode>` per marked run, then `construct|row|kind|level|part|parent|call|run|span|name`
+ * per row (span file:line:col-end_line:end_col, file without directory), then `alias|run|ast|row`
+ * per alias (a node without a row of its own: `constructs` mode, transparent kinds), then
+ * `miss|record` per recorded miss. */
+static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *text) {
     odin3_status st = ODIN3_OK;
     for (uint32_t run = 1; st == ODIN3_OK && run < odin3_passrun_end(design); run++) {
         odin3_construct_mode mode = odin3_construct_run_mode(design, (odin3_passrun_id){run});
@@ -239,16 +287,10 @@ static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *te
                  : odin3_strbuf_appendf(text, "run|%u|%s\n", run, k_mode_names[mode]);
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_construct_end(design); i++) {
-        const odin3_construct_row *row = odin3_construct_get(design, i);
-        st = odin3_strbuf_appendf(text, "construct|%u|%s|%s|%u|%u|%u|%u|%s:%u:%u-%u:%u|", i,
-                                  construct_kind_name(row->kind), k_level_names[row->level],
-                                  (unsigned)row->part, row->parent, row->call, row->run,
-                                  base_name(odin3_strtab_get(tab, row->file)), row->line, row->col,
-                                  row->end_line, row->end_col);
-        st = st != ODIN3_OK ? st : append_escaped(text, odin3_strtab_get(tab, row->name));
-        st = st != ODIN3_OK ? st : odin3_strbuf_append(text, odin3_bytes_cstr("\n"));
+        st = dump_construct_row(design, i, text);
     }
-    return st;
+    st = st != ODIN3_OK ? st : dump_aliases(design, text);
+    return st != ODIN3_OK ? st : dump_misses(design, text);
 }
 
 static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
@@ -259,7 +301,7 @@ static odin3_status dump_locs_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     if (parse_args(args, &parsed) != ODIN3_OK) {
         odin3_log(
             ODIN3_LOG_ERROR,
-            "dump_locs: expects [--types] [--constructs] [--] and at most one non-empty path");
+            "dump_locs: expects [--types | --constructs] [--] and at most one non-empty path");
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_bytes path = parsed.path;
