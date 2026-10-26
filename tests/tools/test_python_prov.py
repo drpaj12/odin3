@@ -154,6 +154,17 @@ class ReadDesignTest(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.odin3.call("odin3_log_set_level", cls.odin3.lib.ODIN3_LOG_INFO)
 
+    @unittest.skipIf("ODIN3_PROV_AST" in os.environ, "ODIN3_PROV_AST is set by the caller")
+    def test_design_does_not_touch_environment(self) -> None:
+        with Design(self.odin3) as design:
+            design.run_pass("read_verilog", f'"{VERILOG}"')
+            self.assertNotIn("ODIN3_PROV_AST", os.environ)
+            self.assertGreater(design.construct_count(), 1)
+        with Design(self.odin3) as design:
+            design.run_script(f'read_verilog "{VERILOG}"; check')
+            self.assertNotIn("ODIN3_PROV_AST", os.environ)
+            self.assertGreater(design.construct_count(), 1)
+
     def test_records_after_proc_and_opt(self) -> None:
         with Design(self.odin3) as design:
             design.run_pass("read_verilog", f'"{VERILOG}"')
