@@ -32,8 +32,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const uint32_t NO_FRAME_ID = UINT32_MAX;
+
 enum {
-    NO_FRAME = UINT32_MAX,
     FLAG_MARKED = 1, /* a SOURCE record of the run points at the node */
     FLAG_SEEN = 2,   /* the walk reached the node */
     IF_THEN_SLOT = 1,
@@ -44,7 +45,7 @@ typedef struct frame {
     uint32_t node; /* AST node; for an arm frame the IF */
     uint32_t idx;  /* next child slot */
     uint32_t n;    /* child slots (1 for an arm frame) */
-    uint32_t up;   /* nearest levelled ancestor frame, NO_FRAME for none */
+    uint32_t up;   /* nearest levelled ancestor frame, NO_FRAME_ID for none */
     uint32_t row;  /* the frame's row, 0 until emitted */
     uint32_t arm_child;
     uint8_t part; /* ODIN3_CONSTRUCT_PART_* */
@@ -84,9 +85,9 @@ typedef struct snap {
 
 /* --- helpers ------------------------------------------------------------------------------- */
 
-static int span_cmp(const odin3_srcloc *a, const odin3_srcloc *b) {
-    const uint32_t ka[] = {a->file, a->line, a->col, a->end_line, a->end_col};
-    const uint32_t kb[] = {b->file, b->line, b->col, b->end_line, b->end_col};
+static int span_cmp(const odin3_srcloc *lhs, const odin3_srcloc *rhs) {
+    const uint32_t ka[] = {lhs->file, lhs->line, lhs->col, lhs->end_line, lhs->end_col};
+    const uint32_t kb[] = {rhs->file, rhs->line, rhs->col, rhs->end_line, rhs->end_col};
     for (size_t i = 0; i < sizeof ka / sizeof ka[0]; i++) {
         if (ka[i] != kb[i]) {
             return ka[i] < kb[i] ? -1 : 1;
@@ -95,17 +96,17 @@ static int span_cmp(const odin3_srcloc *a, const odin3_srcloc *b) {
     return 0;
 }
 
-static int site_cmp(const void *a, const void *b) {
-    return span_cmp(&((const site *)a)->span, &((const site *)b)->span);
+static int site_cmp(const void *lhs, const void *rhs) {
+    return span_cmp(&((const site *)lhs)->span, &((const site *)rhs)->span);
 }
 
 /* The index of the site with this span, SIZE_MAX when none. */
-static size_t site_find(const snap *s, const odin3_srcloc *span) {
+static size_t site_find(const snap *sn, const odin3_srcloc *span) {
     size_t lo = 0;
-    size_t hi = s->sites.len;
+    size_t hi = sn->sites.len;
     while (lo < hi) {
         size_t mid = lo + ((hi - lo) / 2);
-        int cmp = span_cmp(&((const site *)odin3_vec_cat(&s->sites, mid))->span, span);
+        int cmp = span_cmp(&((const site *)odin3_vec_cat(&sn->sites, mid))->span, span);
         if (cmp == 0) {
             return mid;
         }
@@ -118,8 +119,8 @@ static size_t site_find(const snap *s, const odin3_srcloc *span) {
     return SIZE_MAX;
 }
 
-static frame *frame_at(snap *s, uint32_t idx) {
-    return odin3_vec_at(&s->frames, idx);
+static frame *frame_at(snap *sn, uint32_t idx) {
+    return odin3_vec_at(&sn->frames, idx);
 }
 
 static bool level_fits(uint8_t parent, uint8_t row) {
@@ -127,166 +128,184 @@ static bool level_fits(uint8_t parent, uint8_t row) {
            (row == (uint8_t)ODIN3_LEVEL_BRANCH && parent == (uint8_t)ODIN3_LEVEL_STMT);
 }
 
-/* The nearest levelled ancestor of frame k that may be its parent. */
-static uint32_t fit_parent(snap *s, uint32_t k) {
-    uint8_t level = frame_at(s, k)->level;
-    uint32_t p = frame_at(s, k)->up;
-    while (p != NO_FRAME && !level_fits(frame_at(s, p)->level, level)) {
-        p = frame_at(s, p)->up;
+/* The nearest levelled ancestor of frame fi that may be its parent. */
+static uint32_t fit_parent(snap *sn, uint32_t fi) {
+    uint8_t level = frame_at(sn, fi)->level;
+    uint32_t pp = frame_at(sn, fi)->up;
+    while (pp != NO_FRAME_ID && !level_fits(frame_at(sn, pp)->level, level)) {
+        pp = frame_at(sn, pp)->up;
     }
-    return p;
+    return pp;
 }
 
 /* --- rows ---------------------------------------------------------------------------------- */
 
 /* A row for node (part of it) with the span of span_node. */
-static odin3_status add_row(snap *s, const odin3_construct_row *proto, uint32_t span_node,
+static odin3_status add_row(snap *sn, const odin3_construct_row *proto, uint32_t span_node,
                             uint32_t *index) {
     odin3_construct_row row = *proto;
     odin3_srcloc sl;
     odin3_ast_id id = {span_node};
-    odin3_srcman_srcloc(s->sm, (odin3_range){odin3_ast_loc(s->ast, id), odin3_ast_end(s->ast, id)},
-                        &sl);
+    odin3_srcman_srcloc(sn->sm,
+                        (odin3_range){odin3_ast_loc(sn->ast, id), odin3_ast_end(sn->ast, id)}, &sl);
     row.file = sl.file;
     row.line = sl.line;
     row.col = sl.col;
     row.end_line = sl.end_line;
     row.end_col = sl.end_col;
-    return odin3_construct_add(s->design, &row, index);
+    return odin3_construct_add(sn->design, &row, index);
 }
 
-static odin3_status emit_frame(snap *s, uint32_t k, uint32_t parent_row) {
-    const frame f = *frame_at(s, k);
-    odin3_construct_row row = {.run = s->run.v,
-                               .ast = f.node,
-                               .parent = parent_row,
-                               .name =
-                                   f.part == 0 ? odin3_ast_name(s->ast, (odin3_ast_id){f.node}) : 0,
-                               .part = f.part,
-                               .level = f.level,
-                               .kind = f.kind};
+/* Emit frame `frame_idx` under the row `parent_row`. */
+typedef struct emit_req {
+    uint32_t frame_idx;
+    uint32_t parent_row;
+} emit_req;
+
+static odin3_status emit_frame(snap *sn, const emit_req *req) {
+    const frame fr = *frame_at(sn, req->frame_idx);
+    odin3_construct_row row = {
+        .run = sn->run.v,
+        .ast = fr.node,
+        .parent = req->parent_row,
+        .name = fr.part == 0 ? odin3_ast_name(sn->ast, (odin3_ast_id){fr.node}) : 0,
+        .part = fr.part,
+        .level = fr.level,
+        .kind = fr.kind};
     /* A node reached twice (shared in the store) keeps the row of its first visit. */
-    const odin3_construct_key key = {s->run, f.node, f.part, 0};
-    uint32_t index = odin3_construct_find(s->design, &key);
+    const odin3_construct_key key = {sn->run, fr.node, fr.part, 0};
+    uint32_t index = odin3_construct_find(sn->design, &key);
     odin3_status st =
-        index != 0 ? ODIN3_OK : add_row(s, &row, f.part == 0 ? f.node : f.arm_child, &index);
+        index != 0 ? ODIN3_OK : add_row(sn, &row, fr.part == 0 ? fr.node : fr.arm_child, &index);
     if (st == ODIN3_OK) {
-        frame_at(s, k)->row = index;
+        frame_at(sn, req->frame_idx)->row = index;
     }
     return st;
 }
 
-/* Emits frame k and the ancestors that have no row yet, shallowest first. */
-static odin3_status emit_path(snap *s, uint32_t k) {
-    s->path.len = 0;
-    uint32_t at = k;
-    while (at != NO_FRAME && frame_at(s, at)->row == 0) {
-        uint32_t *slot = odin3_vec_push(&s->path);
+/* Emits frame fi and the ancestors that have no row yet, shallowest first. */
+static odin3_status emit_path(snap *sn, uint32_t fi) {
+    sn->path.len = 0;
+    uint32_t at = fi;
+    while (at != NO_FRAME_ID && frame_at(sn, at)->row == 0) {
+        uint32_t *slot = odin3_vec_push(&sn->path);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *slot = at;
-        at = fit_parent(s, at);
+        at = fit_parent(sn, at);
     }
-    uint32_t parent_row = at != NO_FRAME ? frame_at(s, at)->row : 0;
+    uint32_t parent_row = at != NO_FRAME_ID ? frame_at(sn, at)->row : 0;
     odin3_status st = ODIN3_OK;
-    for (size_t i = s->path.len; st == ODIN3_OK && i > 0; i--) {
-        uint32_t frame_idx = *(const uint32_t *)odin3_vec_cat(&s->path, i - 1U);
-        st = emit_frame(s, frame_idx, parent_row);
-        parent_row = frame_at(s, frame_idx)->row;
+    for (size_t i = sn->path.len; st == ODIN3_OK && i > 0; i--) {
+        uint32_t frame_idx = *(const uint32_t *)odin3_vec_cat(&sn->path, i - 1U);
+        st = emit_frame(sn, &(emit_req){frame_idx, parent_row});
+        parent_row = frame_at(sn, frame_idx)->row;
     }
     return st;
 }
 
 /* --- the walk ------------------------------------------------------------------------------ */
 
-static odin3_status push_frame(snap *s, const frame *proto, uint32_t parent) {
-    frame *f = odin3_vec_push(&s->frames);
-    if (f == NULL) {
+static odin3_status push_frame(snap *sn, const frame *proto, uint32_t parent) {
+    frame *fr = odin3_vec_push(&sn->frames);
+    if (fr == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *f = *proto;
-    f->up = NO_FRAME;
-    if (parent != NO_FRAME) {
-        f->up = frame_at(s, parent)->level != 0 ? parent : frame_at(s, parent)->up;
+    *fr = *proto;
+    fr->up = NO_FRAME_ID;
+    if (parent != NO_FRAME_ID) {
+        fr->up = frame_at(sn, parent)->level != 0 ? parent : frame_at(sn, parent)->up;
     }
     return ODIN3_OK;
 }
 
-static frame node_frame(const snap *s, uint32_t node) {
+static frame node_frame(const snap *sn, uint32_t node) {
     odin3_ast_id id = {node};
-    uint32_t kind = (uint32_t)odin3_ast_kind_of(s->ast, id);
+    uint32_t kind = (uint32_t)odin3_ast_kind_of(sn->ast, id);
     return (frame){.node = node,
-                   .n = odin3_ast_nchild(s->ast, id),
+                   .n = odin3_ast_nchild(sn->ast, id),
                    .row = 0,
                    .kind = (uint8_t)kind,
                    .level = (uint8_t)odin3_construct_kind_level(kind)};
 }
 
-/* The nearest levelled ancestor of frame k (not k) that a node can be an alias of. */
-static uint32_t alias_target(snap *s, uint32_t k) {
-    uint32_t p = frame_at(s, k)->up;
-    while (p != NO_FRAME) {
-        const frame *f = frame_at(s, p);
-        if (f->part == 0 &&
-            (s->mode != ODIN3_CONSTRUCT_MODE_CONSTRUCTS || f->level != (uint8_t)ODIN3_LEVEL_EXPR)) {
-            return p;
+/* The nearest levelled ancestor of frame fi (not fi) that a node can be an alias of. */
+static uint32_t alias_target(snap *sn, uint32_t fi) {
+    uint32_t pp = frame_at(sn, fi)->up;
+    while (pp != NO_FRAME_ID) {
+        const frame *fr = frame_at(sn, pp);
+        if (fr->part == 0 && (sn->mode != ODIN3_CONSTRUCT_MODE_CONSTRUCTS ||
+                              fr->level != (uint8_t)ODIN3_LEVEL_EXPR)) {
+            return pp;
         }
-        p = f->up;
+        pp = fr->up;
     }
-    return NO_FRAME;
+    return NO_FRAME_ID;
 }
 
 /* A CALL or TASK_CALL whose span a call-site record named: it gets a row and is counted. */
-static odin3_status note_call(snap *s, uint32_t k) {
-    const frame *f = frame_at(s, k);
-    if (s->sites.len == 0 || (f->kind != ODIN3_AST_CALL && f->kind != ODIN3_AST_TASK_CALL)) {
+static odin3_status note_call(snap *sn, uint32_t fi) {
+    const frame *fr = frame_at(sn, fi);
+    if (sn->sites.len == 0 || (fr->kind != ODIN3_AST_CALL && fr->kind != ODIN3_AST_TASK_CALL)) {
         return ODIN3_OK;
     }
     odin3_srcloc sl;
-    odin3_ast_id id = {f->node};
-    odin3_srcman_srcloc(s->sm, (odin3_range){odin3_ast_loc(s->ast, id), odin3_ast_end(s->ast, id)},
-                        &sl);
-    size_t at = site_find(s, &sl);
+    odin3_ast_id id = {fr->node};
+    odin3_srcman_srcloc(sn->sm,
+                        (odin3_range){odin3_ast_loc(sn->ast, id), odin3_ast_end(sn->ast, id)}, &sl);
+    size_t at = site_find(sn, &sl);
     if (at == SIZE_MAX) {
         return ODIN3_OK;
     }
-    odin3_status st = emit_path(s, k);
-    site *hit = odin3_vec_at(&s->sites, at);
+    odin3_status st = emit_path(sn, fi);
+    site *hit = odin3_vec_at(&sn->sites, at);
     if (st == ODIN3_OK && hit->count++ == 0) {
-        hit->row = frame_at(s, k)->row;
+        hit->row = frame_at(sn, fi)->row;
     }
     return st;
 }
 
-/* What frame k needs: its own row, an alias to an ancestor's, or nothing. */
-static odin3_status visit(snap *s, uint32_t k) {
-    const frame f = *frame_at(s, k);
-    s->flags[f.node] |= FLAG_SEEN;
-    bool marked = (s->flags[f.node] & FLAG_MARKED) != 0;
-    bool own = f.level != 0 && (s->mode == ODIN3_CONSTRUCT_MODE_FULL ||
-                                (marked && (s->mode != ODIN3_CONSTRUCT_MODE_CONSTRUCTS ||
-                                            f.level != (uint8_t)ODIN3_LEVEL_EXPR)));
-    odin3_status st = own ? emit_path(s, k) : ODIN3_OK;
-    st = st != ODIN3_OK ? st : note_call(s, k);
-    if (st != ODIN3_OK || !marked || frame_at(s, k)->row != 0) {
+/* What frame fi needs: its own row, an alias to an ancestor's, or nothing. */
+static odin3_status visit(snap *sn, uint32_t fi) {
+    const frame fr = *frame_at(sn, fi);
+    sn->flags[fr.node] |= FLAG_SEEN;
+    bool marked = (sn->flags[fr.node] & FLAG_MARKED) != 0;
+    bool own = fr.level != 0 && (sn->mode == ODIN3_CONSTRUCT_MODE_FULL ||
+                                 (marked && (sn->mode != ODIN3_CONSTRUCT_MODE_CONSTRUCTS ||
+                                             fr.level != (uint8_t)ODIN3_LEVEL_EXPR)));
+    odin3_status st = own ? emit_path(sn, fi) : ODIN3_OK;
+    st = st != ODIN3_OK ? st : note_call(sn, fi);
+    const odin3_construct_key own_key = {sn->run, fr.node, ODIN3_CONSTRUCT_PART_NODE, 0};
+    /* a node reached twice (shared in the store) keeps what its first visit gave it */
+    if (st != ODIN3_OK || !marked || frame_at(sn, fi)->row != 0 ||
+        odin3_construct_find(sn->design, &own_key) != 0) {
         return st;
     }
-    uint32_t target = alias_target(s, k);
-    if (target == NO_FRAME) {
+    uint32_t target = alias_target(sn, fi);
+    if (target == NO_FRAME_ID) {
         return ODIN3_OK;
     }
-    st = emit_path(s, target);
+    st = emit_path(sn, target);
     return st != ODIN3_OK
                ? st
-               : odin3_construct_alias(s->design, s->run, f.node, frame_at(s, target)->row);
+               : odin3_construct_alias(sn->design, sn->run, fr.node, frame_at(sn, target)->row);
 }
 
 /* Enters child under frame top, through an arm frame when top is an IF and slot is its then or
  * else statement. */
-static odin3_status descend(snap *s, uint32_t top, uint32_t slot, uint32_t child) {
+typedef struct edge {
+    uint32_t top;
+    uint32_t slot;
+    uint32_t child;
+} edge;
+
+static odin3_status descend(snap *sn, const edge *ed) {
+    const uint32_t top = ed->top;
+    const uint32_t slot = ed->slot;
+    const uint32_t child = ed->child;
     uint32_t parent = top;
-    const frame up = *frame_at(s, top);
+    const frame up = *frame_at(sn, top);
     odin3_status st = ODIN3_OK;
     if (up.part == 0 && up.kind == ODIN3_AST_IF && (slot == IF_THEN_SLOT || slot == IF_ELSE_SLOT)) {
         frame arm = {
@@ -296,59 +315,60 @@ static odin3_status descend(snap *s, uint32_t top, uint32_t slot, uint32_t child
             .part = slot == IF_THEN_SLOT ? ODIN3_CONSTRUCT_PART_THEN : ODIN3_CONSTRUCT_PART_ELSE,
             .kind = slot == IF_THEN_SLOT ? ODIN3_CONSTRUCT_IF_THEN : ODIN3_CONSTRUCT_IF_ELSE,
             .level = (uint8_t)ODIN3_LEVEL_BRANCH};
-        st = push_frame(s, &arm, top);
-        parent = (uint32_t)s->frames.len - 1U;
+        st = push_frame(sn, &arm, top);
+        parent = (uint32_t)sn->frames.len - 1U;
     }
     if (st != ODIN3_OK) {
         return st;
     }
-    frame own = node_frame(s, child);
-    st = push_frame(s, &own, parent);
-    return st != ODIN3_OK ? st : visit(s, (uint32_t)s->frames.len - 1U);
+    frame own = node_frame(sn, child);
+    st = push_frame(sn, &own, parent);
+    return st != ODIN3_OK ? st : visit(sn, (uint32_t)sn->frames.len - 1U);
 }
 
-static odin3_status walk_root(snap *s, uint32_t root) {
-    s->frames.len = 0;
-    frame first = node_frame(s, root);
-    odin3_status st = push_frame(s, &first, NO_FRAME);
-    st = st != ODIN3_OK ? st : visit(s, 0);
-    while (st == ODIN3_OK && s->frames.len > 0) {
-        uint32_t top = (uint32_t)s->frames.len - 1U;
-        frame *f = frame_at(s, top);
-        if (f->idx >= f->n) {
-            odin3_vec_pop(&s->frames);
+static odin3_status walk_root(snap *sn, uint32_t root) {
+    sn->frames.len = 0;
+    frame first = node_frame(sn, root);
+    odin3_status st = push_frame(sn, &first, NO_FRAME_ID);
+    st = st != ODIN3_OK ? st : visit(sn, 0);
+    while (st == ODIN3_OK && sn->frames.len > 0) {
+        uint32_t top = (uint32_t)sn->frames.len - 1U;
+        frame *fr = frame_at(sn, top);
+        if (fr->idx >= fr->n) {
+            odin3_vec_pop(&sn->frames);
             continue;
         }
-        uint32_t slot = f->idx++;
-        uint32_t child =
-            f->part != 0 ? f->arm_child : odin3_ast_child(s->ast, (odin3_ast_id){f->node}, slot).v;
-        if (child != 0 && child < s->nodes) {
-            st = descend(s, top, slot, child);
+        uint32_t slot = fr->idx++;
+        uint32_t child = fr->part != 0 ? fr->arm_child
+                                       : odin3_ast_child(sn->ast, (odin3_ast_id){fr->node}, slot).v;
+        /* the store shares some subtrees: a node already reached keeps its first visit */
+        if (child != 0 && child < sn->nodes && (sn->flags[child] & FLAG_SEEN) == 0) {
+            st = descend(sn, &(edge){top, slot, child});
         }
     }
     return st;
 }
 
 /* A marked node the walk never reached (not under a UNIT): a root row of its own. */
-static odin3_status orphans(snap *s) {
+static odin3_status orphans(snap *sn) {
     odin3_status st = ODIN3_OK;
-    for (uint32_t node = 1; st == ODIN3_OK && node < s->nodes; node++) {
-        if ((s->flags[node] & (FLAG_MARKED | FLAG_SEEN)) != FLAG_MARKED) {
+    for (uint32_t node = 1; st == ODIN3_OK && node < sn->nodes; node++) {
+        if ((sn->flags[node] & (FLAG_MARKED | FLAG_SEEN)) != FLAG_MARKED) {
             continue;
         }
-        frame f = node_frame(s, node);
-        if (f.level == 0 ||
-            (s->mode == ODIN3_CONSTRUCT_MODE_CONSTRUCTS && f.level == (uint8_t)ODIN3_LEVEL_EXPR)) {
+        frame fr = node_frame(sn, node);
+        if (fr.level == 0 || (sn->mode == ODIN3_CONSTRUCT_MODE_CONSTRUCTS &&
+                              fr.level == (uint8_t)ODIN3_LEVEL_EXPR)) {
             continue;
         }
         odin3_log(ODIN3_LOG_DEBUG, "construct snapshot: node %u is not under a UNIT", node);
-        odin3_construct_row row = {.run = s->run.v,
+        odin3_construct_row row = {.run = sn->run.v,
                                    .ast = node,
-                                   .level = f.level,
-                                   .kind = f.kind,
-                                   .name = odin3_ast_name(s->ast, (odin3_ast_id){node})};
+                                   .level = fr.level,
+                                   .kind = fr.kind,
+                                   .name = odin3_ast_name(sn->ast, (odin3_ast_id){node})};
         uint32_t index = 0;
-        st = add_row(s, &row, node, &index);
+        st = add_row(sn, &row, node, &index);
     }
     return st;
 }
@@ -356,59 +376,66 @@ static odin3_status orphans(snap *s) {
 /* --- the records --------------------------------------------------------------------------- */
 
 /* Marks the nodes the run's SOURCE records point at and collects the call-site records. */
-static odin3_status sweep(snap *s) {
-    uint32_t end = odin3_prov_end(s->design);
+static odin3_status sweep(snap *sn) {
+    uint32_t end = odin3_prov_end(sn->design);
     for (uint32_t i = 1; i < end; i++) {
-        const odin3_prov_record *rec = odin3_prov_get(s->design, (odin3_prov_id){i});
-        if (rec->run.v != s->run.v || rec->kind != ODIN3_PROV_SOURCE || rec->ast == 0 ||
-            rec->ast >= s->nodes) {
+        const odin3_prov_record *rec = odin3_prov_get(sn->design, (odin3_prov_id){i});
+        if (rec->run.v != sn->run.v || rec->kind != ODIN3_PROV_SOURCE || rec->ast == 0 ||
+            rec->ast >= sn->nodes) {
             continue;
         }
-        s->flags[rec->ast] |= FLAG_MARKED;
+        sn->flags[rec->ast] |= FLAG_MARKED;
         if (rec->n_locs < 2) {
             continue;
         }
-        pending *p = odin3_vec_push(&s->pending);
-        site *sp = odin3_vec_push(&s->sites);
-        if (p == NULL || sp == NULL) {
+        pending *pp = odin3_vec_push(&sn->pending);
+        site *sp = odin3_vec_push(&sn->sites);
+        if (pp == NULL || sp == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        *p = (pending){i, rec->ast, 0, rec->locs[1]};
+        *pp = (pending){i, rec->ast, 0, rec->locs[1]};
         *sp = (site){rec->locs[1], 0, 0};
     }
-    if (s->sites.len > 1) {
-        qsort(s->sites.data, s->sites.len, sizeof(site), site_cmp);
+    if (sn->sites.len > 1) {
+        qsort(sn->sites.data, sn->sites.len, sizeof(site), site_cmp);
     }
     size_t kept = 0;
-    for (size_t i = 0; i < s->sites.len; i++) {
-        site *cur = odin3_vec_at(&s->sites, i);
+    for (size_t i = 0; i < sn->sites.len; i++) {
+        site *cur = odin3_vec_at(&sn->sites, i);
         if (kept == 0 ||
-            span_cmp(&((site *)odin3_vec_at(&s->sites, kept - 1U))->span, &cur->span) != 0) {
-            *(site *)odin3_vec_at(&s->sites, kept++) = *cur;
+            span_cmp(&((site *)odin3_vec_at(&sn->sites, kept - 1U))->span, &cur->span) != 0) {
+            *(site *)odin3_vec_at(&sn->sites, kept++) = *cur;
         }
     }
-    s->sites.len = kept;
-    for (size_t i = 0; i < s->pending.len; i++) {
-        pending *p = odin3_vec_at(&s->pending, i);
-        p->site = (uint32_t)site_find(s, &p->span);
+    sn->sites.len = kept;
+    for (size_t i = 0; i < sn->pending.len; i++) {
+        pending *pp = odin3_vec_at(&sn->pending, i);
+        pp->site = (uint32_t)site_find(sn, &pp->span);
     }
     return ODIN3_OK;
 }
 
 /* Copies the rows from row leaf up to its function or task declaration under the call's row.
  * False when leaf has no such ancestor. */
-static odin3_status copy_chain(snap *s, uint32_t leaf, uint32_t call, bool *copied) {
-    s->chain.len = 0;
+typedef struct call_copy {
+    uint32_t leaf;
+    uint32_t call;
+} call_copy;
+
+static odin3_status copy_chain(snap *sn, const call_copy *req, bool *copied) {
+    const uint32_t leaf = req->leaf;
+    const uint32_t call = req->call;
+    sn->chain.len = 0;
     *copied = false;
     uint32_t at = leaf;
     bool found = false;
     while (at != 0 && !found) {
-        uint32_t *slot = odin3_vec_push(&s->chain);
+        uint32_t *slot = odin3_vec_push(&sn->chain);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *slot = at;
-        const odin3_construct_row *row = odin3_construct_get(s->design, at);
+        const odin3_construct_row *row = odin3_construct_get(sn->design, at);
         found = row->kind == ODIN3_AST_FUNCTION_DECL || row->kind == ODIN3_AST_TASK_DECL;
         at = row->parent;
     }
@@ -417,16 +444,16 @@ static odin3_status copy_chain(snap *s, uint32_t leaf, uint32_t call, bool *copi
     }
     uint32_t parent = call;
     odin3_status st = ODIN3_OK;
-    for (size_t i = s->chain.len; st == ODIN3_OK && i > 0; i--) {
+    for (size_t i = sn->chain.len; st == ODIN3_OK && i > 0; i--) {
         odin3_construct_row row =
-            *odin3_construct_get(s->design, *(const uint32_t *)odin3_vec_cat(&s->chain, i - 1U));
+            *odin3_construct_get(sn->design, *(const uint32_t *)odin3_vec_cat(&sn->chain, i - 1U));
         row.call = call;
         row.parent = parent;
         row.next = 0;
         const odin3_construct_key key = {{row.run}, row.ast, row.part, call};
-        parent = odin3_construct_find(s->design, &key);
+        parent = odin3_construct_find(sn->design, &key);
         if (parent == 0) {
-            st = odin3_construct_add(s->design, &row, &parent);
+            st = odin3_construct_add(sn->design, &row, &parent);
         }
     }
     *copied = st == ODIN3_OK;
@@ -435,20 +462,20 @@ static odin3_status copy_chain(snap *s, uint32_t leaf, uint32_t call, bool *copi
 
 /* The call-instance copies of every call-site record; the ones that cannot be resolved are noted
  * as misses, in record order. */
-static odin3_status call_instances(snap *s) {
+static odin3_status call_instances(snap *sn) {
     odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < s->pending.len; i++) {
-        const pending *p = odin3_vec_cat(&s->pending, i);
-        const site *hit = odin3_vec_cat(&s->sites, p->site);
-        const odin3_construct_key key = {s->run, p->ast, ODIN3_CONSTRUCT_PART_NODE, 0};
-        uint32_t leaf = odin3_construct_find(s->design, &key);
-        const odin3_construct_row *row = odin3_construct_get(s->design, leaf);
+    for (size_t i = 0; st == ODIN3_OK && i < sn->pending.len; i++) {
+        const pending *pp = odin3_vec_cat(&sn->pending, i);
+        const site *hit = odin3_vec_cat(&sn->sites, pp->site);
+        const odin3_construct_key key = {sn->run, pp->ast, ODIN3_CONSTRUCT_PART_NODE, 0};
+        uint32_t leaf = odin3_construct_find(sn->design, &key);
+        const odin3_construct_row *row = odin3_construct_get(sn->design, leaf);
         bool copied = false;
-        if (hit->count == 1 && row != NULL && row->ast == p->ast) {
-            st = copy_chain(s, leaf, hit->row, &copied);
+        if (hit->count == 1 && row != NULL && row->ast == pp->ast) {
+            st = copy_chain(sn, &(call_copy){leaf, hit->row}, &copied);
         }
         if (st == ODIN3_OK && !copied) {
-            st = odin3_construct_note_miss(s->design, (odin3_prov_id){p->record});
+            st = odin3_construct_note_miss(sn->design, (odin3_prov_id){pp->record});
         }
     }
     return st;
@@ -456,39 +483,40 @@ static odin3_status call_instances(snap *s) {
 
 /* --- entry --------------------------------------------------------------------------------- */
 
-static void snap_free(snap *s) {
-    odin3_util_free(s->flags);
-    odin3_vec_free(&s->frames);
-    odin3_vec_free(&s->path);
-    odin3_vec_free(&s->sites);
-    odin3_vec_free(&s->pending);
-    odin3_vec_free(&s->chain);
+static void snap_free(snap *sn) {
+    odin3_util_free(sn->flags);
+    odin3_vec_free(&sn->frames);
+    odin3_vec_free(&sn->path);
+    odin3_vec_free(&sn->sites);
+    odin3_vec_free(&sn->pending);
+    odin3_vec_free(&sn->chain);
 }
 
-static odin3_status snap_open(snap *s, odin3_design *design, const odin3_ast *ast,
+static odin3_status snap_open(snap *sn, odin3_design *design, const odin3_ast *ast,
                               odin3_construct_mode mode) {
-    *s = (snap){.design = design, .ast = ast, .run = odin3_ast_run(ast), .mode = mode};
-    odin3_vec_init(&s->frames, sizeof(frame));
-    odin3_vec_init(&s->path, sizeof(uint32_t));
-    odin3_vec_init(&s->sites, sizeof(site));
-    odin3_vec_init(&s->pending, sizeof(pending));
-    odin3_vec_init(&s->chain, sizeof(uint32_t));
-    s->nodes = odin3_ast_node_end(ast).v;
-    s->flags = odin3_util_calloc(s->nodes);
+    *sn = (snap){.design = design, .ast = ast, .run = odin3_ast_run(ast), .mode = mode};
+    odin3_vec_init(&sn->frames, sizeof(frame));
+    odin3_vec_init(&sn->path, sizeof(uint32_t));
+    odin3_vec_init(&sn->sites, sizeof(site));
+    odin3_vec_init(&sn->pending, sizeof(pending));
+    odin3_vec_init(&sn->chain, sizeof(uint32_t));
+    sn->nodes = odin3_ast_node_end(ast).v;
+    sn->flags = odin3_util_calloc(sn->nodes);
     odin3_srcman *sm = NULL;
-    odin3_status st = s->flags != NULL ? odin3_design_get_srcman(design, &sm) : ODIN3_ERR_NO_MEMORY;
-    s->sm = sm;
+    odin3_status st =
+        sn->flags != NULL ? odin3_design_get_srcman(design, &sm) : ODIN3_ERR_NO_MEMORY;
+    sn->sm = sm;
     return st;
 }
 
-static odin3_status snapshot_run(snap *s) {
-    odin3_status st = sweep(s);
-    for (uint32_t i = 0; st == ODIN3_OK && i < odin3_ast_root_count(s->ast); i++) {
-        st = walk_root(s, odin3_ast_root(s->ast, i).v);
+static odin3_status snapshot_run(snap *sn) {
+    odin3_status st = sweep(sn);
+    for (uint32_t i = 0; st == ODIN3_OK && i < odin3_ast_root_count(sn->ast); i++) {
+        st = walk_root(sn, odin3_ast_root(sn->ast, i).v);
     }
-    st = st != ODIN3_OK ? st : orphans(s);
-    st = st != ODIN3_OK ? st : call_instances(s);
-    return st != ODIN3_OK ? st : odin3_construct_mark_run(s->design, s->run, s->mode);
+    st = st != ODIN3_OK ? st : orphans(sn);
+    st = st != ODIN3_OK ? st : call_instances(sn);
+    return st != ODIN3_OK ? st : odin3_construct_mark_run(sn->design, sn->run, sn->mode);
 }
 
 odin3_status odin3_construct_snapshot(odin3_design *design, const odin3_ast *ast,
@@ -505,9 +533,9 @@ odin3_status odin3_construct_snapshot(odin3_design *design, const odin3_ast *ast
     if (mode == ODIN3_CONSTRUCT_MODE_OFF) {
         return ODIN3_OK;
     }
-    snap s;
-    odin3_status st = snap_open(&s, design, ast, mode);
-    st = st != ODIN3_OK ? st : snapshot_run(&s);
-    snap_free(&s);
+    snap sn;
+    odin3_status st = snap_open(&sn, design, ast, mode);
+    st = st != ODIN3_OK ? st : snapshot_run(&sn);
+    snap_free(&sn);
     return st;
 }

@@ -402,6 +402,9 @@ class Design:
         and destroys. MemoryError when a new design cannot be created, ValueError for a NULL
         handle."""
         self.odin3 = odin3 or default()
+        # The CLI keeps no construct table by default (V1.2.0 5.3); a Python design wants the chain
+        # of Node.chain(), so a read that gives no --prov-ast takes refs (the environment wins).
+        os.environ.setdefault("ODIN3_PROV_AST", "refs")
         if handle is None:
             ptr = self.odin3.lib.odin3_design_create()
             if ptr == self.odin3.ffi.NULL:

@@ -144,14 +144,39 @@ def cmd_bytes(args: argparse.Namespace) -> int:
     return 1 if bad else 0
 
 
+def dump_of(odin3: str, design: Path, mode: str) -> tuple[int, str, str]:
+    script = f"read_verilog --prov-ast {mode} {design}; check; dump_locs --constructs -"
+    proc = subprocess.run([odin3, "-p", script], capture_output=True, text=True, check=False,
+                          cwd=design.parent)
+    return proc.returncode, proc.stdout, proc.stderr[-300:]
+
+
+def mode_problems(odin3: str, design: Path, refs_rows: int) -> list[str]:
+    """What the other modes must give (4.2): off no table; constructs no expression row but the
+    call rows; full at least the rows of refs.  Every run passes ``check``."""
+    problems = []
+    for mode in ("off", "constructs", "full"):
+        code, out, err = dump_of(odin3, design, mode)
+        rows = [line.split("|") for line in out.splitlines() if line.startswith("construct|")]
+        if code != 0:
+            problems.append(f"{mode}: exit {code}: {err}")
+        elif mode == "off" and out != "":
+            problems.append("off: the table is not empty")
+        elif mode == "constructs" and any(r[3] == "expr" and r[2] != "CALL" for r in rows):
+            problems.append("constructs: an expression row")
+        elif mode == "full" and len(rows) < refs_rows:
+            problems.append(f"full: {len(rows)} rows, fewer than refs ({refs_rows})")
+    return problems
+
+
 def cmd_golden(args: argparse.Namespace) -> int:
     root = Path(args.dir).resolve()
     bad = 0
     count = 0
     for design in sorted(p for p in root.iterdir() if p.suffix in (".v", ".sv")):
         count += 1
-        proc = subprocess.run([args.odin3, "-p",
-                               f"read_verilog {design}; check; dump_locs --constructs -"],
+        script = f"read_verilog --prov-ast refs {design}; check; dump_locs --constructs -"
+        proc = subprocess.run([args.odin3, "-p", script],
                               capture_output=True, text=True, check=False, cwd=root)
         golden = design.with_suffix(".constructs")
         if proc.returncode != 0:
@@ -162,6 +187,11 @@ def cmd_golden(args: argparse.Namespace) -> int:
         elif not golden.exists() or golden.read_text() != proc.stdout:
             print(f"DIFF {design.name}: the dump differs from {golden.name}")
             bad += 1
+        if proc.returncode == 0:
+            refs_rows = sum(1 for line in proc.stdout.splitlines() if line.startswith("construct|"))
+            for problem in mode_problems(args.odin3, design, refs_rows):
+                print(f"FAIL {design.name}: {problem}")
+                bad += 1
     print(f"{count} designs, {bad} failed")
     return 1 if bad or count == 0 else 0
 

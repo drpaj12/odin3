@@ -45,6 +45,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -459,12 +460,33 @@ static odin3_status take_name_map(odin3_bytes *rest, rv_args *out) {
     return ODIN3_OK;
 }
 
+static const char *const k_prov_modes[] = {"off", "refs", "constructs", "full"};
+
+/* ODIN3_PROV_AST=refs|constructs|full|off: the mode of a read that gives no --prov-ast. The Python
+ * module sets it to refs (the CLI default is off, V1.2.0 5.3). An unknown value is ignored with a
+ * warning. */
+static void prov_ast_from_env(rv_args *args) {
+    const char *text = getenv("ODIN3_PROV_AST");
+    for (size_t i = 0; text != NULL && !args->prov_set && i < 4; i++) {
+        if (strcmp(text, k_prov_modes[i]) == 0) {
+            args->prov_set = true;
+            args->prov_ast = (odin3_construct_mode)i;
+            return;
+        }
+    }
+    if (text != NULL && text[0] != '\0' && !args->prov_set) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "read_verilog: ODIN3_PROV_AST='%s' is not refs, constructs, full "
+                  "or off; ignored",
+                  text);
+    }
+}
+
 /* --prov-ast refs|constructs|full|off (V1.2.0 4.2): what the construct table keeps. */
 static odin3_status take_prov_ast(odin3_bytes *rest, rv_args *out) {
-    static const char *const names[] = {"off", "refs", "constructs", "full"};
     odin3_bytes mode = odin3_pass_arg_next(rest);
     for (size_t i = 0; mode.ptr != NULL && !out->prov_set && i < 4; i++) {
-        if (odin3_pass_arg_is(mode, names[i])) {
+        if (odin3_pass_arg_is(mode, k_prov_modes[i])) {
             out->prov_set = true;
             out->prov_ast = (odin3_construct_mode)i;
             return ODIN3_OK;
@@ -849,6 +871,9 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_vec svs;
     odin3_vec_init(&svs, sizeof(odin3_pp_source));
     odin3_status st = parse_args(args, &parsed);
+    if (st == ODIN3_OK) {
+        prov_ast_from_env(&parsed);
+    }
     const odin3_construct_mode prov_before = odin3_construct_read_mode(design);
     if (parsed.prov_set) {
         odin3_construct_set_read_mode(design, parsed.prov_ast); /* restored below */

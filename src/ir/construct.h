@@ -60,8 +60,9 @@ typedef enum odin3_construct_mode {
     ODIN3_CONSTRUCT_MODE_FULL
 } odin3_construct_mode;
 
-/* The mode of a read that gave no `--prov-ast` (the gate of V1.2.0 5.3 decides it). */
-#define ODIN3_CONSTRUCT_MODE_DEFAULT ODIN3_CONSTRUCT_MODE_REFS
+/* The mode of a read that gave no `--prov-ast` (OFF: the gate of V1.2.0 5.3 failed on two designs;
+ * see docs/V1.2.0.md, Task 4). */
+#define ODIN3_CONSTRUCT_MODE_DEFAULT ODIN3_CONSTRUCT_MODE_OFF
 
 /* The kind map (2.1). Every kind of odin3_ast_kind_name has exactly one entry. */
 typedef enum odin3_construct_kind_class {

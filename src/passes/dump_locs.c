@@ -162,29 +162,35 @@ typedef struct dump_args {
     odin3_bytes path; /* ptr NULL: stdout */
 } dump_args;
 
-/* Reads `[--types] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated --types, an
- * empty or a second path. A literal `--` ends the options, so a path may start with `--`. */
+/* True when word is the option `name`, which sets *flag; a repeat sets *st to INVALID_ARG. */
+static bool take_flag(odin3_bytes word, const char *name, bool *flag, odin3_status *st) {
+    if (word.len != strlen(name) || memcmp(word.ptr, name, word.len) != 0) {
+        return false;
+    }
+    if (*flag) {
+        odin3_log(ODIN3_LOG_ERROR, "dump_locs: %s given twice", name);
+        *st = ODIN3_ERR_INVALID_ARG;
+    }
+    *flag = true;
+    return true;
+}
+
+/* Reads `[--types | --constructs] [--] [<file>]`; INVALID_ARG for another `--` word, a repeated
+ * --types, an empty or a second path. A literal `--` ends the options, so a path may start with
+ * `--`. */
 static odin3_status parse_args(odin3_bytes args, dump_args *out) {
     *out = (dump_args){false, false, {NULL, 0}};
     bool options = true;
+    odin3_status st = ODIN3_OK;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         if (options && word.len == 2 && memcmp(word.ptr, "--", 2) == 0) {
             options = false;
-        } else if (options && word.len == strlen("--types") &&
-                   memcmp(word.ptr, "--types", word.len) == 0) {
-            if (out->types) {
-                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --types given twice");
-                return ODIN3_ERR_INVALID_ARG;
+        } else if (options && (take_flag(word, "--types", &out->types, &st) ||
+                               take_flag(word, "--constructs", &out->constructs, &st))) {
+            if (st != ODIN3_OK) {
+                return st;
             }
-            out->types = true;
-        } else if (options && word.len == strlen("--constructs") &&
-                   memcmp(word.ptr, "--constructs", word.len) == 0) {
-            if (out->constructs) {
-                odin3_log(ODIN3_LOG_ERROR, "dump_locs: --constructs given twice");
-                return ODIN3_ERR_INVALID_ARG;
-            }
-            out->constructs = true;
         } else if (out->path.ptr != NULL || word.len == 0 ||
                    (options && word.len >= 2 && memcmp(word.ptr, "--", 2) == 0)) {
             return ODIN3_ERR_INVALID_ARG;

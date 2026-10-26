@@ -159,10 +159,12 @@ class ReadDesignTest(unittest.TestCase):
             design.run_pass("read_verilog", f'"{VERILOG}"')
             design.run_pass("proc")
             design.run_pass("opt")
-            self.assertEqual(design.construct_count(), 1)
+            # Design() asks for --prov-ast refs (the CLI default is off), so the read made rows
+            self.assertGreater(design.construct_count(), 1)
             top = design.top()
             assert top is not None
             seen = 0
+            chained = 0
             for node in top.nodes():
                 records = node.provenance()
                 if not records:
@@ -172,14 +174,17 @@ class ReadDesignTest(unittest.TestCase):
                 self.assertTrue(sources)
                 leaves = [r for r in records if r.kind == "source"]
                 self.assertTrue(leaves)
-                self.assertEqual(leaves[0].construct, None)
-                self.assertEqual(node.chain(), [])
+                chain = node.chain()
+                if chain:
+                    chained += 1
+                    self.assertIn("module", [c.level for c in chain])
                 for record in records:
                     self.assertIn(record.dir, ("origin", "refine", "rewrite", "coarsen", "context"))
                     if record.kind == "derived":
                         self.assertNotEqual(record.dir, "origin")
                         self.assertNotEqual(record.to_level, "none")
             self.assertGreater(seen, 0)
+            self.assertGreater(chained, 0)
 
 
 if __name__ == "__main__":
