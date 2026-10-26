@@ -4,6 +4,7 @@
  * instance rule, inlined calls, the cap, bulk), the sort order of J, chain and object readers.
  */
 #include "backends/common/prov_export.h"
+#include "ir/celltype.h"
 #include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -477,6 +478,98 @@ static void test_get_construct_copies_a_row(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 1, NULL));
 }
 
+/* --- NULL arguments, dead and compacted objects ---------------------------------------------- */
+
+static void noop_u32(uint32_t id, void *user) {
+    (void)id;
+    (void)user;
+}
+
+static void noop_construct(const odin3_construct *found, uint32_t leaf, void *user) {
+    (void)found;
+    (void)leaf;
+    (void)user;
+}
+
+/* Each of the seven readers refuses a NULL design, out pointer and visit; outputs stay put. */
+static void test_null_arguments_on_every_reader(void) {
+    odin3_prov_id two[2] = {leaf_of(R_E1), leaf_of(R_B1)};
+    odin3_prov_id id = derive(&COARSEN, two, 2);
+    odin3_module_id mid = {0};
+    (void)make_module(id, &mid);
+    odin3_obj obj = {mid.v, ODIN3_OBJ_MODULE, 0};
+    odin3_construct row;
+    memset(&row, 0x5a, sizeof row);
+    odin3_prov_info info;
+    memset(&info, 0x5a, sizeof info);
+    uint32_t record = 77;
+    TEST_ASSERT_EQUAL_UINT32(0, odin3_design_construct_count(NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(NULL, 1, &row));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_get_construct(design, 1, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_obj_get_prov(NULL, obj, &record));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_obj_get_prov(design, obj, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_get_info(NULL, id.v, &info));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_get_info(design, id.v, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_parents(NULL, id.v, noop_u32, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_parents(design, id.v, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_joined(NULL, id.v, noop_u32, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_joined(design, id.v, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_chain(NULL, obj, noop_construct, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_prov_visit_chain(design, obj, NULL, NULL));
+    odin3_construct untouched;
+    memset(&untouched, 0x5a, sizeof untouched);
+    TEST_ASSERT_EQUAL_MEMORY(&untouched, &row, sizeof row);
+    odin3_prov_info untouched_info;
+    memset(&untouched_info, 0x5a, sizeof untouched_info);
+    TEST_ASSERT_EQUAL_MEMORY(&untouched_info, &info, sizeof info);
+    TEST_ASSERT_EQUAL_UINT32(77, record);
+}
+
+static void test_dead_and_compacted_objects(void) {
+    odin3_prov_id src_a = leaf_of(R_A1);
+    odin3_prov_id src_b = leaf_of(R_B1);
+    odin3_module_id mid = {0};
+    odin3_module *module = make_module((odin3_prov_id){0}, &mid);
+    odin3_celltype_id type = {0};
+    TEST_ASSERT_TRUE(odin3_celltype_find(design, intern("$_NOT_"), &type));
+    odin3_node_id first = {0};
+    odin3_node_id second = {0};
+    odin3_node_spec spec = {type, intern("n1"), src_a, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &first));
+    spec = (odin3_node_spec){type, intern("n2"), src_b, NULL, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create(module, &spec, &second));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_delete(module, first));
+    /* a dead node still answers, until compact */
+    odin3_obj dead = {mid.v, ODIN3_OBJ_NODE, first.v};
+    uint32_t record = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_obj_get_prov(design, dead, &record));
+    TEST_ASSERT_EQUAL_UINT32(src_a.v, record);
+    chain_log log = {{0}, {0}, {0}, 0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_visit_chain(design, dead, on_construct, &log));
+    TEST_ASSERT_EQUAL_UINT32(R_A1, log.index[0]);
+    TEST_ASSERT_EQUAL_UINT32(R_MOD, log.index[log.count - 1U]);
+    odin3_compact_map map = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_compact(module, &map));
+    odin3_compact_map_free(&map);
+    /* the live node is now ID 1; the old ID 2 is past the store */
+    odin3_obj moved = {mid.v, ODIN3_OBJ_NODE, 1};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_obj_get_prov(design, moved, &record));
+    TEST_ASSERT_EQUAL_UINT32(src_b.v, record);
+    odin3_obj gone = {mid.v, ODIN3_OBJ_NODE, second.v};
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_obj_get_prov(design, gone, &record));
+    log.count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_prov_visit_chain(design, gone, on_construct, &log));
+    TEST_ASSERT_EQUAL_UINT32(0, log.count);
+    /* records and rows survive compact */
+    TEST_ASSERT_EQUAL_UINT32(R_B1, info_of(src_b).construct);
+    TEST_ASSERT_EQUAL_UINT32(R_FIRST_FREE, odin3_design_construct_count(design));
+}
+
 /* --- identical chains, the cache, wide and deep graphs -------------------------------------- */
 
 /* A SOURCE record of AST node `ast`, at line `line` (hash-consing keeps equal ones apart). */
@@ -613,6 +706,8 @@ int main(void) {
     RUN_TEST(test_visit_parents_in_stored_order);
     RUN_TEST(test_obj_prov_and_chain);
     RUN_TEST(test_get_construct_copies_a_row);
+    RUN_TEST(test_null_arguments_on_every_reader);
+    RUN_TEST(test_dead_and_compacted_objects);
     RUN_TEST(test_rows_of_one_chain_are_one_construct);
     RUN_TEST(test_labels_follow_the_table_as_it_grows);
     RUN_TEST(test_a_deep_graph_is_read_in_linear_work);

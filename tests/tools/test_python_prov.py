@@ -87,6 +87,10 @@ class ConstructDesignTest(unittest.TestCase):
             node = next(iter(top.nodes()))
             chain = node.chain()
             self.assertEqual([c.row for c in chain], [5, 4, 2, 1])
+            pairs = node.chain_with_leaves()
+            self.assertEqual([c.row for c, _leaf in pairs], [5, 4, 2, 1])
+            self.assertEqual(len({leaf for _c, leaf in pairs}), 1)  # one leaf reached them all
+            self.assertEqual(pairs[0][1], node.provenance()[0].record)
             self.assertEqual([c.level for c in chain], ["expr", "stmt", "block", "module"])
             self.assertEqual(chain[0].kind, "BINARY")
             self.assertTrue(all(isinstance(c, Construct) for c in chain))
@@ -119,6 +123,8 @@ class ConstructDesignTest(unittest.TestCase):
             self.assertEqual([c.row for c in join.joined], [4, 6])
             self.assertEqual(join.parents, (records[1].record, records[2].record))
             self.assertEqual([c.row for c in top.chain()], [5, 4, 2, 1, 6, 3])
+            leaves = [leaf for _c, leaf in top.chain_with_leaves()]
+            self.assertEqual(leaves, [records[1].record] * 4 + [records[2].record] * 2)
 
     def test_net_without_provenance(self) -> None:
         with self.design() as design:

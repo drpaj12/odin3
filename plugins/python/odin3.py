@@ -808,17 +808,24 @@ class _Named:
             stack.extend(reversed(record.parents))
         return records
 
-    def chain(self) -> list[Construct]:
-        """Where the object comes from in the HDL (odin3_prov_visit_chain): for each source leaf
-        in the order of sources(), its construct and then its ancestors up to the module; each
-        construct once, at its first reach. Empty when the design holds no construct table (read
-        with --prov-ast off, or from a netlist) or the object has no provenance."""
+    def chain_with_leaves(self) -> list[tuple[Construct, int]]:
+        """chain() with the SOURCE record that reached each construct first: (construct, leaf
+        record ID) pairs, in the same order. The leaf record is the one whose ``construct`` the
+        entry is (or the first leaf under it, for an ancestor row)."""
         reached: list[tuple[Construct, int]] = []
         odin3 = self.design.odin3
         self.design.call(
             "odin3_prov_visit_chain", self.obj(), odin3._construct_cb, odin3.ffi.new_handle(reached)
         )
-        return [construct for construct, _leaf in reached]
+        return reached
+
+    def chain(self) -> list[Construct]:
+        """Where the object comes from in the HDL (odin3_prov_visit_chain): for each source leaf
+        in the order of sources(), its construct and then its ancestors up to the module; each
+        construct once, at its first reach. Empty when the design holds no construct table (read
+        with --prov-ast off, or from a netlist) or the object has no provenance. See
+        chain_with_leaves() for the leaf record of each entry."""
+        return [construct for construct, _leaf in self.chain_with_leaves()]
 
     def attr(self, key: str) -> str | None:
         """The string attribute key, None when absent."""
