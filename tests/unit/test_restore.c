@@ -285,6 +285,56 @@ typedef struct plant {
     const char *needle;
 } plant;
 
+/* --- Task 9 fix round 1 ----------------------------------------------------------------------- */
+
+/* The design's pass runs, records, construct rows, extra lines and mutating slot as text: what the
+ * restore may change (the string table only grows and is not part of it). */
+static void fingerprint(odin3_strbuf *out) {
+    odin3_strbuf_clear(out);
+    for (uint32_t run = 1; run < odin3_passrun_end(design); run++) {
+        (void)odin3_strbuf_appendf(out, "T%u %u %u %u %d\n", run,
+                                   (unsigned)odin3_passrun_name(design, (odin3_passrun_id){run}),
+                                   (unsigned)odin3_passrun_args(design, (odin3_passrun_id){run}),
+                                   (unsigned)odin3_passrun_info(design, (odin3_passrun_id){run}),
+                                   (int)odin3_passrun_restored(design, (odin3_passrun_id){run}));
+    }
+    for (uint32_t id = 1; id < odin3_prov_end(design); id++) {
+        const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){id});
+        (void)odin3_strbuf_appendf(out, "R%u %d %u %u n%u a%u h%u p%u:", id, (int)rec->kind,
+                                   rec->run.v, rec->op, rec->n_locs, rec->ast, rec->hier,
+                                   rec->parents.count);
+        for (uint32_t k = 0; k < rec->parents.count; k++) {
+            (void)odin3_strbuf_appendf(out, " %u", rec->parents.ids[k].v);
+        }
+        for (uint32_t k = 0; k < rec->n_locs; k++) {
+            (void)odin3_strbuf_appendf(out, " [%u %u.%u-%u.%u]", rec->locs[k].file,
+                                       rec->locs[k].line, rec->locs[k].col, rec->locs[k].end_line,
+                                       rec->locs[k].end_col);
+        }
+        (void)odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
+    }
+    for (uint32_t row = 1; row < odin3_construct_end(design); row++) {
+        const odin3_construct_row *crow = odin3_construct_get(design, row);
+        (void)odin3_strbuf_appendf(out, "C%u %u %u %u %u %u %u %u %u:%u-%u:%u %u %u\n", row,
+                                   crow->run, crow->ast, crow->call, crow->parent, crow->part,
+                                   crow->kind, crow->level, crow->line, crow->col, crow->end_line,
+                                   crow->end_col, crow->file, crow->name);
+    }
+    const odin3_extra_table *extra = odin3_design_extra(design);
+    (void)odin3_strbuf_appendf(out, "X %d %u\n", extra != NULL ? 1 : 0,
+                               (unsigned)odin3_extra_mutating(extra));
+    for (uint32_t k = 0; k < odin3_extra_count(extra); k++) {
+        odin3_bytes line = odin3_extra_line(extra, k);
+        (void)odin3_strbuf_append(out, line);
+        (void)odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
+    }
+    for (uint32_t k = 0; k < odin3_extra_flags_count(extra); k++) {
+        odin3_bytes flags;
+        (void)odin3_strbuf_appendf(out, "F%u ", (unsigned)odin3_extra_flags_line(extra, k, &flags));
+        (void)odin3_strbuf_append(out, flags);
+    }
+}
+
 /* True when one of the logged errors contains the text. */
 static bool error_logged(const char *needle) {
     for (unsigned k = 0; k < error_count && k < MSG_MAX; k++) {
@@ -296,25 +346,26 @@ static bool error_logged(const char *needle) {
 }
 
 static void expect_refused(plant plant_in) {
-    const char *body = plant_in.body;
     const char *needle = plant_in.needle;
-    uint32_t runs = odin3_passrun_end(design);
-    uint32_t recs = odin3_prov_end(design);
-    uint32_t rows = odin3_construct_end(design);
+    odin3_strbuf before;
+    odin3_strbuf after;
+    odin3_strbuf_init(&before);
+    odin3_strbuf_init(&after);
+    fingerprint(&before);
     char text[TEXT_BUF + MSG_LEN];
-    (void)snprintf(text, sizeof text, "%s%s", HEADER, body);
+    (void)snprintf(text, sizeof text, "%s%s", HEADER, plant_in.body);
     parse(text);
     odin3_restore *restore = NULL;
     error_count = 0;
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE,
                                   odin3_design_restore(design, &map, "t.names", &restore), needle);
     TEST_ASSERT_NULL(restore);
-    TEST_ASSERT_TRUE_MESSAGE(error_count > 0, needle);
     TEST_ASSERT_TRUE_MESSAGE(error_logged(needle), needle);
-    TEST_ASSERT_EQUAL_UINT32(runs, odin3_passrun_end(design));
-    TEST_ASSERT_EQUAL_UINT32(recs, odin3_prov_end(design));
-    TEST_ASSERT_EQUAL_UINT32(rows, odin3_construct_end(design));
+    fingerprint(&after); /* no run, record, row or extra table */
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(before.data, after.data, needle);
     TEST_ASSERT_NULL(odin3_design_extra(design));
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&after);
     odin3_name_map_free(&map);
     memset(&map, 0, sizeof map);
 }
@@ -421,56 +472,6 @@ static void test_out_of_memory_returns_no_memory_without_a_crash(void) {
         design = odin3_design_create();
         odin3_pass_ctx ctx = {0};
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern("read_blif"), &ctx));
-    }
-}
-
-/* --- Task 9 fix round 1 ----------------------------------------------------------------------- */
-
-/* The design's pass runs, records, construct rows, extra lines and mutating slot as text: what the
- * restore may change (the string table only grows and is not part of it). */
-static void fingerprint(odin3_strbuf *out) {
-    odin3_strbuf_clear(out);
-    for (uint32_t run = 1; run < odin3_passrun_end(design); run++) {
-        (void)odin3_strbuf_appendf(out, "T%u %u %u %u %d\n", run,
-                                   (unsigned)odin3_passrun_name(design, (odin3_passrun_id){run}),
-                                   (unsigned)odin3_passrun_args(design, (odin3_passrun_id){run}),
-                                   (unsigned)odin3_passrun_info(design, (odin3_passrun_id){run}),
-                                   (int)odin3_passrun_restored(design, (odin3_passrun_id){run}));
-    }
-    for (uint32_t id = 1; id < odin3_prov_end(design); id++) {
-        const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){id});
-        (void)odin3_strbuf_appendf(out, "R%u %d %u %u n%u a%u h%u p%u:", id, (int)rec->kind,
-                                   rec->run.v, rec->op, rec->n_locs, rec->ast, rec->hier,
-                                   rec->parents.count);
-        for (uint32_t k = 0; k < rec->parents.count; k++) {
-            (void)odin3_strbuf_appendf(out, " %u", rec->parents.ids[k].v);
-        }
-        for (uint32_t k = 0; k < rec->n_locs; k++) {
-            (void)odin3_strbuf_appendf(out, " [%u %u.%u-%u.%u]", rec->locs[k].file,
-                                       rec->locs[k].line, rec->locs[k].col, rec->locs[k].end_line,
-                                       rec->locs[k].end_col);
-        }
-        (void)odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
-    }
-    for (uint32_t row = 1; row < odin3_construct_end(design); row++) {
-        const odin3_construct_row *crow = odin3_construct_get(design, row);
-        (void)odin3_strbuf_appendf(out, "C%u %u %u %u %u %u %u %u %u:%u-%u:%u %u %u\n", row,
-                                   crow->run, crow->ast, crow->call, crow->parent, crow->part,
-                                   crow->kind, crow->level, crow->line, crow->col, crow->end_line,
-                                   crow->end_col, crow->file, crow->name);
-    }
-    const odin3_extra_table *extra = odin3_design_extra(design);
-    (void)odin3_strbuf_appendf(out, "X %d %u\n", extra != NULL ? 1 : 0,
-                               (unsigned)odin3_extra_mutating(extra));
-    for (uint32_t k = 0; k < odin3_extra_count(extra); k++) {
-        odin3_bytes line = odin3_extra_line(extra, k);
-        (void)odin3_strbuf_append(out, line);
-        (void)odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
-    }
-    for (uint32_t k = 0; k < odin3_extra_flags_count(extra); k++) {
-        odin3_bytes flags;
-        (void)odin3_strbuf_appendf(out, "F%u ", (unsigned)odin3_extra_flags_line(extra, k, &flags));
-        (void)odin3_strbuf_append(out, flags);
     }
 }
 
