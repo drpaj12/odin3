@@ -251,8 +251,8 @@ static odin3_status strip_count(odin3_expr_ctx *ec, strip_job *job, uint32_t *co
 
 /* An operand without its first `skip` bits; when none is left, its last bit if the operands are
  * signed, else a 0 (Yosys: that bit if A_SIGNED, else a 0-bit port). */
-static odin3_status operand_rest(odin3_expr_ctx *ec, strip_job *job,
-                                 const odin3_expr_sig *full, uint32_t skip, odin3_expr_sig *out) {
+static odin3_status operand_rest(odin3_expr_ctx *ec, strip_job *job, const odin3_expr_sig *full,
+                                 uint32_t skip, odin3_expr_sig *out) {
     if (full->n > skip) {
         *out = odin3_expr_slice(full, skip, full->n - skip);
         return ODIN3_OK;
@@ -335,7 +335,7 @@ typedef struct gbit {
 typedef struct group_job {
     gbit *bits;
     uint32_t n;
-    odin3_expr_sig src; /* the net each result bit becomes */
+    odin3_expr_sig src;     /* the net each result bit becomes */
     odin3_net_id zero, one; /* made on first use by group_const */
 } group_job;
 
@@ -407,6 +407,16 @@ static uint32_t classify(const odin3_expr_ctx *ec, gbit *bit) {
     return const_a || const_b ? GRP_CONST_A : GRP_DYN;
 }
 
+/* Normalises, classifies and keys a bit; a bit normalise made a constant keys as that constant. */
+static void classify_bit(const odin3_expr_ctx *ec, gbit *bit) {
+    bit->fix = -1;
+    normalise(ec, bit);
+    const bool fixed = bit->fix >= 0;
+    bit->group = fixed ? GRP_CONST_AB : classify(ec, bit);
+    bit->ka = fixed ? (uint32_t)bit->fix : bit_key(ec, bit->a);
+    bit->kb = fixed ? (uint32_t)bit->fix : bit_key(ec, bit->b);
+}
+
 static int cmp_gbit(const void *lhs, const void *rhs) {
     const gbit *left = lhs;
     const gbit *right = rhs;
@@ -444,11 +454,7 @@ static odin3_status group_load(odin3_expr_ctx *ec, group_job *job) {
         bit->a = ext_a.net[pos];
         bit->b = ext_b.net[pos];
         bit->y = pos;
-        bit->fix = -1;
-        normalise(ec, bit);
-        bit->group = bit->fix >= 0 ? GRP_CONST_AB : classify(ec, bit);
-        bit->ka = bit->fix >= 0 ? (uint32_t)bit->fix : bit_key(ec, bit->a);
-        bit->kb = bit->fix >= 0 ? (uint32_t)bit->fix : bit_key(ec, bit->b);
+        classify_bit(ec, bit);
     }
     if (st == ODIN3_OK) {
         qsort(job->bits, job->n, sizeof *job->bits, cmp_gbit);
@@ -549,6 +555,19 @@ static odin3_status group_results(odin3_expr_ctx *ec, group_job *job, uint32_t g
     return odin3_expr_new_bin(ec, ec->kind, &pairs->a, &pairs->b, res);
 }
 
+/* The operand nets of a bit: a bit normalise made a constant gets the canonical constant now. */
+static odin3_status bit_nets(odin3_expr_ctx *ec, group_job *job, const gbit *bit,
+                             odin3_net_id *net_a, odin3_net_id *net_b) {
+    *net_a = bit->a;
+    *net_b = bit->b;
+    if (bit->fix < 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = group_const(ec, job, bit->fix == 1, net_a);
+    *net_b = *net_a;
+    return st;
+}
+
 /* One group: its different pairs, the nets they give, and src for each result bit of the group. */
 static odin3_status group_emit(odin3_expr_ctx *ec, group_job *job, uint32_t group) {
     group_range range = range_of(job, group);
@@ -562,14 +581,8 @@ static odin3_status group_emit(odin3_expr_ctx *ec, group_job *job, uint32_t grou
     uint32_t pair = 0;
     for (uint32_t i = range.lo; st == ODIN3_OK && i < range.hi; i++) {
         if (i == range.lo || !same_pair(&job->bits[i - 1], &job->bits[i])) {
-            odin3_net_id net_a = job->bits[i].a;
-            odin3_net_id net_b = job->bits[i].b;
-            if (job->bits[i].fix >= 0) {
-                st = group_const(ec, job, job->bits[i].fix == 1, &net_a);
-                net_b = net_a;
-            }
-            pairs.a.net[pair] = net_a;
-            pairs.b.net[pair++] = net_b;
+            st = bit_nets(ec, job, &job->bits[i], &pairs.a.net[pair], &pairs.b.net[pair]);
+            pair++;
         }
     }
     st = st == ODIN3_OK ? group_results(ec, job, group, &pairs, &res) : st;
