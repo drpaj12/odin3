@@ -7,11 +7,13 @@
 #include "ast/kinds.h"
 #include "backends/common/hdl_loc.h"
 #include "backends/common/name_map.h"
+#include "backends/common/prov_extra.h"
 #include "ir/construct.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/opclass.h"
 #include "ir/prov.h"
+#include "ir/restore.h"
 #include "odin3/odin3.h"
 #include "util/alloc.h"
 #include "util/clock.h"
@@ -977,7 +979,8 @@ typedef struct pm_rec {
     uint8_t kind;  /* odin3_prov_kind */
     uint8_t dir;
     uint8_t from;
-    uint8_t level; /* the `level` field */
+    uint8_t level;  /* the `level` field */
+    uint32_t stale; /* the design run of the stale mark of a post-Odin record, 0 none (4.5) */
 } pm_rec;
 
 /* A construct as numbered: the first row seen with its chain, its number and its parent's. */
@@ -1003,6 +1006,7 @@ typedef struct pm {
     odin3_u64map *run_num;  /* run -> t number */
     odin3_vec run_ids;      /* uint32_t */
     odin3_u64map *op_rank;  /* run << 32 | op -> the op number in the T row */
+    odin3_vec stale;        /* uint32_t per record: the stale run of a post-Odin record (4.5) */
     size_t cons_skipped;    /* joined rows left out of a J list: no numbered construct */
 } pm;
 
@@ -1014,6 +1018,7 @@ static void pm_free(pm *st) {
     odin3_vec_free(&st->hashes);
     odin3_vec_free(&st->file_ids);
     odin3_vec_free(&st->run_ids);
+    odin3_vec_free(&st->stale);
     odin3_u64map_destroy(st->num_of);
     odin3_u64map_destroy(st->by_hash);
     odin3_u64map_destroy(st->file_num);
@@ -1030,6 +1035,7 @@ static odin3_status pm_init(pm *st, const odin3_prov_map_req *req) {
     odin3_vec_init(&st->hashes, sizeof(uint64_t));
     odin3_vec_init(&st->file_ids, sizeof(uint32_t));
     odin3_vec_init(&st->run_ids, sizeof(uint32_t));
+    odin3_vec_init(&st->stale, sizeof(uint32_t));
     st->num_of = odin3_u64map_create(0);
     st->by_hash = odin3_u64map_create(0);
     st->file_num = odin3_u64map_create(0);
@@ -1334,6 +1340,7 @@ static odin3_status pm_label_all(pm *st) {
         pm_rec fresh;
         status = pm_label(st, ((const pm_rec *)odin3_vec_cat(&st->recs, i))->id, &fresh);
         if (status == ODIN3_OK) {
+            fresh.stale = i < st->stale.len ? *(const uint32_t *)odin3_vec_cat(&st->stale, i) : 0U;
             *(pm_rec *)odin3_vec_at(&st->recs, i) = fresh;
         }
     }
@@ -1427,6 +1434,20 @@ static odin3_status pm_rank_ops(pm *st, const odin3_vec *pairs) {
     return ODIN3_OK;
 }
 
+/* The stale runs of the extra lines, in their stored order (3.2 item 6). */
+static odin3_status pm_note_extra_runs(pm *st) {
+    const odin3_extra_table *extra = odin3_design_extra(st->design);
+    odin3_status status = ODIN3_OK;
+    for (uint32_t i = 0; status == ODIN3_OK && i < odin3_extra_count(extra); i++) {
+        odin3_xline line;
+        uint32_t run = odin3_xline_split(odin3_extra_line(extra, i), &line)
+                           ? odin3_xline_stale(st->design, &line)
+                           : 0U;
+        status = run != 0 ? pm_note_run(st, run) : status;
+    }
+    return status;
+}
+
 /* Numbers the pass runs by first reference and ranks the operations each T row names. */
 static odin3_status pm_runs(pm *st) {
     odin3_vec pairs;
@@ -1437,7 +1458,9 @@ static odin3_status pm_runs(pm *st) {
         const odin3_prov_record *rec = odin3_prov_get(st->design, (odin3_prov_id){pr->id});
         *(uint64_t *)odin3_vec_push(&pairs) = ((uint64_t)rec->run.v << KEY_SHIFT) | rec->op;
         status = pm_note_run(st, rec->run.v);
+        status = status == ODIN3_OK && pr->stale != 0 ? pm_note_run(st, pr->stale) : status;
     }
+    status = status == ODIN3_OK ? pm_note_extra_runs(st) : status;
     const elem_ctx sort = {sizeof(uint64_t), cmp_u64_elem, NULL};
     status = status == ODIN3_OK ? merge_sort(&pairs, &sort) : status;
     status = status == ODIN3_OK ? pm_rank_ops(st, &pairs) : status;
@@ -1591,8 +1614,15 @@ static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, 
     status = status == ODIN3_OK && pr->call != 0 ? add_flag_num(out, "call=c%u", pr->call) : status;
     status = status == ODIN3_OK && pr->n_context != 0 ? add_flag_num(out, "ctx=%u", pr->n_context)
                                                       : status;
-    return status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0 ? add_flag(out, "bulk")
-                                                                            : status;
+    status = status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0
+                 ? add_flag(out, "bulk")
+                 : status;
+    uint64_t run = 0;
+    if (status == ODIN3_OK && pr->stale != 0 && odin3_u64map_get(st->run_num, pr->stale, &run)) {
+        status =
+            add_flag_num(out, "stale=t%u", (uint32_t)run); /* a post-Odin record of a stale line */
+    }
+    return status;
 }
 
 static const char *kind_letter(unsigned kind) {
@@ -1845,6 +1875,46 @@ static odin3_status emit_object(const pm *st, const odin3_prov_obj *obj, line_bu
     return status;
 }
 
+/* Gives every record numbered since the last call the stale run `value` (0: none). */
+static odin3_status pm_grow_stale(pm *st, uint32_t value) {
+    while (st->stale.len < st->recs.len) {
+        uint32_t *slot = odin3_vec_push(&st->stale);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = value;
+    }
+    return ODIN3_OK;
+}
+
+/* The roots of the extra lines (3.2 item 2), after those of the objects: the records only they
+ * reach are post-Odin and carry the stale run of the line that reached them first (4.5). */
+static odin3_status pm_visit_extra(pm *st) {
+    const odin3_extra_table *extra = odin3_design_extra(st->design);
+    odin3_vec ids;
+    odin3_vec_init(&ids, sizeof(uint32_t));
+    odin3_status status = pm_grow_stale(st, 0);
+    for (uint32_t i = 0; status == ODIN3_OK && i < odin3_extra_count(extra); i++) {
+        odin3_xline line;
+        odin3_vec_clear(&ids);
+        if (!odin3_xline_split(odin3_extra_line(extra, i), &line)) {
+            status = ODIN3_ERR_INVALID_ARG;
+            break;
+        }
+        status = odin3_xline_records(&line, &ids);
+        for (size_t k = 0; status == ODIN3_OK && k < ids.len; k++) {
+            uint32_t id = *(const uint32_t *)odin3_vec_cat(&ids, k);
+            status = odin3_prov_get(st->design, (odin3_prov_id){id}) != NULL
+                         ? pm_visit(st, id)
+                         : ODIN3_ERR_INVALID_ARG;
+        }
+        status =
+            status == ODIN3_OK ? pm_grow_stale(st, odin3_xline_stale(st->design, &line)) : status;
+    }
+    odin3_vec_free(&ids);
+    return status;
+}
+
 /* Numbers the records behind the objects, labels them and the constructs. */
 static odin3_status pm_prepare(pm *st, const odin3_prov_obj *objs, const odin3_vec *sorted) {
     odin3_status status = ODIN3_OK;
@@ -1852,9 +1922,43 @@ static odin3_status pm_prepare(pm *st, const odin3_prov_obj *objs, const odin3_v
         uint32_t record = objs[*(const uint32_t *)odin3_vec_cat(sorted, i)].record;
         status = record != 0 ? pm_visit(st, record) : ODIN3_OK;
     }
+    status = status == ODIN3_OK ? pm_visit_extra(st) : status;
     status = status == ODIN3_OK ? pm_label_all(st) : status;
     status = status == ODIN3_OK ? pm_add_all_rows(st) : status;
     return status == ODIN3_OK ? pm_runs(st) : status;
+}
+
+/* True for a record that is a join and was made after the restore (not by a restored run). */
+static bool pm_new_join(const pm *st, const pm_rec *pr, uint32_t *run) {
+    if (pr->kind != (uint8_t)ODIN3_PROV_DERIVED ||
+        (pr->flags & (ODIN3_PROV_F_JOIN | ODIN3_PROV_F_JOIN_INSTANCE)) == 0) {
+        return false;
+    }
+    *run = odin3_prov_get(st->design, (odin3_prov_id){pr->id})->run.v;
+    return !odin3_passrun_restored(st->design, (odin3_passrun_id){*run});
+}
+
+/* The A, Q and K lines of a restored map, then the objective-only Q of each join made since (3.6,
+ * 4.5): none for a design that was not restored. */
+static odin3_status emit_extra(pm *st, odin3_strbuf *out) {
+    const odin3_extra_table *extra = odin3_design_extra(st->design);
+    const odin3_xline_nums nums = {st->design, st->num_of, st->run_num};
+    odin3_status status = ODIN3_OK;
+    for (uint32_t i = 0; status == ODIN3_OK && i < odin3_extra_count(extra); i++) {
+        odin3_xline line;
+        status = odin3_xline_split(odin3_extra_line(extra, i), &line)
+                     ? odin3_xline_emit(&nums, &line, out)
+                     : ODIN3_ERR_INVALID_ARG;
+    }
+    for (size_t i = 0; status == ODIN3_OK && extra != NULL && i < st->recs.len; i++) {
+        uint32_t run = 0;
+        if (pm_new_join(st, odin3_vec_cat(&st->recs, i), &run)) {
+            status = odin3_xline_emit_fresh_q(
+                (uint32_t)i + 1U,
+                str_of(st->design, odin3_passrun_name(st->design, (odin3_passrun_id){run})), out);
+        }
+    }
+    return status;
 }
 
 /* The lines in file order; out is appended to. */
@@ -1879,6 +1983,7 @@ static odin3_status pm_emit(pm *st, const odin3_prov_obj *objs, const odin3_vec 
     for (size_t i = 0; status == ODIN3_OK && i < st->run_ids.len; i++) {
         status = emit_run(st, i, &bufs, out);
     }
+    status = status == ODIN3_OK ? emit_extra(st, out) : status;
     bufs_free(&bufs);
     return status;
 }

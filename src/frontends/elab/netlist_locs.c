@@ -333,7 +333,9 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
         return ODIN3_OK;
     }
     if (odin3_netlist_restored(e2)) { /* V1.2.0 4.5: the map's record, no restored-location one */
-        *out = nl != NULL && nl->name != NULL ? (odin3_prov_id){nl->name->rec} : base;
+        if (nl != NULL && nl->name != NULL) {
+            out->v = nl->name->rec;
+        }
         return ODIN3_OK;
     }
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];

@@ -457,6 +457,7 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/backends/common/prov_export.c
+    src/backends/common/prov_extra.c
     src/frontends/hdl_restore.c
     src/frontends/name_resolve.c
     src/frontends/blif/reader_names.c
