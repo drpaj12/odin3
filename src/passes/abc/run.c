@@ -663,8 +663,6 @@ static odin3_status finish_info(odin3_abc_run *run) {
     const char *k_text = run->opts.lut_k != 0 ? number : "none";
     char depth_text[DEPTH_TEXT_BYTES];
     (void)snprintf(depth_text, sizeof depth_text, "%u", (unsigned)depth);
-    const bool has_objective = run->script.objective[0] != '\0';
-    const char *objective_src = run->script.objective_stated ? "stated" : "rule";
     const struct {
         const char *key;
         const char *value;
@@ -675,9 +673,7 @@ static odin3_status finish_info(odin3_abc_run *run) {
                  {"exchange", run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif"},
                  {"gates", run->opts.gates},
                  {"genlib", run->genlib_sha256_hex},
-                 {"depth", depth_text},
-                 {"objective", has_objective ? run->script.objective : NULL},
-                 {"objective_src", has_objective ? objective_src : NULL}};
+                 {"depth", depth_text}};
     for (size_t i = 0; st == ODIN3_OK && i < sizeof words / sizeof words[0]; i++) {
         if (words[i].value != NULL && (run->gates_mode || strcmp(words[i].key, "genlib") != 0)) {
             st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));
@@ -688,6 +684,9 @@ static odin3_status finish_info(odin3_abc_run *run) {
     st = st == ODIN3_OK ? odin3_passrun_set_info(run->ctx, str) : st;
     odin3_strbuf_free(&info);
     if (st == ODIN3_OK) {
+        /* the objective reaches the name map's Q line through this memo, not the run information */
+        odin3_abc_objective_note(run->script.sha256_hex, run->script.objective,
+                                 run->script.objective_stated);
         odin3_log(ODIN3_LOG_INFO, "abc: final: depth %u", (unsigned)depth);
     }
     return st;

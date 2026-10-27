@@ -458,7 +458,7 @@ static void test_run_information_default_script(void) {
     char want[400];
     (void)snprintf(want, sizeof want,
                    "script=builtin:lib/abc/vtr.abc sha256=%s abc=a3001b72edc5de22442e942165487fddf1"
-                   "50e3d0 K=6 exchange=blif depth=1 objective=depth objective_src=rule",
+                   "50e3d0 K=6 exchange=blif depth=1",
                    hex);
     TEST_ASSERT_EQUAL_STRING(want, last_info());
 }
@@ -480,8 +480,7 @@ static void test_run_information_quotes_a_path_with_blanks(void) {
     char want[AFX_JOIN + 16];
     (void)snprintf(want, sizeof want, "script=\"%s\" ", script);
     TEST_ASSERT_EQUAL_INT(0, strncmp(last_info(), want, strlen(want)));
-    TEST_ASSERT_NOT_NULL(
-        strstr(last_info(), " K=4 exchange=blif depth=1 objective=depth objective_src=rule"));
+    TEST_ASSERT_NOT_NULL(strstr(last_info(), " K=4 exchange=blif depth=1"));
 }
 
 /* Without a top module there is nothing to map, and the depth is 0. */
@@ -489,8 +488,7 @@ static void test_run_information_without_top(void) {
     odin3_design_destroy(design);
     design = odin3_design_create();
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run_abc("--lut 6"), afx_errors());
-    TEST_ASSERT_NOT_NULL(
-        strstr(last_info(), " K=6 exchange=blif depth=0 objective=depth objective_src=rule"));
+    TEST_ASSERT_NOT_NULL(strstr(last_info(), " K=6 exchange=blif depth=0"));
 }
 
 /* --- the per-run INFO line ------------------------------------------------------------------ */

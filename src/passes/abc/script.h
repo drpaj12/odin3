@@ -183,6 +183,17 @@ void odin3_abc_script_free(odin3_abc_script *script);
 void odin3_abc_objective(odin3_bytes text, const odin3_abc_cmd *cmds, uint32_t n_cmds,
                          char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated);
 
+/*
+ * The memo that carries an objective to the name map exporter without the pass-run record (whose
+ * information the writers print verbatim). note stores the objective of the script with SHA-256
+ * sha_hex (64 digits) once a run of it is done; find returns true and fills out and *stated when
+ * that script was noted in this process (the last 32 distinct scripts are kept). The objective is a
+ * pure function of the script bytes, so the memo is a cache, never a state. Single-threaded.
+ */
+void odin3_abc_objective_note(const char *sha_hex, const char *objective, bool stated);
+bool odin3_abc_objective_find(odin3_bytes sha_hex, char out[ODIN3_ABC_OBJECTIVE_BYTES],
+                              bool *stated);
+
 /* The command at index, or NULL for a NULL script or an index at or past n_cmds. */
 const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32_t index);
 

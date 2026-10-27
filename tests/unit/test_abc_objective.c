@@ -136,10 +136,16 @@ static void q_line(const char *pass, const char *info, char *out, size_t cap) {
     odin3_strbuf_free(&buf);
 }
 
+#define SHA_A "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+#define SHA_B "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+#define SHA_C "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+/* The objective reaches the Q line through the memo of the abc run, found by the info's sha256=
+ * word; the run information itself holds no objective word. */
 static void test_q_for_a_stated_objective_is_recorded(void) {
     char line[LINE_CAP];
-    q_line("abc", "script=a.abc K=6 depth=1 objective=area objective_src=stated", line,
-           sizeof line);
+    odin3_abc_objective_note(SHA_A, "area", true);
+    q_line("abc", "script=a.abc sha256=" SHA_A " K=6 depth=1", line, sizeof line);
     TEST_ASSERT_EQUAL_STRING("Q\tr7\t\tarea\t\t\t\t\t\t\t\twhy=-,objective=r,gain=-,pcrit=-,rho=-,"
                              "slack=-,near=-,npaths=-\t-\n",
                              line);
@@ -147,18 +153,23 @@ static void test_q_for_a_stated_objective_is_recorded(void) {
 
 static void test_q_for_a_script_derived_objective_is_inferred(void) {
     char line[LINE_CAP];
-    q_line("abc", "script=a.abc K=6 depth=1 objective=depth objective_src=rule", line, sizeof line);
+    odin3_abc_objective_note(SHA_B, "depth", false);
+    q_line("abc", "script=a.abc sha256=" SHA_B " K=6 depth=1", line, sizeof line);
     TEST_ASSERT_EQUAL_STRING("Q\tr7\t\tdepth\t\t\t\t\t\t\t\twhy=-,objective=i,gain=-,pcrit=-,rho=-,"
                              "slack=-,near=-,npaths=-\t-\n",
                              line);
 }
 
+/* A script that states no goal (noted with an empty objective), and one never run here. */
 static void test_q_for_abc_with_no_objective_is_empty(void) {
     char line[LINE_CAP];
-    q_line("abc", "script=a.abc K=6 depth=1", line, sizeof line);
+    odin3_abc_objective_note(SHA_C, "", false);
+    q_line("abc", "script=a.abc sha256=" SHA_C " K=6 depth=1", line, sizeof line);
     TEST_ASSERT_EQUAL_STRING("Q\tr7\t\t\t\t\t\t\t\t\t\twhy=-,objective=-,gain=-,pcrit=-,rho=-,"
                              "slack=-,near=-,npaths=-\t-\n",
                              line);
+    q_line("abc", "script=a.abc K=6 depth=1", line, sizeof line);
+    TEST_ASSERT_NOT_NULL(strstr(line, "objective=-,"));
 }
 
 static void test_q_ignores_an_objective_word_inside_a_quoted_value(void) {

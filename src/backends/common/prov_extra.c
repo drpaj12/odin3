@@ -2,6 +2,7 @@
 #include "backends/common/prov_extra.h"
 
 #include "ir/restore.h"
+#include "passes/abc/script.h"
 #include "util/alloc.h"
 #include "util/log.h"
 
@@ -192,18 +193,23 @@ typedef struct q_source {
 
 /* The objective of a join and its basis letter: `r` (read as written: the pass name, or a goal
  * the script states), `i` (derived from the script by the rule of src/passes/abc/objective.c) or
- * `-` (none: an abc script that states no goal). abc records its objective in its run
- * information; any other pass is named. */
+ * `-` (none: an abc script that states no goal, or one this process did not run). abc's objective
+ * is not in its run information (the writers print that verbatim): the exporter finds it by the
+ * `sha256=` word of the information, in the memo that the abc run filled; any other pass is
+ * named. */
 static char objective_of(const q_source *src, char *out, size_t cap) {
     out[0] = '\0';
     if (src->pass.len == 3U && memcmp(src->pass.ptr, "abc", 3U) == 0) {
-        char how[ID_TEXT] = "";
-        if (!info_word(src->info, "objective", out, cap)) {
+        char sha[ID_TEXT * 8] = "";
+        char found[ODIN3_ABC_OBJECTIVE_BYTES];
+        bool stated = false;
+        if (!info_word(src->info, "sha256", sha, sizeof sha) ||
+            !odin3_abc_objective_find(odin3_bytes_cstr(sha), found, &stated) || found[0] == '\0' ||
+            strlen(found) >= cap) {
             return '-';
         }
-        return info_word(src->info, "objective_src", how, sizeof how) && strcmp(how, "stated") == 0
-                   ? 'r'
-                   : 'i';
+        memcpy(out, found, strlen(found) + 1U);
+        return stated ? 'r' : 'i';
     }
     if (src->pass.len == 0U || src->pass.len >= cap) {
         return '-';

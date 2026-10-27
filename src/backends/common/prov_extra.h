@@ -56,8 +56,8 @@ enum { ODIN3_XLINE_OBJECTIVE_BYTES = 64 };
 
 /* Appends the objective-only Q line of the join record numbered rnum, made by the pass `pass`
  * whose run information is `info` (3.6). The objective is the pass name, except for abc, whose
- * objective is the `objective=` word of its run information (`objective_src=stated`: basis r; any
- * other source: the script rule, basis i; no word: empty, basis -). stale is `-`. */
+ * objective is the memo of its script (found by the `sha256=` word of the run information;
+ * stated: basis r; the script rule: basis i; none: empty, basis -). stale is `-`. */
 odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_bytes info,
                                       odin3_strbuf *out);
 

@@ -27,7 +27,11 @@ enum { OBJ_PREFIX_BYTES = 10 }; /* the bytes of `objective:` */
 
 static const char OBJ_PREFIX[] = "objective:";
 
-/* The valued option letters of the four mapping commands (abc.c usage lines at the pin). */
+/* The valued option letters of the four mapping commands, checked against the usage lines of
+ * third_party/abc/src/base/abci/abc.c at the pin: `if` 23480 (-KCFAGRNTXYZMU num, -DEW float, -SJ
+ * str), `&if` 45832 (-KCFAGRTXYZM num, -DEW float, -SJ str), `map` 21626 (-DABFSG float, -M num),
+ * `&nf` 47268 (-KCFARLEDQM num, -Z file). `-a` is a plain flag in all four (21635 map, 23500 if,
+ * 45851 &if; &nf 47281 is the SAT-based area-oriented mapping, an area goal as well). */
 static const struct {
     const char *name;
     const char *valued;
@@ -141,4 +145,53 @@ void odin3_abc_objective(odin3_bytes text, const odin3_abc_cmd *cmds, uint32_t n
             return;
         }
     }
+}
+
+/* --- the memo ------------------------------------------------------------------------------- */
+
+enum { MEMO_SLOTS = 32, MEMO_SHA_CHARS = 64 };
+
+typedef struct objective_memo {
+    char sha[MEMO_SHA_CHARS];
+    char objective[ODIN3_ABC_OBJECTIVE_BYTES];
+    bool stated;
+    bool used;
+} objective_memo;
+
+static objective_memo g_memo[MEMO_SLOTS];
+static uint32_t g_memo_next;
+
+void odin3_abc_objective_note(const char *sha_hex, const char *objective, bool stated) {
+    if (sha_hex == NULL || objective == NULL || strlen(sha_hex) != MEMO_SHA_CHARS ||
+        strlen(objective) >= ODIN3_ABC_OBJECTIVE_BYTES) {
+        return;
+    }
+    objective_memo *slot = NULL;
+    for (uint32_t i = 0; i < MEMO_SLOTS && slot == NULL; i++) {
+        slot = g_memo[i].used && memcmp(g_memo[i].sha, sha_hex, MEMO_SHA_CHARS) == 0 ? &g_memo[i]
+                                                                                    : NULL;
+    }
+    if (slot == NULL) {
+        slot = &g_memo[g_memo_next];
+        g_memo_next = (g_memo_next + 1U) % MEMO_SLOTS;
+    }
+    memcpy(slot->sha, sha_hex, MEMO_SHA_CHARS);
+    memcpy(slot->objective, objective, strlen(objective) + 1U);
+    slot->stated = stated;
+    slot->used = true;
+}
+
+bool odin3_abc_objective_find(odin3_bytes sha_hex, char out[ODIN3_ABC_OBJECTIVE_BYTES],
+                              bool *stated) {
+    if (sha_hex.ptr == NULL || sha_hex.len != MEMO_SHA_CHARS) {
+        return false;
+    }
+    for (uint32_t i = 0; i < MEMO_SLOTS; i++) {
+        if (g_memo[i].used && memcmp(g_memo[i].sha, sha_hex.ptr, MEMO_SHA_CHARS) == 0) {
+            memcpy(out, g_memo[i].objective, ODIN3_ABC_OBJECTIVE_BYTES);
+            *stated = g_memo[i].stated;
+            return true;
+        }
+    }
+    return false;
 }
