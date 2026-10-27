@@ -1,0 +1,83 @@
+<?xml version="1.0"?>
+<block name="why.net" instance="FPGA_packed_netlist[0]">
+<inputs>a b c d e f g h i x</inputs><outputs>out:o1 out:q1 out:n5 out:n6</outputs><clocks>clk</clocks>
+<block name="n1" instance="clb[0]" mode="default">
+<block name="n1" instance="fle[0]" mode="n1_lut6">
+<block name="n1" instance="lut6[0]" mode="lut6"/>
+</block>
+<block name="n2" instance="fle[1]" mode="n1_lut6">
+<block name="n2" instance="lut6[0]" mode="lut6"/>
+</block>
+<block name="n3" instance="fle[2]" mode="n1_lut6">
+<block name="n3" instance="lut6[0]" mode="lut6"/>
+</block>
+<block name="q1" instance="fle[3]" mode="n1_lut6">
+<block name="q1" instance="ff[0]" mode="ff"/>
+</block>
+<block name="n4" instance="fle[4]" mode="n1_lut6">
+<block name="n4" instance="lut6[0]" mode="lut6"/>
+</block>
+<block name="n5" instance="fle[5]" mode="n1_lut6">
+<block name="n5" instance="lut6[0]" mode="lut6"/>
+</block>
+<block name="n6" instance="fle[6]" mode="n1_lut6">
+<block name="n6" instance="lut6[0]" mode="lut6"/>
+</block>
+</block>
+<block name="o1" instance="clb[1]" mode="default">
+<block name="o1" instance="fle[0]" mode="n1_lut6">
+<block name="o1" instance="lut6[0]" mode="lut6"/>
+</block>
+</block>
+<block name="md" instance="memory[0]" mode="mem_512x64_sp">
+<block name="md" instance="mem_512x64_sp[0]" mode="mem_512x64_sp">
+<inputs><port name="addr">a</port><port name="we">c</port></inputs>
+<outputs><port name="dout">mem_512x64_sp[0].dout[0]->md</port></outputs>
+</block>
+</block>
+<block name="a" instance="io[0]" mode="inpad">
+<block name="a" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="b" instance="io[1]" mode="inpad">
+<block name="b" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="c" instance="io[2]" mode="inpad">
+<block name="c" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="d" instance="io[3]" mode="inpad">
+<block name="d" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="e" instance="io[4]" mode="inpad">
+<block name="e" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="f" instance="io[5]" mode="inpad">
+<block name="f" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="g" instance="io[6]" mode="inpad">
+<block name="g" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="h" instance="io[7]" mode="inpad">
+<block name="h" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="i" instance="io[8]" mode="inpad">
+<block name="i" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="x" instance="io[9]" mode="inpad">
+<block name="x" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="clk" instance="io[10]" mode="inpad">
+<block name="clk" instance="inpad[0]" mode="inpad"/>
+</block>
+<block name="out:o1" instance="io[11]" mode="outpad">
+<block name="out:o1" instance="outpad[0]" mode="outpad"/>
+</block>
+<block name="out:q1" instance="io[12]" mode="outpad">
+<block name="out:q1" instance="outpad[0]" mode="outpad"/>
+</block>
+<block name="out:n5" instance="io[13]" mode="outpad">
+<block name="out:n5" instance="outpad[0]" mode="outpad"/>
+</block>
+<block name="out:n6" instance="io[14]" mode="outpad">
+<block name="out:n6" instance="outpad[0]" mode="outpad"/>
+</block>
+</block>

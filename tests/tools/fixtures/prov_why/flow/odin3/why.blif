@@ -1,0 +1,27 @@
+# hand-made BLIF for the prov_why fixture (hash-style names)
+.model why
+.inputs a b c d e f g h i x clk
+.outputs o1 q1 n5 n6
+.names a b n1
+11 1
+.names n1 a n2
+11 1
+.names n2 d n3
+11 1
+.names e f n4
+11 1
+.names e g n5
+11 1
+.names h md n6
+11 1
+.names n4 x o1
+11 1
+.subckt single_port_ram addr=a we=c dout=md
+.latch n3 q1 re clk 2
+.end
+
+.model single_port_ram
+.inputs addr we
+.outputs dout
+.blackbox
+.end

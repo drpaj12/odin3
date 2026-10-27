@@ -1,0 +1,8 @@
+<architecture>
+  <models>
+    <model name="single_port_ram">
+      <input_ports><port name="addr"/><port name="we"/><port name="clk" is_clock="1"/></input_ports>
+      <output_ports><port name="dout" clock="clk"/></output_ports>
+    </model>
+  </models>
+</architecture>

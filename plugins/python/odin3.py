@@ -1230,7 +1230,7 @@ class AstNode:
 
 _MAP_ESCAPES_V1 = {"%09": "\t", "%0A": "\n", "%5C": "\\", "%25": "%", "%23": "#"}
 _MAP_ESCAPES = {**_MAP_ESCAPES_V1, "%2C": ",", "%7C": "|"}
-_MAP_MIN_FIELDS = {"O": 9, "N": 5, "R": 9, "C": 7, "F": 2, "T": 4, "A": 3}
+_MAP_MIN_FIELDS = {"O": 9, "N": 5, "R": 9, "C": 7, "F": 2, "T": 4, "A": 3, "Q": 12, "K": 7}
 _MAP_MAX_FIELDS = 12  # the fields the C parse keeps (ODIN3_NM2_MAX_FIELDS)
 _MAP_MAX_LINE = 1 << 20  # the longest line kept, bytes (ODIN3_NAME_MAP_MAX_LINE); longer: ignored
 _MAP_MAX_FILE = 1 << 30  # the largest map file read, bytes (the C `names` pass has the same cap)
@@ -1336,11 +1336,64 @@ class MapConstruct:
     raw: str
 
 
+def _map_list(text: str) -> tuple[str, ...]:
+    """A comma list of a Q or K field, each element unescaped (an empty field is no elements)."""
+    return tuple(_map_unescape(item) for item in text.split(",")) if text else ()
+
+
+def _map_ref_lenient(text: str, prefix: str) -> int:
+    """The number in a reference like r12, 0 when the field is not one (a Q or K line is kept even
+    then; `names --check` reports the id)."""
+    try:
+        return _map_ref(text, prefix)
+    except ValueError:
+        return 0
+
+
+@dataclass(frozen=True)
+class MapWhy:
+    """A Q line (spec 3.6): why the join record ``record`` was made and how critical it was.
+    ``why`` and ``gain`` are ``name:share`` elements, ``near`` and ``npaths`` ``margin:value``
+    elements, ``basis`` ``field=r|i|-`` elements; ``pcrit``, ``rho``, ``slack`` and ``members`` are
+    the field texts (empty when absent). ``stale`` is ``-`` or ``t<n>``. ``record`` is 0 when the
+    id field is not an ``r<n>``."""
+
+    record: int
+    why: tuple[str, ...]
+    objective: str
+    gain: tuple[str, ...]
+    pcrit: str
+    rho: str
+    slack: str
+    near: tuple[str, ...]
+    npaths: tuple[str, ...]
+    members: str
+    basis: tuple[str, ...]
+    stale: str
+    raw: str
+
+
+@dataclass(frozen=True)
+class MapMember:
+    """A K line (spec 3.6): one member (an atom) of the join record ``record`` with its own
+    criticality; fields as in MapWhy (``basis`` lists ``pcrit``, ``rho`` and ``slack``)."""
+
+    record: int
+    member: str
+    pcrit: str
+    rho: str
+    slack: str
+    basis: tuple[str, ...]
+    stale: str
+    raw: str
+
+
 @dataclass
 class NameMap:
     """A parsed name map. version is 1 or 2; ast is the header's ast word (version 2). Lines of
     a type this reader does not know are skipped with one warning per type; A lines are kept
-    unparsed in atoms (fields after the type letter). Hash names are not verified here
+    unparsed in atoms (fields after the type letter); Q lines are whys and K lines members (spec
+    3.6). Hash names are not verified here
     (`names --check` does)."""
 
     version: int
@@ -1352,6 +1405,8 @@ class NameMap:
     files: list[str] = field(default_factory=list)
     runs: list[tuple[str, str, str]] = field(default_factory=list)
     atoms: list[tuple[str, ...]] = field(default_factory=list)
+    whys: list[MapWhy] = field(default_factory=list)
+    members: list[MapMember] = field(default_factory=list)
     ignored: int = 0
     _index: dict[str, list[MapObject]] = field(default_factory=dict, init=False, repr=False,
                                                compare=False)
@@ -1366,6 +1421,16 @@ class NameMap:
                 self._index.setdefault(obj.name, []).append(obj)
             self._indexed = len(self.objects)
         return list(self._index.get(name, ()))
+
+    def why_of(self, record: int) -> MapWhy | None:
+        """The current Q line of a join record (the last whose stale field is ``-``), None when it
+        has none. A stale line is history: ask ``whys`` for it."""
+        found = [w for w in self.whys if w.record == record and w.stale == "-"]
+        return found[-1] if found else None
+
+    def members_of(self, record: int) -> list[MapMember]:
+        """The current K lines (stale ``-``) of a join record, in file order."""
+        return [m for m in self.members if m.record == record and m.stale == "-"]
 
     def provenance(self, obj: MapObject) -> list[MapRecord]:
         """The records of obj, as Node.provenance(): its naming record first, then every record
@@ -1458,6 +1523,15 @@ def _map_line(nm: NameMap, text: str) -> None:
         nm.files.append(raw[1])
     elif kind == "T":
         nm.runs.append((raw[1], raw[2], raw[3]))
+    elif kind == "Q":
+        nm.whys.append(MapWhy(
+            _map_ref_lenient(fields[0], "r"), _map_list(fields[1]), raw[2], _map_list(fields[3]),
+            raw[4], raw[5], raw[6], _map_list(fields[7]), _map_list(fields[8]), raw[9],
+            _map_list(fields[10]), raw[11], text))
+    elif kind == "K":
+        nm.members.append(MapMember(
+            _map_ref_lenient(fields[0], "r"), raw[1], raw[2], raw[3], raw[4],
+            _map_list(fields[5]), raw[6], text))
     else:
         nm.atoms.append(tuple(raw))
 

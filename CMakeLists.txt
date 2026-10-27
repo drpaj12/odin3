@@ -255,6 +255,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
+    src/passes/abc/objective.c
     src/passes/abc/engine.c
     src/passes/abc/child.c
     src/passes/abc/args.c
@@ -581,6 +582,7 @@ install(FILES ${_odin3_share_libs} DESTINATION ${_odin3_share_dir}/lib)
 install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/lib/abc)
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
               tools/flow/timing_report.py tools/flow/name_map_v2.py tools/flow/prov_post.py
+              tools/flow/prov_why.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post
         DESTINATION ${_odin3_share_dir}/tools/flow)
@@ -1540,6 +1542,7 @@ if(BUILD_TESTING)
     # point (p)) and the embedded default script, compared with lib/abc/vtr.abc.
     odin3_add_unit_test(test_abc_script)
     target_sources(test_abc_script PRIVATE tests/unit/abc_script_cases.c)
+    odin3_add_unit_test(test_abc_objective)
     odin3_add_unit_test(test_abc_default_script)
     target_compile_definitions(test_abc_default_script PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -2709,7 +2712,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
     list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
     # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
-    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
+    # ODIN3_REQUIRE_CLI: test_prov_why fails (does not skip) when ODIN3_CLI is unset under CTest.
+    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>" "ODIN3_REQUIRE_CLI=1")
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")

@@ -105,6 +105,36 @@ class SyntheticMaps(Agreement, unittest.TestCase):
                           ours.atoms, ours.ignored), (2, 1, 1, [("atom_0", "r1", "-")], 2))
         self.assertEqual(warnings, 1)  # one warning per unknown type
 
+    def test_q_and_k_lines_are_parsed_by_both(self) -> None:
+        """V1.2.0 Task 10: the Q (why, objective, criticality) and K (member) lines of spec 3.6."""
+        basis = "why=r,objective=i,gain=r,pcrit=r,rho=r,slack=r,near=r,npaths=r"
+        text = (TWO + "F\tf1\ta.v\nT\tt1\tread_verilog\t\t\n"
+                "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:3.5-3.20\t\t\n"
+                "Q\tr1\tSC:0.500,FL:0.500\tnorns-pack:beta=4\tseed:1.000\t0.900\t1.000\t-1.000\t"
+                f"5:1,10:1\t5:>=2,10:3\t2\t{basis}\t-\n"
+                "Q\tr1\t\topt" + "\t" * 9 + "t1\n"
+                "K\tr1\tm%2Cx\t0.900\t1.000\t-1.000\tpcrit=r,rho=r,slack=r\t-\n"
+                "K\tbad\tm" + "\t" * 5 + "t1\n")
+        ours, warnings = self.agree(self.write("qk.names", text))
+        self.assertEqual((len(ours.whys), len(ours.members), ours.ignored, warnings), (2, 2, 0, 0))
+        first = ours.whys[0]
+        self.assertEqual((first.record, first.why, first.gain, first.near, first.npaths),
+                         (1, ("SC:0.500", "FL:0.500"), ("seed:1.000",), ("5:1", "10:1"),
+                          ("5:>=2", "10:3")))
+        self.assertEqual((first.pcrit, first.rho, first.slack, first.members, first.stale),
+                         ("0.900", "1.000", "-1.000", "2", "-"))
+        self.assertEqual(first.basis[:2], ("why=r", "objective=i"))
+        self.assertEqual(ours.whys[1].stale, "t1")
+        self.assertEqual(ours.members[0].member, "m,x")  # %2C is a comma in the name
+        self.assertEqual(ours.members[1].record, 0)  # an id that is not r<n> is kept as 0
+        self.assertIs(ours.why_of(1), first)  # the current line, not the stale one
+        self.assertEqual([m.member for m in ours.members_of(1)], ["m,x"])
+
+    def test_q_and_k_lines_with_too_few_fields_are_ignored_by_both(self) -> None:
+        text = TWO + "Q\tr1\tx\nK\tr1\tm\n"
+        ours, warnings = self.agree(self.write("short.names", text))
+        self.assertEqual((len(ours.whys), len(ours.members), ours.ignored, warnings), (0, 0, 2, 2))
+
     def test_malformed_lines_are_ignored_as_the_c_parse_does(self) -> None:
         cases: dict[str, str | bytes] = {
             "v1_cr": ONE + GOOD1 + "\r\n",

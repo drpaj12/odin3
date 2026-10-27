@@ -1,0 +1,57 @@
+{
+ "clbs": {
+  "clb0": {
+   "members": [
+    "n1",
+    "n2",
+    "n3",
+    "n4",
+    "n5",
+    "n6",
+    "q1"
+   ],
+   "pairs": 21,
+   "counts": {
+    "SC": 2,
+    "SN": 1,
+    "SI": 1,
+    "OR": 1,
+    "FL": 16
+   }
+  },
+  "clb1": {
+   "members": [
+    "o1"
+   ],
+   "pairs": 0,
+   "counts": {
+    "SC": 0,
+    "SN": 0,
+    "SI": 0,
+    "OR": 0,
+    "FL": 0
+   }
+  },
+  "mem0": {
+   "members": [],
+   "pairs": 0,
+   "counts": {
+    "SC": 0,
+    "SN": 0,
+    "SI": 0,
+    "OR": 0,
+    "FL": 0
+   }
+  }
+ },
+ "total": {
+  "pairs": 21,
+  "counts": {
+   "SC": 2,
+   "SN": 1,
+   "SI": 1,
+   "OR": 1,
+   "FL": 16
+  }
+ }
+}
