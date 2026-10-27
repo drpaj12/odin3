@@ -156,6 +156,48 @@ class RestoreExtra(unittest.TestCase):
             2, sum(1 for x in lines(names_of(again)) if x.startswith("R\t") and "stale=" in x)
         )
 
+    def test_task10_enriched_q_survives_an_unchanged_restore_and_goes_stale_after_opt(self) -> None:
+        """Spec 3.6 and 4.5: a restored Q wins over a new objective-only one only while it is not
+        stale. An unchanged restore then write keeps the enriched line; restore, opt, write gives
+        the restored Q (and its K) with the stale run of opt, plus a fresh objective-only Q with
+        stale `-` for each join opt made."""
+        work = workdir("task10")
+        first = work / "cmp.json"
+        write_first(
+            "bm_stmt_compare_padding", "json", first, steps="proc; flatten; hardmap; lower; "
+        )
+        self.assertFalse([x for x in lines(names_of(first)) if x.startswith("Q\t")])
+        basis = "why=r,objective=i,gain=r,pcrit=r,rho=r,slack=r,near=r,npaths=r"
+        enriched = [
+            f"Q\tr3\tSC:0.500,FL:0.500\tnorns-pack\tseed:1.000\t0.900\t1.000\t-1.000\t5:1,10:1\t"
+            f"5:2,10:3\t2\t{basis}\t-",
+            "K\tr3\tm\t0.900\t1.000\t-1.000\tpcrit=r,rho=r,slack=r\t-",
+        ]
+        with names_of(first).open("a") as handle:
+            handle.write("\n".join(enriched) + "\n")
+        same, after = work / "cmp.2.json", work / "cmp.3.json"
+        rewrite("json", names_of(first), first, same)
+        post = ("Q\t", "K\t")
+        self.assertEqual(enriched, [x for x in lines(names_of(same)) if x.startswith(post)])
+        rewrite("json", names_of(same), same, after, middle="opt -full; ")
+        out = [x for x in lines(names_of(after)) if x.startswith(post)]
+        opt_row = next(
+            x.split("\t")[1]
+            for x in lines(names_of(after))
+            if x.startswith("T\t") and x.split("\t")[2] == "opt"
+        )
+        stale = [x for x in out if last_field(x) == opt_row]
+        self.assertEqual([x.rsplit("\t", 1)[0] for x in stale],
+                         [x.rsplit("\t", 1)[0] for x in enriched])
+        fresh = [x for x in out if x.startswith("Q\t") and last_field(x) == "-"]
+        self.assertTrue(fresh, "opt made joins")
+        for line in fresh:
+            fields = line.split("\t")
+            self.assertEqual(fields[3], "opt")
+            self.assertTrue(all(f == "" for f in [fields[2], *fields[4:11]]))
+            self.assertIn("objective=r", fields[11])
+            self.assertNotEqual(fields[1], "r3")
+
     def test_a_pass_that_only_looks_leaves_the_lines_current(self) -> None:
         work = workdir("look")
         first = work / "mux.blif"
@@ -251,10 +293,15 @@ class RestoreExtra(unittest.TestCase):
                 # a port vector keeps one record (its first bit's): records are renumbered and
                 # BLEs over the bits of one port become one record (hash-consing); every A, Q, K
                 # line is kept, and no record is dropped for lack of a parent
-                for letter in ("A\t", "Q\t", "K\t"):
+                self.assertEqual(
+                    sorted(x.split("\t")[1] for x in before if x.startswith("A\t")),
+                    sorted(x.split("\t")[1] for x in after if x.startswith("A\t")),
+                )
+                # Q and K lines are keyed by record number, which the renumbering changes
+                for letter in ("Q\t", "K\t"):
                     self.assertEqual(
-                        sorted(x.split("\t")[1] for x in before if x.startswith(letter)),
-                        sorted(x.split("\t")[1] for x in after if x.startswith(letter)),
+                        sum(1 for x in before if x.startswith(letter)),
+                        sum(1 for x in after if x.startswith(letter)),
                     )
                 for level in ("ble", "clb", "site"):
                     count_after = sum(

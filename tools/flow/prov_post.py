@@ -643,7 +643,7 @@ def odin_specs(nm: NameMap, names: Resolver, clusters: list[Cluster], base: int,
     qrecs = {w.record: w for w in nm.whys if w.stale == "-" and 1 <= w.record <= base}
     if report is None or not qrecs:
         return []
-    atoms = [a for cl in clusters for a in cl.atoms]
+    atoms = [a for cl in clusters for a in cl.atoms if cl.stems.get(a) not in PAD_STEMS]
     start_of: dict[str, int] = {}
     for atom in atoms:
         obj = names.lookup(atom)

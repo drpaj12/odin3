@@ -1,0 +1,77 @@
+{
+ "schema_version": 1,
+ "timing": {
+  "paths_requested": 100,
+  "paths_in_report": 4,
+  "paths_kept": 4
+ },
+ "paths": [
+  {
+   "index": 1,
+   "arrival_ns": 10.0,
+   "slack_ns": -1.0,
+   "nodes": [
+    {
+     "atom": "a"
+    },
+    {
+     "atom": "n1"
+    },
+    {
+     "atom": "n2"
+    },
+    {
+     "atom": "n3"
+    },
+    {
+     "atom": "q1"
+    }
+   ]
+  },
+  {
+   "index": 2,
+   "arrival_ns": 9.7,
+   "slack_ns": -0.7,
+   "nodes": [
+    {
+     "atom": "e"
+    },
+    {
+     "atom": "n4"
+    },
+    {
+     "atom": "o1"
+    },
+    {
+     "atom": "out:o1"
+    }
+   ]
+  },
+  {
+   "index": 3,
+   "arrival_ns": 9.2,
+   "slack_ns": -0.2,
+   "nodes": [
+    {
+     "atom": "e"
+    },
+    {
+     "atom": "n5"
+    }
+   ]
+  },
+  {
+   "index": 4,
+   "arrival_ns": 5.0,
+   "slack_ns": 4.0,
+   "nodes": [
+    {
+     "atom": "h"
+    },
+    {
+     "atom": "n6"
+    }
+   ]
+  }
+ ]
+}

@@ -10,9 +10,9 @@ repos:
       # tests/tools/fixtures/vtr_qor/ holds VTR's own output: parse rows end with a tab
       # tests/tools/fixtures/timing_attr_v2/*.names are name maps: their last field may be empty (a tab); prov_post holds raw VPR .net and .place files too
       - id: trailing-whitespace
-        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$|^tests/tools/fixtures/prov_post/.*\.(net|place|names)$'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$|^tests/tools/fixtures/prov_(post|why)/.*\.(net|place|names|tsv|flat_place)$'
       - id: end-of-file-fixer
-        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$|^tests/tools/fixtures/prov_post/.*\.(net|place|names)$'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$|^tests/tools/fixtures/prov_(post|why)/.*\.(net|place|names|tsv|flat_place)$'
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=500']

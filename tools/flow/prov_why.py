@@ -588,7 +588,8 @@ class WhyResult:
         """Q and K lines to append, each Q followed by its K lines, in record order."""
         out: list[str] = []
         for spec_record, line in self._appended:
-            out.append(line)
+            if line:  # a Q line that replaces one in place has K lines only
+                out.append(line)
             out.extend(self.klines.get(spec_record, ()))
         return out
 
@@ -658,10 +659,9 @@ def build_lines(specs: Sequence[JoinSpec], net: Netlist | None, census: Census |
                 stats.with_gain += 1
         line = q_line(spec, why, gain, pcrit, crit, letters)
         result.qlines.append(line)
-        result._appended.append((spec.record, line))
+        result._appended.append((spec.record, "" if spec.replaces else line))
         if spec.replaces:
             result.replace[spec.replaces] = line
-            result._appended.pop()
         result.klines[spec.record] = _member_lines(spec, census, report)
         stats.q_lines += 1
         stats.k_lines += len(result.klines[spec.record])
