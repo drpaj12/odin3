@@ -40,7 +40,8 @@ def blif() -> str:
     for name, ins in LUTS.items():
         out += [f".names {' '.join(ins)} {name}", "11 1"]
     out += [".subckt single_port_ram addr=a we=c dout=md"]
-    out += [".latch n3 q1 re clk 2", ".end", ""]
+    out += [".latch n3 q1 re clk 2", ".end", "",
+            ".model single_port_ram", ".inputs addr we", ".outputs dout", ".blackbox", ".end", ""]
     return "\n".join(out)
 
 

@@ -19,3 +19,9 @@
 .subckt single_port_ram addr=a we=c dout=md
 .latch n3 q1 re clk 2
 .end
+
+.model single_port_ram
+.inputs addr we
+.outputs dout
+.blackbox
+.end

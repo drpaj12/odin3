@@ -176,7 +176,7 @@ class NamesV2Test(unittest.TestCase):
         self.assertIn("needs a version 2 map", err)
 
     def test_version_1_output_is_unchanged(self) -> None:
-        for micro in ("bm_base_memory", "ch_intrinsics"):
+        for micro in ("ansiportlist_2", "ch_intrinsics"):
             path = write_map(self.work, micro, "blif", 1)
             lines = path.read_text().split("\n")
             short = lines[1].split("\t")[2]
