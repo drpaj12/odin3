@@ -3,7 +3,8 @@
 Maps are written by the Task 5 writers (`write_blif --vtr`, `write_json`, `write_verilog` with
 `--name-style hash --prov-map`) from two micro designs run through the VTR flow to `lower` (no
 ABC, so the test runs in every build). The golden text under tests/tools/data/names_v2 holds the
-`--lookup` and `--chain` output for a fixed choice of objects (each line ends with `$`); ODIN3_UPDATE_GOLDEN=1 rewrites it.
+`--lookup` and `--chain` output for a fixed choice of objects (each line ends with `$`);
+ODIN3_UPDATE_GOLDEN=1 rewrites it.
 Version 1 goldens (`v1_*.txt`) were produced by the `odin3` of main before this task and pin that
 `names` output on a version 1 map is unchanged. Needs ODIN3_CLI (CTest python_tools sets it).
 Work files go to a fresh temporary directory that is left in place.
