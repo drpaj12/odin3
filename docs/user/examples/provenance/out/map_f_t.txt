@@ -1,0 +1,9 @@
+F	f1	/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v
+T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v"	
+T	t2	opt	-full	
+T	t3	wreduce		
+T	t4	hardmap		multiply=0 adder=19 chains=3 sp_slices=0 dp_slices=0 soft=0
+T	t5	proc		
+T	t6	lower		modules=1 cells=3 nodes=31
+T	t7	pack		clbs=16 bles=12 atoms=36 net=bm_DL_BCD_adder.net
+T	t8	place		sites=16 place=bm_DL_BCD_adder.place

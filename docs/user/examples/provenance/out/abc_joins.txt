@@ -1,0 +1,5 @@
+R	r7	D	lut	coarsen:gate	t3.4	r3,r6		c5,c7	join
+R	r11	D	lut	coarsen:gate	t3.4	r10,r3,r6		c9,c5,c7	join
+T	t3	abc	--lut 6	script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=2
+Q	r7		depth								why=-,objective=i,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-	-
+Q	r11		depth								why=-,objective=i,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-	-

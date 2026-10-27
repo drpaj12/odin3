@@ -1,0 +1,3 @@
+Cout net gate records [14, 13, 12]
+chain ['IF', 'SEQ_BLOCK', 'TIMING_STMT', 'ALWAYS', 'MODULE']
+r30 objective vpr-pack rho 1.000 members 10 10 K lines

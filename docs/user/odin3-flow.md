@@ -18,7 +18,7 @@ odin3-flow design.v [more.v ...] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml
 | `--family FAMILY` | LPM device family for `--target lpm` |
 | `--vpr`, `--no-vpr` | run VPR after Odin III; default on when `VTR_ROOT` is set; `vtr` target only |
 | `--analysis` | also write the dot, JSON, levelize and locations files; `vtr` target only |
-| `--prov` | write the BLIF with hash names and the version 2 name map `odin3/<top>.blif.names` next to it (`read_verilog --prov-ast refs`, `write_blif --name-style hash --prov-map`): every net's records, full source spans and construct chain. VPR reads that BLIF. A step `prov` checks the map; `vtr` target only |
+| `--prov` | write the BLIF with hash names and the version 2 name map `odin3/<top>.blif.names` next to it (`read_verilog --prov-ast refs`, `write_blif --name-style hash --prov-map`): every net's records, full source spans and construct chain (the format and what the records mean: {doc}`provenance`). VPR reads that BLIF. A step `prov` checks the map; `vtr` target only |
 | `--timing-attr` | attribute the critical path to HDL statements, modules and words: writes `timing/attribution.json` and `timing/summary.txt` (see {doc}`timing-attribution`); needs `--target vtr` and VPR. It uses the name map, so it implies `--prov`: no second BLIF is written. **Behaviour change since version 1.1.1:** VPR now reads the hash-name BLIF, so the net names in VPR's own files (`.net`, `.place`, `.route`, its reports and logs) are hash names (`h3k9...`) where they were the short names (`$n12`). The CPD, LUT count, channel width and wirelength do not change (the tests check the CPD and LUTs on both routes); only the names do. A script that reads net names out of VPR's files of a `--timing-attr` run must use `--timing-legacy` (the way back to the old names and the old second BLIF), or look the hash up in `<top>.blif.names` |
 | `--timing-paths N` | setup paths VPR reports and the attribution uses (default 100); implies `--timing-attr`. VPR gets `--timing_report_npaths N` only when N is not 100 |
 | `--timing-legacy` | with `--timing-attr`: the version 1.1.1 route (a short-name BLIF for VPR plus a second BLIF with provenance names, line-level spans, no chain) instead of the name map |
@@ -44,7 +44,7 @@ default). `odin3-prov-post FLOW_DIR [--map FILE] [--blif FILE] [--run-dir DIR] [
 FILE] [--top NAME] [--census FILE [--census-net-sha256 HEX]] [--words FILE] [--arch FILE] [--attribution FILE] [--pack-objective TEXT]` then extends the version 2 name map of a `--prov --vpr --keep-results` run with
 the BLE, CLB and site records of VPR's packing and placement, one `A` line per atom and the `Q` and `K` lines of
 the logic CLBs (why they were joined, how critical; {doc}`outputs`; exit codes: 0
-ok, 1 refused or failed, 2 usage error); see {doc}`outputs`. Give `--run-dir` when a route retry left
+ok, 1 refused or failed, 2 usage error); see {doc}`outputs` and {doc}`provenance`. Give `--run-dir` when a route retry left
 two `vpr/` directories with a `.net`.
 
 `odin3-timing FLOW_DIR [--paths N] [--out DIR]` attributes a flow output directory that was made
