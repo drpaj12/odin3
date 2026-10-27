@@ -36,6 +36,21 @@ the mode, so write a file of that name as `./refs`. A derived record whose opera
 operation class stops the export (the error names the record, run and operation); an export that
 fails writes neither the map nor the netlist.
 
+For a version 2 map the pass `names` reads the records too:
+
+- `names --map FILE --lookup SHORT` prints the `O` line of the object (or the `N` line, when the argument
+  is the name of an object that kept its name), then its records indented by their depth (its own record
+  first, then the parents, depth first, each once), then the constructs of its chain (the statement,
+  block and module each source leaf comes from) and the `F` and `T` lines they name.
+- `names --map FILE --chain SHORT` prints the chain alone: the `C` lines and the files they name.
+- `names --map FILE --check` adds a line with the counts of `R`, `C`, `F`, `T` and object lines and of each
+  problem (an id that is not its line number, a reference that does not resolve, a parent numbered after its
+  child, a record with no valid class, an object whose record is missing), and fails on any of them.
+
+Output is the map's own text, so it can be read back by the same parse. In Python,
+`odin3.read_name_map(path)` reads the file without a design: `NameMap.find(name)`, `provenance(obj)`
+and `chain(obj)` give what the pass prints. Version 1 maps behave as before (`--chain` needs version 2).
+
 ## HDL locations
 
 Every IR object carries provenance. Where the writer can express it, so does the file:
