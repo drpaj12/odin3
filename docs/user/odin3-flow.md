@@ -39,6 +39,13 @@ width fails, the VPR step fails and its log lists the widths tried.
 
 Exit codes: 0 all steps passed, 1 a step failed (the `timing` step too), 2 usage error.
 
+`--keep-results` keeps VPR's `.net`, `.place` and `.route` in `vpr/run` (the flow deletes them by
+default). `odin3-prov-post FLOW_DIR [--map FILE] [--blif FILE] [--run-dir DIR] [--net FILE] [--place
+FILE] [--top NAME]` then extends the version 2 name map of a `--prov --vpr --keep-results` run with
+the BLE, CLB and site records of VPR's packing and placement and one `A` line per atom (exit codes: 0
+ok, 1 refused or failed, 2 usage error); see {doc}`outputs`. Give `--run-dir` when a route retry left
+two `vpr/` directories with a `.net`.
+
 `odin3-timing FLOW_DIR [--paths N] [--out DIR]` attributes a flow output directory that was made
 with `--timing-attr` without rerunning anything (same exit codes); {doc}`timing-attribution` has the
 outputs and the JSON schema.

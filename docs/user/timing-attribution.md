@@ -226,6 +226,15 @@ The delay model: a row of the VPR report that stays inside one atom is a cell de
 of the next atom carries the interconnect delay of the net the previous atom drives, and that delay
 is charged to the previous atom's statement (the net belongs to its driver).
 
+## After the attribution: packing and placement
+
+The same name map can carry what VPR did with each atom. Run the flow with `--keep-results` as well
+(`odin3-flow --prov --vpr --keep-results`; `--timing-attr` implies `--prov`), then
+`odin3-prov-post FLOW_DIR`. The tool reads VPR's `.net` and `.place`, joins every atom by its name
+(the hash name the BLIF holds) and adds the BLE, CLB and site records and the `A` lines to
+`odin3/<top>.blif.names`; `odin3-timing` reads the extended map as before. The tool runs once per
+map.
+
 ## Limits
 
 - Setup paths only; a hold path in the setup report is skipped and counted in `paths_skipped`.

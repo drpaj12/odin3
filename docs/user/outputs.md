@@ -36,6 +36,14 @@ the mode, so write a file of that name as `./refs`. A derived record whose opera
 operation class stops the export (the error names the record, run and operation); an export that
 fails writes neither the map nor the netlist.
 
+After VPR, `odin3-prov-post FLOW_DIR` appends to the same map the records of packing and placement:
+`R` lines of level `ble` and `clb` (step `pack`), of level `site` (step `place`, with the `.place`
+coordinates `x=`, `y=`, `sub=`, `layer=` in `flags`), and one `A` line per atom of the packed
+netlist with its BLE, CLB and site records. A cluster whose atoms blend distinct constructs is a
+`join` labelled by `pack`. It needs the flow directory of `odin3-flow --prov --vpr --keep-results`,
+refuses a BLIF written with short names, and refuses a map that it has already extended. The `.net` is trusted local VPR output, parsed with ElementTree. `names
+--check` accepts the extended map.
+
 For a version 2 map the pass `names` reads the records too:
 
 - `names --map FILE --lookup SHORT` prints the `O` line of the object (or the `N` line, when the argument

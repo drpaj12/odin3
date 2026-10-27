@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# odin3-prov-post: extend the name map of an odin3-flow output directory (made with --prov --vpr
+# --keep-results) with VPR's packing and placement. Exit codes: 0 ok; 1 refused or failed; 2 usage
+# error. See prov_post.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/prov_post.py" "$@"
