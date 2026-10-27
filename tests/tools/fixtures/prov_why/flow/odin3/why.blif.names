@@ -18,6 +18,7 @@ N	why	net	n4	r16	word
 N	why	net	n5	r17	word
 N	why	net	n6	r18	word
 N	why	net	o1	r19	word
+N	why	net	md	r20	word
 R	r1	S	stmt	origin	t1.1		f1:1.1-1.20		chain=span
 R	r2	S	stmt	origin	t1.1		f1:2.1-2.20		chain=span
 R	r3	S	stmt	origin	t1.1		f1:3.1-3.20		chain=span
@@ -37,6 +38,7 @@ R	r16	S	stmt	origin	t1.1		f1:16.1-16.20	c6
 R	r17	S	stmt	origin	t1.1		f1:17.1-17.20	c7	
 R	r18	S	stmt	origin	t1.1		f1:18.1-18.20	c2	
 R	r19	S	stmt	origin	t1.1		f1:19.1-19.20	c8	
+R	r20	S	stmt	origin	t1.1		f1:20.1-20.20		chain=span
 C	c1	MODULE	module		f1	1.1-40.10	why
 C	c2	DECLARATOR	stmt	c1	f1	2.1-2.20	w
 C	c3	CONT_ASSIGN	block	c1	f1	3.1-3.20	

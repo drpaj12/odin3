@@ -56,9 +56,13 @@ toggles area). `odin3-prov-post` adds, for every logic CLB, the pair classes of 
 series-noncritical, `SI` shared-input, `OR` orthogonal, `FL` filler; shares that sum to 1.000), and for every CLB, BLE join
 and Odin III join the post-route criticality `rho`, `slack`, `near` and `npaths` at the margins 5 and 10 percent, from
 `timing/attribution.json`. With `--census FILE` (the Norns packer's `--norns_pack_census` log; its `.net` SHA-256 must
-match, else the census values are absent with a WARNING) it also gives the classes, the `gain` terms and the pack-time
+match, else the census values are absent with a WARNING; the SHA-256 is read from `--census-net-sha256`, else from the
+`net_sha256` of the `metrics.json` next to the census, else from a `# net_sha256=` line of the census) it also gives the classes, the `gain` terms and the pack-time
 criticality `pcrit`. A `K` line per member (every member of a CLB) carries the member's own values. `basis` says per field
-whether the value was recorded (`r`) or inferred (`i`), `-` when absent. Without a census there are no classes, `gain` or
+whether the value was recorded (`r`) or inferred (`i`), `-` when absent. The `OR` class needs a word label of each atom:
+`--words FILE` (a Norns `words/members.json`) gives it (`why=r`); without it the nearest declarator of the name map is used
+and `why=i`. The output pins of a hard block come from `--arch FILE` (the architecture's models) or, by default, from the
+`.net`'s primitive ports. Without a census there are no classes, `gain` or
 `pcrit`. `odin3.read_name_map(path)` returns these as `NameMap.whys` and `NameMap.members`.
 
 For a version 2 map the pass `names` reads the records too:

@@ -27,6 +27,7 @@ import hashlib
 import json
 import logging
 import re
+import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -46,8 +47,7 @@ SOURCES = ("seed", "connectivity_timing", "affinity_group", "transitive", "high_
 UNKNOWN_SOURCE = "unknown"
 MEMBER_KINDS = ("lut", "latch", "adder")
 CLOCK_LATCH_TYPES = ("re", "fe", "ah", "al", "as")
-ADDER_OUTPUTS = frozenset(("cout", "sumout"))
-HARD_OUTPUT_FORMALS = frozenset(("o", "q", "z", "cout", "sumout"))
+ANY_MODEL = ""  # the key of OutputPorts that holds the ports read from a .net (no model name)
 NO_RHO = 0.0
 _CONT = re.compile(r"\\\s*$")
 _SHA = re.compile(r"^#\s*net_sha256\s*[=\t ]\s*([0-9a-fA-F]{64})\s*$")
@@ -203,6 +203,7 @@ class Block:
     rows: list[tuple[str, str]] = field(default_factory=list)
     pins: dict[str, str] = field(default_factory=dict)
     model: str = ""
+    outs: frozenset[str] = frozenset()  # the pin formals of a hard block that are outputs
 
 
 def logical_lines(path: Path) -> list[str]:
@@ -226,20 +227,55 @@ def logical_lines(path: Path) -> list[str]:
     return out
 
 
-def is_output_formal(model: str, formal: str) -> bool:
-    """Whether a hard block's port formal is an output. The architecture would say; without it the
-    adder's ports are known and other models follow VTR's names (``out``, ``out1``, ... and
-    ``o``, ``q``, ``z``)."""
-    base = formal.split("[")[0].lower()
-    if model == "adder":
-        return base in ADDER_OUTPUTS
-    return base in HARD_OUTPUT_FORMALS or base.startswith("out")
+# model name -> the names of its output ports (the base name, without a ``[bit]``)
+OutputPorts = Mapping[str, frozenset[str]]
 
 
-def read_blif(path: Path) -> tuple[list[Block], list[str], set[str]]:
+def arch_output_ports(arch: Path) -> dict[str, frozenset[str]]:
+    """Model name -> output port names, from the ``<model>`` definitions of the VPR architecture
+    (``output_ports/port``), as ``nornlib.arch_output_ports`` does for r4census.py:140-141."""
+    try:
+        root = ET.parse(arch).getroot()
+    except (ET.ParseError, OSError) as exc:
+        raise WhyError(f"cannot read the architecture {arch}: {exc}") from exc
+    out: dict[str, frozenset[str]] = {}
+    for model in root.iter("model"):
+        name = model.get("name")
+        if name:
+            out[name] = frozenset(p.get("name") or "" for p in model.findall("output_ports/port"))
+    return out
+
+
+def net_output_ports(net: Path) -> dict[str, frozenset[str]]:
+    """The output port names of the primitives of a packed netlist: every leaf block (not a
+    wire-mode block, not ``open``) lists its ports under ``<outputs>``, and a primitive's ports are
+    its model's ports. The ``.net`` does not name the model, so the names are kept under
+    ANY_MODEL: the union over all primitives. Used when no architecture is given."""
+    try:
+        root = ET.parse(net).getroot()
+    except (ET.ParseError, OSError) as exc:
+        raise WhyError(f"cannot read the packed netlist {net}: {exc}") from exc
+    ports: set[str] = set()
+    for block in root.iter("block"):
+        if block.find("block") is None and block.get("name") != "open" \
+                and block.get("mode") != "wire":
+            ports.update(p.get("name") or "" for p in block.findall("outputs/port"))
+    return {ANY_MODEL: frozenset(ports)}
+
+
+def is_output_formal(ports: OutputPorts, model: str, formal: str) -> bool:
+    """Whether a hard block's port formal is an output: its model's output ports (from the
+    architecture), else the ports of the primitives of the ``.net``."""
+    known = ports.get(model)
+    if known is None:
+        known = ports.get(ANY_MODEL, frozenset())
+    return formal.split("[")[0] in known
+
+
+def read_blif(path: Path, ports: OutputPorts) -> tuple[list[Block], list[str], set[str]]:
     """(blocks, primary outputs, clock nets) of a VTR-dialect BLIF. A block is named after its
-    output net (``.names``, ``.latch``) or its first output pin's net (``.subckt``: an adder is
-    named after its ``cout`` net, as VPR names it)."""
+    output net (``.names``, ``.latch``) or its first output pin's net (``.subckt``, by ``ports``).
+    """
     blocks: list[Block] = []
     outputs: list[str] = []
     clocks: set[str] = set()
@@ -263,11 +299,11 @@ def read_blif(path: Path) -> tuple[list[Block], list[str], set[str]]:
             if len(tok) >= 5 and tok[3] in CLOCK_LATCH_TYPES:
                 clocks.add(tok[4])
         elif head == ".subckt":
-            blocks.append(_subckt(tok, clocks))
+            blocks.append(_subckt(tok, clocks, ports))
     return blocks, outputs, clocks
 
 
-def _subckt(tok: list[str], clocks: set[str]) -> Block:
+def _subckt(tok: list[str], clocks: set[str], ports: OutputPorts) -> Block:
     model = tok[1] if len(tok) > 1 else ""
     pins: dict[str, str] = {}
     for item in tok[2:]:
@@ -276,9 +312,14 @@ def _subckt(tok: list[str], clocks: set[str]) -> Block:
             pins[formal] = actual
             if formal.lower().startswith("clk") or formal.lower() == "clock":
                 clocks.add(actual)
-    outs = [actual for formal, actual in pins.items() if is_output_formal(model, formal)]
+    formals = frozenset(f for f in pins if is_output_formal(ports, model, f))
+    if not formals and model not in ports and pins:
+        LOG.warning("WARNING: the hard block model '%s' has no known output ports (not in the "
+                    "architecture, no primitive of the .net with its ports): it drives nothing",
+                    model)
+    outs = [actual for formal, actual in pins.items() if formal in formals]
     name = outs[0] if outs else (next(iter(pins.values())) if pins else "")
-    return Block(name, "hard", list(pins.values()), [], pins, model)
+    return Block(name, "hard", list(pins.values()), [], pins, model, formals)
 
 
 def absorbed_buffers(blocks: Sequence[Block]) -> set[str]:
@@ -304,8 +345,8 @@ def _resolver(alias: Mapping[str, str]) -> Callable[[str], str]:
 def _pins(b: Block, res: Callable[[str], str]) -> tuple[list[str], list[str]]:
     """(output nets, input nets resolved through absorbed buffers) of a block."""
     if b.kind == "hard":
-        outs = [n for f, n in b.pins.items() if is_output_formal(b.model, f)]
-        ins = [res(n) for f, n in b.pins.items() if not is_output_formal(b.model, f)]
+        outs = [n for f, n in b.pins.items() if f in b.outs]
+        ins = [res(n) for f, n in b.pins.items() if f not in b.outs]
         return outs, ins
     return [b.name], [res(n) for n in b.inputs]
 
@@ -350,6 +391,7 @@ class Netlist:
     the common local nets (shared inputs) and the broadcast nets each atom reads."""
 
     kind: dict[str, str] = field(default_factory=dict)
+    driver: dict[str, str] = field(default_factory=dict)  # net -> the block that drives it
     series: dict[tuple[str, str], list[str]] = field(default_factory=dict)
     shared: set[tuple[str, str]] = field(default_factory=set)
     bcast: dict[str, set[str]] = field(default_factory=dict)
@@ -369,7 +411,7 @@ def _drivers_and_sinks(blocks: Sequence[Block], gone: set[str], clocks: set[str]
                 out.kind[b.name] = "adder"
             for formal, net in b.pins.items():
                 net = res(net)
-                if is_output_formal(b.model, formal):
+                if formal in b.outs:
                     driver[net] = b.name
                 elif net not in clocks:
                     sinks[net].append(b.name)
@@ -383,11 +425,12 @@ def _drivers_and_sinks(blocks: Sequence[Block], gone: set[str], clocks: set[str]
     return driver, sinks
 
 
-def build_netlist(blif: Path) -> Netlist:
+def build_netlist(blif: Path, ports: OutputPorts) -> Netlist:
     """r4census.py ``Netlist`` over a BLIF: the buffers VPR absorbs and the logic it sweeps are
     left out, a net is local when it has at most FANOUT_LOCAL sink pins (a pad counts as one) and
-    broadcast above, and the clock nets are not nets."""
-    blocks, outputs, clocks = read_blif(blif)
+    broadcast above, and the clock nets are not nets. ``ports`` says which pins of a hard block are
+    outputs (``arch_output_ports`` or ``net_output_ports``)."""
+    blocks, outputs, clocks = read_blif(blif, ports)
     absorbed = absorbed_buffers(blocks)
     gone = absorbed | swept_blocks(blocks, outputs, absorbed)
     res = _resolver({b.name: b.inputs[0] for b in blocks if b.name in absorbed and b.inputs})
@@ -411,6 +454,7 @@ def build_netlist(blif: Path) -> Netlist:
             for right in members[i + 1:]:
                 out.shared.add((left, right))
     out.bcast = dict(bcast)
+    out.driver = driver
     return out
 
 
@@ -629,10 +673,13 @@ def k_line(record: int, member: str, pcrit: str, rho: str, slack: str, letters: 
 
 def build_lines(specs: Sequence[JoinSpec], net: Netlist | None, census: Census | None,
                 report: PathReport | None, word: Callable[[str], str | None],
-                cluster_atoms: Mapping[int, frozenset[str]] | None = None) -> WhyResult:
+                cluster_atoms: Mapping[int, frozenset[str]] | None = None,
+                word_basis: str = "r") -> WhyResult:
     """The Q lines (and their K lines) of ``specs``. ``net`` and ``census`` together give the pair
     classes, gain and pack-time criticality of the specs marked ``classes`` (None for either: they
-    are absent); ``report`` gives rho, slack and the near-critical fields (None: absent)."""
+    are absent); ``report`` gives rho, slack and the near-critical fields (None: absent).
+    ``word_basis`` is the ``why`` basis letter: ``r`` when the OR word labels were read (a Norns
+    words file), ``i`` when they were inferred from the name map's declarators."""
     result = WhyResult()
     stats = result.stats
     stats.census_used = census is not None
@@ -650,7 +697,7 @@ def build_lines(specs: Sequence[JoinSpec], net: Netlist | None, census: Census |
             if net is not None and len(members) >= 2:
                 counts = pair_counts(net, census.pin_crit, word, members)
                 why = share_text(shares(counts, CLASSES))
-                letters["why"] = "r"
+                letters["why"] = word_basis
                 stats.with_classes += 1
             gain_items = _gain(spec, census, members, cluster_atoms)
             if gain_items:

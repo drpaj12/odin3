@@ -7,10 +7,13 @@ a FF), one LUT in a second CLB (o1) and an I/O cluster, chosen so the CLB holds 
 class (precedence: n1 and n2 are both a direct local net and a shared input, which is SC):
 
     n1 = f(a, b)   n2 = f(n1, a)   n3 = f(n2, d)   q1 = FF(n3)   n4 = f(e, f)   n5 = f(e, g)
-    n6 = f(h, i)   o1 = f(n4, x)
+    n6 = f(h, md)  o1 = f(n4, x)   md = a memory block (.subckt single_port_ram, output `dout`)
 
-Pin criticality (census P lines): n2 reads n1 at 0.9 (SC), n3 reads n2 at 0.2 (SN), q1 reads n3 at
-0.7 (SC); n4 and n5 share e (SI); n1 and n6 have the same word label (OR); the rest is FL.
+The memory block is a non-logic cluster whose output `dout` is a hard-block formal that no name
+says is an output: only the `.net` primitive ports (or `arch.xml`) do.
+
+Pin criticality (census P lines): n2 reads n1 at 0.9 (SC), n3 reads n2 at 0.2 (SN), q1 reads n3
+at 0.7 (SC); n4 and n5 share e (SI); n1 and n6 have the same word label (OR); the rest is FL.
 Usage: python3 gen_fixture.py
 """
 
@@ -23,7 +26,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 FLOW = HERE / "flow"
 LUTS = {"n1": ("a", "b"), "n2": ("n1", "a"), "n3": ("n2", "d"), "n4": ("e", "f"),
-        "n5": ("e", "g"), "n6": ("h", "i"), "o1": ("n4", "x")}
+        "n5": ("e", "g"), "n6": ("h", "md"), "o1": ("n4", "x")}
 INPUTS = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "x", "clk"]
 OUTPUTS = ["o1", "q1", "n5", "n6"]  # the atoms nothing reads: primary outputs, so VPR sweeps none
 PADS = ["out:" + o for o in OUTPUTS]
@@ -36,6 +39,7 @@ def blif() -> str:
            ".inputs " + " ".join(INPUTS), ".outputs " + " ".join(OUTPUTS)]
     for name, ins in LUTS.items():
         out += [f".names {' '.join(ins)} {name}", "11 1"]
+    out += [".subckt single_port_ram addr=a we=c dout=md"]
     out += [".latch n3 q1 re clk 2", ".end", ""]
     return "\n".join(out)
 
@@ -55,6 +59,11 @@ def net() -> str:
             out += [f'<block name="{atom}" instance="fle[{k}]" mode="n1_lut6">',
                     leaf(atom, stem), "</block>"]
         out.append("</block>")
+    out += ['<block name="md" instance="memory[0]" mode="mem_512x64_sp">',
+            '<block name="md" instance="mem_512x64_sp[0]" mode="mem_512x64_sp">',
+            '<inputs><port name="addr">a</port><port name="we">c</port></inputs>',
+            '<outputs><port name="dout">mem_512x64_sp[0].dout[0]->md</port></outputs>',
+            "</block>", "</block>"]
     for k, name in enumerate([*INPUTS, *PADS]):
         stem = "outpad" if name.startswith("out:") else "inpad"
         out += [f'<block name="{name}" instance="io[{k}]" mode="{stem}">', leaf(name, stem),
@@ -67,14 +76,14 @@ def place() -> str:
     rows = ["Netlist_File: why.net Netlist_ID: SHA256:0", "Array size: 4 x 4 logic blocks", "",
             "#block name\tx\ty\tsubblk\tlayer\tblock number",
             "#----------\t--\t--\t------\t-----\t------------", "n1\t1\t1\t0\t0\t#0",
-            "o1\t1\t2\t0\t0\t#1"]
+            "o1\t1\t2\t0\t0\t#1", "md\t2\t1\t0\t0\t#2"]
     names = [*INPUTS, *PADS]
-    rows += [f"{n}\t0\t{k + 1}\t0\t0\t#{k + 2}" for k, n in enumerate(names)]
+    rows += [f"{n}\t0\t{k + 1}\t0\t0\t#{k + 3}" for k, n in enumerate(names)]
     return "\n".join(rows) + "\n"
 
 
 def names_map() -> str:
-    atoms = [*INPUTS, "n1", "n2", "n3", "q1", "n4", "n5", "n6", "o1"]
+    atoms = [*INPUTS, "n1", "n2", "n3", "q1", "n4", "n5", "n6", "o1", "md"]
     out = ["# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs"]
     for k, atom in enumerate(atoms, start=1):
         out.append("\t".join(("N", "why", "net", atom, f"r{k}", "word")))
@@ -95,11 +104,11 @@ def names_map() -> str:
     return "\n".join(out) + "\n"
 
 
-def census(sha: str) -> str:
+def census() -> str:
     def mol(cseq: int, idx: int, source: int, root: str) -> str:
         return f"M\t{cseq}\t{idx}\tlut\t{source}\t1\t0.5\t0\t0\t0\t-1\t{root}"
 
-    rows = [f"# net_sha256={sha}"]
+    rows: list[str] = []  # the Norns writer puts no header; the SHA is in metrics.json
     plan = [(1, 0, 0, ["n1"]), (1, 1, 1, ["n2"]), (1, 2, 1, ["n3", "q1"]), (1, 3, 2, ["n4"]),
             (1, 4, 7, ["n5"]), (1, 5, 7, ["n6"]), (2, 0, 0, ["o1"]), (9, 0, 0, ["zz"])]
     for cseq, idx, source, atoms in plan:
@@ -114,11 +123,38 @@ def census(sha: str) -> str:
     return "\n".join(rows) + "\n"
 
 
+def metrics(sha: str) -> dict[str, object]:
+    """The run record next to a census (the keys Norns round4.py writes that matter here)."""
+    return {"arm": "r4", "design": "why", "net_sha256": sha, "rc": 0, "source": "word"}
+
+
+def words() -> dict[str, object]:
+    """Norns words/members.json (build_words.py): atom -> {word, bit, bus, kind, ngroups}; n1 and
+    n6 are bits of one word, the others have none."""
+    def entry(word: str | None) -> dict[str, object]:
+        return {"bit": -1, "bus": "", "kind": "lut", "ngroups": 1, "word": word}
+
+    names = ["n1", "n2", "n3", "q1", "n4", "n5", "n6", "o1"]
+    return {n: entry("w1" if n in ("n1", "n6") else None) for n in names}
+
+
+ARCH = """<architecture>
+  <models>
+    <model name="single_port_ram">
+      <input_ports><port name="addr"/><port name="we"/><port name="clk" is_clock="1"/></input_ports>
+      <output_ports><port name="dout" clock="clk"/></output_ports>
+    </model>
+  </models>
+</architecture>
+"""
+
+
 def flat_place() -> str:
     rows = []
     for atom in CLB0:
         rows.append(f"{atom} 1 1 0 0 clb0 {'ff' if atom == 'q1' else 'lut6'}")
     rows.append("o1 1 2 0 0 clb1 lut6")
+    rows.append("md 2 1 0 0 mem0 mem_512x64_sp")
     rows += [f"{n} 0 {k + 1} 0 {k} io{k} {'outpad' if n.startswith('out:') else 'inpad'}"
              for k, n in enumerate([*INPUTS, *PADS])]
     return "\n".join(rows) + "\n"
@@ -148,7 +184,11 @@ def main() -> None:
     write(FLOW / "vpr" / "run" / "why.net", net_text)
     write(FLOW / "vpr" / "run" / "why.place", place())
     write(FLOW / "timing" / "attribution.json", json.dumps(attribution(), indent=1) + "\n")
-    write(HERE / "census.tsv", census(hashlib.sha256(net_text.encode()).hexdigest()))
+    write(HERE / "census.tsv", census())
+    sha = hashlib.sha256(net_text.encode()).hexdigest()
+    write(HERE / "metrics.json", json.dumps(metrics(sha), indent=1) + "\n")
+    write(HERE / "words" / "members.json", json.dumps(words(), indent=1) + "\n")
+    write(HERE / "arch.xml", ARCH)
     write(HERE / "norns" / "final.flat_place", flat_place())
 
 

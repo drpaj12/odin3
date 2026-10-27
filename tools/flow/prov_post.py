@@ -55,7 +55,14 @@ ANCHOR_RANK = 5  # a construct of this rank (stmt) or coarser is its own anchor
 LEVEL_RANK = {"module": 1, "instance": 2, "block": 3, "branch": 4, "stmt": 5, "expr": 6}
 NO_SOURCE_ATOMS = frozenset(("gnd", "vcc", "unconn"))  # constant generators: no source object
 PAD_STEMS = frozenset(("inpad", "outpad"))  # primitives of an I/O block: not in any BLE
-NON_LOGIC_WORDS = ("memory", "ram", "mult", "dsp")  # a block of these is not a logic CLB
+# A block of these is not a logic CLB. Exact names from the architecture, never substrings: the
+# top-level blocks (EArch.xml:189 and 201 `<tile name="mult_36">`, `<tile name="memory">`, the
+# same in k6_frac_N10_frac_chain_mem32K_40nm.xml), the BLIF models of the hard blocks
+# (`<model name="multiply">`, `single_port_ram`, `dual_port_ram`) and their primitives (pb_types
+# `mult_9x9`, `mult_18x18`, `mult_36x36`, `mem_<depth>x<width>_sp` and `_dp`).
+NON_LOGIC_NAMES = frozenset(("memory", "mult_36", "multiply", "single_port_ram",
+                             "dual_port_ram", "mult_9x9", "mult_18x18", "mult_36x36"))
+_MEMORY_PRIMITIVE = re.compile(r"^mem_\d+x\d+_[sd]p$")
 PACK, PLACE = "pack", "place"
 OP_BLE, OP_CLB, OP_SITE = 1, 2, 1  # operation numbers within a pass run (renumbered when written)
 BLE_ATOMS_WARN = 10  # a single BLE with more atoms than this: the level-1 block is not a BLE
@@ -351,9 +358,9 @@ class Cluster:
     def logic(self) -> bool:
         """A logic cluster (its members get a Q line, 3.6): it holds a primitive that is not a
         pad, and none of its blocks is a memory or a multiplier (r3lib/build_seeds classify)."""
-        names = {self.kind.lower(), *(s.lower() for s in self.stems.values())}
+        names = {self.kind, *self.stems.values()}
         return bool(self.stems) and not set(self.stems.values()) <= PAD_STEMS and not any(
-            word in name for name in names for word in NON_LOGIC_WORDS)
+            name in NON_LOGIC_NAMES or _MEMORY_PRIMITIVE.match(name) for name in names)
 
 
 def primitives(block: ET.Element) -> list[tuple[str, str]]:
@@ -551,11 +558,31 @@ def pack_objective(ns: argparse.Namespace | None, run_dir: Path | None,
     return "", "-"
 
 
-def word_labeler(nm: NameMap, names: Resolver) -> Callable[[str], str | None]:
-    """The word label of an atom (the OR class): the nearest DECLARATOR construct on the chain of
-    its first leaf, as ``c<n>``; None when the atom has no leaf with a construct (an IMPORTED
-    atom, a BLIF with no map). Spec 3.6 says "level word"; a construct row has no such level, the
-    declarator is a ``stmt`` row (2.1), so the kind is what is tested."""
+def read_words(path: Path) -> dict[str, str]:
+    """atom name -> word of a Norns ``words/members.json`` (``build_words.py`` writes
+    ``{atom: {"word": <id or null>, "bit": .., "bus": .., ..}}``; r4census.py:240 keeps the atoms
+    with a word)."""
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise PostError(f"cannot read the words file {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise PostError(f"{path}: not a Norns words/members.json (a JSON object of atoms)")
+    return {atom: str(info["word"]) for atom, info in data.items()
+            if isinstance(info, dict) and info.get("word") is not None
+            and info["word"] != ""}
+
+
+def word_labeler(nm: NameMap, names: Resolver,
+                 words: Mapping[str, str] | None = None) -> Callable[[str], str | None]:
+    """The word label of an atom (the OR class). With a Norns words file (``--words``,
+    r4census.py:222-224, 240) it is the file's word of the atom (None when it has none). Without
+    one it is the nearest DECLARATOR construct on the chain of its first leaf, as ``c<n>``; None
+    when the atom has no leaf with a construct (an IMPORTED atom, a BLIF with no map). Spec 3.6
+    says "level word"; a construct row has no such level, the declarator is a ``stmt`` row (2.1),
+    so the kind is what is tested. The ``why`` basis letter says which one was used."""
+    if words is not None:
+        return words.get
     cache: dict[str, str | None] = {}
 
     def label(atom: str) -> str | None:
@@ -610,6 +637,26 @@ def q_ancestors(nm: NameMap, qrecs: set[int], starts: Iterable[int]) -> dict[int
     return memo
 
 
+def census_sha(path: Path, cen: prov_why.Census, ns: argparse.Namespace | None) -> str:
+    """The SHA-256 of the ``.net`` the census ran with, lower case, '' for none. In order:
+    ``--census-net-sha256``; the ``net_sha256`` of the ``metrics.json`` next to the census (the
+    run record that Norns' ``round4.py`` writes in the run directory, next to ``census.tsv``:
+    ``rec["net_sha256"] = sha256(net)`` at round4.py:335 and 476; null when no ``.net``); a
+    ``# net_sha256=<hex>`` line of the census itself."""
+    given = getattr(ns, "census_net_sha256", None)
+    if given:
+        return str(given).lower()
+    metrics = path.with_name("metrics.json")
+    if metrics.is_file():
+        try:
+            value = json.loads(metrics.read_text()).get("net_sha256")
+        except (OSError, ValueError, AttributeError) as exc:
+            raise PostError(f"cannot read {metrics}: {exc}") from exc
+        if isinstance(value, str) and value:
+            return value.lower()
+    return cen.net_sha256 or ""
+
+
 def census_for(nm_net: Path, ns: argparse.Namespace | None) -> prov_why.Census | None:
     """The census of ``--census``, or None when none is given or it does not name this ``.net``
     (3.6, the packing-differs rule): a mismatch or a census that names no SHA-256 gives a WARNING
@@ -619,14 +666,14 @@ def census_for(nm_net: Path, ns: argparse.Namespace | None) -> prov_why.Census |
         return None
     try:
         cen = prov_why.read_census(Path(path))
-        want = (getattr(ns, "census_net_sha256", None) or cen.net_sha256 or "").lower()
+        want = census_sha(Path(path), cen, ns)
         have = prov_why.sha256_of(nm_net)
     except (prov_why.WhyError, OSError) as exc:
         raise PostError(str(exc)) from exc
     if not want:
-        LOG.warning("WARNING: the census %s names no .net SHA-256 (a '# net_sha256=<hex>' line or "
-                    "--census-net-sha256): its packing is unchecked, so why, gain and pcrit are "
-                    "absent", path)
+        LOG.warning("WARNING: the census %s names no .net SHA-256 (no metrics.json with a "
+                    "net_sha256 next to it, no --census-net-sha256, no '# net_sha256=<hex>' "
+                    "line): its packing is unchecked, so why, gain and pcrit are absent", path)
         return None
     if want != have:
         LOG.warning("WARNING: the census %s ran with another .net (SHA-256 %s, this one %s): "
@@ -678,12 +725,17 @@ def why_extend(nm: NameMap, clusters: list[Cluster], names: Resolver, inp: Input
             LOG.warning("WARNING: %s holds no usable path: rho, slack, near and npaths are absent",
                         inp.attribution)
     census = census_for(inp.net, ns)
+    arch = getattr(ns, "arch", None)
+    words_path = getattr(ns, "words", None)
+    words = read_words(Path(words_path)) if words_path else None
     net: prov_why.Netlist | None = None
     if census is not None:
         if inp.blif is None:
             raise PostError("--census needs the BLIF VPR read (odin3/*.blif or --blif)")
         try:
-            net = prov_why.build_netlist(inp.blif)
+            ports = (prov_why.arch_output_ports(Path(arch)) if arch
+                     else prov_why.net_output_ports(inp.net))
+            net = prov_why.build_netlist(inp.blif, ports)
         except prov_why.WhyError as exc:
             raise PostError(str(exc)) from exc
     objective, letter = pack_objective(ns, inp.run_dir, census is not None)
@@ -705,7 +757,8 @@ def why_extend(nm: NameMap, clusters: list[Cluster], names: Resolver, inp: Input
                 specs.append(prov_why.JoinSpec(part.rec.number, sorted(part.atoms), objective,
                                                letter))
     specs += odin_specs(nm, names, clusters, base, report)
-    return prov_why.build_lines(specs, net, census, report, word_labeler(nm, names), block_of)
+    return prov_why.build_lines(specs, net, census, report, word_labeler(nm, names, words),
+                                block_of, "r" if words is not None else "i")
 
 
 # --- the extension ----------------------------------------------------------------------------
@@ -1023,6 +1076,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
                     "gives the pair classes, gain terms and pack-time criticality (3.6)")
     ap.add_argument("--census-net-sha256", help="SHA-256 of the .net the census ran with "
                     "(default: its '# net_sha256=<hex>' line)")
+    ap.add_argument("--words", type=Path, help="Norns words/members.json: the word label of an "
+                    "atom, for the OR class (without it the nearest declarator of the name map "
+                    "is used, and the why basis letter is i, not r)")
+    ap.add_argument("--arch", type=Path, help="VPR architecture XML: the output ports of the "
+                    "hard-block models (default: the output ports of the primitives of the .net)")
     ap.add_argument("--attribution", type=Path, help="timing/attribution.json (default: the "
                     "flow directory's): gives rho, slack and the near-critical fields")
     ap.add_argument("--pack-objective", help="the packer and its options as the run recorded "

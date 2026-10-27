@@ -2712,7 +2712,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_CMAKE: test_heavy_run's configure-time check of odin3_add_sweep_test (cmake -P).
     list(APPEND _tools_env "ODIN3_CMAKE=${CMAKE_COMMAND}")
     # ODIN3_CLI: test_vtr_fixtures' round trips (3E §16.3 step 1 on the --vtr fixtures).
-    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>")
+    # ODIN3_REQUIRE_CLI: test_prov_why fails (does not skip) when ODIN3_CLI is unset under CTest.
+    list(APPEND _tools_env "ODIN3_CLI=$<TARGET_FILE:odin3>" "ODIN3_REQUIRE_CLI=1")
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")

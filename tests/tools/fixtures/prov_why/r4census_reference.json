@@ -31,6 +31,17 @@
     "OR": 0,
     "FL": 0
    }
+  },
+  "mem0": {
+   "members": [],
+   "pairs": 0,
+   "counts": {
+    "SC": 0,
+    "SN": 0,
+    "SI": 0,
+    "OR": 0,
+    "FL": 0
+   }
   }
  },
  "total": {

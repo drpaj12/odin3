@@ -13,6 +13,7 @@ Work files go to a fresh temporary directory that is left in place.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -175,7 +176,7 @@ class NamesV2Test(unittest.TestCase):
         self.assertIn("needs a version 2 map", err)
 
     def test_version_1_output_is_unchanged(self) -> None:
-        for micro in ("ansiportlist_2", "ch_intrinsics"):
+        for micro in ("bm_base_memory", "ch_intrinsics"):
             path = write_map(self.work, micro, "blif", 1)
             lines = path.read_text().split("\n")
             short = lines[1].split("\t")[2]
@@ -304,6 +305,30 @@ class NamesV2CheckTest(unittest.TestCase):
         self.assertEqual(code, 0, err)
         objects = int(out.split("objects=")[1].split()[0])
         self.assertEqual(objects, int(self.text_objects()) + 1)
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools sets it)")
+class NamesV1UnchangedTest(unittest.TestCase):
+    """V1.2.0 Task 10: a version 1 map end (no --prov-map) is byte-identical to main's. The digests
+    are those of main 0f66eb2f (Task 9) for every file of three writers on two micros."""
+
+    def test_v1_outputs_are_byte_identical_to_main(self) -> None:
+        import hashlib
+        import json
+
+        want = json.loads((GOLDEN / "v1_main_sha256.json").read_text())["files"]
+        work = Path(tempfile.mkdtemp(prefix="names-v1-"))
+        self.addCleanup(shutil.rmtree, work, True)
+        got: dict[str, str] = {}
+        for micro in ("bm_base_memory", "ch_intrinsics"):
+            for writer in WRITERS:
+                names = write_map(work, micro, writer, 1)
+                out = Path(str(names)[: -len(".names")])
+                for path in (out, names):
+                    key = path.name.replace("_v1", "")
+                    got[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+        self.assertEqual(sorted(got), sorted(want))
+        self.assertEqual({k: v for k, v in got.items() if v != want[k]}, {})
 
 
 if __name__ == "__main__":

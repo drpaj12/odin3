@@ -29,6 +29,12 @@
 <block name="o1" instance="lut6[0]" mode="lut6"/>
 </block>
 </block>
+<block name="md" instance="memory[0]" mode="mem_512x64_sp">
+<block name="md" instance="mem_512x64_sp[0]" mode="mem_512x64_sp">
+<inputs><port name="addr">a</port><port name="we">c</port></inputs>
+<outputs><port name="dout">mem_512x64_sp[0].dout[0]->md</port></outputs>
+</block>
+</block>
 <block name="a" instance="io[0]" mode="inpad">
 <block name="a" instance="inpad[0]" mode="inpad"/>
 </block>

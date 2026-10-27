@@ -6,6 +6,7 @@ n4 1 1 0 0 clb0 lut6
 n5 1 1 0 0 clb0 lut6
 n6 1 1 0 0 clb0 lut6
 o1 1 2 0 0 clb1 lut6
+md 2 1 0 0 mem0 mem_512x64_sp
 a 0 1 0 0 io0 inpad
 b 0 2 0 1 io1 inpad
 c 0 3 0 2 io2 inpad

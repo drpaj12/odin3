@@ -3,12 +3,14 @@
 The fixture under tests/tools/fixtures/prov_why is a hand-made flow directory (`gen_fixture.py`):
 one logic CLB of seven atoms with a pair of every class (n1..n6 LUTs, q1 a FF), a CLB of one LUT
 (o1), an I/O cluster, a Norns census (`census.tsv`) and a four-path attribution. Each test works
-on a copy in a fresh temporary directory that is left in place.
+on a copy in a temporary directory that the test removes at its end (it removes only the directory
+it made); set KEEP_TMP=1 to keep them for debugging.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import random
 import shutil
 import tempfile
@@ -24,11 +26,21 @@ from .test_names_v2 import CLI_ENV, ODIN3
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "prov_why"
 CENSUS = FIX / "census.tsv"
+WORDS = FIX / "words" / "members.json"
+ARCH = FIX / "arch.xml"
 NAMES = "why.blif.names"
 
 
-def fresh() -> Path:
-    work = Path(tempfile.mkdtemp(prefix="provwhy-test-")) / "flow"
+def scratch(case: unittest.TestCase) -> Path:
+    """A new temporary directory that the test removes at its end (KEEP_TMP=1 keeps it)."""
+    root = Path(tempfile.mkdtemp(prefix="provwhy-test-"))
+    if not os.environ.get("KEEP_TMP"):
+        case.addCleanup(shutil.rmtree, root, True)
+    return root
+
+
+def fresh(case: unittest.TestCase) -> Path:
+    work = scratch(case) / "flow"
     shutil.copytree(FIX / "flow", work)
     return work
 
@@ -36,7 +48,7 @@ def fresh() -> Path:
 def run(flow: Path, census: Path | None = CENSUS, **extra: object) -> prov_post.PostResult:
     ns = SimpleNamespace(map=None, net=None, place=None, blif=None, top=None, run_dir=None,
                          census=census, census_net_sha256=None, attribution=None,
-                         pack_objective=None)
+                         pack_objective=None, words=WORDS, arch=None)
     for key, value in extra.items():
         setattr(ns, key, value)
     return prov_post.extend_flow_dir(flow, ns)  # type: ignore[arg-type]
@@ -90,7 +102,7 @@ class Shares(unittest.TestCase):
 
 class FixtureLines(unittest.TestCase):
     def setUp(self) -> None:
-        self.flow = fresh()
+        self.flow = fresh(self)
         self.result = run(self.flow)
         self.nm = parsed(self.flow)
 
@@ -142,6 +154,8 @@ class FixtureLines(unittest.TestCase):
 
     def test_names_check_accepts_the_q_and_k_lines(self) -> None:
         if not ODIN3:
+            if os.environ.get("ODIN3_REQUIRE_CLI"):  # set by the CTest registration
+                self.fail("ODIN3_CLI is not set: names --check cannot run under CTest")
             self.skipTest("ODIN3_CLI is not set")
         import subprocess
 
@@ -153,7 +167,7 @@ class FixtureLines(unittest.TestCase):
 
 class WithoutCensus(unittest.TestCase):
     def test_without_a_census_why_gain_and_pcrit_are_absent(self) -> None:
-        flow = fresh()
+        flow = fresh(self)
         run(flow, census=None)
         nm = parsed(flow)
         for number in logic_clbs(nm):
@@ -167,7 +181,7 @@ class WithoutCensus(unittest.TestCase):
         self.assertTrue(all(m.pcrit == "" for m in nm.members))
 
     def test_a_vpr_log_names_the_packer_as_inferred(self) -> None:
-        flow = fresh()
+        flow = fresh(self)
         (flow / "vpr" / "run" / "vpr.out").write_text("# Packing\nBegin packing 'why.blif'.\n")
         run(flow, census=None)
         nm = parsed(flow)
@@ -175,14 +189,14 @@ class WithoutCensus(unittest.TestCase):
         self.assertEqual((w.objective, w.basis[1]), ("vpr-pack", "objective=i"))
 
     def test_a_stated_pack_objective_is_recorded(self) -> None:
-        flow = fresh()
+        flow = fresh(self)
         run(flow, pack_objective="norns-pack:beta=4")
         nm = parsed(flow)
         w = q_of(nm, logic_clbs(nm)[0])
         self.assertEqual((w.objective, w.basis[1]), ("norns-pack:beta=4", "objective=r"))
 
     def test_without_an_attribution_the_post_route_fields_are_absent(self) -> None:
-        flow = fresh()
+        flow = fresh(self)
         (flow / "timing" / "attribution.json").rename(flow / "timing" / "attribution.moved")
         run(flow)
         nm = parsed(flow)
@@ -204,27 +218,52 @@ class PackingDiffers(unittest.TestCase):
             self.assertNotIn("r", {b.split("=")[1] for b in w.basis[:1] + w.basis[2:4]})
             self.assertEqual((w.objective, w.basis[1]), ("", "objective=-"))
 
-    def test_a_net_sha256_mismatch_gives_absent_with_a_warning(self) -> None:
-        flow = fresh()
-        bad = Path(tempfile.mkdtemp(prefix="provwhy-census-")) / "census.tsv"
-        text = CENSUS.read_text().splitlines()
-        text[0] = "# net_sha256=" + "0" * 64
-        bad.write_text("\n".join(text) + "\n")
-        self.check_absent(flow, bad)
+    def census_in(self, metrics: object = "keep", header: str | None = None) -> Path:
+        """A census in a new directory: with the fixture's metrics.json ("keep"), a metrics.json
+        holding `metrics` (a dict), or none (None); `header` becomes a '# net_sha256=' line."""
+        where = scratch(self)
+        text = CENSUS.read_text()
+        (where / "census.tsv").write_text(f"# net_sha256={header}\n{text}" if header else text)
+        if metrics == "keep":
+            shutil.copy(FIX / "metrics.json", where / "metrics.json")
+        elif metrics is not None:
+            (where / "metrics.json").write_text(json.dumps(metrics))
+        return where / "census.tsv"
 
-    def test_the_sha_option_overrides_the_header_and_no_sha_is_unchecked(self) -> None:
-        flow = fresh()
-        self.check_absent(flow, CENSUS, census_net_sha256="1" * 64)
-        other = fresh()
-        bare = Path(tempfile.mkdtemp(prefix="provwhy-census-")) / "census.tsv"
-        bare.write_text("".join(CENSUS.read_text().splitlines(keepends=True)[1:]))
-        self.check_absent(other, bare)
+    def check_used(self, flow: Path, census: Path, **extra: object) -> None:
+        run(flow, census=census, **extra)
+        nm = parsed(flow)
+        self.assertEqual(q_of(nm, logic_clbs(nm)[0]).basis[0], "why=r")
+
+    def test_a_net_sha256_mismatch_gives_absent_with_a_warning(self) -> None:
+        self.check_absent(fresh(self), self.census_in({"net_sha256": "0" * 64}))
+
+    def test_the_sha_is_read_from_the_metrics_json_next_to_the_census(self) -> None:
+        self.check_used(fresh(self), self.census_in())  # the fixture's metrics.json names the .net
+
+    def test_the_sha_option_overrides_the_metrics_and_the_header(self) -> None:
+        self.check_absent(fresh(self), CENSUS, census_net_sha256="1" * 64)
+        good = json.loads((FIX / "metrics.json").read_text())["net_sha256"]
+        wrong = self.census_in({"net_sha256": "2" * 64}, header="3" * 64)
+        self.check_used(fresh(self), wrong, census_net_sha256=good.upper())
+
+    def test_a_census_header_is_the_last_source(self) -> None:
+        good = json.loads((FIX / "metrics.json").read_text())["net_sha256"]
+        self.check_used(fresh(self), self.census_in(None, header=good))
+        self.check_absent(fresh(self), self.census_in(None, header="4" * 64))
+        # a metrics.json that has a sha wins over the header
+        self.check_absent(fresh(self), self.census_in({"net_sha256": "5" * 64}, header=good))
+
+    def test_a_census_with_no_sha_from_any_source_is_unchecked(self) -> None:
+        self.check_absent(fresh(self), self.census_in(None))
+        self.check_absent(fresh(self), self.census_in({"net_sha256": None}))  # no .net kept
+        self.check_absent(fresh(self), self.census_in({"rc": 0}))
 
 
 class CensusJoin(unittest.TestCase):
     def test_a_cseq_that_maps_to_no_clb_changes_nothing(self) -> None:
         # cseq 9 holds the atom `zz`, which is in no block of the .net; cseq 3 never closed
-        flow = fresh()
+        flow = fresh(self)
         run(flow)
         nm = parsed(flow)
         gains = [q_of(nm, n).gain for n in logic_clbs(nm)]
@@ -315,14 +354,15 @@ class R4censusReproduction(unittest.TestCase):
 
     def test_the_pair_counts_equal_r4census(self) -> None:
         ref = json.loads((FIX / "r4census_reference.json").read_text())
-        flow = fresh()
+        flow = fresh(self)
         run(flow)
         nm = parsed(flow)
         counts: dict[str, dict[str, int]] = {}
-        net = prov_why.build_netlist(flow / "odin3" / "why.blif")
+        net = prov_why.build_netlist(flow / "odin3" / "why.blif",
+                                     prov_why.net_output_ports(flow / "vpr" / "run" / "why.net"))
         census = prov_why.read_census(CENSUS)
         names = prov_post.Resolver(nm, None)
-        word = prov_post.word_labeler(nm, names)
+        word = prov_post.word_labeler(nm, names, prov_post.read_words(WORDS))
         for clb, info in ref["clbs"].items():
             counts[clb] = prov_why.pair_counts(net, census.pin_crit, word, info["members"])
         for clb, info in ref["clbs"].items():
@@ -338,16 +378,50 @@ class R4censusReproduction(unittest.TestCase):
             cls, share = item.split(":")
             self.assertAlmostEqual(float(share), ref["total"]["counts"][cls] / total, delta=0.0011)
 
-    def test_the_word_label_is_the_declarator_of_the_first_leaf(self) -> None:
-        flow = fresh()
+    def test_the_word_label_is_the_declarator_of_the_first_leaf_without_a_words_file(self) -> None:
+        flow = fresh(self)
         nm = parsed(flow)
         word = prov_post.word_labeler(nm, prov_post.Resolver(nm, None))
         self.assertEqual((word("n1"), word("n6")), ("c2", "c2"))
         self.assertIsNone(word("n2"))
         self.assertIsNone(word("not_an_atom"))
 
+    def test_the_word_label_is_read_from_a_norns_words_file(self) -> None:
+        # the real members.json format: {atom: {word: <id or null>, bit, bus, kind, ngroups}}
+        words = prov_post.read_words(WORDS)
+        self.assertEqual(words, {"n1": "w1", "n6": "w1"})  # atoms with a null word are absent
+        flow = fresh(self)
+        nm = parsed(flow)
+        word = prov_post.word_labeler(nm, prov_post.Resolver(nm, None), words)
+        self.assertEqual((word("n1"), word("n6"), word("n2")), ("w1", "w1", None))
+        # a word differing from the declarator splits a pair the declarator would join
+        other = scratch(self) / "members.json"
+        other.write_text(json.dumps({"n1": {"word": "wa"}, "n6": {"word": "wb"}}))
+        split = prov_post.word_labeler(nm, prov_post.Resolver(nm, None),
+                                       prov_post.read_words(other))
+        self.assertNotEqual(split("n1"), split("n6"))
+
+    def test_the_why_basis_says_whether_the_word_labels_were_read_or_inferred(self) -> None:
+        with_words, without = fresh(self), fresh(self)
+        run(with_words)
+        run(without, words=None)
+        a, b = parsed(with_words), parsed(without)
+        wa, wb = (q_of(x, logic_clbs(x)[0]) for x in (a, b))
+        self.assertEqual((wa.basis[0], wb.basis[0]), ("why=r", "why=i"))
+        self.assertEqual(wa.why, wb.why)  # the fixture's declarator and word agree
+
+    def test_a_words_file_that_is_not_a_norns_one_is_refused(self) -> None:
+        bad = scratch(self) / "members.json"
+        bad.write_text("[1, 2]")
+        with self.assertRaises(prov_post.PostError):
+            prov_post.read_words(bad)
+        bad.write_text("{")
+        with self.assertRaises(prov_post.PostError):
+            prov_post.read_words(bad)
+
     def test_precedence_a_pair_that_fits_sc_and_si_is_sc(self) -> None:
-        net = prov_why.build_netlist(FIX / "flow" / "odin3" / "why.blif")
+        net = prov_why.build_netlist(FIX / "flow" / "odin3" / "why.blif",
+                                     prov_why.arch_output_ports(ARCH))
         self.assertIn(("n1", "n2"), net.shared)  # both read `a`
         self.assertIn(("n1", "n2"), net.series)  # and n1 drives n2
         crit = {"n2": {"n1": 0.9}}
@@ -356,23 +430,83 @@ class R4censusReproduction(unittest.TestCase):
                          "SN")
 
 
+class HardBlockOutputs(unittest.TestCase):
+    """The output pins of a hard block come from the architecture or the .net, not from a name."""
+
+    BLIF = FIX / "flow" / "odin3" / "why.blif"
+    NET = FIX / "flow" / "vpr" / "run" / "why.net"
+
+    def test_a_memory_dout_gets_a_driver_from_the_net_ports(self) -> None:
+        net = prov_why.build_netlist(self.BLIF, prov_why.net_output_ports(self.NET))
+        self.assertEqual(net.driver["md"], "md")  # the block is named after its output net
+        self.assertNotIn("md", net.kind)  # not a pair member: a memory
+        self.assertIn("md", net.driver)
+
+    def test_a_memory_dout_gets_a_driver_from_the_architecture(self) -> None:
+        net = prov_why.build_netlist(self.BLIF, prov_why.arch_output_ports(ARCH))
+        self.assertEqual(net.driver["md"], "md")
+
+    def test_the_two_sources_give_the_same_netlist(self) -> None:
+        a = prov_why.build_netlist(self.BLIF, prov_why.net_output_ports(self.NET))
+        b = prov_why.build_netlist(self.BLIF, prov_why.arch_output_ports(ARCH))
+        self.assertEqual((a.series, a.shared, a.bcast, a.driver, a.kind),
+                         (b.series, b.shared, b.bcast, b.driver, b.kind))
+
+    def test_no_name_heuristic_a_port_that_is_not_an_output_is_not_one(self) -> None:
+        # `dout` is an input of a model that does not list it: no driver, and a WARNING
+        with self.assertLogs("odin3", level="WARNING") as logs:
+            net = prov_why.build_netlist(self.BLIF, {"adder": frozenset(("cout", "sumout"))})
+        self.assertNotIn("md", net.driver)
+        self.assertTrue(any("single_port_ram" in line for line in logs.output))
+        # the old name rule would have taken `out1`/`q`; ports say what is an output
+        ports = {"m": frozenset(("dout",))}
+        self.assertTrue(prov_why.is_output_formal(ports, "m", "dout[3]"))
+        self.assertFalse(prov_why.is_output_formal(ports, "m", "out"))
+        self.assertTrue(prov_why.is_output_formal({"": frozenset(("q",))}, "any", "q"))
+
+    def test_prov_post_option_arch_gives_the_same_lines_as_the_net_ports(self) -> None:
+        a, b = fresh(self), fresh(self)
+        run(a)
+        run(b, arch=ARCH)
+        self.assertEqual((a / "odin3" / NAMES).read_text(), (b / "odin3" / NAMES).read_text())
+
+
+class NonLogicNames(unittest.TestCase):
+    """A block is not a logic CLB by exact architecture names, never by a substring."""
+
+    @staticmethod
+    def logic(kind: str, stems: dict[str, str]) -> bool:
+        return prov_post.Cluster("c", kind, [], list(stems), stems=stems).logic
+
+    def test_exact_names_of_the_architecture(self) -> None:
+        for kind, stem in (("memory", "mem_512x64_sp"), ("mult_36", "mult_18x18"),
+                           ("clb", "single_port_ram"), ("clb", "mem_2048x8_dp"),
+                           ("clb", "multiply"), ("memory", "lut6")):
+            self.assertFalse(self.logic(kind, {"a": stem}), (kind, stem))
+
+    def test_a_substring_does_not_make_a_block_non_logic(self) -> None:
+        for kind, stem in (("clb", "lut6"), ("program_clb", "ff"), ("dsp_helper", "lut6"),
+                           ("clb", "ramp_lut"), ("clb", "multiplexer")):
+            self.assertTrue(self.logic(kind, {"a": stem}), (kind, stem))
+
+
 class OdinJoins(unittest.TestCase):
     """The objective-only Q lines Odin III wrote get the post-route fields from the attribution."""
 
     def test_an_odin_q_is_filled_in_place_and_keeps_its_objective(self) -> None:
-        flow = fresh()
+        flow = fresh(self)
         path = flow / "odin3" / NAMES
         text = path.read_text()
         # r17 (n1's record, a SOURCE) gets a join above it: a derived record over n1 and n2
-        # r20 is a join of r16 and r17 (the sources of n4 and n5); n4 and n5 are bound to it
-        join = "R\tr20\tD\tlut\tcoarsen:stmt\tt2.1\tr16,r17\t\t\tjoin\n"
+        # r21 is a join of r16 and r17 (the sources of n4 and n5); n4 and n5 are bound to it
+        join = "R\tr21\tD\tlut\tcoarsen:stmt\tt2.1\tr16,r17\t\t\tjoin\n"
         text = text.replace("F\tf1\twhy.v\n", join + "F\tf1\twhy.v\n")
-        text = text.replace("net\tn4\tr16", "net\tn4\tr20")
-        text = text.replace("net\tn5\tr17", "net\tn5\tr20")
+        text = text.replace("net\tn4\tr16", "net\tn4\tr21")
+        text = text.replace("net\tn5\tr17", "net\tn5\tr21")
         first_run = "T\tt1\tread_verilog\t\t\n"
         text = text.replace(first_run, first_run + "T\tt2\topt\t\t\n")
         basis = "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-"
-        old = "Q\tr20\t\topt" + "\t" * 8 + basis + "\t-"
+        old = "Q\tr21\t\topt" + "\t" * 8 + basis + "\t-"
         path.write_text(text + old + "\n")
         before = path.read_text().splitlines()
         run(flow, census=None)
@@ -380,13 +514,13 @@ class OdinJoins(unittest.TestCase):
         self.assertNotIn(old, after)
         self.assertEqual(len(before) - 1, len([x for x in after if x in before]))
         nm = parsed(flow)
-        w = q_of(nm, 20)
+        w = q_of(nm, 21)
         self.assertEqual(w.objective, "opt")
         self.assertEqual((w.why, w.gain, w.pcrit), ((), (), ""))
         self.assertEqual(w.basis[:4], ("why=-", "objective=r", "gain=-", "pcrit=-"))
         self.assertEqual((w.rho, w.slack, w.members), ("0.970", "-0.700", "2"))
-        self.assertEqual([m.member for m in nm.members if m.record == 20], ["n4", "n5"])
-        self.assertEqual(len([x for x in nm.whys if x.record == 20]), 1)
+        self.assertEqual([m.member for m in nm.members if m.record == 21], ["n4", "n5"])
+        self.assertEqual(len([x for x in nm.whys if x.record == 21]), 1)
 
 
 if __name__ == "__main__":

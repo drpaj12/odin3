@@ -41,7 +41,7 @@ Exit codes: 0 all steps passed, 1 a step failed (the `timing` step too), 2 usage
 
 `--keep-results` keeps VPR's `.net`, `.place` and `.route` in `vpr/run` (the flow deletes them by
 default). `odin3-prov-post FLOW_DIR [--map FILE] [--blif FILE] [--run-dir DIR] [--net FILE] [--place
-FILE] [--top NAME] [--census FILE [--census-net-sha256 HEX]] [--attribution FILE] [--pack-objective TEXT]` then extends the version 2 name map of a `--prov --vpr --keep-results` run with
+FILE] [--top NAME] [--census FILE [--census-net-sha256 HEX]] [--words FILE] [--arch FILE] [--attribution FILE] [--pack-objective TEXT]` then extends the version 2 name map of a `--prov --vpr --keep-results` run with
 the BLE, CLB and site records of VPR's packing and placement, one `A` line per atom and the `Q` and `K` lines of
 the logic CLBs (why they were joined, how critical; {doc}`outputs`; exit codes: 0
 ok, 1 refused or failed, 2 usage error); see {doc}`outputs`. Give `--run-dir` when a route retry left

@@ -12,9 +12,10 @@
 11 1
 .names e g n5
 11 1
-.names h i n6
+.names h md n6
 11 1
 .names n4 x o1
 11 1
+.subckt single_port_ram addr=a we=c dout=md
 .latch n3 q1 re clk 2
 .end

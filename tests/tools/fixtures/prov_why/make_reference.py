@@ -4,9 +4,9 @@ bytecode is written there.
 
     python3 -B make_reference.py PATH/TO/norns/scripts
 
-The word labels are the ones the fixture's name map gives (n1 and n6 share a declarator): the
-Norns round-2 `members.json` is replaced by that table, as the spec (3.6) says the labelling
-differs. The architecture's output ports are the adder's.
+The word labels are read from the fixture's `words/members.json` (the real Norns file format,
+`build_words.py`), and the output ports from the fixture's `arch.xml` by Norns' own
+`arch_output_ports`.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-WORDS = {"n1": "w", "n6": "w"}
 
 
 def main(scripts: str) -> None:
@@ -26,11 +25,13 @@ def main(scripts: str) -> None:
     import r4census as rc  # type: ignore[import-not-found]
 
     def runs_dir(_design: str, *parts: str) -> Path:
+        if parts and parts[0] == "words":
+            return HERE / "words" / "members.json"
         return HERE / "flow" / "odin3" / "why.blif"
 
+    real_ports = nl.arch_output_ports
     nl.runs_dir = runs_dir
-    nl.arch_output_ports = lambda _arch: {"adder": {"cout", "sumout"}}
-    rc.Netlist._words = staticmethod(lambda _design: dict(WORDS))
+    nl.arch_output_ports = lambda _arch: real_ports(HERE / "arch.xml")
     net = rc.Netlist("why")
     cen = rc.Census(HERE / "census.tsv")
     atoms_of_clb, cls = r3lib.clb_atoms_of(HERE / "norns" / "final.flat_place")
