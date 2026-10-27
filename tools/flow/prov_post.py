@@ -39,12 +39,14 @@ import shutil
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from collections.abc import Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import name_map_v2
+import prov_why
 from name_map_v2 import MapRecord, NameMap
+from prov_why import escape as escape
 
 LOG = logging.getLogger("odin3")
 MAP_MATCH_MIN = 0.9  # least share of the .net's atoms the name map must hold
@@ -53,10 +55,10 @@ ANCHOR_RANK = 5  # a construct of this rank (stmt) or coarser is its own anchor
 LEVEL_RANK = {"module": 1, "instance": 2, "block": 3, "branch": 4, "stmt": 5, "expr": 6}
 NO_SOURCE_ATOMS = frozenset(("gnd", "vcc", "unconn"))  # constant generators: no source object
 PAD_STEMS = frozenset(("inpad", "outpad"))  # primitives of an I/O block: not in any BLE
+NON_LOGIC_WORDS = ("memory", "ram", "mult", "dsp")  # a block of these is not a logic CLB
 PACK, PLACE = "pack", "place"
 OP_BLE, OP_CLB, OP_SITE = 1, 2, 1  # operation numbers within a pass run (renumbered when written)
 BLE_ATOMS_WARN = 10  # a single BLE with more atoms than this: the level-1 block is not a BLE
-_ESCAPES = (("%", "%25"), ("\t", "%09"), ("\n", "%0A"), ("\\", "%5C"), (",", "%2C"), ("|", "%7C"))
 _SPAN = re.compile(r"(\d+)\.(\d+)-(\d+)\.(\d+)")
 _STEM = re.compile(r"^([^\[]*)")
 
@@ -67,13 +69,6 @@ class PostError(Exception):
 
 class UsageError(Exception):
     pass
-
-
-def escape(text: str) -> str:
-    """A name map field (version 2): %25 %09 %0A %5C %2C %7C, and %23 for a leading '#'."""
-    for raw, esc in _ESCAPES:
-        text = text.replace(raw, esc)
-    return "%23" + text[1:] if text.startswith("#") else text
 
 
 # --- the graph: anchors, J, instance chains (3.3) -------------------------------------------------
@@ -334,6 +329,7 @@ class Ble:
 
     atoms: list[str]
     record: int = 0
+    rec: NewRec | None = None
 
 
 @dataclass
@@ -348,6 +344,16 @@ class Cluster:
     clb: int = 0
     site: int = 0
     place: tuple[str, ...] = ()
+    stems: dict[str, str] = field(default_factory=dict)  # atom -> instance stem of its primitive
+    clb_rec: NewRec | None = None
+
+    @property
+    def logic(self) -> bool:
+        """A logic cluster (its members get a Q line, 3.6): it holds a primitive that is not a
+        pad, and none of its blocks is a memory or a multiplier (r3lib/build_seeds classify)."""
+        names = {self.kind.lower(), *(s.lower() for s in self.stems.values())}
+        return bool(self.stems) and not set(self.stems.values()) <= PAD_STEMS and not any(
+            word in name for name in names for word in NON_LOGIC_WORDS)
 
 
 def primitives(block: ET.Element) -> list[tuple[str, str]]:
@@ -396,6 +402,7 @@ def read_net(path: Path) -> list[Cluster]:
             else:
                 cluster.parts.extend(n for n, _ in prims)
             cluster.atoms.extend(n for n, _ in prims)
+            cluster.stems.update(prims)
         for atom in cluster.atoms:
             if atom in seen:
                 raise PostError(f"{path}: the atom name '{atom}' occurs twice in the packed "
@@ -441,6 +448,8 @@ class Inputs:
     place: Path
     blif: Path | None
     top: str | None
+    attribution: Path | None = None
+    run_dir: Path | None = None
 
 
 def one(paths: list[Path], what: str, where: Path) -> Path:
@@ -494,8 +503,11 @@ def find_inputs(flow: Path, ns: argparse.Namespace | None = None) -> Inputs:
     net = opt.net or one(sorted(Path(run).glob("*.net")), ".net", Path(run))
     place = opt.place or one(sorted(Path(run).glob("*.place")), ".place", Path(run))
     top = opt.top or inputs.get("top")
+    attribution = getattr(opt, "attribution", None)
+    if attribution is None and (flow / "timing" / "attribution.json").is_file():
+        attribution = flow / "timing" / "attribution.json"
     return Inputs(Path(names), Path(net), Path(place), Path(blif) if blif else None,
-                  top if isinstance(top, str) else None)
+                  top if isinstance(top, str) else None, attribution, Path(run))
 
 
 def blif_names_style(blif: Path) -> str | None:
@@ -509,6 +521,191 @@ def blif_names_style(blif: Path) -> str | None:
     except OSError:
         return None
     return None
+
+
+# --- why and how critical (3.6, Task 10) --------------------------------------------------------
+
+VPR_PACK_LOG = "vpr.out"  # the VPR log in the run directory, when the flow kept it
+_VPR_PACKING = re.compile(r"^(# Packing|Begin packing)", re.M)
+OBJ_BASIS = re.compile(r"(?:^|,)objective=([ri-])")
+
+
+def pack_objective(ns: argparse.Namespace | None, run_dir: Path | None,
+                   census_used: bool) -> tuple[str, str]:
+    """(objective, basis) of the pack records (3.6): ``--pack-objective`` is the packer and its
+    options as the run recorded them (``r``); a census run without it is ``norns-pack`` (``i``:
+    the census implies the packer); a stock run whose VPR log shows the packing step is
+    ``vpr-pack`` (``i``: the packer name from the log); otherwise none."""
+    given = getattr(ns, "pack_objective", None)
+    if given:
+        return str(given), "r"
+    if census_used:
+        return "norns-pack", "i"
+    log = run_dir / VPR_PACK_LOG if run_dir is not None else None
+    if log is not None and log.is_file():
+        try:
+            if _VPR_PACKING.search(log.read_text(errors="replace")):
+                return "vpr-pack", "i"
+        except OSError:
+            pass
+    return "", "-"
+
+
+def word_labeler(nm: NameMap, names: Resolver) -> Callable[[str], str | None]:
+    """The word label of an atom (the OR class): the nearest DECLARATOR construct on the chain of
+    its first leaf, as ``c<n>``; None when the atom has no leaf with a construct (an IMPORTED
+    atom, a BLIF with no map). Spec 3.6 says "level word"; a construct row has no such level, the
+    declarator is a ``stmt`` row (2.1), so the kind is what is tested."""
+    cache: dict[str, str | None] = {}
+
+    def label(atom: str) -> str | None:
+        if atom in cache:
+            return cache[atom]
+        found: str | None = None
+        obj = names.lookup(atom)
+        if obj is not None and obj.records:
+            for rec in nm.provenance(obj):
+                if rec.kind == "D":
+                    continue
+                row = rec.constructs[0] if rec.constructs else 0
+                for _ in range(len(nm.constructs)):
+                    if not 1 <= row <= len(nm.constructs):
+                        break
+                    con = nm.constructs[row - 1]
+                    if con.kind == "DECLARATOR":
+                        found = f"c{row}"
+                        break
+                    row = con.parent
+                break  # the first leaf only
+        cache[atom] = found
+        return found
+
+    return label
+
+
+def q_ancestors(nm: NameMap, qrecs: set[int], starts: Iterable[int]) -> dict[int, frozenset[int]]:
+    """For each record reached from ``starts``, the records of ``qrecs`` among itself and its
+    ancestors. Iterative; parents come before children, so it is one pass over the DAG."""
+    memo: dict[int, frozenset[int]] = {}
+    for start in starts:
+        stack = [start]
+        while stack:
+            top = stack[-1]
+            if top in memo:
+                stack.pop()
+                continue
+            if not 1 <= top <= len(nm.records):
+                memo[top] = frozenset()
+                continue
+            parents = [p for p in nm.records[top - 1].parents if 1 <= p <= len(nm.records)]
+            pending = [p for p in parents if p not in memo]
+            if pending:
+                stack.extend(pending)
+                continue
+            stack.pop()
+            found: set[int] = {top} if top in qrecs else set()
+            for parent in parents:
+                found |= memo[parent]
+            memo[top] = frozenset(found)
+    return memo
+
+
+def census_for(nm_net: Path, ns: argparse.Namespace | None) -> prov_why.Census | None:
+    """The census of ``--census``, or None when none is given or it does not name this ``.net``
+    (3.6, the packing-differs rule): a mismatch or a census that names no SHA-256 gives a WARNING
+    and no census-based value, never ``r`` or ``i``."""
+    path = getattr(ns, "census", None)
+    if not path:
+        return None
+    try:
+        cen = prov_why.read_census(Path(path))
+        want = (getattr(ns, "census_net_sha256", None) or cen.net_sha256 or "").lower()
+        have = prov_why.sha256_of(nm_net)
+    except (prov_why.WhyError, OSError) as exc:
+        raise PostError(str(exc)) from exc
+    if not want:
+        LOG.warning("WARNING: the census %s names no .net SHA-256 (a '# net_sha256=<hex>' line or "
+                    "--census-net-sha256): its packing is unchecked, so why, gain and pcrit are "
+                    "absent", path)
+        return None
+    if want != have:
+        LOG.warning("WARNING: the census %s ran with another .net (SHA-256 %s, this one %s): "
+                    "packing differs, so why, gain and pcrit are absent", path, want, have)
+        return None
+    return cen
+
+
+def odin_specs(nm: NameMap, names: Resolver, clusters: list[Cluster], base: int,
+               report: prov_why.PathReport | None) -> list[prov_why.JoinSpec]:
+    """The objective-only Q lines Odin III wrote (current, on a record it made) get the post-route
+    fields: the members are the atoms of the packed netlist whose naming record has the join among
+    its ancestors. Needs a path report."""
+    qrecs = {w.record: w for w in nm.whys if w.stale == "-" and 1 <= w.record <= base}
+    if report is None or not qrecs:
+        return []
+    atoms = [a for cl in clusters for a in cl.atoms]
+    start_of: dict[str, int] = {}
+    for atom in atoms:
+        obj = names.lookup(atom)
+        if obj is not None and obj.records:
+            start_of[atom] = obj.records[0]
+    anc = q_ancestors(nm, set(qrecs), set(start_of.values()))
+    members: dict[int, list[str]] = {}
+    for atom, start in start_of.items():
+        for rec in anc.get(start, ()):
+            members.setdefault(rec, []).append(atom)
+    specs: list[prov_why.JoinSpec] = []
+    for rec, old in sorted(qrecs.items()):
+        if rec not in members:
+            continue
+        found = OBJ_BASIS.search(",".join(old.basis))
+        specs.append(prov_why.JoinSpec(rec, sorted(members[rec]), old.objective,
+                                       found.group(1) if found else "-", False, old.raw))
+    return specs
+
+
+def why_extend(nm: NameMap, clusters: list[Cluster], names: Resolver, inp: Inputs,
+               ns: argparse.Namespace | None, base: int) -> prov_why.WhyResult:
+    """The Q and K lines of the run (3.6): every logic CLB, every join BLE of a logic cluster,
+    and Odin III's own joins (their post-route fields)."""
+    report = None
+    if inp.attribution is not None:
+        try:
+            report = prov_why.read_attribution(inp.attribution)
+        except prov_why.WhyError as exc:
+            raise PostError(str(exc)) from exc
+        if report is None:
+            LOG.warning("WARNING: %s holds no usable path: rho, slack, near and npaths are absent",
+                        inp.attribution)
+    census = census_for(inp.net, ns)
+    net: prov_why.Netlist | None = None
+    if census is not None:
+        if inp.blif is None:
+            raise PostError("--census needs the BLIF VPR read (odin3/*.blif or --blif)")
+        try:
+            net = prov_why.build_netlist(inp.blif)
+        except prov_why.WhyError as exc:
+            raise PostError(str(exc)) from exc
+    objective, letter = pack_objective(ns, inp.run_dir, census is not None)
+    specs: list[prov_why.JoinSpec] = []
+    block_of: dict[int, frozenset[str]] = {}
+    for cl in clusters:
+        if not cl.logic:
+            continue
+        logic = [a for a in cl.atoms if cl.stems.get(a) not in PAD_STEMS
+                 and (net is None or a in net.kind)]
+        if cl.clb_rec is not None and cl.clb_rec.number:
+            specs.append(prov_why.JoinSpec(cl.clb_rec.number, sorted(logic), objective, letter,
+                                           True))
+            block_of[cl.clb_rec.number] = frozenset(cl.atoms)
+        for part in cl.parts:
+            lab = part.rec.label if isinstance(part, Ble) and part.rec is not None else None
+            if isinstance(part, Ble) and part.rec is not None and part.rec.number and lab and (
+                    lab.join or lab.instance):
+                specs.append(prov_why.JoinSpec(part.rec.number, sorted(part.atoms), objective,
+                                               letter))
+    specs += odin_specs(nm, names, clusters, base, report)
+    return prov_why.build_lines(specs, net, census, report, word_labeler(nm, names), block_of)
 
 
 # --- the extension ----------------------------------------------------------------------------
@@ -542,6 +739,8 @@ class PostResult:
     bytes_before: int
     bytes_after: int
     lines: list[str] = field(default_factory=list)
+    q_lines: int = 0
+    k_lines: int = 0
 
 
 class Resolver:
@@ -617,6 +816,7 @@ def build(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str, ...
             if not found:  # no atom of the BLE is in the map: no record to chain (agent default)
                 continue
             ble = NewRec("ble", "coarsen:lut", OP_BLE, PACK, found)
+            part.rec = ble
             parents.append(ble)
             made.append(ble)
             ble_of.update({a: ble for a in part.atoms})
@@ -626,6 +826,7 @@ def build(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str, ...
             # (an output pad `out:<port>` has no map object by design; Task 9 fix round 1, item 5)
             continue
         clb = NewRec("clb", "coarsen:ble", OP_CLB, PACK, parents)
+        cl.clb_rec = clb
         made.append(clb)
         site: NewRec | None = None
         if cl.name in places:
@@ -714,12 +915,16 @@ def extend_map(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str
     return tlines, rlines, alines, result
 
 
-def merged_text(raw: bytes, tlines: list[str], rlines: list[str], alines: list[str]) -> bytes:
+def merged_text(raw: bytes, tlines: list[str], rlines: list[str], alines: list[str],
+                qlines: Sequence[str] = (), replace: Mapping[str, str] | None = None) -> bytes:
     """The map with the new lines inserted: T after the last T line, R after the last R line, A at
     the end; every old line stays as it was."""
     lines = raw.split(b"\n")
     if lines and lines[-1] == b"":
         lines.pop()
+    if replace:  # the objective-only Q lines of Odin III's joins, filled in place (3.6)
+        swap = {k.encode(): v.encode() for k, v in replace.items()}
+        lines = [swap.get(line, line) for line in lines]
     last: dict[bytes, int] = {}
     for i, line in enumerate(lines):
         if len(line) > 1 and line[1:2] == b"\t":
@@ -731,7 +936,7 @@ def merged_text(raw: bytes, tlines: list[str], rlines: list[str], alines: list[s
             inserts.append((last.get(letter, len(lines) - 1) + 1, new))
     for pos, new in sorted(inserts, reverse=True):
         lines[pos:pos] = [n.encode() for n in new]
-    lines.extend(a.encode() for a in alines)
+    lines.extend(a.encode() for a in [*alines, *qlines])
     return b"\n".join(lines) + b"\n"
 
 
@@ -787,14 +992,17 @@ def _extend(flow: Path, ns: argparse.Namespace | None) -> PostResult:
              if a not in NO_SOURCE_ATOMS and not a.startswith("out:")]
     matched = sum(1 for a in atoms if names.lookup(a) is not None)
     check_names(inp.blif, matched / len(atoms) if atoms else 1.0, matched, len(atoms))
+    base = len(nm.records)
     tlines, rlines, alines, result = extend_map(nm, clusters, places, names, inp.net, inp.place)
-    data = merged_text(raw, tlines, rlines, alines)
+    why = why_extend(nm, clusters, names, inp, ns, base)
+    data = merged_text(raw, tlines, rlines, alines, why.appended(), why.replace)
+    result.q_lines, result.k_lines = why.stats.q_lines, why.stats.k_lines
     try:
         write_atomic(inp.map, data)
     except OSError as exc:
         raise PostError(f"cannot write {inp.map}: {exc}") from exc
     result.map_path, result.bytes_before, result.bytes_after = inp.map, len(raw), len(data)
-    result.lines = [*tlines, *rlines, *alines]
+    result.lines = [*tlines, *rlines, *alines, *why.appended()]
     return result
 
 
@@ -811,6 +1019,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     ap.add_argument("--net", type=Path, help="VPR packed netlist (default: <run-dir>/*.net)")
     ap.add_argument("--place", type=Path, help="VPR placement (default: <run-dir>/*.place)")
     ap.add_argument("--top", help="top module (default: top in timing/inputs.json)")
+    ap.add_argument("--census", type=Path, help="Norns packing census (--norns_pack_census): "
+                    "gives the pair classes, gain terms and pack-time criticality (3.6)")
+    ap.add_argument("--census-net-sha256", help="SHA-256 of the .net the census ran with "
+                    "(default: its '# net_sha256=<hex>' line)")
+    ap.add_argument("--attribution", type=Path, help="timing/attribution.json (default: the "
+                    "flow directory's): gives rho, slack and the near-critical fields")
+    ap.add_argument("--pack-objective", help="the packer and its options as the run recorded "
+                    "them (the objective of the pack records, basis r)")
     ns = ap.parse_args(argv)
     if not ns.flow_dir.is_dir():
         raise UsageError(f"no such directory: {ns.flow_dir}")
@@ -832,7 +1048,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     print(f"atoms {res.atoms} (not in the map: {res.unmatched}); bles {res.bles}, clbs {res.clbs}, "
           f"sites {res.sites}; joins by pack {res.joins}, of instances {res.instance_joins}, "
-          f"lossy {res.lossy}")
+          f"lossy {res.lossy}; Q lines {res.q_lines}, K lines {res.k_lines}")
     print(f"wrote {res.map_path} (+{res.bytes_after - res.bytes_before} bytes, "
           f"{len(res.lines)} lines)")
     return 0

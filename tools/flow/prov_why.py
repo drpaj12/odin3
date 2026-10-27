@@ -132,6 +132,30 @@ def _census_int(text: str, path: Path, number: int) -> int:
         raise WhyError(f"{path}:{number}: '{text}' is not an integer") from exc
 
 
+def _census_line(cen: Census, latest: dict[str, int], f: list[str], number: int) -> None:
+    """One data line of a census (M, A, P or K); other types are not read."""
+    path, kind = cen.path, f[0]
+    if kind == "M" and len(f) >= 6:
+        key = (_census_int(f[1], path, number), _census_int(f[2], path, number))
+        cen.source_of[key] = _census_int(f[4], path, number)
+    elif kind == "A" and len(f) >= 4:
+        key = (_census_int(f[1], path, number), _census_int(f[2], path, number))
+        cen.atoms_of.setdefault(key, []).append(f[3])
+    elif kind == "P" and len(f) >= 5:
+        cseq, atom, net = _census_int(f[1], path, number), f[2], f[3]
+        try:
+            crit = float(f[4])
+        except ValueError as exc:
+            raise WhyError(f"{path}:{number}: '{f[4]}' is not a number") from exc
+        if latest.get(atom, 0) <= cseq:
+            if latest.get(atom) != cseq:
+                cen.pin_crit[atom] = {}
+            latest[atom] = cseq
+            cen.pin_crit[atom][net] = max(crit, cen.pin_crit[atom].get(net, 0.0))
+    elif kind == "K" and len(f) >= 2:
+        cen.closed.add(_census_int(f[1], path, number))
+
+
 def read_census(path: Path) -> Census:
     """Parse a census file. An atom's final cluster is the latest closed cluster that added it (a
     destroyed cluster has no K line), as in r4census.py; a pin's criticality is the latest
@@ -148,26 +172,7 @@ def read_census(path: Path) -> Census:
             if match:
                 cen.net_sha256 = match.group(1).lower()
             continue
-        f = line.split("\t")
-        kind = f[0]
-        try:
-            if kind == "M" and len(f) >= 6:
-                key = (_census_int(f[1], path, number), _census_int(f[2], path, number))
-                cen.source_of[key] = _census_int(f[4], path, number)
-            elif kind == "A" and len(f) >= 4:
-                key = (_census_int(f[1], path, number), _census_int(f[2], path, number))
-                cen.atoms_of.setdefault(key, []).append(f[3])
-            elif kind == "P" and len(f) >= 5:
-                cseq, atom, net, crit = _census_int(f[1], path, number), f[2], f[3], float(f[4])
-                if latest.get(atom, 0) <= cseq:
-                    if latest.get(atom) != cseq:
-                        cen.pin_crit[atom] = {}
-                    latest[atom] = cseq
-                    cen.pin_crit[atom][net] = max(crit, cen.pin_crit[atom].get(net, 0.0))
-            elif kind == "K" and len(f) >= 2:
-                cen.closed.add(_census_int(f[1], path, number))
-        except ValueError as exc:
-            raise WhyError(f"{path}:{number}: bad number in a {kind} line: {exc}") from exc
+        _census_line(cen, latest, line.split("\t"), number)
     for cseq, idx in sorted(cen.source_of):
         cen.molecules.setdefault(cseq, []).append(cen.source_of[(cseq, idx)])
         if cseq in cen.closed:
@@ -283,10 +288,8 @@ def absorbed_buffers(blocks: Sequence[Block]) -> set[str]:
             if b.kind == "lut" and len(b.inputs) == 1 and b.rows == [("1", "1")]}
 
 
-def swept_blocks(blocks: Sequence[Block], outputs: Sequence[str], gone: set[str]) -> set[str]:
-    """Blocks whose outputs nobody uses once the buffers in ``gone`` are absorbed, repeatedly
-    (VPR's ``sweep_blocks``)."""
-    alias = {b.name: b.inputs[0] for b in blocks if b.name in gone and b.inputs}
+def _resolver(alias: Mapping[str, str]) -> Callable[[str], str]:
+    """Follows absorbed buffers: a net they drive is the net they read."""
 
     def res(net: str) -> str:
         for _ in range(len(alias) + 1):
@@ -295,18 +298,27 @@ def swept_blocks(blocks: Sequence[Block], outputs: Sequence[str], gone: set[str]
             net = alias[net]
         return net
 
+    return res
+
+
+def _pins(b: Block, res: Callable[[str], str]) -> tuple[list[str], list[str]]:
+    """(output nets, input nets resolved through absorbed buffers) of a block."""
+    if b.kind == "hard":
+        outs = [n for f, n in b.pins.items() if is_output_formal(b.model, f)]
+        ins = [res(n) for f, n in b.pins.items() if not is_output_formal(b.model, f)]
+        return outs, ins
+    return [b.name], [res(n) for n in b.inputs]
+
+
+def swept_blocks(blocks: Sequence[Block], outputs: Sequence[str], gone: set[str]) -> set[str]:
+    """Blocks whose outputs nobody uses once the buffers in ``gone`` are absorbed, repeatedly
+    (VPR's ``sweep_blocks``)."""
+    res = _resolver({b.name: b.inputs[0] for b in blocks if b.name in gone and b.inputs})
     outs_of: dict[str, list[str]] = {}
     ins_of: dict[str, list[str]] = {}
     for b in blocks:
-        if b.name in gone:
-            continue
-        if b.kind == "hard":
-            outs_of[b.name] = [n for f, n in b.pins.items() if is_output_formal(b.model, f)]
-            ins_of[b.name] = [res(n) for f, n in b.pins.items()
-                              if not is_output_formal(b.model, f)]
-        else:
-            outs_of[b.name] = [b.name]
-            ins_of[b.name] = [res(n) for n in b.inputs]
+        if b.name not in gone:
+            outs_of[b.name], ins_of[b.name] = _pins(b, res)
     users: dict[str, int] = collections.defaultdict(int)
     driver: dict[str, str] = {}
     for nets in ins_of.values():
@@ -343,23 +355,10 @@ class Netlist:
     bcast: dict[str, set[str]] = field(default_factory=dict)
 
 
-def build_netlist(blif: Path) -> Netlist:
-    """r4census.py ``Netlist`` over a BLIF: the buffers VPR absorbs and the logic it sweeps are
-    left out, a net is local when it has at most FANOUT_LOCAL sink pins (a pad counts as one) and
-    broadcast above, and the clock nets are not nets."""
-    blocks, outputs, clocks = read_blif(blif)
-    absorbed = absorbed_buffers(blocks)
-    gone = absorbed | swept_blocks(blocks, outputs, absorbed)
-    alias = {b.name: b.inputs[0] for b in blocks if b.name in absorbed and b.inputs}
-
-    def res(net: str) -> str:
-        for _ in range(len(alias) + 1):
-            if net not in alias:
-                break
-            net = alias[net]
-        return net
-
-    out = Netlist()
+def _drivers_and_sinks(blocks: Sequence[Block], gone: set[str], clocks: set[str],
+                       res: Callable[[str], str], out: Netlist
+                       ) -> tuple[dict[str, str], dict[str, list[str]]]:
+    """The driver of each net and the sink pins of each (a block once per pin); fills out.kind."""
     driver: dict[str, str] = {}
     sinks: dict[str, list[str]] = collections.defaultdict(list)
     for b in blocks:
@@ -374,30 +373,43 @@ def build_netlist(blif: Path) -> Netlist:
                     driver[net] = b.name
                 elif net not in clocks:
                     sinks[net].append(b.name)
-        else:
-            out.kind[b.name] = b.kind
-            driver[b.name] = b.name
-            for net in b.inputs:
-                net = res(net)
-                if net not in clocks:
-                    sinks[net].append(b.name)
+            continue
+        out.kind[b.name] = b.kind
+        driver[b.name] = b.name
+        sinks_here = (res(n) for n in b.inputs)
+        for net in sinks_here:
+            if net not in clocks:
+                sinks[net].append(b.name)
+    return driver, sinks
+
+
+def build_netlist(blif: Path) -> Netlist:
+    """r4census.py ``Netlist`` over a BLIF: the buffers VPR absorbs and the logic it sweeps are
+    left out, a net is local when it has at most FANOUT_LOCAL sink pins (a pad counts as one) and
+    broadcast above, and the clock nets are not nets."""
+    blocks, outputs, clocks = read_blif(blif)
+    absorbed = absorbed_buffers(blocks)
+    gone = absorbed | swept_blocks(blocks, outputs, absorbed)
+    res = _resolver({b.name: b.inputs[0] for b in blocks if b.name in absorbed and b.inputs})
+    out = Netlist()
+    driver, sinks = _drivers_and_sinks(blocks, gone, clocks, res, out)
     for net in outputs:
         sinks[res(net)].append("<pad>")
     bcast: dict[str, set[str]] = collections.defaultdict(set)
     for net, ss in sinks.items():
         drv = driver.get(net)
         members = sorted({s for s in ss if s in out.kind})
-        if len(ss) <= FANOUT_LOCAL:
-            if drv in out.kind:
-                for sink in members:
-                    if sink != drv:
-                        out.series.setdefault((drv, sink), []).append(net)
-            for i, left in enumerate(members):
-                for right in members[i + 1:]:
-                    out.shared.add((left, right))
-        else:
+        if len(ss) > FANOUT_LOCAL:
             for sink in members:
                 bcast[sink].add(net)
+            continue
+        if drv in out.kind:
+            for sink in members:
+                if sink != drv:
+                    out.series.setdefault((drv, sink), []).append(net)
+        for i, left in enumerate(members):
+            for right in members[i + 1:]:
+                out.shared.add((left, right))
     out.bcast = dict(bcast)
     return out
 
