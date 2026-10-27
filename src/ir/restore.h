@@ -47,6 +47,18 @@ odin3_status odin3_extra_add(odin3_extra_table *table, odin3_bytes line);
 uint32_t odin3_extra_count(const odin3_extra_table *table);
 odin3_bytes odin3_extra_line(const odin3_extra_table *table, uint32_t index);
 
+/*
+ * The flag list, apart from the lines above: the flags of a record that the writer cannot compute
+ * from the design (the foreign flags of odin3-prov-post, such as the site coordinates, and the
+ * mark `capped` of a record that had more than 8 locations, written first, comma separated).
+ * Added once per record by the restore. odin3_extra_flags_line gives the record of entry `index`
+ * and its flags (escaped); 0 and empty for an index past the end.
+ */
+odin3_status odin3_extra_add_flags(odin3_extra_table *table, uint32_t record, odin3_bytes flags);
+uint32_t odin3_extra_flags_count(const odin3_extra_table *table);
+uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index,
+                                odin3_bytes *flags);
+
 /* The mutating run, 0 for none (V1.2.0 4.5). */
 uint32_t odin3_extra_mutating(const odin3_extra_table *table);
 

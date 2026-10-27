@@ -3,11 +3,12 @@
 
 #include "ir/restore.h"
 #include "util/alloc.h"
+#include "util/log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-enum { DECIMAL_BASE = 10, X_LINE_MIN = 5, ID_TEXT = 16 };
+enum { DECIMAL_BASE = 10, ID_TEXT = 16 };
 
 bool odin3_xline_split(odin3_bytes line, odin3_xline *out) {
     const char *bytes = line.ptr;
@@ -56,23 +57,6 @@ static bool parse_ref(odin3_bytes field, char letter, uint32_t *out) {
            at == end;
 }
 
-bool odin3_xline_flags(odin3_bytes line, uint32_t *record, odin3_bytes *flags) {
-    const char *bytes = line.ptr;
-    if (line.len < X_LINE_MIN || bytes[0] != 'X' || bytes[1] != '\t') {
-        return false;
-    }
-    const char *tab = memchr(bytes + 2, '\t', line.len - 2U);
-    if (tab == NULL) {
-        return false;
-    }
-    odin3_bytes id = {bytes + 2, (size_t)(tab - (bytes + 2))};
-    if (!parse_ref(id, 'r', record)) {
-        return false;
-    }
-    *flags = (odin3_bytes){tab + 1, line.len - (size_t)(tab + 1 - bytes)};
-    return true;
-}
-
 uint32_t odin3_xline_stale(const odin3_design *design, const odin3_xline *line) {
     uint32_t run = 0;
     if (parse_ref(line->f[line->stale], 't', &run)) {
@@ -114,8 +98,11 @@ static odin3_status append_records(const odin3_xline_nums *nums, odin3_bytes fie
         }
         uint32_t id = 0;
         uint64_t num = 0;
-        if (parse_ref((odin3_bytes){bytes + start, i - start}, 'r', &id)) {
-            (void)odin3_u64map_get(nums->num_of, id, &num);
+        if (!parse_ref((odin3_bytes){bytes + start, i - start}, 'r', &id) ||
+            !odin3_u64map_get(nums->num_of, id, &num)) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "name map writer: an extra line names a record the map does not hold");
+            return ODIN3_ERR_INVALID_ARG;
         }
         status = buf->len > 0 ? odin3_strbuf_append(buf, odin3_bytes_cstr(",")) : status;
         status = status == ODIN3_OK ? odin3_strbuf_appendf(buf, "r%u", (unsigned)num) : status;

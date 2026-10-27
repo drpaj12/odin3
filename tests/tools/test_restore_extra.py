@@ -8,9 +8,9 @@ maps and the prov_post extension, through the odin3 CLI (ODIN3_CLI).
     `opt` has a Q line with stale `-` and the objective `opt`; a further restore keeps all of it;
   - ast=none: restore, write again, header and no C lines;
   - version 1 map: no restore, the files a v1 round trip gives are unchanged;
-  - odin3-prov-post's extension of a flow directory restores, and the lines of the rewrite equal the
-    lines of the extended map (a cluster of pads alone has a CLB with no parent: the IR cannot hold
-    it, so it is left out with a WARNING).
+  - odin3-prov-post's extension of a flow directory restores, and the lines of the rewrite equal
+    the lines of the extended map, every A, Q, K line and every record kept (every record
+    odin3-prov-post makes has a parent, so none is dropped).
 Work files are made under TMPDIR and left in place.
 """
 
@@ -156,6 +156,24 @@ class RestoreExtra(unittest.TestCase):
             2, sum(1 for x in lines(names_of(again)) if x.startswith("R\t") and "stale=" in x)
         )
 
+    def test_a_pass_that_only_looks_leaves_the_lines_current(self) -> None:
+        work = workdir("look")
+        first = work / "mux.blif"
+        write_first("bm_DL_2_1_mux", "blif", first)
+        with names_of(first).open("a") as handle:
+            handle.write("A\tatom1\tr1,r2\t-\nQ\tr2\t\topt\t\t\t\t\t\t\t\tbasis\t-\n")
+        looked, mutated = work / "mux.2.blif", work / "mux.3.blif"
+        rewrite("blif", names_of(first), first, looked, middle="stats; check; ")
+        text = names_of(looked).read_text()
+        self.assertNotIn("stale=", text)
+        self.assertTrue(
+            all(last_field(x) == "-" for x in lines(names_of(looked)) if x[:2] in ("A\t", "Q\t"))
+        )
+        rewrite("blif", names_of(first), first, mutated, middle="opt; ")
+        self.assertTrue(
+            all(last_field(x) != "-" for x in lines(names_of(mutated)) if x[:2] in ("A\t", "Q\t"))
+        )
+
     def test_ast_none_restores_and_writes_no_construct(self) -> None:
         work = workdir("none")
         first = work / "enc.blif"
@@ -184,9 +202,38 @@ class RestoreExtra(unittest.TestCase):
         self.assertEqual(first.read_bytes(), second.read_bytes())
         self.assertEqual(names_of(first).read_bytes(), names_of(second).read_bytes())
 
+    def v1_map_changes_nothing(self, kind: str, micro: str, reader: str, suffix: str) -> None:
+        """A version 1 map: the reader restores nothing, and the second write equals the first
+        (netlist and map), for a micro the pair proved idempotent (step 0)."""
+        work = workdir(f"v1{kind}")
+        first = work / f"{micro}.{suffix}"
+        writer = "write_json" if kind == "json" else "write_verilog"
+        script = flow(micro, "") + f"{writer} --name-style hash {first}"
+        self.assertEqual(0, run_cli(script).returncode)
+        self.assertTrue(lines(names_of(first))[0].startswith("# odin3-names 1 "))
+        second = work / f"{micro}.2.{suffix}"
+        run = run_cli(
+            f"read_techlib {LIB}; {reader.format(names=names_of(first), src=first)}"
+            f"{writer} --name-style hash {second}"
+        )
+        self.assertEqual(0, run.returncode, run.stderr)
+        self.assertNotIn("name map restore", run.stderr)
+        self.assertEqual(first.read_bytes(), second.read_bytes())
+        self.assertEqual(names_of(first).read_bytes(), names_of(second).read_bytes())
+
+    def test_a_version_1_map_changes_nothing_for_the_json_reader(self) -> None:
+        self.v1_map_changes_nothing(
+            "json", "bm_lpm_concat", "read_json --name-map {names} {src}; ", "json"
+        )
+
+    def test_a_version_1_map_changes_nothing_for_the_verilog_reader(self) -> None:
+        self.v1_map_changes_nothing(
+            "v", "bm_DL_2_1_mux", "read_verilog -netlist -name-map {names} {src}; proc; ", "v"
+        )
+
     def test_prov_post_extension_restores_and_rewrites_the_same_lines(self) -> None:
         work = workdir("post")
-        for design, dropped in (("bm_DL_logic_w_Dff", False), ("bm_DL_BCD_adder", True)):
+        for design in ("bm_DL_logic_w_Dff", "bm_DL_BCD_adder"):
             flow_dir = work / design
             shutil.copytree(FIXTURES / "prov_post" / design, flow_dir)
             self.assertEqual(0, prov_post.main([str(flow_dir)]))
@@ -196,12 +243,28 @@ class RestoreExtra(unittest.TestCase):
             rewrite("blif", names_of(second), second, third)
             self.assertEqual(names_of(second).read_bytes(), names_of(third).read_bytes())
             before, after = set(lines(names_of(blif))), set(lines(names_of(second)))
-            if dropped:
-                self.assertIn("record(s) with no parent were not restored", err)
-                self.assertTrue(len(after) < len(before))
-            else:
-                self.assertNotIn("not restored", err)
+            self.assertNotIn("not restored", err)
+            self.assertNotIn("no parent", err)
+            if design == "bm_DL_logic_w_Dff":
                 self.assertEqual(before, after, "the set of lines of the prov_post file")
+            else:
+                # a port vector keeps one record (its first bit's): records are renumbered and
+                # BLEs over the bits of one port become one record (hash-consing); every A, Q, K
+                # line is kept, and no record is dropped for lack of a parent
+                for letter in ("A\t", "Q\t", "K\t"):
+                    self.assertEqual(
+                        sorted(x.split("\t")[1] for x in before if x.startswith(letter)),
+                        sorted(x.split("\t")[1] for x in after if x.startswith(letter)),
+                    )
+                for level in ("ble", "clb", "site"):
+                    count_after = sum(
+                        1 for x in after if x.startswith("R\t") and f"\t{level}\t" in x
+                    )
+                    count_before = sum(
+                        1 for x in before if x.startswith("R\t") and f"\t{level}\t" in x
+                    )
+                    self.assertTrue(0 < count_after <= count_before, level)
+            self.assertTrue(any(x.startswith("R\t") and "\tsite\t" in x for x in after))
             check = run_cli(f"names --map {names_of(second)} --check")
             self.assertEqual(0, check.returncode, check.stderr)
 

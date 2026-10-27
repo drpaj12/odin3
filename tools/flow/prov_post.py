@@ -620,10 +620,11 @@ def build(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str, ...
             parents.append(ble)
             made.append(ble)
             ble_of.update({a: ble for a in part.atoms})
-        if not parents and any(isinstance(p, Ble) for p in cl.parts):
-            continue  # logic with no atom in the map: no CLB, no site, no A lines (agent default)
-            # a cluster of pads alone keeps its CLB and site even with no parent: an output pad
-            # (`out:<port>`) has no map object by design, and the site is still a placement fact
+        if not parents:
+            # no atom and no pad of the cluster is in the map: no CLB, no site, no A lines. A
+            # derived record has a parent (check rule 7), so a CLB with none cannot be restored
+            # (an output pad `out:<port>` has no map object by design; Task 9 fix round 1, item 5)
+            continue
         clb = NewRec("clb", "coarsen:ble", OP_CLB, PACK, parents)
         made.append(clb)
         site: NewRec | None = None

@@ -30,10 +30,20 @@ enum {
     SPAN_NUMBERS = 4,
     MAX_DECIMAL_DIGITS = 10,
     DECIMAL_BASE = 10,
-    READ_LEN = 5,  /* strlen("read_") */
-    WRITE_LEN = 6, /* strlen("write_") */
     PASS_ARG_MAX = 3
 };
+
+static bool bytes_is(odin3_bytes field, const char *word) {
+    return field.len == strlen(word) && memcmp(field.ptr, word, field.len) == 0;
+}
+
+static bool bytes_has_prefix(odin3_bytes field, const char *prefix) {
+    size_t len = strlen(prefix);
+    return field.len >= len && memcmp(field.ptr, prefix, len) == 0;
+}
+
+static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
+static const uint64_t FNV_PRIME = 0x100000001b3ULL;
 
 /* --- the extra table -------------------------------------------------------------------------- */
 
@@ -41,9 +51,17 @@ typedef struct extra_span {
     size_t off, len;
 } extra_span;
 
+/* The flags of one record that the A, Q, K lines do not hold (an internal list of the table). */
+typedef struct extra_flags {
+    uint32_t record;
+    extra_span span; /* into flag_text */
+} extra_flags;
+
 struct odin3_extra_table {
     odin3_strbuf text;
-    odin3_vec spans; /* extra_span */
+    odin3_vec spans; /* extra_span: the A, Q, K lines */
+    odin3_strbuf flag_text;
+    odin3_vec flags; /* extra_flags */
     uint32_t mutating;
 };
 
@@ -52,6 +70,8 @@ odin3_extra_table *odin3_extra_create(void) {
     if (table != NULL) {
         odin3_strbuf_init(&table->text);
         odin3_vec_init(&table->spans, sizeof(extra_span));
+        odin3_strbuf_init(&table->flag_text);
+        odin3_vec_init(&table->flags, sizeof(extra_flags));
     }
     return table;
 }
@@ -62,6 +82,8 @@ void odin3_extra_destroy(odin3_extra_table *table) {
     }
     odin3_strbuf_free(&table->text);
     odin3_vec_free(&table->spans);
+    odin3_strbuf_free(&table->flag_text);
+    odin3_vec_free(&table->flags);
     odin3_util_free(table);
 }
 
@@ -87,12 +109,44 @@ odin3_status odin3_extra_clone(odin3_design *dst, const odin3_design *src) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = odin3_vec_copy(&dst->extra->spans, &src->extra->spans);
+    st = st == ODIN3_OK ? odin3_vec_copy(&dst->extra->flags, &src->extra->flags) : st;
     st = st == ODIN3_OK
              ? odin3_strbuf_append(&dst->extra->text,
                                    (odin3_bytes){src->extra->text.data, src->extra->text.len})
              : st;
+    st = st == ODIN3_OK ? odin3_strbuf_append(&dst->extra->flag_text,
+                                              (odin3_bytes){src->extra->flag_text.data,
+                                                            src->extra->flag_text.len})
+                        : st;
     dst->extra->mutating = src->extra->mutating;
     return st;
+}
+
+odin3_status odin3_extra_add_flags(odin3_extra_table *table, uint32_t record, odin3_bytes flags) {
+    extra_flags *entry = odin3_vec_push(&table->flags);
+    if (entry == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *entry = (extra_flags){record, {table->flag_text.len, flags.len}};
+    if (odin3_strbuf_append(&table->flag_text, flags) != ODIN3_OK) {
+        odin3_vec_pop(&table->flags);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+uint32_t odin3_extra_flags_count(const odin3_extra_table *table) {
+    return table != NULL ? (uint32_t)table->flags.len : 0U;
+}
+
+uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index, odin3_bytes *flags) {
+    if (table == NULL || index >= table->flags.len) {
+        *flags = (odin3_bytes){NULL, 0};
+        return 0;
+    }
+    const extra_flags *entry = odin3_vec_cat(&table->flags, index);
+    *flags = (odin3_bytes){table->flag_text.data + entry->span.off, entry->span.len};
+    return entry->record;
 }
 
 uint32_t odin3_extra_count(const odin3_extra_table *table) {
@@ -115,26 +169,44 @@ size_t odin3_extra_bytes_reserved(const odin3_extra_table *table) {
     if (table == NULL) {
         return 0;
     }
-    return sizeof *table + table->text.cap + (table->spans.cap * table->spans.elem_size);
+    return sizeof *table + table->text.cap + (table->spans.cap * table->spans.elem_size) +
+           table->flag_text.cap + (table->flags.cap * table->flags.elem_size);
 }
 
 const odin3_extra_table *odin3_design_extra(const odin3_design *design) {
     return design != NULL ? design->extra : NULL;
 }
 
-/* True when the pass name of run starts with `read_` or `write_` (a reader or a writer). */
-static bool is_io_pass(const odin3_design *design, odin3_passrun_id run) {
+/*
+ * True when the run is of a pass that leaves the netlist as it is: a reader or a writer (`read_`,
+ * `write_`), or one of the listed passes that only look (the check, the statistics, the dumps, the
+ * name lookups, the simulation, the choice of the top). Every other pass is taken to change the
+ * netlist, and the first such run after a restore is the mutating run (V1.2.0 4.5). The list is
+ * kept here, apart from the pass table (no registry or ABI change): a new pass that only looks
+ * is added to it, and until it is, it counts as a change, which is the safe side (a `stale=` mark
+ * on lines that are still right, never the other way).
+ */
+static bool is_readonly_pass(const odin3_design *design, odin3_passrun_id run) {
+    static const char *const LOOKERS[] = {"check", "stats",        "stat",       "hierarchy",
+                                          "names", "dump_locs",    "dump_project", "sim",
+                                          "preprocess"};
     const odin3_strtab *tab = odin3_design_strtab(design);
     uint32_t name = odin3_passrun_name(design, run);
-    const char *text = odin3_strtab_get(tab, name);
-    size_t len = odin3_strtab_len(tab, name);
-    return (len >= READ_LEN && memcmp(text, "read_", READ_LEN) == 0) ||
-           (len >= WRITE_LEN && memcmp(text, "write_", WRITE_LEN) == 0);
+    const odin3_bytes text = {odin3_strtab_get(tab, name), odin3_strtab_len(tab, name)};
+    if (bytes_has_prefix(text, "read_") || bytes_has_prefix(text, "write_")) {
+        return true;
+    }
+    for (size_t k = 0; k < sizeof LOOKERS / sizeof LOOKERS[0]; k++) {
+        if (bytes_is(text, LOOKERS[k])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 void odin3_extra_note_run(odin3_design *design, odin3_passrun_id run, bool restored) {
     odin3_extra_table *table = design->extra;
-    if (table != NULL && table->mutating == 0 && !restored && !is_io_pass(design, run)) {
+    if (table != NULL && table->mutating == 0 && !restored && !is_readonly_pass(design, run)) {
         table->mutating = run.v;
     }
 }
@@ -210,15 +282,6 @@ static bool each_elem(odin3_bytes field, char sep, elem_fn fn, void *ctx) {
     return true;
 }
 
-static bool bytes_is(odin3_bytes field, const char *word) {
-    return field.len == strlen(word) && memcmp(field.ptr, word, field.len) == 0;
-}
-
-static bool bytes_has_prefix(odin3_bytes field, const char *prefix) {
-    size_t len = strlen(prefix);
-    return field.len >= len && memcmp(field.ptr, prefix, len) == 0;
-}
-
 /* --- the plan --------------------------------------------------------------------------------- */
 
 typedef struct rs_run {
@@ -239,6 +302,7 @@ typedef struct rs_rec {
     uint32_t run, op, con;
     size_t foreign_off, foreign_len; /* flags the map writers of this version do not define */
     uint8_t kind, dir, from, to, bulk, tail;
+    bool capped; /* the flag `capped`: more than 8 locations were joined (a restored one keeps 8) */
 } rs_rec;
 
 typedef struct rs {
@@ -254,10 +318,12 @@ typedef struct rs {
     odin3_vec rec_id;     /* uint32_t: the design record of each R line */
     odin3_vec ids;        /* odin3_prov_id: the parents of the record being made */
     odin3_strbuf foreign; /* the foreign flags of every record, escaped */
-    uint32_t dropped;     /* records with no parent (check rule 7) left out */
     odin3_vec locs;       /* odin3_srcloc: its origins */
     odin3_u64map *rows;   /* (design run << 32 | c) -> construct row */
     odin3_u64map *seen;   /* design run -> 1 once it holds rows */
+    uint8_t *reached;     /* apply: per C line number, 1 once a row exists for it in some run */
+    odin3_u64map *kinds;  /* plan: hash of a kind word -> its kind code */
+    odin3_u64map *arms;   /* plan: (parent c << 8 | part) of the arm rows planned so far */
     uint32_t default_run;
     uint32_t first_record; /* the first record this restore makes */
     uint32_t twins;        /* records told apart from an equal one by a made-up ast */
@@ -285,6 +351,7 @@ static void rs_init(rs *st, odin3_design *design, odin3_name_map *map, const cha
     odin3_vec_init(&st->locs, sizeof(odin3_srcloc));
     st->rows = odin3_u64map_create(0);
     st->seen = odin3_u64map_create(0);
+    st->arms = odin3_u64map_create(0);
 }
 
 static void rs_free(rs *st) {
@@ -299,6 +366,9 @@ static void rs_free(rs *st) {
     odin3_vec_free(&st->locs);
     odin3_u64map_destroy(st->rows);
     odin3_u64map_destroy(st->seen);
+    odin3_u64map_destroy(st->arms);
+    odin3_u64map_destroy(st->kinds);
+    odin3_util_free(st->reached);
 }
 
 /* Unescapes a field of a line into *out. NO_MEMORY is returned; a bad escape is a located
@@ -371,25 +441,58 @@ static odin3_status plan_runs(rs *st) {
     return status;
 }
 
+/* The name of a C line kind: the three synthetic ones, else the AST kind's. */
+static const char *kind_name(uint32_t kind) {
+    switch (kind) {
+    case ODIN3_CONSTRUCT_IF_THEN:
+        return "IF_THEN";
+    case ODIN3_CONSTRUCT_IF_ELSE:
+        return "IF_ELSE";
+    case ODIN3_CONSTRUCT_CALL_SITE:
+        return "CALL_SITE";
+    default:
+        return odin3_ast_kind_name(kind);
+    }
+}
+
+static uint64_t word_hash(odin3_bytes word) {
+    uint64_t hash = FNV_OFFSET;
+    for (size_t i = 0; i < word.len; i++) {
+        hash = (hash ^ (uint64_t)((const unsigned char *)word.ptr)[i]) * FNV_PRIME;
+    }
+    return hash;
+}
+
+/* The hash of every kind word -> its kind code, made once per restore (one lookup per C line
+ * instead of a compare against each of about a hundred names). */
+static odin3_status make_kind_table(rs *st) {
+    const uint32_t synth[] = {ODIN3_CONSTRUCT_IF_THEN, ODIN3_CONSTRUCT_IF_ELSE,
+                              ODIN3_CONSTRUCT_CALL_SITE};
+    st->kinds = odin3_u64map_create(0);
+    if (st->kinds == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t kind = 1; kind < (uint32_t)ODIN3_AST_KIND_COUNT + 3U; kind++) {
+        uint32_t code = kind < (uint32_t)ODIN3_AST_KIND_COUNT
+                            ? kind
+                            : synth[kind - (uint32_t)ODIN3_AST_KIND_COUNT];
+        if (odin3_u64map_put(st->kinds,
+                             (odin3_kv){word_hash(odin3_bytes_cstr(kind_name(code))), code}) !=
+            ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    return ODIN3_OK;
+}
+
 /* The kind code of a C line's kind word, 0 when it is none. */
-static uint8_t kind_of_word(odin3_bytes word) {
-    static const struct {
-        const char *word;
-        uint8_t kind;
-    } SYNTH[] = {{"IF_THEN", ODIN3_CONSTRUCT_IF_THEN},
-                 {"IF_ELSE", ODIN3_CONSTRUCT_IF_ELSE},
-                 {"CALL_SITE", ODIN3_CONSTRUCT_CALL_SITE}};
-    for (size_t k = 0; k < sizeof SYNTH / sizeof SYNTH[0]; k++) {
-        if (bytes_is(word, SYNTH[k].word)) {
-            return SYNTH[k].kind;
-        }
+static uint8_t kind_of_word(const rs *st, odin3_bytes word) {
+    uint64_t code = 0;
+    if (!odin3_u64map_get(st->kinds, word_hash(word), &code) || code == 0 ||
+        !bytes_is(word, kind_name((uint32_t)code))) {
+        return 0;
     }
-    for (uint32_t kind = 1; kind < (uint32_t)ODIN3_AST_KIND_COUNT; kind++) {
-        if (bytes_is(word, odin3_ast_kind_name(kind))) {
-            return (uint8_t)kind;
-        }
-    }
-    return 0;
+    return (uint8_t)code;
 }
 
 /* The row a copy of a function or task body hangs under is a call. */
@@ -426,7 +529,7 @@ static odin3_status plan_con_fields(rs *st, const odin3_nm_line *line, rs_con *c
     odin3_level level = ODIN3_LEVEL_NONE;
     uint32_t number = (uint32_t)st->cons.len + 1U;
     *good = true;
-    con->kind = kind_of_word(line->f[1]);
+    con->kind = kind_of_word(st, line->f[1]);
     *good = *good && con->kind != 0 && odin3_level_from_word(line->f[2], &level);
     con->level = (uint8_t)level;
     con->part = ODIN3_CONSTRUCT_PART_NODE;
@@ -463,6 +566,14 @@ static odin3_status plan_con_line(rs *st, const odin3_nm_line *line) {
     con.in_call = top || (parent != NULL && parent->in_call);
     if (!good || !con_fits(st, &con)) {
         rs_error(st, line->lineno, "a C line with a bad kind, level, parent, file or span");
+    } else if (con.part != ODIN3_CONSTRUCT_PART_NODE) {
+        /* odin3_construct_add refuses a second arm row of one part under one IF row */
+        uint64_t key = ((uint64_t)con.parent << 8) | con.part;
+        if (odin3_u64map_get(st->arms, key, NULL)) {
+            rs_error(st, line->lineno, "a second IF_THEN or IF_ELSE C line under one IF");
+        } else if (odin3_u64map_put(st->arms, (odin3_kv){key, 1}) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
     }
     rs_con *slot = odin3_vec_push(&st->cons);
     if (slot == NULL) {
@@ -482,16 +593,46 @@ static odin3_status plan_cons(rs *st) {
     return status;
 }
 
-/* True for a flag the writers of this version define (3.2) or compute again at write time. */
+/* True when elem is `prefix` and then digits only, 1 to 10 of them, that fit 32 bits. */
+static bool number_after(odin3_bytes elem, const char *prefix, uint32_t *out) {
+    size_t len = strlen(prefix);
+    uint32_t scratch = 0;
+    const char *at = (const char *)elem.ptr + len;
+    const char *end = (const char *)elem.ptr + elem.len;
+    return bytes_has_prefix(elem, prefix) && take_decimal(&at, end, out != NULL ? out : &scratch) &&
+           at == end;
+}
+
+/* True when elem is `prefix` then a reference `<letter><digits>` as in the map's other fields. */
+static bool ref_after(odin3_bytes elem, const char *prefix, char letter) {
+    size_t len = strlen(prefix);
+    uint32_t num = 0;
+    return bytes_has_prefix(elem, prefix) &&
+           odin3_name_map_ref_number((odin3_bytes){(const char *)elem.ptr + len, elem.len - len},
+                                     letter, &num);
+}
+
+/* True for a flag the writers of this version define (3.2) or compute again at write time, with
+ * its value well formed: join, join=instance, chain=span, capped, bulk, lossy=bulk|cap, n=<n>,
+ * hier=<text>, call=c<n>, cell=<type>, ctx=<n>, stale=t<n>. A known prefix with a bad value is
+ * not known: it is a located problem. */
 static bool known_flag(odin3_bytes elem) {
-    static const char *const WORDS[] = {"join", "join=instance", "chain=span", "capped", "bulk"};
-    static const char *const PREFIXES[] = {
-        "lossy=", "n=", "hier=", "call=", "cell=", "ctx=", "stale="};
+    static const char *const WORDS[] = {"join",      "join=instance", "chain=span",
+                                        "lossy=bulk", "lossy=cap",     "capped",
+                                        "bulk"};
     for (size_t k = 0; k < sizeof WORDS / sizeof WORDS[0]; k++) {
         if (bytes_is(elem, WORDS[k])) {
             return true;
         }
     }
+    return number_after(elem, "n=", NULL) || number_after(elem, "ctx=", NULL) ||
+           ref_after(elem, "call=", 'c') || ref_after(elem, "stale=", 't') ||
+           (bytes_has_prefix(elem, "hier=")) || (bytes_has_prefix(elem, "cell=") && elem.len > 5U);
+}
+
+/* True when the element has the form of a flag this version defines but its value is bad. */
+static bool broken_flag(odin3_bytes elem) {
+    static const char *const PREFIXES[] = {"lossy=", "n=", "call=", "cell=", "ctx=", "stale="};
     for (size_t k = 0; k < sizeof PREFIXES / sizeof PREFIXES[0]; k++) {
         if (bytes_has_prefix(elem, PREFIXES[k])) {
             return true;
@@ -520,35 +661,46 @@ static bool add_foreign(flag_job *job, odin3_bytes elem) {
     return odin3_strbuf_append(&st->foreign, elem) == ODIN3_OK;
 }
 
-/* One element of `flags`: hier=<text>, ctx=<n> and bulk are read, the rest is recomputed. */
-static bool flag_elem(void *ctx, odin3_bytes elem) {
-    flag_job *job = ctx;
+/* hier=<text>, ctx=<n>, bulk and capped are read, the other known flags are recomputed. */
+static bool read_flag(flag_job *job, odin3_bytes elem) {
     static const char HIER[] = "hier=";
-    static const char CTX[] = "ctx=";
     odin3_bytes text = {NULL, 0};
-    if (!known_flag(elem)) {
-        return add_foreign(job, elem);
-    }
-    if (!bytes_has_prefix(elem, HIER) && !bytes_has_prefix(elem, CTX) && !bytes_is(elem, "bulk")) {
-        return true;
-    }
-    if (rs_unescape(job->st, job->line, elem, &text) != ODIN3_OK) {
-        return false;
-    }
-    if (bytes_is(text, "bulk")) {
+    if (bytes_is(elem, "capped")) {
+        job->rec->capped = true;
+    } else if (bytes_is(elem, "bulk")) {
         job->rec->bulk = 1;
-    } else if (bytes_has_prefix(text, HIER)) {
+    } else if (bytes_has_prefix(elem, HIER)) {
+        if (rs_unescape(job->st, job->line, elem, &text) != ODIN3_OK) {
+            return false;
+        }
         job->rec->hier =
             (odin3_bytes){(const char *)text.ptr + sizeof HIER - 1U, text.len - (sizeof HIER - 1U)};
-    } else if (bytes_has_prefix(text, CTX)) {
-        const char *at = (const char *)text.ptr + sizeof CTX - 1U;
+    } else if (bytes_has_prefix(elem, "ctx=")) {
         uint32_t tail = 0;
-        if (!take_decimal(&at, (const char *)text.ptr + text.len, &tail) || tail > UINT8_MAX) {
+        if (!number_after(elem, "ctx=", &tail) || tail > UINT8_MAX) {
             rs_error(job->st, job->line->lineno, "ctx= is not a number below 256");
         }
         job->rec->tail = (uint8_t)tail;
     }
     return true;
+}
+
+/* One element of `flags`. An empty element, or a defined flag with a bad value, is a located
+ * problem; a flag this version does not define is kept. */
+static bool flag_elem(void *ctx, odin3_bytes elem) {
+    flag_job *job = ctx;
+    if (elem.len == 0) {
+        rs_error(job->st, job->line->lineno, "an empty element in the flags");
+        return true;
+    }
+    if (known_flag(elem)) {
+        return read_flag(job, elem);
+    }
+    if (broken_flag(elem)) {
+        rs_error(job->st, job->line->lineno, "a flag with a bad value");
+        return true;
+    }
+    return add_foreign(job, elem);
 }
 
 typedef struct count_job {
@@ -621,6 +773,8 @@ static void check_rec(rs *st, const odin3_nm_line *line, const rs_rec *rec, uint
     odin3_opclass cls = class_of(rec);
     if (!parents.good || !origins.good) {
         rs_error(st, line->lineno, "an R line with a bad parent or origin");
+    } else if (derived && parents.count == 0) {
+        rs_error(st, line->lineno, "a D record with no parent (check rule 7)");
     } else if (derived ? (rec->tail > parents.count || !odin3_opclass_valid(&cls))
                        : (parents.count != 0 || origins.count > ODIN3_HDL_LOC_MAX)) {
         rs_error(st, line->lineno,
@@ -764,6 +918,7 @@ static odin3_status add_row(rs *st, row_at where, uint32_t up) {
     uint32_t index = 0;
     status = status == ODIN3_OK ? odin3_construct_add(st->design, &row, &index) : status;
     status = status == ODIN3_OK ? note_row_run(st, run) : status;
+    st->reached[where.con] = status == ODIN3_OK ? 1U : st->reached[where.con];
     if (status == ODIN3_OK &&
         odin3_u64map_put(st->rows, (odin3_kv){row_key(run, where.con), index}) != ODIN3_OK) {
         status = ODIN3_ERR_NO_MEMORY;
@@ -841,9 +996,11 @@ static odin3_status leaf_record(const odin3_pass_ctx *ctx, odin3_prov_kind kind,
  */
 static odin3_status split_twin(rs *st, const odin3_pass_ctx *ctx, const rs_rec *rec,
                                odin3_prov_origin *origin, odin3_prov_id *out) {
+    /* the row of the record's own C line, in the run, whatever call instance it sits in */
+    uint64_t found = 0;
     uint32_t row =
-        rec->con != 0
-            ? odin3_construct_find(st->design, &(odin3_construct_key){ctx->run, rec->con, 0, 0})
+        rec->con != 0 && odin3_u64map_get(st->rows, row_key(ctx->run.v, rec->con), &found)
+            ? (uint32_t)found
             : 0U;
     origin->ast = (uint32_t)st->cons.len + 1U + st->twins++;
     if (rec->con != 0) {
@@ -887,54 +1044,47 @@ static bool parent_id_elem(void *ctx, odin3_bytes elem) {
     if (!odin3_name_map_ref_number(elem, 'r', &num)) {
         return false;
     }
-    uint32_t id = *(const uint32_t *)odin3_vec_cat(&st->rec_id, num - 1U);
-    odin3_prov_id *slot = id != 0 ? odin3_vec_push(&st->ids) : NULL;
-    if (id != 0 && slot == NULL) {
+    odin3_prov_id *slot = odin3_vec_push(&st->ids);
+    if (slot == NULL) {
         return false;
     }
-    if (slot != NULL) {
-        slot->v = id; /* a parent left out (below) is not a parent */
-    }
+    slot->v = *(const uint32_t *)odin3_vec_cat(&st->rec_id, num - 1U);
     return true;
 }
 
-/* The DERIVED record of an R line: its parents mapped to the design's records, its class. */
+/* The DERIVED record of an R line: its parents mapped to the design's records, its class. The
+ * plan has checked that it has a parent and that the context tail fits them. */
 static odin3_status make_derived(rs *st, const rs_rec *rec, uint32_t run, odin3_prov_id *out) {
     odin3_vec_clear(&st->ids);
     if (!each_elem(rec->line->f[NM_R_PARENTS], ',', parent_id_elem, st)) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    if (st->ids.len == 0) {
-        /* No parent, or only parents left out: the IR has no such record (check rule 7: a derived
-         * record has a parent), and odin3-prov-post writes the CLB of a cluster of pads alone
-         * with none (Task 8 default 14). It is not restored; whatever names it loses it. */
-        st->dropped++;
-        out->v = 0;
-        return ODIN3_OK;
-    }
     uint32_t hier = 0;
     odin3_status status = intern_bytes(st, rec->hier, &hier);
     odin3_opclass cls = class_of(rec);
-    cls.context_tail = cls.context_tail > st->ids.len ? (uint8_t)st->ids.len : cls.context_tail;
     const odin3_pass_ctx ctx = {st->design, {run}, rec->op};
     const odin3_prov_list parents = {st->ids.data, (uint32_t)st->ids.len};
     return status == ODIN3_OK ? odin3_prov_derive_class(&ctx, parents, hier, &cls, out) : status;
 }
 
-/* Keeps the foreign flags of a record in the extra table as `X<TAB>r<id><TAB>flags`. */
+/* Keeps the foreign flags of a record (and its `capped` mark) in the extra table's flag list. */
 static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id) {
-    if (rec->foreign_len == 0) {
+    if (rec->foreign_len == 0 && !rec->capped) {
         return ODIN3_OK;
     }
     odin3_strbuf line;
     odin3_strbuf_init(&line);
-    odin3_status status = odin3_strbuf_appendf(&line, "X\tr%u\t", (unsigned)id.v);
+    odin3_status status = rec->capped ? odin3_strbuf_append(&line, odin3_bytes_cstr("capped"))
+                                      : ODIN3_OK;
+    status = status == ODIN3_OK && rec->capped && rec->foreign_len > 0
+                 ? odin3_strbuf_append(&line, odin3_bytes_cstr(","))
+                 : status;
     status = status == ODIN3_OK
                  ? odin3_strbuf_append(
                        &line, (odin3_bytes){st->foreign.data + rec->foreign_off, rec->foreign_len})
                  : status;
     status = status == ODIN3_OK
-                 ? odin3_extra_add(st->design->extra, (odin3_bytes){line.data, line.len})
+                 ? odin3_extra_add_flags(st->design->extra, id.v, (odin3_bytes){line.data, line.len})
                  : status;
     odin3_strbuf_free(&line);
     return status;
@@ -954,16 +1104,10 @@ static odin3_status apply_recs(rs *st) {
             return status != ODIN3_OK ? status : ODIN3_ERR_NO_MEMORY;
         }
         *slot = id.v;
-        status = id.v != 0 ? add_foreign_line(st, rec, id) : ODIN3_OK;
+        status = add_foreign_line(st, rec, id);
         if (status != ODIN3_OK) {
             return status;
         }
-    }
-    if (st->dropped > 0) {
-        odin3_log(ODIN3_LOG_WARN,
-                  "%s: name map restore: %u record(s) with no parent were not restored (a derived "
-                  "record has a parent, check rule 7)",
-                  st->path, (unsigned)st->dropped);
     }
     return ODIN3_OK;
 }
@@ -977,12 +1121,7 @@ static odin3_status apply_other_rows(rs *st) {
     }
     odin3_status status = ODIN3_OK;
     for (uint32_t con_no = 1; status == ODIN3_OK && run != 0 && con_no <= st->cons.len; con_no++) {
-        bool reached = false;
-        for (size_t k = 0; !reached && k < st->run_id.len; k++) {
-            uint32_t at = *(const uint32_t *)odin3_vec_cat(&st->run_id, k);
-            reached = odin3_u64map_get(st->rows, row_key(at, con_no), NULL);
-        }
-        status = reached ? ODIN3_OK : ensure_row(st, (row_at){run, con_no});
+        status = st->reached[con_no] != 0 ? ODIN3_OK : ensure_row(st, (row_at){run, con_no});
     }
     return status;
 }
@@ -1004,9 +1143,6 @@ static bool ref_elem(void *ctx, odin3_bytes elem) {
         return false;
     }
     uint32_t id = *(const uint32_t *)odin3_vec_cat(&job->st->rec_id, num - 1U);
-    if (id == 0) {
-        return true; /* a record left out (no parent): the line does not name it */
-    }
     job->status = job->status == ODIN3_OK && !job->first
                       ? odin3_strbuf_append(job->buf, odin3_bytes_cstr(","))
                       : job->status;
@@ -1033,9 +1169,7 @@ static extra_pos extra_positions(char type) {
 
 /* The stored text of one A, Q or K line: the fields as the file has them, with the record ids
  * and the stale run named by the design's. */
-static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_strbuf *buf,
-                               bool *keep) {
-    *keep = true;
+static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_strbuf *buf) {
     const extra_pos pos = extra_positions(line->type);
     odin3_strbuf_clear(buf);
     odin3_status status = odin3_strbuf_appendf(buf, "%c", line->type);
@@ -1050,7 +1184,6 @@ static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_st
             job.first = true;
             (void)each_elem(line->f[k], ',', ref_elem, &job);
             status = job.status;
-            *keep = line->type == 'A' || !job.first; /* a Q or K line whose record is gone goes */
         } else if (k == pos.stale && odin3_name_map_ref_number(line->f[k], 't', &run)) {
             status = odin3_strbuf_appendf(
                 buf, "t%u", (unsigned)*(const uint32_t *)odin3_vec_cat(&st->run_id, run - 1U));
@@ -1069,9 +1202,8 @@ static odin3_status apply_extra(rs *st) {
     for (size_t i = 0; status == ODIN3_OK && i < st->map->lines.len; i++) {
         const odin3_nm_line *line = line_at(st, i);
         if (line->type == 'A' || line->type == 'Q' || line->type == 'K') {
-            bool keep = true;
-            status = extra_text(st, line, &buf, &keep);
-            status = status == ODIN3_OK && keep
+            status = extra_text(st, line, &buf);
+            status = status == ODIN3_OK
                          ? odin3_extra_add(st->design->extra, (odin3_bytes){buf.data, buf.len})
                          : status;
         }
@@ -1246,9 +1378,15 @@ static odin3_construct_mode mode_of_header(odin3_bytes ast) {
 
 /* Validates the map and parses its lines into the plan. ODIN3_ERR_PARSE when anything is wrong. */
 static odin3_status make_plan(rs *st) {
+    if (st->arms == NULL || make_kind_table(st) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
     odin3_name_check_v2 check = odin3_name_map_check_v2(st->map);
     if (!odin3_name_check_v2_report(&check, st->path)) {
         return ODIN3_ERR_PARSE;
+    }
+    if (st->map->over_limit != 0) {
+        rs_error(st, st->map->over_line, st->map->over_why);
     }
     odin3_status status = plan_files(st);
     status = status == ODIN3_OK ? plan_runs(st) : status;
@@ -1265,12 +1403,25 @@ static odin3_status make_plan(rs *st) {
     return status;
 }
 
+/* A pass run before the restore that changed the netlist is the mutating run too (4.5). */
+static void note_earlier_runs(odin3_design *design) {
+    if (design->extra == NULL) {
+        return;
+    }
+    for (uint32_t run = 1; run < odin3_passrun_end(design); run++) {
+        odin3_extra_note_run(design, (odin3_passrun_id){run}, odin3_passrun_restored(design,
+                                                                (odin3_passrun_id){run}));
+    }
+}
+
 /* Creates what the plan describes. */
 static odin3_status apply_plan(rs *st) {
     if (st->design->extra == NULL) {
         st->design->extra = odin3_extra_create();
+        note_earlier_runs(st->design);
     }
-    if (st->design->extra == NULL || st->rows == NULL || st->seen == NULL) {
+    st->reached = odin3_util_calloc(st->cons.len + 1U);
+    if (st->design->extra == NULL || st->rows == NULL || st->seen == NULL || st->reached == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     st->first_record = odin3_prov_end(st->design);
@@ -1278,6 +1429,53 @@ static odin3_status apply_plan(rs *st) {
     status = status == ODIN3_OK ? apply_recs(st) : status;
     status = status == ODIN3_OK ? apply_other_rows(st) : status;
     return status == ODIN3_OK ? apply_extra(st) : status;
+}
+
+/*
+ * The tables a restore changes: the provenance store (records and pass runs), the op-class table,
+ * the construct table and the extra table. The restore works on a copy of them in a shell design
+ * (a shallow copy of the struct: modules, arena, strtab and the rest are shared) and swaps them in
+ * only when everything, the binding table included, succeeded; a failure frees the copies and the
+ * design is as it was read (V1.2.0 4.5). The string table is shared and only grows: strings
+ * interned by a failed restore stay, unseen by any record, row, pass run or extra line.
+ */
+static void shell_free_tables(odin3_design *shell) {
+    odin3_prov_store_free(shell);
+    odin3_opclass_destroy(shell->opclass);
+    odin3_construct_destroy(shell->construct);
+    odin3_extra_destroy(shell->extra);
+    shell->opclass = NULL;
+    shell->construct = NULL;
+    shell->extra = NULL;
+}
+
+static odin3_status shell_make(odin3_design *shell, const odin3_design *design) {
+    *shell = *design;
+    shell->prov = NULL;
+    shell->extra = NULL;
+    shell->opclass = odin3_opclass_create();
+    shell->construct = odin3_construct_create();
+    odin3_status status = shell->opclass != NULL && shell->construct != NULL
+                              ? odin3_prov_store_init(shell)
+                              : ODIN3_ERR_NO_MEMORY;
+    status = status == ODIN3_OK ? odin3_prov_store_clone(shell, design) : status;
+    status = status == ODIN3_OK ? odin3_opclass_copy(shell->opclass, design->opclass) : status;
+    status = status == ODIN3_OK ? odin3_construct_copy(shell->construct, design->construct) : status;
+    status = status == ODIN3_OK ? odin3_extra_clone(shell, design) : status;
+    if (status != ODIN3_OK) {
+        shell_free_tables(shell);
+    }
+    return status;
+}
+
+/* The shell's tables become the design's; the design's old ones are freed. */
+static void shell_commit(odin3_design *design, odin3_design *shell) {
+    odin3_design old = *design;
+    design->prov = shell->prov;
+    design->opclass = shell->opclass;
+    design->construct = shell->construct;
+    design->extra = shell->extra;
+    shell_free_tables(&old);
 }
 
 odin3_status odin3_design_restore(odin3_design *design, odin3_name_map *map, const char *path,
@@ -1293,14 +1491,24 @@ odin3_status odin3_design_restore(odin3_design *design, odin3_name_map *map, con
     rs_init(&st, design, map, path);
     st.mode = mode_of_header(map->ast);
     odin3_status status = make_plan(&st);
+    odin3_design shell;
+    bool have_shell = false;
+    if (status == ODIN3_OK) {
+        status = shell_make(&shell, design);
+        have_shell = status == ODIN3_OK;
+        st.design = &shell;
+    }
     status = status == ODIN3_OK ? apply_plan(&st) : status;
     status = status == ODIN3_OK ? bind_objects(&st, out) : status;
     if (status == ODIN3_OK) {
+        shell_commit(design, &shell);
         odin3_log(ODIN3_LOG_INFO,
                   "%s: name map restore: %zu record(s), %zu construct(s), %zu pass run(s), %u "
                   "extra line(s)",
                   path, st.recs.len, st.cons.len, st.runs.len,
                   (unsigned)odin3_extra_count(design->extra));
+    } else if (have_shell) {
+        shell_free_tables(&shell);
     }
     rs_free(&st);
     return status;

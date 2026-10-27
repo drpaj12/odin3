@@ -101,7 +101,7 @@ typedef struct odin3_nm_line {
     char type;
     uint32_t lineno;
     uint32_t nfields;
-    odin3_bytes f[ODIN3_NM2_MAX_FIELDS];
+    odin3_bytes *f; /* nfields entries, in the map's arena (a line keeps only the fields it has) */
 } odin3_nm_line;
 
 /* A parsed map: entries sorted by (module, kind, short); every view lives until map_free. */
@@ -110,6 +110,9 @@ typedef struct odin3_name_map {
     struct odin3_arena *arena;
     uint32_t width;          /* the header's width (H-4) */
     uint32_t ignored;        /* entry lines the parse warned about and dropped */
+    uint32_t over_limit;     /* version 2: lines over the limits below (a restore refuses them) */
+    uint32_t over_line;      /* the line number of the first of them */
+    const char *over_why;    /* and what was wrong with it */
     odin3_name_ref *by_full; /* sorted by (module, kind, full): find_full */
     uint32_t version;        /* 1 or 2 */
     odin3_bytes ast;         /* version 2: the header's ast= word (refs, constructs, full, none) */

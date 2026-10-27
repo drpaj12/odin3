@@ -231,11 +231,33 @@ static void test_if_arms_and_call_instances_restore(void) {
     expect_round_trip(names, records, 2);
 }
 
+/* A SOURCE record of more than 8 locations writes `capped` and keeps 8; after a restore it has 8
+ * and the flag still comes out, so the second map equals the first. */
+static void test_a_capped_record_keeps_its_flag_after_a_restore(void) {
+    enum { LOCS = 11 };
+    odin3_srcloc locs[LOCS];
+    for (uint32_t i = 0; i < LOCS; i++) {
+        locs[i] = (odin3_srcloc){intern_in(design, "a.v"), 10 + i, 1, 10 + i, 5, 0};
+    }
+    odin3_prov_origin origin = {locs, LOCS, 0, 0};
+    odin3_prov_id id = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &id));
+    odin3_prov_obj obj = kept("c", id);
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    write_text(design, &obj, 1, &text);
+    TEST_ASSERT_NOT_NULL(strstr(text.data, "capped"));
+    odin3_strbuf_free(&text);
+    const char *names[] = {"c"};
+    expect_round_trip(names, &id, 1);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_a_join_over_the_cap_keeps_the_same_16_after_a_restore);
     RUN_TEST(test_a_bulk_coarsen_record_restores_with_its_flag);
     RUN_TEST(test_a_one_parent_context_record_restores);
     RUN_TEST(test_if_arms_and_call_instances_restore);
+    RUN_TEST(test_a_capped_record_keeps_its_flag_after_a_restore);
     return UNITY_END();
 }
