@@ -30,6 +30,7 @@ ROOT = HERE.parents[1]
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 VTR_ROOT = os.environ.get("VTR_ROOT", "")
 ADDER, DFF = "bm_DL_BCD_adder", "bm_DL_logic_w_Dff"
+MICRO_DFF = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_logic_w_Dff.v"
 EPS = 1e-6
 
 
@@ -669,8 +670,40 @@ class FlowOptions(unittest.TestCase):
         with self.assertRaises(flow.UsageError):
             flow.run_flow(zero)
 
-    def test_timing_script(self) -> None:
+    def test_timing_script_v2_writes_no_second_blif(self) -> None:
         text = flow.timing_script(6, Path("/o/timing"))
+        self.assertEqual(text, '; write_json --odin3 "/o/timing/netlist.odin3.json"')
+        self.assertNotIn("provenance", text)
+
+    def test_prov_script_names_the_blif_with_hashes_and_a_map(self) -> None:
+        base = qor_legs.odin3_script("O", "d.v", "o.blif", 6, "short")
+        text = flow.prov_script(base, 6)
+        self.assertIn("read_verilog --nolatches --vtr-compat --prov-ast refs d.v;", text)
+        self.assertIn("write_blif --vtr --lut-k 6 --name-style hash --prov-map o.blif", text)
+        self.assertEqual(text.count("write_blif"), 1)
+        with self.assertRaises(flow.UsageError):
+            flow.prov_script("read_blif x; write_blif y", 6)
+
+    def test_prov_options(self) -> None:
+        self.assertEqual(self.parse("--vpr", "--prov").prov, True)
+        self.assertEqual(self.parse("--vpr").prov, False)
+        v2 = self.parse("--vpr", "--timing-attr")
+        self.assertEqual((v2.prov, v2.timing_legacy), (True, False))  # --timing-attr uses the map
+        old = self.parse("--vpr", "--timing-attr", "--timing-legacy")
+        self.assertEqual((old.prov, old.timing_legacy), (False, True))
+        for bad in (flow.FlowArgs([MICRO_DFF], None, "lpm", None, "", False, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), prov=True),
+                    flow.FlowArgs([MICRO_DFF], None, "vtr", None, "", True, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), timing_attr=True,
+                                  prov=True, timing_legacy=True),
+                    flow.FlowArgs([MICRO_DFF], None, "vtr", None, "", True, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), timing_legacy=True)):
+            with self.assertRaises(flow.UsageError) as caught:
+                flow.run_flow(bad)
+            self.assertNotIn("no such design", str(caught.exception))
+
+    def test_timing_script(self) -> None:
+        text = flow.timing_script(6, Path("/o/timing"), legacy=True)
         self.assertIn('write_blif --vtr --lut-k 6 --name-style provenance "/o/timing/prov.blif"',
                       text)
         self.assertIn('write_json --odin3 "/o/timing/netlist.odin3.json"', text)

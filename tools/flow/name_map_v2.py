@@ -159,7 +159,7 @@ class SourceSpan:
 _MAP_SPAN = re.compile(r"(?:f(?P<f>[0-9]{1,10}):)?(?P<l>\d+)\.(?P<c>\d+)-(?P<el>\d+)\.(?P<ec>\d+)")
 
 
-def _map_span(text: str, files: list[str], file_number: int = 0) -> SourceSpan | None:
+def span_of(text: str, files: list[str], file_number: int = 0) -> SourceSpan | None:
     """``f<n>:L.C-EL.EC`` (an origin), or ``L.C-EL.EC`` of the file ``file_number`` (a construct),
     as a SourceSpan; None when the text or the file number is not usable."""
     match = _MAP_SPAN.fullmatch(text)
@@ -252,7 +252,7 @@ class NameMap:
         """The first origin of ``record`` as a SourceSpan, None when it has none or cannot be read
         (a file number the map does not hold, or text that is not f<n>:L.C-EL.EC)."""
         for origin in record.origins:
-            span = _map_span(origin, self.files)
+            span = span_of(origin, self.files)
             if span is not None:
                 return span
         return None

@@ -6,6 +6,10 @@
 ``FLOW_DIR`` is an ``odin3-flow`` output directory made with ``--timing-attr``. The tool joins the
 atoms of VPR's setup timing report to the Odin III provenance and writes ``timing/attribution.json``
 (schema_version 1) and ``timing/summary.txt``. Importable: ``attribute_flow_dir(Path) -> dict``.
+A flow directory made with ``--prov`` / ``--timing-attr`` (v1.2.0) holds the version 2 name map of
+the BLIF VPR read (hash names): the join is by atom name, and the location is the full
+``L.C-EL.EC`` span with the construct chain. A directory made by v1.1.1 (a second BLIF with
+provenance names) takes the older route, line-level spans from the paired BLIFs.
 Exit codes: 0 ok, 1 the attribution failed (missing, unreadable or inconsistent input, or an
 output that cannot be written), 2 usage error.
 Standard library only.
@@ -23,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import name_map_v2
 import timing_report
 from timing_report import ReportError, TimingPath
 
@@ -30,6 +35,7 @@ SCHEMA_VERSION = 1
 DEFAULT_PATHS = 100  # VPR's --timing_report_npaths default
 TIMING_DIR = "timing"
 INPUTS_NAME = "inputs.json"
+NAME_MAP_KEY = "name_map"  # inputs.json: the version 2 map of the BLIF (v1.2.0); absent before
 PROV_BLIF_NAME = "prov.blif"
 NETLIST_JSON_NAME = "netlist.odin3.json"
 SUMMARY_TOP = 10
@@ -54,6 +60,29 @@ class UsageError(Exception):
 
 
 @dataclass(frozen=True)
+class ChainItem:
+    """One construct of a chain: its level (stmt, branch, block, module ...), AST kind, name (""
+    when it has none) and span ``L.C-EL.EC``."""
+
+    level: str
+    kind: str
+    name: str
+    span: str
+
+    def text(self) -> str:
+        return f"{self.level} {self.kind}" + (f" {self.name}" if self.name else "") + (
+            f" {self.span}" if self.span else "")
+
+    def record(self) -> dict[str, str]:
+        return {"level": self.level, "kind": self.kind, "name": self.name, "span": self.span}
+
+
+def chain_text(chain: Sequence[ChainItem]) -> str | None:
+    """The chain as one line, leaf first: ``stmt ASSIGN 16.5-16.20 < branch IF_ELSE ...``."""
+    return " < ".join(item.text() for item in chain) if chain else None
+
+
+@dataclass(frozen=True)
 class Origin:
     """Where an atom came from: ``category`` matched (a source location), port (an I/O pad) or
     unmatched; ``via`` says which input gave the location."""
@@ -67,7 +96,10 @@ class Origin:
     line: int | None = None
     col: int | None = None
     via: str = ""
-    word_via: str = ""  # how the word was found: name, json-id or pad ("" when there is none)
+    word_via: str = ""  # how the word was found: name, declarator, json-id or pad ("" if none)
+    loc: str | None = None  # the full span file:L.C-EL.EC of the first source leaf (map only)
+    chain: tuple[ChainItem, ...] = ()  # the construct chain of the first leaf, leaf first
+    generated: bool = False  # the net has no source name ($nNNN)
 
     @property
     def span(self) -> str | None:
@@ -249,10 +281,36 @@ def load_json_index(path: Path, top: str | None) -> JsonIndex | None:
     return index
 
 
+def chain_item(nm: name_map_v2.NameMap, construct: name_map_v2.MapConstruct) -> ChainItem:
+    span = name_map_v2.span_of(construct.span, nm.files, construct.file)
+    return ChainItem(construct.level, construct.kind, construct.name,
+                     f"{span.line}.{span.col}-{span.end_line}.{span.end_col}" if span else "")
+
+
+def all_chain(nm: name_map_v2.NameMap, obj: name_map_v2.MapObject) -> list[name_map_v2.MapConstruct]:
+    """Every construct of the object's chain (``NameMap.chain``: all source leaves)."""
+    return nm.chain(obj)
+
+
+def leaf_chain(nm: name_map_v2.NameMap, obj: name_map_v2.MapObject) -> tuple[ChainItem, ...]:
+    """The chain of the first source leaf that has a construct, leaf first, up to its module."""
+    for record in nm.provenance(obj):
+        number = record.constructs[0] if record.kind != "D" and record.constructs else 0
+        items: list[ChainItem] = []
+        while 1 <= number <= len(nm.constructs) and len(items) <= len(nm.constructs):
+            construct = nm.constructs[number - 1]
+            items.append(chain_item(nm, construct))
+            number = construct.parent
+        if items:
+            return tuple(items)
+    return ()
+
+
 class Resolver:
     """Atom name (and block type) -> Origin, through the provenance names, then the JSON drivers."""
 
-    def __init__(self, names: NameMap, index: JsonIndex | None, top: str | None) -> None:
+    def __init__(self, names: NameMap | name_map_v2.NameMap, index: JsonIndex | None,
+                 top: str | None) -> None:
         self.names, self.index, self.top = names, index, top
         self.cache: dict[tuple[str, str], Origin] = {}
 
@@ -267,7 +325,13 @@ class Resolver:
             port = timing_report.pad_port(atom)
             word, bit = split_word(port)
             return Origin(PORT, atom, self.top, word, bit, via="pad", word_via="pad")
-        hit = self.names.names.get(atom)
+        if isinstance(self.names, name_map_v2.NameMap):
+            found_v2 = self._from_map(self.names, atom)
+            if found_v2 is not None:
+                return found_v2
+            hit = None
+        else:
+            hit = self.names.names.get(atom)
         if hit is not None:
             hier, net, file, line = hit
             word, bit = split_word(net)
@@ -276,11 +340,49 @@ class Resolver:
             if named is not None:
                 word, bit, how = named[0], named[1], "json-id"
             return Origin(MATCHED, atom, hier, word, bit, file, line, via="provenance-name",
-                          word_via=how)
+                          word_via=how, generated=word is None and atom.startswith("$"))
         found = self.index.lookup(atom) if self.index else None
         if found is not None:
             return self._from_span(atom, found)
         return Origin(UNMATCHED, atom)
+
+    def _from_map(self, nm: name_map_v2.NameMap, atom: str) -> Origin | None:
+        """The atom through the version 2 map (spec 6, "Atom name join"): the O or N line keyed
+        by its name, then the record graph: the full span of the first source leaf, the construct
+        chain, and for a net without a source name the word of a DECLARATOR in the chain."""
+        obj = nm.atom(atom, self.top)
+        if obj is None:
+            return None
+        leaf = nm.leaf(obj)
+        if obj.type == "O":
+            file, line = obj.file, obj.line
+        elif leaf is not None:
+            file, line = leaf[1].file, leaf[1].line
+        else:
+            return None
+        if not file or not line:
+            return None
+        net = obj.name
+        hier = obj.hier or obj.module
+        if obj.type == "O":
+            m = _PROV.match(obj.full)
+            net = m.group("net") if m else atom
+            hier = m.group("hier") if m else hier
+        word, bit = split_word(net)
+        how = "name" if word else ""
+        chain = leaf_chain(nm, obj)
+        generated = word is None
+        if word is None:
+            declared = next((c.name for c in all_chain(nm, obj) if c.kind == "DECLARATOR"
+                             and c.name), None)
+            named = self.index.net_word(net) if self.index else None
+            if declared:
+                word, bit, how = declared, None, "declarator"
+            elif named is not None:
+                word, bit, how = named[0], named[1], "json-id"
+        return Origin(MATCHED, atom, hier, word, bit, file, line,
+                      leaf[1].col if leaf else None, via="name-map", word_via=how,
+                      loc=leaf[1].text if leaf else None, chain=chain, generated=generated)
 
     def _from_span(self, atom: str, found: tuple[str, str]) -> Origin:
         text, hier = found
@@ -289,7 +391,8 @@ class Resolver:
             return Origin(UNMATCHED, atom)
         word, bit = split_word(atom)
         return Origin(MATCHED, atom, hier, word, bit, m.group("file"), int(m.group("line")),
-                      int(m.group("col")), via="netlist-json", word_via="name" if word else "")
+                      int(m.group("col")), via="netlist-json", word_via="name" if word else "",
+                      generated=word is None and atom.startswith("$"))
 
 
 @dataclass
@@ -418,15 +521,19 @@ def assigned_word(text: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-def hop_record(hop: Hop, next_hop: Hop | None) -> dict[str, Any]:
+def hop_record(hop: Hop, next_hop: Hop | None, extended: bool = False) -> dict[str, Any]:
     origin = hop.origin or Origin(UNMATCHED, hop.atom)
-    return {
+    record = {
         "atom": hop.atom, "block_type": hop.block_type, "pins": hop.pins,
         "cell_delay_ns": round_ns(hop.cell_ns), "net_delay_in_ns": round_ns(hop.net_in_ns),
         "delay_ns": round_ns(hop.delay_ns(next_hop)), "category": origin.category,
         "span": origin.span, "module": origin.module, "word": origin.word, "bit": origin.bit,
         "word_via": origin.word_via or None,
     }
+    if extended:  # the version 2 map gives the full span and the chain (fields added, schema 1)
+        record["loc"] = origin.loc
+        record["chain_text"] = chain_text(origin.chain)
+    return record
 
 
 def stat_record(stat: Stat, total_ns: float) -> dict[str, Any]:
@@ -439,7 +546,7 @@ def stat_record(stat: Stat, total_ns: float) -> dict[str, Any]:
     }
 
 
-def collapse(hops: Sequence[Hop]) -> list[dict[str, Any]]:
+def collapse(hops: Sequence[Hop], extended: bool = False) -> list[dict[str, Any]]:
     """The critical path as an ordered list of spans: consecutive hops with one origin merge."""
     out: list[dict[str, Any]] = []
     key = None
@@ -463,6 +570,10 @@ def collapse(hops: Sequence[Hop]) -> list[dict[str, Any]]:
                     "words_via": {origin.word: {origin.word_via}} if origin.word_via else {},
                     "cell_delay_ns": cell,
                     "net_delay_ns": net, "atoms": [hop.atom]})
+        if extended:
+            out[-1]["loc"] = origin.loc
+            out[-1]["chain"] = [item.record() for item in origin.chain]
+            out[-1]["chain_text"] = chain_text(origin.chain)
     return out
 
 
@@ -529,6 +640,31 @@ class Aggregates:
 
 def share(part: float, whole: float) -> float:
     return round(part / whole, 6) if whole > 0 else 0.0
+
+
+def attribution_counts(paths: Sequence[Sequence[Hop]]) -> dict[str, Any]:
+    """How much of the logic on the attributed paths reaches each level of the map (version 2
+    only; docs/V1.2.0.md Task 7): of the non-pad path nodes, the shares with a line-level span,
+    a full span, a chain; of the generated nets (no source name), the share that gets a word."""
+    count = dict.fromkeys(("nodes", "span", "loc", "chain", "generated", "generated_word"), 0)
+    for hops in paths:
+        for hop in hops:
+            o = hop.origin or Origin(UNMATCHED, hop.atom)
+            if o.category == PORT:
+                continue
+            count["nodes"] += 1
+            count["span"] += o.span is not None
+            count["loc"] += o.loc is not None
+            count["chain"] += bool(o.chain)
+            count["generated"] += o.generated
+            count["generated_word"] += o.generated and bool(o.word)
+    return {"net_nodes": count["nodes"], "span_nodes": count["span"], "loc_nodes": count["loc"],
+            "chain_nodes": count["chain"], "generated_nodes": count["generated"],
+            "generated_word_nodes": count["generated_word"],
+            "span_share": share(count["span"], count["nodes"]),
+            "loc_share": share(count["loc"], count["nodes"]),
+            "chain_share": share(count["chain"], count["nodes"]),
+            "generated_word_share": share(count["generated_word"], count["generated"])}
 
 
 def coverage_record(agg: Aggregates, crit_hops: Sequence[Hop],
@@ -616,10 +752,11 @@ def build_report(paths: Sequence[TimingPath], resolver: Resolver,
             agg.add_hop(path, hop)
         all_hops.append(hops)
     crit = all_hops[0]
+    extended = isinstance(resolver.names, name_map_v2.NameMap)
     total_ns = add_critical(crit, agg.spans, agg.modules, agg.words)
     mods, wds = group_records(agg, total_ns)
     first = paths[0]
-    spans = collapse(crit)
+    spans = collapse(crit, extended)
     for item in spans:
         item["cell_delay_ns"] = round_ns(item["cell_delay_ns"])
         item["net_delay_ns"] = round_ns(item["net_delay_ns"])
@@ -638,22 +775,23 @@ def build_report(paths: Sequence[TimingPath], resolver: Resolver,
             "paths_skipped_reasons": dict(sorted(counts.skipped.items())),
             "worst_slack_ns": first.slack_ns, "critical_data_delay_ns": round_ns(total_ns),
         },
-        "coverage": coverage_record(agg, crit, sources),
+        "coverage": {**coverage_record(agg, crit, sources),
+                     **(attribution_counts(all_hops) if extended else {})},
         "critical_path": {
             "index": first.index, "slack_ns": first.slack_ns, "arrival_ns": first.arrival_ns,
             "required_ns": first.required_ns, "startpoint": first.startpoint,
             "endpoint": first.endpoint, "data_delay_ns": round_ns(total_ns), "spans": spans,
         },
         "spans": span_rows, "modules": mods, "words": wds,
-        "paths": [path_record(p, h) for p, h in zip(paths, all_hops, strict=True)],
+        "paths": [path_record(p, h, extended) for p, h in zip(paths, all_hops, strict=True)],
     }
 
 
-def path_record(path: TimingPath, hops: Sequence[Hop]) -> dict[str, Any]:
+def path_record(path: TimingPath, hops: Sequence[Hop], extended: bool = False) -> dict[str, Any]:
     return {
         "index": path.index, "slack_ns": path.slack_ns, "arrival_ns": path.arrival_ns,
         "required_ns": path.required_ns, "startpoint": path.startpoint, "endpoint": path.endpoint,
-        "nodes": [hop_record(h, hops[i + 1] if i + 1 < len(hops) else None)
+        "nodes": [hop_record(h, hops[i + 1] if i + 1 < len(hops) else None, extended)
                   for i, h in enumerate(hops)],
     }
 
@@ -677,7 +815,10 @@ def summary_text(report: Mapping[str, Any]) -> str:
         f"ports {cov['port_share'] * 100:.1f}%; unmatched {cov['unmatched_share'] * 100:.1f}%",
         "", "These statements set your Fmax (critical path, in path order):",
     ]
-    lines += [span_line(item) for item in crit["spans"]]
+    for item in crit["spans"]:
+        lines.append(span_line(item))
+        if item.get("chain_text"):
+            lines.append(f"      chain: {item['chain_text']}")
     lines += ["", f"Top {SUMMARY_TOP} statements by delay on the critical path "
                   f"(paths = of the top {t['paths_kept']} through it):"]
     lines += [stmt_line(row) for row in report["spans"][:SUMMARY_TOP]]
@@ -761,15 +902,30 @@ def attribute_flow_dir(flow_dir: Path | str, paths: int | None = None) -> dict[s
         raise AttributionError(f"cannot read an input: {exc}") from exc
 
 
+def read_map(path: Path) -> name_map_v2.NameMap:
+    """The version 2 map of the BLIF; AttributionError for a version 1 map (it has no records)
+    or one that cannot be read."""
+    try:
+        nm = name_map_v2.read_name_map(path)
+    except (ValueError, OSError) as exc:
+        raise AttributionError(f"cannot read the name map {path}: {exc}") from exc
+    if nm.version != 2:
+        raise AttributionError(f"{path} is a version {nm.version} name map: attribution needs "
+                               f"version 2 (odin3-flow --prov)")
+    return nm
+
+
 def _attribute(flow: Path, paths: int | None) -> dict[str, Any]:
     inputs = read_inputs(flow)
     run_dir = absolute(flow, inputs.get("vpr_run_dir"))
     blif, prov = absolute(flow, inputs.get("blif")), absolute(flow, inputs.get("prov_blif"))
-    if run_dir is None or blif is None or prov is None:
+    map_path = absolute(flow, inputs.get(NAME_MAP_KEY))
+    if run_dir is None or blif is None or (prov is None and map_path is None):
         raise AttributionError(
-            f"{flow / TIMING_DIR / INPUTS_NAME} lacks vpr_run_dir, blif or prov_blif")
-    for need in (blif, prov):
-        if not need.is_file():
+            f"{flow / TIMING_DIR / INPUTS_NAME} lacks vpr_run_dir, blif, {NAME_MAP_KEY} or "
+            f"prov_blif")
+    for need in (blif, map_path if map_path is not None else prov):
+        if need is None or not need.is_file():
             raise AttributionError(f"missing input {need}")
     try:
         parsed = timing_report.read_report(run_dir / "report_timing.setup.rpt")
@@ -777,14 +933,21 @@ def _attribute(flow: Path, paths: int | None) -> dict[str, Any]:
         raise AttributionError(str(exc)) from exc
     logs = [(run_dir / n).read_text(errors="replace") for n in ("vpr.crit_path.out", "vpr.out")
             if (run_dir / n).is_file()]
-    names = build_name_map(blif, prov)
+    names: NameMap | name_map_v2.NameMap
+    if map_path is not None:
+        names = read_map(map_path)
+    else:
+        assert prov is not None
+        names = build_name_map(blif, prov)
     jpath = absolute(flow, inputs.get("netlist_json"))
     index = load_json_index(jpath, inputs.get("top")) if jpath else None
     top = inputs.get("top")
     kept = parsed.paths[:paths] if paths else parsed.paths
     meta = {"top": top, "flow_dir": str(flow), "report": str(run_dir / "report_timing.setup.rpt"),
-            "blif": str(blif), "provenance_blif": str(prov),
+            "blif": str(blif), "provenance_blif": str(prov) if prov else None,
             "netlist_json": str(jpath) if jpath and jpath.is_file() else None}
+    if map_path is not None:
+        meta["name_map"] = str(map_path)
     counts = PathCounts(inputs.get("paths_requested"), paths, len(parsed.paths), parsed.skipped)
     return build_report(kept, Resolver(names, index, top), timing_report.final_cpd(logs), meta,
                         counts, source_files(flow, inputs))

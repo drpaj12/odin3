@@ -2,8 +2,8 @@
 section 2.1).
 
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
-        [--family NAME] [--vpr | --no-vpr] [--analysis] [--timing-attr] [--timing-paths N]
-        [--odin3 PATH] [--out DIR]
+        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--timing-attr]
+        [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
 copied) writes ``odin3/<top>.blif``. Target ``lpm``: the 5.1 LPM script (tools/flow/lpm.script)
@@ -66,6 +66,8 @@ class FlowArgs:
     out: Path
     timing_attr: bool = False  # --timing-attr: attribute the critical path to the HDL
     timing_paths: int = VPR_DEFAULT_PATHS  # setup paths VPR reports (and the tool attributes)
+    prov: bool = False  # --prov: the BLIF has hash names and a version 2 name map (v1.2.0)
+    timing_legacy: bool = False  # --timing-legacy: the v1.1.1 route, a second provenance BLIF
 
 
 @dataclass(frozen=True)
@@ -400,13 +402,46 @@ def analysis_step(top: str, adir: Path, odin3_log: Path, result: FlowResult) -> 
     result.steps.append(StepResult("analysis", not bad, log, time.monotonic() - start))
 
 
-def timing_script(k: int, tdir: Path) -> str:
-    """The writes that give the timing attribution its provenance, appended to the script: the
-    same netlist as BLIF with provenance names (same blocks, same order as the BLIF VPR reads) and
-    ``write_json --odin3``. Both only read the netlist: the BLIF VPR reads is unchanged."""
+def prov_script(script: str, k: int) -> str:
+    """The odin3 script of the v1.2.0 route: the same script, with the elaboration keeping the
+    constructs (``read_verilog --prov-ast refs``) and the BLIF VPR reads written with hash names
+    and the version 2 name map next to it (``write_blif --name-style hash --prov-map``). The
+    netlist is the same; only its names change (docs/V1.2.0.md 6.1). UsageError when the script
+    does not have the two places."""
+    read, write = "read_verilog --nolatches --vtr-compat ", f"write_blif --vtr --lut-k {k}"
+    if script.count(read) != 1 or script.count(write) != 1:
+        raise UsageError("internal: the odin3 script has no read_verilog / write_blif to extend")
+    return script.replace(read, "read_verilog --nolatches --vtr-compat --prov-ast refs ").replace(
+        write, f"{write} --name-style hash --prov-map")
+
+
+def timing_script(k: int, tdir: Path, legacy: bool = False) -> str:
+    """The writes that give the timing attribution its provenance, appended to the script. The
+    default (v1.2.0): ``write_json --odin3`` only, because the BLIF VPR reads carries hash names
+    and its name map (``prov_script``), so no second BLIF is written. ``legacy`` (v1.1.1): also
+    the same netlist as BLIF with provenance names (same blocks, same order as the BLIF VPR
+    reads). The writes only read the netlist: the BLIF VPR reads is unchanged."""
+    json_write = f"write_json --odin3 {quote(tdir / timing_attr.NETLIST_JSON_NAME)}"
+    if not legacy:
+        return f"; {json_write}"
     return (f"; write_blif --vtr --lut-k {k} --name-style provenance "
-            f"{quote(tdir / timing_attr.PROV_BLIF_NAME)}; "
-            f"write_json --odin3 {quote(tdir / timing_attr.NETLIST_JSON_NAME)}")
+            f"{quote(tdir / timing_attr.PROV_BLIF_NAME)}; {json_write}")
+
+
+def map_path(blif: Path) -> Path:
+    """The version 2 name map the writer puts next to the BLIF (``<blif>.names``)."""
+    return blif.with_name(blif.name + ".names")
+
+
+def prov_step(blif: Path, result: FlowResult) -> None:
+    """Check the version 2 map next to the BLIF: it exists and has the version 2 header."""
+    start = time.monotonic()
+    path = map_path(blif)
+    log = path.with_name(path.name + ".log")
+    head = path.read_text(errors="replace").split("\n", 1)[0] if path.is_file() else ""
+    ok = head.startswith("# odin3-names 2 ")
+    log.write_text("ok\n" if ok else f"missing or not a version 2 name map: {path}\n")
+    result.steps.append(StepResult("prov", ok, log, time.monotonic() - start))
 
 
 def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: FlowResult) -> None:
@@ -416,7 +451,9 @@ def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: Flo
     tdir = args.out / timing_attr.TIMING_DIR
     log = tdir / "timing.log"
     inputs = {"top": top, "blif": os.path.relpath(blif, args.out),
-              "prov_blif": f"{timing_attr.TIMING_DIR}/{timing_attr.PROV_BLIF_NAME}",
+              **({"prov_blif": f"{timing_attr.TIMING_DIR}/{timing_attr.PROV_BLIF_NAME}"}
+                 if args.timing_legacy
+                 else {timing_attr.NAME_MAP_KEY: os.path.relpath(map_path(blif), args.out)}),
               "netlist_json": f"{timing_attr.TIMING_DIR}/{timing_attr.NETLIST_JSON_NAME}",
               "vpr_run_dir": os.path.relpath(run_dir, args.out),
               "paths_requested": args.timing_paths,
@@ -448,19 +485,25 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     blif = step_dir / f"{top}.blif"
     design = " ".join(quote(d) for d in args.designs)
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
+    if args.prov:
+        script = prov_script(script, k)
     adir = args.out / "analysis"
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
         script += analysis_script(top, adir)
     if args.timing_attr:
         (args.out / timing_attr.TIMING_DIR).mkdir(parents=True, exist_ok=True)
-        script += timing_script(k, args.out / timing_attr.TIMING_DIR)
+        script += timing_script(k, args.out / timing_attr.TIMING_DIR, args.timing_legacy)
     step = run_step("odin3", odin3_command(args, top, script), step_dir)
     result.steps.append(step)
     if not step.ok:
         return None
     result.summary["luts"] = count_luts(blif)
     result.summary["luts_note"] = LUTS_NOTE
+    if args.prov:
+        prov_step(blif, result)
+        if not result.steps[-1].ok:
+            return None
     if args.analysis:
         analysis_step(top, adir, step.log, result)
         if not result.steps[-1].ok:
@@ -501,6 +544,12 @@ def run_flow(args: FlowArgs) -> FlowResult:
         raise UsageError("--timing-attr needs --target vtr and VPR (--vpr, VTR_ROOT)")
     if args.timing_paths < 1:
         raise UsageError("--timing-paths needs a positive number")
+    if args.prov and args.target != "vtr":
+        raise UsageError("--prov applies to --target vtr only")
+    if args.timing_legacy and not args.timing_attr:
+        raise UsageError("--timing-legacy needs --timing-attr")
+    if args.timing_legacy and args.prov:
+        raise UsageError("--timing-legacy is the route without the name map: not with --prov")
     if not args.odin3.is_file():
         raise UsageError(f"no odin3 binary at {args.odin3}: build it, put it on PATH or give "
                          f"--odin3")
@@ -567,12 +616,19 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                          "--target vtr only")
     ap.add_argument("--analysis", action="store_true",
                     help="also write the dot, JSON, levelize and locs files; needs --target vtr")
+    ap.add_argument("--prov", action="store_true",
+                    help="write the BLIF with hash names and the version 2 name map "
+                         "(<top>.blif.names: records, spans, constructs); implied by "
+                         "--timing-attr; needs --target vtr")
     ap.add_argument("--timing-attr", action="store_true",
                     help="attribute the critical path to HDL statements, modules and words "
                          "(timing/attribution.json and summary.txt); needs VPR")
     ap.add_argument("--timing-paths", type=int, default=None, metavar="N",
                     help=f"setup paths to report and attribute (default {VPR_DEFAULT_PATHS}); "
                          f"implies --timing-attr")
+    ap.add_argument("--timing-legacy", action="store_true",
+                    help="with --timing-attr: the v1.1.1 route (short-name BLIF plus a second "
+                         "BLIF with provenance names, line-level spans) instead of the name map")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -586,10 +642,11 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     vpr = resolve_vpr(ns.vpr, ns.target)
     arch = ns.arch.resolve() if ns.arch else None
     attr = ns.timing_attr or ns.timing_paths is not None
+    prov = ns.prov or (attr and not ns.timing_legacy)
     paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
-                    attr, paths)
+                    attr, paths, prov, ns.timing_legacy)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
