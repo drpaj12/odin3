@@ -27,6 +27,13 @@ typedef struct blif_locs blif_locs;
 blif_locs *blif_locs_create(odin3_pass_ctx *ctx, odin3_blif_read_stats *stats, const char *path);
 void blif_locs_destroy(blif_locs *locs);
 
+/*
+ * Version 2 map (V1.2.0 4.5): decode the names as above but make no record of this half's own. The
+ * record a created net takes is the one the caller passes (the record the map binds to it, or 0);
+ * `.attr src` is swallowed without a record and the D-5 inheritance is skipped.
+ */
+void blif_locs_bind(blif_locs *locs);
+
 /* The module a net or cell lives in; key (the reader's 1-based model index) tells modules apart in
  * the maps. */
 typedef struct blif_scope {

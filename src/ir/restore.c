@@ -392,9 +392,12 @@ static bool con_fits(const rs *st, const rs_con *con) {
         return false;
     }
     if (con->parent == 0) {
-        return true;
+        return con->part == ODIN3_CONSTRUCT_PART_NODE;
     }
     const rs_con *parent = odin3_vec_cat(&st->cons, con->parent - 1U);
+    if (con->part != ODIN3_CONSTRUCT_PART_NODE && parent->kind != (uint8_t)ODIN3_AST_IF) {
+        return false; /* an arm hangs under the IF row of its node */
+    }
     odin3_construct_row up = {.level = parent->level};
     return odin3_construct_parent_fits(&up, &row);
 }
@@ -581,7 +584,9 @@ static bool parse_rec_head(const rs *st, const odin3_nm_line *line, rs_rec *rec)
     if (line->f[NM_R_CONS].len > 0 && rec->kind == (uint8_t)ODIN3_PROV_SOURCE) {
         return st->mode != ODIN3_CONSTRUCT_MODE_OFF &&
                odin3_name_map_ref_number(line->f[NM_R_CONS], 'c', &rec->con) &&
-               rec->con <= st->cons.len;
+               rec->con <= st->cons.len &&
+               ((const rs_con *)odin3_vec_cat(&st->cons, rec->con - 1U))->part ==
+                   ODIN3_CONSTRUCT_PART_NODE; /* a SOURCE names a node's row, not an arm */
     }
     return true;
 }
@@ -664,8 +669,11 @@ static odin3_status add_row(rs *st, uint32_t run, uint32_t c, uint32_t up) {
         bool top = is_decl_kind(con->kind) && plan_up != NULL && is_call_kind(plan_up->kind);
         call = top ? up : above->call;
     }
+    /* An arm row (IF_THEN, IF_ELSE) is a part of its IF row's node: check rule 12 wants it under
+     * the IF row of the same node, so it takes the ast of its parent's C line (4.5 said it takes
+     * its own; the code's rule wins). Its own C line is reached only as a parent. */
     odin3_construct_row row = {.run = run,
-                               .ast = c,
+                               .ast = con->part != ODIN3_CONSTRUCT_PART_NODE ? con->parent : c,
                                .call = call,
                                .parent = up,
                                .line = con->span[0],

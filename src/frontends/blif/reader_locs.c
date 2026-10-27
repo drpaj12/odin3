@@ -26,6 +26,7 @@ struct blif_locs {
     odin3_u64map *decoded; /* module << 32 | net -> 1 while the net still has its SHORT name */
     odin3_strbuf buf;      /* decoded name text */
     odin3_strbuf name;     /* candidate net names */
+    bool bound;            /* version 2 map: records come from the map, none are made here */
 };
 
 blif_locs *blif_locs_create(odin3_pass_ctx *ctx, odin3_blif_read_stats *stats, const char *path) {
@@ -46,6 +47,10 @@ blif_locs *blif_locs_create(odin3_pass_ctx *ctx, odin3_blif_read_stats *stats, c
         return NULL;
     }
     return locs;
+}
+
+void blif_locs_bind(blif_locs *locs) {
+    locs->bound = true;
 }
 
 void blif_locs_destroy(blif_locs *locs) {
@@ -171,7 +176,7 @@ odin3_status blif_locs_create_net(blif_locs *locs, const blif_scope *scope, odin
         warn_nul(locs, name, imported);
     }
     if (st == ODIN3_OK && matched) {
-        st = name_record(locs, &decoded, imported, &prov);
+        st = locs->bound ? ODIN3_OK : name_record(locs, &decoded, imported, &prov);
         st = st == ODIN3_OK ? free_name(locs, scope->module, decoded.short_name, &str) : st;
     } else if (st == ODIN3_OK) {
         st = odin3_design_intern(locs->ctx->design, name, &str);
@@ -273,6 +278,10 @@ odin3_status blif_locs_cell_src(blif_locs *locs, odin3_module *module, odin3_nod
     odin3_hdl_loc found[ODIN3_HDL_LOC_MAX];
     uint32_t count = odin3_hdl_loc_parse(unquote(src->text), found, ODIN3_HDL_LOC_MAX);
     *restored = false;
+    if (locs->bound) {
+        *restored = true; /* the map holds the records: the attribute is dropped, no record made */
+        return ODIN3_OK;
+    }
     if (count == 0) {
         bad_src(locs, src);
         return ODIN3_OK;
@@ -346,6 +355,9 @@ static odin3_status inherit_node(blif_locs *locs, odin3_module *module, odin3_no
 }
 
 odin3_status blif_locs_inherit(blif_locs *locs, odin3_module *module) {
+    if (locs->bound) {
+        return ODIN3_OK;
+    }
     uint32_t end = odin3_module_node_end(module); /* nodes made by the rebuilds are not revisited */
     odin3_status st = ODIN3_OK;
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {

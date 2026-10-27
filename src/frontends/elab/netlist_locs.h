@@ -58,6 +58,7 @@ typedef struct odin3_netlist_name {
     uint32_t short_str; /* strtab ID of SHORT */
     uint32_t hier_str;  /* strtab ID of HIER, 0 for none */
     odin3_hdl_loc loc;  /* file and line; the file views e2->scratch */
+    uint32_t rec; /* version 2 map: the record the map binds to the name (O entry or N line) */
 } odin3_netlist_name;
 
 /*
@@ -68,6 +69,14 @@ typedef struct odin3_netlist_name {
  */
 odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_loc at,
                                        odin3_netlist_name *out);
+
+/*
+ * Version 2 map (V1.2.0 4.5): true when -name-map is of version 2, so that odin3_netlist_prov binds
+ * a declarator to the record its O or N line names (odin3_netlist_name.rec, 0 when the map does not
+ * list it) and makes no restored-location record. Only module-level declarators (wires and nets)
+ * are named by the elaborator; the other objects keep the reader's own record.
+ */
+bool odin3_netlist_restored(const odin3_elab2 *e2);
 
 /* Notes that a declarator of the current module is spelled str: a decoded name never takes it. */
 odin3_status odin3_netlist_note_raw(odin3_elab2 *e2, uint32_t str);

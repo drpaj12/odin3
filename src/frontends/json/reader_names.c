@@ -60,27 +60,55 @@ static odin3_status decoded_name(jr *rd, jr_name_kind kind, odin3_bytes full, jr
     return st;
 }
 
-/* The full name the map holds for key, when it does. */
-static bool map_full(const jr *rd, jr_name_kind kind, odin3_bytes key, odin3_bytes *full) {
+/* The entry the map holds for key, when it does. */
+static const odin3_name_entry *map_entry(const jr *rd, jr_name_kind kind, odin3_bytes key) {
     if (!rd->have_names || !odin3_name_hash_shaped(key)) {
-        return false;
+        return NULL;
     }
     odin3_bytes module = module_bytes(rd);
     return kind == JR_NAME_WIRE
-               ? odin3_name_resolver_find_decl(&rd->names, module, key, full)
-               : odin3_name_resolver_find(&rd->names, module, ODIN3_NAME_NODE, key, full);
+               ? odin3_name_resolver_entry_decl(&rd->names, module, key)
+               : odin3_name_resolver_entry(&rd->names, module, ODIN3_NAME_NODE, key);
+}
+
+/* The full name the map holds for key, when it does. */
+static bool map_full(const jr *rd, jr_name_kind kind, odin3_bytes key, odin3_bytes *full) {
+    const odin3_name_entry *entry = map_entry(rd, kind, key);
+    if (entry == NULL) {
+        return false;
+    }
+    *full = entry->full;
+    return true;
+}
+
+/* Version 2: the record the map binds to the key: its O entry, else the N line of the key. */
+static uint32_t bound_record(const jr *rd, jr_name_kind kind, odin3_bytes key) {
+    const odin3_name_entry *entry = map_entry(rd, kind, key);
+    odin3_bytes module = module_bytes(rd);
+    if (entry != NULL) {
+        return odin3_name_resolver_record(&rd->names, entry);
+    }
+    uint32_t record = odin3_name_resolver_named(
+        &rd->names, module, kind == JR_NAME_WIRE ? ODIN3_NAME_WIRE : ODIN3_NAME_NODE, key);
+    return record != 0 || kind != JR_NAME_WIRE
+               ? record
+               : odin3_name_resolver_named(&rd->names, module, ODIN3_NAME_NET, key);
 }
 
 odin3_status jr_name_key(jr *rd, const odin3_json_node *node, jr_name_kind kind, jr_named *out) {
     *out = (jr_named){0};
     odin3_bytes key = odin3_bytes_cstr(odin3_json_key(node));
     odin3_bytes full = {NULL, 0};
+    uint32_t record = rd->restored ? bound_record(rd, kind, key) : 0U;
     if (map_full(rd, kind, key, &full)) {
-        return decoded_name(rd, kind, full, out);
+        odin3_status st = decoded_name(rd, kind, full, out);
+        out->rec = record;
+        return st;
     }
     if (rd->have_names && odin3_name_hash_shaped(key)) {
         odin3_name_miss_note(&rd->name_miss, key, odin3_json_key_pos(node).line);
     }
+    out->rec = record;
     return jr_fail(rd, odin3_design_intern(rd->design, key, &out->name));
 }
 

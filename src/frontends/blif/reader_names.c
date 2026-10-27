@@ -31,6 +31,10 @@ struct blif_names {
     odin3_u64map *taken; /* model << 32 | name: spelled by a raw token or claimed by a hash */
     odin3_u64map *moved; /* model << 32 | hash name -> its final name */
     uint32_t model_id;   /* the open model in tab */
+    /* Version 2 map: the O entry each replaced token stands for, by (model as written, token). */
+    bool v2;
+    odin3_strtab *rtab;
+    odin3_u64map *rentry; /* model << 32 | token -> index of the entry in the map + 1 */
 };
 
 typedef struct rep {
@@ -52,8 +56,14 @@ blif_names *blif_names_create(const blif_names_files *files, odin3_status *st) {
     odin3_strbuf_init(&names->legal);
     odin3_vec_init(&names->tokens, sizeof(odin3_bytes));
     odin3_vec_init(&names->reps, sizeof(rep));
-    names->move = !files->hdl_locs;
     *st = odin3_name_resolver_open(&names->map, "read_blif", files->map_path);
+    names->v2 = *st == ODIN3_OK && odin3_name_resolver_v2(&names->map);
+    names->move = !files->hdl_locs && !names->v2; /* a version 2 map decodes, as --hdl-locs */
+    if (names->v2) {
+        names->rtab = odin3_strtab_create();
+        names->rentry = odin3_u64map_create(0);
+        *st = names->rtab != NULL && names->rentry != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    }
     if (*st == ODIN3_OK && names->move) {
         *st = prescan(names, files->read_path);
     }
@@ -78,6 +88,8 @@ void blif_names_destroy(blif_names *names) {
     odin3_strtab_destroy(names->tab);
     odin3_u64map_destroy(names->taken);
     odin3_u64map_destroy(names->moved);
+    odin3_strtab_destroy(names->rtab);
+    odin3_u64map_destroy(names->rentry);
     odin3_util_free(names);
 }
 
@@ -152,16 +164,28 @@ static odin3_status decode_model(blif_names *names) {
     return st;
 }
 
-/* The full name of the hash name part of the open model: under its name as written, else under
- * the decoded one. */
-static bool find_net(const blif_names *names, odin3_bytes part, odin3_bytes *full) {
+/* The entry of the hash name part of the open model: under its name as written, else under the
+ * decoded one. NULL for none. */
+static const odin3_name_entry *find_entry(const blif_names *names, odin3_bytes part) {
     odin3_bytes model = {names->model.data, names->model.len};
-    if (odin3_name_resolver_find(&names->map, model, ODIN3_NAME_NET, part, full)) {
-        return true;
+    const odin3_name_entry *entry =
+        odin3_name_resolver_entry(&names->map, model, ODIN3_NAME_NET, part);
+    if (entry != NULL) {
+        return entry;
     }
     model = (odin3_bytes){names->model_dec.data, names->model_dec.len};
-    return model.len > 0 &&
-           odin3_name_resolver_find(&names->map, model, ODIN3_NAME_NET, part, full);
+    return model.len > 0 ? odin3_name_resolver_entry(&names->map, model, ODIN3_NAME_NET, part)
+                         : NULL;
+}
+
+/* The full name of the hash name part of the open model. */
+static bool find_net(const blif_names *names, odin3_bytes part, odin3_bytes *full) {
+    const odin3_name_entry *entry = find_entry(names, part);
+    if (entry == NULL) {
+        return false;
+    }
+    *full = entry->full;
+    return true;
 }
 
 /* Starts model `ln` (a .model line): its name for the lookups and its ID in the prescan table. */
@@ -307,21 +331,35 @@ static odin3_bytes moved_text(const blif_names *names, odin3_bytes part) {
                          odin3_strtab_len(names->tab, (uint32_t)id)};
 }
 
+/* Version 2: remembers that the token `final` of the open model stands for entry. */
+static odin3_status note_entry(blif_names *names, odin3_bytes final,
+                               const odin3_name_entry *entry) {
+    uint32_t model = 0;
+    uint32_t text = 0;
+    const odin3_name_entry *base = names->map.map.entries.data;
+    odin3_status st = odin3_strtab_intern(
+        names->rtab, (odin3_bytes){names->model.data, names->model.len}, &model);
+    st = st == ODIN3_OK ? odin3_strtab_intern(names->rtab, final, &text) : st;
+    return st == ODIN3_OK ? put_pair(names->rentry, model, text, (uint64_t)(entry - base) + 1U)
+                          : st;
+}
+
 /* Replaces token i when the map has its name: appends the new token (NUL included) to the pool. */
 static odin3_status replace_one(blif_names *names, const odin3_blif_line *ln, uint32_t index,
                                 bool subckt) {
     size_t prefix = 0;
     odin3_bytes part = name_part(ln->tokens[index], subckt, &prefix);
-    odin3_bytes full = {NULL, 0};
     if (part.ptr == NULL || !odin3_name_hash_shaped(part)) {
         return ODIN3_OK;
     }
-    if (!find_net(names, part, &full)) {
+    const odin3_name_entry *entry = find_entry(names, part);
+    if (entry == NULL) {
         if (names->count) {
             odin3_name_miss_note(&names->miss, part, ln->line);
         }
         return ODIN3_OK;
     }
+    odin3_bytes full = entry->full;
     odin3_bytes final = moved_text(names, part);
     rep *slot = odin3_vec_push(&names->reps);
     if (slot == NULL) {
@@ -337,6 +375,7 @@ static odin3_status replace_one(blif_names *names, const odin3_blif_line *ln, ui
         final = (odin3_bytes){names->legal.data, names->legal.len};
     }
     st = st == ODIN3_OK ? odin3_strbuf_append(&names->pool, final) : st;
+    st = st == ODIN3_OK && names->v2 ? note_entry(names, final, entry) : st;
     slot->len = names->pool.len - slot->off;
     return st == ODIN3_OK ? odin3_strbuf_append(&names->pool, (odin3_bytes){"\0", 1}) : st;
 }
@@ -381,4 +420,34 @@ odin3_status blif_names_apply(blif_names *names, odin3_blif_line *ln) {
         st = replace_one(names, ln, i, subckt);
     }
     return st == ODIN3_OK && names->reps.len > 0 ? rebuild(names, ln) : st;
+}
+
+bool blif_names_v2(const blif_names *names) {
+    return names != NULL && names->v2;
+}
+
+odin3_status blif_names_restore(blif_names *names, odin3_design *design, const char *path) {
+    return odin3_name_resolver_restore(&names->map, design, path);
+}
+
+uint32_t blif_names_record(blif_names *names, odin3_bytes model, odin3_bytes name) {
+    uint32_t model_id = 0;
+    uint32_t text_id = 0;
+    uint64_t index = 0;
+    odin3_strbuf_clear(&names->model);
+    odin3_strbuf_clear(&names->model_dec);
+    if (odin3_strbuf_append(&names->model, model) != ODIN3_OK || decode_model(names) != ODIN3_OK) {
+        return 0;
+    }
+    if (odin3_strtab_find(names->rtab, model, &model_id) &&
+        odin3_strtab_find(names->rtab, name, &text_id) &&
+        odin3_u64map_get(names->rentry, pair_key(model_id, text_id), &index) && index > 0) {
+        const odin3_name_entry *base = names->map.map.entries.data;
+        return odin3_name_resolver_record(&names->map, base + (index - 1U));
+    }
+    uint32_t record = odin3_name_resolver_named(&names->map, model, ODIN3_NAME_NET, name);
+    odin3_bytes decoded = {names->model_dec.data, names->model_dec.len};
+    return record != 0 || decoded.len == 0
+               ? record
+               : odin3_name_resolver_named(&names->map, decoded, ODIN3_NAME_NET, name);
 }

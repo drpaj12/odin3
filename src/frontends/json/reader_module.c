@@ -206,6 +206,7 @@ static odin3_status make_module(jr *rd, jr_mod *mod) {
         st = jr_fail(rd, odin3_module_create(rd->design, mod->name_str, prov, &mod->module));
     }
     odin3_module *module = st == ODIN3_OK ? odin3_module_get(rd->design, mod->module) : NULL;
+    mod->base = rd->restored ? (odin3_prov_id){0} : mod->base; /* 4.5: the nets take no record */
     if (st == ODIN3_OK) {
         st = jr_set_attrs(rd, module, (odin3_objref){ODIN3_OBJ_MODULE, mod->module.v},
                           jr_member(mod->node, "attributes"), &(jr_where){0});

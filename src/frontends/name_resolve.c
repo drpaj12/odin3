@@ -52,6 +52,8 @@ odin3_status odin3_name_resolver_open(odin3_name_resolver *res, const char *who,
 }
 
 void odin3_name_resolver_close(odin3_name_resolver *res) {
+    odin3_restore_free(res->restore);
+    res->restore = NULL;
     odin3_name_map_free(&res->map);
 }
 
@@ -70,12 +72,24 @@ bool odin3_name_hash_shaped(odin3_bytes text) {
     return true;
 }
 
+const odin3_name_entry *odin3_name_resolver_entry(const odin3_name_resolver *res,
+                                                  odin3_bytes module, odin3_name_kind kind,
+                                                  odin3_bytes name) {
+    if (!odin3_name_hash_shaped(name)) {
+        return NULL;
+    }
+    return odin3_name_map_find(&res->map, module, kind, name);
+}
+
+const odin3_name_entry *odin3_name_resolver_entry_decl(const odin3_name_resolver *res,
+                                                       odin3_bytes module, odin3_bytes name) {
+    const odin3_name_entry *entry = odin3_name_resolver_entry(res, module, ODIN3_NAME_WIRE, name);
+    return entry != NULL ? entry : odin3_name_resolver_entry(res, module, ODIN3_NAME_NET, name);
+}
+
 bool odin3_name_resolver_find(const odin3_name_resolver *res, odin3_bytes module,
                               odin3_name_kind kind, odin3_bytes name, odin3_bytes *full) {
-    if (!odin3_name_hash_shaped(name)) {
-        return false;
-    }
-    const odin3_name_entry *entry = odin3_name_map_find(&res->map, module, kind, name);
+    const odin3_name_entry *entry = odin3_name_resolver_entry(res, module, kind, name);
     if (entry == NULL) {
         return false;
     }
@@ -85,8 +99,33 @@ bool odin3_name_resolver_find(const odin3_name_resolver *res, odin3_bytes module
 
 bool odin3_name_resolver_find_decl(const odin3_name_resolver *res, odin3_bytes module,
                                    odin3_bytes name, odin3_bytes *full) {
-    return odin3_name_resolver_find(res, module, ODIN3_NAME_WIRE, name, full) ||
-           odin3_name_resolver_find(res, module, ODIN3_NAME_NET, name, full);
+    const odin3_name_entry *entry = odin3_name_resolver_entry_decl(res, module, name);
+    if (entry == NULL) {
+        return false;
+    }
+    *full = entry->full;
+    return true;
+}
+
+bool odin3_name_resolver_v2(const odin3_name_resolver *res) {
+    return res != NULL && res->map.version == ODIN3_NAME_MAP_VERSION_2;
+}
+
+odin3_status odin3_name_resolver_restore(odin3_name_resolver *res, odin3_design *design,
+                                         const char *path) {
+    if (!odin3_name_resolver_v2(res) || res->restore != NULL) {
+        return ODIN3_OK;
+    }
+    return odin3_design_restore(design, &res->map, path, &res->restore);
+}
+
+uint32_t odin3_name_resolver_record(const odin3_name_resolver *res, const odin3_name_entry *entry) {
+    return res != NULL ? odin3_restore_entry_record(res->restore, entry) : 0U;
+}
+
+uint32_t odin3_name_resolver_named(const odin3_name_resolver *res, odin3_bytes module,
+                                   odin3_name_kind kind, odin3_bytes name) {
+    return res != NULL ? odin3_restore_named_record(res->restore, module, kind, name) : 0U;
 }
 
 void odin3_name_miss_note(odin3_name_miss *miss, odin3_bytes name, uint32_t line) {

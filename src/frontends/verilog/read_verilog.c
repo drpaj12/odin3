@@ -732,7 +732,7 @@ static uint32_t soft_blocks_of(const odin3_design *design, const rv_args *args) 
 }
 
 /* -name-map: loads the map into names and points the elaboration options at it. */
-static odin3_status open_names(rv_args *args, odin3_name_resolver *names) {
+static odin3_status open_names(rv_args *args, odin3_design *design, odin3_name_resolver *names) {
     if (args->name_map.ptr == NULL) {
         return ODIN3_OK;
     }
@@ -740,6 +740,12 @@ static odin3_status open_names(rv_args *args, odin3_name_resolver *names) {
     odin3_strbuf_init(&path);
     odin3_status st = odin3_strbuf_append(&path, args->name_map);
     st = st != ODIN3_OK ? st : odin3_name_resolver_open(names, "read_verilog", path.data);
+    if (st == ODIN3_OK) { /* a version 2 map: the records, classes and rows of the file (4.5) */
+        st = odin3_name_resolver_restore(names, design, path.data);
+        if (st != ODIN3_OK) {
+            odin3_name_resolver_close(names);
+        }
+    }
     args->elab.names = st == ODIN3_OK ? names : NULL;
     odin3_strbuf_free(&path);
     return st;
@@ -891,7 +897,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     } else if (st == ODIN3_OK) {
         const bool vtr = soft_read(&parsed);
         uint32_t soft = soft_blocks_of(design, &parsed);
-        st = open_names(&parsed, &names);
+        st = open_names(&parsed, design, &names);
         if (st == ODIN3_OK) {
             odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
             st = odin3_read_verilog_files_soft(design, &opts, soft, vtr, &ast);

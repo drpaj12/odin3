@@ -84,6 +84,10 @@ static odin3_status make_restored(jr *rd, const jr_restore_in *in, const odin3_h
 
 odin3_status jr_restore_src(jr *rd, const jr_restore_in *in, odin3_prov_id *out) {
     *out = in->base;
+    if (rd->restored && in->named != NULL) {
+        *out = (odin3_prov_id){in->named->rec}; /* V1.2.0 4.5: the record the map binds, or none */
+        return ODIN3_OK;
+    }
     const odin3_json_node *src = rd->opts.keep_src_attr ? NULL : src_member(in->attrs);
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];
     uint32_t count = 0;
@@ -153,6 +157,11 @@ odin3_status jr_port_prov(jr *rd, const jr_port_srcs *srcs, const odin3_json_nod
     *out = base;
     uint64_t index = 0;
     uint32_t str = 0;
+    if (rd->restored) { /* version 2: the N line of the port's netname binds its record */
+        out->v = odin3_name_resolver_named(&rd->names, odin3_bytes_cstr(rd->cur_name),
+                                           ODIN3_NAME_WIRE, odin3_bytes_cstr(odin3_json_key(port)));
+        return ODIN3_OK;
+    }
     if (srcs->by_name == NULL) {
         return ODIN3_OK;
     }
@@ -212,6 +221,9 @@ static odin3_status collect_one(jr *rd, const odin3_json_node *name) {
 }
 
 odin3_status jr_collect_netlocs(jr *rd) {
+    if (rd->restored) {
+        return ODIN3_OK; /* version 2: a net takes no restored-location record */
+    }
     const odin3_json_node *names = jr_member(rd->cur.mod->node, "netnames");
     odin3_status st = ODIN3_OK;
     for (const odin3_json_node *name = jr_first(names); st == ODIN3_OK && name != NULL;
