@@ -641,9 +641,16 @@ record identity.
   the IR gains exactly two things for it. (1) The **extra table** (`design->extra`, NULL until a
   restore; copied by `odin3_design_clone`, counted by `odin3_design_bytes_reserved`): the `A`, `Q` and
   `K` lines of the map (post-Odin data) as text with their record ids rewritten to the design's, in file
-  order, and one slot, the **mutating run** (a pass-run row number, 0 = none). `odin3_pass_run_begin`
-  sets the slot to the new run when the table exists, the slot is 0, the run is not restored and the
-  pass name does not begin with `read_` or `write_`; it never changes it afterwards. The writer reads it
+  order; a second, internal list of the flags of a record that the writer cannot compute (the foreign
+  flags of `odin3-prov-post` and the mark `capped`; not returned by `odin3_extra_count` and
+  `odin3_extra_line`); and one slot, the **mutating run** (a pass-run row number, 0 = none).
+  `odin3_pass_run_begin` sets the slot to the new run when the table exists, the slot is 0, the run is
+  not restored and the pass is not a reader or writer (`read_`, `write_`) or one of a short list of
+  passes that only look (`check`, `stats`, `hierarchy`, `names`, `dump_locs`, `dump_project`, `sim`,
+  `preprocess`; the list is in `restore.c`, not in the pass table); the restore itself sets it from
+  the pass runs that came before it; it never changes it afterwards. The restore works on copies of
+  the provenance store, the op-class table, the construct table and the extra table and swaps them
+  in only when it succeeded, so a failed restore leaves the design as read. The writer reads it
   to mark the lines and the post-Odin records `stale=t<n>`. (2) The **`restored` flag of a pass-run
   row** (the fourth `uint32_t` of `odin3_passrun_row`): set on the rows a restore appends
   (`odin3_passrun_append_restored`), so code that expects an SOURCE record's `ast` to be a node ID of an

@@ -98,7 +98,7 @@ static void parse(const char *text) {
 }
 
 static odin3_restore *restore_body(const char *header, const char *body) {
-    char text[TEXT_BUF];
+    char text[TEXT_BUF + MSG_LEN];
     (void)snprintf(text, sizeof text, "%s%s", header, body);
     parse(text);
     odin3_restore *restore = NULL;
@@ -291,7 +291,7 @@ static void expect_refused(plant plant_in) {
     uint32_t runs = odin3_passrun_end(design);
     uint32_t recs = odin3_prov_end(design);
     uint32_t rows = odin3_construct_end(design);
-    char text[TEXT_BUF];
+    char text[TEXT_BUF + MSG_LEN];
     (void)snprintf(text, sizeof text, "%s%s", HEADER, body);
     parse(text);
     odin3_restore *restore = NULL;

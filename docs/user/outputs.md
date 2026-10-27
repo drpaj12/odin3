@@ -75,11 +75,15 @@ IR run numbers, and the records of objects the file does not mention (a net with
 uses is listed by the writer and cannot be bound). `read_blif` binds nets only (a cell has no record, a
 port vector's bits share the record of the first bit); `read_json` binds netnames and cells;
 `read_verilog -netlist` binds module-level wires and nets. A `clb` or `site` record that
-`odin3-prov-post` wrote with no parent (a cluster of pads alone) is not restored: a derived record has
-a parent. A warning says how many.
+`odin3-prov-post` wrote with no parent (a cluster of pads alone, in a map from before this version) makes
+the restore fail with a located error: a derived record has a parent. The tool now writes no record for
+such a cluster. A restore is all or nothing: a map that fails restores nothing and leaves the design as
+it was read. A line over the limits of its type (more fields than the type has, or longer than 1 MiB) and
+a flag with a bad value are refused too.
 
 Lines of the map written after Odin III (`A`, `Q`, `K` and the `ble`, `clb`, `site` records only they
-reach) describe the netlist as it was. After a read-back the first pass that is not a reader or a writer
+reach) describe the netlist as it was. After a read-back the first pass that changes the netlist (not a reader, a writer, `check`, `stats`,
+`hierarchy`, `names`, `dump_locs`, `dump_project`, `sim` or `preprocess`)
 is the mutating run: when the map is written again those lines end in `t<n>`, the `T` line of that
 run, and those records carry `stale=t<n>` in their flags. They are history: still written, never
 presented as current. A join made after the restore gets a fresh `Q` line with stale `-` and the name

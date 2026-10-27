@@ -104,6 +104,12 @@ typedef struct odin3_restore odin3_restore;
  *     rows of the C lines that SOURCE records reach (`ast` = the number of the C line, per run),
  *     marks the runs that hold rows with the map's AST mode, and keeps A, Q, K lines in the
  *     design's extra table with the mutating slot at 0;
+ *   - all or nothing: the restore works on copies of the provenance store, the op-class table,
+ *     the construct table and the extra table and swaps them in when it, the binding table
+ *     included, succeeded; any failure (ODIN3_ERR_PARSE, NO_MEMORY) leaves the design as it was
+ *     (strings interned meanwhile stay in the string table, which only grows). A reader that fails
+ *     for another reason after the restore leaves the design as any failed read does: fit only
+ *     for destruction;
  *   - a recs list of an O or N line with more than one id is a located WARNING (the first is
  * bound). *out is the binding table (free it with odin3_restore_free), NULL on failure. A map of
  * version 1 is INVALID_ARG. NO_MEMORY. The map must stay alive until odin3_restore_free.
