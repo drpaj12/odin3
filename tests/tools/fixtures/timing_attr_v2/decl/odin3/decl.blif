@@ -7,19 +7,19 @@
 .names gnd
 .names vcc
 1
-.subckt adder a=vcc b=gnd cin=gnd cout=hi5z4ukq5od sumout=hni27kaf4ta
-.subckt adder a=a[0] b=b[0] cin=hi5z4ukq5od cout=hrbr7iafsqp sumout=hp7uoetip2f
-.subckt adder a=a[1] b=b[1] cin=hrbr7iafsqp cout=hjkohe3545d sumout=h5r4pj6r3jg
-.subckt adder a=a[2] b=b[2] cin=hjkohe3545d cout=hg65ldudofl sumout=hvny35mbjy4
-.subckt adder a=a[3] b=b[3] cin=hg65ldudofl cout=hdcf2b75bvg sumout=hojc5p3u243
-.subckt adder a=gnd b=gnd cin=hdcf2b75bvg cout=h4jblbqpl34 sumout=haq5exfiet5
-.names c[0] hp7uoetip2f y[0]
+.subckt adder a=vcc b=gnd cin=gnd cout=hlpdfsaxqtf sumout=hq67at46dv2
+.subckt adder a=a[0] b=b[0] cin=hlpdfsaxqtf cout=hkl77hbv7ad sumout=h5o4qb2asxm
+.subckt adder a=a[1] b=b[1] cin=hkl77hbv7ad cout=h4pmykbamze sumout=hu4vsg6bv73
+.subckt adder a=a[2] b=b[2] cin=h4pmykbamze cout=h2y67v4u24i sumout=hidf2jz3dx6
+.subckt adder a=a[3] b=b[3] cin=h2y67v4u24i cout=hysissq33jo sumout=h7ccsmxkz2w
+.subckt adder a=gnd b=gnd cin=hysissq33jo cout=hexwqpxb62r sumout=hkpawgnswar
+.names c[0] h5o4qb2asxm y[0]
 11 1
-.names c[1] h5r4pj6r3jg y[1]
+.names c[1] hu4vsg6bv73 y[1]
 11 1
-.names c[2] hvny35mbjy4 y[2]
+.names c[2] hidf2jz3dx6 y[2]
 11 1
-.names c[3] hojc5p3u243 y[3]
+.names c[3] h7ccsmxkz2w y[3]
 11 1
 .end
 

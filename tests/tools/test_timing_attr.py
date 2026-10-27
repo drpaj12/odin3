@@ -617,8 +617,10 @@ class Outputs(unittest.TestCase):
 class NameMapAttribution(unittest.TestCase):
     """The version 2 route (V1.2.0 Task 7): the join is by atom name through the map next to the
     hash-name BLIF, with the full span, the construct chain and the DECLARATOR word. The fixtures
-    are the two micros of the older ones re-run with `--prov` (VPR report translated to the hash
-    names by pairing the two BLIFs) and `decl`, a design with a declarator initialiser."""
+    are the raw files of a real VPR run of `odin3-flow --prov --vpr --timing-attr` (VPR 9, the
+    pinned commit) on the two micros and `decl`, a design with a declarator initialiser; only the
+    absolute paths were made relative (the checkout prefix removed, VTR_ROOT as a placeholder),
+    and inputs.json lost its `designs` list."""
 
     def paths(self, name: str) -> list[dict[str, object]]:
         return ta.attribute_flow_dir(FIXTURES_V2 / name)["paths"]  # type: ignore[no-any-return]
@@ -654,19 +656,28 @@ class NameMapAttribution(unittest.TestCase):
     def test_generated_net_gets_the_word_of_its_declarator(self) -> None:
         report = ta.attribute_flow_dir(FIXTURES_V2 / "decl")
         nodes = {n["atom"]: n for n in report["paths"][0]["nodes"]}
-        adder = nodes["hrbr7iafsqp"]  # a generated net ($nNN) inside `wire [3:0] t = a + b`
+        adder = nodes["hkl77hbv7ad"]  # a carry of the adder in `wire [3:0] t = a + b` ($n21)
         self.assertEqual((adder["word"], adder["bit"], adder["word_via"]),
                          ("t", None, "declarator"))
         self.assertTrue(adder["loc"].endswith("decl.v:4.17-4.22"), adder["loc"])
         self.assertEqual(adder["chain_text"], "expr BINARY 4.17-4.22 < stmt DECLARATOR t "
                          "4.13-4.22 < stmt NET_DECL 4.2-4.23 < module MODULE decl 1.1-6.10")
-        self.assertEqual(nodes["h5r4pj6r3jg"]["word_via"], "name")  # a source net: t[1]
-        self.assertEqual((nodes["y[1]"]["word"], nodes["y[1]"]["bit"]), ("y", 1))
+        out = nodes["y[1]"]  # a source net: the word comes from its name, not the declarator
+        self.assertEqual((out["word"], out["bit"], out["word_via"]), ("y", 1, "name"))
         cov = report["coverage"]
         self.assertEqual((cov["generated_nodes"], cov["generated_word_nodes"],
-                          cov["generated_word_share"]), (2, 2, 1.0))
+                          cov["generated_word_share"]), (10, 10, 1.0))
         self.assertEqual((cov["net_nodes"], cov["span_share"], cov["loc_share"],
-                          cov["chain_share"]), (4, 1.0, 1.0, 1.0))
+                          cov["chain_share"]), (14, 1.0, 1.0, 1.0))
+
+    def test_real_vpr_atoms_all_join_the_map(self) -> None:
+        """VPR 9 keeps the BLIF's names as atom names (a .subckt atom is its first output net, a
+        latch its output, a pad its port): every atom of every reported path is in the map."""
+        for name in (ADDER, DFF, "decl"):
+            report = ta.attribute_flow_dir(FIXTURES_V2 / name)
+            self.assertEqual(report["coverage"]["unmatched"], 0, name)
+            self.assertEqual(report["coverage"]["unmatched_atoms"], [], name)
+            self.assertGreater(report["coverage"]["matched"], 0, name)
 
     def test_generated_nets_without_a_declarator_have_no_word(self) -> None:
         cov = ta.attribute_flow_dir(FIXTURES_V2 / ADDER)["coverage"]
@@ -677,7 +688,7 @@ class NameMapAttribution(unittest.TestCase):
     def test_atom_not_in_the_map_is_unmatched_and_listed(self) -> None:
         flow_dir = copy_fixture_v2(self, DFF)
         report = (flow_dir / "vpr/run/report_timing.setup.rpt")
-        report.write_text(report.read_text().replace("hvihy24qg2f", "zzunknown"))
+        report.write_text(report.read_text().replace("h3wiklgbylb", "zzunknown"))
         cov = ta.attribute_flow_dir(flow_dir)["coverage"]
         self.assertEqual([e["atom"] for e in cov["unmatched_atoms"]], ["zzunknown"])
 
@@ -790,7 +801,7 @@ class MapResolution(unittest.TestCase):
     def test_unmatched_rows_carry_the_reason_on_the_map_route_only(self) -> None:
         flow_dir = copy_fixture_v2(self, DFF)
         report = flow_dir / "vpr/run/report_timing.setup.rpt"
-        report.write_text(report.read_text().replace("hvihy24qg2f", "zzunknown"))
+        report.write_text(report.read_text().replace("h3wiklgbylb", "zzunknown"))
         rows = ta.attribute_flow_dir(flow_dir)["coverage"]["unmatched_atoms"]
         self.assertEqual(rows[0]["reason"], "not in the name map")
         older = ta.attribute_flow_dir(FIXTURES / DFF)["coverage"]["unmatched_atoms"]
@@ -1021,8 +1032,11 @@ class Integration(unittest.TestCase):
     MICRO = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_BCD_adder.v"
 
     def run_flow(self, out: Path, *extra: str) -> int:
-        code, text, err = run_main(flow.main, [str(self.MICRO), "--odin3", ODIN3, "--out",
-                                               str(out), "--vpr", *extra])
+        # the CLI links its own sanitizer runtime: a CTest LD_PRELOAD would clash (as CLI_ENV)
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            code, text, err = run_main(flow.main, [str(self.MICRO), "--odin3", ODIN3, "--out",
+                                                   str(out), "--vpr", *extra])
         self.assertEqual(code, 0, text + err)
         return code
 

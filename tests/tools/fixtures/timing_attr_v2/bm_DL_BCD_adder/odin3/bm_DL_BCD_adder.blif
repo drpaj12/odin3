@@ -7,52 +7,52 @@
 .names gnd
 .names vcc
 1
-.subckt adder a=vcc b=gnd cin=gnd cout=htya7iasrgi sumout=hissw73hsoz
-.subckt adder a=X[0] b=Y[0] cin=htya7iasrgi cout=h3tyyj4vyi7 sumout=hbhxbewowvi
-.subckt adder a=X[1] b=Y[1] cin=h3tyyj4vyi7 cout=hh4nw76ke3m sumout=hwwbeps7aqr
-.subckt adder a=X[2] b=Y[2] cin=hh4nw76ke3m cout=hu6xl2qmoks sumout=hh26kfh6zak
-.subckt adder a=X[3] b=Y[3] cin=hu6xl2qmoks cout=hxwesq6xufj sumout=h3fhgro7rif
-.subckt adder a=gnd b=gnd cin=hxwesq6xufj cout=hxe6qghdbgs sumout=h7ur46elpte
-.subckt adder a=vcc b=gnd cin=gnd cout=hrp5zb53pjp sumout=hi6nazwxi4z
-.subckt adder a=hbhxbewowvi b=Cin cin=hrp5zb53pjp cout=htoiko2malx sumout=he2asfwwgqc
-.subckt adder a=hwwbeps7aqr b=gnd cin=htoiko2malx cout=h7un433aq6p sumout=hgnijhjzuv6
-.subckt adder a=hh26kfh6zak b=gnd cin=h7un433aq6p cout=hv4yh2a7syh sumout=hw6nhvv3egf
-.subckt adder a=h3fhgro7rif b=gnd cin=hv4yh2a7syh cout=h257dvenw6y sumout=hcc7ey2k67w
-.subckt adder a=h7ur46elpte b=gnd cin=h257dvenw6y cout=hvn52e2jmoy sumout=ha4fcdipby6
-.subckt adder a=gnd b=gnd cin=hvn52e2jmoy cout=hxjd7krfcb2 sumout=heoqqat7yzq
-.subckt adder a=vcc b=gnd cin=gnd cout=h4gul7kjgjc sumout=hydhihrp6km
-.subckt adder a=hgnijhjzuv6 b=vcc cin=h4gul7kjgjc cout=he7a72j3hwc sumout=h2e2vqbiejz
-.subckt adder a=hw6nhvv3egf b=vcc cin=he7a72j3hwc cout=hd7aq7ztbxp sumout=hfjs36xyeqy
-.subckt adder a=hcc7ey2k67w b=gnd cin=hd7aq7ztbxp cout=hjq2xe4boov sumout=h5mexlr6vmn
-.subckt adder a=ha4fcdipby6 b=gnd cin=hjq2xe4boov cout=hdlfh5atxxc sumout=hhpzaiv2fdc
-.subckt adder a=gnd b=gnd cin=hdlfh5atxxc cout=hbr5jkm2bsn sumout=hjnlrdaqrom
-.names hgnijhjzuv6 ha4fcdipby6 hhpzaiv2fdc hw6nhvv3egf hcc7ey2k67w Cout
+.subckt adder a=vcc b=gnd cin=gnd cout=hbuqretaqz7 sumout=hmtbts5itpk
+.subckt adder a=X[0] b=Y[0] cin=hbuqretaqz7 cout=hhxxd4br7ep sumout=hzx3nek5egu
+.subckt adder a=X[1] b=Y[1] cin=hhxxd4br7ep cout=hrxa25fch2f sumout=hdqnupjp4db
+.subckt adder a=X[2] b=Y[2] cin=hrxa25fch2f cout=hsmbtdvfyby sumout=hrdvw3uxvuj
+.subckt adder a=X[3] b=Y[3] cin=hsmbtdvfyby cout=hxwitjrsjbt sumout=hwh2m5f4iau
+.subckt adder a=gnd b=gnd cin=hxwitjrsjbt cout=hm7e6zgs73u sumout=hnlwqefb4qa
+.subckt adder a=vcc b=gnd cin=gnd cout=hir64vks2ao sumout=hj7nflhkymw
+.subckt adder a=hzx3nek5egu b=Cin cin=hir64vks2ao cout=hos2l66k7yt sumout=h5nzgr7iblw
+.subckt adder a=hdqnupjp4db b=gnd cin=hos2l66k7yt cout=hfwbdhv2wpm sumout=hhrf6avhp7m
+.subckt adder a=hrdvw3uxvuj b=gnd cin=hfwbdhv2wpm cout=hjsa3w34nam sumout=h3527fmuii7
+.subckt adder a=hwh2m5f4iau b=gnd cin=hjsa3w34nam cout=hgqg24oiogd sumout=h56wtqycsyt
+.subckt adder a=hnlwqefb4qa b=gnd cin=hgqg24oiogd cout=huplxa7isag sumout=hjrinsua4pe
+.subckt adder a=gnd b=gnd cin=huplxa7isag cout=hfmixjadlxu sumout=hqggbzilhgs
+.subckt adder a=vcc b=gnd cin=gnd cout=hdtj6jpj6le sumout=heksgcule2t
+.subckt adder a=hhrf6avhp7m b=vcc cin=hdtj6jpj6le cout=hwi76j7ogtq sumout=hd2plxpvgz3
+.subckt adder a=h3527fmuii7 b=vcc cin=hwi76j7ogtq cout=hkdmusv7jze sumout=hfxx7l27g6b
+.subckt adder a=h56wtqycsyt b=gnd cin=hkdmusv7jze cout=hshqdxdcihh sumout=h24ncuvkltz
+.subckt adder a=hjrinsua4pe b=gnd cin=hshqdxdcihh cout=hb6q4xa5dyh sumout=hytzpjgbgb4
+.subckt adder a=gnd b=gnd cin=hb6q4xa5dyh cout=hmcyb3e3r2h sumout=h7xwfbobqcv
+.names hhrf6avhp7m hjrinsua4pe hytzpjgbgb4 h3527fmuii7 h56wtqycsyt Cout
 -1--0 1
 --111 1
 1-1-1 1
 01-0- 1
-.names hw6nhvv3egf hgnijhjzuv6 hcc7ey2k67w h2e2vqbiejz S[1]
+.names h3527fmuii7 hhrf6avhp7m h56wtqycsyt hd2plxpvgz3 S[1]
 1-11 1
 -1-1 1
 -10- 1
-.names hgnijhjzuv6 hw6nhvv3egf hcc7ey2k67w hfjs36xyeqy S[2]
+.names hhrf6avhp7m h3527fmuii7 h56wtqycsyt hfxx7l27g6b S[2]
 1-11 1
 -1-1 1
 -10- 1
-.names hw6nhvv3egf hgnijhjzuv6 h5mexlr6vmn hcc7ey2k67w S[3]
+.names h3527fmuii7 hhrf6avhp7m h24ncuvkltz h56wtqycsyt S[3]
 --11 1
 00-1 1
-.names he2asfwwgqc S[0]
+.names h5nzgr7iblw S[0]
 1 1
-.names he2asfwwgqc Z[0]
+.names h5nzgr7iblw Z[0]
 1 1
-.names hgnijhjzuv6 Z[1]
+.names hhrf6avhp7m Z[1]
 1 1
-.names hw6nhvv3egf Z[2]
+.names h3527fmuii7 Z[2]
 1 1
-.names hcc7ey2k67w Z[3]
+.names h56wtqycsyt Z[3]
 1 1
-.names ha4fcdipby6 Z[4]
+.names hjrinsua4pe Z[4]
 1 1
 .end
 

@@ -5,7 +5,7 @@
     "bm_DL_BCD_adder": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "micro/bm_DL_BCD_adder.v:3.1-22.10"
+        "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:3.1-22.10"
       },
       "ports": {
         "Cin": {
@@ -41,7 +41,7 @@
           },
           "attributes": {
             "hardmap": "adder:head",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -60,7 +60,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c7.s0": {
@@ -70,7 +70,7 @@
           },
           "attributes": {
             "hardmap": "adder:s0",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -89,7 +89,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c7.s1": {
@@ -99,7 +99,7 @@
           },
           "attributes": {
             "hardmap": "adder:s1",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -118,7 +118,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c7.s2": {
@@ -128,7 +128,7 @@
           },
           "attributes": {
             "hardmap": "adder:s2",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -147,7 +147,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c7.s3": {
@@ -157,7 +157,7 @@
           },
           "attributes": {
             "hardmap": "adder:s3",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -176,7 +176,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c7.top": {
@@ -186,7 +186,7 @@
           },
           "attributes": {
             "hardmap": "adder:top",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12"
           },
           "port_directions": {
             "a": "input",
@@ -205,7 +205,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.12" ]
           }
         },
         "$c15": {
@@ -215,7 +215,7 @@
           },
           "attributes": {
             "hardmap": "adder:head",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -234,7 +234,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.s0": {
@@ -244,7 +244,7 @@
           },
           "attributes": {
             "hardmap": "adder:s0",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -263,7 +263,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.s1": {
@@ -273,7 +273,7 @@
           },
           "attributes": {
             "hardmap": "adder:s1",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -292,7 +292,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.s2": {
@@ -302,7 +302,7 @@
           },
           "attributes": {
             "hardmap": "adder:s2",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -321,7 +321,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.s3": {
@@ -331,7 +331,7 @@
           },
           "attributes": {
             "hardmap": "adder:s3",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -350,7 +350,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.s4": {
@@ -360,7 +360,7 @@
           },
           "attributes": {
             "hardmap": "adder:s4",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -379,7 +379,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c8.top": {
@@ -389,7 +389,7 @@
           },
           "attributes": {
             "hardmap": "adder:top",
-            "src": "micro/bm_DL_BCD_adder.v:15.7-15.18"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18"
           },
           "port_directions": {
             "a": "input",
@@ -408,7 +408,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:15.7-15.18" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:15.7-15.18" ]
           }
         },
         "$c22": {
@@ -418,7 +418,7 @@
           },
           "attributes": {
             "hardmap": "adder:head",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -437,7 +437,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c18.s0": {
@@ -447,7 +447,7 @@
           },
           "attributes": {
             "hardmap": "adder:s0",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -466,7 +466,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c18.s1": {
@@ -476,7 +476,7 @@
           },
           "attributes": {
             "hardmap": "adder:s1",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -495,7 +495,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c18.s2": {
@@ -505,7 +505,7 @@
           },
           "attributes": {
             "hardmap": "adder:s2",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -524,7 +524,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c18.s3": {
@@ -534,7 +534,7 @@
           },
           "attributes": {
             "hardmap": "adder:s3",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -553,7 +553,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c18.top": {
@@ -563,7 +563,7 @@
           },
           "attributes": {
             "hardmap": "adder:top",
-            "src": "micro/bm_DL_BCD_adder.v:19.16-19.21"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21"
           },
           "port_directions": {
             "a": "input",
@@ -582,7 +582,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:19.16-19.21" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:19.16-19.21" ]
           }
         },
         "$c28": {
@@ -593,7 +593,7 @@
             "LUT": "11110000111001001100110011001100"
           },
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -606,7 +606,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23", "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22" ]
           }
         },
         "$c29": {
@@ -617,7 +617,7 @@
             "LUT": "1110110000001100"
           },
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -630,7 +630,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23", "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22" ]
           }
         },
         "$c30": {
@@ -641,7 +641,7 @@
             "LUT": "1110110000001100"
           },
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -654,7 +654,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23", "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22" ]
           }
         },
         "$c31": {
@@ -665,7 +665,7 @@
             "LUT": "1111000100000000"
           },
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:16.7-16.23|micro/bm_DL_BCD_adder.v:16.3-19.22"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23|tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22"
           },
           "port_directions": {
             "A": "input",
@@ -678,7 +678,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:16.7-16.23", "micro/bm_DL_BCD_adder.v:16.3-19.22" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.7-16.23", "tests/micro/verilog/micro/bm_DL_BCD_adder.v:16.3-19.22" ]
           }
         }
       },
@@ -687,79 +687,79 @@
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:4.2-4.12"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:4.2-4.12"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:4.2-4.12" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:4.2-4.12" ]
           }
         },
         "X": {
           "hide_name": 0,
           "bits": [ 3, 4, 5, 6 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:5.2-5.19"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.2-5.19"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:5.2-5.19" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.2-5.19" ]
           }
         },
         "Y": {
           "hide_name": 0,
           "bits": [ 7, 8, 9, 10 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:5.2-5.19"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.2-5.19"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:5.2-5.19" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:5.2-5.19" ]
           }
         },
         "S": {
           "hide_name": 0,
           "bits": [ 11, 79, 80, 81 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:6.2-6.17"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:6.2-6.17"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:6.2-6.17" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:6.2-6.17" ]
           }
         },
         "Cout": {
           "hide_name": 0,
           "bits": [ 78 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:7.2-7.14"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:7.2-7.14"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:7.2-7.14" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:7.2-7.14" ]
           }
         },
         "Z": {
           "hide_name": 0,
           "bits": [ 11, 12, 13, 14, 15 ],
           "attributes": {
-            "src": "micro/bm_DL_BCD_adder.v:10.2-10.17"
+            "src": "tests/micro/verilog/micro/bm_DL_BCD_adder.v:10.2-10.17"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_BCD_adder",
-            "hdl": [ "micro/bm_DL_BCD_adder.v:10.2-10.17" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:10.2-10.17" ]
           }
         }
       },
       "odin3_prov": {
         "kind": "SOURCE",
         "hier": "bm_DL_BCD_adder",
-        "hdl": [ "micro/bm_DL_BCD_adder.v:3.1-22.10" ]
+        "hdl": [ "tests/micro/verilog/micro/bm_DL_BCD_adder.v:3.1-22.10" ]
       }
     }
   }

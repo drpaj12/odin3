@@ -67,8 +67,8 @@ clock Clock (rise edge)                                          0.000     0.000
 clock source latency                                             0.000     0.000
 input external delay                                             0.000     0.000
 x1.inpad[0] (.input)                                             0.000     0.000
-hvihy24qg2f.in[0] (.names)                                               0.287     0.287
-hvihy24qg2f.out[0] (.names)                                              0.235     0.522
+hjykhhsi76m.in[0] (.names)                                       0.287     0.287
+hjykhhsi76m.out[0] (.names)                                      0.235     0.522
 f.D[0] (.latch)                                                  0.000     0.522
 data arrival time                                                          0.522
 
@@ -97,8 +97,8 @@ clock Clock (rise edge)                                          0.000     0.000
 clock source latency                                             0.000     0.000
 input external delay                                             0.000     0.000
 x3.inpad[0] (.input)                                             0.000     0.000
-hwkgwdxucww.in[0] (.names)                                               0.287     0.287
-hwkgwdxucww.out[0] (.names)                                              0.235     0.522
+h3wiklgbylb.in[0] (.names)                                       0.287     0.287
+h3wiklgbylb.out[0] (.names)                                      0.235     0.522
 g.D[0] (.latch)                                                  0.000     0.522
 data arrival time                                                          0.522
 

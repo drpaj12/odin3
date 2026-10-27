@@ -4,10 +4,10 @@
 .model bm_DL_logic_w_Dff
 .inputs x1 x2 x3 Clock
 .outputs f g
-.names x1 x2 hvihy24qg2f
+.names x1 x2 hjykhhsi76m
 11 1
-.names x3 f hwkgwdxucww
+.names x3 f h3wiklgbylb
 00 0
-.latch hvihy24qg2f f re Clock 2
-.latch hwkgwdxucww g re Clock 2
+.latch hjykhhsi76m f re Clock 2
+.latch h3wiklgbylb g re Clock 2
 .end

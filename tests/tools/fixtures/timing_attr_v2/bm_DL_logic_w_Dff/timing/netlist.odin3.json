@@ -5,7 +5,7 @@
     "bm_DL_logic_w_Dff": {
       "attributes": {
         "top": "00000000000000000000000000000001",
-        "src": "micro/bm_DL_logic_w_Dff.v:3.1-14.10"
+        "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:3.1-14.10"
       },
       "ports": {
         "x1": {
@@ -42,7 +42,7 @@
             "LUT": "1000"
           },
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:10.8-10.15"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:10.8-10.15"
           },
           "port_directions": {
             "A": "input",
@@ -55,7 +55,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:10.8-10.15" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:10.8-10.15" ]
           }
         },
         "$c8": {
@@ -66,7 +66,7 @@
             "LUT": "1110"
           },
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:11.8-11.14"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:11.8-11.14"
           },
           "port_directions": {
             "A": "input",
@@ -79,7 +79,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:11.8-11.14" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:11.8-11.14" ]
           }
         },
         "f.dff_p0": {
@@ -88,7 +88,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:8.2-12.5"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:8.2-12.5"
           },
           "port_directions": {
             "C": "input",
@@ -103,7 +103,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:8.2-12.5" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:8.2-12.5" ]
           }
         },
         "g.dff_p0": {
@@ -112,7 +112,7 @@
           "parameters": {
           },
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:8.2-12.5"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:8.2-12.5"
           },
           "port_directions": {
             "C": "input",
@@ -127,7 +127,7 @@
           "odin3_prov": {
             "kind": "DERIVED",
             "hier": "",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:8.2-12.5" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:8.2-12.5" ]
           }
         }
       },
@@ -136,48 +136,48 @@
           "hide_name": 0,
           "bits": [ 2 ],
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:4.2-4.26"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
           }
         },
         "x2": {
           "hide_name": 0,
           "bits": [ 3 ],
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:4.2-4.26"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
           }
         },
         "x3": {
           "hide_name": 0,
           "bits": [ 4 ],
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:4.2-4.26"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
           }
         },
         "Clock": {
           "hide_name": 0,
           "bits": [ 5 ],
           "attributes": {
-            "src": "micro/bm_DL_logic_w_Dff.v:4.2-4.26"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:4.2-4.26" ]
           }
         },
         "f": {
@@ -185,12 +185,12 @@
           "bits": [ 6 ],
           "attributes": {
             "init": "x",
-            "src": "micro/bm_DL_logic_w_Dff.v:5.2-5.14"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:5.2-5.14"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:5.2-5.14" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:5.2-5.14" ]
           }
         },
         "g": {
@@ -198,19 +198,19 @@
           "bits": [ 7 ],
           "attributes": {
             "init": "x",
-            "src": "micro/bm_DL_logic_w_Dff.v:5.2-5.14"
+            "src": "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:5.2-5.14"
           },
           "odin3_prov": {
             "kind": "SOURCE",
             "hier": "bm_DL_logic_w_Dff",
-            "hdl": [ "micro/bm_DL_logic_w_Dff.v:5.2-5.14" ]
+            "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:5.2-5.14" ]
           }
         }
       },
       "odin3_prov": {
         "kind": "SOURCE",
         "hier": "bm_DL_logic_w_Dff",
-        "hdl": [ "micro/bm_DL_logic_w_Dff.v:3.1-14.10" ]
+        "hdl": [ "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:3.1-14.10" ]
       }
     }
   }

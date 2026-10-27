@@ -1,8 +1,9 @@
 {
  "top": "bm_DL_logic_w_Dff",
  "blif": "odin3/bm_DL_logic_w_Dff.blif",
+ "name_map": "odin3/bm_DL_logic_w_Dff.blif.names",
  "netlist_json": "timing/netlist.odin3.json",
  "vpr_run_dir": "vpr/run",
  "paths_requested": 100,
- "name_map": "odin3/bm_DL_logic_w_Dff.blif.names"
+ "source_cwd": "odin3"
 }
