@@ -874,6 +874,14 @@ static void test_v2_check_finds_each_problem(void) {
     /* an object whose record is missing */
     (void)snprintf(body, sizeof body, "N\tm\tnet\tp\tr4\tgate\n%s%s", GOOD_R, TAIL);
     TEST_ASSERT_EQUAL_UINT32(1, check_of(body).no_record);
+    /* an O or N line with an empty record field has no record either */
+    (void)snprintf(body, sizeof body, "N\tm\tnet\tp\t\tgate\n%s%s", GOOD_R, TAIL);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).no_record);
+    /* an R line with an empty level is a bad class; a call= flag that does not resolve is a ref */
+    (void)snprintf(body, sizeof body, "R\tr1\tS\t\torigin\tt1.1\t\t\t\t\n%s", TAIL);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_class);
+    (void)snprintf(body, sizeof body, "R\tr1\tS\tstmt\torigin\tt1.1\t\t\t\tcall=c99\n%s", TAIL);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_ref);
     /* a construct under a parent numbered later */
     (void)snprintf(
         body, sizeof body,

@@ -18,7 +18,44 @@
 
 enum { INDENT_STEP = 2, INDENT_BASE = 2 };
 
+/* One mark that is set: its table and line number. */
+typedef struct touch {
+    uint32_t tab;
+    uint32_t num;
+} touch;
+
+static void marks_free(names_v2_marks *mk) {
+    for (size_t k = 0; k < NV2_TABS; k++) {
+        odin3_util_free(mk->seen[k]);
+        mk->seen[k] = NULL;
+    }
+    odin3_vec_free(&mk->touched);
+}
+
+static odin3_status marks_init(names_v2_marks *mk, const odin3_vec tab[NV2_TABS]) {
+    odin3_vec_init(&mk->touched, sizeof(touch));
+    for (size_t k = 0; k < NV2_TABS; k++) {
+        mk->seen[k] = odin3_util_calloc(tab[k].len + 1U);
+        if (mk->seen[k] == NULL) {
+            marks_free(mk);
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* Clears the marks set since the last reset, and only those. */
+static void marks_reset(names_v2_marks *mk) {
+    for (size_t i = 0; i < mk->touched.len; i++) {
+        const touch *t = odin3_vec_cat(&mk->touched, i);
+        mk->seen[t->tab][t->num] = 0;
+    }
+    mk->touched.len = 0;
+}
+
 void names_v2_free(names_v2 *v2) {
+    marks_free(&v2->walk);
+    marks_free(&v2->reach);
     for (size_t k = 0; k < NV2_TABS; k++) {
         odin3_vec_free(&v2->tab[k]);
     }
@@ -41,6 +78,8 @@ static int table_of(char type) {
 
 odin3_status names_v2_init(names_v2 *v2, const odin3_name_map *map) {
     v2->map = map;
+    memset(&v2->walk, 0, sizeof v2->walk);
+    memset(&v2->reach, 0, sizeof v2->reach);
     for (size_t k = 0; k < NV2_TABS; k++) {
         odin3_vec_init(&v2->tab[k], sizeof(names_v2_ref));
     }
@@ -56,7 +95,12 @@ odin3_status names_v2_init(names_v2 *v2, const odin3_name_map *map) {
             slot->line = line;
         }
     }
-    return ODIN3_OK;
+    odin3_status st = marks_init(&v2->walk, v2->tab);
+    st = st == ODIN3_OK ? marks_init(&v2->reach, v2->tab) : st;
+    if (st != ODIN3_OK) {
+        names_v2_free(v2);
+    }
+    return st;
 }
 
 /* The line numbered num of a table, or NULL when there is no such line. */
@@ -105,34 +149,16 @@ typedef struct walk_item {
     uint32_t depth;
 } walk_item;
 
-/* Marks of one query: one byte per R, C, F and T line. */
-typedef struct marks {
-    uint8_t *seen[NV2_TABS];
-} marks;
-
-static void marks_free(marks *mk) {
-    for (size_t k = 0; k < NV2_TABS; k++) {
-        odin3_util_free(mk->seen[k]);
-        mk->seen[k] = NULL;
-    }
-}
-
-static odin3_status marks_init(marks *mk, const names_v2 *v2) {
-    for (size_t k = 0; k < NV2_TABS; k++) {
-        mk->seen[k] = odin3_util_calloc(v2->tab[k].len + 1U);
-        if (mk->seen[k] == NULL) {
-            marks_free(mk);
-            return ODIN3_ERR_NO_MEMORY;
-        }
-    }
-    return ODIN3_OK;
-}
-
 /* Marks num of table tab; true when it was not marked before (and is a line of the table). */
-static bool mark_new(const names_v2 *v2, marks *mk, names_v2_tab tab, uint32_t num) {
+static bool mark_new(const names_v2 *v2, names_v2_marks *mk, names_v2_tab tab, uint32_t num) {
     if (num < 1 || num > v2->tab[tab].len || mk->seen[tab][num] != 0) {
         return false;
     }
+    touch *t = odin3_vec_push(&mk->touched);
+    if (t == NULL) {
+        return false; /* out of memory: treated as already reached, so the walk ends */
+    }
+    *t = (touch){(uint32_t)tab, num};
     mk->seen[tab][num] = 1;
     return true;
 }
@@ -158,7 +184,7 @@ static odin3_status push_parents(const odin3_nm_line *line, uint32_t depth, odin
 }
 
 /* The records reachable from the first record of recs, in the order of Node.provenance(). */
-static odin3_status walk_records(const names_v2 *v2, marks *mk, odin3_bytes recs,
+static odin3_status walk_records(const names_v2 *v2, names_v2_marks *mk, odin3_bytes recs,
                                  odin3_vec *order) {
     odin3_vec stack;
     odin3_vec_init(&stack, sizeof(walk_item));
@@ -203,7 +229,7 @@ static uint32_t leaf_construct(const odin3_nm_line *line) {
 }
 
 /* Adds construct num and its ancestors (module last) not yet reached to chain. */
-static odin3_status chain_up(const names_v2 *v2, marks *mk, uint32_t num, odin3_vec *chain) {
+static odin3_status chain_up(const names_v2 *v2, names_v2_marks *mk, uint32_t num, odin3_vec *chain) {
     for (size_t steps = v2->tab[NV2_C].len; num != 0 && steps > 0; steps--) {
         const odin3_nm_line *line = line_at(v2, NV2_C, num);
         if (line == NULL || !mark_new(v2, mk, NV2_C, num)) {
@@ -220,7 +246,7 @@ static odin3_status chain_up(const names_v2 *v2, marks *mk, uint32_t num, odin3_
     return ODIN3_OK;
 }
 
-static odin3_status build_chain(const names_v2 *v2, marks *mk, const odin3_vec *order,
+static odin3_status build_chain(const names_v2 *v2, names_v2_marks *mk, const odin3_vec *order,
                                 odin3_vec *chain) {
     odin3_status st = ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < order->len; i++) {
@@ -233,7 +259,7 @@ static odin3_status build_chain(const names_v2 *v2, marks *mk, const odin3_vec *
 }
 
 /* Marks the file in an `f<n>:span` origin or an `f<n>` field. */
-static void mark_file(const names_v2 *v2, marks *mk, odin3_bytes tok) {
+static void mark_file(const names_v2 *v2, names_v2_marks *mk, odin3_bytes tok) {
     const char *colon = tok.len > 0 ? memchr(tok.ptr, ':', tok.len) : NULL;
     uint32_t num = 0;
     if (colon != NULL) {
@@ -244,7 +270,7 @@ static void mark_file(const names_v2 *v2, marks *mk, odin3_bytes tok) {
     }
 }
 
-static odin3_status mark_origins(const names_v2 *v2, marks *mk, const odin3_nm_line *line) {
+static odin3_status mark_origins(const names_v2 *v2, names_v2_marks *mk, const odin3_nm_line *line) {
     odin3_vec parts;
     odin3_vec_init(&parts, sizeof(odin3_bytes));
     odin3_status st = split_list(line->f[NM_R_ORIGINS], '|', &parts);
@@ -256,7 +282,7 @@ static odin3_status mark_origins(const names_v2 *v2, marks *mk, const odin3_nm_l
 }
 
 /* Marks the run of a step `t<n>.<op>`. */
-static void mark_run(const names_v2 *v2, marks *mk, odin3_bytes step) {
+static void mark_run(const names_v2 *v2, names_v2_marks *mk, odin3_bytes step) {
     const char *dot = step.len > 0 ? memchr(step.ptr, '.', step.len) : NULL;
     uint32_t num = 0;
     if (dot != NULL) {
@@ -268,7 +294,7 @@ static void mark_run(const names_v2 *v2, marks *mk, odin3_bytes step) {
 }
 
 /* Appends the marked lines of a table in number order, indented. */
-static odin3_status put_marked(const names_v2 *v2, const marks *mk, names_v2_tab tab,
+static odin3_status put_marked(const names_v2 *v2, const names_v2_marks *mk, names_v2_tab tab,
                                uint32_t indent, odin3_strbuf *out) {
     odin3_status st = ODIN3_OK;
     for (uint32_t num = 1; st == ODIN3_OK && num <= v2->tab[tab].len; num++) {
@@ -278,68 +304,67 @@ static odin3_status put_marked(const names_v2 *v2, const marks *mk, names_v2_tab
 }
 
 /* The lookup text: the records (by depth), the chain, then the files and runs they name. */
-static odin3_status print_lookup(const names_v2 *v2, const odin3_vec *order, const odin3_vec *chain,
+static odin3_status print_lookup(names_v2 *v2, const odin3_vec *order, const odin3_vec *chain,
                                  odin3_strbuf *out) {
-    marks reach = {{NULL}};
-    odin3_status st = marks_init(&reach, v2);
+    names_v2_marks *reach = &v2->reach;
+    odin3_status st = ODIN3_OK;
+    marks_reset(reach);
     for (size_t i = 0; st == ODIN3_OK && i < order->len; i++) {
         const walk_item *item = odin3_vec_cat(order, i);
         const odin3_nm_line *line = line_at(v2, NV2_R, item->rec);
         st = put_line(out, line, INDENT_BASE + INDENT_STEP * item->depth);
-        st = st == ODIN3_OK ? mark_origins(v2, &reach, line) : st;
-        mark_run(v2, &reach, line->f[NM_R_STEP]);
+        st = st == ODIN3_OK ? mark_origins(v2, reach, line) : st;
+        mark_run(v2, reach, line->f[NM_R_STEP]);
     }
     for (size_t i = 0; st == ODIN3_OK && i < chain->len; i++) {
         uint32_t num = *(const uint32_t *)odin3_vec_cat(chain, i);
         const odin3_nm_line *line = line_at(v2, NV2_C, num);
         st = put_line(out, line, INDENT_BASE);
-        mark_file(v2, &reach, line->f[NM_C_FILE]);
+        mark_file(v2, reach, line->f[NM_C_FILE]);
     }
-    st = st == ODIN3_OK ? put_marked(v2, &reach, NV2_F, INDENT_BASE, out) : st;
-    st = st == ODIN3_OK ? put_marked(v2, &reach, NV2_T, INDENT_BASE, out) : st;
-    marks_free(&reach);
+    st = st == ODIN3_OK ? put_marked(v2, reach, NV2_F, INDENT_BASE, out) : st;
+    st = st == ODIN3_OK ? put_marked(v2, reach, NV2_T, INDENT_BASE, out) : st;
     return st;
 }
 
 /* The chain text: the construct lines, then the file lines they name. */
-static odin3_status print_chain(const names_v2 *v2, const odin3_vec *chain, odin3_strbuf *out) {
-    marks reach = {{NULL}};
-    odin3_status st = marks_init(&reach, v2);
+static odin3_status print_chain(names_v2 *v2, const odin3_vec *chain, odin3_strbuf *out) {
+    names_v2_marks *reach = &v2->reach;
+    odin3_status st = ODIN3_OK;
+    marks_reset(reach);
     for (size_t i = 0; st == ODIN3_OK && i < chain->len; i++) {
         const odin3_nm_line *line = line_at(v2, NV2_C, *(const uint32_t *)odin3_vec_cat(chain, i));
         st = put_line(out, line, 0);
-        mark_file(v2, &reach, line->f[NM_C_FILE]);
+        mark_file(v2, reach, line->f[NM_C_FILE]);
     }
-    st = st == ODIN3_OK ? put_marked(v2, &reach, NV2_F, 0, out) : st;
-    marks_free(&reach);
+    st = st == ODIN3_OK ? put_marked(v2, reach, NV2_F, 0, out) : st;
     return st;
 }
 
 /* One matching O or N line. */
-static odin3_status print_object(const names_v2 *v2, const odin3_nm_line *obj, names_v2_mode mode,
+static odin3_status print_object(names_v2 *v2, const odin3_nm_line *obj, names_v2_mode mode,
                                  odin3_strbuf *out) {
     odin3_bytes recs = obj->type == 'O' ? obj->f[NM_O_RECS] : obj->f[NM_N_RECS];
-    marks mk = {{NULL}};
+    names_v2_marks *mk = &v2->walk;
     odin3_vec order;
     odin3_vec chain;
     odin3_vec_init(&order, sizeof(walk_item));
     odin3_vec_init(&chain, sizeof(uint32_t));
-    odin3_status st = marks_init(&mk, v2);
-    st = st == ODIN3_OK ? walk_records(v2, &mk, recs, &order) : st;
-    st = st == ODIN3_OK ? build_chain(v2, &mk, &order, &chain) : st;
+    marks_reset(mk);
+    odin3_status st = walk_records(v2, mk, recs, &order);
+    st = st == ODIN3_OK ? build_chain(v2, mk, &order, &chain) : st;
     if (st == ODIN3_OK && mode == NV2_LOOKUP) {
         st = put_line(out, obj, 0);
         st = st == ODIN3_OK ? print_lookup(v2, &order, &chain, out) : st;
     } else if (st == ODIN3_OK) {
         st = print_chain(v2, &chain, out);
     }
-    marks_free(&mk);
     odin3_vec_free(&order);
     odin3_vec_free(&chain);
     return st;
 }
 
-odin3_status names_v2_print(const names_v2 *v2, odin3_bytes value, names_v2_mode mode,
+odin3_status names_v2_print(names_v2 *v2, odin3_bytes value, names_v2_mode mode,
                             odin3_strbuf *out, uint32_t *matches) {
     odin3_strbuf want;
     odin3_strbuf_init(&want);

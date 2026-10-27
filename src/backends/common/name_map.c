@@ -1068,7 +1068,7 @@ static void check_object(chk *ck, const odin3_nm_line *line) {
     odin3_bytes recs = line->type == 'O' ? line->f[NM_O_RECS] : line->f[NM_N_RECS];
     uint32_t before = ck->res->bad_ref;
     check_list(ck, recs, 'r', false);
-    if (ck->res->bad_ref != before) {
+    if (recs.len == 0 || ck->res->bad_ref != before) {
         ck->res->bad_ref = before;
         ck->res->no_record++;
     }

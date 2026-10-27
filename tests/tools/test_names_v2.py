@@ -215,12 +215,19 @@ class NamesV2CheckTest(unittest.TestCase):
             tempfile.mkdtemp(prefix="names-v2-bad-", dir=base if base.is_dir() else None))
         cls.text = write_map(cls.work, "ch_intrinsics", "blif", 2).read_text()
 
-    def rejected(self, label: str, text: str, want: str) -> None:
+    def rejected(self, label: str, text: str, want: str, stdout: str = "") -> None:
+        """--check fails, stderr holds `want` and stdout holds `stdout` (when given)."""
         path = self.work / f"{label}.names"
         path.write_text(text)
         code, out, err = names(f"--map {path} --check")
         self.assertNotEqual(code, 0, label)
-        self.assertIn(want, err + out, label)
+        self.assertIn(want, err, label)
+        self.assertIn(stdout, out, label)
+
+    def text_objects(self) -> str:
+        path = self.work / "good.names"
+        path.write_text(self.text)
+        return names(f"--map {path} --check")[1].split("objects=")[1].split()[0]
 
     def test_the_unmodified_map_passes(self) -> None:
         path = self.work / "good.names"
@@ -230,37 +237,70 @@ class NamesV2CheckTest(unittest.TestCase):
     def test_planted_problems(self) -> None:
         text = self.text
         join = "R\tr45\t"
+        # label: (map text, text expected on stderr, text expected on stdout)
+        ign = "ignored=1"
         cases = {
-            "bad_id": (edit(text, "R\tr2\t", with_field(1, "r99999")), "id is not"),
-            "parent_unresolved": (edit(text, join, with_field(6, "r99999")), "do not resolve"),
-            "parent_after_child": (edit(text, join, with_field(6, "r46")), "not numbered before"),
-            "self_parent": (edit(text, join, with_field(6, "r45")), "not numbered before"),
-            "bad_dir": (edit(text, join, with_field(4, "sideways:word")), "no valid kind"),
-            "bad_step": (edit(text, join, with_field(5, "t99.1")), "no valid kind"),
-            "bad_file": (edit(text, "R\tr1\t", with_field(7, "f9:1.1-1.2")), "do not resolve"),
-            "bad_cons": (edit(text, join, with_field(8, "c99999")), "do not resolve"),
-            "no_record": (edit(text, "O\t", with_field(8, "r99999")), "record is missing"),
+            "bad_id": (edit(text, "R\tr2\t", with_field(1, "r99999")),
+                       "line(s) whose id is not their line number", ""),
+            "parent_unresolved": (edit(text, join, with_field(6, "r99999")),
+                                  "reference(s) that do not resolve", ""),
+            "parent_after_child": (edit(text, join, with_field(6, "r46")),
+                                   "parent(s) not numbered before their child", ""),
+            "self_parent": (edit(text, join, with_field(6, "r45")),
+                            "parent(s) not numbered before their child", ""),
+            "bad_dir": (edit(text, join, with_field(4, "sideways:word")),
+                        "R line(s) with no valid kind, dir or step", ""),
+            "bad_step": (edit(text, join, with_field(5, "t99.1")),
+                         "R line(s) with no valid kind, dir or step", ""),
+            "empty_level": (edit(text, join, with_field(3, "")),
+                            "R line(s) with no valid kind, dir or step", ""),
+            "bad_file": (edit(text, "R\tr1\t", with_field(7, "f9:1.1-1.2")),
+                         "reference(s) that do not resolve", ""),
+            "bad_cons": (edit(text, join, with_field(8, "c99999")),
+                         "reference(s) that do not resolve", ""),
+            "bad_call_flag": (edit(text, join, with_field(9, "call=c99999")),
+                              "reference(s) that do not resolve", ""),
+            "no_record": (edit(text, "O\t", with_field(8, "r99999")),
+                          "O or N line(s) whose record is missing", ""),
+            "empty_records_o": (edit(text, "O\t", with_field(8, "")),
+                                "O or N line(s) whose record is missing", ""),
+            "empty_records_n": (edit(text, "N\t", with_field(4, "")),
+                                "O or N line(s) whose record is missing", ""),
             "construct_parent_after": (edit(text, "C\tc2\t", with_field(4, "c3")),
-                                       "not numbered before"),
-            "too_few_fields": (edit(text, "R\tr3\t", lambda f: f[:3]), "ignored"),
-            "bad_hash": (edit(text, "O\t", with_field(3, "hxxxxxxxxxx")), "ignored"),
-            "unknown_type": (text + "Z\tx\n", "ignored"),
-            "bad_escape": (edit(text, "O\t", with_field(1, "m%2G")), "ignored"),
+                                       "parent(s) not numbered before their child", ""),
+            "too_few_fields": (edit(text, "R\tr3\t", lambda f: f[:3]), "ignored", ign),
+            # The parse drops an entry whose short name is not the hash of its full name, so
+            # the bad_hash counter of the check stays 0 on a parsed map; it shows as ignored.
+            "ignored_o_line": (edit(text, "O\t", with_field(3, "hxxxxxxxxxx")),
+                               "short name 'hxxxxxxxxxx' is not the hash", ign),
+            "unknown_type": (text + "Z\tx\n", "ignored", ign),
+            "bad_escape": (edit(text, "O\t", with_field(1, "m%2G")), "bad escape", ign),
             "carriage_return": (edit(text, "R\tr3\t", lambda f: f[:-1] + [f[-1] + "\r"]),
-                                "ignored"),
-            "unknown_version": (text.replace("odin3-names 2", "odin3-names 3", 1), "version"),
-            "bad_header": (text.replace(" prov=1", "", 1), "header"),
-            "not_a_map": ("hello\n" + text, "not a name map"),
+                                "ignored", ign),
+            "unknown_version": (text.replace("odin3-names 2", "odin3-names 3", 1), "version", ""),
+            "bad_header": (text.replace(" prov=1", "", 1), "header", ""),
+            "not_a_map": ("hello\n" + text, "not a name map", ""),
         }
-        for label, (changed, want) in cases.items():
+        for label, (changed, want, stdout) in cases.items():
             with self.subTest(label):
-                self.rejected(label, changed, want)
+                self.rejected(label, changed, want, stdout)
 
-    def test_duplicate_object_is_counted(self) -> None:
+    def test_duplicate_object_is_counted_and_duplicate_n_is_not(self) -> None:
         lines = self.text.split("\n")
         first_o = next(line for line in lines if line.startswith("O\t"))
         twice = self.text.replace(first_o + "\n", first_o + "\n" + first_o + "\n", 1)
-        self.rejected("duplicate", twice, "duplicates")
+        self.rejected("duplicate", twice, "ODIN3_ERR_PARSE", "duplicates=1")
+        first_n = next(line for line in lines if line.startswith("N\t"))
+        twice_n = self.text.replace(first_n + "\n", first_n + "\n" + first_n + "\n", 1)
+        # N lines are not entries of the version 1 duplicate check, and `--check` does not
+        # compare their keys (the writers drop a second N line of one key, V1.2.0 Task 5), so a
+        # duplicate N line is accepted and counted as one more object.
+        path = self.work / "duplicate_n.names"
+        path.write_text(twice_n)
+        code, out, err = names(f"--map {path} --check")
+        self.assertEqual(code, 0, err)
+        objects = int(out.split("objects=")[1].split()[0])
+        self.assertEqual(objects, int(self.text_objects()) + 1)
 
 
 if __name__ == "__main__":
