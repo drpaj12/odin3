@@ -44,11 +44,11 @@ def names(args: str) -> tuple[int, str, str]:
     return run.returncode, run.stdout, run.stderr
 
 
-def write_map(work: Path, micro: str, writer: str, version: int) -> Path:
+def write_map(work: Path, micro: str, writer: str, version: int, folder: str = MICRO) -> Path:
     """The name map of one micro through one writer; version 1 is written without --prov-map."""
     assert ODIN3 is not None
     out = work / f"{micro}{'' if version == 2 else '_v1'}.{writer}"
-    script = FLOW.format(ast="--prov-ast refs" if version == 2 else "", src=f"{MICRO}/{micro}.v")
+    script = FLOW.format(ast="--prov-ast refs" if version == 2 else "", src=f"{folder}/{micro}.v")
     script += WRITERS[writer].format(map="--prov-map" if version == 2 else "", out=out)
     run = subprocess.run([ODIN3, "-p", script], cwd=REPO_ROOT, capture_output=True, text=True,
                          check=False)

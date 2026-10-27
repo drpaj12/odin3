@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .helpers import REPO_ROOT
 from .test_names_v2 import CASES, ODIN3, names, write_map
 
 try:
@@ -30,6 +31,8 @@ if TYPE_CHECKING or HAVE_CFFI:
     from odin3 import NameMap, read_name_map
 
 SAMPLE = 30
+MICRO_SET = "tests/micro/verilog/micro"
+SKIP_BIG_BYTES = 40000
 
 
 def sample(nm: NameMap) -> list[str]:
@@ -77,32 +80,60 @@ class ReadNameMapTest(unittest.TestCase):
             self.assertEqual(len(nm.runs), int(counts["runs"]))
             self.assertEqual(len(nm.objects), int(counts["objects"]))
 
+    def agree(self, path: Path, nm: NameMap, name: str) -> None:
+        """names --lookup and --chain of one object give the records and chain nm gives."""
+        (obj,) = nm.find(name)
+        code, out, err = names(f"--map {path} --lookup {name}")
+        self.assertEqual(code, 0, err)
+        lines = [line.strip(" ") for line in out.splitlines()]
+        records = [r.raw for r in nm.provenance(obj)]
+        chain = [c.raw for c in nm.chain(obj)]
+        self.assertEqual(lines[0], obj.raw)
+        self.assertEqual([x for x in lines if x.startswith("R\t")], records, name)
+        self.assertEqual([x for x in lines if x.startswith("C\t")], chain, name)
+        want_files = {int(o.split(":")[0][1:]) for r in nm.provenance(obj)
+                      for o in r.origins if o[0] == "f"} | {c.file for c in nm.chain(obj)
+                                                           if c.file}
+        self.assertEqual(sorted(want_files), numbers(lines, "F"), name)
+        want_runs = {int(r.step.split(".")[0][1:]) for r in nm.provenance(obj)}
+        self.assertEqual(sorted(want_runs), numbers(lines, "T"), name)
+        code, out, err = names(f"--map {path} --chain {name}")
+        self.assertEqual(code, 0, err)
+        self.assertEqual([x for x in out.splitlines() if x.startswith("C\t")], chain)
+
     def test_records_and_chain_agree_with_lookup(self) -> None:
         total = 0
         for micro, writer in CASES:
             path = write_map(self.work, micro, writer, 2)
             nm = read_name_map(path)
             for name in sample(nm):
-                (obj,) = nm.find(name)
-                code, out, err = names(f"--map {path} --lookup {name}")
-                self.assertEqual(code, 0, err)
-                lines = [line.strip(" ") for line in out.splitlines()]
-                records = [r.raw for r in nm.provenance(obj)]
-                chain = [c.raw for c in nm.chain(obj)]
-                self.assertEqual(lines[0], obj.raw)
-                self.assertEqual([x for x in lines if x.startswith("R\t")], records, name)
-                self.assertEqual([x for x in lines if x.startswith("C\t")], chain, name)
-                want_files = {int(o.split(":")[0][1:]) for r in nm.provenance(obj)
-                              for o in r.origins if o[0] == "f"} | {c.file for c in nm.chain(obj)
-                                                                   if c.file}
-                self.assertEqual(sorted(want_files), numbers(lines, "F"), name)
-                want_runs = {int(r.step.split(".")[0][1:]) for r in nm.provenance(obj)}
-                self.assertEqual(sorted(want_runs), numbers(lines, "T"), name)
-                code, out, err = names(f"--map {path} --chain {name}")
-                self.assertEqual(code, 0, err)
-                self.assertEqual([x for x in out.splitlines() if x.startswith("C\t")], chain)
+                self.agree(path, nm, name)
                 total += 1
         self.assertGreater(total, 40)
+
+    def test_micro_set(self) -> None:
+        """Every micro design (the small ones, as the Task 5 map test): the counts of the Python
+        reader equal `names --check`, and six objects per map agree record for record."""
+        maps = 0
+        for design in sorted((REPO_ROOT / MICRO_SET).glob("*.v")):
+            if design.stat().st_size > SKIP_BIG_BYTES:
+                continue
+            try:
+                path = write_map(self.work, design.stem, "blif", 2, MICRO_SET)
+            except AssertionError:
+                continue  # a micro the flow refuses has no map
+            nm = read_name_map(path)
+            _code, out, _err = names(f"--map {path} --check")
+            counts = dict(item.split("=") for item in out.splitlines()[1].split())
+            self.assertEqual(
+                (len(nm.records), len(nm.constructs), len(nm.files), len(nm.runs),
+                 len(nm.objects)),
+                tuple(int(counts[key]) for key in
+                      ("records", "constructs", "files", "runs", "objects")), design.name)
+            for name in sample(nm)[:6]:
+                self.agree(path, nm, name)
+            maps += 1
+        self.assertGreater(maps, 20)
 
     def test_the_chain_reaches_the_module(self) -> None:
         path = write_map(self.work, "ch_intrinsics", "blif", 2)
