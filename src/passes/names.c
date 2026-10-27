@@ -34,7 +34,13 @@
 
 enum { MAP_MAX_BYTES = 1 << 30 };
 
-typedef enum names_action { ACTION_NONE, ACTION_LOOKUP, ACTION_REVERSE, ACTION_CHECK, ACTION_CHAIN } names_action;
+typedef enum names_action {
+    ACTION_NONE,
+    ACTION_LOOKUP,
+    ACTION_REVERSE,
+    ACTION_CHECK,
+    ACTION_CHAIN
+} names_action;
 
 typedef struct names_args {
     odin3_strbuf map; /* --map's path */
@@ -86,7 +92,10 @@ static odin3_status names_option(odin3_bytes word, odin3_bytes *rest, names_args
         odin3_strbuf_clear(&out->map);
         return odin3_strbuf_append(&out->map, value);
     }
-    names_action action = lookup ? ACTION_LOOKUP : (reverse ? ACTION_REVERSE : ACTION_CHAIN);
+    names_action action = ACTION_CHAIN;
+    if (lookup || reverse) {
+        action = lookup ? ACTION_LOOKUP : ACTION_REVERSE;
+    }
     return set_action(out, action, value);
 }
 
@@ -234,7 +243,8 @@ static odin3_status run_action(const names_args *args, const odin3_name_map *map
     odin3_status st = ODIN3_OK;
     uint32_t matches = 0;
     if (args->action == ACTION_CHAIN && !v2) {
-        odin3_log(ODIN3_LOG_ERROR, "names: --chain needs a version 2 map (written with --prov-map)");
+        odin3_log(ODIN3_LOG_ERROR,
+                  "names: --chain needs a version 2 map (written with --prov-map)");
         return ODIN3_ERR_INVALID_ARG;
     }
     if (args->action == ACTION_CHECK) {

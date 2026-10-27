@@ -1035,8 +1035,8 @@ static bool step_valid(const chk *ck, odin3_bytes step) {
     }
     odin3_bytes run = {step.ptr, (size_t)(dot - (const char *)step.ptr)};
     odin3_bytes op_text = {dot + 1, step.len - run.len - 1};
-    return odin3_name_map_ref_number(run, 't', &num) && num <= ck->limit[LIM_T] && parse_decimal(op_text, &op) &&
-           op > 0;
+    return odin3_name_map_ref_number(run, 't', &num) && num <= ck->limit[LIM_T] &&
+           parse_decimal(op_text, &op) && op > 0;
 }
 
 static void check_r(chk *ck, const odin3_nm_line *line) {
