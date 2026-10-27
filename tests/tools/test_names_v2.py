@@ -21,6 +21,9 @@ from pathlib import Path
 from .helpers import REPO_ROOT
 
 ODIN3 = os.environ.get("ODIN3_CLI")
+# The CLI links its own sanitizer runtime; the LD_PRELOAD that CTest python_names sets for a
+# sanitized libodin3 in Python clashes with it (clang: "incompatible ASan runtimes").
+CLI_ENV = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
 GOLDEN = Path(__file__).resolve().parent / "data" / "names_v2"
 UPDATE = os.environ.get("ODIN3_UPDATE_GOLDEN") == "1"
 MICRO = "tests/micro/verilog/full"
@@ -41,7 +44,7 @@ def names(args: str) -> tuple[int, str, str]:
     """Run the names pass through the CLI; (exit code, stdout, stderr)."""
     assert ODIN3 is not None
     run = subprocess.run([ODIN3, "-p", f"names {args}"], cwd=REPO_ROOT, capture_output=True,
-                         text=True, check=False)
+                         text=True, check=False, env=CLI_ENV)
     return run.returncode, run.stdout, run.stderr
 
 
@@ -52,7 +55,7 @@ def write_map(work: Path, micro: str, writer: str, version: int, folder: str = M
     script = FLOW.format(ast="--prov-ast refs" if version == 2 else "", src=f"{folder}/{micro}.v")
     script += WRITERS[writer].format(map="--prov-map" if version == 2 else "", out=out)
     run = subprocess.run([ODIN3, "-p", script], cwd=REPO_ROOT, capture_output=True, text=True,
-                         check=False)
+                         check=False, env=CLI_ENV)
     if run.returncode != 0:
         raise AssertionError(run.stderr)
     return Path(str(out) + ".names")
