@@ -27,6 +27,14 @@ typedef struct odin3_xline {
     odin3_bytes f[ODIN3_NM2_MAX_FIELDS];
 } odin3_xline;
 
+/*
+ * The extra table also holds `X<TAB>r<id><TAB>flags` lines: the flags of the record `id` that
+ * this version does not define (the site coordinates of odin3-prov-post, for one), kept as the file
+ * had them and written again with the record. They are not post-Odin data and not roots. True and
+ * *record, *flags (escaped, comma separated) for such a line.
+ */
+bool odin3_xline_flags(odin3_bytes line, uint32_t *record, odin3_bytes *flags);
+
 /* Splits a stored line; false for a type other than A, Q, K or too few fields. */
 bool odin3_xline_split(odin3_bytes line, odin3_xline *out);
 

@@ -106,37 +106,49 @@ static odin3_prov_id rec(uint32_t first, uint32_t n) {
     return (odin3_prov_id){first + n - 1U};
 }
 
-static void test_restores_runs_records_classes_and_rows(void) {
+static const char *text_of_str(uint32_t str) {
+    return odin3_strtab_get(odin3_design_strtab(design), str);
+}
+
+static void test_restores_the_pass_runs_flagged_restored(void) {
     uint32_t runs_before = odin3_passrun_end(design);
-    uint32_t first = odin3_prov_end(design);
     odin3_restore *restore = restore_body(HEADER, BODY);
     TEST_ASSERT_EQUAL_UINT32(runs_before + 2U, odin3_passrun_end(design));
-    TEST_ASSERT_EQUAL_UINT32(first + 6U, odin3_prov_end(design));
     odin3_passrun_id t1 = {runs_before};
     odin3_passrun_id t2 = {runs_before + 1U};
     TEST_ASSERT_FALSE(odin3_passrun_restored(design, (odin3_passrun_id){1}));
     TEST_ASSERT_TRUE(odin3_passrun_restored(design, t1));
     TEST_ASSERT_TRUE(odin3_passrun_restored(design, t2));
-    TEST_ASSERT_EQUAL_STRING(
-        "opt", odin3_strtab_get(odin3_design_strtab(design), odin3_passrun_name(design, t2)));
-    TEST_ASSERT_EQUAL_STRING(
-        "-full", odin3_strtab_get(odin3_design_strtab(design), odin3_passrun_args(design, t2)));
-    TEST_ASSERT_EQUAL_STRING(
-        "passes=2", odin3_strtab_get(odin3_design_strtab(design), odin3_passrun_info(design, t2)));
-    /* r1, r2: SOURCE in t1 op 1; r3 to r5 DERIVED in t2; parents are the design's records */
+    TEST_ASSERT_EQUAL_STRING("opt", text_of_str(odin3_passrun_name(design, t2)));
+    TEST_ASSERT_EQUAL_STRING("-full", text_of_str(odin3_passrun_args(design, t2)));
+    TEST_ASSERT_EQUAL_STRING("passes=2", text_of_str(odin3_passrun_info(design, t2)));
+    odin3_restore_free(restore);
+}
+
+static void test_restores_the_records_with_their_origins_and_parents(void) {
+    uint32_t runs_before = odin3_passrun_end(design);
+    uint32_t first = odin3_prov_end(design);
+    odin3_restore *restore = restore_body(HEADER, BODY);
+    TEST_ASSERT_EQUAL_UINT32(first + 6U, odin3_prov_end(design));
     const odin3_prov_record *r1 = odin3_prov_get(design, rec(first, 1));
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_SOURCE, r1->kind);
-    TEST_ASSERT_EQUAL_UINT32(t1.v, r1->run.v);
+    TEST_ASSERT_EQUAL_UINT32(runs_before, r1->run.v);
     TEST_ASSERT_EQUAL_UINT32(1, r1->n_locs);
     TEST_ASSERT_EQUAL_UINT32(3, r1->locs[0].line);
     TEST_ASSERT_EQUAL_UINT32(9, r1->locs[0].end_col);
     TEST_ASSERT_EQUAL_UINT32(3, r1->ast); /* the remap: ast is the C line number */
     const odin3_prov_record *r2 = odin3_prov_get(design, rec(first, 2));
-    TEST_ASSERT_EQUAL_STRING("top/u", odin3_strtab_get(odin3_design_strtab(design), r2->hier));
+    TEST_ASSERT_EQUAL_STRING("top/u", text_of_str(r2->hier));
     const odin3_prov_record *r4 = odin3_prov_get(design, rec(first, 4));
     TEST_ASSERT_EQUAL_UINT32(2, r4->parents.count);
     TEST_ASSERT_EQUAL_UINT32(rec(first, 2).v, r4->parents.ids[1].v);
     TEST_ASSERT_EQUAL_UINT32(1, r4->op);
+    odin3_restore_free(restore);
+}
+
+static void test_restores_the_classes_as_defaults_and_overrides(void) {
+    uint32_t first = odin3_prov_end(design);
+    odin3_restore *restore = restore_body(HEADER, BODY);
     odin3_opclass cls;
     TEST_ASSERT_TRUE(odin3_prov_class_of(design, rec(first, 3), &cls));
     TEST_ASSERT_EQUAL_INT(ODIN3_DIR_REWRITE, cls.dir);
@@ -145,6 +157,13 @@ static void test_restores_runs_records_classes_and_rows(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_STMT, cls.from_level);
     TEST_ASSERT_EQUAL_INT(ODIN3_LEVEL_GATE, cls.to_level);
     TEST_ASSERT_FALSE(cls.bulk);
+    odin3_restore_free(restore);
+}
+
+static void test_restores_the_bulk_flag_and_the_context_tail(void) {
+    uint32_t first = odin3_prov_end(design);
+    odin3_restore *restore = restore_body(HEADER, BODY);
+    odin3_opclass cls;
     TEST_ASSERT_TRUE(odin3_prov_class_of(design, rec(first, 5), &cls));
     TEST_ASSERT_TRUE(cls.bulk);
     TEST_ASSERT_TRUE(odin3_prov_class_of(design, rec(first, 6), &cls));
@@ -255,7 +274,14 @@ static void test_a_recs_list_of_several_ids_warns_and_binds_the_first(void) {
 
 /* Each plant makes the plan fail: the design is as the reader made it (no run, record, row or
  * extra table), with a located error. */
-static void expect_refused(const char *body, const char *needle) {
+typedef struct plant {
+    const char *body;
+    const char *needle;
+} plant;
+
+static void expect_refused(plant plant_in) {
+    const char *body = plant_in.body;
+    const char *needle = plant_in.needle;
     uint32_t runs = odin3_passrun_end(design);
     uint32_t recs = odin3_prov_end(design);
     uint32_t rows = odin3_construct_end(design);
@@ -284,49 +310,49 @@ static void test_a_map_that_fails_restores_nothing(void) {
                    "R\tr1\tD\tgate\trewrite:stmt\tt1.1\tr2\t\t\t\nR\tr2\tS\tstmt\torigin\tt1."
                    "1\t\tf1:1.1-1.2\t\t\n%s",
                    TAIL);
-    expect_refused(body, "bad_order");
+    expect_refused((plant){body, "bad_order"});
     /* a D record with no dir (a version 1 era tool) */
     (void)snprintf(
         body, sizeof body,
         "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\t\t\nR\tr2\tD\tgate\t\tt1.2\tr1\t\t\t\n%s",
         TAIL);
-    expect_refused(body, "no dir");
+    expect_refused((plant){body, "no dir"});
     /* a class the table rejects: bulk on a rewrite */
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\t\t\nR\tr2\tD\tgate\trewrite:"
                    "stmt\tt1.2\tr1\t\t\tbulk\n%s",
                    TAIL);
-    expect_refused(body, "bulk on a rewrite");
+    expect_refused((plant){body, "bulk on a rewrite"});
     /* a context tail longer than the parents */
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\t\t\nR\tr2\tD\tgate\tcontext:"
                    "stmt\tt1.2\tr1\t\t\tctx=2\n%s",
                    TAIL);
-    expect_refused(body, "ctx longer than parents");
+    expect_refused((plant){body, "ctx longer than parents"});
     /* a SOURCE with a construct that has no C line; a C line of an unknown kind or bad span */
     (void)snprintf(body, sizeof body, "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\tc1\t\n%s", TAIL);
-    expect_refused(body, "no C line");
+    expect_refused((plant){body, "no C line"});
     (void)snprintf(
         body, sizeof body,
         "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\tc1\t\nC\tc1\tNOPE\tstmt\t\tf1\t1.1-1.2\t\n%s",
         TAIL);
-    expect_refused(body, "unknown kind");
+    expect_refused((plant){body, "unknown kind"});
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\tc1\t\nC\tc1\tNONBLOCKING_"
                    "ASSIGN\tstmt\t\tf1\t1.1-oops\t\n%s",
                    TAIL);
-    expect_refused(body, "bad span");
+    expect_refused((plant){body, "bad span"});
     /* a kind that does not match its level */
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\tc1\t\nC\tc1\tNONBLOCKING_"
                    "ASSIGN\tmodule\t\tf1\t1.1-1.2\t\n%s",
                    TAIL);
-    expect_refused(body, "kind and level disagree");
+    expect_refused((plant){body, "kind and level disagree"});
     /* a step whose run is not a T line; an origin with a bad span */
     (void)snprintf(body, sizeof body, "R\tr1\tS\tstmt\torigin\tt9.1\t\tf1:1.1-1.2\t\t\n%s", TAIL);
-    expect_refused(body, "no run");
+    expect_refused((plant){body, "no run"});
     (void)snprintf(body, sizeof body, "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1\t\t\n%s", TAIL);
-    expect_refused(body, "origin without a span");
+    expect_refused((plant){body, "origin without a span"});
 }
 
 static void test_ast_none_with_c_lines_is_refused(void) {
@@ -383,7 +409,10 @@ static void test_out_of_memory_returns_no_memory_without_a_crash(void) {
 
 int main(void) {
     UNITY_BEGIN();
-    RUN_TEST(test_restores_runs_records_classes_and_rows);
+    RUN_TEST(test_restores_the_pass_runs_flagged_restored);
+    RUN_TEST(test_restores_the_records_with_their_origins_and_parents);
+    RUN_TEST(test_restores_the_classes_as_defaults_and_overrides);
+    RUN_TEST(test_restores_the_bulk_flag_and_the_context_tail);
     RUN_TEST(test_construct_rows_are_remapped_per_run);
     RUN_TEST(test_extra_lines_names_and_the_slot);
     RUN_TEST(test_a_design_with_no_restore_has_no_table_and_no_slot);

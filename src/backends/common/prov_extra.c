@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <string.h>
 
+enum { DECIMAL_BASE = 10, X_LINE_MIN = 5, ID_TEXT = 16 };
+
 bool odin3_xline_split(odin3_bytes line, odin3_xline *out) {
     const char *bytes = line.ptr;
     if (line.len < 2U || bytes[1] != '\t' ||
@@ -25,7 +27,12 @@ bool odin3_xline_split(odin3_bytes line, odin3_xline *out) {
         }
     }
     out->refs = out->type == 'A' ? NM_A_RECS : NM_Q_ID;
-    out->stale = out->type == 'A' ? NM_A_STALE : (out->type == 'Q' ? NM_Q_STALE : NM_K_STALE);
+    out->stale = NM_K_STALE;
+    if (out->type == 'A') {
+        out->stale = NM_A_STALE;
+    } else if (out->type == 'Q') {
+        out->stale = NM_Q_STALE;
+    }
     return out->n > out->stale && out->n <= ODIN3_NM2_MAX_FIELDS;
 }
 
@@ -34,7 +41,7 @@ static bool take_number(const char **at, const char *end, uint32_t *out) {
     uint64_t value = 0;
     const char *from = *at;
     while (*at < end && **at >= '0' && **at <= '9' && value <= UINT32_MAX) {
-        value = (value * 10U) + (uint64_t)(**at - '0');
+        value = (value * DECIMAL_BASE) + (uint64_t)(**at - '0');
         (*at)++;
     }
     *out = (uint32_t)value;
@@ -47,6 +54,23 @@ static bool parse_ref(odin3_bytes field, char letter, uint32_t *out) {
     const char *end = (const char *)field.ptr + field.len;
     return field.len > 1U && ((const char *)field.ptr)[0] == letter && take_number(&at, end, out) &&
            at == end;
+}
+
+bool odin3_xline_flags(odin3_bytes line, uint32_t *record, odin3_bytes *flags) {
+    const char *bytes = line.ptr;
+    if (line.len < X_LINE_MIN || bytes[0] != 'X' || bytes[1] != '\t') {
+        return false;
+    }
+    const char *tab = memchr(bytes + 2, '\t', line.len - 2U);
+    if (tab == NULL) {
+        return false;
+    }
+    odin3_bytes id = {bytes + 2, (size_t)(tab - (bytes + 2))};
+    if (!parse_ref(id, 'r', record)) {
+        return false;
+    }
+    *flags = (odin3_bytes){tab + 1, line.len - (size_t)(tab + 1 - bytes)};
+    return true;
 }
 
 uint32_t odin3_xline_stale(const odin3_design *design, const odin3_xline *line) {
@@ -136,7 +160,7 @@ odin3_status odin3_xline_emit(const odin3_xline_nums *nums, const odin3_xline *l
 }
 
 odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_strbuf *out) {
-    char id[16];
+    char id[ID_TEXT];
     (void)snprintf(id, sizeof id, "r%u", (unsigned)rnum);
     static const char BASIS_STATED[] =
         "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
@@ -144,6 +168,11 @@ odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_str
         "why=-,objective=-,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
     odin3_strbuf objective;
     odin3_strbuf_init(&objective);
+    /* abc: the objective is derived from its script (Task 10), so none is stated here */
+    const bool is_abc = pass.len == 3U && memcmp(pass.ptr, "abc", 3U) == 0;
+    if (is_abc) {
+        pass = (odin3_bytes){NULL, 0};
+    }
     odin3_status status = odin3_name_map_escape(&objective, pass);
     const odin3_bytes none = {NULL, 0};
     const odin3_nm_field fields[] = {

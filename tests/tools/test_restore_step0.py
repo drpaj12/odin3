@@ -37,7 +37,8 @@ def pair_result(micro: str, work: Path) -> dict[str, str]:
     """pass/fail per pair for one micro ('error' when a step could not run)."""
     first = {p: work / f"{micro}.1.{p}" for p in PAIRS}
     script = flow(micro) + "".join(
-        WRITE[p].format(names="", out=first[p]) + "; " for p in PAIRS).rstrip("; ")
+        WRITE[p].format(names="", out=first[p]) + "; " for p in PAIRS
+    ).rstrip("; ")
     if run_cli(script).returncode != 0:
         return {p: "error" for p in PAIRS}
     result = {}

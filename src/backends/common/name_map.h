@@ -50,6 +50,8 @@ enum {
     NM_R_FLAGS = 8,
     NM_C_PARENT = 3,
     NM_C_FILE = 4,
+    NM_C_SPAN = 5,
+    NM_C_NAME = 6,
     NM_O_SHORT = 2,
     NM_O_RECS = 7,
     NM_N_NAME = 2,

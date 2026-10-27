@@ -25,7 +25,15 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { KEY_SHIFT = 32, SPAN_NUMBERS = 4, MAX_DECIMAL_DIGITS = 10 };
+enum {
+    KEY_SHIFT = 32,
+    SPAN_NUMBERS = 4,
+    MAX_DECIMAL_DIGITS = 10,
+    DECIMAL_BASE = 10,
+    READ_LEN = 5,  /* strlen("read_") */
+    WRITE_LEN = 6, /* strlen("write_") */
+    PASS_ARG_MAX = 3
+};
 
 /* --- the extra table -------------------------------------------------------------------------- */
 
@@ -120,8 +128,8 @@ static bool is_io_pass(const odin3_design *design, odin3_passrun_id run) {
     uint32_t name = odin3_passrun_name(design, run);
     const char *text = odin3_strtab_get(tab, name);
     size_t len = odin3_strtab_len(tab, name);
-    return (len >= 5U && memcmp(text, "read_", 5U) == 0) ||
-           (len >= 6U && memcmp(text, "write_", 6U) == 0);
+    return (len >= READ_LEN && memcmp(text, "read_", READ_LEN) == 0) ||
+           (len >= WRITE_LEN && memcmp(text, "write_", WRITE_LEN) == 0);
 }
 
 void odin3_extra_note_run(odin3_design *design, odin3_passrun_id run, bool restored) {
@@ -138,7 +146,7 @@ static bool take_decimal(const char **at, const char *end, uint32_t *out) {
     uint64_t value = 0;
     size_t digits = 0;
     while (*at < end && **at >= '0' && **at <= '9' && digits < MAX_DECIMAL_DIGITS) {
-        value = (value * 10U) + (uint64_t)(**at - '0');
+        value = (value * DECIMAL_BASE) + (uint64_t)(**at - '0');
         (*at)++;
         digits++;
     }
@@ -229,6 +237,7 @@ typedef struct rs_rec {
     const odin3_nm_line *line;
     odin3_bytes hier;
     uint32_t run, op, con;
+    size_t foreign_off, foreign_len; /* flags the map writers of this version do not define */
     uint8_t kind, dir, from, to, bulk, tail;
 } rs_rec;
 
@@ -237,17 +246,21 @@ typedef struct rs {
     odin3_name_map *map;
     const char *path;
     odin3_construct_mode mode;
-    odin3_vec files;    /* odin3_bytes, unescaped */
-    odin3_vec runs;     /* rs_run */
-    odin3_vec cons;     /* rs_con */
-    odin3_vec recs;     /* rs_rec */
-    odin3_vec run_id;   /* uint32_t: the design run of each T line */
-    odin3_vec rec_id;   /* uint32_t: the design record of each R line */
-    odin3_vec ids;      /* odin3_prov_id: the parents of the record being made */
-    odin3_vec locs;     /* odin3_srcloc: its origins */
-    odin3_u64map *rows; /* (design run << 32 | c) -> construct row */
-    odin3_u64map *seen; /* design run -> 1 once it holds rows */
+    odin3_vec files;      /* odin3_bytes, unescaped */
+    odin3_vec runs;       /* rs_run */
+    odin3_vec cons;       /* rs_con */
+    odin3_vec recs;       /* rs_rec */
+    odin3_vec run_id;     /* uint32_t: the design run of each T line */
+    odin3_vec rec_id;     /* uint32_t: the design record of each R line */
+    odin3_vec ids;        /* odin3_prov_id: the parents of the record being made */
+    odin3_strbuf foreign; /* the foreign flags of every record, escaped */
+    uint32_t dropped;     /* records with no parent (check rule 7) left out */
+    odin3_vec locs;       /* odin3_srcloc: its origins */
+    odin3_u64map *rows;   /* (design run << 32 | c) -> construct row */
+    odin3_u64map *seen;   /* design run -> 1 once it holds rows */
     uint32_t default_run;
+    uint32_t first_record; /* the first record this restore makes */
+    uint32_t twins;        /* records told apart from an equal one by a made-up ast */
     uint32_t problems;
 } rs;
 
@@ -268,6 +281,7 @@ static void rs_init(rs *st, odin3_design *design, odin3_name_map *map, const cha
     odin3_vec_init(&st->run_id, sizeof(uint32_t));
     odin3_vec_init(&st->rec_id, sizeof(uint32_t));
     odin3_vec_init(&st->ids, sizeof(odin3_prov_id));
+    odin3_strbuf_init(&st->foreign);
     odin3_vec_init(&st->locs, sizeof(odin3_srcloc));
     st->rows = odin3_u64map_create(0);
     st->seen = odin3_u64map_create(0);
@@ -281,6 +295,7 @@ static void rs_free(rs *st) {
     odin3_vec_free(&st->run_id);
     odin3_vec_free(&st->rec_id);
     odin3_vec_free(&st->ids);
+    odin3_strbuf_free(&st->foreign);
     odin3_vec_free(&st->locs);
     odin3_u64map_destroy(st->rows);
     odin3_u64map_destroy(st->seen);
@@ -326,28 +341,32 @@ static odin3_status plan_files(rs *st) {
     return status;
 }
 
+/* Reads one T line into st->runs. */
+static odin3_status plan_run_line(rs *st, const odin3_nm_line *line) {
+    rs_run run = {{NULL, 0}, {NULL, 0}, {NULL, 0}};
+    odin3_status status = rs_unescape(st, line, line->f[1], &run.name);
+    status = status == ODIN3_OK ? rs_unescape(st, line, line->f[2], &run.args) : status;
+    status = status == ODIN3_OK ? rs_unescape(st, line, line->f[3], &run.info) : status;
+    if (status != ODIN3_OK) {
+        return status;
+    }
+    if (run.name.len == 0) {
+        rs_error(st, line->lineno, "a T line names no pass");
+    }
+    rs_run *slot = odin3_vec_push(&st->runs);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = run;
+    return ODIN3_OK;
+}
+
 /* T lines: pass, arguments, information. */
 static odin3_status plan_runs(rs *st) {
     odin3_status status = ODIN3_OK;
     for (size_t i = 0; status == ODIN3_OK && i < st->map->lines.len; i++) {
         const odin3_nm_line *line = line_at(st, i);
-        if (line->type != 'T') {
-            continue;
-        }
-        rs_run run = {{NULL, 0}, {NULL, 0}, {NULL, 0}};
-        status = rs_unescape(st, line, line->f[1], &run.name);
-        status = status == ODIN3_OK ? rs_unescape(st, line, line->f[2], &run.args) : status;
-        status = status == ODIN3_OK ? rs_unescape(st, line, line->f[3], &run.info) : status;
-        if (status == ODIN3_OK && run.name.len == 0) {
-            rs_error(st, line->lineno, "a T line names no pass");
-        }
-        if (status == ODIN3_OK) {
-            rs_run *slot = odin3_vec_push(&st->runs);
-            status = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-            if (slot != NULL) {
-                *slot = run;
-            }
-        }
+        status = line->type == 'T' ? plan_run_line(st, line) : status;
     }
     return status;
 }
@@ -410,9 +429,12 @@ static odin3_status plan_con_fields(rs *st, const odin3_nm_line *line, rs_con *c
     con->kind = kind_of_word(line->f[1]);
     *good = *good && con->kind != 0 && odin3_level_from_word(line->f[2], &level);
     con->level = (uint8_t)level;
-    con->part = con->kind == ODIN3_CONSTRUCT_IF_THEN   ? ODIN3_CONSTRUCT_PART_THEN
-                : con->kind == ODIN3_CONSTRUCT_IF_ELSE ? ODIN3_CONSTRUCT_PART_ELSE
-                                                       : ODIN3_CONSTRUCT_PART_NODE;
+    con->part = ODIN3_CONSTRUCT_PART_NODE;
+    if (con->kind == ODIN3_CONSTRUCT_IF_THEN) {
+        con->part = ODIN3_CONSTRUCT_PART_THEN;
+    } else if (con->kind == ODIN3_CONSTRUCT_IF_ELSE) {
+        con->part = ODIN3_CONSTRUCT_PART_ELSE;
+    }
     if (line->f[NM_C_PARENT].len > 0) {
         *good = *good && odin3_name_map_ref_number(line->f[NM_C_PARENT], 'c', &con->parent) &&
                 con->parent < number;
@@ -421,8 +443,33 @@ static odin3_status plan_con_fields(rs *st, const odin3_nm_line *line, rs_con *c
         *good = *good && odin3_name_map_ref_number(line->f[NM_C_FILE], 'f', &con->file) &&
                 con->file <= st->files.len;
     }
-    *good = *good && parse_span(line->f[5], con->span);
-    return rs_unescape(st, line, line->f[6], &con->name);
+    *good = *good && parse_span(line->f[NM_C_SPAN], con->span);
+    return rs_unescape(st, line, line->f[NM_C_NAME], &con->name);
+}
+
+/* Reads one C line into st->cons (the row keeps its place even when it is bad). */
+static odin3_status plan_con_line(rs *st, const odin3_nm_line *line) {
+    rs_con con = {.name = {NULL, 0}};
+    bool good = false;
+    odin3_status status = plan_con_fields(st, line, &con, &good);
+    if (status != ODIN3_OK) {
+        return status;
+    }
+    const rs_con *parent = NULL;
+    if (con.parent != 0 && good) {
+        parent = odin3_vec_cat(&st->cons, con.parent - 1U);
+    }
+    bool top = is_decl_kind(con.kind) && parent != NULL && is_call_kind(parent->kind);
+    con.in_call = top || (parent != NULL && parent->in_call);
+    if (!good || !con_fits(st, &con)) {
+        rs_error(st, line->lineno, "a C line with a bad kind, level, parent, file or span");
+    }
+    rs_con *slot = odin3_vec_push(&st->cons);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = con;
+    return ODIN3_OK;
 }
 
 /* C lines, in number order. */
@@ -430,29 +477,27 @@ static odin3_status plan_cons(rs *st) {
     odin3_status status = ODIN3_OK;
     for (size_t i = 0; status == ODIN3_OK && i < st->map->lines.len; i++) {
         const odin3_nm_line *line = line_at(st, i);
-        if (line->type != 'C') {
-            continue;
-        }
-        rs_con con = {.name = {NULL, 0}};
-        bool good = false;
-        status = plan_con_fields(st, line, &con, &good);
-        if (status != ODIN3_OK) {
-            break;
-        }
-        const rs_con *parent =
-            con.parent != 0 && good ? odin3_vec_cat(&st->cons, con.parent - 1U) : NULL;
-        con.in_call = (is_decl_kind(con.kind) && parent != NULL && is_call_kind(parent->kind)) ||
-                      (parent != NULL && parent->in_call);
-        if (!good || !con_fits(st, &con)) {
-            rs_error(st, line->lineno, "a C line with a bad kind, level, parent, file or span");
-        }
-        rs_con *slot = odin3_vec_push(&st->cons);
-        status = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-        if (slot != NULL) {
-            *slot = con;
-        }
+        status = line->type == 'C' ? plan_con_line(st, line) : status;
     }
     return status;
+}
+
+/* True for a flag the writers of this version define (3.2) or compute again at write time. */
+static bool known_flag(odin3_bytes elem) {
+    static const char *const WORDS[] = {"join", "join=instance", "chain=span", "capped", "bulk"};
+    static const char *const PREFIXES[] = {
+        "lossy=", "n=", "hier=", "call=", "cell=", "ctx=", "stale="};
+    for (size_t k = 0; k < sizeof WORDS / sizeof WORDS[0]; k++) {
+        if (bytes_is(elem, WORDS[k])) {
+            return true;
+        }
+    }
+    for (size_t k = 0; k < sizeof PREFIXES / sizeof PREFIXES[0]; k++) {
+        if (bytes_has_prefix(elem, PREFIXES[k])) {
+            return true;
+        }
+    }
+    return false;
 }
 
 typedef struct flag_job {
@@ -461,12 +506,29 @@ typedef struct flag_job {
     rs_rec *rec;
 } flag_job;
 
+/* A flag this version does not define (the site coordinates `x=`, `y=` of odin3-prov-post, ...)
+ * is kept, escaped as the file has it, to be written again with the record (V1.2.0 4.5). */
+static bool add_foreign(flag_job *job, odin3_bytes elem) {
+    rs_rec *rec = job->rec;
+    rs *st = job->st;
+    if (rec->foreign_len == 0) {
+        rec->foreign_off = st->foreign.len;
+    } else if (odin3_strbuf_append(&st->foreign, odin3_bytes_cstr(",")) != ODIN3_OK) {
+        return false;
+    }
+    rec->foreign_len += elem.len + (rec->foreign_len > 0 ? 1U : 0U);
+    return odin3_strbuf_append(&st->foreign, elem) == ODIN3_OK;
+}
+
 /* One element of `flags`: hier=<text>, ctx=<n> and bulk are read, the rest is recomputed. */
 static bool flag_elem(void *ctx, odin3_bytes elem) {
     flag_job *job = ctx;
     static const char HIER[] = "hier=";
     static const char CTX[] = "ctx=";
     odin3_bytes text = {NULL, 0};
+    if (!known_flag(elem)) {
+        return add_foreign(job, elem);
+    }
     if (!bytes_has_prefix(elem, HIER) && !bytes_has_prefix(elem, CTX) && !bytes_is(elem, "bulk")) {
         return true;
     }
@@ -559,11 +621,10 @@ static void check_rec(rs *st, const odin3_nm_line *line, const rs_rec *rec, uint
     odin3_opclass cls = class_of(rec);
     if (!parents.good || !origins.good) {
         rs_error(st, line->lineno, "an R line with a bad parent or origin");
-    } else if (derived
-                   ? (parents.count == 0 || rec->tail > parents.count || !odin3_opclass_valid(&cls))
-                   : (parents.count != 0 || origins.count > ODIN3_HDL_LOC_MAX)) {
+    } else if (derived ? (rec->tail > parents.count || !odin3_opclass_valid(&cls))
+                       : (parents.count != 0 || origins.count > ODIN3_HDL_LOC_MAX)) {
         rs_error(st, line->lineno,
-                 derived ? "a D record with no parent or an invalid class"
+                 derived ? "a D record with a bad class or a context tail past its parents"
                          : "an S or I record with parents or more than 8 origins");
     }
 }
@@ -575,9 +636,12 @@ static bool parse_rec_head(const rs *st, const odin3_nm_line *line, rs_rec *rec)
     if (letter == NULL || *letter == '\0') {
         return false;
     }
-    rec->kind = *letter == 'S'   ? (uint8_t)ODIN3_PROV_SOURCE
-                : *letter == 'I' ? (uint8_t)ODIN3_PROV_IMPORTED
-                                 : (uint8_t)ODIN3_PROV_DERIVED;
+    rec->kind = (uint8_t)ODIN3_PROV_DERIVED;
+    if (*letter == 'S') {
+        rec->kind = (uint8_t)ODIN3_PROV_SOURCE;
+    } else if (*letter == 'I') {
+        rec->kind = (uint8_t)ODIN3_PROV_IMPORTED;
+    }
     if (!parse_step(line->f[NM_R_STEP], &rec->run, &rec->op) || rec->run > st->runs.len) {
         return false;
     }
@@ -660,8 +724,15 @@ static odin3_status note_row_run(rs *st, uint32_t run) {
 }
 
 /* Adds the row of construct c in design run `run` under parent row `up` (0 for a module). */
-static odin3_status add_row(rs *st, uint32_t run, uint32_t c, uint32_t up) {
-    const rs_con *con = odin3_vec_cat(&st->cons, c - 1U);
+/* A construct (the number of its C line) in a design run. */
+typedef struct row_at {
+    uint32_t run;
+    uint32_t con;
+} row_at;
+
+static odin3_status add_row(rs *st, row_at where, uint32_t up) {
+    const uint32_t run = where.run;
+    const rs_con *con = odin3_vec_cat(&st->cons, where.con - 1U);
     const odin3_construct_row *above = up != 0 ? odin3_construct_get(st->design, up) : NULL;
     const rs_con *plan_up = con->parent != 0 ? odin3_vec_cat(&st->cons, con->parent - 1U) : NULL;
     uint32_t call = 0;
@@ -673,7 +744,8 @@ static odin3_status add_row(rs *st, uint32_t run, uint32_t c, uint32_t up) {
      * the IF row of the same node, so it takes the ast of its parent's C line (4.5 said it takes
      * its own; the code's rule wins). Its own C line is reached only as a parent. */
     odin3_construct_row row = {.run = run,
-                               .ast = con->part != ODIN3_CONSTRUCT_PART_NODE ? con->parent : c,
+                               .ast =
+                                   con->part != ODIN3_CONSTRUCT_PART_NODE ? con->parent : where.con,
                                .call = call,
                                .parent = up,
                                .line = con->span[0],
@@ -693,7 +765,7 @@ static odin3_status add_row(rs *st, uint32_t run, uint32_t c, uint32_t up) {
     status = status == ODIN3_OK ? odin3_construct_add(st->design, &row, &index) : status;
     status = status == ODIN3_OK ? note_row_run(st, run) : status;
     if (status == ODIN3_OK &&
-        odin3_u64map_put(st->rows, (odin3_kv){row_key(run, c), index}) != ODIN3_OK) {
+        odin3_u64map_put(st->rows, (odin3_kv){row_key(run, where.con), index}) != ODIN3_OK) {
         status = ODIN3_ERR_NO_MEMORY;
     }
     return status;
@@ -701,11 +773,12 @@ static odin3_status add_row(rs *st, uint32_t run, uint32_t c, uint32_t up) {
 
 /* The construct row of C line c in design run `run`, and of its ancestors, created parents
  * first (an explicit stack, no recursion). */
-static odin3_status ensure_row(rs *st, uint32_t run, uint32_t c) {
+static odin3_status ensure_row(rs *st, row_at where) {
+    const uint32_t run = where.run;
     odin3_vec todo;
     odin3_vec_init(&todo, sizeof(uint32_t));
     odin3_status status = ODIN3_OK;
-    for (uint32_t at = c;
+    for (uint32_t at = where.con;
          status == ODIN3_OK && at != 0 && !odin3_u64map_get(st->rows, row_key(run, at), NULL);
          at = ((const rs_con *)odin3_vec_cat(&st->cons, at - 1U))->parent) {
         uint32_t *slot = odin3_vec_push(&todo);
@@ -722,7 +795,7 @@ static odin3_status ensure_row(rs *st, uint32_t run, uint32_t c) {
             (void)odin3_u64map_get(st->rows, row_key(run, parent), &up);
         }
         odin3_vec_pop(&todo);
-        status = add_row(st, run, at, (uint32_t)up);
+        status = add_row(st, (row_at){run, at}, (uint32_t)up);
     }
     odin3_vec_free(&todo);
     return status;
@@ -750,6 +823,39 @@ static bool loc_elem(void *ctx, odin3_bytes elem) {
     return true;
 }
 
+/* The SOURCE or IMPORTED record for origin in the context's run. */
+static odin3_status leaf_record(const odin3_pass_ctx *ctx, odin3_prov_kind kind,
+                                const odin3_prov_origin *origin, odin3_prov_id *out) {
+    return kind == ODIN3_PROV_SOURCE ? odin3_prov_source(ctx, origin, out)
+                                     : odin3_prov_imported(ctx, origin, out);
+}
+
+/*
+ * Two R lines that differ only in the AST node their record came from (the map has no node ID:
+ * equal spans, equal construct) are two records in the file and would hash-cons into one. The
+ * second gets an `ast` of its own, past the numbers of the C lines, so that the restore keeps them
+ * apart and a second write has the same lines: with a construct, the new `ast` is an alias of the
+ * row of the first (odin3_construct_alias); without one, the record is a recorded miss (a span-only
+ * leaf, as chain=span says). If the alias is refused the two stay one record (the weaker claim
+ * of 4.5).
+ */
+static odin3_status split_twin(rs *st, const odin3_pass_ctx *ctx, const rs_rec *rec,
+                               odin3_prov_origin *origin, odin3_prov_id *out) {
+    uint32_t row =
+        rec->con != 0
+            ? odin3_construct_find(st->design, &(odin3_construct_key){ctx->run, rec->con, 0, 0})
+            : 0U;
+    origin->ast = (uint32_t)st->cons.len + 1U + st->twins++;
+    if (rec->con != 0) {
+        if (row == 0 || odin3_construct_alias(st->design, ctx->run, origin->ast, row) != ODIN3_OK) {
+            return ODIN3_OK; /* kept as one record */
+        }
+    }
+    odin3_status status = leaf_record(ctx, (odin3_prov_kind)rec->kind, origin, out);
+    return status == ODIN3_OK && rec->con == 0 ? odin3_construct_note_miss(st->design, *out)
+                                               : status;
+}
+
 /* The SOURCE or IMPORTED record of an R line. */
 static odin3_status make_leaf(rs *st, const rs_rec *rec, uint32_t run, odin3_prov_id *out) {
     odin3_vec_clear(&st->locs);
@@ -761,24 +867,34 @@ static odin3_status make_leaf(rs *st, const rs_rec *rec, uint32_t run, odin3_pro
     odin3_status status = intern_bytes(st, rec->hier, &origin.hier);
     if (status == ODIN3_OK && rec->con != 0) {
         st->default_run = st->default_run != 0 ? st->default_run : run;
-        status = ensure_row(st, run, rec->con);
+        status = ensure_row(st, (row_at){run, rec->con});
     }
     const odin3_pass_ctx ctx = {st->design, {run}, rec->op};
     if (status != ODIN3_OK) {
         return status;
     }
-    return rec->kind == (uint8_t)ODIN3_PROV_SOURCE ? odin3_prov_source(&ctx, &origin, out)
-                                                   : odin3_prov_imported(&ctx, &origin, out);
+    uint32_t before = odin3_prov_end(st->design);
+    status = leaf_record(&ctx, (odin3_prov_kind)rec->kind, &origin, out);
+    if (status == ODIN3_OK && out->v < before && out->v >= st->first_record) {
+        status = split_twin(st, &ctx, rec, &origin, out);
+    }
+    return status;
 }
 
 static bool parent_id_elem(void *ctx, odin3_bytes elem) {
     rs *st = ctx;
     uint32_t num = 0;
-    odin3_prov_id *slot = odin3_vec_push(&st->ids);
-    if (slot == NULL || !odin3_name_map_ref_number(elem, 'r', &num)) {
+    if (!odin3_name_map_ref_number(elem, 'r', &num)) {
         return false;
     }
-    slot->v = *(const uint32_t *)odin3_vec_cat(&st->rec_id, num - 1U);
+    uint32_t id = *(const uint32_t *)odin3_vec_cat(&st->rec_id, num - 1U);
+    odin3_prov_id *slot = id != 0 ? odin3_vec_push(&st->ids) : NULL;
+    if (id != 0 && slot == NULL) {
+        return false;
+    }
+    if (slot != NULL) {
+        slot->v = id; /* a parent left out (below) is not a parent */
+    }
     return true;
 }
 
@@ -788,12 +904,40 @@ static odin3_status make_derived(rs *st, const rs_rec *rec, uint32_t run, odin3_
     if (!each_elem(rec->line->f[NM_R_PARENTS], ',', parent_id_elem, st)) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    if (st->ids.len == 0) {
+        /* No parent, or only parents left out: the IR has no such record (check rule 7: a derived
+         * record has a parent), and odin3-prov-post writes the CLB of a cluster of pads alone
+         * with none (Task 8 default 14). It is not restored; whatever names it loses it. */
+        st->dropped++;
+        out->v = 0;
+        return ODIN3_OK;
+    }
     uint32_t hier = 0;
     odin3_status status = intern_bytes(st, rec->hier, &hier);
-    const odin3_opclass cls = class_of(rec);
+    odin3_opclass cls = class_of(rec);
+    cls.context_tail = cls.context_tail > st->ids.len ? (uint8_t)st->ids.len : cls.context_tail;
     const odin3_pass_ctx ctx = {st->design, {run}, rec->op};
     const odin3_prov_list parents = {st->ids.data, (uint32_t)st->ids.len};
     return status == ODIN3_OK ? odin3_prov_derive_class(&ctx, parents, hier, &cls, out) : status;
+}
+
+/* Keeps the foreign flags of a record in the extra table as `X<TAB>r<id><TAB>flags`. */
+static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id) {
+    if (rec->foreign_len == 0) {
+        return ODIN3_OK;
+    }
+    odin3_strbuf line;
+    odin3_strbuf_init(&line);
+    odin3_status status = odin3_strbuf_appendf(&line, "X\tr%u\t", (unsigned)id.v);
+    status = status == ODIN3_OK
+                 ? odin3_strbuf_append(
+                       &line, (odin3_bytes){st->foreign.data + rec->foreign_off, rec->foreign_len})
+                 : status;
+    status = status == ODIN3_OK
+                 ? odin3_extra_add(st->design->extra, (odin3_bytes){line.data, line.len})
+                 : status;
+    odin3_strbuf_free(&line);
+    return status;
 }
 
 /* The records of the R lines, in file order; rec_id[i] is the design record of line i + 1. */
@@ -810,6 +954,16 @@ static odin3_status apply_recs(rs *st) {
             return status != ODIN3_OK ? status : ODIN3_ERR_NO_MEMORY;
         }
         *slot = id.v;
+        status = id.v != 0 ? add_foreign_line(st, rec, id) : ODIN3_OK;
+        if (status != ODIN3_OK) {
+            return status;
+        }
+    }
+    if (st->dropped > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "%s: name map restore: %u record(s) with no parent were not restored (a derived "
+                  "record has a parent, check rule 7)",
+                  st->path, (unsigned)st->dropped);
     }
     return ODIN3_OK;
 }
@@ -817,18 +971,18 @@ static odin3_status apply_recs(rs *st) {
 /* The rows no record reached (the `full` mode keeps every row): in the run of the first SOURCE
  * with a construct, else the first restored run. */
 static odin3_status apply_other_rows(rs *st) {
-    uint32_t run =
-        st->default_run != 0
-            ? st->default_run
-            : (st->run_id.len > 0 ? *(const uint32_t *)odin3_vec_cat(&st->run_id, 0) : 0U);
+    uint32_t run = st->default_run;
+    if (run == 0 && st->run_id.len > 0) {
+        run = *(const uint32_t *)odin3_vec_cat(&st->run_id, 0);
+    }
     odin3_status status = ODIN3_OK;
-    for (uint32_t c = 1; status == ODIN3_OK && run != 0 && c <= st->cons.len; c++) {
+    for (uint32_t con_no = 1; status == ODIN3_OK && run != 0 && con_no <= st->cons.len; con_no++) {
         bool reached = false;
         for (size_t k = 0; !reached && k < st->run_id.len; k++) {
-            reached = odin3_u64map_get(
-                st->rows, row_key(*(const uint32_t *)odin3_vec_cat(&st->run_id, k), c), NULL);
+            uint32_t at = *(const uint32_t *)odin3_vec_cat(&st->run_id, k);
+            reached = odin3_u64map_get(st->rows, row_key(at, con_no), NULL);
         }
-        status = reached ? ODIN3_OK : ensure_row(st, run, c);
+        status = reached ? ODIN3_OK : ensure_row(st, (row_at){run, con_no});
     }
     return status;
 }
@@ -849,28 +1003,40 @@ static bool ref_elem(void *ctx, odin3_bytes elem) {
     if (!odin3_name_map_ref_number(elem, 'r', &num)) {
         return false;
     }
+    uint32_t id = *(const uint32_t *)odin3_vec_cat(&job->st->rec_id, num - 1U);
+    if (id == 0) {
+        return true; /* a record left out (no parent): the line does not name it */
+    }
     job->status = job->status == ODIN3_OK && !job->first
                       ? odin3_strbuf_append(job->buf, odin3_bytes_cstr(","))
                       : job->status;
     job->first = false;
-    uint32_t id = *(const uint32_t *)odin3_vec_cat(&job->st->rec_id, num - 1U);
     job->status =
         job->status == ODIN3_OK ? odin3_strbuf_appendf(job->buf, "r%u", (unsigned)id) : job->status;
     return job->status == ODIN3_OK;
 }
 
 /* The field position of the record list and of the stale run of an A, Q or K line. */
-static void extra_positions(char type, uint32_t *refs, uint32_t *stale) {
-    *refs = type == 'A' ? NM_A_RECS : NM_Q_ID;
-    *stale = type == 'A' ? NM_A_STALE : (type == 'Q' ? NM_Q_STALE : NM_K_STALE);
+typedef struct extra_pos {
+    uint32_t refs, stale;
+} extra_pos;
+
+static extra_pos extra_positions(char type) {
+    extra_pos pos = {NM_Q_ID, NM_K_STALE};
+    if (type == 'A') {
+        pos = (extra_pos){NM_A_RECS, NM_A_STALE};
+    } else if (type == 'Q') {
+        pos.stale = NM_Q_STALE;
+    }
+    return pos;
 }
 
 /* The stored text of one A, Q or K line: the fields as the file has them, with the record ids
  * and the stale run named by the design's. */
-static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_strbuf *buf) {
-    uint32_t refs = 0;
-    uint32_t stale = 0;
-    extra_positions(line->type, &refs, &stale);
+static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_strbuf *buf,
+                               bool *keep) {
+    *keep = true;
+    const extra_pos pos = extra_positions(line->type);
     odin3_strbuf_clear(buf);
     odin3_status status = odin3_strbuf_appendf(buf, "%c", line->type);
     extra_job job = {st, buf, true, ODIN3_OK};
@@ -880,11 +1046,12 @@ static odin3_status extra_text(const rs *st, const odin3_nm_line *line, odin3_st
         if (status != ODIN3_OK) {
             break;
         }
-        if (k == refs) {
+        if (k == pos.refs) {
             job.first = true;
             (void)each_elem(line->f[k], ',', ref_elem, &job);
             status = job.status;
-        } else if (k == stale && odin3_name_map_ref_number(line->f[k], 't', &run)) {
+            *keep = line->type == 'A' || !job.first; /* a Q or K line whose record is gone goes */
+        } else if (k == pos.stale && odin3_name_map_ref_number(line->f[k], 't', &run)) {
             status = odin3_strbuf_appendf(
                 buf, "t%u", (unsigned)*(const uint32_t *)odin3_vec_cat(&st->run_id, run - 1U));
         } else {
@@ -902,8 +1069,9 @@ static odin3_status apply_extra(rs *st) {
     for (size_t i = 0; status == ODIN3_OK && i < st->map->lines.len; i++) {
         const odin3_nm_line *line = line_at(st, i);
         if (line->type == 'A' || line->type == 'Q' || line->type == 'K') {
-            status = extra_text(st, line, &buf);
-            status = status == ODIN3_OK
+            bool keep = true;
+            status = extra_text(st, line, &buf, &keep);
+            status = status == ODIN3_OK && keep
                          ? odin3_extra_add(st->design->extra, (odin3_bytes){buf.data, buf.len})
                          : status;
         }
@@ -1105,6 +1273,7 @@ static odin3_status apply_plan(rs *st) {
     if (st->design->extra == NULL || st->rows == NULL || st->seen == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    st->first_record = odin3_prov_end(st->design);
     odin3_status status = apply_runs(st);
     status = status == ODIN3_OK ? apply_recs(st) : status;
     status = status == ODIN3_OK ? apply_other_rows(st) : status;

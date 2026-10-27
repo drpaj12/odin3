@@ -916,11 +916,11 @@ static void test_v2_q_and_k_lines_are_parsed(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
     TEST_ASSERT_EQUAL_UINT(0, warn_count);
     TEST_ASSERT_EQUAL_UINT(3, map.lines.len);
-    const odin3_nm_line *q = odin3_vec_cat(&map.lines, 0);
-    TEST_ASSERT_EQUAL_INT('Q', q->type);
-    TEST_ASSERT_EQUAL_UINT32(12, q->nfields);
-    expect_bytes(q->f[NM_Q_ID], text_of("r1"));
-    expect_bytes(q->f[NM_Q_STALE], text_of("-"));
+    const odin3_nm_line *qline = odin3_vec_cat(&map.lines, 0);
+    TEST_ASSERT_EQUAL_INT('Q', qline->type);
+    TEST_ASSERT_EQUAL_UINT32(12, qline->nfields);
+    expect_bytes(qline->f[NM_Q_ID], text_of("r1"));
+    expect_bytes(qline->f[NM_Q_STALE], text_of("-"));
     const odin3_nm_line *k = odin3_vec_cat(&map.lines, 1);
     TEST_ASSERT_EQUAL_INT('K', k->type);
     expect_bytes(k->f[NM_K_STALE], text_of("-"));

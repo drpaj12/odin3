@@ -23,6 +23,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   version 2 map, `names --chain` the chain, `names --check` the version 2 invariants; Python
   `odin3.read_name_map`. Version 1 output is unchanged. No core, IR or ABI change.
 
+- V1.2.0 Task 9 (`docs/V1.2.0.md` 4.5): `read_blif`, `read_json` and `read_verilog -netlist` restore a version 2
+  `--name-map`: the pass runs, records (with their classes), construct rows and the `A`, `Q`, `K` lines of the file,
+  bound to the objects the map names, with no restored-location record; the writers number the extra roots, mark the
+  lines and post-Odin records `stale=t<n>` after a pass changed the netlist, and write the objective-only `Q` of a new
+  join. IR addition (Peter reviews): the extra table with the mutating-run slot and the `restored` flag of a pass-run row
+  (`docs/IR.md` IR-12a). ABI stays 7. A version 1 map reads as before.
 - V1.2.0 Task 7 (`docs/V1.2.0.md` 6, 7.2, 8): `odin3-flow --prov` (hash-name BLIF plus the version 2
   name map), `--timing-legacy`, and `odin3-timing` reading the map (full span, construct chain, the
   `DECLARATOR` word); `tools/flow/name_map_v2.py`, a stdlib reader that agrees with
