@@ -51,8 +51,14 @@ typedef struct odin3_xline_nums {
 odin3_status odin3_xline_emit(const odin3_xline_nums *nums, const odin3_xline *line,
                               odin3_strbuf *out);
 
+/* The longest objective word an objective-only Q line carries (a pass name or a script's goal). */
+enum { ODIN3_XLINE_OBJECTIVE_BYTES = 64 };
+
 /* Appends the objective-only Q line of the join record numbered rnum, made by the pass `pass`
- * (empty: no objective is stated, as for an abc script, Task 10). stale is `-`. */
-odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_strbuf *out);
+ * whose run information is `info` (3.6). The objective is the pass name, except for abc, whose
+ * objective is the memo of its script (found by the `sha256=` word of the run information;
+ * stated: basis r; the script rule: basis i; none: empty, basis -). stale is `-`. */
+odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_bytes info,
+                                      odin3_strbuf *out);
 
 #endif

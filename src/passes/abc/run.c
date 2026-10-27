@@ -684,6 +684,9 @@ static odin3_status finish_info(odin3_abc_run *run) {
     st = st == ODIN3_OK ? odin3_passrun_set_info(run->ctx, str) : st;
     odin3_strbuf_free(&info);
     if (st == ODIN3_OK) {
+        /* the objective reaches the name map's Q line through this memo, not the run information */
+        odin3_abc_objective_note(run->script.sha256_hex, run->script.objective,
+                                 run->script.objective_stated);
         odin3_log(ODIN3_LOG_INFO, "abc: final: depth %u", (unsigned)depth);
     }
     return st;

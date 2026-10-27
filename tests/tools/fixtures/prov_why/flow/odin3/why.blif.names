@@ -1,0 +1,51 @@
+# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
+N	why	net	a	r1	word
+N	why	net	b	r2	word
+N	why	net	c	r3	word
+N	why	net	d	r4	word
+N	why	net	e	r5	word
+N	why	net	f	r6	word
+N	why	net	g	r7	word
+N	why	net	h	r8	word
+N	why	net	i	r9	word
+N	why	net	x	r10	word
+N	why	net	clk	r11	word
+N	why	net	n1	r12	word
+N	why	net	n2	r13	word
+N	why	net	n3	r14	word
+N	why	net	q1	r15	word
+N	why	net	n4	r16	word
+N	why	net	n5	r17	word
+N	why	net	n6	r18	word
+N	why	net	o1	r19	word
+N	why	net	md	r20	word
+R	r1	S	stmt	origin	t1.1		f1:1.1-1.20		chain=span
+R	r2	S	stmt	origin	t1.1		f1:2.1-2.20		chain=span
+R	r3	S	stmt	origin	t1.1		f1:3.1-3.20		chain=span
+R	r4	S	stmt	origin	t1.1		f1:4.1-4.20		chain=span
+R	r5	S	stmt	origin	t1.1		f1:5.1-5.20		chain=span
+R	r6	S	stmt	origin	t1.1		f1:6.1-6.20		chain=span
+R	r7	S	stmt	origin	t1.1		f1:7.1-7.20		chain=span
+R	r8	S	stmt	origin	t1.1		f1:8.1-8.20		chain=span
+R	r9	S	stmt	origin	t1.1		f1:9.1-9.20		chain=span
+R	r10	S	stmt	origin	t1.1		f1:10.1-10.20		chain=span
+R	r11	S	stmt	origin	t1.1		f1:11.1-11.20		chain=span
+R	r12	S	stmt	origin	t1.1		f1:12.1-12.20	c2	
+R	r13	S	stmt	origin	t1.1		f1:13.1-13.20	c3	
+R	r14	S	stmt	origin	t1.1		f1:14.1-14.20	c4	
+R	r15	S	stmt	origin	t1.1		f1:15.1-15.20	c5	
+R	r16	S	stmt	origin	t1.1		f1:16.1-16.20	c6	
+R	r17	S	stmt	origin	t1.1		f1:17.1-17.20	c7	
+R	r18	S	stmt	origin	t1.1		f1:18.1-18.20	c2	
+R	r19	S	stmt	origin	t1.1		f1:19.1-19.20	c8	
+R	r20	S	stmt	origin	t1.1		f1:20.1-20.20		chain=span
+C	c1	MODULE	module		f1	1.1-40.10	why
+C	c2	DECLARATOR	stmt	c1	f1	2.1-2.20	w
+C	c3	CONT_ASSIGN	block	c1	f1	3.1-3.20	
+C	c4	CONT_ASSIGN	block	c1	f1	4.1-4.20	
+C	c5	CONT_ASSIGN	block	c1	f1	5.1-5.20	
+C	c6	CONT_ASSIGN	block	c1	f1	6.1-6.20	
+C	c7	CONT_ASSIGN	block	c1	f1	7.1-7.20	
+C	c8	CONT_ASSIGN	block	c1	f1	8.1-8.20	
+F	f1	why.v
+T	t1	read_verilog		

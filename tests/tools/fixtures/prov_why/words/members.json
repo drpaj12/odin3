@@ -1,0 +1,58 @@
+{
+ "n1": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": "w1"
+ },
+ "n2": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ },
+ "n3": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ },
+ "q1": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ },
+ "n4": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ },
+ "n5": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ },
+ "n6": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": "w1"
+ },
+ "o1": {
+  "bit": -1,
+  "bus": "",
+  "kind": "lut",
+  "ngroups": 1,
+  "word": null
+ }
+}

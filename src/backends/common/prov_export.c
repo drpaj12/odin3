@@ -2002,8 +2002,9 @@ static bool pm_new_join(const pm *st, const pm_rec *pr, uint32_t *run) {
     return !odin3_passrun_restored(st->design, (odin3_passrun_id){*run});
 }
 
-/* The A, Q and K lines of a restored map, then the objective-only Q of each join made since (3.6,
- * 4.5): none for a design that was not restored. */
+/* The A, Q and K lines of a restored map, then the objective-only Q of each join made in a run
+ * that was not restored (3.6, 4.5): every join of a design that was not restored, and those made
+ * since the restore otherwise. */
 static odin3_status emit_extra(pm *st, odin3_strbuf *out) {
     const odin3_extra_table *extra = odin3_design_extra(st->design);
     const odin3_xline_nums nums = {st->design, st->num_of, st->run_num};
@@ -2014,12 +2015,13 @@ static odin3_status emit_extra(pm *st, odin3_strbuf *out) {
                      ? odin3_xline_emit(&nums, &line, out)
                      : ODIN3_ERR_INVALID_ARG;
     }
-    for (size_t i = 0; status == ODIN3_OK && extra != NULL && i < st->recs.len; i++) {
+    for (size_t i = 0; status == ODIN3_OK && i < st->recs.len; i++) {
         uint32_t run = 0;
         if (pm_new_join(st, odin3_vec_cat(&st->recs, i), &run)) {
+            const odin3_passrun_id id = {run};
             status = odin3_xline_emit_fresh_q(
-                (uint32_t)i + 1U,
-                str_of(st->design, odin3_passrun_name(st->design, (odin3_passrun_id){run})), out);
+                (uint32_t)i + 1U, str_of(st->design, odin3_passrun_name(st->design, id)),
+                str_of(st->design, odin3_passrun_info(st->design, id)), out);
         }
     }
     return status;

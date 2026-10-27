@@ -9,6 +9,7 @@ temporary directory that is left in place. The ``names --check`` test needs ODIN
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -26,11 +27,27 @@ from .test_names_v2 import CLI_ENV, ODIN3
 
 FIX = Path(__file__).resolve().parent / "fixtures" / "prov_post"
 DESIGNS = ("bm_DL_BCD_adder", "bm_DL_logic_w_Dff")
+_ACTIVE: list[unittest.TestCase] = []  # the test that is running: its temporary directories go
+
+
+def mktemp() -> Path:
+    """A new temporary directory that the running test removes at its end (only this one);
+    KEEP_TMP=1 keeps it for debugging."""
+    root = Path(tempfile.mkdtemp(prefix="provpost-test-"))
+    if _ACTIVE and not os.environ.get("KEEP_TMP"):
+        _ACTIVE[-1].addCleanup(shutil.rmtree, root, True)
+    return root
+
+
+class TmpCase(unittest.TestCase):
+    def setUp(self) -> None:
+        _ACTIVE.append(self)
+        self.addCleanup(_ACTIVE.pop)
 
 
 def fresh(design: str) -> Path:
     """A copy of one fixture flow directory in a new temporary directory."""
-    work = Path(tempfile.mkdtemp(prefix="provpost-test-")) / design
+    work = mktemp() / design
     shutil.copytree(FIX / design, work)
     return work
 
@@ -44,7 +61,7 @@ def lines_of(path: Path, letter: str) -> list[list[str]]:
             if ln.startswith(letter + "\t")]
 
 
-class Records(unittest.TestCase):
+class Records(TmpCase):
     """BLE, CLB and site records, the T rows and the A lines of the two fixtures."""
 
     def test_records_levels_and_steps(self) -> None:
@@ -144,7 +161,7 @@ class Records(unittest.TestCase):
         self.assertIn("f", names)  # a latch is named after its output
 
 
-class Joins(unittest.TestCase):
+class Joins(TmpCase):
     """The join rule of 3.3 on hand-made maps, and on the BCD adder (the CLB mixing two
     statements)."""
 
@@ -227,7 +244,7 @@ class Joins(unittest.TestCase):
             self.assertEqual(rec.constructs, ())
 
 
-class Refusals(unittest.TestCase):
+class Refusals(TmpCase):
     def test_short_name_blif_is_refused_and_the_map_untouched(self) -> None:
         flow = fresh("bm_DL_BCD_adder")
         blif = flow / "odin3" / "bm_DL_BCD_adder.blif"
@@ -283,7 +300,7 @@ NET_HEAD = '<block name="n.net" instance="FPGA_packed_netlist[0]">\n'
 
 
 def net_file(body: str) -> Path:
-    path = Path(tempfile.mkdtemp(prefix="provpost-test-")) / "t.net"
+    path = mktemp() / "t.net"
     path.write_text(NET_HEAD + body + "</block>\n")
     return path
 
@@ -296,7 +313,7 @@ def clb_xml(name: str, *prims: tuple[str, str]) -> str:
             f"</block></block>")
 
 
-class NetReading(unittest.TestCase):
+class NetReading(TmpCase):
     def test_wire_mode_leaf_is_not_an_atom(self) -> None:
         leaves = (clb_xml("c1", ("a", "lut6"), ("netw", "lut6"))
                   .replace('<block name="netw" instance="lut6[1]"/>',
@@ -328,7 +345,7 @@ class Stub:
         return self.table.get(name, 0)
 
 
-class BuildEdges(unittest.TestCase):
+class BuildEdges(TmpCase):
     @staticmethod
     def run_build(clusters: list[prov_post.Cluster], table: dict[str, int]) -> tuple[
             list[prov_post.NewRec], dict[str, list[prov_post.NewRec]], int]:
@@ -370,7 +387,7 @@ class BuildEdges(unittest.TestCase):
             self.assertTrue(rec.parents)
 
 
-class Writing(unittest.TestCase):
+class Writing(TmpCase):
     def test_failed_replace_leaves_the_old_map(self) -> None:
         flow = fresh("bm_DL_BCD_adder")
         before = map_of(flow, "bm_DL_BCD_adder").read_bytes()
@@ -417,7 +434,7 @@ class Writing(unittest.TestCase):
         self.assertEqual(prov_post.escape("#x"), "%23x")
 
 
-class Accepted(unittest.TestCase):
+class Accepted(TmpCase):
     """The extended map is accepted by both parsers and by ``names --check``."""
 
     def test_name_map_v2_parses_every_line(self) -> None:
@@ -443,9 +460,9 @@ class Accepted(unittest.TestCase):
                                              r"no_record=0")
 
 
-class Inputs(unittest.TestCase):
+class Inputs(TmpCase):
     def test_read_place_with_and_without_layer(self) -> None:
-        work = Path(tempfile.mkdtemp(prefix="provpost-test-"))
+        work = mktemp()
         path = work / "p.place"
         path.write_text("Netlist_File: n.net Netlist_ID: SHA256:ab\n"
                         "Array size: 2 x 2 logic blocks\n\n"
@@ -464,7 +481,7 @@ class Inputs(unittest.TestCase):
         import odin3_flow  # noqa: PLC0415
 
         design = FIX.parent / "timing_attr_v2" / "decl" / "decl.v"
-        out = Path(tempfile.mkdtemp(prefix="provpost-test-"))
+        out = mktemp()
         with mock.patch.object(odin3_flow, "vtr_root_from_env", return_value=Path("/vtr")):
             kept = odin3_flow.parse_args([str(design), "--keep-results", "--out", str(out)])
             plain = odin3_flow.parse_args([str(design), "--out", str(out)])
@@ -489,7 +506,7 @@ class Inputs(unittest.TestCase):
             seen.append(list(argv))
             return odin3_flow.StepResult(name, False, Path("/dev/null"), 0.0)
 
-        work = Path(tempfile.mkdtemp(prefix="provpost-test-"))
+        work = mktemp()
         blif = work / "d.blif"
         blif.write_text(".model d\n.end\n")
         for keep in (False, True):

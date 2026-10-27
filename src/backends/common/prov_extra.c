@@ -2,13 +2,14 @@
 #include "backends/common/prov_extra.h"
 
 #include "ir/restore.h"
+#include "passes/abc/script.h"
 #include "util/alloc.h"
 #include "util/log.h"
 
 #include <stdio.h>
 #include <string.h>
 
-enum { DECIMAL_BASE = 10, ID_TEXT = 16 };
+enum { DECIMAL_BASE = 10, ID_TEXT = 16, SHA_TEXT = 72 }; /* SHA_TEXT: a hex SHA-256 and its NUL */
 
 bool odin3_xline_split(odin3_bytes line, odin3_xline *out) {
     const char *bytes = line.ptr;
@@ -146,35 +147,104 @@ odin3_status odin3_xline_emit(const odin3_xline_nums *nums, const odin3_xline *l
     return status;
 }
 
-odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_strbuf *out) {
+/* The end of the info word that starts at `start`: a blank outside double quotes (with backslash
+ * escapes inside them) ends it. */
+static size_t info_word_end(odin3_bytes info, size_t start) {
+    const char *text = info.ptr;
+    bool quoted = false;
+    size_t i = start;
+    while (i < info.len && (quoted || text[i] != ' ')) {
+        if (text[i] == '\\' && quoted) {
+            i++;
+        } else if (text[i] == '"') {
+            quoted = !quoted;
+        }
+        i++;
+    }
+    return i < info.len ? i : info.len;
+}
+
+/* The value of `key=` among the blank-separated words of a pass run's info (a value may be
+ * double-quoted and then holds blanks); false when the key is absent, the value is quoted, or it
+ * does not fit in cap bytes with its NUL. */
+static bool info_word(odin3_bytes info, const char *key, char *out, size_t cap) {
+    const char *text = info.ptr;
+    const size_t key_len = strlen(key);
+    size_t start = 0;
+    while (text != NULL && start < info.len) {
+        const size_t end = info_word_end(info, start);
+        const size_t value = start + key_len + 1U;
+        if (end > value && memcmp(text + start, key, key_len) == 0 &&
+            text[start + key_len] == '=' && text[value] != '"' && end - value < cap) {
+            memcpy(out, text + value, end - value);
+            out[end - value] = '\0';
+            return true;
+        }
+        start = end + 1U;
+    }
+    return false;
+}
+
+/* The pass that made a join and its run information. */
+typedef struct q_source {
+    odin3_bytes pass;
+    odin3_bytes info;
+} q_source;
+
+/* The objective of a join and its basis letter: `r` (read as written: the pass name, or a goal
+ * the script states), `i` (derived from the script by the rule of src/passes/abc/objective.c) or
+ * `-` (none: an abc script that states no goal, or one this process did not run). abc's objective
+ * is not in its run information (the writers print that verbatim): the exporter finds it by the
+ * `sha256=` word of the information, in the memo that the abc run filled; any other pass is
+ * named. */
+static char objective_of(const q_source *src, char *out, size_t cap) {
+    out[0] = '\0';
+    if (src->pass.len == 3U && memcmp(src->pass.ptr, "abc", 3U) == 0) {
+        char sha[SHA_TEXT] = "";
+        char found[ODIN3_ABC_OBJECTIVE_BYTES];
+        bool stated = false;
+        if (!info_word(src->info, "sha256", sha, sizeof sha) ||
+            !odin3_abc_objective_find(odin3_bytes_cstr(sha), found, &stated) || found[0] == '\0' ||
+            strlen(found) >= cap) {
+            return '-';
+        }
+        memcpy(out, found, strlen(found) + 1U);
+        return stated ? 'r' : 'i';
+    }
+    if (src->pass.len == 0U || src->pass.len >= cap) {
+        return '-';
+    }
+    memcpy(out, src->pass.ptr, src->pass.len);
+    out[src->pass.len] = '\0';
+    return 'r';
+}
+
+odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_bytes info,
+                                      odin3_strbuf *out) {
     char id[ID_TEXT];
     (void)snprintf(id, sizeof id, "r%u", (unsigned)rnum);
-    static const char BASIS_STATED[] =
-        "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
-    static const char BASIS_NONE[] =
-        "why=-,objective=-,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
+    char word[ODIN3_XLINE_OBJECTIVE_BYTES];
+    const q_source source = {pass, info};
+    const char basis_letter = objective_of(&source, word, sizeof word);
+    char basis[sizeof "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-"];
+    (void)snprintf(basis, sizeof basis,
+                   "why=-,objective=%c,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-", basis_letter);
     odin3_strbuf objective;
     odin3_strbuf_init(&objective);
-    /* abc: the objective is derived from its script (Task 10), so none is stated here */
-    const bool is_abc = pass.len == 3U && memcmp(pass.ptr, "abc", 3U) == 0;
-    if (is_abc) {
-        pass = (odin3_bytes){NULL, 0};
-    }
-    odin3_status status = odin3_name_map_escape(&objective, pass);
+    odin3_status status = odin3_name_map_escape(&objective, odin3_bytes_cstr(word));
     const odin3_bytes none = {NULL, 0};
-    const odin3_nm_field fields[] = {
-        {odin3_bytes_cstr(id), true},
-        {none, true},
-        {{objective.data, objective.len}, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {odin3_bytes_cstr(pass.len > 0 ? BASIS_STATED : BASIS_NONE), true},
-        {odin3_bytes_cstr("-"), true}};
+    const odin3_nm_field fields[] = {{odin3_bytes_cstr(id), true},
+                                     {none, true},
+                                     {{objective.data, objective.len}, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {odin3_bytes_cstr(basis), true},
+                                     {odin3_bytes_cstr("-"), true}};
     status = status == ODIN3_OK
                  ? odin3_name_map_write_line_v2(out, 'Q', fields, sizeof fields / sizeof fields[0])
                  : status;

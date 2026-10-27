@@ -13,6 +13,7 @@
 #include "util/sha256.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* One `alias` line of abc.rc: `alias <name> <expansion>`, the expansion's words joined by one
@@ -34,6 +35,9 @@ uint32_t odin3_abc_alias_count(void);
 
 /* The alias at index in that table (file order), or NULL at or past odin3_abc_alias_count(). */
 const odin3_abc_alias *odin3_abc_alias_at(uint32_t index);
+
+/* The bytes of the objective word of a checked script, NUL included (see odin3_abc_objective). */
+enum { ODIN3_ABC_OBJECTIVE_BYTES = 32 };
 
 /* A command's class (§7.5): the four allowed P3-11 groups, then the refused ones. */
 typedef enum odin3_abc_class {
@@ -131,7 +135,9 @@ typedef struct odin3_abc_script {
     uint32_t n_cmds;
     bool uses_k;
     uint8_t final_space;
-    char sha256_hex[ODIN3_SHA256_HEX_CHARS]; /* 65: 64 digits and the NUL */
+    bool objective_stated; /* objective was a `# objective: <word>` comment, not the rule */
+    char objective[ODIN3_ABC_OBJECTIVE_BYTES]; /* "depth", "area", a stated word, or "" */
+    char sha256_hex[ODIN3_SHA256_HEX_CHARS];   /* 65: 64 digits and the NUL */
     odin3_arena *arena;
 } odin3_abc_script;
 
@@ -167,6 +173,26 @@ odin3_status odin3_abc_script_parse_mode(const odin3_abc_script_src *src,
 /* Frees what odin3_abc_script_parse filled and zeroes *script. NULL and a zeroed script are
  * no-ops. */
 void odin3_abc_script_free(odin3_abc_script *script);
+
+/*
+ * The objective of a script, for the provenance map (V1.2.0 3.6). out gets, as a NUL-terminated
+ * word, the first `# objective: <word>` comment of text (*stated true), else `area` or `depth`
+ * from the last mapping command of cmds (`if`, `&if`, `map`, `&nf`; `area` when its `a` flags
+ * are odd in number), else "" (a script that states none). Pure; never allocates.
+ */
+void odin3_abc_objective(odin3_bytes text, const odin3_abc_cmd *cmds, uint32_t n_cmds,
+                         char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated);
+
+/*
+ * The memo that carries an objective to the name map exporter without the pass-run record (whose
+ * information the writers print verbatim). note stores the objective of the script with SHA-256
+ * sha_hex (64 digits) once a run of it is done; find returns true and fills out and *stated when
+ * that script was noted in this process (the last 32 distinct scripts are kept). The objective is a
+ * pure function of the script bytes, so the memo is a cache, never a state. Single-threaded.
+ */
+void odin3_abc_objective_note(const char *sha_hex, const char *objective, bool stated);
+bool odin3_abc_objective_find(odin3_bytes sha_hex, char out[ODIN3_ABC_OBJECTIVE_BYTES],
+                              bool *stated);
 
 /* The command at index, or NULL for a NULL script or an index at or past n_cmds. */
 const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32_t index);
