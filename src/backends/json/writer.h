@@ -4,6 +4,7 @@
 #ifndef ODIN3_BACKENDS_JSON_WRITER_H
 #define ODIN3_BACKENDS_JSON_WRITER_H
 
+#include "backends/common/prov_export.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 
@@ -62,6 +63,7 @@ typedef struct odin3_json_write_opts {
      * under `attributes`. false: the output is byte for byte that of odin3_json_write.
      */
     bool odin3_keys;
+    odin3_prov_map_mode prov_map; /* HASH only: the name map is version 2 (V1.2.0 3.5) */
 } odin3_json_write_opts;
 
 /*

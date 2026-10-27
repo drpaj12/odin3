@@ -976,6 +976,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_construct_snapshot)
     odin3_add_unit_test(test_construct_check)
     odin3_add_unit_test(test_prov_label)
+    odin3_add_unit_test(test_prov_export)
     odin3_add_unit_test(test_opclass_passes)
     target_compile_definitions(test_opclass_passes PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
@@ -1861,6 +1862,13 @@ if(BUILD_TESTING)
     # 5.4f-b: --name-style hash in the three writers and the names pass, each case in a mkdtemp dir.
     odin3_add_unit_test(test_hash_writers)
     target_compile_definitions(test_hash_writers PRIVATE ODIN3_HASHW_ROOT="${PROJECT_BINARY_DIR}")
+    # V1.2.0 Task 5: a version 2 map for the micro set is well formed and complete.
+    odin3_add_unit_test(test_prov_map_micro)
+    target_compile_definitions(test_prov_map_micro PRIVATE
+        ODIN3_PMM_ROOT="${PROJECT_BINARY_DIR}"
+        ODIN3_PMM_MICRO="${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro"
+        ODIN3_PMM_LIB="${PROJECT_SOURCE_DIR}/lib")
+    set_tests_properties(test_prov_map_micro PROPERTIES TIMEOUT 1800)
     # 5.4f-c: --name-map in the three readers (H-6), each case in a mkdtemp dir.
     odin3_add_unit_test(test_hash_readers)
     target_compile_definitions(test_hash_readers PRIVATE ODIN3_HASHR_ROOT="${PROJECT_BINARY_DIR}")

@@ -604,5 +604,10 @@ const char *jw_plain_key(jw *out, const jw_keyspec *spec) {
 
 const char *jw_make_key(jw *out, const jw_keyspec *spec) {
     const char *key = jw_prov_key(out, spec);
-    return key != NULL ? key : jw_plain_key(out, spec);
+    if (key != NULL) {
+        return key;
+    }
+    key = jw_plain_key(out, spec);
+    (void)jw_names_kept(out, spec, key);
+    return key;
 }

@@ -13,11 +13,26 @@
 #include <string.h>
 
 enum {
-    HEADER_TOKENS = 5,
+    HEADER_TOKENS = 7,
     HEX_DIGITS = 2,
     LINE_DIGITS_MAX = 10,
     DECIMAL = 10,
-    WIDTH_KEY_LEN = 6 /* strlen("width=") */
+    WIDTH_KEY_LEN = 6, /* strlen("width=") */
+    BYTE_VALUES = 256,
+    V1_HEADER_TOKENS = 3, /* after the version: hash=, width= ... */
+    V2_HEADER_TOKENS = 5, /* ... and prov=, ast= */
+    R_KIND = 1,
+    R_LEVEL = 2,
+    R_DIR = 3,
+    R_STEP = 4,
+    R_PARENTS = 5,
+    R_ORIGINS = 6,
+    R_CONS = 7,
+    R_FLAGS = 8,
+    C_PARENT = 3,
+    C_FILE = 4,
+    O_RECS = 7,
+    N_RECS = 3
 };
 
 /* The sort order of `kind` is its enum order, which must equal the byte order of the words. */
@@ -26,6 +41,9 @@ _Static_assert(ODIN3_NAME_NET == 0 && ODIN3_NAME_NODE == 1 && ODIN3_NAME_WIRE ==
                "kind enum order must be net, node, wire (H-4 sort order)");
 static const char *const KIND_NAMES[ODIN3_NAME_KIND_COUNT] = {"net", "node", "wire"};
 static const char HEADER_WORD[] = "# odin3-names";
+static const char *const AST_WORDS[] = {"refs", "constructs", "full", "none"};
+static const char PROV_TOKEN[] = "prov=1";
+static const char AST_KEY[] = "ast=";
 static const char HEADER_PREFIX[] = "# odin3-names ";
 
 const char *odin3_name_kind_str(odin3_name_kind kind) {
@@ -89,8 +107,15 @@ static int entry_cmp(const void *lhs, const void *rhs) {
 /* --- write ---------------------------------------------------------------------------------------
  */
 
-/* The escape of one byte of a field (TAB, LF, `\` and `%`), or NULL for any other byte. */
-static const char *escape_of(char ch) {
+/* The escape of one byte of a field (TAB, LF, `\` and `%`; in version 2 also `,` and `|`), or NULL
+ * for any other byte. */
+static const char *escape_of(char ch, bool v2) {
+    if (v2 && ch == ',') {
+        return "%2C";
+    }
+    if (v2 && ch == '|') {
+        return "%7C";
+    }
     switch (ch) {
     case '\t':
         return "%09";
@@ -106,14 +131,14 @@ static const char *escape_of(char ch) {
 }
 
 /* Appends field with TAB, LF, `\` and `%` written as %09, %0A, %5C, %25. */
-static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
+static odin3_status put_field_ex(odin3_strbuf *out, odin3_bytes field, bool v2) {
     if (field.len == 0) {
         return ODIN3_OK; /* an empty field may have a NULL pointer: no offset on it */
     }
     const char *bytes = (const char *)field.ptr;
     size_t run = 0;
     for (size_t i = 0; i < field.len; i++) {
-        const char *esc = escape_of(bytes[i]);
+        const char *esc = escape_of(bytes[i], v2);
         if (esc == NULL) {
             continue;
         }
@@ -127,6 +152,10 @@ static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
         run = i + 1;
     }
     return odin3_strbuf_append(out, (odin3_bytes){bytes + run, field.len - run});
+}
+
+static odin3_status put_field(odin3_strbuf *out, odin3_bytes field) {
+    return put_field_ex(out, field, false);
 }
 
 static odin3_status put_entry(odin3_strbuf *out, const odin3_name_entry *entry) {
@@ -240,11 +269,15 @@ odin3_status odin3_name_map_init(odin3_name_map *map) {
     map->width = ODIN3_HASH_NAME_WIDTH;
     map->ignored = 0;
     map->by_full = NULL;
+    map->version = ODIN3_NAME_MAP_VERSION;
+    map->ast = (odin3_bytes){NULL, 0};
+    odin3_vec_init(&map->lines, sizeof(odin3_nm_line));
     return map->arena == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
 void odin3_name_map_free(odin3_name_map *map) {
     odin3_vec_free(&map->entries);
+    odin3_vec_free(&map->lines);
     odin3_util_free(map->by_full);
     map->by_full = NULL;
     odin3_arena_destroy(map->arena);
@@ -256,6 +289,7 @@ typedef struct nm_parser {
     odin3_name_map *map;
     const char *path;
     uint32_t lineno;
+    bool warned[BYTE_VALUES]; /* version 2: a type letter already warned about */
 } nm_parser;
 
 static void parse_error(const nm_parser *ps, const char *msg, odin3_bytes detail) {
@@ -325,7 +359,39 @@ static size_t header_tokens(odin3_bytes line, odin3_bytes tok[HEADER_TOKENS]) {
     return count;
 }
 
-/* Header: `# odin3-names 1 hash=sha256 width=N`. ODIN3_ERR_PARSE (logged) for anything else. */
+/* Is tok `ast=` and one of the four mode words? */
+static bool parse_ast_token(odin3_bytes tok, odin3_bytes *word) {
+    size_t key = sizeof AST_KEY - 1;
+    if (tok.len <= key || memcmp(tok.ptr, AST_KEY, key) != 0) {
+        return false;
+    }
+    odin3_bytes value = {(const char *)tok.ptr + key, tok.len - key};
+    for (size_t k = 0; k < sizeof AST_WORDS / sizeof AST_WORDS[0]; k++) {
+        if (bytes_cmp(value, odin3_bytes_cstr(AST_WORDS[k])) == 0) {
+            *word = odin3_bytes_cstr(AST_WORDS[k]); /* the static word, not the caller's text */
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Do the tokens after the version fit the version's header? Stores the width and, for version 2,
+ * the ast word. */
+static bool header_shape_ok(nm_parser *ps, const odin3_bytes tok[HEADER_TOKENS], size_t count,
+                            uint32_t *width) {
+    bool v2 = tok[0].len == 1 && ((const char *)tok[0].ptr)[0] == '0' + ODIN3_NAME_MAP_VERSION_2;
+    bool shape = count == (v2 ? (size_t)V2_HEADER_TOKENS : (size_t)V1_HEADER_TOKENS) &&
+                 bytes_cmp(tok[1], odin3_bytes_cstr("hash=sha256")) == 0 &&
+                 parse_width_token(tok[2], width);
+    if (shape && v2) {
+        shape = bytes_cmp(tok[3], odin3_bytes_cstr(PROV_TOKEN)) == 0 &&
+                parse_ast_token(tok[4], &ps->map->ast);
+    }
+    return shape;
+}
+
+/* Header: `# odin3-names 1 hash=sha256 width=N`, or version 2's `2 hash=sha256 width=N prov=1
+ * ast=<mode>`. ODIN3_ERR_PARSE (logged) for anything else. */
 static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
     odin3_bytes tok[HEADER_TOKENS] = {{NULL, 0}};
     uint32_t width = 0;
@@ -350,28 +416,34 @@ static odin3_status parse_header(nm_parser *ps, odin3_bytes line) {
         return ODIN3_ERR_PARSE;
     }
     size_t count = header_tokens(line, tok);
-    if (tok[0].len != 1 || ((const char *)tok[0].ptr)[0] != '0' + ODIN3_NAME_MAP_VERSION) {
+    uint32_t version = tok[0].len == 1 ? (uint32_t)(((const char *)tok[0].ptr)[0] - '0') : 0;
+    if (version != ODIN3_NAME_MAP_VERSION && version != ODIN3_NAME_MAP_VERSION_2) {
         parse_error(ps, "unsupported name map version", tok[0]);
         return ODIN3_ERR_PARSE;
     }
-    if (count != 3 || bytes_cmp(tok[1], odin3_bytes_cstr("hash=sha256")) != 0 ||
-        !parse_width_token(tok[2], &width)) {
-        parse_error(ps, "malformed name map header (want 'hash=sha256 width=1..52')",
+    if (!header_shape_ok(ps, tok, count, &width)) {
+        parse_error(ps,
+                    version == ODIN3_NAME_MAP_VERSION_2
+                        ? "malformed name map header (want 'hash=sha256 width=1..52 prov=1 "
+                          "ast=refs|constructs|full|none')"
+                        : "malformed name map header (want 'hash=sha256 width=1..52')",
                     (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
     }
     ps->map->width = width;
+    ps->map->version = version;
     return ODIN3_OK;
 }
 
 /* One escape `%XX` at bytes[i]: its byte in *ch, or false when it is not one of the four. */
-static bool decode_escape(const char *bytes, size_t left, char *ch) {
-    static const char CODES[] = {'\t', '\n', '\\', '%', '#'};
-    static const char *const TEXTS[] = {"09", "0A", "5C", "25", "23"};
+static bool decode_escape(const char *bytes, size_t left, bool v2, char *ch) {
+    static const char CODES[] = {'\t', '\n', '\\', '%', '#', ',', '|'};
+    static const char *const TEXTS[] = {"09", "0A", "5C", "25", "23", "2C", "7C"};
     if (left < 1 + HEX_DIGITS) {
         return false;
     }
-    for (size_t k = 0; k < sizeof CODES; k++) {
+    size_t known = v2 ? sizeof CODES : sizeof CODES - 2; /* %2C and %7C are version 2's */
+    for (size_t k = 0; k < known; k++) {
         if (bytes[1] == TEXTS[k][0] && bytes[2] == TEXTS[k][1]) {
             *ch = CODES[k];
             return true;
@@ -381,7 +453,7 @@ static bool decode_escape(const char *bytes, size_t left, char *ch) {
 }
 
 /* Unescapes field into the arena. INVALID_ARG for a bad escape, NO_MEMORY on out of memory. */
-static odin3_status unescape(odin3_arena *arena, odin3_bytes field, odin3_bytes *out) {
+static odin3_status unescape_ex(odin3_arena *arena, odin3_bytes field, bool v2, odin3_bytes *out) {
     const char *src = (const char *)field.ptr;
     char *dst = (char *)odin3_arena_alloc(arena, field.len + 1);
     size_t len = 0;
@@ -391,7 +463,7 @@ static odin3_status unescape(odin3_arena *arena, odin3_bytes field, odin3_bytes 
     for (size_t i = 0; i < field.len; i++) {
         if (src[i] != '%') {
             dst[len++] = src[i];
-        } else if (decode_escape(src + i, field.len - i, &dst[len])) {
+        } else if (decode_escape(src + i, field.len - i, v2, &dst[len])) {
             len++;
             i += HEX_DIGITS;
         } else {
@@ -444,9 +516,11 @@ static odin3_status build_entry(nm_parser *ps, const odin3_bytes raw[ODIN3_NAME_
         if (slots[i] == NULL) {
             continue;
         }
-        odin3_status st = unescape(ps->map->arena, raw[i], slots[i]);
+        odin3_status st = unescape_ex(ps->map->arena, raw[i], ps->map->version == 2, slots[i]);
         if (st != ODIN3_OK) {
-            *why = "bad escape (only %09 %0A %5C %25 %23 are allowed)";
+            *why = ps->map->version == 2
+                       ? "bad escape (only %09 %0A %5C %25 %23 %2C %7C are allowed)"
+                       : "bad escape (only %09 %0A %5C %25 %23 are allowed)";
             return st;
         }
     }
@@ -471,8 +545,22 @@ static odin3_status build_entry(nm_parser *ps, const odin3_bytes raw[ODIN3_NAME_
     return ODIN3_OK;
 }
 
+/* Keeps an entry. ODIN3_ERR_PARSE past the limit, NO_MEMORY. */
+static odin3_status push_entry(nm_parser *ps, const odin3_name_entry *entry) {
+    if (ps->map->entries.len >= ODIN3_NAME_MAP_MAX_ENTRIES) {
+        parse_error(ps, "too many entries in the name map", (odin3_bytes){NULL, 0});
+        return ODIN3_ERR_PARSE;
+    }
+    odin3_name_entry *slot = (odin3_name_entry *)odin3_vec_push(&ps->map->entries);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = *entry;
+    return ODIN3_OK;
+}
+
 /* One entry line: kept, or warned about and ignored. NO_MEMORY or PARSE end the parse. */
-static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
+static odin3_status parse_entry_v1(nm_parser *ps, odin3_bytes line) {
     odin3_bytes raw[ODIN3_NAME_MAP_FIELDS];
     odin3_name_entry entry = {{NULL, 0}, ODIN3_NAME_NET, {NULL, 0}, {NULL, 0},
                               {NULL, 0}, {NULL, 0},      0};
@@ -499,16 +587,137 @@ static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
     if (st != ODIN3_OK) {
         return st;
     }
-    if (ps->map->entries.len >= ODIN3_NAME_MAP_MAX_ENTRIES) {
-        parse_error(ps, "too many entries in the name map", (odin3_bytes){NULL, 0});
+    return push_entry(ps, &entry);
+}
+
+/* --- parse, version 2 ------------------------------------------------------------------------ */
+
+/* The type letters of version 2 and the fewest fields each takes (after the letter). */
+typedef struct nm2_type {
+    char letter;
+    uint32_t min_fields;
+} nm2_type;
+
+enum {
+    O_FIELDS = 9,
+    N_FIELDS = 5,
+    R_FIELDS = 9,
+    C_FIELDS = 7,
+    F_FIELDS = 2,
+    T_FIELDS = 4,
+    A_FIELDS = 3
+};
+static const nm2_type NM2_TYPES[] = {{'O', O_FIELDS}, {'N', N_FIELDS}, {'R', R_FIELDS},
+                                     {'C', C_FIELDS}, {'F', F_FIELDS}, {'T', T_FIELDS},
+                                     {'A', A_FIELDS}};
+
+static const nm2_type *nm2_type_of(char letter) {
+    for (size_t k = 0; k < sizeof NM2_TYPES / sizeof NM2_TYPES[0]; k++) {
+        if (NM2_TYPES[k].letter == letter) {
+            return &NM2_TYPES[k];
+        }
+    }
+    return NULL;
+}
+
+/* Splits rest at TABs; keeps the first ODIN3_NM2_MAX_FIELDS and returns how many there were. */
+static uint32_t split_fields_v2(odin3_bytes rest, odin3_bytes out[ODIN3_NM2_MAX_FIELDS]) {
+    const char *bytes = (const char *)rest.ptr;
+    uint32_t count = 0;
+    size_t start = 0;
+    for (size_t i = 0; i <= rest.len; i++) {
+        if (i < rest.len && bytes[i] != '\t') {
+            continue;
+        }
+        if (count < ODIN3_NM2_MAX_FIELDS) {
+            out[count] = (odin3_bytes){bytes + start, i - start};
+        }
+        count++;
+        start = i + 1;
+    }
+    return count;
+}
+
+/* Keeps a parsed line (a copy of its text in the arena). NO_MEMORY or PARSE (over the limit). */
+static odin3_status push_line(nm_parser *ps, char type, odin3_bytes line) {
+    odin3_bytes fields[ODIN3_NM2_MAX_FIELDS] = {{NULL, 0}};
+    char *copy = (char *)odin3_arena_alloc(ps->map->arena, line.len + 1);
+    if (copy == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    memcpy(copy, line.ptr, line.len);
+    copy[line.len] = '\0';
+    uint32_t have = split_fields_v2((odin3_bytes){copy + 2, line.len - 2}, fields);
+    if (ps->map->lines.len >= ODIN3_NAME_MAP_MAX_ENTRIES) {
+        parse_error(ps, "too many lines in the name map", (odin3_bytes){NULL, 0});
         return ODIN3_ERR_PARSE;
     }
-    odin3_name_entry *slot = (odin3_name_entry *)odin3_vec_push(&ps->map->entries);
+    odin3_nm_line *slot = (odin3_nm_line *)odin3_vec_push(&ps->map->lines);
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *slot = entry;
+    *slot = (odin3_nm_line){.type = type, .lineno = ps->lineno};
+    slot->nfields = have < ODIN3_NM2_MAX_FIELDS ? have : (uint32_t)ODIN3_NM2_MAX_FIELDS;
+    memcpy(slot->f, fields, sizeof fields);
     return ODIN3_OK;
+}
+
+/* An O line: the seven version 1 fields become an entry (checked as there). */
+static odin3_status parse_o_line(nm_parser *ps, odin3_bytes line,
+                                 const odin3_bytes raw[ODIN3_NM2_MAX_FIELDS]) {
+    odin3_name_entry entry = {{NULL, 0}, ODIN3_NAME_NET, {NULL, 0}, {NULL, 0},
+                              {NULL, 0}, {NULL, 0},      0};
+    const char *why = NULL;
+    odin3_status st = build_entry(ps, raw, &entry, &why);
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        if (why != NULL) {
+            ignore_line(ps, why);
+        }
+        return ODIN3_OK;
+    }
+    st = st == ODIN3_OK ? push_line(ps, 'O', line) : st;
+    return st == ODIN3_OK ? push_entry(ps, &entry) : st;
+}
+
+/* One version 2 line: kept, or warned about and ignored. NO_MEMORY or PARSE end the parse. */
+static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
+    if (ps->map->version != ODIN3_NAME_MAP_VERSION_2) {
+        return parse_entry_v1(ps, line);
+    }
+    odin3_bytes raw[ODIN3_NM2_MAX_FIELDS] = {{NULL, 0}};
+    if (line.len > ODIN3_NAME_MAP_MAX_LINE) {
+        ignore_line(ps, "line is too long");
+        return ODIN3_OK;
+    }
+    if (((const char *)line.ptr)[line.len - 1] == '\r') {
+        ignore_line(ps, "CR at the end of the line (a name map uses LF line ends)");
+        return ODIN3_OK;
+    }
+    char letter = ((const char *)line.ptr)[0];
+    if (line.len < 2 || ((const char *)line.ptr)[1] != '\t') {
+        ignore_line(ps, "no type letter and TAB at the start of the line");
+        return ODIN3_OK;
+    }
+    const nm2_type *type = nm2_type_of(letter);
+    if (type == NULL) {
+        if (!ps->warned[(unsigned char)letter]) {
+            ps->warned[(unsigned char)letter] = true;
+            odin3_log(ODIN3_LOG_WARN, "%s:%u: name map line type '%c' is unknown and ignored",
+                      ps->path, ps->lineno, letter);
+        }
+        ps->map->ignored++;
+        return ODIN3_OK;
+    }
+    uint32_t nfields =
+        split_fields_v2((odin3_bytes){(const char *)line.ptr + 2, line.len - 2}, raw);
+    if (nfields < type->min_fields) {
+        ignore_line(ps, "too few fields for its type");
+        return ODIN3_OK;
+    }
+    if (letter == 'O') {
+        return parse_o_line(ps, line, raw);
+    }
+    return push_line(ps, letter, line);
 }
 
 /* The next line of text from *pos (without its LF); false at the end of the text. */
@@ -560,7 +769,7 @@ static odin3_status build_full_index(odin3_name_map *map) {
 }
 
 odin3_status odin3_name_map_parse(odin3_name_map *map, odin3_bytes text, const char *path) {
-    nm_parser ps = {map, path, 0};
+    nm_parser ps = {.map = map, .path = path};
     odin3_bytes line = {NULL, 0};
     size_t pos = 0;
     odin3_status st = ODIN3_OK;
@@ -639,4 +848,319 @@ odin3_name_check odin3_name_map_check(const odin3_name_map *map) {
         prev = entry;
     }
     return res;
+}
+
+/* --- version 2: write --------------------------------------------------------------------------
+ */
+
+int odin3_name_entry_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rhs) {
+    return key_cmp(lhs, rhs);
+}
+
+odin3_status odin3_name_map_escape(odin3_strbuf *out, odin3_bytes text) {
+    return put_field_ex(out, text, true);
+}
+
+odin3_status odin3_name_map_unescape(odin3_name_map *map, odin3_bytes field, odin3_bytes *out) {
+    return unescape_ex(map->arena, field, true, out);
+}
+
+odin3_status odin3_name_map_write_header_v2(odin3_strbuf *out, uint32_t width, const char *ast) {
+    bool known = false;
+    for (size_t k = 0; ast != NULL && k < sizeof AST_WORDS / sizeof AST_WORDS[0]; k++) {
+        known = known || strcmp(ast, AST_WORDS[k]) == 0;
+    }
+    if (width < 1 || width > ODIN3_HASH_NAME_MAX_CHARS || !known) {
+        odin3_log(ODIN3_LOG_ERROR, "name map: version 2 header width %u or ast '%s' out of range",
+                  width, ast != NULL ? ast : "");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_strbuf_appendf(out, "# odin3-names %d hash=sha256 width=%u %s ast=%s\n",
+                                ODIN3_NAME_MAP_VERSION_2, width, PROV_TOKEN, ast);
+}
+
+static odin3_status put_line_fields(odin3_strbuf *out, char type, const odin3_nm_field *fields,
+                                    size_t n) {
+    odin3_status st = odin3_strbuf_appendf(out, "%c\t", type);
+    for (size_t i = 0; st == ODIN3_OK && i < n; i++) {
+        if (i > 0) {
+            st = odin3_strbuf_append(out, odin3_bytes_cstr("\t"));
+        }
+        if (st == ODIN3_OK && fields[i].raw) {
+            st = fields[i].text.len == 0 ? ODIN3_OK : odin3_strbuf_append(out, fields[i].text);
+        } else if (st == ODIN3_OK) {
+            st = put_field_ex(out, fields[i].text, true);
+        }
+    }
+    return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n")) : st;
+}
+
+odin3_status odin3_name_map_write_line_v2(odin3_strbuf *out, char type,
+                                          const odin3_nm_field *fields, size_t n) {
+    bool letter = (type >= 'A' && type <= 'Z') || (type >= 'a' && type <= 'z');
+    if (!letter || n == 0 || n > ODIN3_NM2_MAX_FIELDS) {
+        odin3_log(ODIN3_LOG_ERROR, "name map: a version 2 line of type '%c' with %zu fields", type,
+                  n);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    size_t start = out->len;
+    odin3_status st = put_line_fields(out, type, fields, n);
+    if (st == ODIN3_OK && out->len - start - 1 > ODIN3_NAME_MAP_MAX_LINE) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "name map: a version 2 line of type '%c' is %zu bytes, over the "
+                  "limit of %d",
+                  type, out->len - start - 1, ODIN3_NAME_MAP_MAX_LINE);
+        st = ODIN3_ERR_INVALID_ARG;
+    }
+    if (st != ODIN3_OK && out->len != start) {
+        truncate_to(out, start);
+    }
+    return st;
+}
+
+/* --- version 2: check --------------------------------------------------------------------------
+ */
+
+/* The number in a reference like `r12` (prefix r), false for anything else. */
+static bool ref_number(odin3_bytes tok, char prefix, uint32_t *num) {
+    if (tok.len < 2 || ((const char *)tok.ptr)[0] != prefix) {
+        return false;
+    }
+    return parse_decimal((odin3_bytes){(const char *)tok.ptr + 1, tok.len - 1}, num) && *num > 0;
+}
+
+/* Calls fn for each element of a list field split at sep (an empty field has none). */
+typedef void (*elem_fn)(void *ctx, odin3_bytes elem);
+
+static void each_element(odin3_bytes field, char sep, elem_fn fn, void *ctx) {
+    const char *bytes = (const char *)field.ptr;
+    size_t start = 0;
+    for (size_t i = 0; field.len > 0 && i <= field.len; i++) {
+        if (i == field.len || bytes[i] == sep) {
+            fn(ctx, (odin3_bytes){bytes + start, i - start});
+            start = i + 1;
+        }
+    }
+}
+
+/* What a check of one line needs: the counters, the line's own number and the table sizes. */
+typedef struct chk {
+    odin3_name_check_v2 *res;
+    uint32_t own;      /* the number of the line being checked */
+    uint32_t limit[4]; /* r, c, f, t counts */
+} chk;
+
+enum { LIM_R, LIM_C, LIM_F, LIM_T };
+
+static void ref_elem(chk *ck, odin3_bytes tok, char prefix, uint32_t limit, bool before) {
+    uint32_t num = 0;
+    if (!ref_number(tok, prefix, &num) || num > limit) {
+        ck->res->bad_ref++;
+    } else if (before && num >= ck->own) {
+        ck->res->bad_order++;
+    }
+}
+
+typedef struct list_job {
+    chk *ck;
+    char prefix;
+    uint32_t limit;
+    bool before; /* every element must be numbered before the line's own */
+} list_job;
+
+static void list_elem(void *ctx, odin3_bytes elem) {
+    const list_job *job = ctx;
+    ref_elem(job->ck, elem, job->prefix, job->limit, job->before);
+}
+
+static uint32_t limit_of(const chk *ck, char prefix) {
+    switch (prefix) {
+    case 'r':
+        return ck->limit[LIM_R];
+    case 'c':
+        return ck->limit[LIM_C];
+    case 'f':
+        return ck->limit[LIM_F];
+    default:
+        return ck->limit[LIM_T];
+    }
+}
+
+static void check_list(chk *ck, odin3_bytes field, char prefix, bool before) {
+    list_job job = {ck, prefix, limit_of(ck, prefix), before};
+    each_element(field, ',', list_elem, &job);
+}
+
+/* An origin `f<n>:span` or `-:span`. */
+static void origin_elem(void *ctx, odin3_bytes elem) {
+    chk *ck = ctx;
+    const char *bytes = (const char *)elem.ptr;
+    const char *colon = elem.len > 0 ? (const char *)memchr(bytes, ':', elem.len) : NULL;
+    if (colon == NULL) {
+        ck->res->bad_ref++;
+        return;
+    }
+    odin3_bytes file = {bytes, (size_t)(colon - bytes)};
+    if (bytes_cmp(file, odin3_bytes_cstr("-")) != 0) {
+        ref_elem(ck, file, 'f', ck->limit[LIM_F], false);
+    }
+}
+
+/* `call=c<n>` in a flags element resolves. */
+static void flag_elem(void *ctx, odin3_bytes elem) {
+    chk *ck = ctx;
+    static const char CALL[] = "call=";
+    if (elem.len > sizeof CALL - 1 && memcmp(elem.ptr, CALL, sizeof CALL - 1) == 0) {
+        ref_elem(
+            ck,
+            (odin3_bytes){(const char *)elem.ptr + sizeof CALL - 1, elem.len - (sizeof CALL - 1)},
+            'c', ck->limit[LIM_C], false);
+    }
+}
+
+/* The dir field: `origin` or `<refine|rewrite|coarsen|context>:<level>`. */
+static bool dir_valid(odin3_bytes dir, char kind) {
+    static const char *const DIRS[] = {"refine", "rewrite", "coarsen", "context"};
+    if (kind != 'D') {
+        return bytes_cmp(dir, odin3_bytes_cstr("origin")) == 0;
+    }
+    const char *colon = dir.len > 0 ? (const char *)memchr(dir.ptr, ':', dir.len) : NULL;
+    if (colon == NULL) {
+        return false;
+    }
+    odin3_bytes word = {dir.ptr, (size_t)(colon - (const char *)dir.ptr)};
+    for (size_t k = 0; k < sizeof DIRS / sizeof DIRS[0]; k++) {
+        if (bytes_cmp(word, odin3_bytes_cstr(DIRS[k])) == 0) {
+            return dir.len > word.len + 1;
+        }
+    }
+    return false;
+}
+
+/* The step `t<n>.<op>`: t resolves and op is a number. */
+static bool step_valid(const chk *ck, odin3_bytes step) {
+    const char *dot = step.len > 0 ? (const char *)memchr(step.ptr, '.', step.len) : NULL;
+    uint32_t num = 0;
+    uint32_t op = 0;
+    if (dot == NULL) {
+        return false;
+    }
+    odin3_bytes run = {step.ptr, (size_t)(dot - (const char *)step.ptr)};
+    odin3_bytes op_text = {dot + 1, step.len - run.len - 1};
+    return ref_number(run, 't', &num) && num <= ck->limit[LIM_T] && parse_decimal(op_text, &op) &&
+           op > 0;
+}
+
+static void check_r(chk *ck, const odin3_nm_line *line) {
+    const odin3_bytes *fld = line->f;
+    char kind = '?';
+    if (fld[R_KIND].len == 1) {
+        kind = ((const char *)fld[R_KIND].ptr)[0];
+    }
+    if ((kind != 'S' && kind != 'I' && kind != 'D') || fld[R_LEVEL].len == 0 ||
+        !dir_valid(fld[R_DIR], kind) || !step_valid(ck, fld[R_STEP])) {
+        ck->res->bad_class++;
+    }
+    check_list(ck, fld[R_PARENTS], 'r', true);
+    each_element(fld[R_ORIGINS], '|', origin_elem, ck);
+    check_list(ck, fld[R_CONS], 'c', false);
+    each_element(fld[R_FLAGS], ',', flag_elem, ck);
+}
+
+static void check_c(chk *ck, const odin3_nm_line *line) {
+    if (line->f[C_PARENT].len > 0) {
+        ref_elem(ck, line->f[C_PARENT], 'c', ck->limit[LIM_C], true);
+    }
+    if (line->f[C_FILE].len > 0) {
+        ref_elem(ck, line->f[C_FILE], 'f', ck->limit[LIM_F], false);
+    }
+}
+
+static void check_object(chk *ck, const odin3_nm_line *line) {
+    odin3_bytes recs = line->type == 'O' ? line->f[O_RECS] : line->f[N_RECS];
+    uint32_t before = ck->res->bad_ref;
+    check_list(ck, recs, 'r', false);
+    if (ck->res->bad_ref != before) {
+        ck->res->bad_ref = before;
+        ck->res->no_record++;
+    }
+}
+
+/* Counts the lines of each numbered type and checks that their ids run 1, 2, 3, ... */
+static void count_lines(const odin3_name_map *map, chk *ck) {
+    static const char LETTERS[] = {'R', 'C', 'F', 'T'};
+    static const char PREFIX[] = {'r', 'c', 'f', 't'};
+    uint32_t seen[4] = {0, 0, 0, 0};
+    for (size_t i = 0; i < map->lines.len; i++) {
+        const odin3_nm_line *line = (const odin3_nm_line *)odin3_vec_cat(&map->lines, i);
+        for (size_t k = 0; k < sizeof LETTERS; k++) {
+            uint32_t num = 0;
+            if (line->type != LETTERS[k]) {
+                continue;
+            }
+            seen[k]++;
+            if (!ref_number(line->f[0], PREFIX[k], &num) || num != seen[k]) {
+                ck->res->bad_id++;
+            }
+        }
+        ck->res->objects += line->type == 'O' || line->type == 'N' ? 1U : 0U;
+    }
+    for (size_t k = 0; k < 4; k++) {
+        ck->limit[k] = seen[k];
+    }
+    ck->res->records = seen[LIM_R];
+    ck->res->constructs = seen[LIM_C];
+    ck->res->files = seen[LIM_F];
+    ck->res->runs = seen[LIM_T];
+}
+
+odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map) {
+    odin3_name_check_v2 res = {0};
+    chk ck = {&res, 0, {0, 0, 0, 0}};
+    uint32_t number[4] = {0, 0, 0, 0};
+    if (map->version != ODIN3_NAME_MAP_VERSION_2) {
+        return res;
+    }
+    res.ignored = map->ignored;
+    count_lines(map, &ck);
+    for (size_t i = 0; i < map->lines.len; i++) {
+        const odin3_nm_line *line = (const odin3_nm_line *)odin3_vec_cat(&map->lines, i);
+        if (line->type == 'R') {
+            ck.own = ++number[LIM_R];
+            check_r(&ck, line);
+        } else if (line->type == 'C') {
+            ck.own = ++number[LIM_C];
+            check_c(&ck, line);
+        } else if (line->type == 'O' || line->type == 'N') {
+            check_object(&ck, line);
+        }
+    }
+    return res;
+}
+
+bool odin3_name_check_v2_ok(const odin3_name_check_v2 *check) {
+    return check->bad_id == 0 && check->bad_ref == 0 && check->bad_order == 0 &&
+           check->bad_class == 0 && check->no_record == 0;
+}
+
+bool odin3_name_check_v2_report(const odin3_name_check_v2 *check, const char *who) {
+    const struct {
+        uint32_t count;
+        const char *what;
+    } problems[] = {{check->bad_id, "line(s) whose id is not their line number"},
+                    {check->bad_ref, "reference(s) that do not resolve"},
+                    {check->bad_order, "parent(s) not numbered before their child"},
+                    {check->bad_class, "R line(s) with no valid kind, dir or step"},
+                    {check->no_record, "O or N line(s) whose record is missing"}};
+    for (size_t k = 0; k < sizeof problems / sizeof problems[0]; k++) {
+        if (problems[k].count != 0) {
+            odin3_log(ODIN3_LOG_ERROR, "%s: name map check: %u %s", who != NULL ? who : "name map",
+                      (unsigned)problems[k].count, problems[k].what);
+        }
+    }
+    if (check->ignored != 0) {
+        odin3_log(ODIN3_LOG_WARN, "%s: name map check: %u line(s) ignored by the parse",
+                  who != NULL ? who : "name map", (unsigned)check->ignored);
+    }
+    return odin3_name_check_v2_ok(check);
 }

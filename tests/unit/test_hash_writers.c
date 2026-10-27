@@ -8,6 +8,7 @@
 #include "frontends/blif/reader.h"
 #include "ir/design.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "passes/manager.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -765,6 +766,315 @@ static void test_names_arguments(void) {
     odin3_util_free(text);
 }
 
+/* --- --prov-map: the version 2 map (V1.2.0 3.5) ---------------------------------------------- */
+
+/* Parses the map text into map (fresh) and expects a clean version 2 map. */
+static void parse_v2(odin3_name_map *map, const char *text) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(map));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_name_map_parse(map, odin3_bytes_cstr(text), "test.names"), log_text);
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, map->ignored, text);
+    TEST_ASSERT_EQUAL_UINT32(2, map->version);
+}
+
+/* Every O line of the version 2 map carries the record of its object. */
+static void expect_records_on_o_lines(const odin3_name_map *map, const char *pass) {
+    for (size_t k = 0; k < map->lines.len; k++) {
+        const odin3_nm_line *line = odin3_vec_cat(&map->lines, k);
+        if (line->type == 'O') {
+            TEST_ASSERT_TRUE_MESSAGE(line->f[7].len > 1, pass);
+            TEST_ASSERT_EQUAL_CHAR('r', ((const char *)line->f[7].ptr)[0]);
+        }
+    }
+}
+
+/* The O lines of the version 2 map are the version 1 lines: same short and full names, in order. */
+static void expect_same_names(const odin3_name_map *first, const odin3_name_map *second) {
+    TEST_ASSERT_EQUAL_UINT(first->entries.len, second->entries.len);
+    for (size_t k = 0; k < first->entries.len; k++) {
+        const odin3_name_entry *want = odin3_vec_cat(&first->entries, k);
+        const odin3_name_entry *got = odin3_vec_cat(&second->entries, k);
+        TEST_ASSERT_EQUAL_size_t(want->short_name.len, got->short_name.len);
+        TEST_ASSERT_EQUAL_MEMORY(want->short_name.ptr, got->short_name.ptr, want->short_name.len);
+        TEST_ASSERT_EQUAL_size_t(want->full.len, got->full.len);
+        TEST_ASSERT_EQUAL_MEMORY(want->full.ptr, got->full.ptr, want->full.len);
+    }
+}
+
+static void check_version_2_pair(const writer_case *wc, const written *one, const written *two) {
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(one->net, two->net, wc->pass); /* the netlist is unchanged */
+    TEST_ASSERT_EQUAL_INT(0, strncmp(one->map, "# odin3-names 1 ", 16));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        0, strncmp(two->map, "# odin3-names 2 hash=sha256 width=10 prov=1 ast=none\n", 53),
+        two->map);
+    odin3_name_map map;
+    parse_v2(&map, two->map);
+    TEST_ASSERT_EQUAL_UINT_MESSAGE(wc->entries, map.entries.len, two->map);
+    odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
+    TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_ok(&check), two->map);
+    TEST_ASSERT_TRUE(check.records > 0);
+    expect_records_on_o_lines(&map, wc->pass);
+    odin3_name_map first;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_name_map_init(&first));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_name_map_parse(&first, odin3_bytes_cstr(one->map), "v1.names"));
+    expect_same_names(&first, &map);
+    odin3_name_map_free(&first);
+    odin3_name_map_free(&map);
+}
+
+static void reset_design(void) {
+    odin3_design_destroy(design);
+    design = odin3_design_create();
+}
+
+static void test_prov_map_writes_version_2_beside_an_identical_netlist(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "v1"), log_text);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, write_hash_extra(wc, "v2", odin3_bytes_cstr("--prov-map")), log_text);
+        written one = read_written(wc, "v1");
+        written two = read_written(wc, "v2");
+        check_version_2_pair(wc, &one, &two);
+        free_written(&one);
+        free_written(&two);
+        reset_design();
+    }
+}
+
+static void expect_full_in(const odin3_name_entry *entry, const char *prov) {
+    char full[SMALL * 4];
+    TEST_ASSERT_TRUE(entry->full.len < sizeof full);
+    memcpy(full, entry->full.ptr, entry->full.len);
+    full[entry->full.len] = '\0';
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(prov, full), full);
+}
+
+/* Every `full` of the map is in the provenance-style netlist text. */
+static void expect_fulls_in(const odin3_name_map *map, const char *prov) {
+    TEST_ASSERT_TRUE(map->entries.len > 0);
+    for (size_t k = 0; k < map->entries.len; k++) {
+        expect_full_in(odin3_vec_cat(&map->entries, k), prov);
+    }
+}
+
+/* 3.5: the `full` of every O line is the name --name-style provenance writes for the net. */
+static void test_prov_map_full_equals_the_provenance_name(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, write_hash_extra(wc, "h", odin3_bytes_cstr("--prov-map")), log_text);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK,
+            run(wc->pass, fmt_args("%s --name-style provenance %s/p%s", wc->flags, dir, wc->ext)),
+            log_text);
+        written hashed = read_written(wc, "h");
+        char pname[SMALL];
+        (void)snprintf(pname, sizeof pname, "p%s", wc->ext);
+        char *prov = slurp(pname);
+        odin3_name_map map;
+        parse_v2(&map, hashed.map);
+        expect_fulls_in(&map, prov);
+        odin3_name_map_free(&map);
+        odin3_util_free(prov);
+        free_written(&hashed);
+        reset_design();
+    }
+}
+
+static void test_prov_map_needs_hash_names(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_ERR_INVALID_ARG,
+            run(wc->pass, fmt_args("%s --prov-map %s/np%s", wc->flags, dir, wc->ext)));
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "--prov-map needs --name-style hash"),
+                                     log_text);
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_ERR_INVALID_ARG,
+            run(wc->pass, fmt_args("%s --name-style provenance --prov-map full %s/np%s", wc->flags,
+                                   dir, wc->ext)));
+        char name[SMALL];
+        (void)snprintf(name, sizeof name, "np%s", wc->ext);
+        TEST_ASSERT_FALSE(exists(name));
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
+/* No file named base + ext (+ .names) exists. */
+static void expect_nothing_written(const writer_case *wc, const char *base) {
+    char name[SMALL];
+    (void)snprintf(name, sizeof name, "%s%s", base, wc->ext);
+    TEST_ASSERT_FALSE(exists(name));
+    (void)snprintf(name, sizeof name, "%s%s.names", base, wc->ext);
+    TEST_ASSERT_FALSE(exists(name));
+}
+
+static void test_prov_map_above_what_the_read_kept_is_refused(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design(); /* a BLIF read: no construct table was kept */
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                              write_hash_extra(wc, "kept", odin3_bytes_cstr("--prov-map full")));
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "read_verilog --prov-ast full"), log_text);
+        expect_nothing_written(wc, "kept"); /* refused before anything is written */
+        reset_design();
+    }
+}
+
+/* A mode word after the option is the mode; a path after it is not. */
+static void test_prov_map_option_word_is_optional(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK,
+            run(wc->pass,
+                fmt_args("--prov-map %s --name-style hash %s/w%s", wc->flags, dir, wc->ext)),
+            log_text);
+        char name[SMALL];
+        (void)snprintf(name, sizeof name, "w%s.names", wc->ext);
+        char *map = slurp(name);
+        TEST_ASSERT_NOT_NULL(strstr(map, "# odin3-names 2 "));
+        odin3_util_free(map);
+        odin3_design_destroy(design);
+        design = odin3_design_create();
+    }
+}
+
+/* --prov-map given twice is refused by all three writers; nothing is written. */
+static void test_prov_map_twice_is_refused(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_ERR_INVALID_ARG,
+            write_hash_extra(wc, "twice", odin3_bytes_cstr("--prov-map refs --prov-map")));
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "given twice"), log_text);
+        expect_nothing_written(wc, "twice");
+        reset_design();
+    }
+}
+
+/* An output in a directory that does not exist: the write fails and leaves no netlist and no map.
+ */
+static void test_prov_map_write_failure_leaves_nothing(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_NOT_EQUAL_INT(
+            ODIN3_OK, run(wc->pass, fmt_args("%s --name-style hash --prov-map %s/nodir/x%s",
+                                             wc->flags, dir, wc->ext)));
+        char name[SMALL];
+        (void)snprintf(name, sizeof name, "nodir/x%s", wc->ext);
+        TEST_ASSERT_FALSE(exists(name));
+        (void)snprintf(name, sizeof name, "nodir/x%s.names", wc->ext);
+        TEST_ASSERT_FALSE(exists(name));
+        reset_design();
+    }
+}
+
+/* A map that cannot be renamed into place fails the write; the existing netlist stays and no
+ * version 2 map appears (the same rule as version 1, with --prov-map). */
+static void test_prov_map_commit_failure_keeps_the_old_netlist(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        char outname[SMALL];
+        char path[PATH_BUF];
+        char extra[PATH_BUF];
+        (void)snprintf(outname, sizeof outname, "oldv2%s", wc->ext);
+        put_file(outname, odin3_bytes_cstr("OLD\n"));
+        path_of("mapdir2", path);
+        TEST_ASSERT_EQUAL_INT(0, mkdir(path, 0700));
+        (void)snprintf(extra, sizeof extra, "--prov-map --name-map %.400s", path);
+        TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, write_hash_extra(wc, "oldv2", odin3_bytes_cstr(extra)));
+        char *net = slurp(outname);
+        TEST_ASSERT_EQUAL_STRING("OLD\n", net);
+        odin3_util_free(net);
+        TEST_ASSERT_EQUAL_INT(0, rmdir(path));
+        reset_design();
+    }
+}
+
+/* A located net whose record is derived by an operation with no class (an export-time refusal). */
+static void add_classless_net(void) {
+    odin3_pass_ctx ctx;
+    uint32_t file = 0;
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("d.v"), &file));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("bad@d.v:9"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, file, &ctx));
+    odin3_srcloc loc = {file, 9, 1, 9, 5, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id src = {0};
+    odin3_prov_id bad = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &src));
+    odin3_prov_begin_op(&ctx); /* no class */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&src, 1}, &bad));
+    odin3_module *top = odin3_module_get(design, odin3_design_top(design));
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, name, bad, &net));
+}
+
+/* A class-less derived record stops the export: no map and no netlist, in all three writers.  In a
+ * Debug build the check before the pass refuses it first (rule 13); in a Release build the writer
+ * does (INVALID_ARG, "has no class"). */
+static void test_prov_map_classless_record_writes_neither_file(void) {
+#ifdef NDEBUG
+    const odin3_status want = ODIN3_ERR_INVALID_ARG;
+#else
+    const odin3_status want = ODIN3_ERR_CHECK;
+#endif
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        add_classless_net();
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            want, write_hash_extra(wc, "nocls", odin3_bytes_cstr("--prov-map")), log_text);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "has no class"), log_text);
+        expect_nothing_written(wc, "nocls");
+        reset_design();
+    }
+}
+
+static uint32_t count_type(const odin3_name_map *map, char type) {
+    uint32_t count = 0;
+    for (size_t k = 0; k < map->lines.len; k++) {
+        count += ((const odin3_nm_line *)odin3_vec_cat(&map->lines, k))->type == type ? 1U : 0U;
+    }
+    return count;
+}
+
+/* Each writer's version 2 map has N lines for the names it keeps (BLIF: nets only). */
+static void test_prov_map_has_n_lines_from_every_writer(void) {
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, write_hash_extra(wc, "nl", odin3_bytes_cstr("--prov-map")), log_text);
+        written files = read_written(wc, "nl");
+        odin3_name_map map;
+        parse_v2(&map, files.map);
+        TEST_ASSERT_TRUE_MESSAGE(count_type(&map, 'N') > 0, wc->pass);
+        odin3_name_check_v2 check = odin3_name_map_check_v2(&map);
+        TEST_ASSERT_TRUE_MESSAGE(odin3_name_check_v2_report(&check, wc->pass), files.map);
+        odin3_name_map_free(&map);
+        free_written(&files);
+        reset_design();
+    }
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_blif_hash);
@@ -787,5 +1097,15 @@ int main(void) {
     RUN_TEST(test_json_plain_key_equals_provenance);
     RUN_TEST(test_names_check);
     RUN_TEST(test_names_arguments);
+    RUN_TEST(test_prov_map_writes_version_2_beside_an_identical_netlist);
+    RUN_TEST(test_prov_map_full_equals_the_provenance_name);
+    RUN_TEST(test_prov_map_needs_hash_names);
+    RUN_TEST(test_prov_map_above_what_the_read_kept_is_refused);
+    RUN_TEST(test_prov_map_option_word_is_optional);
+    RUN_TEST(test_prov_map_twice_is_refused);
+    RUN_TEST(test_prov_map_write_failure_leaves_nothing);
+    RUN_TEST(test_prov_map_commit_failure_keeps_the_old_netlist);
+    RUN_TEST(test_prov_map_has_n_lines_from_every_writer);
+    RUN_TEST(test_prov_map_classless_record_writes_neither_file);
     return UNITY_END();
 }

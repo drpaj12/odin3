@@ -262,6 +262,7 @@ enum {
     WB_SRC_ATTR = 1U << 3,
     WB_NAME_MAP = 1U << 4,
     WB_GATES_AS_NAMES = 1U << 5,
+    WB_PROV_MAP = 1U << 6,
     WB_DECIMAL = 10,
     WB_MAX_DIGITS = 9, /* more digits than this are out of range anyway (no overflow) */
 };
@@ -313,22 +314,40 @@ static odin3_status wb_name_map(odin3_bytes value, write_blif_args *out) {
     return odin3_strbuf_append(&out->name_map, value);
 }
 
+/* The WB_* bit of an option word, 0 for an unknown one. */
+static uint8_t wb_bit_of(odin3_bytes word) {
+    static const struct {
+        const char *name;
+        uint8_t bit;
+    } OPTIONS[] = {{"--vtr", WB_VTR},
+                   {"--lut-k", WB_LUT_K},
+                   {"--name-style", WB_NAME_STYLE},
+                   {"--src-attr", WB_SRC_ATTR},
+                   {"--name-map", WB_NAME_MAP},
+                   {"--gates-as-names", WB_GATES_AS_NAMES},
+                   {"--prov-map", WB_PROV_MAP}};
+    for (size_t k = 0; k < sizeof OPTIONS / sizeof OPTIONS[0]; k++) {
+        if (odin3_pass_arg_is(word, OPTIONS[k].name)) {
+            return OPTIONS[k].bit;
+        }
+    }
+    return 0;
+}
+
+/* --prov-map and its optional value (refs, constructs or full: the next word, when it is one). */
+static void wb_prov_map(odin3_bytes *rest, write_blif_args *out) {
+    odin3_bytes peek = *rest;
+    odin3_prov_map_mode mode = ODIN3_PROV_MAP_ANY;
+    if (odin3_prov_map_word(odin3_pass_arg_next(&peek), &mode)) {
+        *rest = peek;
+    }
+    out->opts.prov_map = mode;
+}
+
 /* Option word (its value read from rest): unknown, given twice, or parsed into out. */
 static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_args *out) {
-    uint8_t bit = 0;
-    if (odin3_pass_arg_is(word, "--vtr")) {
-        bit = WB_VTR;
-    } else if (odin3_pass_arg_is(word, "--lut-k")) {
-        bit = WB_LUT_K;
-    } else if (odin3_pass_arg_is(word, "--name-style")) {
-        bit = WB_NAME_STYLE;
-    } else if (odin3_pass_arg_is(word, "--src-attr")) {
-        bit = WB_SRC_ATTR;
-    } else if (odin3_pass_arg_is(word, "--name-map")) {
-        bit = WB_NAME_MAP;
-    } else if (odin3_pass_arg_is(word, "--gates-as-names")) {
-        bit = WB_GATES_AS_NAMES;
-    } else {
+    uint8_t bit = wb_bit_of(word);
+    if (bit == 0) {
         return unknown_arg("write_blif", word);
     }
     if ((out->seen & bit) != 0) {
@@ -339,6 +358,10 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
     out->seen |= bit;
     if (bit == WB_VTR) {
         out->opts.dialect = ODIN3_BLIF_DIALECT_VTR;
+        return ODIN3_OK;
+    }
+    if (bit == WB_PROV_MAP) {
+        wb_prov_map(rest, out);
         return ODIN3_OK;
     }
     if (bit == WB_SRC_ATTR || bit == WB_GATES_AS_NAMES) {
@@ -366,6 +389,8 @@ static odin3_status wb_check_options(const write_blif_args *out) {
         why = "write_blif: --lut-k and --name-style need --vtr";
     } else if ((out->seen & WB_NAME_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
         why = "write_blif: --name-map needs --name-style hash";
+    } else if ((out->seen & WB_PROV_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
+        why = "write_blif: --prov-map needs --name-style hash";
     } else if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
         why = "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines";
     } else if ((out->seen & WB_GATES_AS_NAMES) != 0 && (out->seen & WB_VTR) != 0) {
@@ -412,9 +437,9 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
                                    void *user) {
     (void)user;
     (void)ctx;
-    write_blif_args parsed = {
-        .opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL, false},
-        .seen = 0};
+    write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false,
+                                       NULL, false, ODIN3_PROV_MAP_NONE},
+                              .seen = 0};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.name_map);
     odin3_status st = write_blif_parse(args, &parsed);
@@ -775,7 +800,8 @@ static const odin3_pass_def READ_TECHLIB = {
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif",
     "write_blif [--vtr] [--lut-k K] [--name-style short|provenance|hash [--name-map <file>]] "
-    "[--src-attr] [--gates-as-names] <file>: write the design as BLIF (the top first); --vtr "
+    "[--prov-map [refs|constructs|full]] [--src-attr] [--gates-as-names] <file>: write the design "
+    "as BLIF (the top first); --prov-map (hash names only) writes the version 2 name map; --vtr "
     "writes the top alone in the dialect VPR reads; hash names write the name map to "
     "<file>.names or --name-map; --src-attr (plain dialect only) writes each cell's HDL "
     "locations as `.attr src \"SRC\"`; --gates-as-names (plain dialect only) writes gate cells "

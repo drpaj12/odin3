@@ -547,7 +547,8 @@ static odin3_status note_hashed(blif_writer *wr, odin3_net_id net, uint32_t suff
                                        .module_name = str_bytes(wr, odin3_module_name(wr->module)),
                                        .kind = ODIN3_NAME_NET,
                                        .key = net.v,
-                                       .full = {full.data, full.len}})
+                                       .full = {full.data, full.len},
+                                       .prov = odin3_net_prov(wr->module, net).v})
              : st;
     odin3_strbuf_free(&full);
     return st;
@@ -1085,7 +1086,15 @@ static odin3_status hash_reserved(blif_writer *wr, odin3_bytes **out, uint32_t *
     for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
         uint64_t row = 0;
         if (odin3_net_live(wr->module, (odin3_net_id){i}) && !odin3_u64map_get(renamed, i, &row)) {
-            (*out)[(*count)++] = net_name(wr, (odin3_net_id){i});
+            odin3_net_id net = {i};
+            (*out)[(*count)++] = net_name(wr, net);
+            st = odin3_hash_rows_add_kept(
+                &wr->rows,
+                &(odin3_hash_kept_req){.module = odin3_module_id_of(wr->module).v,
+                                       .module_name = str_bytes(wr, odin3_module_name(wr->module)),
+                                       .kind = ODIN3_NAME_NET,
+                                       .name = net_name(wr, net),
+                                       .prov = odin3_net_prov(wr->module, net).v});
         }
     }
     odin3_u64map_destroy(renamed);
@@ -2582,6 +2591,10 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     odin3_strbuf_init(&wr->prov);
     odin3_strbuf_init(&wr->map_text);
     odin3_hash_rows_init(&wr->rows);
+    odin3_status prov_st =
+        opts->name_style == ODIN3_BLIF_NAMES_HASH && opts->prov_map != ODIN3_PROV_MAP_NONE
+            ? odin3_hash_rows_prov_enable(&wr->rows, design, opts->prov_map, "write_blif")
+            : ODIN3_OK;
     odin3_strbuf_init(&wr->cover);
     odin3_strbuf_init(&wr->orig);
     odin3_strbuf_init(&wr->legal);
@@ -2603,6 +2616,9 @@ static odin3_status wr_init(blif_writer *wr, const odin3_design *design, const c
     wr->hdl = odin3_hdl_ctx_create(design, "write_blif");
     if (wr->type_module == NULL || wr->declared == NULL || wr->hdl == NULL) {
         return wr_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
+    if (prov_st != ODIN3_OK) {
+        return wr_fail(wr, prov_st);
     }
     for (uint32_t i = odin3_design_declared_model_count(design); i > 0; i--) {
         /* backwards, so each type ends up mapped to its first entry */
@@ -2695,7 +2711,7 @@ static const char *plain_only_option(const odin3_blif_write_opts *opts) {
 
 /* The options' refusals for odin3_blif_write_with (plan 3E points (m) and (n)), before the
  * preflight (whose own option checks serve its direct callers); logged, ODIN3_ERR_INVALID_ARG. */
-static odin3_status check_opts(const odin3_blif_write_opts *opts) {
+static odin3_status check_opts_base(const odin3_blif_write_opts *opts) {
     bool vtr = opts->dialect == ODIN3_BLIF_DIALECT_VTR;
     bool provenance = opts->name_style == ODIN3_BLIF_NAMES_PROVENANCE ||
                       opts->name_style == ODIN3_BLIF_NAMES_HASH;
@@ -2719,6 +2735,15 @@ static odin3_status check_opts(const odin3_blif_write_opts *opts) {
         return ODIN3_ERR_INVALID_ARG;
     }
     return ODIN3_OK;
+}
+
+/* check_opts_base, and --prov-map only with hash names (V1.2.0 3.5). */
+static odin3_status check_opts(const odin3_blif_write_opts *opts) {
+    if (opts->prov_map != ODIN3_PROV_MAP_NONE && opts->name_style != ODIN3_BLIF_NAMES_HASH) {
+        odin3_log(ODIN3_LOG_ERROR, "odin3_blif_write_with: --prov-map needs --name-style hash");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return check_opts_base(opts);
 }
 
 /* One `# abc: <run information>` line per pass run named abc that has information, in run order
@@ -2874,7 +2899,8 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
     odin3_blif_write_opts use =
         opts != NULL ? *opts
                      : (odin3_blif_write_opts){
-                           ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL, false};
+                           ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL, false,
+                           ODIN3_PROV_MAP_NONE};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {

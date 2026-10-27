@@ -18,8 +18,12 @@ static uint32_t test_start = 0;
 
 void odin3_hash_rows_init(odin3_hash_rows *rows) {
     odin3_vec_init(&rows->rows, sizeof(odin3_hash_row));
+    odin3_vec_init(&rows->kept, sizeof(odin3_hash_kept));
     odin3_strbuf_init(&rows->text);
     rows->start = test_start;
+    rows->design = NULL;
+    rows->ast = ODIN3_CONSTRUCT_MODE_OFF;
+    rows->prov_map = false;
 }
 
 void odin3_hash_rows_test_start(uint32_t start) {
@@ -32,6 +36,7 @@ static uint32_t start_of(const odin3_hash_rows *rows) {
 
 void odin3_hash_rows_free(odin3_hash_rows *rows) {
     odin3_vec_free(&rows->rows);
+    odin3_vec_free(&rows->kept);
     odin3_strbuf_free(&rows->text);
 }
 
@@ -53,7 +58,49 @@ odin3_status odin3_hash_rows_add(odin3_hash_rows *rows, const odin3_hash_row_req
                             .module_name_off = used,
                             .module_name_len = req->module_name.len,
                             .full_off = used + req->module_name.len,
-                            .full_len = req->full.len};
+                            .full_len = req->full.len,
+                            .prov = req->prov};
+    return ODIN3_OK;
+}
+
+odin3_status odin3_hash_rows_prov_enable(odin3_hash_rows *rows, const odin3_design *design,
+                                         odin3_prov_map_mode requested, const char *who) {
+    odin3_construct_mode ast = ODIN3_CONSTRUCT_MODE_OFF;
+    odin3_status st = odin3_prov_map_resolve(design, requested, who, &ast);
+    if (st == ODIN3_OK) {
+        rows->design = design;
+        rows->ast = ast;
+        rows->prov_map = true;
+    }
+    return st;
+}
+
+bool odin3_hash_rows_prov_on(const odin3_hash_rows *rows) {
+    return rows->prov_map;
+}
+
+odin3_status odin3_hash_rows_add_kept(odin3_hash_rows *rows, const odin3_hash_kept_req *req) {
+    if (!rows->prov_map || req->prov == 0) {
+        return ODIN3_OK;
+    }
+    size_t used = rows->text.len;
+    odin3_status st = odin3_strbuf_append(&rows->text, req->module_name);
+    st = st == ODIN3_OK ? odin3_strbuf_append(&rows->text, req->name) : st;
+    odin3_hash_kept *kept = st == ODIN3_OK ? odin3_vec_push(&rows->kept) : NULL;
+    if (kept == NULL) {
+        if (rows->text.data != NULL) {
+            rows->text.len = used;
+            rows->text.data[used] = '\0';
+        }
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *kept = (odin3_hash_kept){.module = req->module,
+                              .kind = req->kind,
+                              .module_name_off = used,
+                              .module_name_len = req->module_name.len,
+                              .name_off = used + req->module_name.len,
+                              .name_len = req->name.len,
+                              .prov = req->prov};
     return ODIN3_OK;
 }
 
@@ -65,8 +112,14 @@ const odin3_hash_row *odin3_hash_rows_at(const odin3_hash_rows *rows, size_t ind
     return odin3_vec_cat(&rows->rows, index);
 }
 
+/* text[off, off + len) of the rows' name text; an empty view (no pointer arithmetic) for len 0,
+ * because the text buffer is still NULL while no row was added and NULL + 0 is undefined. */
+static odin3_bytes text_at(const odin3_hash_rows *rows, size_t off, size_t len) {
+    return len == 0 ? (odin3_bytes){"", 0} : (odin3_bytes){rows->text.data + off, len};
+}
+
 odin3_bytes odin3_hash_rows_full(const odin3_hash_rows *rows, const odin3_hash_row *row) {
-    return (odin3_bytes){rows->text.data + row->full_off, row->full_len};
+    return text_at(rows, row->full_off, row->full_len);
 }
 
 /* Resolves the rows of kind `kind` (any kind when `all`) among rows[first..count). */
@@ -133,11 +186,10 @@ odin3_status odin3_hash_rows_index(const odin3_hash_rows *rows, odin3_u64map **i
 /* The map entry of a row; hier, file and line are the parts of the full name (empty and 0 when it
  * does not decode as one). */
 static odin3_name_entry entry_of(const odin3_hash_rows *rows, const odin3_hash_row *row) {
-    odin3_name_entry entry = {
-        .module = {rows->text.data + row->module_name_off, row->module_name_len},
-        .kind = row->kind,
-        .short_name = {row->hash.text, strlen(row->hash.text)},
-        .full = odin3_hash_rows_full(rows, row)};
+    odin3_name_entry entry = {.module = text_at(rows, row->module_name_off, row->module_name_len),
+                              .kind = row->kind,
+                              .short_name = {row->hash.text, strlen(row->hash.text)},
+                              .full = odin3_hash_rows_full(rows, row)};
     odin3_hdl_name parts;
     if (odin3_hdl_name_decode(entry.full, &parts)) {
         entry.hier = parts.hier;
@@ -147,7 +199,43 @@ static odin3_name_entry entry_of(const odin3_hash_rows *rows, const odin3_hash_r
     return entry;
 }
 
+/* The objects of the version 2 map: the renamed rows, then the kept names. NULL on out of memory
+ * (or *count 0 and a non-NULL pointer when there are none). */
+static odin3_prov_obj *prov_objects(const odin3_hash_rows *rows, size_t *count) {
+    *count = rows->rows.len + rows->kept.len;
+    odin3_prov_obj *objs = odin3_util_calloc((*count + 1) * sizeof *objs);
+    for (size_t i = 0; objs != NULL && i < rows->rows.len; i++) {
+        const odin3_hash_row *row = odin3_hash_rows_at(rows, i);
+        objs[i] = (odin3_prov_obj){.entry = entry_of(rows, row), .record = row->prov};
+    }
+    for (size_t i = 0; objs != NULL && i < rows->kept.len; i++) {
+        const odin3_hash_kept *kept = odin3_vec_cat(&rows->kept, i);
+        objs[rows->rows.len + i] = (odin3_prov_obj){
+            .entry = {.module = text_at(rows, kept->module_name_off, kept->module_name_len),
+                      .kind = kept->kind,
+                      .short_name = text_at(rows, kept->name_off, kept->name_len)},
+            .kept = true,
+            .record = kept->prov};
+    }
+    return objs;
+}
+
+static odin3_status map_text_v2(const odin3_hash_rows *rows, odin3_strbuf *out) {
+    size_t count = 0;
+    odin3_prov_obj *objs = prov_objects(rows, &count);
+    if (objs == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    const odin3_prov_map_req req = {rows->design, start_of(rows), rows->ast};
+    odin3_status st = odin3_prov_map_text(&req, objs, count, out);
+    odin3_util_free(objs);
+    return st;
+}
+
 odin3_status odin3_hash_rows_map_text(const odin3_hash_rows *rows, odin3_strbuf *out) {
+    if (rows->prov_map) {
+        return map_text_v2(rows, out);
+    }
     size_t count = rows->rows.len;
     odin3_name_entry *entries = odin3_util_calloc((count + 1) * sizeof *entries);
     if (entries == NULL) {
