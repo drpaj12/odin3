@@ -168,8 +168,9 @@ void odin3_abc_objective_note(const char *sha_hex, const char *objective, bool s
     }
     objective_memo *slot = NULL;
     for (uint32_t i = 0; i < MEMO_SLOTS && slot == NULL; i++) {
-        slot = g_memo[i].used && memcmp(g_memo[i].sha, sha_hex, MEMO_SHA_CHARS) == 0 ? &g_memo[i]
-                                                                                    : NULL;
+        if (g_memo[i].used && memcmp(g_memo[i].sha, sha_hex, MEMO_SHA_CHARS) == 0) {
+            slot = &g_memo[i];
+        }
     }
     if (slot == NULL) {
         slot = &g_memo[g_memo_next];

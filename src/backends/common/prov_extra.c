@@ -9,7 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { DECIMAL_BASE = 10, ID_TEXT = 16 };
+enum { DECIMAL_BASE = 10, ID_TEXT = 16, SHA_TEXT = 72 }; /* SHA_TEXT: a hex SHA-256 and its NUL */
 
 bool odin3_xline_split(odin3_bytes line, odin3_xline *out) {
     const char *bytes = line.ptr;
@@ -200,7 +200,7 @@ typedef struct q_source {
 static char objective_of(const q_source *src, char *out, size_t cap) {
     out[0] = '\0';
     if (src->pass.len == 3U && memcmp(src->pass.ptr, "abc", 3U) == 0) {
-        char sha[ID_TEXT * 8] = "";
+        char sha[SHA_TEXT] = "";
         char found[ODIN3_ABC_OBJECTIVE_BYTES];
         bool stated = false;
         if (!info_word(src->info, "sha256", sha, sizeof sha) ||
