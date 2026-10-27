@@ -85,7 +85,8 @@ Top level: `schema_version` (integer, 1), `design`, `timing`, `coverage`, `criti
 the clock constraint is not met; VPR's default constraint is 0, so slack is minus the delay).
 
 `design`: `top` (module name), `flow_dir`, `report` (the VPR file), `blif` (the BLIF VPR read),
-`provenance_blif` (the second BLIF of a version 1.1.1 flow directory; null when there is none),
+`provenance_blif` (the second BLIF of a version 1.1.1 flow directory; an empty string "" for a flow
+directory with a name map, which has no second BLIF; a string on both routes),
 `netlist_json` (null when absent) and, with a name map, `name_map` (its path).
 
 `timing`:
@@ -174,9 +175,21 @@ further guess, from the text of the line. A bit is the declared index (`offset` 
 JSON netname are applied). When several source names hold one net, the shortest name wins, then
 the smaller one; that choice is deterministic and has no other meaning.
 
-Layout: `schema_version` stays 1 because every round only added fields. The name map round added
-`design.name_map`, `loc` and `chain` / `chain_text` (spans, nodes), the `coverage` shares above and
-`word_via` `declarator`; a flow directory without a name map gives exactly the older output. The
+Layout: `schema_version` stays 1 because every round only added fields. The name map round added,
+for a flow directory with a name map only:
+
+- `design.name_map` (the map's path);
+- `loc` and `chain` (spans of `critical_path`) and `loc` and `chain_text` (nodes of `paths`);
+- the `coverage` fields `net_nodes`, `span_nodes`, `loc_nodes`, `chain_nodes`, `generated_nodes`,
+  `generated_word_nodes` and the shares `span_share`, `loc_share`, `chain_share`,
+  `generated_word_share`;
+- `reason` on the rows of `coverage.unmatched_atoms` (`not in the name map`, `in the name map only
+  under another module than <top>`, or `in the name map but no source location`);
+- the `word_via` value `declarator`;
+- in `summary.txt`, a line `chain: ...` under each statement of the critical path.
+
+`design.provenance_blif` is a string on both routes (empty for the name map route). A flow directory
+without a name map gives exactly the older output, byte for byte (no field above, no `reason`). The
 earlier round added (`paths_limit`,
 `paths_in_report`, `paths_kept`, `paths_skipped`, `paths_skipped_reasons`,
 `coverage.matched_share_excl_port`, `coverage.source_files*`, `word_via`, `words_via`,
@@ -193,9 +206,17 @@ earlier round added (`paths_limit`,
    source net such as `S[3]`, the word `S` and bit 3. The record graph of the line gives the full
    span `L.C-EL.EC` of the first source leaf and the construct chain around it. A net with only a
    generated name gets the word of a `DECLARATOR` in the chain, if the chain has one, else the
-   `json-id` guess below. An I/O pad is `port`. A block whose name is not in the map is looked up in
-   the `write_json --odin3` netlist: the driver cell's first source span. Everything else is
-   `unmatched` and listed.
+   `json-id` guess below. An I/O pad is `port`. The map decides: an atom that is not a line of it
+   is `unmatched` (with a `reason`), never looked up elsewhere. Only an `N` line that has no source
+   leaf is looked up in the `write_json --odin3` netlist (the driver cell's first source span; the
+   node's `via` says `netlist-json (map: no leaf)`). Everything else is `unmatched` and listed. The
+   name of a net comes from the full name of its `O` line (the module path and the `@file:line`
+   tail taken off; a `/` inside an escaped identifier stays); a full name with nothing usable left
+   gives no word, and the hash name is never a word. The `DECLARATOR` word is taken from the chain
+   of the same leaf that gives `loc`.
+   Before it joins, the tool checks that the map belongs to the BLIF: if fewer than 90% of the BLIF's
+   net names (the primary outputs and the constants not counted) are in the map it stops with an
+   error that gives the share, because the map is then from another run.
 3. A flow directory made by version 1.1.1 has no map. It holds a second BLIF with
    `--name-style provenance` instead (net names `<module path>/<net>@<file>:<line>`), and the tool
    pairs the two files token by token and refuses with a message if they do not line up. That
@@ -227,6 +248,8 @@ is charged to the previous atom's statement (the net belongs to its driver).
   do not: `flatten`, `opt` and `lower` do not keep wire names for them). `assigned_word` is a guess
   from the source text for the statements without one.
 - Atoms that VPR renames or merges, or that the provenance writer does not name, are `unmatched`.
-  Their share is in `coverage`.
+  Their share is in `coverage`. On the two micros and the declarator design of the test fixtures,
+  taken from a real VPR 9 run, VPR kept every name (an adder atom is its first output net, a latch
+  its output, a pad its port) and no atom was unmatched.
 - The attribution needs the VPR run that routed the BLIF in the flow directory. The flow directory must have
   been made with `--timing-attr`.

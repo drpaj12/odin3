@@ -215,7 +215,9 @@ class Helpers(unittest.TestCase):
 
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools sets it)")
 class MicroMaps(Agreement, unittest.TestCase):
-    """The maps of the micro set and the four Task 6 cases, written by the odin3 CLI."""
+    """The maps of the micro set and the four Task 6 cases, written by the odin3 CLI: this
+    agreement test needs ODIN3_CLI (CTest sets it for python_tools) and is skipped without it, so
+    a run outside CTest checks only the synthetic maps unless ODIN3_CLI is exported."""
 
     @classmethod
     def setUpClass(cls) -> None:
