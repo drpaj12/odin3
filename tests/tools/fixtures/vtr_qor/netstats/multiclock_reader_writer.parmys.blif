@@ -134,7 +134,7 @@
 .names $auto$hard_block.cc:122:cell_hard_block$144.S[0] $auto$hard_block.cc:122:cell_hard_block$144.S[1] $auto$simplemap.cc:125:simplemap_reduce$415
 1- 1
 -1 1
-.names $auto$simplemap.cc:125:simplemap_reduce$415 $auto$hard_block.cc:122:cell_hard_block$144.S[2] $techmap$auto$hard_block.cc:122:cell_hard_block$144.$reduce_or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:598$329_Y
+.names $auto$simplemap.cc:125:simplemap_reduce$415 $auto$hard_block.cc:122:cell_hard_block$144.S[2] $techmap$auto$hard_block.cc:122:cell_hard_block$144.$reduce_or$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:598$329_Y
 1- 1
 -1 1
 .names $auto$simplemap.cc:248:simplemap_eqne$394[0] $auto$simplemap.cc:248:simplemap_eqne$256[1] $auto$simplemap.cc:166:logic_reduce$250
@@ -155,7 +155,7 @@
 0 1
 .names $auto$simplemap.cc:254:simplemap_eqne$386 $eq~14^Y~0
 0 1
-.names $auto$hard_block.cc:122:cell_hard_block$144.A $auto$hard_block.cc:122:cell_hard_block$144.Y_B $techmap$auto$hard_block.cc:122:cell_hard_block$144.$reduce_or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:598$329_Y $auto$hard_block.cc:122:cell_hard_block$144.Y
+.names $auto$hard_block.cc:122:cell_hard_block$144.A $auto$hard_block.cc:122:cell_hard_block$144.Y_B $techmap$auto$hard_block.cc:122:cell_hard_block$144.$reduce_or$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:598$329_Y $auto$hard_block.cc:122:cell_hard_block$144.Y
 1-0 1
 -11 1
 .names $auto$hard_block.cc:122:cell_hard_block$144.B[2] $auto$hard_block.cc:122:cell_hard_block$144.S[2] $auto$hard_block.cc:122:cell_hard_block$144.B_AND_S[2]

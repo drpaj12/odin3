@@ -13,7 +13,7 @@ RewriteZ:  blink           : pi =    14  po =    15  lat =     5  and =       5 
 [1;37mblink                         :[0m i/o =   14/   15  lat =    5  nd =     9  edge =     11  cube =     6  lev = 1
 elapse: 0.02 seconds, total: 0.02 seconds
 elapse: 0.00 seconds, total: 0.02 seconds
-	Command being timed: "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/abc/abc -c echo ""; echo "Load Netlist"; echo "============"; read 0_blink.parmys.blif; time; echo ""; echo "Circuit Info"; echo "=========="; print_stats; print_latch; time; echo ""; echo "LUT Costs"; echo "========="; print_lut; time; echo ""; echo "Logic Opt + Techmap"; echo "==================="; strash; ifraig -v; scorr -v; dc2 -v; dch -f; if -K 6 -v; mfs2 -v; print_stats; time; echo ""; echo "Output Netlist"; echo "=============="; write_hie 0_blink.parmys.blif 0_blink.raw.abc.blif; time;"
+	Command being timed: "/ws/odin3-ws/external/vtr-verilog-to-routing/abc/abc -c echo ""; echo "Load Netlist"; echo "============"; read 0_blink.parmys.blif; time; echo ""; echo "Circuit Info"; echo "=========="; print_stats; print_latch; time; echo ""; echo "LUT Costs"; echo "========="; print_lut; time; echo ""; echo "Logic Opt + Techmap"; echo "==================="; strash; ifraig -v; scorr -v; dc2 -v; dch -f; if -K 6 -v; mfs2 -v; print_stats; time; echo ""; echo "Output Netlist"; echo "=============="; write_hie 0_blink.parmys.blif 0_blink.raw.abc.blif; time;"
 	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.03
 	Maximum resident set size (kbytes): 34712
 	Exit status: 0

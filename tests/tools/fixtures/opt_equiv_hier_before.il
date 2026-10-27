@@ -66,7 +66,7 @@ module \bm_if_collapse
     connect \B \d_in
     connect \Y $n27
   end
-  process $proc$/home/jamiespa/odin3-ws/odin3-2F3/tests/micro/verilog/micro/bm_if_collapse.v:35$17
+  process $proc$/ws/odin3-ws/odin3-2F3/tests/micro/verilog/micro/bm_if_collapse.v:35$17
     assign { $n17 $n16 } \out0
     assign $n20 \out1
     assign { $n19 $n18 } \temp_a
@@ -123,7 +123,7 @@ module \a
     connect \B \out2
     connect \Y { $n22 $n21 }
   end
-  process $proc$/home/jamiespa/odin3-ws/odin3-2F3/tests/micro/verilog/micro/bm_if_collapse.v:69$9
+  process $proc$/ws/odin3-ws/odin3-2F3/tests/micro/verilog/micro/bm_if_collapse.v:69$9
     assign { $n15 $n14 } \out1
     assign { $n17 $n16 } \out2
     assign { $n13 $n12 } { $n22 $n21 }

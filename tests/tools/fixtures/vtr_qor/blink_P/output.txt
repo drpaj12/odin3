@@ -1,5 +1,5 @@
 vpr_status=success
 vpr_seconds=0
-rundir=/home/jamiespa/odin3-ws/work/blink
+rundir=/ws/odin3-ws/work/blink
 hostname=CEC-JAMIESPA701
 error=

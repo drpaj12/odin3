@@ -42,7 +42,7 @@
   },
   "multiclock_reader_writer.parmys.blif": {
    "adders": 8,
-   "blif_sha256": "6ecbf3a9776bd272acbec2496ff4c343424420da94b1355e72a9f005f256b8e7",
+   "blif_sha256": "db4e81a433d773d552adc7124e37944eca1d40743037bb6ee617d3b0e08684ae",
    "buffers": 9,
    "depth": 9,
    "ffs": 11,
