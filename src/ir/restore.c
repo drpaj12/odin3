@@ -1081,7 +1081,7 @@ static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id
     status = status == ODIN3_OK && rec->capped && rec->foreign_len > 0
                  ? odin3_strbuf_append(&line, odin3_bytes_cstr(","))
                  : status;
-    status = status == ODIN3_OK
+    status = status == ODIN3_OK && rec->foreign_len > 0
                  ? odin3_strbuf_append(
                        &line, (odin3_bytes){st->foreign.data + rec->foreign_off, rec->foreign_len})
                  : status;
