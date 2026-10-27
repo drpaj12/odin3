@@ -209,22 +209,35 @@ odin3_status odin3_expr_rule_fine_const_b(odin3_expr_ctx *ec) {
  * becomes: the stripped bits' sources, then the new cell's outputs. */
 typedef struct strip_job {
     odin3_expr_sig a, b, y, src;
-    odin3_net_id zero;
+    odin3_net_id zero; /* made on first use by strip_zero */
     bool sub;
 } strip_job;
 
+/* The canonical 0 net, made on first use. A rule that rewrites nothing must not make a constant:
+ * a Debug build sweeps cells a Release build never revisits, and a constant made and dropped
+ * there would still use up a net and a node ID (IR-6), so the IDs, and the `$n<ID>` names built on
+ * them, would depend on the build. */
+static odin3_status strip_zero(odin3_expr_ctx *ec, strip_job *job) {
+    if (odin3_net_valid(job->zero)) {
+        return ODIN3_OK;
+    }
+    return odin3_opt_const_net(ec->oc, ODIN3_BIT_0, &job->zero);
+}
+
 /* How many low bits are copies of an operand bit (Yosys's loop), filling src for them: B bit 0;
  * $add: A bit 0; $sub: 1 - 1 = 0. */
-static uint32_t strip_count(const odin3_expr_ctx *ec, strip_job *job) {
+static odin3_status strip_count(odin3_expr_ctx *ec, strip_job *job, uint32_t *count) {
     uint32_t limit = job->y.n < job->a.n ? job->y.n : job->a.n;
     limit = limit < job->b.n ? limit : job->b.n;
     uint32_t i = 0;
-    for (; i < limit; i++) {
+    odin3_status st = ODIN3_OK;
+    for (; st == ODIN3_OK && i < limit; i++) {
         odin3_const bv = odin3_expr_cval(ec, job->b.net[i]);
         odin3_const av = odin3_expr_cval(ec, job->a.net[i]);
         if (bv == ODIN3_CONST_0) {
             job->src.net[i] = job->a.net[i];
         } else if (job->sub && bv == ODIN3_CONST_1 && av == ODIN3_CONST_1) {
+            st = strip_zero(ec, job);
             job->src.net[i] = job->zero;
         } else if (!job->sub && av == ODIN3_CONST_0) {
             job->src.net[i] = job->b.net[i];
@@ -232,18 +245,22 @@ static uint32_t strip_count(const odin3_expr_ctx *ec, strip_job *job) {
             break;
         }
     }
-    return i;
+    *count = i;
+    return st;
 }
 
 /* An operand without its first `skip` bits; when none is left, its last bit if the operands are
  * signed, else a 0 (Yosys: that bit if A_SIGNED, else a 0-bit port). */
-static odin3_status operand_rest(odin3_expr_ctx *ec, const strip_job *job,
+static odin3_status operand_rest(odin3_expr_ctx *ec, strip_job *job,
                                  const odin3_expr_sig *full, uint32_t skip, odin3_expr_sig *out) {
     if (full->n > skip) {
         *out = odin3_expr_slice(full, skip, full->n - skip);
         return ODIN3_OK;
     }
     odin3_status st = odin3_expr_sig_new(ec, 1, out);
+    if (st == ODIN3_OK && !odin3_expr_both_signed(ec)) {
+        st = strip_zero(ec, job);
+    }
     if (st == ODIN3_OK) {
         out->net[0] = odin3_expr_both_signed(ec) ? full->net[full->n - 1] : job->zero;
     }
@@ -292,13 +309,10 @@ odin3_status odin3_expr_rule_fine_addsub(odin3_expr_ctx *ec) {
     st = st == ODIN3_OK ? odin3_expr_read(ec, PORT_B, &job.b) : st;
     st = st == ODIN3_OK ? odin3_expr_read(ec, odin3_expr_y_port(ec), &job.y) : st;
     st = st == ODIN3_OK ? odin3_expr_sig_new(ec, job.y.n, &job.src) : st;
-    st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, ODIN3_BIT_0, &job.zero) : st;
-    if (st != ODIN3_OK) {
+    uint32_t stripped = 0;
+    st = st == ODIN3_OK ? strip_count(ec, &job, &stripped) : st;
+    if (st != ODIN3_OK || stripped == 0) {
         return st;
-    }
-    uint32_t stripped = strip_count(ec, &job);
-    if (stripped == 0) {
-        return ODIN3_OK;
     }
     if (stripped == job.y.n) { /* nothing is left to compute: Y is wiring (§17 #26) */
         return odin3_expr_wire(ec, ODIN3_OPT_RULE_FINE_ADDSUB, &job.src);
@@ -315,14 +329,27 @@ enum { GRP_DYN, GRP_CONST_A, GRP_CONST_AB, GRP_N };
 typedef struct gbit {
     uint32_t group, ka, kb, y;
     odin3_net_id a, b;
+    int fix; /* normalise made the pair a constant: 0 or 1 (a and b are then not read), else -1 */
 } gbit;
 
 typedef struct group_job {
     gbit *bits;
     uint32_t n;
     odin3_expr_sig src; /* the net each result bit becomes */
-    odin3_net_id zero, one;
+    odin3_net_id zero, one; /* made on first use by group_const */
 } group_job;
+
+/* The canonical 0 or 1 net, made on first use (see strip_zero: no constant is made by a rule that
+ * ends up rewriting nothing). */
+static odin3_status group_const(odin3_expr_ctx *ec, group_job *job, bool one, odin3_net_id *out) {
+    odin3_net_id *slot = one ? &job->one : &job->zero;
+    odin3_status st = ODIN3_OK;
+    if (!odin3_net_valid(*slot)) {
+        st = odin3_opt_const_net(ec->oc, one ? ODIN3_BIT_1 : ODIN3_BIT_0, slot);
+    }
+    *out = *slot;
+    return st;
+}
 
 static bool group_kind(odin3_expr_type kind) {
     return kind == ODIN3_EXPR_T_NOT || kind == ODIN3_EXPR_T_AND || kind == ODIN3_EXPR_T_OR ||
@@ -331,29 +358,29 @@ static bool group_kind(odin3_expr_type kind) {
 
 /* Yosys's per-bit normalisation: an $or bit with a 1 is 1 with 1, an $and bit with a 0 is 0 with
  * 0, and (without -keepdc) equal $xor / $xnor inputs are 0 with 0 / 1 with 1. */
-static void normalise(const odin3_expr_ctx *ec, const group_job *job, gbit *bit) {
+static void normalise(const odin3_expr_ctx *ec, gbit *bit) {
     odin3_const ca = odin3_expr_cval(ec, bit->a);
     odin3_const cb = odin3_expr_cval(ec, bit->b);
     bool equal = odin3_expr_same(ec, bit->a, bit->b);
     switch (ec->kind) {
     case ODIN3_EXPR_T_OR:
         if (ca == ODIN3_CONST_1 || cb == ODIN3_CONST_1) {
-            bit->a = bit->b = job->one;
+            bit->fix = 1;
         }
         break;
     case ODIN3_EXPR_T_AND:
         if (ca == ODIN3_CONST_0 || cb == ODIN3_CONST_0) {
-            bit->a = bit->b = job->zero;
+            bit->fix = 0;
         }
         break;
     case ODIN3_EXPR_T_XOR:
         if (!ec->keepdc && equal) {
-            bit->a = bit->b = job->zero;
+            bit->fix = 0;
         }
         break;
     case ODIN3_EXPR_T_XNOR:
         if (!ec->keepdc && equal) {
-            bit->a = bit->b = job->one;
+            bit->fix = 1;
         }
         break;
     default:
@@ -410,8 +437,6 @@ static odin3_status group_load(odin3_expr_ctx *ec, group_job *job) {
     st = st == ODIN3_OK ? odin3_expr_read(ec, is_not ? PORT_A : PORT_B, &raw_b) : st;
     st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_a, job->n, is_signed, &ext_a) : st;
     st = st == ODIN3_OK ? odin3_expr_extend(ec, &raw_b, job->n, is_signed, &ext_b) : st;
-    st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, ODIN3_BIT_0, &job->zero) : st;
-    st = st == ODIN3_OK ? odin3_opt_const_net(ec->oc, ODIN3_BIT_1, &job->one) : st;
     job->bits = st == ODIN3_OK ? odin3_expr_alloc(ec, sizeof *job->bits * job->n) : NULL;
     st = job->bits != NULL || st != ODIN3_OK ? st : ODIN3_ERR_NO_MEMORY;
     for (uint32_t pos = 0; st == ODIN3_OK && pos < job->n; pos++) {
@@ -419,10 +444,11 @@ static odin3_status group_load(odin3_expr_ctx *ec, group_job *job) {
         bit->a = ext_a.net[pos];
         bit->b = ext_b.net[pos];
         bit->y = pos;
-        normalise(ec, job, bit);
-        bit->group = classify(ec, bit);
-        bit->ka = bit_key(ec, bit->a);
-        bit->kb = bit_key(ec, bit->b);
+        bit->fix = -1;
+        normalise(ec, bit);
+        bit->group = bit->fix >= 0 ? GRP_CONST_AB : classify(ec, bit);
+        bit->ka = bit->fix >= 0 ? (uint32_t)bit->fix : bit_key(ec, bit->a);
+        bit->kb = bit->fix >= 0 ? (uint32_t)bit->fix : bit_key(ec, bit->b);
     }
     if (st == ODIN3_OK) {
         qsort(job->bits, job->n, sizeof *job->bits, cmp_gbit);
@@ -469,24 +495,24 @@ typedef struct pair_sigs {
 
 /* The net the constant-A $and / $or pair `index` gives: B, or (without -keepdc) the dominant
  * constant for an undefined A. */
-static odin3_net_id andor_result(const odin3_expr_ctx *ec, const group_job *job,
-                                 const pair_sigs *pairs, uint32_t index) {
+static odin3_status andor_result(odin3_expr_ctx *ec, group_job *job, const pair_sigs *pairs,
+                                 uint32_t index, odin3_net_id *out) {
     if (ec->keepdc || !odin3_expr_is_undef(ec, pairs->a.net[index])) {
-        return pairs->b.net[index];
+        *out = pairs->b.net[index];
+        return ODIN3_OK;
     }
-    return ec->kind == ODIN3_EXPR_T_AND ? job->zero : job->one;
+    return group_const(ec, job, ec->kind != ODIN3_EXPR_T_AND, out);
 }
 
 /* The net the constant-A $xor / $xnor pair `index` gives: the constant for an undefined A (without
  * -keepdc), else B or a new $not of it. */
-static odin3_status xor_result(odin3_expr_ctx *ec, const group_job *job, const pair_sigs *pairs,
+static odin3_status xor_result(odin3_expr_ctx *ec, group_job *job, const pair_sigs *pairs,
                                uint32_t index, odin3_net_id *out) {
     bool is_xor = ec->kind == ODIN3_EXPR_T_XOR;
     odin3_net_id const_bit = pairs->a.net[index];
     odin3_net_id other = pairs->b.net[index];
     if (odin3_expr_is_undef(ec, const_bit)) {
-        *out = is_xor ? job->zero : job->one;
-        return ODIN3_OK;
+        return group_const(ec, job, !is_xor, out);
     }
     bool invert = (odin3_expr_cval(ec, const_bit) == ODIN3_CONST_1) == is_xor;
     if (!invert) {
@@ -503,13 +529,13 @@ static odin3_status xor_result(odin3_expr_ctx *ec, const group_job *job, const p
 
 /* The nets of a group's different pairs: wiring for a constant A of $and / $or / $xor / $xnor,
  * else one new unsigned cell of the visited type. */
-static odin3_status group_results(odin3_expr_ctx *ec, const group_job *job, uint32_t group,
+static odin3_status group_results(odin3_expr_ctx *ec, group_job *job, uint32_t group,
                                   const pair_sigs *pairs, odin3_expr_sig *res) {
     odin3_status st = odin3_expr_sig_new(ec, pairs->a.n, res);
     bool const_a = group == GRP_CONST_A && ec->kind != ODIN3_EXPR_T_NOT;
     for (uint32_t j = 0; st == ODIN3_OK && const_a && j < pairs->a.n; j++) {
         if (ec->kind == ODIN3_EXPR_T_AND || ec->kind == ODIN3_EXPR_T_OR) {
-            res->net[j] = andor_result(ec, job, pairs, j);
+            st = andor_result(ec, job, pairs, j, &res->net[j]);
         } else {
             st = xor_result(ec, job, pairs, j, &res->net[j]);
         }
@@ -536,8 +562,14 @@ static odin3_status group_emit(odin3_expr_ctx *ec, group_job *job, uint32_t grou
     uint32_t pair = 0;
     for (uint32_t i = range.lo; st == ODIN3_OK && i < range.hi; i++) {
         if (i == range.lo || !same_pair(&job->bits[i - 1], &job->bits[i])) {
-            pairs.a.net[pair] = job->bits[i].a;
-            pairs.b.net[pair++] = job->bits[i].b;
+            odin3_net_id net_a = job->bits[i].a;
+            odin3_net_id net_b = job->bits[i].b;
+            if (job->bits[i].fix >= 0) {
+                st = group_const(ec, job, job->bits[i].fix == 1, &net_a);
+                net_b = net_a;
+            }
+            pairs.a.net[pair] = net_a;
+            pairs.b.net[pair++] = net_b;
         }
     }
     st = st == ODIN3_OK ? group_results(ec, job, group, &pairs, &res) : st;

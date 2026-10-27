@@ -38,6 +38,7 @@
 # memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
 # hash_name_soft_dir (hash names do not depend on where lib/soft_primitives is found: BLIF, JSON, Verilog and name maps byte-identical for three soft directories).
+# hash_name_ids (the IDs of nets after lower do not depend on the build type: Debug's opt_expr sweep made no constant IDs).
 # pm_carry (4.5 C-4: `partial_map --min-add N` leaves smaller adds soft; bad arguments are refused with a located message).
 # pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
@@ -1020,6 +1021,21 @@ hash_name_soft_dir)
         if grep -qF "$work" "$work"/s1.*.names; then fail "$design: a name map holds the soft directory"; fi
         grep -qF "lib/soft_primitives/adder.v" "$work/s1.blif.names" || fail "$design: no stable soft body name"
     done
+    ;;
+hash_name_ids)
+    # The IDs, and so the `$n<ID>` names, do not depend on the build type. A Debug build sweeps
+    # opt_expr cells again to check the dirty set (settle); a constant a rule made there used up a
+    # net and a node ID although it was dropped, so Debug and Release named the objects after
+    # `lower` differently. The expected IDs are those of a build with no Debug sweep (opt_expr makes no constant for a
+    # cell it does not rewrite), whatever build runs this test.
+    mic=$fixtures/../../micro/verilog
+    lib=$fixtures/../../../lib/vtr.o3lib
+    "$odin3" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat $mic/micro/bm_DL_logic_w_Dff.v; proc; opt; flatten; opt -full; wreduce; hardmap; lower; write_verilog --name-style provenance $work/ids.v" \
+        >"$work/out" 2>"$work/err" || fail "odin3 failed"
+    for id in 11 12; do
+        grep -q "wire .bm_DL_logic_w_Dff/\$n$id@" "$work/ids.v" || fail "no net \$n$id: IDs depend on the build"
+    done
+    if grep -q '\$n1[3-9]@' "$work/ids.v"; then fail "IDs past 12: a dropped constant used up IDs"; fi
     ;;
 sv_compound_assign)
     # #264 semantics: a compound assignment to a bit-select must lower to `q[i] = q[i] op rhs` with

@@ -1120,6 +1120,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_hash_name_soft_dir PROPERTIES LABELS unit)
+    add_test(NAME cli_hash_name_ids
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hash_name_ids $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_hash_name_ids PROPERTIES LABELS unit)
     add_test(NAME cli_hardmap_mul
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_mul $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
