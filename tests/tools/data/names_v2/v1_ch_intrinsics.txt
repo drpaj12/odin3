@@ -1,0 +1,6 @@
+== --check
+entries=773 bad_hash=0 duplicates=0 ignored=0
+== --lookup
+memset	net	h22xqkihndi	memset/$n2343@tests/micro/verilog/full/ch_intrinsics.v:149	memset	tests/micro/verilog/full/ch_intrinsics.v	149
+== --reverse
+h22xqkihndi
