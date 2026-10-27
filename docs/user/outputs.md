@@ -44,6 +44,23 @@ netlist with its BLE, CLB and site records. A cluster whose atoms blend distinct
 refuses a BLIF written with short names, and refuses a map that it has already extended. The `.net` is trusted local VPR output, parsed with ElementTree. `names
 --check` accepts the extended map.
 
+The flags of an `R` line are `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`, `chain=span`,
+`capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, and, written by `odin3-prov-post` and the
+restore, `stale=t<n>` (a post-Odin record that a later pass made stale) and the site flags `x=`, `y=`, `sub=` and
+`layer=`.
+
+Why a join was made, and how critical it was (`Q` and `K` lines). Odin III writes one `Q` line per join record with
+its objective (the name of the pass; for `abc` the goal its script states, or `area` or `depth` from the script's last
+mapping command: `# objective: <word>` in the script states it, `if`, `&if`, `map` and `&nf` map for delay unless `-a`
+toggles area). `odin3-prov-post` adds, for every logic CLB, the pair classes of its members (`SC` series-critical, `SN`
+series-noncritical, `SI` shared-input, `OR` orthogonal, `FL` filler; shares that sum to 1.000), and for every CLB, BLE join
+and Odin III join the post-route criticality `rho`, `slack`, `near` and `npaths` at the margins 5 and 10 percent, from
+`timing/attribution.json`. With `--census FILE` (the Norns packer's `--norns_pack_census` log; its `.net` SHA-256 must
+match, else the census values are absent with a WARNING) it also gives the classes, the `gain` terms and the pack-time
+criticality `pcrit`. A `K` line per member (every member of a CLB) carries the member's own values. `basis` says per field
+whether the value was recorded (`r`) or inferred (`i`), `-` when absent. Without a census there are no classes, `gain` or
+`pcrit`. `odin3.read_name_map(path)` returns these as `NameMap.whys` and `NameMap.members`.
+
 For a version 2 map the pass `names` reads the records too:
 
 - `names --map FILE --lookup SHORT` prints the `O` line of the object (or the `N` line, when the argument

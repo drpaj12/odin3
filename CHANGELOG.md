@@ -23,6 +23,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   version 2 map, `names --chain` the chain, `names --check` the version 2 invariants; Python
   `odin3.read_name_map`. Version 1 output is unchanged. No core, IR or ABI change.
 
+- V1.2.0 Task 10 (`docs/V1.2.0.md` 3.6): the `Q` and `K` lines. `odin3-prov-post` writes the N17 pair classes (shares by
+  largest-remainder rounding), gain terms and pack-time criticality (with a Norns census), post-route `rho`, `slack` and
+  near-critical flags and counts, and `basis` letters; the Odin III writers write an objective-only `Q` for every join
+  (the `abc` objective is `area` or `depth` from the script's last mapping command, or the goal a `# objective:` comment
+  states; the `abc` pass run information gains `objective=` and `objective_src=`); `odin3.read_name_map` and
+  `tools/flow/name_map_v2.py` parse `Q` and `K`. ABI stays 7. Only `Q` lines (and the `abc` run information) differ in
+  the writers' output.
+
 - V1.2.0 Task 9 (`docs/V1.2.0.md` 4.5): `read_blif`, `read_json` and `read_verilog -netlist` restore a version 2
   `--name-map`: the pass runs, records (with their classes), construct rows and the `A`, `Q`, `K` lines of the file,
   bound to the objects the map names, with no restored-location record; the writers number the extra roots, mark the
