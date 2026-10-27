@@ -1,4 +1,4 @@
-O	bm_DL_BCD_adder	net	h5j5t26zpp3	bm_DL_BCD_adder/$n60@/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v	15	r10	word
+O	bm_DL_BCD_adder	net	h5j5t26zpp3	bm_DL_BCD_adder/$n60@<work>/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	<work>/bm_DL_BCD_adder.v	15	r10	word
   R	r10	D	word	rewrite:word	t4.2	r9			
     R	r9	S	expr	origin	t1.1		f1:15.7-15.18	c11	hier=bm_DL_BCD_adder
   C	c11	BINARY	expr	c10	f1	15.7-15.18	
@@ -7,6 +7,6 @@ O	bm_DL_BCD_adder	net	h5j5t26zpp3	bm_DL_BCD_adder/$n60@/tmp/claude-1000/pdoc-exa
   C	c3	TIMING_STMT	stmt	c2	f1	13.9-20.5	
   C	c2	ALWAYS	block	c1	f1	13.2-20.5	
   C	c1	MODULE	module		f1	3.1-22.10	bm_DL_BCD_adder
-  F	f1	/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v"	
+  F	f1	<work>/bm_DL_BCD_adder.v
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "<work>/bm_DL_BCD_adder.v"	
   T	t4	hardmap		multiply=0 adder=19 chains=3 sp_slices=0 dp_slices=0 soft=0

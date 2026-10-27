@@ -12,7 +12,7 @@ records) to ``out/``. A slice that leaves lines out has a line ``... trimmed ...
 The hash names of the flow example are a function of the design's absolute path
 (``odin3-flow`` resolves it), so the work directory defaults to a fixed path and the output is
 byte-identical only for that default. The work directory is only ever added to and overwritten,
-never emptied. The second design is run from its own directory by relative path, so its names do
+never emptied. Every emitted file names the work directory as ``<work>``. The second design is run from its own directory by relative path, so its names do
 not depend on where the directory is.
 """
 
@@ -50,9 +50,16 @@ def odin(odin3: Path, script: str, cwd: Path) -> str:
     return run([str(odin3), "--diag-paths", "resolved", "-p", script], cwd)
 
 
+WORK_TAG = "<work>"
+_work_dir: list[str] = []  # the work directory, set once by main; every emitted file names it as <work>
+
+
 def emit(name: str, lines: list[str]) -> None:
     OUT.mkdir(exist_ok=True)
-    (OUT / name).write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    text = "".join(f"{line}\n" for line in lines)
+    for where in _work_dir:
+        text = text.replace(where, WORK_TAG)
+    (OUT / name).write_text(text, encoding="utf-8")
 
 
 def map_lines(path: Path) -> list[str]:
@@ -198,6 +205,7 @@ def main() -> int:
     args = ap.parse_args()
     odin3 = args.odin3.resolve()
     work = args.work.resolve()
+    _work_dir.append(str(work))
     names = flow_example(odin3, work)
     map_slices(names, odin3, work)
     restore_examples(odin3, work)

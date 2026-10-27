@@ -1,4 +1,4 @@
 # odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
-O	bm_DL_BCD_adder	net	h2jmzaf3xxy	bm_DL_BCD_adder/$n37@/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v	19	r2	word
-O	bm_DL_BCD_adder	net	h3mdbxsce37	bm_DL_BCD_adder/$n70@/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/pdoc-example/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h2jmzaf3xxy	bm_DL_BCD_adder/$n37@<work>/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	<work>/bm_DL_BCD_adder.v	19	r2	word
+O	bm_DL_BCD_adder	net	h3mdbxsce37	bm_DL_BCD_adder/$n70@<work>/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	<work>/bm_DL_BCD_adder.v	19	r4	word
 ... trimmed ...

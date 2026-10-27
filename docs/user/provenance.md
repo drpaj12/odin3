@@ -67,8 +67,8 @@ relates to its parents and is the `dir` field of an `R` line (`<dir>:<from level
 |---|---|---|
 | `origin` | a source or imported record; implicit | `read_verilog`, readers |
 | `refine` | one parent, many pieces share the record | `proc`, `lower` |
-| `rewrite` | 1:1, or a regrouping that blends nothing | `opt` rewrites, `hardmap`, `lpmmap`, `dfflibmap`, `unmap`, `submod`, restored locations; `place` |
-| `coarsen` | N to 1 | `opt` merges and FF merges, common-subexpression merges, `abc`, `raise`; `pack` |
+| `rewrite` | 1:1, or a regrouping that blends nothing | `opt` rewrites, `hardmap`, `lpmmap`, `unmap`, `submod`, restored locations; `place` |
+| `coarsen` | N to 1 | `opt` merges and FF merges, common-subexpression merges, `abc`, `raise`, `dfflibmap` (the shared inverter record); `pack` |
 | `context` | flatten adds the instance | `flatten` |
 
 ### The construct table
@@ -156,9 +156,9 @@ The header is `# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs`.
 | `Q` | `id why objective gain pcrit rho slack near npaths members basis stale` | the why-classes, objective and criticality of a join (below) |
 | `K` | `id member pcrit rho slack basis stale` | one member of a join with its own criticality |
 
-There is no `X` line in the file. `X` is the name the restore gives to the **foreign flags** that
-`odin3-prov-post` writes in the flags of an `R` line (`x=`, `y=`, `sub=`, `layer=`): a restore keeps
-them beside their record and writes them again with it.
+The file has no other line type. The **foreign flags** that `odin3-prov-post` writes in the flags
+of an `R` line (`x=`, `y=`, `sub=`, `layer=`) are not a line type and are not `X` lines: a restore
+keeps them in a separate list of the same table, beside their record, and writes them again with it.
 
 `kind` of an `O` or `N` line is `net`, `node` or `wire`. Lines come in the order header, `O`, `N`,
 `R`, `C`, `F`, `T`; `odin3-prov-post` appends `T`, `R` and `A`, `Q`, `K` lines at the end.
@@ -181,13 +181,13 @@ them beside their record and writes them again with it.
 | Flag | Written by | Meaning |
 |---|---|---|
 | `hier=<text>` | Odin III | the record's hierarchy string (escaped); absent when empty |
-| `stale=t<n>` | `odin3-prov-post`, restore | the post-Odin record was made stale by the pass run `t<n>` (see [Restore](#restore-from-a-map)); the last flag |
+| `stale=t<n>` | restore | on an `R` record only: the post-Odin record was made stale by the pass run `t<n>` (see [Restore](#restore-from-a-map)); the last flag. An `A`, `Q` or `K` line has no such flag: it carries `t<n>` in its `stale` field |
 | `x=<n>`, `y=<n>`, `sub=<n>` | `odin3-prov-post` | the grid column, row and subtile of a `site` record, from the `.place` |
 | `layer=<n>` | `odin3-prov-post` | the layer, when the `.place` has the column |
 
 The full flag list, then, is `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`,
 `chain=span`, `capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, `stale=t<n>`,
-`x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. The writers do not yet write `cell=<type>` (a record
+`x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. (`stale=t<n>` is a flag of `R` records only; an `A`, `Q` or `K` line has the field `stale`, `-` when current, else `t<n>`.) The writers do not yet write `cell=<type>` (a record
 does not know the cell type of the hard object it made).
 
 ### Examples of each line type
@@ -247,7 +247,8 @@ An atom with no object in the map (`gnd`, `vcc`, an output pad `out:Cout`) still
 The `Q` and `K` lines of the join `r30`. This is stock VPR (no census): `why`, `gain` and `pcrit` are empty
 and `basis` says `-` for them. `objective` is the packer, found from the VPR log (`i`). `rho`, `slack`, `near`
 and `npaths` come from `timing/attribution.json` (`r`). `rho` is 1.000 because a member sits on the critical
-path; the slack, -4.619 ns, is the negative of this run's critical path delay (4.61929 ns):
+path; the slack, -4.619 ns, is the negative of this run's critical path delay (`cpd_ns` 4.61929 in
+`timing/attribution.json`, whose `required_ns` is 0.0):
 
 ```{literalinclude} examples/provenance/out/map_q_k.txt
 :language: text
@@ -312,7 +313,7 @@ The fields of `Q`:
 | `id` | the join record `r<n>` |
 | `why` | `class:share` list, descending, shares to three decimals summing to 1.000 (largest-remainder rounding); empty if not computed |
 | `objective` | the stated purpose of the step: the pass name (`opt`), a depth-or-area word for `abc`, the packer for `pack` |
-| `gain` | `source:share` list: which term of the packer pulled the molecules in (seed, connectivity and timing, affinity group, transitive, high fanout, attraction group, RAM, unrelated); only with a census |
+| `gain` | `source:share` list: which term of the packer pulled the molecules in (seed, connectivity and timing, affinity group, transitive, high fanout, attraction group, RAM, unrelated, and `unknown` for a molecule with a source index outside this list); only with a census |
 | `pcrit` | pack-time criticality, the maximum over the members, 0 to 1; only with a census |
 | `rho` | post-route criticality: the maximum over the members of the largest arrival-time ratio of a path through them to path 1 (0 off every reported path) |
 | `slack` | the smallest post-route slack in ns over the members |
@@ -371,7 +372,7 @@ each value comes from:
 |---|---|---|---|
 | pair classes `why` | absent (`-`): stock VPR does not write the pack-time criticality of a sink pin | `r` (`i` without `--words`) | not computed; empty |
 | `gain` | absent | `r` | absent |
-| `objective` | `i` for `pack` (the packer named in the VPR log) | `r` | `r` for a pass kind; `i` for an `abc` objective derived from the script |
+| `objective` | `i` for `pack` (the packer named in the VPR log) | `i` (`norns-pack`, implied by the census); `r` only with `--pack-objective` | `r` for a pass kind; `i` for an `abc` objective derived from the script |
 | `pcrit` | absent | `r` | absent |
 | `rho`, `slack` | `r` from `timing/attribution.json` | same | attached to `lut` records through the `A` lines; `r` |
 | `near`, `npaths` | `r` | `r` | as `rho`; `r` |
@@ -397,8 +398,9 @@ appends:
 - one `A` line per atom: its BLE, CLB and site records;
 - the `Q` and `K` lines of the logic CLBs and of join BLEs and Odin III joins.
 
-Every top-level block of the `.net` is a cluster and gets a `clb` record (an I/O cluster, a memory or
-a multiplier too, but those get no `Q` line). A BLE is a level-1 block that holds a primitive other
+Every top-level block of the `.net` that has an atom or pad in the map is a cluster and gets a `clb`
+record (an I/O cluster, a memory or a multiplier too, but those get no `Q` line); a cluster none of
+whose atoms or pads is in the map gets no `clb` record. A BLE is a level-1 block that holds a primitive other
 than a pad. A cluster of output pads alone has no parent record and gets no CLB, no site and no `A`
 line. A `clb` whose BLEs have distinct anchors is a `join` labelled by `pack`. The map is rewritten
 atomically; every existing line stays byte-identical. The tool refuses a map it has already
@@ -429,14 +431,15 @@ parent or no class, and a flag with a bad value are refused.
 **Stale.** The `A`, `Q`, `K` lines and the post-Odin records describe the netlist as it was. After a
 restore, the first pass run that is not a reader, a writer or one that only looks (`check`,
 `stats`, `stat`, `hierarchy`, `names`, `dump_locs`, `dump_project`, `sim`, `preprocess`) is the
-**mutating run** `t`. When the map is written again, every restored `A`, `Q`, `K` line ends in
-`stale=t<n>` and every post-Odin record carries the flag `stale=t<n>`. History is kept: the lines are
+**mutating run** `t`. When the map is written again, every restored `A`, `Q`, `K` line carries `t<n>` in its `stale` field
+(`-` when current) and every post-Odin `R` record carries the flag `stale=t<n>`. History is kept: the lines are
 still written, never presented as current; treat a stale line as not current. A join made after the
 restore gets a fresh `Q` line with stale `-` and only its objective, and the stale lines stay. A line
 already stale keeps its first mutating run. Writing the map again after an unchanged read-back keeps
 every line.
 
-**Round trip.** The claims are scoped to what was proven. For each pair of writer and reader the
+**Round trip.** The claims are scoped to what was proven; the counts below are those of `tests/tools/data/restore/roundtrip.txt`
+(the cells match it for all four `ast=` modes). For each pair of writer and reader the
 claim holds only if the reader reproduces its own writer's netlist first (Task 9, step 0).
 `write_blif --vtr` with `read_blif` passes on 68 of 68 micros, `write_json` with `read_json` on 4 of 68,
 and `write_verilog` with `read_verilog -netlist; proc` on 23 of 68. The results of the second write
@@ -457,16 +460,20 @@ What a restore does not bring back: records no listed object or extra line reach
 IDs, the IR run numbers, and the records of objects the file does not mention (a net with a record
 that no cell uses is listed by the writer and cannot be bound). `read_blif` binds nets only (a BLIF
 cell has no record); `read_json` binds netnames and cells; `read_verilog -netlist` binds
-module-level wires and nets. The cost is the size of the map: a read with a map takes 5.8 to 7.0
-times as long as one without, and for `LU64PEEng` (a map of 244 MB) adds about 1.1 GB.
+module-level wires and nets. The cost is the size of the map: in the Task 9 log of `docs/V1.2.0.md` (release build,
+medians of 3), a read with a map took 5.8 to 7.0 times as long as one without, and for `LU64PEEng`
+(a map of 244 MB) added about 1.1 GB.
 
 ### Example
 
 The map of the worked example, read back with `read_blif --name-map` and written again with no pass
-between, then read back and written after `opt -full` (a pass that changes the netlist). The first
-write has 62 `R` lines; the second has fewer: this is the known gap of the table above, a BLIF
-cell is not a bound object and the map lists nets the netlist does not use. The `A`, `Q` and `K`
-lines are all kept:
+between (`check`, a pass that only looks, runs between the read and the write), then read back and
+written after `opt -full` (a pass that changes the netlist). In the table, `first` is the map the
+flow wrote (and `odin3-prov-post` extended) and `second` is the map the write after the read-back
+wrote. The `O` lines drop from 67 to 38, the `N` lines from 13 to 10 and the `R` lines from 62 to 38.
+This is the known gap of the table above (the BLIF row): the map lists objects the netlist does
+not mention (a BLIF cell is not a bound object), so what the reader cannot bind is not written
+again. Task 9 gives no finer cause for these counts. The `A`, `Q` and `K` lines are all kept:
 
 ```{literalinclude} examples/provenance/out/restore_counts.txt
 :language: text
@@ -509,12 +516,14 @@ reads it. `--chain` on a version 1 map is an error; the other options work on bo
 no construct (`ast=none`, or an imported record) prints no chain and succeeds; a name that matches
 nothing fails.
 
-`--check` prints the version 1 line, then
+`--check` first prints the version 1 line, `entries=N bad_hash=N duplicates=N ignored=N` (the `O`
+and `N` lines, bad hash names, duplicates, and lines the parse dropped), then
 `records=N constructs=N files=N runs=N objects=N bad_id=N bad_ref=N bad_order=N bad_class=N no_record=N`,
 and fails on any problem: an id that is not its line number, a reference (`r`, `c`, `f`, `t`) that
 does not resolve, a parent numbered after its child (this is the "no cycle" check), a record with
 no valid class, an object whose record is missing, a duplicate, a bad hash, or a line the parse
-ignored. A lookup costs about two thirds of a check, because the cost is reading the file; a program
+ignored. A lookup costs about two thirds of a check, because the cost is reading the file (Task 6 log of
+`docs/V1.2.0.md`: 0.99 s against 1.51 s on `LU64PEEng`); a program
 that asks many questions reads the map once.
 
 ## The Python readers
@@ -525,12 +534,13 @@ nothing. It returns a `NameMap` with `objects` (`MapObject`), `records` (`MapRec
 `members` (`MapMember`, the `K` lines), and `ignored`, the number of lines the parse dropped.
 `NameMap.find(name)` returns the `O` and `N` lines of a name, `provenance(obj)` the records (naming
 record first, parents depth-first, each once), `chain(obj)` the constructs, `why_of(record)` and
-`members_of(record)` the `Q` and `K` lines of a record. Hash names are not verified (that is
+`members_of(record)` the current `Q` and `K` lines of a record (stale `-` only; a stale line is
+history and stays in `whys` and `members`). Hash names are not verified (that is
 `names --check`). A bad reference in a line is a warning and the line is ignored.
 
 `tools/flow/name_map_v2.py` is the copy of this parse for the flow tools, which cannot import
 `odin3.py` (it needs `cffi`). A test loads both and compares them on every small micro map. It adds
-`NameMap.atom(name, top)`, `leaf(obj)`, `location(record)` and the `SourceSpan` type, which the
+`NameMap.atom(name, module)`, `leaf(obj)`, `location(record)` and the `SourceSpan` type, which the
 timing attribution uses. In a design, `Node.provenance()`, `Net.provenance()` and `chain()` give the
 same answers from the C readers ({doc}`python-api`).
 
@@ -566,8 +576,8 @@ odin3-prov-post flow
 :language: text
 ```
 
-The summary line says 36 atoms, of which 8 are not found in the map by name. The map gains `ble`, `clb`
-and `site` records for the 16 clusters, `A` lines for the atoms and `Q` and `K` lines for the three logic
+The summary line says 36 atoms, of which 8 are not found in the map by name, and 12 bles, 16 clbs and 16
+sites. The map gains `ble`, `clb` and `site` records (12, 16 and 16), `A` lines for the atoms and `Q` and `K` lines for the three logic
 CLBs. One of them is a join by `pack`: the record `r30` above.
 
 **3. Ask a question of one net.** The net `h5j5t26zpp3` is a net `hardmap` made for the adder of line 15. `names --lookup` prints
@@ -628,9 +638,11 @@ python3 docs/user/examples/provenance/make_examples.py [--odin3 PATH] [--work DI
 
 from a release build and `VTR_ROOT` with VPR. The script runs the tools above on the designs in
 `docs/user/examples/provenance/src/` and on the test fixture, and writes only slices of what they
-made. The hash names of the flow example depend on the absolute path of the design, so the work
+made. The hash names of the flow example depend on the absolute path of the design (a known issue,
+under investigation), so the work
 directory has a fixed default (`/tmp/claude-1000/pdoc-example`) and the committed files are the output for that
-default; a run with another `--work` gives other hash names. Running the script twice gives
+default, with the work directory written as `<work>` in every file; a run with another `--work` gives
+other hash names. Running the script twice gives
 byte-identical files. The work directory is never emptied.
 
 ## Limits: what the chain cannot give

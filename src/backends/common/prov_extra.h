@@ -1,8 +1,9 @@
 /*
  * prov_extra.h — the post-Odin lines (A, Q, K) of a restored version 2 map, as the writer puts
  * them out again (V1.2.0 4.5): held in the design's extra table with the design's record ids, they
- * are written with the record numbers of this map, and with `stale=t<n>` in the last field when
- * the netlist was changed after the restore. Also the fresh objective-only Q line of a join made
+ * are written with the record numbers of this map, and with `t<n>` in the `stale` field (`-` when
+ * current) when the netlist was changed after the restore. (Only an `R` record carries the flag
+ * `stale=t<n>`; that is prov_export.c.) Also the fresh objective-only Q line of a join made
  * after a restore (3.6). Internal to prov_export.c.
  */
 #ifndef ODIN3_BACKENDS_COMMON_PROV_EXTRA_H
