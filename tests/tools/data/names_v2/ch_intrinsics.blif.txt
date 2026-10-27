@@ -1,177 +1,177 @@
 == --lookup h22xqkihndi
-O	memset	net	h22xqkihndi	memset/$n2343@tests/micro/verilog/full/ch_intrinsics.v:149	memset	tests/micro/verilog/full/ch_intrinsics.v	149	r19	gate
-  R	r19	D	gate	refine:word	t4.34	r18
-    R	r18	D	word	rewrite:word	t3.2	r17
-      R	r17	D	word	refine:stmt	t2.1	r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16
-        R	r1	S	stmt	origin	t1.1		f1:149.1-275.8	c6	hier=memset
-        R	r2	S	branch	origin	t1.1		f1:150.2-157.5	c7	hier=memset
-        R	r3	S	branch	origin	t1.1		f1:158.2-166.5	c8	hier=memset
-        R	r4	S	branch	origin	t1.1		f1:167.2-174.5	c9	hier=memset
-        R	r5	S	branch	origin	t1.1		f1:175.2-187.5	c10	hier=memset
-        R	r6	S	branch	origin	t1.1		f1:188.2-192.5	c11	hier=memset
-        R	r7	S	branch	origin	t1.1		f1:193.2-196.5	c12	hier=memset
-        R	r8	S	branch	origin	t1.1		f1:197.2-203.5	c13	hier=memset
-        R	r9	S	branch	origin	t1.1		f1:204.2-215.5	c14	hier=memset
-        R	r10	S	branch	origin	t1.1		f1:216.2-223.5	c15	hier=memset
-        R	r11	S	branch	origin	t1.1		f1:224.2-228.5	c16	hier=memset
-        R	r12	S	branch	origin	t1.1		f1:229.2-234.5	c17	hier=memset
-        R	r13	S	branch	origin	t1.1		f1:235.2-243.5	c18	hier=memset
-        R	r14	S	branch	origin	t1.1		f1:244.2-250.5	c19	hier=memset
-        R	r15	S	branch	origin	t1.1		f1:251.2-265.5	c20	hier=memset
-        R	r16	S	branch	origin	t1.1		f1:268.2-274.5	c21	hier=memset
-  C	c6	CASE	stmt	c5	f1	149.1-275.8
-  C	c5	IF_ELSE	branch	c4	f1	149.1-275.8
-  C	c4	IF	stmt	c3	f1	146.1-275.8
-  C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8
-  C	c2	ALWAYS	block	c1	f1	145.1-275.8
-  C	c1	MODULE	module		f1	71.1-290.10	memset
-  C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5
-  C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5
-  C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5
-  C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5
-  C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5
-  C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5
-  C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5
-  C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5
-  C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5
-  C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5
-  C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5
-  C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5
-  C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5
-  C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5
-  C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5
-  F	f1	tests/micro/verilog/full/ch_intrinsics.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v
-  T	t2	proc
-  T	t3	opt	-full
-  T	t4	lower		modules=1 cells=43 nodes=829
+O	memset	net	h22xqkihndi	memset/$n2343@tests/micro/verilog/full/ch_intrinsics.v:149	memset	tests/micro/verilog/full/ch_intrinsics.v	149	r19	gate$
+  R	r19	D	gate	refine:word	t4.34	r18			$
+    R	r18	D	word	rewrite:word	t3.2	r17			$
+      R	r17	D	word	refine:stmt	t2.1	r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16			$
+        R	r1	S	stmt	origin	t1.1		f1:149.1-275.8	c6	hier=memset$
+        R	r2	S	branch	origin	t1.1		f1:150.2-157.5	c7	hier=memset$
+        R	r3	S	branch	origin	t1.1		f1:158.2-166.5	c8	hier=memset$
+        R	r4	S	branch	origin	t1.1		f1:167.2-174.5	c9	hier=memset$
+        R	r5	S	branch	origin	t1.1		f1:175.2-187.5	c10	hier=memset$
+        R	r6	S	branch	origin	t1.1		f1:188.2-192.5	c11	hier=memset$
+        R	r7	S	branch	origin	t1.1		f1:193.2-196.5	c12	hier=memset$
+        R	r8	S	branch	origin	t1.1		f1:197.2-203.5	c13	hier=memset$
+        R	r9	S	branch	origin	t1.1		f1:204.2-215.5	c14	hier=memset$
+        R	r10	S	branch	origin	t1.1		f1:216.2-223.5	c15	hier=memset$
+        R	r11	S	branch	origin	t1.1		f1:224.2-228.5	c16	hier=memset$
+        R	r12	S	branch	origin	t1.1		f1:229.2-234.5	c17	hier=memset$
+        R	r13	S	branch	origin	t1.1		f1:235.2-243.5	c18	hier=memset$
+        R	r14	S	branch	origin	t1.1		f1:244.2-250.5	c19	hier=memset$
+        R	r15	S	branch	origin	t1.1		f1:251.2-265.5	c20	hier=memset$
+        R	r16	S	branch	origin	t1.1		f1:268.2-274.5	c21	hier=memset$
+  C	c6	CASE	stmt	c5	f1	149.1-275.8	$
+  C	c5	IF_ELSE	branch	c4	f1	149.1-275.8	$
+  C	c4	IF	stmt	c3	f1	146.1-275.8	$
+  C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8	$
+  C	c2	ALWAYS	block	c1	f1	145.1-275.8	$
+  C	c1	MODULE	module		f1	71.1-290.10	memset$
+  C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5	$
+  C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5	$
+  C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5	$
+  C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5	$
+  C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5	$
+  C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5	$
+  C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5	$
+  C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5	$
+  C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5	$
+  C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5	$
+  C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5	$
+  C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5	$
+  C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5	$
+  C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5	$
+  C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5	$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t2	proc		$
+  T	t3	opt	-full	$
+  T	t4	lower		modules=1 cells=43 nodes=829$
 == --chain h22xqkihndi
-C	c6	CASE	stmt	c5	f1	149.1-275.8
-C	c5	IF_ELSE	branch	c4	f1	149.1-275.8
-C	c4	IF	stmt	c3	f1	146.1-275.8
-C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8
-C	c2	ALWAYS	block	c1	f1	145.1-275.8
-C	c1	MODULE	module		f1	71.1-290.10	memset
-C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5
-C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5
-C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5
-C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5
-C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5
-C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5
-C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5
-C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5
-C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5
-C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5
-C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5
-C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5
-C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5
-C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5
-C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5
-F	f1	tests/micro/verilog/full/ch_intrinsics.v
+C	c6	CASE	stmt	c5	f1	149.1-275.8	$
+C	c5	IF_ELSE	branch	c4	f1	149.1-275.8	$
+C	c4	IF	stmt	c3	f1	146.1-275.8	$
+C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8	$
+C	c2	ALWAYS	block	c1	f1	145.1-275.8	$
+C	c1	MODULE	module		f1	71.1-290.10	memset$
+C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5	$
+C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5	$
+C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5	$
+C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5	$
+C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5	$
+C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5	$
+C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5	$
+C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5	$
+C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5	$
+C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5	$
+C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5	$
+C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5	$
+C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5	$
+C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5	$
+C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5	$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
 == --lookup h2nooqmgnc3
-O	memset	net	h2nooqmgnc3	memory_controller/$n1650@tests/micro/verilog/full/ch_intrinsics.v:28	memory_controller	tests/micro/verilog/full/ch_intrinsics.v	28	r51	word
-  R	r51	D	word	context:word	t7.1	r49,r50			hier=memset/memtroll,ctx=1
-    R	r49	S	stmt	origin	t1.1		f1:28.12-28.19	c29	hier=memory_controller
-    R	r50	S	instance	origin	t1.1		f1:131.19-131.137	c31	hier=memset
-  C	c29	DECLARATOR	stmt	c28	f1	28.12-28.19	str_out
-  C	c28	NET_DECL	stmt	c27	f1	28.1-28.20
-  C	c27	MODULE	module		f1	9.1-68.10	memory_controller
-  C	c31	INSTANCE	instance	c30	f1	131.19-131.137	memtroll
-  C	c30	INSTANTIATION	instance	c1	f1	131.1-131.138	memory_controller
-  C	c1	MODULE	module		f1	71.1-290.10	memset
-  F	f1	tests/micro/verilog/full/ch_intrinsics.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v
-  T	t7	flatten		roots=1 instances=1 kept=0 nodes=9 renamed=0
+O	memset	net	h2nooqmgnc3	memory_controller/$n1650@tests/micro/verilog/full/ch_intrinsics.v:28	memory_controller	tests/micro/verilog/full/ch_intrinsics.v	28	r51	word$
+  R	r51	D	word	context:word	t7.1	r49,r50			hier=memset/memtroll,ctx=1$
+    R	r49	S	stmt	origin	t1.1		f1:28.12-28.19	c29	hier=memory_controller$
+    R	r50	S	instance	origin	t1.1		f1:131.19-131.137	c31	hier=memset$
+  C	c29	DECLARATOR	stmt	c28	f1	28.12-28.19	str_out$
+  C	c28	NET_DECL	stmt	c27	f1	28.1-28.20	$
+  C	c27	MODULE	module		f1	9.1-68.10	memory_controller$
+  C	c31	INSTANCE	instance	c30	f1	131.19-131.137	memtroll$
+  C	c30	INSTANTIATION	instance	c1	f1	131.1-131.138	memory_controller$
+  C	c1	MODULE	module		f1	71.1-290.10	memset$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t7	flatten		roots=1 instances=1 kept=0 nodes=9 renamed=0$
 == --chain h2nooqmgnc3
-C	c29	DECLARATOR	stmt	c28	f1	28.12-28.19	str_out
-C	c28	NET_DECL	stmt	c27	f1	28.1-28.20
-C	c27	MODULE	module		f1	9.1-68.10	memory_controller
-C	c31	INSTANCE	instance	c30	f1	131.19-131.137	memtroll
-C	c30	INSTANTIATION	instance	c1	f1	131.1-131.138	memory_controller
-C	c1	MODULE	module		f1	71.1-290.10	memset
-F	f1	tests/micro/verilog/full/ch_intrinsics.v
+C	c29	DECLARATOR	stmt	c28	f1	28.12-28.19	str_out$
+C	c28	NET_DECL	stmt	c27	f1	28.1-28.20	$
+C	c27	MODULE	module		f1	9.1-68.10	memory_controller$
+C	c31	INSTANCE	instance	c30	f1	131.19-131.137	memtroll$
+C	c30	INSTANTIATION	instance	c1	f1	131.1-131.138	memory_controller$
+C	c1	MODULE	module		f1	71.1-290.10	memset$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
 == --lookup c[0]
-N	memset	net	c[0]	r125	stmt
-  R	r125	S	stmt	origin	t1.1		f1:97.1-97.16	c48	hier=memset
-  C	c48	PORT_DECL	stmt	c1	f1	97.1-97.16
-  C	c1	MODULE	module		f1	71.1-290.10	memset
-  F	f1	tests/micro/verilog/full/ch_intrinsics.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v
+N	memset	net	c[0]	r125	stmt$
+  R	r125	S	stmt	origin	t1.1		f1:97.1-97.16	c48	hier=memset$
+  C	c48	PORT_DECL	stmt	c1	f1	97.1-97.16	$
+  C	c1	MODULE	module		f1	71.1-290.10	memset$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
 == --chain c[0]
-C	c48	PORT_DECL	stmt	c1	f1	97.1-97.16
-C	c1	MODULE	module		f1	71.1-290.10	memset
-F	f1	tests/micro/verilog/full/ch_intrinsics.v
+C	c48	PORT_DECL	stmt	c1	f1	97.1-97.16	$
+C	c1	MODULE	module		f1	71.1-290.10	memset$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
 == --lookup hzztv5nsgvs
-O	memset	net	hzztv5nsgvs	memset/$n2149@tests/micro/verilog/full/ch_intrinsics.v:145	memset	tests/micro/verilog/full/ch_intrinsics.v	145	r25	gate
-  R	r25	D	gate	refine:word	t4.24	r24
-    R	r24	D	word	coarsen:word	t5.19	r21,r17,r23
-      R	r21	D	word	refine:stmt	t2.1	r20
-        R	r20	S	block	origin	t1.1		f1:145.1-275.8	c2	hier=memset
-      R	r17	D	word	refine:stmt	t2.1	r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16
-        R	r1	S	stmt	origin	t1.1		f1:149.1-275.8	c6	hier=memset
-        R	r2	S	branch	origin	t1.1		f1:150.2-157.5	c7	hier=memset
-        R	r3	S	branch	origin	t1.1		f1:158.2-166.5	c8	hier=memset
-        R	r4	S	branch	origin	t1.1		f1:167.2-174.5	c9	hier=memset
-        R	r5	S	branch	origin	t1.1		f1:175.2-187.5	c10	hier=memset
-        R	r6	S	branch	origin	t1.1		f1:188.2-192.5	c11	hier=memset
-        R	r7	S	branch	origin	t1.1		f1:193.2-196.5	c12	hier=memset
-        R	r8	S	branch	origin	t1.1		f1:197.2-203.5	c13	hier=memset
-        R	r9	S	branch	origin	t1.1		f1:204.2-215.5	c14	hier=memset
-        R	r10	S	branch	origin	t1.1		f1:216.2-223.5	c15	hier=memset
-        R	r11	S	branch	origin	t1.1		f1:224.2-228.5	c16	hier=memset
-        R	r12	S	branch	origin	t1.1		f1:229.2-234.5	c17	hier=memset
-        R	r13	S	branch	origin	t1.1		f1:235.2-243.5	c18	hier=memset
-        R	r14	S	branch	origin	t1.1		f1:244.2-250.5	c19	hier=memset
-        R	r15	S	branch	origin	t1.1		f1:251.2-265.5	c20	hier=memset
-        R	r16	S	branch	origin	t1.1		f1:268.2-274.5	c21	hier=memset
-      R	r23	D	word	refine:stmt	t2.1	r22
-        R	r22	S	stmt	origin	t1.1		f1:146.1-275.8	c4	hier=memset
-  C	c2	ALWAYS	block	c1	f1	145.1-275.8
-  C	c1	MODULE	module		f1	71.1-290.10	memset
-  C	c6	CASE	stmt	c5	f1	149.1-275.8
-  C	c5	IF_ELSE	branch	c4	f1	149.1-275.8
-  C	c4	IF	stmt	c3	f1	146.1-275.8
-  C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8
-  C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5
-  C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5
-  C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5
-  C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5
-  C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5
-  C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5
-  C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5
-  C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5
-  C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5
-  C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5
-  C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5
-  C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5
-  C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5
-  C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5
-  C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5
-  F	f1	tests/micro/verilog/full/ch_intrinsics.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v
-  T	t2	proc
-  T	t4	lower		modules=1 cells=43 nodes=829
-  T	t5	opt
+O	memset	net	hzztv5nsgvs	memset/$n2149@tests/micro/verilog/full/ch_intrinsics.v:145	memset	tests/micro/verilog/full/ch_intrinsics.v	145	r25	gate$
+  R	r25	D	gate	refine:word	t4.24	r24			$
+    R	r24	D	word	coarsen:word	t5.19	r21,r17,r23			$
+      R	r21	D	word	refine:stmt	t2.1	r20			$
+        R	r20	S	block	origin	t1.1		f1:145.1-275.8	c2	hier=memset$
+      R	r17	D	word	refine:stmt	t2.1	r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16			$
+        R	r1	S	stmt	origin	t1.1		f1:149.1-275.8	c6	hier=memset$
+        R	r2	S	branch	origin	t1.1		f1:150.2-157.5	c7	hier=memset$
+        R	r3	S	branch	origin	t1.1		f1:158.2-166.5	c8	hier=memset$
+        R	r4	S	branch	origin	t1.1		f1:167.2-174.5	c9	hier=memset$
+        R	r5	S	branch	origin	t1.1		f1:175.2-187.5	c10	hier=memset$
+        R	r6	S	branch	origin	t1.1		f1:188.2-192.5	c11	hier=memset$
+        R	r7	S	branch	origin	t1.1		f1:193.2-196.5	c12	hier=memset$
+        R	r8	S	branch	origin	t1.1		f1:197.2-203.5	c13	hier=memset$
+        R	r9	S	branch	origin	t1.1		f1:204.2-215.5	c14	hier=memset$
+        R	r10	S	branch	origin	t1.1		f1:216.2-223.5	c15	hier=memset$
+        R	r11	S	branch	origin	t1.1		f1:224.2-228.5	c16	hier=memset$
+        R	r12	S	branch	origin	t1.1		f1:229.2-234.5	c17	hier=memset$
+        R	r13	S	branch	origin	t1.1		f1:235.2-243.5	c18	hier=memset$
+        R	r14	S	branch	origin	t1.1		f1:244.2-250.5	c19	hier=memset$
+        R	r15	S	branch	origin	t1.1		f1:251.2-265.5	c20	hier=memset$
+        R	r16	S	branch	origin	t1.1		f1:268.2-274.5	c21	hier=memset$
+      R	r23	D	word	refine:stmt	t2.1	r22			$
+        R	r22	S	stmt	origin	t1.1		f1:146.1-275.8	c4	hier=memset$
+  C	c2	ALWAYS	block	c1	f1	145.1-275.8	$
+  C	c1	MODULE	module		f1	71.1-290.10	memset$
+  C	c6	CASE	stmt	c5	f1	149.1-275.8	$
+  C	c5	IF_ELSE	branch	c4	f1	149.1-275.8	$
+  C	c4	IF	stmt	c3	f1	146.1-275.8	$
+  C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8	$
+  C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5	$
+  C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5	$
+  C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5	$
+  C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5	$
+  C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5	$
+  C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5	$
+  C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5	$
+  C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5	$
+  C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5	$
+  C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5	$
+  C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5	$
+  C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5	$
+  C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5	$
+  C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5	$
+  C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5	$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t2	proc		$
+  T	t4	lower		modules=1 cells=43 nodes=829$
+  T	t5	opt		$
 == --chain hzztv5nsgvs
-C	c2	ALWAYS	block	c1	f1	145.1-275.8
-C	c1	MODULE	module		f1	71.1-290.10	memset
-C	c6	CASE	stmt	c5	f1	149.1-275.8
-C	c5	IF_ELSE	branch	c4	f1	149.1-275.8
-C	c4	IF	stmt	c3	f1	146.1-275.8
-C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8
-C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5
-C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5
-C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5
-C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5
-C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5
-C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5
-C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5
-C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5
-C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5
-C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5
-C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5
-C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5
-C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5
-C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5
-C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5
-F	f1	tests/micro/verilog/full/ch_intrinsics.v
+C	c2	ALWAYS	block	c1	f1	145.1-275.8	$
+C	c1	MODULE	module		f1	71.1-290.10	memset$
+C	c6	CASE	stmt	c5	f1	149.1-275.8	$
+C	c5	IF_ELSE	branch	c4	f1	149.1-275.8	$
+C	c4	IF	stmt	c3	f1	146.1-275.8	$
+C	c3	TIMING_STMT	stmt	c2	f1	145.8-275.8	$
+C	c7	CASE_ITEM	branch	c6	f1	150.2-157.5	$
+C	c8	CASE_ITEM	branch	c6	f1	158.2-166.5	$
+C	c9	CASE_ITEM	branch	c6	f1	167.2-174.5	$
+C	c10	CASE_ITEM	branch	c6	f1	175.2-187.5	$
+C	c11	CASE_ITEM	branch	c6	f1	188.2-192.5	$
+C	c12	CASE_ITEM	branch	c6	f1	193.2-196.5	$
+C	c13	CASE_ITEM	branch	c6	f1	197.2-203.5	$
+C	c14	CASE_ITEM	branch	c6	f1	204.2-215.5	$
+C	c15	CASE_ITEM	branch	c6	f1	216.2-223.5	$
+C	c16	CASE_ITEM	branch	c6	f1	224.2-228.5	$
+C	c17	CASE_ITEM	branch	c6	f1	229.2-234.5	$
+C	c18	CASE_ITEM	branch	c6	f1	235.2-243.5	$
+C	c19	CASE_ITEM	branch	c6	f1	244.2-250.5	$
+C	c20	CASE_ITEM	branch	c6	f1	251.2-265.5	$
+C	c21	CASE_ITEM	branch	c6	f1	268.2-274.5	$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$

@@ -1,64 +1,64 @@
 == --lookup h26muvurua7
-O	ansiportlist	net	h26muvurua7	ansiportlist/$n348@tests/micro/verilog/full/ansiportlist_2.v:28	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	28	r3	gate
-  R	r3	D	gate	refine:word	t3.12	r2
-    R	r2	D	word	rewrite:word	t2.6	r1
-      R	r1	S	expr	origin	t1.1		f1:28.18-28.30	c4	hier=ansiportlist
-  C	c4	BINARY	expr	c3	f1	28.18-28.30
-  C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30
-  C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31
-  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-  F	f1	tests/micro/verilog/full/ansiportlist_2.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v
-  T	t2	wreduce
-  T	t3	lower		modules=1 cells=16 nodes=166
+O	ansiportlist	net	h26muvurua7	ansiportlist/$n348@tests/micro/verilog/full/ansiportlist_2.v:28	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	28	r3	gate$
+  R	r3	D	gate	refine:word	t3.12	r2			$
+    R	r2	D	word	rewrite:word	t2.6	r1			$
+      R	r1	S	expr	origin	t1.1		f1:28.18-28.30	c4	hier=ansiportlist$
+  C	c4	BINARY	expr	c3	f1	28.18-28.30	$
+  C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30	$
+  C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31	$
+  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+  F	f1	tests/micro/verilog/full/ansiportlist_2.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v	$
+  T	t2	wreduce		$
+  T	t3	lower		modules=1 cells=16 nodes=166$
 == --chain h26muvurua7
-C	c4	BINARY	expr	c3	f1	28.18-28.30
-C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30
-C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31
-C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-F	f1	tests/micro/verilog/full/ansiportlist_2.v
+C	c4	BINARY	expr	c3	f1	28.18-28.30	$
+C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30	$
+C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31	$
+C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+F	f1	tests/micro/verilog/full/ansiportlist_2.v$
 == --lookup and_o[0]
-N	ansiportlist	net	and_o[0]	r36	gate
-  R	r36	D	gate	refine:word	t3.6	r35
-    R	r35	D	word	coarsen:word	t5.2	r33,r34		c31,c34	join
-      R	r33	S	expr	origin	t1.1		f1:12.18-12.30	c32	hier=ansiportlist
-      R	r34	S	expr	origin	t1.1		f1:13.18-13.30	c36	hier=ansiportlist
-  C	c32	BINARY	expr	c31	f1	12.18-12.30
-  C	c31	NET_ASSIGN	block	c30	f1	12.8-12.30
-  C	c30	CONT_ASSIGN	block	c1	f1	12.1-12.31
-  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-  C	c36	BINARY	expr	c35	f1	13.18-13.30
-  C	c35	UNARY	expr	c34	f1	13.18-13.30
-  C	c34	NET_ASSIGN	block	c33	f1	13.8-13.30
-  C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31
-  F	f1	tests/micro/verilog/full/ansiportlist_2.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v
-  T	t3	lower		modules=1 cells=16 nodes=166
-  T	t5	opt
+N	ansiportlist	net	and_o[0]	r36	gate$
+  R	r36	D	gate	refine:word	t3.6	r35			$
+    R	r35	D	word	coarsen:word	t5.2	r33,r34		c31,c34	join$
+      R	r33	S	expr	origin	t1.1		f1:12.18-12.30	c32	hier=ansiportlist$
+      R	r34	S	expr	origin	t1.1		f1:13.18-13.30	c36	hier=ansiportlist$
+  C	c32	BINARY	expr	c31	f1	12.18-12.30	$
+  C	c31	NET_ASSIGN	block	c30	f1	12.8-12.30	$
+  C	c30	CONT_ASSIGN	block	c1	f1	12.1-12.31	$
+  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+  C	c36	BINARY	expr	c35	f1	13.18-13.30	$
+  C	c35	UNARY	expr	c34	f1	13.18-13.30	$
+  C	c34	NET_ASSIGN	block	c33	f1	13.8-13.30	$
+  C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31	$
+  F	f1	tests/micro/verilog/full/ansiportlist_2.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v	$
+  T	t3	lower		modules=1 cells=16 nodes=166$
+  T	t5	opt		$
 == --chain and_o[0]
-C	c32	BINARY	expr	c31	f1	12.18-12.30
-C	c31	NET_ASSIGN	block	c30	f1	12.8-12.30
-C	c30	CONT_ASSIGN	block	c1	f1	12.1-12.31
-C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-C	c36	BINARY	expr	c35	f1	13.18-13.30
-C	c35	UNARY	expr	c34	f1	13.18-13.30
-C	c34	NET_ASSIGN	block	c33	f1	13.8-13.30
-C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31
-F	f1	tests/micro/verilog/full/ansiportlist_2.v
+C	c32	BINARY	expr	c31	f1	12.18-12.30	$
+C	c31	NET_ASSIGN	block	c30	f1	12.8-12.30	$
+C	c30	CONT_ASSIGN	block	c1	f1	12.1-12.31	$
+C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+C	c36	BINARY	expr	c35	f1	13.18-13.30	$
+C	c35	UNARY	expr	c34	f1	13.18-13.30	$
+C	c34	NET_ASSIGN	block	c33	f1	13.8-13.30	$
+C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31	$
+F	f1	tests/micro/verilog/full/ansiportlist_2.v$
 == --lookup hzwqeu7rhfh
-O	ansiportlist	net	hzwqeu7rhfh	ansiportlist/$n170@tests/micro/verilog/full/ansiportlist_2.v:17	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	17	r21	word
-  R	r21	D	word	rewrite:word	t4.2	r20
-    R	r20	S	expr	origin	t1.1		f1:17.18-17.30	c23	hier=ansiportlist
-  C	c23	BINARY	expr	c22	f1	17.18-17.30
-  C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30
-  C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31
-  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-  F	f1	tests/micro/verilog/full/ansiportlist_2.v
-  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v
-  T	t4	hardmap		multiply=1 adder=12 chains=2 sp_slices=0 dp_slices=0 soft=0
+O	ansiportlist	net	hzwqeu7rhfh	ansiportlist/$n170@tests/micro/verilog/full/ansiportlist_2.v:17	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	17	r21	word$
+  R	r21	D	word	rewrite:word	t4.2	r20			$
+    R	r20	S	expr	origin	t1.1		f1:17.18-17.30	c23	hier=ansiportlist$
+  C	c23	BINARY	expr	c22	f1	17.18-17.30	$
+  C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30	$
+  C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31	$
+  C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+  F	f1	tests/micro/verilog/full/ansiportlist_2.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v	$
+  T	t4	hardmap		multiply=1 adder=12 chains=2 sp_slices=0 dp_slices=0 soft=0$
 == --chain hzwqeu7rhfh
-C	c23	BINARY	expr	c22	f1	17.18-17.30
-C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30
-C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31
-C	c1	MODULE	module		f1	1.1-30.10	ansiportlist
-F	f1	tests/micro/verilog/full/ansiportlist_2.v
+C	c23	BINARY	expr	c22	f1	17.18-17.30	$
+C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30	$
+C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31	$
+C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
+F	f1	tests/micro/verilog/full/ansiportlist_2.v$

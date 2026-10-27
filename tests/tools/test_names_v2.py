@@ -3,7 +3,7 @@
 Maps are written by the Task 5 writers (`write_blif --vtr`, `write_json`, `write_verilog` with
 `--name-style hash --prov-map`) from two micro designs run through the VTR flow to `lower` (no
 ABC, so the test runs in every build). The golden text under tests/tools/data/names_v2 holds the
-`--lookup` and `--chain` output for a fixed choice of objects; ODIN3_UPDATE_GOLDEN=1 rewrites it.
+`--lookup` and `--chain` output for a fixed choice of objects (each line ends with `$`); ODIN3_UPDATE_GOLDEN=1 rewrites it.
 Version 1 goldens (`v1_*.txt`) were produced by the `odin3` of main before this task and pin that
 `names` output on a version 1 map is unchanged. Needs ODIN3_CLI (CTest python_tools sets it).
 Work files go to a fresh temporary directory that is left in place.
@@ -55,6 +55,12 @@ def write_map(work: Path, micro: str, writer: str, version: int, folder: str = M
     if run.returncode != 0:
         raise AssertionError(run.stderr)
     return Path(str(out) + ".names")
+
+
+def marked(out: str) -> str:
+    """out with a `$` after every line, so that a trailing TAB (an empty last field) survives the
+    pre-commit whitespace fixer in the golden files."""
+    return "".join(f"{line}$\n" for line in out.splitlines())
 
 
 def pick(lines: list[str]) -> list[str]:
@@ -111,7 +117,7 @@ class NamesV2Test(unittest.TestCase):
                 for action in ("lookup", "chain"):
                     code, out, err = names(f"--map {path} --{action} {name}")
                     self.assertEqual(code, 0, err)
-                    text += f"== --{action} {name}\n{out}"
+                    text += f"== --{action} {name}\n" + marked(out)
             self.golden(f"{micro}.{writer}.txt", text)
 
     def test_every_line_type_is_printed(self) -> None:
