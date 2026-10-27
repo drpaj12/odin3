@@ -646,6 +646,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                 raise UsageError(f"no such design file: {design}")
         out = Path("odin3_out") / resolve_top(ns.designs, ns.top)
     vpr = resolve_vpr(ns.vpr, ns.target)
+    if ns.keep_results and not vpr:
+        ap.error("--keep-results needs VPR (--vpr)")
     arch = ns.arch.resolve() if ns.arch else None
     attr = ns.timing_attr or ns.timing_paths is not None
     prov = ns.prov or (attr and not ns.timing_legacy)

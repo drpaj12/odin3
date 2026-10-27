@@ -255,11 +255,108 @@ class Refusals(unittest.TestCase):
             prov_post.extend_flow_dir(flow)
         self.assertEqual(map_of(flow, "bm_DL_BCD_adder").read_bytes(), once)
 
+    def test_hand_added_pack_row_refuses_the_map(self) -> None:
+        """A `pack` or `place` T row (the pass is the second field) refuses a second run."""
+        for word in ("pack", "place"):
+            with self.subTest(word=word):
+                flow = fresh("bm_DL_BCD_adder")
+                path = map_of(flow, "bm_DL_BCD_adder")
+                text = path.read_text()
+                path.write_text(text.replace("\nT\tt6\t", f"\nT\tt4x\t{word}\t\t\nT\tt6\t", 1))
+                self.assertIn(f"\t{word}\t", path.read_text())
+                with self.assertRaisesRegex(prov_post.PostError, "already holds"):
+                    prov_post.extend_flow_dir(flow)
+
     def test_missing_vpr_files_are_named(self) -> None:
         flow = fresh("bm_DL_BCD_adder")
         shutil.move(str(flow / "vpr"), str(flow / "vpr-moved"))
         with self.assertRaisesRegex(prov_post.PostError, "keep-results"):
             prov_post.extend_flow_dir(flow)
+
+
+NET_HEAD = '<block name="n.net" instance="FPGA_packed_netlist[0]">\n'
+
+
+def net_file(body: str) -> Path:
+    path = Path(tempfile.mkdtemp(prefix="provpost-test-")) / "t.net"
+    path.write_text(NET_HEAD + body + "</block>\n")
+    return path
+
+
+def clb_xml(name: str, *prims: tuple[str, str]) -> str:
+    """A cluster with one level-1 block holding the given (atom name, stem) primitives."""
+    leaves = "".join(f'<block name="{n}" instance="{stem}[{i}]"/>'
+                     for i, (n, stem) in enumerate(prims))
+    return (f'<block name="{name}" instance="clb[0]"><block name="x" instance="fle[0]">{leaves}'
+            f"</block></block>")
+
+
+class NetReading(unittest.TestCase):
+    def test_wire_mode_leaf_is_not_an_atom(self) -> None:
+        leaves = (clb_xml("c1", ("a", "lut6"), ("netw", "lut6"))
+                  .replace('<block name="netw" instance="lut6[1]"/>',
+                           '<block name="netw" instance="lut6[1]" mode="wire"/>'))
+        clusters = prov_post.read_net(net_file(leaves))
+        self.assertEqual([c.atoms for c in clusters], [["a"]])
+
+    def test_duplicate_atom_name_is_refused(self) -> None:
+        body = clb_xml("c1", ("a", "lut6")) + clb_xml("c2", ("b", "lut6"), ("a", "ff"))
+        with self.assertRaisesRegex(prov_post.PostError, "'a' occurs twice"):
+            prov_post.read_net(net_file(body))
+
+    def test_single_big_ble_warns(self) -> None:
+        prims = tuple((f"a{i}", "lut6") for i in range(prov_post.BLE_ATOMS_WARN + 1))
+        with self.assertLogs("odin3", level="WARNING") as cm:
+            prov_post.read_net(net_file(clb_xml("c1", *prims)))
+        self.assertIn("level-1 block a BLE", cm.output[0])
+        with self.assertNoLogs("odin3", level="WARNING"):
+            prov_post.read_net(net_file(clb_xml("c1", *prims[:3])))
+
+
+class Stub:
+    """A Resolver stand-in: atom name -> record number, 0 when absent."""
+
+    def __init__(self, table: dict[str, int]) -> None:
+        self.table = table
+
+    def record(self, name: str) -> int:
+        return self.table.get(name, 0)
+
+
+class BuildEdges(unittest.TestCase):
+    @staticmethod
+    def run_build(clusters: list[prov_post.Cluster], table: dict[str, int]) -> tuple[
+            list[prov_post.NewRec], dict[str, list[prov_post.NewRec]], int]:
+        places: dict[str, tuple[str, ...]] = {c.name: ("x=1", "y=1", "sub=0") for c in clusters}
+        return prov_post.build(NameMap(2, 10, "refs"), clusters, places,
+                               Stub(table))  # type: ignore[arg-type]
+
+    def test_clb_parents_are_not_repeated(self) -> None:
+        cl = prov_post.Cluster("io", "io", ["p", "q"], ["p", "q"])
+        made, _, _ = self.run_build([cl], {"p": 7, "q": 7})
+        clb = next(r for r in made if r.level == "clb")
+        self.assertEqual(clb.parents, [7])
+
+    def test_a_ble_with_no_resolved_atom_gets_no_record(self) -> None:
+        cl = prov_post.Cluster("c", "clb", [prov_post.Ble(["u", "v"]), prov_post.Ble(["w"])],
+                               ["u", "v", "w"])
+        made, recs, unmatched = self.run_build([cl], {"w": 3})
+        self.assertEqual([r.level for r in made], ["ble", "clb", "site"])
+        self.assertEqual(unmatched, 2)
+        self.assertEqual([r.level for r in recs["u"]], ["clb", "site"])
+        self.assertEqual([r.level for r in recs["w"]], ["ble", "clb", "site"])
+
+    def test_a_cluster_with_no_resolved_atom_gets_no_records(self) -> None:
+        cl = prov_post.Cluster("c", "clb", [prov_post.Ble(["u"])], ["u"])
+        made, recs, unmatched = self.run_build([cl], {})
+        self.assertEqual((made, recs, unmatched), ([], {}, 1))
+
+    def test_a_cluster_of_unmatched_pads_keeps_its_clb_and_site(self) -> None:
+        cl = prov_post.Cluster("io", "io", ["out:z"], ["out:z"])
+        made, recs, _ = self.run_build([cl], {})
+        self.assertEqual([r.level for r in made], ["clb", "site"])
+        self.assertEqual(made[0].parents, [])
+        self.assertEqual([r.level for r in recs["out:z"]], ["clb", "site"])
 
 
 class Writing(unittest.TestCase):
@@ -270,6 +367,26 @@ class Writing(unittest.TestCase):
                 self.assertRaises(prov_post.PostError):
             prov_post.extend_flow_dir(flow)
         self.assertEqual(map_of(flow, "bm_DL_BCD_adder").read_bytes(), before)
+
+    def test_failed_write_removes_only_its_own_temporary_file(self) -> None:
+        flow = fresh("bm_DL_BCD_adder")
+        other = map_of(flow, "bm_DL_BCD_adder").with_name("keep.tmp")
+        other.write_text("x")
+        with mock.patch("os.replace", side_effect=OSError("disk gone")), \
+                self.assertRaises(prov_post.PostError):
+            prov_post.extend_flow_dir(flow)
+        self.assertEqual(sorted(p.name for p in (flow / "odin3").iterdir() if p.suffix == ".tmp"),
+                         ["keep.tmp"])
+
+    def test_map_keeps_its_mode_and_is_parsed_from_one_read(self) -> None:
+        flow = fresh("bm_DL_BCD_adder")
+        path = map_of(flow, "bm_DL_BCD_adder")
+        path.chmod(0o640)
+        with mock.patch.object(Path, "read_bytes", autospec=True,
+                               side_effect=Path.read_bytes) as rb:
+            prov_post.extend_flow_dir(flow)
+        self.assertEqual(sum(1 for c in rb.call_args_list if c.args[0] == path), 1)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o640)
 
     def test_success_leaves_no_temporary_file(self) -> None:
         flow = fresh("bm_DL_BCD_adder")
@@ -337,9 +454,40 @@ class Inputs(unittest.TestCase):
 
         design = FIX.parent / "timing_attr_v2" / "decl" / "decl.v"
         out = Path(tempfile.mkdtemp(prefix="provpost-test-"))
-        kept = odin3_flow.parse_args([str(design), "--keep-results", "--out", str(out)])
-        plain = odin3_flow.parse_args([str(design), "--out", str(out)])
+        with mock.patch.object(odin3_flow, "vtr_root_from_env", return_value=Path("/vtr")):
+            kept = odin3_flow.parse_args([str(design), "--keep-results", "--out", str(out)])
+            plain = odin3_flow.parse_args([str(design), "--out", str(out)])
         self.assertEqual((kept.keep_results, plain.keep_results), (True, False))
+
+    def test_keep_results_needs_vpr(self) -> None:
+        import odin3_flow  # noqa: PLC0415
+
+        design = FIX.parent / "timing_attr_v2" / "decl" / "decl.v"
+        with self.assertRaises(SystemExit) as cm, mock.patch("sys.stderr"):
+            odin3_flow.parse_args([str(design), "--keep-results", "--no-vpr"])
+        self.assertEqual(cm.exception.code, 2)
+
+    def test_vpr_argv_keeps_results_only_on_request(self) -> None:
+        import odin3_flow  # noqa: PLC0415
+        import qor_legs  # noqa: PLC0415
+
+        seen: list[list[str]] = []
+
+        def fake_step(name: str, argv: list[str], *_a: object, **_k: object
+                      ) -> odin3_flow.StepResult:
+            seen.append(list(argv))
+            return odin3_flow.StepResult(name, False, Path("/dev/null"), 0.0)
+
+        work = Path(tempfile.mkdtemp(prefix="provpost-test-"))
+        blif = work / "d.blif"
+        blif.write_text(".model d\n.end\n")
+        for keep in (False, True):
+            args = odin3_flow.FlowArgs([Path("x.v")], None, "vtr", None, "", True, False,
+                                       Path("odin3"), work, keep_results=keep)
+            with mock.patch.object(odin3_flow, "run_step", fake_step), \
+                    mock.patch.object(qor_legs, "stage_timeout", return_value=10):
+                odin3_flow.vpr_run(args, Path("/vtr"), Path("/a.xml"), 6, blif, work / "j", None)
+            self.assertEqual("-delete_result_files" in seen[-1], not keep, seen[-1])
 
 
 if __name__ == "__main__":

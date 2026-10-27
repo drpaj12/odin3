@@ -18,8 +18,10 @@ schema (3.2), to the map:
 Joins follow 3.3 unchanged (anchors, the reduced set J, the join of instances): a CLB or BLE whose
 atoms blend distinct anchors is labelled a ``join`` by ``pack``. The new records are numbered by the
 numbering algorithm of 3.2 (post-order from the ``A`` lines in line order). The map is rewritten
-atomically (temporary file, then ``os.replace``); a map that already holds ``A`` lines or ``pack``
-records is refused. A BLIF written with short names is refused (no map is keyed by them).
+atomically (a ``mkstemp`` file in the map's directory, then ``os.replace``; the tool removes that
+file if the write fails); a map that already holds ``A`` lines or ``pack``
+records is refused. A BLIF written with short names is refused (no map is keyed by them). The
+``.net`` is trusted local VPR output, parsed with ElementTree.
 
 Importable: ``extend_flow_dir(Path) -> PostResult``. Exit codes: 0 ok, 1 refused or failed (missing
 or inconsistent input, short-name BLIF, map already extended), 2 usage error.
@@ -33,7 +35,9 @@ import json
 import logging
 import os
 import re
+import shutil
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -51,7 +55,7 @@ NO_SOURCE_ATOMS = frozenset(("gnd", "vcc", "unconn"))  # constant generators: no
 PAD_STEMS = frozenset(("inpad", "outpad"))  # primitives of an I/O block: not in any BLE
 PACK, PLACE = "pack", "place"
 OP_BLE, OP_CLB, OP_SITE = 1, 2, 1  # operation numbers within a pass run (renumbered when written)
-TEMP_SUFFIX = ".prov-post.tmp"
+BLE_ATOMS_WARN = 10  # a single BLE with more atoms than this: the level-1 block is not a BLE
 _ESCAPES = (("%", "%25"), ("\t", "%09"), ("\n", "%0A"), ("\\", "%5C"), (",", "%2C"), ("|", "%7C"))
 _SPAN = re.compile(r"(\d+)\.(\d+)-(\d+)\.(\d+)")
 _STEM = re.compile(r"^([^\[]*)")
@@ -348,7 +352,8 @@ class Cluster:
 
 def primitives(block: ET.Element) -> list[tuple[str, str]]:
     """(atom name, instance stem) of every primitive under a block, in document order. A
-    primitive is a block with no sub-block whose name is not ``open``."""
+    primitive is a block with no sub-block whose name is not ``open`` and whose mode is not
+    ``wire`` (a wire-mode leaf is named after a net)."""
     out: list[tuple[str, str]] = []
     stack = [block]
     while stack:
@@ -356,6 +361,8 @@ def primitives(block: ET.Element) -> list[tuple[str, str]]:
         kids = cur.findall("block")
         if not kids:
             name = cur.get("name", "")
+            if cur.get("mode") == "wire":  # a routing-only block: its name is a net, not an atom
+                continue
             if name and name != "open":
                 out.append((name, _STEM.match(cur.get("instance", "")).group(1)))  # type: ignore[union-attr]
         stack.extend(reversed(kids))
@@ -371,6 +378,7 @@ def read_net(path: Path) -> list[Cluster]:
     except (ET.ParseError, OSError) as exc:
         raise PostError(f"cannot read the packed netlist {path}: {exc}") from exc
     clusters: list[Cluster] = []
+    seen: set[str] = set()
     for top in root.findall("block"):
         name = top.get("name", "")
         if not name or name == "open":
@@ -388,6 +396,16 @@ def read_net(path: Path) -> list[Cluster]:
             else:
                 cluster.parts.extend(n for n, _ in prims)
             cluster.atoms.extend(n for n, _ in prims)
+        for atom in cluster.atoms:
+            if atom in seen:
+                raise PostError(f"{path}: the atom name '{atom}' occurs twice in the packed "
+                                f"netlist: the A lines are keyed by atom name")
+            seen.add(atom)
+        bles = [p for p in cluster.parts if isinstance(p, Ble)]
+        if len(bles) == 1 and len(bles[0].atoms) > BLE_ATOMS_WARN:
+            LOG.warning("%s: cluster '%s' holds one BLE of %d atoms: is the architecture's "
+                        "level-1 block a BLE? (the BLE records would equal the CLB's)", path,
+                        name, len(bles[0].atoms))
         if cluster.atoms:
             clusters.append(cluster)
     return clusters
@@ -449,7 +467,7 @@ def find_inputs(flow: Path, ns: argparse.Namespace | None = None) -> Inputs:
     if path.is_file():
         try:
             inputs = json.loads(path.read_text())
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             raise PostError(f"cannot read {path}: {exc}") from exc
 
     def rel(key: str) -> Path | None:
@@ -583,20 +601,29 @@ def build(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str, ...
     unmatched = 0
     for cl in clusters:
         parents: list[int | NewRec] = []
+        pads: set[int] = set()  # a pad record can recur: it is a parent once
         ble_of: dict[str, NewRec] = {}
         for part in cl.parts:
             if isinstance(part, str):
                 number = res.record(part)
                 unmatched += number == 0
-                parents.append(number) if number else None
+                if number and number not in pads:
+                    pads.add(number)
+                    parents.append(number)
                 continue
             atoms = [res.record(a) for a in part.atoms]
             unmatched += atoms.count(0)
-            ble = NewRec("ble", "coarsen:lut", OP_BLE, PACK, list(dict.fromkeys(a for a in atoms
-                                                                               if a)))
+            found: list[int | NewRec] = list(dict.fromkeys(a for a in atoms if a))
+            if not found:  # no atom of the BLE is in the map: no record to chain (agent default)
+                continue
+            ble = NewRec("ble", "coarsen:lut", OP_BLE, PACK, found)
             parents.append(ble)
             made.append(ble)
             ble_of.update({a: ble for a in part.atoms})
+        if not parents and any(isinstance(p, Ble) for p in cl.parts):
+            continue  # logic with no atom in the map: no CLB, no site, no A lines (agent default)
+            # a cluster of pads alone keeps its CLB and site even with no parent: an output pad
+            # (`out:<port>`) has no map object by design, and the site is still a placement fact
         clb = NewRec("clb", "coarsen:ble", OP_CLB, PACK, parents)
         made.append(clb)
         site: NewRec | None = None
@@ -604,8 +631,7 @@ def build(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str, ...
             site = NewRec("site", "rewrite:clb", OP_SITE, PLACE, [clb], places[cl.name])
             made.append(site)
         for atom in cl.atoms:
-            row = [r for r in (ble_of.get(atom), clb, site) if r is not None]
-            atom_recs[atom] = row
+            atom_recs[atom] = [r for r in (ble_of.get(atom), clb, site) if r is not None]
     return made, atom_recs, unmatched
 
 
@@ -650,7 +676,7 @@ def extend_map(nm: NameMap, clusters: list[Cluster], places: dict[str, tuple[str
                                                                  list[str], PostResult]:
     """The new T, R and A lines (not yet in any file) and the result counts."""
     made, atom_recs, unmatched = build(nm, clusters, places, names)
-    order = [a for cl in clusters for a in cl.atoms]
+    order = [a for cl in clusters for a in cl.atoms if a in atom_recs]
     base = len(nm.records)
     number_records(order, atom_recs, base)
     reached = sorted((r for r in made if r.number), key=lambda r: r.number)
@@ -709,25 +735,35 @@ def merged_text(raw: bytes, tlines: list[str], rlines: list[str], alines: list[s
 
 
 def write_atomic(path: Path, data: bytes) -> None:
-    """Temporary file next to the map, then ``os.replace``: a reader sees the old map or the new
-    one. A failed write leaves the old map and the temporary file (`<map>.prov-post.tmp`, reused
-    by the next run); the tool deletes nothing."""
-    temp = path.with_name(path.name + TEMP_SUFFIX)
-    with temp.open("wb") as fh:
-        fh.write(data)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(temp, path)
+    """Temporary file in the map's directory (``tempfile.mkstemp``, so a concurrent run never
+    shares it), then ``os.replace``: a reader sees the old map or the new one. A failed write
+    leaves the old map; the tool removes its own temporary file and nothing else."""
+    fd, name = tempfile.mkstemp(dir=path.parent, prefix=path.name + ".", suffix=".tmp")
+    temp = Path(name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        shutil.copymode(path, temp)  # mkstemp makes the file 0600
+        os.replace(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 def extend_flow_dir(flow_dir: Path | str, ns: argparse.Namespace | None = None) -> PostResult:
     """Extend the name map of ``flow_dir`` with the pack, place and atom lines. PostError when an
     input is missing or inconsistent, the BLIF has short names or the map is already extended."""
-    flow = Path(flow_dir).resolve()
+    return _extend(Path(flow_dir).resolve(), ns)
+
+
+def _read_map(path: Path) -> tuple[bytes, NameMap]:
     try:
-        return _extend(flow, ns)
+        raw = path.read_bytes()
+        return raw, name_map_v2.parse_name_map(raw, path)
     except (OSError, ValueError) as exc:
-        raise PostError(f"cannot read or write an input: {exc}") from exc
+        raise PostError(f"cannot read the name map {path}: {exc}") from exc
 
 
 def _extend(flow: Path, ns: argparse.Namespace | None) -> PostResult:
@@ -735,7 +771,7 @@ def _extend(flow: Path, ns: argparse.Namespace | None) -> PostResult:
     for need in (inp.map, inp.net, inp.place):
         if not need.is_file():
             raise PostError(f"missing input {need}")
-    nm = name_map_v2.read_name_map(inp.map)
+    raw, nm = _read_map(inp.map)
     check_extendable(nm, inp.map)
     if nm.records and nm.records[-1].number != len(nm.records) or any(
             r.number != i + 1 for i, r in enumerate(nm.records)):
@@ -750,10 +786,12 @@ def _extend(flow: Path, ns: argparse.Namespace | None) -> PostResult:
              if a not in NO_SOURCE_ATOMS and not a.startswith("out:")]
     matched = sum(1 for a in atoms if names.lookup(a) is not None)
     check_names(inp.blif, matched / len(atoms) if atoms else 1.0, matched, len(atoms))
-    raw = inp.map.read_bytes()
     tlines, rlines, alines, result = extend_map(nm, clusters, places, names, inp.net, inp.place)
     data = merged_text(raw, tlines, rlines, alines)
-    write_atomic(inp.map, data)
+    try:
+        write_atomic(inp.map, data)
+    except OSError as exc:
+        raise PostError(f"cannot write {inp.map}: {exc}") from exc
     result.map_path, result.bytes_before, result.bytes_after = inp.map, len(raw), len(data)
     result.lines = [*tlines, *rlines, *alines]
     return result

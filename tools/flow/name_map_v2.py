@@ -374,7 +374,13 @@ def read_name_map(path: str | Path) -> NameMap:
     size = Path(path).stat().st_size
     if size > _MAP_MAX_FILE:
         raise ValueError(f"{path}: the name map is over {_MAP_MAX_FILE} bytes")
-    lines = Path(path).read_bytes().split(b"\n")
+    return parse_name_map(Path(path).read_bytes(), path)
+
+
+def parse_name_map(raw: bytes, path: str | Path = "<memory>") -> NameMap:
+    """Parse the bytes of a name map (what read_name_map reads from its file); `path` names the
+    map in warnings and errors. Raises ValueError for a bad header."""
+    lines = raw.split(b"\n")
     if lines and lines[-1] == b"":
         lines.pop()
     if not lines:

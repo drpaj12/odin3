@@ -22,8 +22,8 @@ from .helpers import REPO_ROOT
 
 ODIN3 = os.environ.get("ODIN3_CLI")
 # The CLI links its own sanitizer runtime; the LD_PRELOAD that CTest python_names sets for a
-# sanitized libodin3 in Python clashes with it (clang: "incompatible ASan runtimes").
-CLI_ENV = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+# sanitized libodin3 in Python (and LD_AUDIT) clashes with it (clang: "incompatible ASan runtimes").
+CLI_ENV = {k: v for k, v in os.environ.items() if k not in ("LD_PRELOAD", "LD_AUDIT")}
 GOLDEN = Path(__file__).resolve().parent / "data" / "names_v2"
 UPDATE = os.environ.get("ODIN3_UPDATE_GOLDEN") == "1"
 MICRO = "tests/micro/verilog/full"
