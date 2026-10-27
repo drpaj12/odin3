@@ -58,8 +58,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   nets and nodes after `opt_expr` higher than a Release build (two per dropped constant) and every `$n<ID>` name
   built on them, hence the hash names, differed (522 of 1224 writer files on the micros, Debug against Release). The
   rules (`src/passes/opt/expr_fine.c`) now make a constant only when they rewrite. Test `cli_hash_name_ids`. IDs, and
-  so names, of objects made after such a rule change in every build (fewer IDs used); no committed golden holds them.
-  ABI stays 7.
+  so names, of objects made after such a rule change in every build (fewer IDs used). Goldens regenerated for that
+  (IDs only): `tests/opt/rules/expr/fine.group.il`, `tests/tools/data/names_v2/{ansiportlist_2.blif,v1_ansiportlist_2}.txt`,
+  `tests/tools/data/restore/roundtrip.txt` (the BLIF rows' `map_identical` count rises). ABI stays 7.
 - The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs
   without git: `tools/release/make-tarball` writes `third_party/abc/.odin3-commit` and
   `third_party/unity/.odin3-commit` (the submodule HEADs; generated, not committed) and
