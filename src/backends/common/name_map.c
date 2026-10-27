@@ -593,11 +593,13 @@ enum {
     C_FIELDS = 7,
     F_FIELDS = 2,
     T_FIELDS = 4,
-    A_FIELDS = 3
+    A_FIELDS = 3,
+    Q_FIELDS = 12,
+    K_FIELDS = 7
 };
 static const nm2_type NM2_TYPES[] = {{'O', O_FIELDS}, {'N', N_FIELDS}, {'R', R_FIELDS},
                                      {'C', C_FIELDS}, {'F', F_FIELDS}, {'T', T_FIELDS},
-                                     {'A', A_FIELDS}};
+                                     {'A', A_FIELDS}, {'Q', Q_FIELDS}, {'K', K_FIELDS}};
 
 static const nm2_type *nm2_type_of(char letter) {
     for (size_t k = 0; k < sizeof NM2_TYPES / sizeof NM2_TYPES[0]; k++) {
@@ -1064,6 +1066,29 @@ static void check_c(chk *ck, const odin3_nm_line *line) {
     }
 }
 
+/* The stale field of an A, Q or K line: `-` or a run `t<n>` that resolves. */
+static void check_stale(chk *ck, odin3_bytes stale) {
+    if (stale.len == 1 && ((const char *)stale.ptr)[0] == '-') {
+        return;
+    }
+    ref_elem(ck, stale, 't', ck->limit[LIM_T], false);
+}
+
+/* A, Q and K lines (post-Odin data, V1.2.0 3.2): the record ids and the stale run resolve. */
+static void check_extra(chk *ck, const odin3_nm_line *line) {
+    const odin3_bytes *fld = line->f;
+    if (line->type == 'A') {
+        check_list(ck, fld[NM_A_RECS], 'r', false);
+        check_stale(ck, fld[NM_A_STALE]);
+    } else if (line->type == 'Q') {
+        ref_elem(ck, fld[NM_Q_ID], 'r', ck->limit[LIM_R], false);
+        check_stale(ck, fld[NM_Q_STALE]);
+    } else {
+        ref_elem(ck, fld[NM_K_ID], 'r', ck->limit[LIM_R], false);
+        check_stale(ck, fld[NM_K_STALE]);
+    }
+}
+
 static void check_object(chk *ck, const odin3_nm_line *line) {
     odin3_bytes recs = line->type == 'O' ? line->f[NM_O_RECS] : line->f[NM_N_RECS];
     uint32_t before = ck->res->bad_ref;
@@ -1121,6 +1146,8 @@ odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map) {
             check_c(&ck, line);
         } else if (line->type == 'O' || line->type == 'N') {
             check_object(&ck, line);
+        } else if (line->type == 'A' || line->type == 'Q' || line->type == 'K') {
+            check_extra(&ck, line);
         }
     }
     return res;

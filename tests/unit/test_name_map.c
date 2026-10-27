@@ -789,12 +789,12 @@ static void test_v2_malformed_lines_warn_and_are_ignored(void) {
 
 static void test_v2_unknown_type_warns_once_per_type(void) {
     char text[TEXT_BUF];
-    (void)snprintf(text, sizeof text, "%sQ\tq1\tx\nQ\tq2\ty\nK\tk1\nQ\tq3\nF\tf1\tt.v\n", HEADER2);
+    (void)snprintf(text, sizeof text, "%sX\tq1\tx\nX\tq2\ty\nZ\tk1\nX\tq3\nF\tf1\tt.v\n", HEADER2);
     odin3_name_map map;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
-    TEST_ASSERT_EQUAL_UINT(2, warn_count); /* Q once, K once */
-    expect_warning(0, "line type 'Q' is unknown");
-    expect_warning(1, "line type 'K' is unknown");
+    TEST_ASSERT_EQUAL_UINT(2, warn_count); /* X once, Z once */
+    expect_warning(0, "line type 'X' is unknown");
+    expect_warning(1, "line type 'Z' is unknown");
     TEST_ASSERT_EQUAL_UINT(1, map.lines.len);
     TEST_ASSERT_EQUAL_UINT32(4, map.ignored);
     odin3_name_map_free(&map);
@@ -906,11 +906,67 @@ static void test_v2_ast_word_survives_the_callers_text(void) {
     }
 }
 
+/* Q and K are parsed (Task 9): the fewest fields keep the line, fewer warn and drop it. */
+static void test_v2_q_and_k_lines_are_parsed(void) {
+    static const char Q12[] = "Q\tr1\t\tpass\t\t\t\t\t\t\t\tbasis\t-\n";
+    static const char K7[] = "K\tr1\tm\t\t\t\tbasis\t-\n";
+    char text[TEXT_BUF];
+    (void)snprintf(text, sizeof text, "%s%s%sF\tf1\tt.v\n", HEADER2, Q12, K7);
+    odin3_name_map map;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+    TEST_ASSERT_EQUAL_UINT(0, warn_count);
+    TEST_ASSERT_EQUAL_UINT(3, map.lines.len);
+    const odin3_nm_line *q = odin3_vec_cat(&map.lines, 0);
+    TEST_ASSERT_EQUAL_INT('Q', q->type);
+    TEST_ASSERT_EQUAL_UINT32(12, q->nfields);
+    expect_bytes(q->f[NM_Q_ID], text_of("r1"));
+    expect_bytes(q->f[NM_Q_STALE], text_of("-"));
+    const odin3_nm_line *k = odin3_vec_cat(&map.lines, 1);
+    TEST_ASSERT_EQUAL_INT('K', k->type);
+    expect_bytes(k->f[NM_K_STALE], text_of("-"));
+    odin3_name_map_free(&map);
+}
+
+static void test_v2_q_and_k_with_too_few_fields_are_ignored(void) {
+    char text[TEXT_BUF];
+    (void)snprintf(text, sizeof text,
+                   "%sQ\tr1\t\tpass\t\t\t\t\t\t\tbasis\t-\nK\tr1\tm\t\t\tbasis\t-\nF\tf1\tt.v\n",
+                   HEADER2);
+    odin3_name_map map;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, parse_text(&map, text_of(text)));
+    TEST_ASSERT_EQUAL_UINT32(2, map.ignored); /* Q has 11 fields, K has 6 */
+    TEST_ASSERT_EQUAL_UINT(2, warn_count);
+    expect_warning(0, "name.map:2: name map entry ignored: too few fields for its type");
+    TEST_ASSERT_EQUAL_UINT(1, map.lines.len);
+    odin3_name_map_free(&map);
+}
+
+/* The check resolves the record ids and the stale run of A, Q and K lines. */
+static void test_v2_check_resolves_extra_line_references(void) {
+    static const char TAIL[] = "F\tf1\tt.v\nT\tt1\tread_verilog\t\t\n";
+    static const char R1[] = "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.5\t\t\n";
+    static const char Q_OK[] = "Q\tr1\t\tp\t\t\t\t\t\t\t\tb\tt1\n";
+    static const char Q_BAD_ID[] = "Q\tr2\t\tp\t\t\t\t\t\t\t\tb\t-\n";
+    static const char K_BAD_STALE[] = "K\tr1\tm\t\t\t\tb\tt9\n";
+    static const char A_BAD_RECS[] = "A\tatom\tr1,r7\t-\n";
+    static const char A_OK[] = "A\tatom\tr1\t-\n";
+    char body[TEXT_BUF];
+    (void)snprintf(body, sizeof body, "%s%s%s%s%s", R1, TAIL, Q_OK, A_OK, "K\tr1\tm\t\t\t\tb\t-\n");
+    odin3_name_check_v2 good = check_of(body);
+    TEST_ASSERT_TRUE(odin3_name_check_v2_ok(&good));
+    (void)snprintf(body, sizeof body, "%s%s%s", R1, TAIL, Q_BAD_ID);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_ref);
+    (void)snprintf(body, sizeof body, "%s%s%s", R1, TAIL, K_BAD_STALE);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_ref);
+    (void)snprintf(body, sizeof body, "%s%s%s", R1, TAIL, A_BAD_RECS);
+    TEST_ASSERT_EQUAL_UINT32(1, check_of(body).bad_ref);
+}
+
 /* The check reports how many lines the parse ignored; a map with only ignored lines is still ok. */
 static void test_v2_check_counts_ignored_lines(void) {
-    static const char BODY[] = "Q\tq1\tx\nK\tk1\nF\tf1\tt.v\nT\tt1\tread_verilog\t\t\nR\tbad\n";
+    static const char BODY[] = "X\tq1\tx\nZ\tk1\nF\tf1\tt.v\nT\tt1\tread_verilog\t\t\nR\tbad\n";
     odin3_name_check_v2 check = check_of(BODY);
-    TEST_ASSERT_EQUAL_UINT32(3, check.ignored); /* Q, K, and the R line with too few fields */
+    TEST_ASSERT_EQUAL_UINT32(3, check.ignored); /* X, Z, and the R line with too few fields */
     TEST_ASSERT_TRUE(odin3_name_check_v2_ok(&check));
     TEST_ASSERT_TRUE(odin3_name_check_v2_report(&check, "test"));
 }
@@ -1003,6 +1059,9 @@ int main(void) {
     RUN_TEST(test_v2_header_errors);
     RUN_TEST(test_v2_check_finds_each_problem);
     RUN_TEST(test_v2_ast_word_survives_the_callers_text);
+    RUN_TEST(test_v2_q_and_k_lines_are_parsed);
+    RUN_TEST(test_v2_q_and_k_with_too_few_fields_are_ignored);
+    RUN_TEST(test_v2_check_resolves_extra_line_references);
     RUN_TEST(test_v2_check_counts_ignored_lines);
     RUN_TEST(test_v2_writer_refuses_a_line_over_the_parser_cap);
     RUN_TEST(test_check_of_a_version_1_map_is_empty);

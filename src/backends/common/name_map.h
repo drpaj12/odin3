@@ -14,7 +14,7 @@
  *
  * Version 2 (V1.2.0 3.2) begins `# odin3-names 2 hash=sha256 width=N prov=1 ast=<mode>` and every
  * later line starts with a one letter type and a TAB: O (an O line is the seven fields above, then
- * recs and level), N, R, C, F, T, A. The escapes are the four above plus %2C and %7C (list fields
+ * recs and level), N, R, C, F, T, A, Q, K. The escapes are the four above plus %2C and %7C (list fields
  * are `,` and `|` separated, each element escaped on its own). This module writes the lines it is
  * given and parses and checks them; the numbering and the join rules are prov_export.c's.
  */
@@ -53,7 +53,13 @@ enum {
     NM_O_SHORT = 2,
     NM_O_RECS = 7,
     NM_N_NAME = 2,
-    NM_N_RECS = 3
+    NM_N_RECS = 3,
+    NM_A_RECS = 1, /* A: atom recs stale */
+    NM_A_STALE = 2,
+    NM_Q_ID = 0, /* Q: id why objective gain pcrit rho slack near npaths members basis stale */
+    NM_Q_STALE = 11,
+    NM_K_ID = 0, /* K: id member pcrit rho slack basis stale */
+    NM_K_STALE = 6
 };
 
 typedef enum odin3_name_kind {
