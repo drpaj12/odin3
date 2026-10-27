@@ -193,6 +193,10 @@ class NameMap:
                                                compare=False)
     _indexed: int = field(default=-1, init=False, repr=False, compare=False)
 
+    def __post_init__(self) -> None:
+        # not a field: the parse (and its agreement test with odin3.read_name_map) is unchanged
+        self.module_misses = 0  # atom() lookups whose name is held only by other modules
+
     def find(self, name: str) -> list[MapObject]:
         """The O lines whose hash name, and the N lines whose name, is name, in file order. The
         first call builds an index by name (rebuilt when objects has grown or shrunk since)."""
@@ -239,11 +243,16 @@ class NameMap:
 
     def atom(self, name: str, module: str | None = None) -> MapObject | None:
         """The object a BLIF net or atom ``name`` is: the O or N line keyed by that name (spec 6,
-        "Atom name join"). A name that several modules share is decided by ``module`` when given,
-        else the first net, else the first object in file order. None when no line has it."""
+        "Atom name join"). When ``module`` is given only that module's lines count: if the name is
+        held only by other modules, the answer is None and the miss is counted in
+        ``module_misses`` (no other module is picked silently). Without ``module``, a name several
+        modules share gives the first net, else the first object in file order. None when no line
+        has it."""
         found = self.find(name)
         if module is not None:
-            found = [o for o in found if o.module == module] or found
+            kept = [o for o in found if o.module == module]
+            self.module_misses += bool(found) and not kept
+            found = kept
         nets = [o for o in found if o.kind == "net"]
         pick = nets or found
         return pick[0] if pick else None

@@ -187,6 +187,14 @@ class Helpers(unittest.TestCase):
         self.assertEqual(other.module, "n")
         self.assertIsNone(nm.atom("nothing"))
 
+    def test_atom_with_no_line_in_the_top_module_is_a_recorded_miss(self) -> None:
+        nm = self.load()
+        self.assertEqual(nm.module_misses, 0)
+        self.assertIsNone(nm.atom("h1", "elsewhere"))  # held by m and n only: no silent pick
+        self.assertEqual(nm.module_misses, 1)
+        self.assertIsNone(nm.atom("nothing", "m"))  # unknown everywhere: not a module miss
+        self.assertEqual(nm.module_misses, 1)
+
     def test_leaf_skips_derived_and_unlocated_records(self) -> None:
         nm = self.load()
         obj = nm.atom("h1")

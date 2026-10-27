@@ -635,7 +635,7 @@ class NameMapAttribution(unittest.TestCase):
         self.assertEqual(first["loc"], node["loc"])
         self.assertEqual([c["level"] for c in first["chain"]], ["block", "module"])
         self.assertEqual(report["design"]["name_map"].rsplit("/", 1)[1], f"{DFF}.blif.names")
-        self.assertIsNone(report["design"]["provenance_blif"])
+        self.assertEqual(report["design"]["provenance_blif"], "")  # a string, empty
 
     def test_same_spans_modules_and_words_as_the_older_route(self) -> None:
         for name in (ADDER, DFF):
@@ -705,6 +705,110 @@ class NameMapAttribution(unittest.TestCase):
         for section in ("design", "timing", "coverage"):
             self.assertLessEqual(set(old[section]), set(new[section]), section)
         self.assertLessEqual(set(old["paths"][0]["nodes"][0]), set(new["paths"][0]["nodes"][0]))
+
+
+class MapResolution(unittest.TestCase):
+    """The version 2 join on small hand-written maps: the word and the location come from the
+    same leaf, a name is taken from the full name only when it is usable, and the map decides."""
+
+    HEAD = ("# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs\n"
+            "F\tf1\tf.v\nT\tt1\tread_verilog\t-\tinfo\n"
+            "C\tc1\tMODULE\tmodule\t\tf1\t1.1-9.10\tm\n"
+            "C\tc2\tASSIGN\tstmt\tc1\tf1\t3.5-3.20\t\n"
+            "C\tc3\tDECLARATOR\tstmt\tc1\tf1\t5.5-5.20\tzz\n"
+            "R\tr1\tD\tword\trewrite:word\tt1.1\tr2,r3\t\t\t\n"
+            "R\tr2\tS\tstmt\torigin\tt1.1\t\tf1:3.5-3.20\tc2\t\n"
+            "R\tr3\tS\tstmt\torigin\tt1.1\t\tf1:5.5-5.20\tc3\t\n"
+            "R\tr4\tD\tword\trewrite:word\tt1.1\tr3,r2\t\t\t\n"
+            "R\tr5\tD\tword\trewrite:word\tt1.1\t\t\t\t\n")
+
+    def resolver(self, lines: str, index: ta.JsonIndex | None = None) -> ta.Resolver:
+        tmp = scratch(self, "ot-tattr-res-")
+        path = tmp / "x.blif.names"
+        path.write_text(self.HEAD + lines)
+        return ta.Resolver(ta.read_map(path), index, "m")
+
+    def test_escaped_identifier_with_a_slash_keeps_its_whole_name(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/a/b@f.v:3\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.category, o.word, o.bit, o.module), (ta.MATCHED, "a/b", None, "m"))
+        self.assertEqual(o.word_via, "name")
+        self.assertFalse(o.generated)
+
+    def test_full_name_without_the_file_line_tail_is_still_used(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/q[2]\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.word, o.bit, o.word_via), ("q", 2, "name"))
+
+    def test_hash_is_never_the_word(self) -> None:
+        for full in ("", "haaa", "m/haaa", "m/@f.v:3"):
+            res = self.resolver(f"O\tm\tnet\thaaa\t{full}\tm\tf.v\t3\tr2\tstmt\n")
+            o = res.resolve("haaa", ".names")
+            self.assertEqual((o.category, o.word, o.generated), (ta.MATCHED, None, True), full)
+            self.assertEqual(o.word_via, "", full)
+
+    def test_generated_net_keeps_the_dollar_name_as_no_word(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/$n7@f.v:3\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.word, o.generated), (None, True))
+
+    def test_declarator_comes_from_the_leaf_of_the_location_only(self) -> None:
+        # r1 has the leaves r2 (an ASSIGN, no declarator) then r3 (a DECLARATOR named zz): the
+        # location and chain are r2's, so the word must not be zz. r4 has them the other way.
+        res = self.resolver("O\tm\tnet\thaaa\t\tm\tf.v\t3\tr1\tword\n"
+                            "O\tm\tnet\thbbb\t\tm\tf.v\t5\tr4\tword\n")
+        first, second = res.resolve("haaa", ".names"), res.resolve("hbbb", ".names")
+        self.assertEqual(first.loc, "f.v:3.5-3.20")
+        self.assertEqual([c.kind for c in first.chain], ["ASSIGN", "MODULE"])
+        self.assertEqual((first.word, first.word_via), (None, ""))
+        self.assertEqual(second.loc, "f.v:5.5-5.20")
+        self.assertEqual((second.word, second.word_via), ("zz", "declarator"))
+
+    def test_atom_not_in_the_map_is_unmatched_with_a_reason_and_no_json_fallback(self) -> None:
+        index = ta.JsonIndex("m", bits={"n": [5]}, drivers={5: ("f.v:3.1-3.9", "m")})
+        res = self.resolver("O\tm\tnet\thaaa\tm/x[0]@f.v:3\tm\tf.v\t3\tr2\tstmt\n", index)
+        o = res.resolve("n[0]", ".names")  # the JSON would find a driver: the map decides
+        self.assertEqual((o.category, o.reason), (ta.UNMATCHED, "not in the name map"))
+
+    def test_atom_held_only_by_another_module_is_unmatched(self) -> None:
+        res = self.resolver("O\tother\tnet\thaaa\tother/x@f.v:3\tother\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual(o.category, ta.UNMATCHED)
+        self.assertIn("another module", o.reason)
+        self.assertEqual(res.names.module_misses, 1)  # type: ignore[union-attr]
+
+    def test_n_line_without_a_leaf_falls_back_to_the_json_and_says_so(self) -> None:
+        index = ta.JsonIndex("m", bits={"n": [5]}, drivers={5: ("f.v:3.1-3.9", "m")})
+        res = self.resolver("N\tm\tnet\tn[0]\tr5\tword\nN\tm\tnet\tk[0]\tr5\tword\n", index)
+        o = res.resolve("n[0]", ".names")
+        self.assertEqual((o.category, o.via, o.word, o.bit),
+                         (ta.MATCHED, "netlist-json (map: no leaf)", "n", 0))
+        none = res.resolve("k[0]", ".names")  # the JSON has no driver either
+        self.assertEqual(none.category, ta.UNMATCHED)
+        self.assertIn("no source location", none.reason)
+
+    def test_unmatched_rows_carry_the_reason_on_the_map_route_only(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        report = flow_dir / "vpr/run/report_timing.setup.rpt"
+        report.write_text(report.read_text().replace("hvihy24qg2f", "zzunknown"))
+        rows = ta.attribute_flow_dir(flow_dir)["coverage"]["unmatched_atoms"]
+        self.assertEqual(rows[0]["reason"], "not in the name map")
+        older = ta.attribute_flow_dir(FIXTURES / DFF)["coverage"]["unmatched_atoms"]
+        self.assertTrue(all("reason" not in r for r in older))
+
+    def test_stale_map_is_refused_with_the_share(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        stale = (FIXTURES_V2 / ADDER / "odin3" / f"{ADDER}.blif.names").read_text()
+        (flow_dir / "odin3" / f"{DFF}.blif.names").write_text(stale)
+        with self.assertRaisesRegex(ta.AttributionError, r"does not match the BLIF.*only [0-9.]+%"):
+            ta.attribute_flow_dir(flow_dir)
+
+    def test_every_committed_map_holds_nearly_all_of_its_blif(self) -> None:
+        for name in (ADDER, DFF, "decl"):
+            base = FIXTURES_V2 / name / "odin3" / name
+            share = ta.check_map_matches(ta.read_map(base.with_suffix(".blif.names")),
+                                         base.with_suffix(".blif"), base)
+            self.assertGreaterEqual(share, ta.MAP_MATCH_MIN, name)
 
 
 class OlderFlowDirectory(unittest.TestCase):

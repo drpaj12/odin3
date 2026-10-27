@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import re
 import sys
 from collections import defaultdict
@@ -31,7 +32,10 @@ import name_map_v2
 import timing_report
 from timing_report import ReportError, TimingPath
 
+LOG = logging.getLogger("odin3")
 SCHEMA_VERSION = 1
+MAP_MATCH_MIN = 0.9  # least share of the BLIF's net names the name map must hold
+NO_SOURCE_NETS = frozenset(("gnd", "vcc", "unconn"))  # BLIF constants and open pins
 DEFAULT_PATHS = 100  # VPR's --timing_report_npaths default
 TIMING_DIR = "timing"
 INPUTS_NAME = "inputs.json"
@@ -100,6 +104,7 @@ class Origin:
     loc: str | None = None  # the full span file:L.C-EL.EC of the first source leaf (map only)
     chain: tuple[ChainItem, ...] = ()  # the construct chain of the first leaf, leaf first
     generated: bool = False  # the net has no source name ($nNNN)
+    reason: str = ""  # why an atom is unmatched (map route only)
 
     @property
     def span(self) -> str | None:
@@ -287,6 +292,21 @@ def chain_item(nm: name_map_v2.NameMap, construct: name_map_v2.MapConstruct) -> 
                      f"{span.line}.{span.col}-{span.end_line}.{span.end_col}" if span else "")
 
 
+_TAIL = re.compile(r"@[^@]*:\d+$")
+
+
+def map_net_name(obj: name_map_v2.MapObject) -> str | None:
+    """The source name of an O line, from its full name ``<hier>/<name>@<file>:<line>``: the
+    ``@file:line`` tail and the ``<hier>/`` head are taken off, and what is left is the name, which
+    may hold ``/`` (an escaped identifier). None when nothing usable is left (empty, or the hash
+    name itself): the atom has no source name."""
+    tail = f"@{obj.file}:{obj.line}"
+    body = obj.full[:-len(tail)] if obj.full.endswith(tail) else _TAIL.sub("", obj.full)
+    head = f"{obj.hier}/"
+    name = body[len(head):] if obj.hier and body.startswith(head) else body
+    return name if name and name != obj.name else None
+
+
 def leaf_chain(nm: name_map_v2.NameMap, obj: name_map_v2.MapObject) -> tuple[ChainItem, ...]:
     """The chain of the first source leaf that has a construct, leaf first, up to its module."""
     for record in nm.provenance(obj):
@@ -321,12 +341,8 @@ class Resolver:
             word, bit = split_word(port)
             return Origin(PORT, atom, self.top, word, bit, via="pad", word_via="pad")
         if isinstance(self.names, name_map_v2.NameMap):
-            found_v2 = self._from_map(self.names, atom)
-            if found_v2 is not None:
-                return found_v2
-            hit = None
-        else:
-            hit = self.names.names.get(atom)
+            return self._resolve_map(self.names, atom)
+        hit = self.names.names.get(atom)
         if hit is not None:
             hier, net, file, line = hit
             word, bit = split_word(net)
@@ -341,13 +357,30 @@ class Resolver:
             return self._from_span(atom, found)
         return Origin(UNMATCHED, atom)
 
-    def _from_map(self, nm: name_map_v2.NameMap, atom: str) -> Origin | None:
-        """The atom through the version 2 map (spec 6, "Atom name join"): the O or N line keyed
-        by its name, then the record graph: the full span of the first source leaf, the construct
-        chain, and for a net without a source name the word of a DECLARATOR in the chain."""
+    def _resolve_map(self, nm: name_map_v2.NameMap, atom: str) -> Origin:
+        """An atom on the version 2 route. The map decides: an atom it does not hold is unmatched
+        (with the reason), never looked for elsewhere. Only an N line with no source leaf falls
+        back to the netlist JSON, and says so in ``via``."""
         obj = nm.atom(atom, self.top)
         if obj is None:
-            return None
+            other = self.top is not None and nm.find(atom)
+            return Origin(UNMATCHED, atom, reason=(
+                f"in the name map only under another module than {self.top}" if other
+                else "not in the name map"))
+        found = self._from_map(nm, obj, atom)
+        if found is not None:
+            return found
+        span = self.index.lookup(atom) if self.index and obj.type == "N" else None
+        if span is not None:
+            return self._from_span(atom, span, "netlist-json (map: no leaf)")
+        return Origin(UNMATCHED, atom, reason="in the name map but no source location")
+
+    def _from_map(self, nm: name_map_v2.NameMap, obj: name_map_v2.MapObject,
+                  atom: str) -> Origin | None:
+        """The atom through the version 2 map (spec 6, "Atom name join"): the O or N line keyed
+        by its name, then the record graph: the full span of the first source leaf, the construct
+        chain of that leaf, and for a net without a source name the word of a DECLARATOR in that
+        chain. None when the object has no source location."""
         leaf = nm.leaf(obj)
         if obj.type == "O":
             file, line = obj.file, obj.line
@@ -357,36 +390,35 @@ class Resolver:
             return None
         if not file or not line:
             return None
-        net = obj.name
-        hier = obj.hier or obj.module
-        if obj.type == "O":
-            m = _PROV.match(obj.full)
-            net = m.group("net") if m else atom
-            hier = m.group("hier") if m else hier
-        word, bit = split_word(net)
-        how = "name" if word else ""
+        net = map_net_name(obj) if obj.type == "O" else obj.name
         chain = leaf_chain(nm, obj)
-        generated = word is None
-        if word is None:
-            declared = next((c.name for c in nm.chain(obj) if c.kind == "DECLARATOR"
-                             and c.name), None)
-            named = self.index.net_word(net) if self.index else None
-            if declared:
-                word, bit, how = declared, None, "declarator"
-            elif named is not None:
-                word, bit, how = named[0], named[1], "json-id"
-        return Origin(MATCHED, atom, hier, word, bit, file, line,
+        word, bit, how = self._map_word(net, chain)
+        return Origin(MATCHED, atom, obj.hier or obj.module, word, bit, file, line,
                       leaf[1].col if leaf else None, via="name-map", word_via=how,
-                      loc=leaf[1].text if leaf else None, chain=chain, generated=generated)
+                      loc=leaf[1].text if leaf else None, chain=chain,
+                      generated=net is None or net.startswith("$"))
 
-    def _from_span(self, atom: str, found: tuple[str, str]) -> Origin:
+    def _map_word(self, net: str | None, chain: Sequence[ChainItem]
+                  ) -> tuple[str | None, int | None, str]:
+        """(word, bit, how) of a net on the map route: its source name when it has one; else the
+        name of a DECLARATOR in the chain of the same leaf; else the JSON word of a ``$nNN`` net."""
+        word, bit = split_word(net) if net else (None, None)
+        if word is not None:
+            return word, bit, "name"
+        declared = next((c.name for c in chain if c.kind == "DECLARATOR" and c.name), None)
+        if declared:
+            return declared, None, "declarator"
+        named = self.index.net_word(net) if self.index and net else None
+        return (named[0], named[1], "json-id") if named is not None else (None, None, "")
+
+    def _from_span(self, atom: str, found: tuple[str, str], via: str = "netlist-json") -> Origin:
         text, hier = found
         m = _SPAN.match(text)
         if m is None:
             return Origin(UNMATCHED, atom)
         word, bit = split_word(atom)
         return Origin(MATCHED, atom, hier, word, bit, m.group("file"), int(m.group("line")),
-                      int(m.group("col")), via="netlist-json", word_via="name" if word else "",
+                      int(m.group("col")), via=via, word_via="name" if word else "",
                       generated=word is None and atom.startswith("$"))
 
 
@@ -628,7 +660,8 @@ class Aggregates:
         if origin.category == UNMATCHED:
             entry = self.unmatched.setdefault(
                 (hop.atom, hop.block_type),
-                {"atom": hop.atom, "block_type": hop.block_type, "nodes": 0, "paths": set()})
+                {"atom": hop.atom, "block_type": hop.block_type, "nodes": 0, "paths": set(),
+                 "reason": origin.reason})
             entry["nodes"] += 1
             entry["paths"].add(path.index)
 
@@ -672,7 +705,8 @@ def coverage_record(agg: Aggregates, crit_hops: Sequence[Hop],
     crit_total = sum(delay.values())
     listed = sorted(agg.unmatched.values(), key=lambda e: (-e["nodes"], e["atom"]))
     rows = [{"atom": e["atom"], "block_type": e["block_type"], "nodes": e["nodes"],
-             "paths": len(e["paths"])} for e in listed]
+             "paths": len(e["paths"]), **({"reason": e["reason"]} if e["reason"] else {})}
+            for e in listed]
     return {
         "nodes": total,
         "matched": agg.counts[MATCHED], "port": agg.counts[PORT],
@@ -910,6 +944,42 @@ def read_map(path: Path) -> name_map_v2.NameMap:
     return nm
 
 
+def blif_nets(blif: Path) -> set[str]:
+    """The net names of the first model of ``blif`` that a name map should hold: inputs and the
+    nets of every block, without the primary outputs (pads, they keep their port names), the
+    constants and the latch control words."""
+    nets: set[str] = set()
+    outputs: set[str] = set()
+    for line in logical_lines(blif):
+        t = line.split()
+        if t[0] == ".end":
+            break
+        if t[0] == ".outputs":
+            outputs.update(t[1:])
+        elif t[0] in (".inputs", ".names"):
+            nets.update(t[1:])
+        elif t[0] == ".latch":
+            nets.update(t[1:3] + t[4:5])
+        elif t[0] == ".subckt":
+            nets.update(arg.split("=", 1)[1] for arg in t[2:] if "=" in arg)
+    return nets - outputs - NO_SOURCE_NETS
+
+
+def check_map_matches(nm: name_map_v2.NameMap, blif: Path, map_path: Path) -> float:
+    """The share of the BLIF's net names that the map holds (logged). AttributionError when it is
+    below MAP_MATCH_MIN: the map is not the one written with this BLIF (a stale map)."""
+    nets = blif_nets(blif)
+    share_in = sum(1 for n in nets if nm.find(n)) / len(nets) if nets else 1.0
+    LOG.info("name map %s holds %.1f%% of the %d net names of %s", map_path.name, 100 * share_in,
+             len(nets), blif.name)
+    if share_in < MAP_MATCH_MIN:
+        raise AttributionError(
+            f"the name map {map_path} does not match the BLIF {blif}: it holds only "
+            f"{share_in:.1%} of the {len(nets)} net names (at least {MAP_MATCH_MIN:.0%} needed); "
+            f"is it a stale map from another run?")
+    return share_in
+
+
 def _attribute(flow: Path, paths: int | None) -> dict[str, Any]:
     inputs = read_inputs(flow)
     run_dir = absolute(flow, inputs.get("vpr_run_dir"))
@@ -931,6 +1001,7 @@ def _attribute(flow: Path, paths: int | None) -> dict[str, Any]:
     names: NameMap | name_map_v2.NameMap
     if map_path is not None:
         names = read_map(map_path)
+        check_map_matches(names, blif, map_path)
     else:
         assert prov is not None
         names = build_name_map(blif, prov)
@@ -939,7 +1010,7 @@ def _attribute(flow: Path, paths: int | None) -> dict[str, Any]:
     top = inputs.get("top")
     kept = parsed.paths[:paths] if paths else parsed.paths
     meta = {"top": top, "flow_dir": str(flow), "report": str(run_dir / "report_timing.setup.rpt"),
-            "blif": str(blif), "provenance_blif": str(prov) if prov else None,
+            "blif": str(blif), "provenance_blif": str(prov) if prov else "",
             "netlist_json": str(jpath) if jpath and jpath.is_file() else None}
     if map_path is not None:
         meta["name_map"] = str(map_path)
