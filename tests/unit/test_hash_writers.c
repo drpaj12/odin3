@@ -8,6 +8,7 @@
 #include "frontends/blif/reader.h"
 #include "ir/design.h"
 #include "ir/module.h"
+#include "ir/prov.h"
 #include "passes/manager.h"
 #include "unity.h"
 #include "util/alloc.h"
@@ -1004,6 +1005,50 @@ static void test_prov_map_commit_failure_keeps_the_old_netlist(void) {
     }
 }
 
+/* A located net whose record is derived by an operation with no class (an export-time refusal). */
+static void add_classless_net(void) {
+    odin3_pass_ctx ctx;
+    uint32_t file = 0;
+    uint32_t name = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("d.v"), &file));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_intern(design, odin3_bytes_cstr("bad@d.v:9"), &name));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, file, &ctx));
+    odin3_srcloc loc = {file, 9, 1, 9, 5, 0};
+    odin3_prov_origin origin = {&loc, 1, 0, 0};
+    odin3_prov_id src = {0};
+    odin3_prov_id bad = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_source(&ctx, &origin, &src));
+    odin3_prov_begin_op(&ctx); /* no class */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_derive(&ctx, (odin3_prov_list){&src, 1}, &bad));
+    odin3_module *top = odin3_module_get(design, odin3_design_top(design));
+    odin3_net_id net = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_create(top, name, bad, &net));
+}
+
+/* A class-less derived record stops the export: no map and no netlist, in all three writers.  In a
+ * Debug build the check before the pass refuses it first (rule 13); in a Release build the writer
+ * does (INVALID_ARG, "has no class"). */
+static void test_prov_map_classless_record_writes_neither_file(void) {
+#ifdef NDEBUG
+    const odin3_status want = ODIN3_ERR_INVALID_ARG;
+#else
+    const odin3_status want = ODIN3_ERR_CHECK;
+#endif
+    for (int i = 0; i < N_WRITERS; i++) {
+        const writer_case *wc = &WRITERS[i];
+        load_design();
+        add_classless_net();
+        log_text[0] = '\0';
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            want, write_hash_extra(wc, "nocls", odin3_bytes_cstr("--prov-map")), log_text);
+        TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "has no class"), log_text);
+        expect_nothing_written(wc, "nocls");
+        reset_design();
+    }
+}
+
 static uint32_t count_type(const odin3_name_map *map, char type) {
     uint32_t count = 0;
     for (size_t k = 0; k < map->lines.len; k++) {
@@ -1062,5 +1107,6 @@ int main(void) {
     RUN_TEST(test_prov_map_write_failure_leaves_nothing);
     RUN_TEST(test_prov_map_commit_failure_keeps_the_old_netlist);
     RUN_TEST(test_prov_map_has_n_lines_from_every_writer);
+    RUN_TEST(test_prov_map_classless_record_writes_neither_file);
     return UNITY_END();
 }
