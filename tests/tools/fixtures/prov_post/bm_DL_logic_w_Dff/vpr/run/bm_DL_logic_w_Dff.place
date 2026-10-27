@@ -1,0 +1,12 @@
+Netlist_File: bm_DL_logic_w_Dff.net Netlist_ID: SHA256:f45a9fbe6e5b85a2f7302e9ecf415b79edfa111d980040bebb6ff2125d6c8ec6
+Array size: 3 x 3 logic blocks
+
+#block name	x	y	subblk	layer	block number
+#----------	--	--	------	-----	------------
+he72oymwrq4	1	1	0	0	#0
+out:f		1	0	2	0	#1
+out:g		1	0	3	0	#2
+x1		0	1	2	0	#3
+x2		0	1	1	0	#4
+x3		0	1	6	0	#5
+Clock		1	2	3	0	#6

@@ -1,0 +1,120 @@
+# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
+O	bm_DL_BCD_adder	net	h2brotlpglt	bm_DL_BCD_adder/$n65@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	h2r3xvu6xfd	bm_DL_BCD_adder/$n28@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h2tkhxgafrm	bm_DL_BCD_adder/$n54@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	h3ai4qzr4nb	bm_DL_BCD_adder/$n71@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	h3uy656e4jb	bm_DL_BCD_adder/$n42@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h4dopssnzaz	bm_DL_BCD_adder/$n17@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r5	expr
+O	bm_DL_BCD_adder	net	h4l5rrtzym5	bm_DL_BCD_adder/$n43@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h54zrrylag2	bm_DL_BCD_adder/$n23@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h5a3mh5ji2x	bm_DL_BCD_adder/$n69@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	h5jdwdhymjf	bm_DL_BCD_adder/$n30@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h5ko7xri6fv	bm_DL_BCD_adder/$n61@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	h6n5ucld4fo	bm_DL_BCD_adder/$n12@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	h7nadhe32yl	bm_DL_BCD_adder/$n11@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	h7ozec7eo6s	bm_DL_BCD_adder/$n36@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h7vptznsm2u	bm_DL_BCD_adder/$n40@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	halafilocsq	bm_DL_BCD_adder/$n66@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hb7yeoqltec	bm_DL_BCD_adder/$n73@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hceprhlib2h	bm_DL_BCD_adder/$n75@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hcmlhn5hs5m	bm_DL_BCD_adder/$n72@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hd27ssw22as	bm_DL_BCD_adder/$n50@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r7	word
+O	bm_DL_BCD_adder	net	hd5rb4zhcll	bm_DL_BCD_adder/$n32@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hdu72seqgom	bm_DL_BCD_adder/$n19@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r5	expr
+O	bm_DL_BCD_adder	net	he6bgkhrwzh	bm_DL_BCD_adder/$n45@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hecwswrhe5k	bm_DL_BCD_adder/$n31@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hedcrcjip4h	bm_DL_BCD_adder/$n63@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hf4kxbj3jtw	bm_DL_BCD_adder/$n20@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:3	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	3	r10	module
+O	bm_DL_BCD_adder	net	hfr6lt5u4r3	bm_DL_BCD_adder/$n26@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hfrcketcylu	bm_DL_BCD_adder/$n56@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hg2fl66dory	bm_DL_BCD_adder/$n13@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hiepzufme4v	bm_DL_BCD_adder/$n37@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hmosbo2bpnx	bm_DL_BCD_adder/$n60@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hmvz2ywpb7w	bm_DL_BCD_adder/$n18@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r5	expr
+O	bm_DL_BCD_adder	net	hnce574w73o	bm_DL_BCD_adder/$n14@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hnhtc737dkr	bm_DL_BCD_adder/$n57@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hp7yjsxhijq	bm_DL_BCD_adder/$n35@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hpfavv5tafp	bm_DL_BCD_adder/$n58@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hqrn47d7buz	bm_DL_BCD_adder/$n21@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:3	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	3	r10	module
+O	bm_DL_BCD_adder	net	hqrwy46fieu	bm_DL_BCD_adder/$n51@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r7	word
+O	bm_DL_BCD_adder	net	hr4kgufqvto	bm_DL_BCD_adder/$n48@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrb3bcoq4da	bm_DL_BCD_adder/$n24@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrihzz5klqj	bm_DL_BCD_adder/$n49@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r7	word
+O	bm_DL_BCD_adder	net	hrjmbs5rx5g	bm_DL_BCD_adder/$n53@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hrkraejwhbv	bm_DL_BCD_adder/$n44@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrnrwkh3r5f	bm_DL_BCD_adder/$n34@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrp5od6xqtv	bm_DL_BCD_adder/$n27@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hs6onnq4jji	bm_DL_BCD_adder/$n68@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hsxzazuvh65	bm_DL_BCD_adder/$n52@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r7	word
+O	bm_DL_BCD_adder	net	htntmfvkk6e	bm_DL_BCD_adder/$n29@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hts7dwkqfrq	bm_DL_BCD_adder/$n41@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hujhvraxss2	bm_DL_BCD_adder/$n15@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r5	expr
+O	bm_DL_BCD_adder	net	huko6fu7x5e	bm_DL_BCD_adder/$n47@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	huxqmpdj2z7	bm_DL_BCD_adder/$n16@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r5	expr
+O	bm_DL_BCD_adder	net	hv7eg6ylz64	bm_DL_BCD_adder/$n76@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hwatbge46fq	bm_DL_BCD_adder/$n62@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hws7os5grbu	bm_DL_BCD_adder/$n74@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hx6wt6a642q	bm_DL_BCD_adder/$n22@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hxanoznemxx	bm_DL_BCD_adder/$n55@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hxsztlgot2r	bm_DL_BCD_adder/$n25@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hxvlgh6lf5q	bm_DL_BCD_adder/$n67@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hxzxtkvujvd	bm_DL_BCD_adder/$n39@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hy3d534vwwp	bm_DL_BCD_adder/$n33@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hy4qxlz2xob	bm_DL_BCD_adder/$n46@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hz3maclt56i	bm_DL_BCD_adder/$n70@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hz52ruw3kp5	bm_DL_BCD_adder/$n59@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r6	word
+O	bm_DL_BCD_adder	net	hz54nuzqqr6	bm_DL_BCD_adder/$n64@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hzeptw3gsae	bm_DL_BCD_adder/$n10@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hzywfzv6vq6	bm_DL_BCD_adder/$n38@/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v	19	r4	word
+N	bm_DL_BCD_adder	net	Cin	r11	stmt
+N	bm_DL_BCD_adder	net	Cout	r14	gate
+N	bm_DL_BCD_adder	net	S[1]	r16	gate
+N	bm_DL_BCD_adder	net	S[2]	r16	gate
+N	bm_DL_BCD_adder	net	S[3]	r16	gate
+N	bm_DL_BCD_adder	net	X[0]	r17	stmt
+N	bm_DL_BCD_adder	net	X[1]	r17	stmt
+N	bm_DL_BCD_adder	net	X[2]	r17	stmt
+N	bm_DL_BCD_adder	net	X[3]	r17	stmt
+N	bm_DL_BCD_adder	net	Y[0]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[1]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[2]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[3]	r18	stmt
+R	r1	S	expr	origin	t1.1		f1:15.7-15.18	c6	hier=bm_DL_BCD_adder
+R	r2	D	word	rewrite:word	t2.2	r1			
+R	r3	S	expr	origin	t1.1		f1:19.16-19.21	c10	hier=bm_DL_BCD_adder
+R	r4	D	word	rewrite:word	t3.1	r3			
+R	r5	S	expr	origin	t1.1		f1:15.7-15.12	c11	hier=bm_DL_BCD_adder
+R	r6	D	word	rewrite:word	t2.1	r5			
+R	r7	D	word	rewrite:word	t4.1	r4			
+R	r8	D	word	rewrite:word	t2.3	r7			
+R	r9	S	stmt	origin	t1.1		f1:10.2-10.17	c12	hier=bm_DL_BCD_adder
+R	r10	S	module	origin	t1.1		f1:3.1-22.10	c1	hier=bm_DL_BCD_adder
+R	r11	S	stmt	origin	t1.1		f1:4.2-4.12	c13	hier=bm_DL_BCD_adder
+R	r12	S	stmt	origin	t1.1		f1:16.3-19.22	c7	hier=bm_DL_BCD_adder
+R	r13	D	word	refine:stmt	t5.1	r12			
+R	r14	D	gate	refine:word	t6.1	r13			
+R	r15	D	word	rewrite:word	t3.2	r13			
+R	r16	D	gate	refine:word	t6.2	r15			
+R	r17	S	stmt	origin	t1.1		f1:5.2-5.19	c14	hier=bm_DL_BCD_adder
+R	r18	S	stmt	origin	t1.1		f1:5.2-5.19	c14	hier=bm_DL_BCD_adder
+C	c1	MODULE	module		f1	3.1-22.10	bm_DL_BCD_adder
+C	c2	ALWAYS	block	c1	f1	13.2-20.5	
+C	c3	TIMING_STMT	stmt	c2	f1	13.9-20.5	
+C	c4	SEQ_BLOCK	stmt	c3	f1	14.2-20.5	
+C	c5	BLOCKING_ASSIGN	stmt	c4	f1	15.3-15.19	
+C	c6	BINARY	expr	c5	f1	15.7-15.18	
+C	c7	IF	stmt	c4	f1	16.3-19.22	
+C	c8	IF_ELSE	branch	c7	f1	19.4-19.22	
+C	c9	BLOCKING_ASSIGN	stmt	c8	f1	19.4-19.22	
+C	c10	BINARY	expr	c9	f1	19.16-19.21	
+C	c11	BINARY	expr	c6	f1	15.7-15.12	
+C	c12	PORT_DECL	stmt	c1	f1	10.2-10.17	
+C	c13	PORT_DECL	stmt	c1	f1	4.2-4.12	
+C	c14	PORT_DECL	stmt	c1	f1	5.2-5.19	
+F	f1	/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v
+T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "/tmp/claude-1000/provpost-fx/src/bm_DL_BCD_adder.v"	
+T	t2	hardmap		multiply=0 adder=19 chains=3 sp_slices=0 dp_slices=0 soft=0
+T	t3	opt	-full	
+T	t4	wreduce		
+T	t5	proc		
+T	t6	lower		modules=1 cells=3 nodes=31

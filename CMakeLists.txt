@@ -578,9 +578,9 @@ file(GLOB _odin3_share_qor CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tools/vtr-qor
 install(FILES ${_odin3_share_libs} DESTINATION ${_odin3_share_dir}/lib)
 install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/lib/abc)
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
-              tools/flow/timing_report.py tools/flow/name_map_v2.py
+              tools/flow/timing_report.py tools/flow/name_map_v2.py tools/flow/prov_post.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
-install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing
+install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
 

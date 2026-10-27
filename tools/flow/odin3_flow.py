@@ -68,6 +68,7 @@ class FlowArgs:
     timing_paths: int = VPR_DEFAULT_PATHS  # setup paths VPR reports (and the tool attributes)
     prov: bool = False  # --prov: the BLIF has hash names and a version 2 name map (v1.2.0)
     timing_legacy: bool = False  # --timing-legacy: the v1.1.1 route, a second provenance BLIF
+    keep_results: bool = False  # --keep-results: keep VPR's .net, .place and .route (prov_post)
 
 
 @dataclass(frozen=True)
@@ -303,6 +304,8 @@ def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_
     shutil.copy(blif, job_dir / blif.name)  # build_commands reads <job_dir>/<design>.blif
     cmd = qor_legs.build_commands("O", blif.stem, ctx)[1]
     argv = [*cmd.argv, "--route_chan_width", str(width)] if width is not None else list(cmd.argv)
+    if args.keep_results:  # odin3-prov-post reads the packed netlist and the placement
+        argv = [a for a in argv if a != "-delete_result_files"]
     if args.timing_attr and args.timing_paths != VPR_DEFAULT_PATHS:
         argv += ["--timing_report_npaths", str(args.timing_paths)]
     started = time.time()
@@ -629,6 +632,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--timing-legacy", action="store_true",
                     help="with --timing-attr: the v1.1.1 route (short-name BLIF plus a second "
                          "BLIF with provenance names, line-level spans) instead of the name map")
+    ap.add_argument("--keep-results", action="store_true",
+                    help="keep VPR's .net, .place and .route in vpr/run (odin3-prov-post reads "
+                         "them); needs --vpr")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -646,7 +652,7 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
-                    attr, paths, prov, ns.timing_legacy)
+                    attr, paths, prov, ns.timing_legacy, ns.keep_results)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

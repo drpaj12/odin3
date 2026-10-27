@@ -1,0 +1,27 @@
+Netlist_File: bm_DL_BCD_adder.net Netlist_ID: SHA256:dad32040d7a303389132dbf6e545ec8a4ece418872ab213e44b9ee8d71ea2172
+Array size: 5 x 5 logic blocks
+
+#block name	x	y	subblk	layer	block number
+#----------	--	--	------	-----	------------
+hrjmbs5rx5g	1	1	0	0	#0
+hmosbo2bpnx	1	2	0	0	#1
+h5a3mh5ji2x	1	3	0	0	#2
+out:Cout	0	2	7	0	#3
+out:S[3]	0	2	1	0	#4
+out:S[2]	0	2	4	0	#5
+out:S[1]	0	2	5	0	#6
+out:Z[4]	0	3	7	0	#7
+out:Z[3]	0	3	5	0	#8
+out:Z[2]	0	3	1	0	#9
+out:Z[1]	0	3	2	0	#10
+out:S[0]	1	4	7	0	#11
+out:Z[0]	1	4	5	0	#12
+Cin		0	2	6	0	#13
+X[0]		0	1	2	0	#14
+X[1]		0	1	5	0	#15
+X[2]		0	1	7	0	#16
+X[3]		1	0	3	0	#17
+Y[0]		0	1	3	0	#18
+Y[1]		0	1	1	0	#19
+Y[2]		0	1	0	0	#20
+Y[3]		0	2	0	0	#21
