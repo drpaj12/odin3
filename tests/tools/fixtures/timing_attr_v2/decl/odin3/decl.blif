@@ -1,0 +1,30 @@
+# Odin III 1.1.1 write_blif --vtr (K=6, names hash)
+# abc: script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=1
+
+.model decl
+.inputs a[0] a[1] a[2] a[3] b[0] b[1] b[2] b[3] c[0] c[1] c[2] c[3]
+.outputs y[0] y[1] y[2] y[3]
+.names gnd
+.names vcc
+1
+.subckt adder a=vcc b=gnd cin=gnd cout=hi5z4ukq5od sumout=hni27kaf4ta
+.subckt adder a=a[0] b=b[0] cin=hi5z4ukq5od cout=hrbr7iafsqp sumout=hp7uoetip2f
+.subckt adder a=a[1] b=b[1] cin=hrbr7iafsqp cout=hjkohe3545d sumout=h5r4pj6r3jg
+.subckt adder a=a[2] b=b[2] cin=hjkohe3545d cout=hg65ldudofl sumout=hvny35mbjy4
+.subckt adder a=a[3] b=b[3] cin=hg65ldudofl cout=hdcf2b75bvg sumout=hojc5p3u243
+.subckt adder a=gnd b=gnd cin=hdcf2b75bvg cout=h4jblbqpl34 sumout=haq5exfiet5
+.names c[0] hp7uoetip2f y[0]
+11 1
+.names c[1] h5r4pj6r3jg y[1]
+11 1
+.names c[2] hvny35mbjy4 y[2]
+11 1
+.names c[3] hojc5p3u243 y[3]
+11 1
+.end
+
+.model adder
+.inputs a b cin
+.outputs cout sumout
+.blackbox
+.end

@@ -18,10 +18,13 @@ cat out/design/timing/summary.txt
 
 `--timing-paths N` sets how many setup paths VPR reports and the tool attributes (default 100,
 VPR's default; it implies `--timing-attr`). `--timing-attr` needs `--target vtr` and VPR. The
-flow adds two writes to the Odin III step (a second BLIF with provenance names and
-`write_json --odin3`; both only read the netlist, so the BLIF VPR reads is byte-identical) and, when
-N is not 100, the VPR report option `--timing_report_npaths N`. Placement, routing and the QoR
-figures do not depend on it (see `docs/V1.1.1.md` for the check).
+flow writes the BLIF VPR reads with hash names and the version 2 name map next to it
+(`odin3-flow --prov`, implied) and `write_json --odin3`; no second BLIF is written. When N is not
+100 it adds the VPR report option `--timing_report_npaths N`. A BLIF with hash names differs from
+the short-name one only in its names, and VPR's packing, placement, routing and critical path
+do not depend on them (`docs/V1.2.0.md` 6.1; the check of `docs/V1.1.1.md` is for the second BLIF
+of version 1.1.1). `--timing-legacy` runs the version 1.1.1 route instead (a second BLIF with
+provenance names).
 
 To attribute a flow output directory that already exists, without rerunning anything:
 
@@ -51,7 +54,7 @@ Everything goes into `<out>/timing/`:
 |---|---|
 | `attribution.json` | The attribution, `schema_version` 1. The one file the Wyrd III view reads |
 | `summary.txt` | Fmax and CPD, then the statements that set them |
-| `prov.blif`, `netlist.odin3.json`, `inputs.json` | The inputs of the join (`odin3-timing` reads them) |
+| `netlist.odin3.json`, `inputs.json` | The inputs of the join (`odin3-timing` reads them); the name map is `odin3/<top>.blif.names`. A `--timing-legacy` run also writes `prov.blif` |
 | `timing.log` | `ok`, or the reason the step failed |
 
 ### summary.txt
@@ -82,7 +85,8 @@ Top level: `schema_version` (integer, 1), `design`, `timing`, `coverage`, `criti
 the clock constraint is not met; VPR's default constraint is 0, so slack is minus the delay).
 
 `design`: `top` (module name), `flow_dir`, `report` (the VPR file), `blif` (the BLIF VPR read),
-`provenance_blif`, `netlist_json` (null when absent).
+`provenance_blif` (the second BLIF of a version 1.1.1 flow directory; null when there is none),
+`netlist_json` (null when absent) and, with a name map, `name_map` (its path).
 
 `timing`:
 
@@ -119,6 +123,8 @@ the clock constraint is not met; VPR's default constraint is 0, so slack is minu
 | `span` | `file:line`, or null for a port or an unmatched node |
 | `kind` | `matched`, `port` or `unmatched` |
 | `file`, `line`, `module` | Where it came from; `module` is the module instance path |
+| `loc` | With a name map: the full span `file:L.C-EL.EC` of the first source leaf of the first atom |
+| `chain`, `chain_text` | With a name map: the constructs around that leaf, leaf first, up to the module (`level`, `kind`, `name`, `span` each), and the same as one line: `stmt ASSIGN 16.5-16.20 < branch IF_ELSE 14.9-18.12 < block ALWAYS 12.5-20.8 < module top` |
 | `words` | Source names of the nets (a bus gives its word; a generated net gives the wire that holds it, if any) |
 | `words_via` | For each word, how it was found (see "word_via" below) |
 | `cell_delay_ns`, `net_delay_ns`, `delay_ns` | Cell delay, interconnect delay on the nets these atoms drive, and their sum |
@@ -147,6 +153,8 @@ Which nodes each table counts (`nodes`, `paths_through` and the delays use exact
 | `words` | `matched` and `port` nodes that have a word; pads in their own `port` entries |
 | `critical_path.spans` | every node of path 1; consecutive nodes of one span merge, a pad is `kind` `port` |
 
+With a name map, each node of `paths` also has `loc` and `chain_text` (null for a pad or an unmatched atom), and `coverage` has the shares of the non-pad path nodes that reach each level: `net_nodes`, `span_nodes` / `span_share` (a line-level span), `loc_nodes` / `loc_share` (a full span), `chain_nodes` / `chain_share` (a chain), and for the generated nets (no source name) `generated_nodes`, `generated_word_nodes` and `generated_word_share`.
+
 `paths`: every parsed path: `index`, `slack_ns`, `arrival_ns`, `required_ns`, `startpoint`,
 `endpoint` and `nodes`, in path order, each with `atom` (VPR block name), `block_type` (`.names`,
 `.latch`, `adder`, `.input`, ...), `pins` (the pins of the atom the path uses), `cell_delay_ns`,
@@ -157,14 +165,19 @@ one), `delay_ns` (its contribution: cell delay plus the delay on the net it driv
 `word_via` (nodes, `words_via` of spans, `word_via` of words) is how the word was joined, so a
 consumer can tell a fact from a derived guess. It is `name` when the word is the name of the net in
 the provenance name or in the netlist JSON (a fact: `S[3]` is word `S`, bit 3), `pad` for the port
-of an I/O pad (a fact), and `json-id` when the net has only a generated name (`$n312`) and the
+of an I/O pad (a fact), `declarator` when the net has only a generated name and the construct chain
+of its records holds a `DECLARATOR` (the word is that declaration's name; a fact of the name map,
+bit unknown), and `json-id` when the net has only a generated name (`$n312`) and the
 word comes from the heuristic that the JSON writer numbers net `ID` as bit `ID + 1`: derived, and
 right only as far as that numbering holds. It is null when there is no word. `assigned_word` is a
 further guess, from the text of the line. A bit is the declared index (`offset` and `upto` of the
 JSON netname are applied). When several source names hold one net, the shortest name wins, then
 the smaller one; that choice is deterministic and has no other meaning.
 
-Layout: `schema_version` stays 1 because this round only added fields (`paths_limit`,
+Layout: `schema_version` stays 1 because every round only added fields. The name map round added
+`design.name_map`, `loc` and `chain` / `chain_text` (spans, nodes), the `coverage` shares above and
+`word_via` `declarator`; a flow directory without a name map gives exactly the older output. The
+earlier round added (`paths_limit`,
 `paths_in_report`, `paths_kept`, `paths_skipped`, `paths_skipped_reasons`,
 `coverage.matched_share_excl_port`, `coverage.source_files*`, `word_via`, `words_via`,
 `words[].port`, `modules[].port_nodes`); no field changed meaning. `paths_parsed` is kept and equals
@@ -173,15 +186,20 @@ Layout: `schema_version` stays 1 because this round only added fields (`paths_li
 ## How the join works
 
 1. VPR names each atom after the net its first output drives (an I/O pad after the port). Those
-   names are the net names of the BLIF VPR reads, which are short names such as `$n312`.
-2. The same Odin III run writes a second BLIF with `--name-style provenance`: the same blocks in the
-   same order, with net names `<module path>/<net>@<file>:<line>`. The tool pairs the two files
-   token by token and refuses with a message if they do not line up.
-3. A timing atom is `matched` when its name is in that map: the file and line, the module instance
-   path and, for a source net such as `S[3]`, the word `S` and bit 3. An I/O pad is `port`.
-   A block whose net keeps a port name (the provenance writer leaves ports alone) is looked up in the
-   `write_json --odin3` netlist instead: the driver cell's first source span. Everything else is
+   names are the net names of the BLIF VPR reads. With `--prov` they are hash names, and the name
+   map `<blif>.names` has one line per name.
+2. A timing atom is `matched` when its name is a line of that map (`O`, or `N` for a net that
+   keeps its name, such as a port bit): the file and line, the module instance path and, for a
+   source net such as `S[3]`, the word `S` and bit 3. The record graph of the line gives the full
+   span `L.C-EL.EC` of the first source leaf and the construct chain around it. A net with only a
+   generated name gets the word of a `DECLARATOR` in the chain, if the chain has one, else the
+   `json-id` guess below. An I/O pad is `port`. A block whose name is not in the map is looked up in
+   the `write_json --odin3` netlist: the driver cell's first source span. Everything else is
    `unmatched` and listed.
+3. A flow directory made by version 1.1.1 has no map. It holds a second BLIF with
+   `--name-style provenance` instead (net names `<module path>/<net>@<file>:<line>`), and the tool
+   pairs the two files token by token and refuses with a message if they do not line up. That
+   route gives line-level spans and no chain.
 
 The delay model: a row of the VPR report that stays inside one atom is a cell delay; the first row
 of the next atom carries the interconnect delay of the net the previous atom drives, and that delay
@@ -196,12 +214,18 @@ is charged to the previous atom's statement (the net belongs to its driver).
   paths and the directory odin3 ran in in `timing/inputs.json` (`designs`, `source_cwd`), and
   `odin3-timing` looks there, never in the directory it is started from. A file it cannot read is
   counted in `coverage.source_files_unreadable` and named in `summary.txt`.
-- Source locations are line-level: the provenance name carries a line, not a column, so a statement
-  that spans several lines (an `always` block) is the line where its first location is. A register
-  inside a clocked block is attributed to the `always` line, its logic to the assignments.
-- A generated net (`$nNNN`) gets a word only when the netlist JSON names its wire (registers and
-  ports do; the nets inside combinational logic do not: `flatten`, `opt` and `lower` do not keep wire
-  names for them). `assigned_word` is a guess from the source text for the statements without one.
+- With a name map, `loc` is the full span of the first source leaf and `span` stays `file:line` (the
+  aggregates, `spans`, are by line, as before). A flow directory from version 1.1.1 has line-level
+  spans only: the provenance name carries a line, not a column, so a statement that spans several
+  lines (an `always` block) is the line where its first location is. A register inside a clocked
+  block is attributed to the `always` line, its logic to the assignments.
+- The chain exists when the read kept the constructs (`odin3-flow --prov` reads with
+  `--prov-ast refs`). A net made from restored locations or imported from a netlist has a span
+  and no chain.
+- A generated net (`$nNNN`) gets a word when its chain holds a `DECLARATOR` (name map) or when the
+  netlist JSON names its wire (registers and ports do; the nets inside combinational logic mostly
+  do not: `flatten`, `opt` and `lower` do not keep wire names for them). `assigned_word` is a guess
+  from the source text for the statements without one.
 - Atoms that VPR renames or merges, or that the provenance writer does not name, are `unmatched`.
   Their share is in `coverage`.
 - The attribution needs the VPR run that routed the BLIF in the flow directory. The flow directory must have

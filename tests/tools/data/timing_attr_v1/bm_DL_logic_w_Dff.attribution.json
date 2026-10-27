@@ -1,0 +1,469 @@
+{
+ "schema_version": 1,
+ "design": {
+  "top": "bm_DL_logic_w_Dff",
+  "flow_dir": "<FLOW>",
+  "report": "<FLOW>/vpr/run/report_timing.setup.rpt",
+  "blif": "<FLOW>/odin3/bm_DL_logic_w_Dff.blif",
+  "provenance_blif": "<FLOW>/timing/prov.blif",
+  "netlist_json": "<FLOW>/timing/netlist.odin3.json"
+ },
+ "timing": {
+  "cpd_ns": 1.45102,
+  "fmax_mhz": 689.17,
+  "paths_requested": 100,
+  "paths_limit": null,
+  "paths_in_report": 4,
+  "paths_kept": 4,
+  "paths_parsed": 4,
+  "paths_skipped": 0,
+  "paths_skipped_reasons": {},
+  "worst_slack_ns": -1.451,
+  "critical_data_delay_ns": 1.409
+ },
+ "coverage": {
+  "nodes": 10,
+  "matched": 6,
+  "port": 4,
+  "unmatched": 0,
+  "matched_share": 0.6,
+  "port_share": 0.4,
+  "unmatched_share": 0.0,
+  "matched_share_excl_port": 1.0,
+  "critical_matched_delay_share": 1.0,
+  "critical_port_delay_share": 0.0,
+  "critical_unmatched_delay_share": 0.0,
+  "unmatched_atoms": [],
+  "unmatched_atoms_total": 0,
+  "source_files": 1,
+  "source_files_unreadable": 1,
+  "source_files_unreadable_list": [
+   "micro/bm_DL_logic_w_Dff.v"
+  ]
+ },
+ "critical_path": {
+  "index": 1,
+  "slack_ns": -1.451,
+  "arrival_ns": 1.451,
+  "required_ns": 0.0,
+  "startpoint": "g.Q[0] (.latch clocked by Clock)",
+  "endpoint": "out:g.outpad[0] (.output clocked by Clock)",
+  "data_delay_ns": 1.409,
+  "spans": [
+   {
+    "span": "micro/bm_DL_logic_w_Dff.v:8",
+    "kind": "matched",
+    "module": "bm_DL_logic_w_Dff",
+    "file": "micro/bm_DL_logic_w_Dff.v",
+    "line": 8,
+    "words": [
+     "g"
+    ],
+    "words_via": {
+     "g": [
+      "name"
+     ]
+    },
+    "cell_delay_ns": 0.124,
+    "net_delay_ns": 1.285,
+    "atoms": [
+     "g"
+    ],
+    "delay_ns": 1.409,
+    "share": 1.0
+   },
+   {
+    "span": null,
+    "kind": "port",
+    "module": "bm_DL_logic_w_Dff",
+    "file": null,
+    "line": null,
+    "words": [
+     "g"
+    ],
+    "words_via": {
+     "g": [
+      "pad"
+     ]
+    },
+    "cell_delay_ns": 0.0,
+    "net_delay_ns": 0.0,
+    "atoms": [
+     "out:g"
+    ],
+    "delay_ns": 0.0,
+    "share": 0.0
+   }
+  ]
+ },
+ "spans": [
+  {
+   "id": "micro/bm_DL_logic_w_Dff.v:8",
+   "file": "micro/bm_DL_logic_w_Dff.v",
+   "line": 8,
+   "text": null,
+   "modules": [
+    "bm_DL_logic_w_Dff"
+   ],
+   "words": [
+    "f",
+    "g"
+   ],
+   "words_via": {
+    "f": [
+     "name"
+    ],
+    "g": [
+     "name"
+    ]
+   },
+   "paths_through": 4,
+   "worst_slack_ns": -1.451,
+   "nodes": 4,
+   "critical_delay_ns": 1.409,
+   "critical_share": 1.0,
+   "assigned_word": null
+  },
+  {
+   "id": "micro/bm_DL_logic_w_Dff.v:10",
+   "file": "micro/bm_DL_logic_w_Dff.v",
+   "line": 10,
+   "text": null,
+   "modules": [
+    "bm_DL_logic_w_Dff"
+   ],
+   "words": [],
+   "words_via": {},
+   "paths_through": 1,
+   "worst_slack_ns": -0.546,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0,
+   "assigned_word": null
+  },
+  {
+   "id": "micro/bm_DL_logic_w_Dff.v:11",
+   "file": "micro/bm_DL_logic_w_Dff.v",
+   "line": 11,
+   "text": null,
+   "modules": [
+    "bm_DL_logic_w_Dff"
+   ],
+   "words": [],
+   "words_via": {},
+   "paths_through": 1,
+   "worst_slack_ns": -0.546,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0,
+   "assigned_word": null
+  }
+ ],
+ "modules": [
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "words": [
+    "f",
+    "g",
+    "x1",
+    "x3"
+   ],
+   "port_nodes": 4,
+   "paths_through": 4,
+   "worst_slack_ns": -1.451,
+   "nodes": 10,
+   "critical_delay_ns": 1.409,
+   "critical_share": 1.0
+  }
+ ],
+ "words": [
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "g",
+   "port": false,
+   "bits": [],
+   "word_via": [
+    "name"
+   ],
+   "paths_through": 2,
+   "worst_slack_ns": -1.451,
+   "nodes": 2,
+   "critical_delay_ns": 1.409,
+   "critical_share": 1.0
+  },
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "f",
+   "port": false,
+   "bits": [],
+   "word_via": [
+    "name"
+   ],
+   "paths_through": 2,
+   "worst_slack_ns": -0.683,
+   "nodes": 2,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "f",
+   "port": true,
+   "bits": [],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -0.683,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "g",
+   "port": true,
+   "bits": [],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -1.451,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "x1",
+   "port": true,
+   "bits": [],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -0.546,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_logic_w_Dff",
+   "word": "x3",
+   "port": true,
+   "bits": [],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -0.546,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  }
+ ],
+ "paths": [
+  {
+   "index": 1,
+   "slack_ns": -1.451,
+   "arrival_ns": 1.451,
+   "required_ns": 0.0,
+   "startpoint": "g.Q[0] (.latch clocked by Clock)",
+   "endpoint": "out:g.outpad[0] (.output clocked by Clock)",
+   "nodes": [
+    {
+     "atom": "g",
+     "block_type": ".latch",
+     "pins": [
+      "Q[0]"
+     ],
+     "cell_delay_ns": 0.124,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 1.409,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:8",
+     "module": "bm_DL_logic_w_Dff",
+     "word": "g",
+     "bit": null,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:g",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 1.285,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_logic_w_Dff",
+     "word": "g",
+     "bit": null,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 2,
+   "slack_ns": -0.683,
+   "arrival_ns": 0.683,
+   "required_ns": 0.0,
+   "startpoint": "f.Q[0] (.latch clocked by Clock)",
+   "endpoint": "out:f.outpad[0] (.output clocked by Clock)",
+   "nodes": [
+    {
+     "atom": "f",
+     "block_type": ".latch",
+     "pins": [
+      "Q[0]"
+     ],
+     "cell_delay_ns": 0.124,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.641,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:8",
+     "module": "bm_DL_logic_w_Dff",
+     "word": "f",
+     "bit": null,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:f",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.517,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_logic_w_Dff",
+     "word": "f",
+     "bit": null,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 3,
+   "slack_ns": -0.546,
+   "arrival_ns": 0.522,
+   "required_ns": -0.024,
+   "startpoint": "x1.inpad[0] (.input clocked by Clock)",
+   "endpoint": "f.D[0] (.latch clocked by Clock)",
+   "nodes": [
+    {
+     "atom": "x1",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.287,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_logic_w_Dff",
+     "word": "x1",
+     "bit": null,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n7",
+     "block_type": ".names",
+     "pins": [
+      "in[0]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.287,
+     "delay_ns": 0.235,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:10",
+     "module": "bm_DL_logic_w_Dff",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "f",
+     "block_type": ".latch",
+     "pins": [
+      "D[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.0,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:8",
+     "module": "bm_DL_logic_w_Dff",
+     "word": "f",
+     "bit": null,
+     "word_via": "name"
+    }
+   ]
+  },
+  {
+   "index": 4,
+   "slack_ns": -0.546,
+   "arrival_ns": 0.522,
+   "required_ns": -0.024,
+   "startpoint": "x3.inpad[0] (.input clocked by Clock)",
+   "endpoint": "g.D[0] (.latch clocked by Clock)",
+   "nodes": [
+    {
+     "atom": "x3",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.287,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_logic_w_Dff",
+     "word": "x3",
+     "bit": null,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n8",
+     "block_type": ".names",
+     "pins": [
+      "in[0]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.287,
+     "delay_ns": 0.235,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:11",
+     "module": "bm_DL_logic_w_Dff",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "g",
+     "block_type": ".latch",
+     "pins": [
+      "D[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.0,
+     "category": "matched",
+     "span": "micro/bm_DL_logic_w_Dff.v:8",
+     "module": "bm_DL_logic_w_Dff",
+     "word": "g",
+     "bit": null,
+     "word_via": "name"
+    }
+   ]
+  }
+ ]
+}

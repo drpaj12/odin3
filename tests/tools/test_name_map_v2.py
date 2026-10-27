@@ -54,7 +54,7 @@ def plain(nm: object) -> dict[str, object]:
     data = dataclasses.asdict(nm)  # type: ignore[call-overload]
     for key in [k for k in data if k.startswith("_")]:
         del data[key]
-    return data
+    return dict(data)
 
 
 def texts(log: mock.MagicMock) -> list[tuple[str, ...]]:
@@ -153,7 +153,8 @@ class SyntheticMaps(Agreement, unittest.TestCase):
         self.assertEqual((obj.module, obj.full, obj.hier, obj.file), ("#m\tx", "f%g", "h%", "f\\"))
         ours, warnings = self.agree(self.write("esc1c.names", ONE + "m\tnet\th\tf%2Cg\th\tf\t7\n"))
         self.assertEqual((ours.ignored, warnings), (1, 1))  # %2C is a version 2 escape
-        ours, _ = self.agree(self.write("esc2.names", TWO + "O\tm\tnet\th\tf%2Cg%7Ch\th\tf\t7\t\t\n"))
+        row = "O\tm\tnet\th\tf%2Cg%7Ch\th\tf\t7\t\t\n"
+        ours, _ = self.agree(self.write("esc2.names", TWO + row))
         self.assertEqual(ours.objects[0].full, "f,g|h")
 
 

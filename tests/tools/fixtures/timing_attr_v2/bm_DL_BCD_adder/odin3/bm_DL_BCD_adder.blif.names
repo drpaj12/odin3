@@ -1,0 +1,120 @@
+# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
+O	bm_DL_BCD_adder	net	h257dvenw6y	bm_DL_BCD_adder/$n65@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	h2e2vqbiejz	bm_DL_BCD_adder/$n49@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r5	word
+O	bm_DL_BCD_adder	net	h3fhgro7rif	bm_DL_BCD_adder/$n18@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r6	expr
+O	bm_DL_BCD_adder	net	h3tyyj4vyi7	bm_DL_BCD_adder/$n55@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	h3xuj6r7xcg	bm_DL_BCD_adder/$n29@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h4gul7kjgjc	bm_DL_BCD_adder/$n69@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	h4znrkjit4m	bm_DL_BCD_adder/$n36@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h55kpdjvh6g	bm_DL_BCD_adder/$n23@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h5mexlr6vmn	bm_DL_BCD_adder/$n51@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r5	word
+O	bm_DL_BCD_adder	net	h6trfrl3pph	bm_DL_BCD_adder/$n33@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	h7un433aq6p	bm_DL_BCD_adder/$n63@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	h7ur46elpte	bm_DL_BCD_adder/$n19@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r6	expr
+O	bm_DL_BCD_adder	net	h7zcj2k2bdx	bm_DL_BCD_adder/$n37@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	ha4fcdipby6	bm_DL_BCD_adder/$n14@tests/micro/verilog/micro/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	ha4phdeslmy	bm_DL_BCD_adder/$n22@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	haqg2s3jbgb	bm_DL_BCD_adder/$n31@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hb5qvxyal7r	bm_DL_BCD_adder/$n35@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hbhxbewowvi	bm_DL_BCD_adder/$n15@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r6	expr
+O	bm_DL_BCD_adder	net	hbr5jkm2bsn	bm_DL_BCD_adder/$n75@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hcc7ey2k67w	bm_DL_BCD_adder/$n13@tests/micro/verilog/micro/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hd7aq7ztbxp	bm_DL_BCD_adder/$n72@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hdgmsvk24ix	bm_DL_BCD_adder/$n27@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hdlfh5atxxc	bm_DL_BCD_adder/$n74@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hdsdhdbz5po	bm_DL_BCD_adder/$n26@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hdtskwhjxso	bm_DL_BCD_adder/$n40@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	he2asfwwgqc	bm_DL_BCD_adder/$n10@tests/micro/verilog/micro/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	he7a72j3hwc	bm_DL_BCD_adder/$n71@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	heoqqat7yzq	bm_DL_BCD_adder/$n68@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hfjs36xyeqy	bm_DL_BCD_adder/$n50@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r5	word
+O	bm_DL_BCD_adder	net	hgktypwpoyq	bm_DL_BCD_adder/$n32@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hgnijhjzuv6	bm_DL_BCD_adder/$n11@tests/micro/verilog/micro/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hh26kfh6zak	bm_DL_BCD_adder/$n17@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r6	expr
+O	bm_DL_BCD_adder	net	hh4nw76ke3m	bm_DL_BCD_adder/$n56@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hhpzaiv2fdc	bm_DL_BCD_adder/$n52@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r5	word
+O	bm_DL_BCD_adder	net	hhye32cte36	bm_DL_BCD_adder/$n38@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hi6nazwxi4z	bm_DL_BCD_adder/$n61@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hissw73hsoz	bm_DL_BCD_adder/$n54@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hja2wffqfv2	bm_DL_BCD_adder/$n43@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hjfrvgttelp	bm_DL_BCD_adder/$n21@tests/micro/verilog/micro/bm_DL_BCD_adder.v:3	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	3	r10	module
+O	bm_DL_BCD_adder	net	hjnlrdaqrom	bm_DL_BCD_adder/$n76@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hjq2xe4boov	bm_DL_BCD_adder/$n73@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+O	bm_DL_BCD_adder	net	hka5k4q4skj	bm_DL_BCD_adder/$n30@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hkpft5nn5ec	bm_DL_BCD_adder/$n28@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hnr56nmdwqe	bm_DL_BCD_adder/$n47@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hnz5vqowunb	bm_DL_BCD_adder/$n44@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hopw6ehlqj4	bm_DL_BCD_adder/$n24@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hoqdk2qrhjb	bm_DL_BCD_adder/$n39@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hqtz7s4fvz6	bm_DL_BCD_adder/$n42@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrlbaoh6oat	bm_DL_BCD_adder/$n34@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hrp5zb53pjp	bm_DL_BCD_adder/$n60@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hrvfqhzkz3r	bm_DL_BCD_adder/$n45@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hso5jhmi4o7	bm_DL_BCD_adder/$n46@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hsslibc6y5t	bm_DL_BCD_adder/$n20@tests/micro/verilog/micro/bm_DL_BCD_adder.v:3	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	3	r10	module
+O	bm_DL_BCD_adder	net	htoiko2malx	bm_DL_BCD_adder/$n62@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	htya7iasrgi	bm_DL_BCD_adder/$n53@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hu6xl2qmoks	bm_DL_BCD_adder/$n57@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hv4yh2a7syh	bm_DL_BCD_adder/$n64@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hvn52e2jmoy	bm_DL_BCD_adder/$n66@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hvrerlrgc7p	bm_DL_BCD_adder/$n41@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hw6nhvv3egf	bm_DL_BCD_adder/$n12@tests/micro/verilog/micro/bm_DL_BCD_adder.v:10	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	10	r9	stmt
+O	bm_DL_BCD_adder	net	hwwbeps7aqr	bm_DL_BCD_adder/$n16@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r6	expr
+O	bm_DL_BCD_adder	net	hxe6qghdbgs	bm_DL_BCD_adder/$n59@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hxjd7krfcb2	bm_DL_BCD_adder/$n67@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r2	word
+O	bm_DL_BCD_adder	net	hxtpo52nxej	bm_DL_BCD_adder/$n25@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hxvdr6enn6g	bm_DL_BCD_adder/$n48@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r4	word
+O	bm_DL_BCD_adder	net	hxwesq6xufj	bm_DL_BCD_adder/$n58@tests/micro/verilog/micro/bm_DL_BCD_adder.v:15	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	15	r7	word
+O	bm_DL_BCD_adder	net	hydhihrp6km	bm_DL_BCD_adder/$n70@tests/micro/verilog/micro/bm_DL_BCD_adder.v:19	bm_DL_BCD_adder	tests/micro/verilog/micro/bm_DL_BCD_adder.v	19	r8	word
+N	bm_DL_BCD_adder	net	Cin	r11	stmt
+N	bm_DL_BCD_adder	net	Cout	r14	gate
+N	bm_DL_BCD_adder	net	S[1]	r16	gate
+N	bm_DL_BCD_adder	net	S[2]	r16	gate
+N	bm_DL_BCD_adder	net	S[3]	r16	gate
+N	bm_DL_BCD_adder	net	X[0]	r17	stmt
+N	bm_DL_BCD_adder	net	X[1]	r17	stmt
+N	bm_DL_BCD_adder	net	X[2]	r17	stmt
+N	bm_DL_BCD_adder	net	X[3]	r17	stmt
+N	bm_DL_BCD_adder	net	Y[0]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[1]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[2]	r18	stmt
+N	bm_DL_BCD_adder	net	Y[3]	r18	stmt
+R	r1	S	expr	origin	t1.1		f1:15.7-15.18	c6	hier=bm_DL_BCD_adder
+R	r2	D	word	rewrite:word	t2.2	r1			
+R	r3	S	expr	origin	t1.1		f1:19.16-19.21	c10	hier=bm_DL_BCD_adder
+R	r4	D	word	rewrite:word	t3.1	r3			
+R	r5	D	word	rewrite:word	t4.1	r4			
+R	r6	S	expr	origin	t1.1		f1:15.7-15.12	c11	hier=bm_DL_BCD_adder
+R	r7	D	word	rewrite:word	t2.1	r6			
+R	r8	D	word	rewrite:word	t2.3	r5			
+R	r9	S	stmt	origin	t1.1		f1:10.2-10.17	c12	hier=bm_DL_BCD_adder
+R	r10	S	module	origin	t1.1		f1:3.1-22.10	c1	hier=bm_DL_BCD_adder
+R	r11	S	stmt	origin	t1.1		f1:4.2-4.12	c13	hier=bm_DL_BCD_adder
+R	r12	S	stmt	origin	t1.1		f1:16.3-19.22	c7	hier=bm_DL_BCD_adder
+R	r13	D	word	refine:stmt	t5.1	r12			
+R	r14	D	gate	refine:word	t6.1	r13			
+R	r15	D	word	rewrite:word	t3.2	r13			
+R	r16	D	gate	refine:word	t6.2	r15			
+R	r17	S	stmt	origin	t1.1		f1:5.2-5.19	c14	hier=bm_DL_BCD_adder
+R	r18	S	stmt	origin	t1.1		f1:5.2-5.19	c14	hier=bm_DL_BCD_adder
+C	c1	MODULE	module		f1	3.1-22.10	bm_DL_BCD_adder
+C	c2	ALWAYS	block	c1	f1	13.2-20.5	
+C	c3	TIMING_STMT	stmt	c2	f1	13.9-20.5	
+C	c4	SEQ_BLOCK	stmt	c3	f1	14.2-20.5	
+C	c5	BLOCKING_ASSIGN	stmt	c4	f1	15.3-15.19	
+C	c6	BINARY	expr	c5	f1	15.7-15.18	
+C	c7	IF	stmt	c4	f1	16.3-19.22	
+C	c8	IF_ELSE	branch	c7	f1	19.4-19.22	
+C	c9	BLOCKING_ASSIGN	stmt	c8	f1	19.4-19.22	
+C	c10	BINARY	expr	c9	f1	19.16-19.21	
+C	c11	BINARY	expr	c6	f1	15.7-15.12	
+C	c12	PORT_DECL	stmt	c1	f1	10.2-10.17	
+C	c13	PORT_DECL	stmt	c1	f1	4.2-4.12	
+C	c14	PORT_DECL	stmt	c1	f1	5.2-5.19	
+F	f1	tests/micro/verilog/micro/bm_DL_BCD_adder.v
+T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/micro/bm_DL_BCD_adder.v	
+T	t2	hardmap		multiply=0 adder=19 chains=3 sp_slices=0 dp_slices=0 soft=0
+T	t3	opt	-full	
+T	t4	wreduce		
+T	t5	proc		
+T	t6	lower		modules=1 cells=3 nodes=31

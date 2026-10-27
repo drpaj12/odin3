@@ -287,11 +287,6 @@ def chain_item(nm: name_map_v2.NameMap, construct: name_map_v2.MapConstruct) -> 
                      f"{span.line}.{span.col}-{span.end_line}.{span.end_col}" if span else "")
 
 
-def all_chain(nm: name_map_v2.NameMap, obj: name_map_v2.MapObject) -> list[name_map_v2.MapConstruct]:
-    """Every construct of the object's chain (``NameMap.chain``: all source leaves)."""
-    return nm.chain(obj)
-
-
 def leaf_chain(nm: name_map_v2.NameMap, obj: name_map_v2.MapObject) -> tuple[ChainItem, ...]:
     """The chain of the first source leaf that has a construct, leaf first, up to its module."""
     for record in nm.provenance(obj):
@@ -373,7 +368,7 @@ class Resolver:
         chain = leaf_chain(nm, obj)
         generated = word is None
         if word is None:
-            declared = next((c.name for c in all_chain(nm, obj) if c.kind == "DECLARATOR"
+            declared = next((c.name for c in nm.chain(obj) if c.kind == "DECLARATOR"
                              and c.name), None)
             named = self.index.net_word(net) if self.index else None
             if declared:
