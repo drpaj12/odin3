@@ -894,21 +894,16 @@ odin3_status odin3_prov_label_compute(const odin3_design *design, uint32_t recor
 
 /* --- the version 2 name map (3.2 to 3.5) ------------------------------------------------------ */
 
-static const char *const LEVEL_WORDS[] = {"none", "module", "instance", "block", "branch",
-                                          "stmt", "expr",   "word",     "gate",  "lut",
-                                          "ble",  "clb",    "site"};
-static const char *const DIR_WORDS[] = {"origin", "refine", "rewrite", "coarsen", "context"};
 static const char *const MODE_WORDS[] = {"none", "refs", "constructs", "full"}; /* by enum */
 static const char *const RANK_WORDS[] = {"none", "constructs", "refs", "full"}; /* by rank */
 enum {
-    LEVEL_WORD_COUNT = sizeof LEVEL_WORDS / sizeof LEVEL_WORDS[0],
     MODE_RANK_MAX = 3,
     MODE_RANK_REFS = 2,
     ORIGIN_CAP = ODIN3_HDL_LOC_MAX /* one constant: the locations a record keeps */
 };
 
 static const char *level_word(unsigned level) {
-    return level < (unsigned)LEVEL_WORD_COUNT ? LEVEL_WORDS[level] : "none";
+    return odin3_level_word(level);
 }
 
 /* 0 for no snapshot, then constructs < refs < full (a larger mode keeps everything a smaller one
@@ -1618,7 +1613,7 @@ static odin3_status build_cons_field(const pm *st, const pm_rec *pr, odin3_strbu
 /* The dir field: `<dir>:<from level>` for a DERIVED record, `origin` for the others. */
 static odin3_status build_dir(const pm_rec *pr, odin3_strbuf *out) {
     if (pr->kind == (uint8_t)ODIN3_PROV_DERIVED) {
-        return odin3_strbuf_appendf(out, "%s:%s", DIR_WORDS[pr->dir], level_word(pr->from));
+        return odin3_strbuf_appendf(out, "%s:%s", odin3_dir_word(pr->dir), level_word(pr->from));
     }
     return odin3_strbuf_appendf(out, "origin");
 }

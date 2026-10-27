@@ -46,6 +46,43 @@ struct odin3_opclass_table {
     uint32_t first_conflict;
 };
 
+static const char *const LEVEL_WORDS[] = {"none", "module", "instance", "block", "branch",
+                                          "stmt", "expr",   "word",     "gate",  "lut",
+                                          "ble",  "clb",    "site"};
+static const char *const DIR_WORDS[] = {"origin", "refine", "rewrite", "coarsen", "context"};
+
+const char *odin3_level_word(unsigned level) {
+    return level < sizeof LEVEL_WORDS / sizeof LEVEL_WORDS[0] ? LEVEL_WORDS[level] : "none";
+}
+
+const char *odin3_dir_word(unsigned dir) {
+    return dir < sizeof DIR_WORDS / sizeof DIR_WORDS[0] ? DIR_WORDS[dir] : "origin";
+}
+
+static bool word_index(const char *const *words, size_t count, odin3_bytes word, size_t *index) {
+    for (size_t k = 0; word.ptr != NULL && k < count; k++) {
+        if (strlen(words[k]) == word.len && memcmp(words[k], word.ptr, word.len) == 0) {
+            *index = k;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool odin3_level_from_word(odin3_bytes word, odin3_level *out) {
+    size_t index = 0;
+    bool found = word_index(LEVEL_WORDS, sizeof LEVEL_WORDS / sizeof LEVEL_WORDS[0], word, &index);
+    *out = found ? (odin3_level)index : ODIN3_LEVEL_NONE;
+    return found;
+}
+
+bool odin3_dir_from_word(odin3_bytes word, odin3_prov_dir *out) {
+    size_t index = 0;
+    bool found = word_index(DIR_WORDS, sizeof DIR_WORDS / sizeof DIR_WORDS[0], word, &index);
+    *out = found ? (odin3_prov_dir)index : ODIN3_DIR_ORIGIN;
+    return found;
+}
+
 bool odin3_opclass_valid(const odin3_opclass *cls) {
     if (cls == NULL || cls->dir == ODIN3_DIR_ORIGIN || cls->dir > ODIN3_DIR_CONTEXT) {
         return false;

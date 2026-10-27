@@ -14,9 +14,9 @@
  *
  * Version 2 (V1.2.0 3.2) begins `# odin3-names 2 hash=sha256 width=N prov=1 ast=<mode>` and every
  * later line starts with a one letter type and a TAB: O (an O line is the seven fields above, then
- * recs and level), N, R, C, F, T, A, Q, K. The escapes are the four above plus %2C and %7C (list fields
- * are `,` and `|` separated, each element escaped on its own). This module writes the lines it is
- * given and parses and checks them; the numbering and the join rules are prov_export.c's.
+ * recs and level), N, R, C, F, T, A, Q, K. The escapes are the four above plus %2C and %7C (list
+ * fields are `,` and `|` separated, each element escaped on its own). This module writes the lines
+ * it is given and parses and checks them; the numbering and the join rules are prov_export.c's.
  */
 #ifndef ODIN3_BACKENDS_COMMON_NAME_MAP_H
 #define ODIN3_BACKENDS_COMMON_NAME_MAP_H

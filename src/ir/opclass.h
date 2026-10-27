@@ -8,6 +8,7 @@
 
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "util/hash.h"
 #include "util/vec.h"
 
 #include <stdbool.h>
@@ -27,6 +28,15 @@ typedef struct odin3_opclass {
     bool bulk;
     uint8_t context_tail;
 } odin3_opclass;
+
+/* The spelling of a level or a direction in the name map (V1.2.0 3.2): "none", "module", ... and
+ * "origin", "refine", "rewrite", "coarsen", "context". "none" for a value out of range. */
+const char *odin3_level_word(unsigned level);
+const char *odin3_dir_word(unsigned dir);
+
+/* True and *out when word is exactly one of those spellings (a level word of "none" is a level). */
+bool odin3_level_from_word(odin3_bytes word, odin3_level *out);
+bool odin3_dir_from_word(odin3_bytes word, odin3_prov_dir *out);
 
 /* True when dir is not ORIGIN and in range, both levels are set and in range, bulk is set only
  * for COARSEN, and a tail is 0 unless dir is CONTEXT. */

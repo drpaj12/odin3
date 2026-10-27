@@ -6,6 +6,7 @@
 #include "ir/ids.h"
 #include "ir/ir_internal.h"
 #include "ir/module.h"
+#include "ir/restore.h"
 #include "ir/value.h"
 #include "util/alloc.h"
 #include "util/arena.h"
@@ -260,6 +261,7 @@ static odin3_status run_append(odin3_design *design, odin3_passrun_row row, odin
     ctx->design = design;
     ctx->run.v = (uint32_t)(store->runs.len - 1);
     ctx->op = 0;
+    odin3_extra_note_run(design, ctx->run, row.restored != 0); /* V1.2.0 4.5: the mutating run */
     return ODIN3_OK;
 }
 
@@ -280,14 +282,20 @@ static odin3_status run_begin(odin3_design *design, odin3_passrun_row row, odin3
 
 odin3_status odin3_pass_run_begin_args(odin3_design *design, uint32_t pass_name_str,
                                        uint32_t args_str, odin3_pass_ctx *ctx) {
-    odin3_passrun_row row = {pass_name_str, args_str, 0};
+    odin3_passrun_row row = {pass_name_str, args_str, 0, 0};
     return run_begin(design, row, ctx, "odin3_pass_run_begin_args");
 }
 
 odin3_status odin3_pass_run_begin(odin3_design *design, uint32_t pass_name_str,
                                   odin3_pass_ctx *ctx) {
-    odin3_passrun_row row = {pass_name_str, 0, 0};
+    odin3_passrun_row row = {pass_name_str, 0, 0, 0};
     return run_begin(design, row, ctx, "odin3_pass_run_begin");
+}
+
+odin3_status odin3_passrun_append_restored(odin3_design *design, const odin3_passrun_text *text,
+                                           odin3_pass_ctx *ctx) {
+    odin3_passrun_row row = {text->name, text->args, text->info, 1};
+    return run_begin(design, row, ctx, "odin3_passrun_append_restored");
 }
 
 void odin3_prov_begin_op(odin3_pass_ctx *ctx) {
@@ -330,6 +338,11 @@ uint32_t odin3_passrun_args(const odin3_design *design, odin3_passrun_id run) {
 uint32_t odin3_passrun_info(const odin3_design *design, odin3_passrun_id run) {
     const odin3_passrun_row *row = run_row(design, run);
     return row != NULL ? row->info : 0;
+}
+
+bool odin3_passrun_restored(const odin3_design *design, odin3_passrun_id run) {
+    const odin3_passrun_row *row = run_row(design, run);
+    return row != NULL && row->restored != 0;
 }
 
 uint32_t odin3_passrun_end(const odin3_design *design) {

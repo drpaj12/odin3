@@ -635,6 +635,27 @@ record identity.
   readers of it (v7) are in `odin3.h`; the join and the class labels they return are computed once, in
   `src/backends/common/prov_export.c`, which the map writers (Task 5) share.
 
+- **The extra table and the restored flag (V1.2.0 Task 9; docs/V1.2.0.md 4.5, Peter reviews).**
+  A version 2 name map read back by `read_blif`, `read_json` or `read_verilog -netlist` rebuilds the
+  records, classes and construct rows of the file (`src/ir/restore.{h,c}`, `odin3_design_restore`), and
+  the IR gains exactly two things for it. (1) The **extra table** (`design->extra`, NULL until a
+  restore; copied by `odin3_design_clone`, counted by `odin3_design_bytes_reserved`): the `A`, `Q` and
+  `K` lines of the map (post-Odin data) as text with their record ids rewritten to the design's, in file
+  order, and one slot, the **mutating run** (a pass-run row number, 0 = none). `odin3_pass_run_begin`
+  sets the slot to the new run when the table exists, the slot is 0, the run is not restored and the
+  pass name does not begin with `read_` or `write_`; it never changes it afterwards. The writer reads it
+  to mark the lines and the post-Odin records `stale=t<n>`. (2) The **`restored` flag of a pass-run
+  row** (the fourth `uint32_t` of `odin3_passrun_row`): set on the rows a restore appends
+  (`odin3_passrun_append_restored`), so code that expects an SOURCE record's `ast` to be a node ID of an
+  AST store can tell a restored run, where `ast` is the number of the `C` line of the map and the
+  construct rows are keyed `(run, c)`. No field of any IR object (node, net, wire, pin, module, record)
+  changes, no ID, attribute, cell type, ABI export (ABI stays 7) or check rule. The restore validates the
+  whole map (`names --check` and its own rules) before it touches the design, so a map that fails
+  restores nothing; it creates the records in file order (hash-consing identity as in IR-13: a SOURCE
+  record by `(locations, ast, run, hier)`, a DERIVED one by `(run, op, parents, hier)`), takes each
+  operation's first class as its default and the others as overrides, and makes the construct rows of a
+  run on demand, parents first, for the `C` lines its SOURCE records reach.
+
 **Names in output (spec §5.3).** An object's provenance name is
 `hier/path/cellname@file:line`, from its first HDL location: the first `SOURCE` leaf of the
 backward walk in parent order that has a location (5.4 W-2: an `IMPORTED` leaf, a netlist's own
@@ -807,6 +828,11 @@ Under V1.2.0 Task 3 (Peter 2026-10-25, ADR D14): IR-12a, the construct table, AB
 `odin3_obj_get_prov`, `odin3_prov_get_info`, `odin3_prov_visit_parents`, `odin3_prov_visit_joined` and
 `odin3_prov_visit_chain`) and check rule 12. Additive: no record field, ID, attribute or op-registry
 entry changes. Plugins built for ABI 6 must be rebuilt.
+
+Under V1.2.0 Task 9 (Peter reviews): IR-12a, the extra table (`design->extra`, with the mutating-run
+slot) and the `restored` flag of a pass-run row, for the restore of a version 2 name map
+(`odin3_design_restore`). Additive: no field of any IR object, ID, attribute, ABI export (ABI stays 7)
+or check rule changes.
 
 Under PHASE3 #37: check rule 7 also tests that a record's `hier` is 0 or a string-table ID. No
 other check rule, field or ABI change; the path's shape is not checked.

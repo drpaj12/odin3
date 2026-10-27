@@ -48,6 +48,7 @@ typedef struct odin3_passrun_row {
     uint32_t name;
     uint32_t args;
     uint32_t info;
+    uint32_t restored; /* 1: rebuilt from a version 2 name map (V1.2.0 4.5), 0 otherwise */
 } odin3_passrun_row;
 
 /* The design's provenance store (prov.c; IR-12, IR-13, IR-6 tombstones). */
@@ -116,11 +117,13 @@ struct odin3_design {
     odin3_prov_store *prov;       /* provenance records, pass runs, tombstones */
     odin3_opclass_table *opclass; /* op-class table (IR-12a): class per (run, op) and record */
     odin3_construct_table
-        *construct;                /* construct table (IR-12a): AST constructs of SOURCE records */
-    odin3_arena *arena;            /* local cell-type definitions (copied) */
-    odin3_type_store *types;       /* shared cell-type arena (odin3_celltype_arena) */
-    odin3_strtab *strtab;          /* design-global names and string values */
-    odin3_vec celltypes;           /* odin3_celltype_entry; slot 0 reserved */
+        *construct; /* construct table (IR-12a): AST constructs of SOURCE records */
+    struct odin3_extra_table
+        *extra;              /* post-Odin lines of a restored map (4.5), NULL until a restore */
+    odin3_arena *arena;      /* local cell-type definitions (copied) */
+    odin3_type_store *types; /* shared cell-type arena (odin3_celltype_arena) */
+    odin3_strtab *strtab;    /* design-global names and string values */
+    odin3_vec celltypes;     /* odin3_celltype_entry; slot 0 reserved */
     odin3_u64map *celltype_names;  /* name strtab ID -> celltype ID */
     odin3_vec declared;            /* odin3_declared_entry, IR-7b declaration order */
     odin3_vec modules;             /* odin3_module *, creation order; slot 0 NULL */

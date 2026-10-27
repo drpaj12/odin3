@@ -11,6 +11,7 @@
 #include "ir/module.h"
 #include "ir/pinpool.h"
 #include "ir/prov.h"
+#include "ir/restore.h"
 #include "util/alloc.h"
 #include "util/arena.h"
 #include "util/attr.h"
@@ -52,7 +53,8 @@ static odin3_status clone_tables(odin3_design *dst, const odin3_design *src) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = odin3_opclass_copy(dst->opclass, src->opclass);
-    return st == ODIN3_OK ? odin3_construct_copy(dst->construct, src->construct) : st;
+    st = st == ODIN3_OK ? odin3_construct_copy(dst->construct, src->construct) : st;
+    return st == ODIN3_OK ? odin3_extra_clone(dst, src) : st;
 }
 
 /* Fills dst, a zeroed design with an empty AST list, from src. */
@@ -119,6 +121,7 @@ ODIN3_EXPORT void odin3_design_destroy(odin3_design *design) {
     odin3_srcman_destroy(design->srcman);
     odin3_opclass_destroy(design->opclass);
     odin3_construct_destroy(design->construct);
+    odin3_extra_destroy(design->extra);
     odin3_prov_store_free(design);
     odin3_module_table_free(design);
     odin3_celltype_table_free(design);
@@ -156,7 +159,8 @@ uint64_t odin3_design_bytes_reserved(const odin3_design *design) {
     }
     uint64_t bytes = sizeof *design;
     bytes += odin3_strtab_bytes_reserved(design->strtab) + odin3_prov_bytes_reserved(design) +
-             odin3_opclass_bytes_reserved(design->opclass) + odin3_construct_bytes_reserved(design);
+             odin3_opclass_bytes_reserved(design->opclass) +
+             odin3_construct_bytes_reserved(design) + odin3_extra_bytes_reserved(design->extra);
     bytes += design->srcman != NULL ? odin3_srcman_bytes_reserved(design->srcman) : 0;
     bytes += odin3_arena_bytes_reserved(design->arena) + vec_bytes(&design->celltypes) +
              (design->types != NULL ? odin3_arena_bytes_reserved(design->types->arena) : 0) +

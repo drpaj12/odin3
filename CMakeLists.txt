@@ -288,6 +288,7 @@ add_library(odin3_core OBJECT
     src/ir/opclass.c
     src/ir/construct.c
     src/ir/construct_snapshot.c
+    src/ir/restore.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -976,6 +977,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_construct)
     odin3_add_unit_test(test_construct_snapshot)
     odin3_add_unit_test(test_construct_check)
+    odin3_add_unit_test(test_restore)
     odin3_add_unit_test(test_prov_label)
     odin3_add_unit_test(test_prov_export)
     odin3_add_unit_test(test_opclass_passes)
