@@ -1226,6 +1226,235 @@ class AstNode:
         return [AstNode(self.tree, kid) for kid in kids if kid]
 
 
+# --- name maps (V1.2.0 3.2, 3.5): a file reader that restores nothing into the IR ---------------
+
+_MAP_ESCAPES = {"%09": "\t", "%0A": "\n", "%5C": "\\", "%25": "%", "%23": "#", "%2C": ",",
+                "%7C": "|"}
+_MAP_MIN_FIELDS = {"O": 9, "N": 5, "R": 9, "C": 7, "F": 2, "T": 4, "A": 3}
+_MAP_HEADER = re.compile(
+    r"# odin3-names (?P<version>[12]) hash=sha256 width=(?P<width>\d{1,2})"
+    r"(?: prov=1 ast=(?P<ast>refs|constructs|full|none))?")
+
+
+def _map_unescape(text: str) -> str:
+    """The text of a name map field with its escapes (%09 %0A %5C %25 %23 %2C %7C) undone."""
+
+    def one(match: re.Match[str]) -> str:
+        try:
+            return _MAP_ESCAPES[match.group(0)]
+        except KeyError:
+            raise ValueError(f"bad escape '{match.group(0)}'") from None
+
+    return re.sub(r"%.{0,2}", one, text)
+
+
+def _map_ref(text: str, prefix: str) -> int:
+    """The number in a reference like r12 (0 for an empty field)."""
+    if not text:
+        return 0
+    if text[0] != prefix or not text[1:].isdecimal() or int(text[1:]) == 0:
+        raise ValueError(f"'{text}' is not a {prefix}<n> reference")
+    return int(text[1:])
+
+
+def _map_refs(field: str, prefix: str, sep: str = ",") -> tuple[int, ...]:
+    return tuple(_map_ref(item, prefix) for item in field.split(sep)) if field else ()
+
+
+@dataclass(frozen=True)
+class MapObject:
+    """An O or N line: an object of a netlist and its provenance record. type is O (renamed by a
+    hash: name is the hash name and full its full name) or N (kept its name; full is empty);
+    kind is net, node or wire; records are record numbers (Odin III writes one); level is the
+    granularity of the record. Version 1 maps give O objects without records. raw is the line
+    as the file holds it."""
+
+    type: str
+    module: str
+    kind: str
+    name: str
+    full: str
+    hier: str
+    file: str
+    line: int
+    records: tuple[int, ...]
+    level: str
+    raw: str
+
+
+@dataclass(frozen=True)
+class MapRecord:
+    """An R line: a provenance record. kind is S (source), I (imported) or D (derived); dir is
+    origin or <refine|rewrite|coarsen|context>:<from level>; step is t<n>.<op>; parents and
+    constructs are record and construct numbers; origins are f<n>:span texts; flags are the
+    comma-separated flags (hier=... unescaped)."""
+
+    number: int
+    kind: str
+    level: str
+    dir: str
+    step: str
+    parents: tuple[int, ...]
+    origins: tuple[str, ...]
+    constructs: tuple[int, ...]
+    flags: tuple[str, ...]
+    raw: str
+
+
+@dataclass(frozen=True)
+class MapConstruct:
+    """A C line: a construct of the AST layer. parent is a construct number (0 for a module) and
+    file a file number (0 when empty)."""
+
+    number: int
+    kind: str
+    level: str
+    parent: int
+    file: int
+    span: str
+    name: str
+    raw: str
+
+
+@dataclass
+class NameMap:
+    """A parsed name map. version is 1 or 2; ast is the header's ast word (version 2). Lines of
+    a type this reader does not know are skipped with one warning per type; A lines are kept
+    unparsed in atoms (fields after the type letter). Hash names are not verified here
+    (`names --check` does)."""
+
+    version: int
+    width: int
+    ast: str
+    objects: list[MapObject] = field(default_factory=list)
+    records: list[MapRecord] = field(default_factory=list)
+    constructs: list[MapConstruct] = field(default_factory=list)
+    files: list[str] = field(default_factory=list)
+    runs: list[tuple[str, str, str]] = field(default_factory=list)
+    atoms: list[tuple[str, ...]] = field(default_factory=list)
+    ignored: int = 0
+
+    def find(self, name: str) -> list[MapObject]:
+        """The O lines whose hash name, and the N lines whose name, is name, in file order."""
+        return [obj for obj in self.objects if obj.name == name]
+
+    def provenance(self, obj: MapObject) -> list[MapRecord]:
+        """The records of obj, as Node.provenance(): its naming record first, then every record
+        reachable through parents, depth first in parent order, each once."""
+        records: list[MapRecord] = []
+        seen: set[int] = set()
+        stack = list(obj.records[:1])
+        while stack:
+            number = stack.pop()
+            if number in seen or not 1 <= number <= len(self.records):
+                continue
+            seen.add(number)
+            record = self.records[number - 1]
+            records.append(record)
+            stack.extend(reversed(record.parents))
+        return records
+
+    def chain(self, obj: MapObject) -> list[MapConstruct]:
+        """The HDL constructs of obj, as Node.chain(): for each source leaf of provenance() that
+        has a construct, the construct and then its ancestors up to the module, each once."""
+        chain: list[MapConstruct] = []
+        reached: set[int] = set()
+        for record in self.provenance(obj):
+            number = record.constructs[0] if record.kind != "D" and record.constructs else 0
+            for _ in range(len(self.constructs)):
+                if number in reached or not 1 <= number <= len(self.constructs):
+                    break
+                reached.add(number)
+                construct = self.constructs[number - 1]
+                chain.append(construct)
+                number = construct.parent
+        return chain
+
+
+def _map_header(line: str, path: str) -> NameMap:
+    match = _MAP_HEADER.fullmatch(line)
+    if match is None or not 1 <= int(match["width"]) <= 52 or (
+            (match["version"] == "2") != (match["ast"] is not None)):
+        raise ValueError(f"{path}:1: not a name map header: '{line}'")
+    return NameMap(int(match["version"]), int(match["width"]), match["ast"] or "")
+
+
+def _map_line_v1(nm: NameMap, text: str) -> None:
+    """Adds one version 1 line (seven fields: module kind short full hier file line)."""
+    fields = text.split("\t")
+    if len(fields) != 7:
+        raise ValueError("not 7 fields")
+    raw = [_map_unescape(item) for item in fields]
+    nm.objects.append(MapObject("O", raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], int(raw[6]),
+                                (), "", text))
+
+
+def _map_line(nm: NameMap, text: str) -> None:
+    """Adds one version 2 line (type letter, TAB, fields); ValueError when it is malformed."""
+    kind, fields = text[0], text[2:].split("\t")
+    if len(fields) < _MAP_MIN_FIELDS[kind]:
+        raise ValueError("too few fields for its type")
+    raw = [_map_unescape(item) for item in fields]
+    if kind == "O":
+        nm.objects.append(MapObject("O", raw[0], raw[1], raw[2], raw[3], raw[4], raw[5],
+                                    int(raw[6]), _map_refs(fields[7], "r"), raw[8], text))
+    elif kind == "N":
+        nm.objects.append(MapObject("N", raw[0], raw[1], raw[2], "", "", "", 0,
+                                    _map_refs(fields[3], "r"), raw[4], text))
+    elif kind == "R":
+        nm.records.append(MapRecord(
+            _map_ref(fields[0], "r"), raw[1], raw[2], raw[3], raw[4], _map_refs(fields[5], "r"),
+            tuple(_map_unescape(item) for item in fields[6].split("|")) if fields[6] else (),
+            _map_refs(fields[7], "c"),
+            tuple(_map_unescape(item) for item in fields[8].split(",")) if fields[8] else (),
+            text))
+    elif kind == "C":
+        nm.constructs.append(MapConstruct(_map_ref(fields[0], "c"), raw[1], raw[2],
+                                          _map_ref(fields[3], "c"), _map_ref(fields[4], "f"),
+                                          raw[5], raw[6], text))
+    elif kind == "F":
+        nm.files.append(raw[1])
+    elif kind == "T":
+        nm.runs.append((raw[1], raw[2], raw[3]))
+    else:
+        nm.atoms.append(tuple(raw))
+
+
+def read_name_map(path: str | Path) -> NameMap:
+    """Read a name map (version 1 or 2, `<netlist>.names`) from a file. Nothing is restored into
+    the IR and no design is needed; lines the reader cannot use are skipped with a warning and
+    counted in ignored, as the C parse does. Raises ValueError (with path:line) for a bad header
+    and OSError when the file cannot be read. See NameMap.provenance() and NameMap.chain()."""
+    text = Path(path).read_bytes().decode("utf-8")
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if not lines:
+        raise ValueError(f"{path}:1: not a name map header: ''")
+    nm = _map_header(lines[0], str(path))
+    warned: set[str] = set()
+    for number, line in enumerate(lines[1:], start=2):
+        if not line or line.startswith("#"):
+            continue
+        try:
+            if nm.version == 1:
+                _map_line_v1(nm, line)
+            elif len(line) < 2 or line[1] != "\t" or line.endswith("\r"):
+                raise ValueError("no type letter and TAB, or a CR at the end of the line")
+            elif line[0] in _MAP_MIN_FIELDS:
+                _map_line(nm, line)
+            else:
+                if line[0] not in warned:
+                    warned.add(line[0])
+                    LOG.warning("%s:%d: name map line type '%s' is unknown and ignored", path,
+                                number, line[0])
+                nm.ignored += 1
+        except ValueError as err:
+            LOG.warning("%s:%d: name map entry ignored: %s", path, number, err)
+            nm.ignored += 1
+    return nm
+
+
 def timing_attribution(flow_dir: str | Path, paths: int | None = None) -> dict[str, Any]:
     """Attribute the critical path of an ``odin3-flow --timing-attr`` run to HDL statements,
     modules and words (docs/user/timing-attribution.md). ``flow_dir`` is the flow's output
