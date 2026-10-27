@@ -37,6 +37,7 @@
 # hardmap_add (3C-2: hardmap maps `$add`/`$sub` to adder chains; the sim vectors before and after equal, an 8+6 add equals tests/hardmap/expected/add_8x6.blif).
 # memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
+# hash_name_soft_dir (hash names do not depend on where lib/soft_primitives is found: BLIF, JSON, Verilog and name maps byte-identical for three soft directories).
 # pm_carry (4.5 C-4: `partial_map --min-add N` leaves smaller adds soft; bad arguments are refused with a located message).
 # pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
@@ -981,6 +982,40 @@ pm_soft_blocks)
             fail "$design: no located warning naming the soft body"
         expect_fail "too many parameter values for cell type 'adder'" -p \
             "read_arch $adder_arch; read_verilog $mic/$design.v"
+    done
+    ;;
+hash_name_soft_dir)
+    # Hash names are a function of the design and the options only. The soft bodies of
+    # lib/soft_primitives are located per build (ODIN3_SOFT_PRIMITIVES_DIR here); their path used
+    # to be in the location of every object of the body, hence in its hash name, so two builds of
+    # one commit named the objects of adder_hard_block and hard_adder_cin_propagation differently.
+    # Three directories (the default, two copies) give byte-identical BLIF, JSON, Verilog and
+    # name maps, and no name map holds a directory.
+    mic=$fixtures/../../micro/verilog
+    lib=$fixtures/../../../lib/vtr.o3lib
+    mkdir "$work/s1" "$work/s2"
+    cp "$fixtures"/../../../lib/soft_primitives/*.v "$work/s1/"
+    cp "$fixtures"/../../../lib/soft_primitives/*.v "$work/s2/"
+    for design in micro/adder_hard_block micro/hard_adder_cin_propagation; do
+        for run in default s1 s2; do
+            dir=$work/$run
+            [[ $run == default ]] && dir=
+            for kind in blif json v; do
+                w="write_$kind"
+                [[ $kind == blif ]] && w="write_blif --vtr"
+                ODIN3_SOFT_PRIMITIVES_DIR=$dir "$odin3" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat $mic/$design.v; proc; opt; flatten; opt -full; wreduce; hardmap; lower; $w --name-style hash --prov-map $work/$run.$kind" \
+                    >"$work/out" 2>"$work/err" || fail "$design: $run $kind: odin3 failed"
+                [[ -s $work/$run.$kind.names ]] || fail "$design: $run $kind: no name map"
+            done
+        done
+        for kind in blif json v; do
+            for run in s1 s2; do
+                cmp -s "$work/default.$kind" "$work/$run.$kind" || fail "$design: $kind differs with soft dir $run"
+                cmp -s "$work/default.$kind.names" "$work/$run.$kind.names" || fail "$design: $kind name map differs with soft dir $run"
+            done
+        done
+        if grep -qF "$work" "$work"/s1.*.names; then fail "$design: a name map holds the soft directory"; fi
+        grep -qF "lib/soft_primitives/adder.v" "$work/s1.blif.names" || fail "$design: no stable soft body name"
     done
     ;;
 sv_compound_assign)

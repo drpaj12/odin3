@@ -1114,6 +1114,12 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(cli_blif_vtr_prov_names PROPERTIES LABELS unit)
+    # Hash names do not depend on where the build finds lib/soft_primitives (hash-name determinism).
+    add_test(NAME cli_hash_name_soft_dir
+        COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hash_name_soft_dir $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
+                ${PROJECT_SOURCE_DIR}/tests/golden/blif)
+    set_tests_properties(cli_hash_name_soft_dir PROPERTIES LABELS unit)
     add_test(NAME cli_hardmap_mul
         COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/test_cli.sh hardmap_mul $<TARGET_FILE:odin3>
                 ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare

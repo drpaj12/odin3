@@ -122,8 +122,11 @@ static odin3_status read_library(odin3_rv *rv, const odin3_pp_source *src) {
     return st != ODIN3_OK ? st : sweep(rv, true);
 }
 
-/* The source of primitive name's body in dir, for read_library: its path interned and the library
- * "work", as the D18 body has always been read. */
+/* The source of primitive name's body in dir, for read_library: the library "work", the file read
+ * from dir (resolved) but named "lib/soft_primitives/<name>.v" (given), the name every location,
+ * diagnostic and hash name carries. dir depends on the build (<exe>/../../lib, the install tree,
+ * $ODIN3_SOFT_PRIMITIVES_DIR); a name made from it would differ between two builds of one
+ * commit, so no object of the body could be joined across builds. */
 static odin3_status soft_source(odin3_rv *rv, const char *name, const char *dir, odin3_loc at,
                                 odin3_pp_source *src) {
     odin3_strbuf path;
@@ -134,9 +137,15 @@ static odin3_status soft_source(odin3_rv *rv, const char *name, const char *dir,
                         : odin3_design_intern(rv->design, odin3_bytes_cstr("work"), &src->library);
     st = st != ODIN3_OK
              ? st
-             : odin3_design_intern(rv->design, (odin3_bytes){path.data, path.len}, &src->given);
-    src->resolved = src->given;
+             : odin3_design_intern(rv->design, (odin3_bytes){path.data, path.len}, &src->resolved);
     odin3_strbuf_free(&path);
+    odin3_strbuf stable;
+    odin3_strbuf_init(&stable);
+    st = st != ODIN3_OK ? st : odin3_strbuf_appendf(&stable, "lib/soft_primitives/%s.v", name);
+    st = st != ODIN3_OK
+             ? st
+             : odin3_design_intern(rv->design, (odin3_bytes){stable.data, stable.len}, &src->given);
+    odin3_strbuf_free(&stable);
     return st;
 }
 
