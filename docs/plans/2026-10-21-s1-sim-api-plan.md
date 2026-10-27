@@ -33,7 +33,7 @@ section 10 is the reference trace).
 - No change to existing vector output: every existing `sim` CLI and unit test stays green
   unchanged, except the one message text of SC-1 (`tests/unit/test_ir_cells.c:783`).
 - Build and test (from the worktree root): `cmake --preset debug`;
-  `/home/jamiespa/odin3-ws/work/controller-scripts/build-mem.sh --preset debug`;
+  `~/odin3-ws/work/controller-scripts/build-mem.sh --preset debug`;
   `env -u ODIN3_HEAVY_OK ctest --preset debug -R '<regex>' -j6 --output-on-failure`; before the last
   push of each PR: the full `env -u ODIN3_HEAVY_OK ctest --preset debug -j6` and `tools/lint.sh`.
   Nothing runs under `tools/heavy-run`.
@@ -70,7 +70,7 @@ Lane 1: S1a, S1b, S1c in order. Lane 2 (in parallel): S1d. Then S1e (either lane
 both append to `CMakeLists.txt` and S1d edits `src/sim/vectors.{h,c}` that S1a does not touch;
 the later of the two merges `origin/main` and resolves the CMake list by keeping both entries.
 Each branch starts from `origin/main` after its dependencies merged:
-`git -C /home/jamiespa/odin3-ws/odin3 fetch -q && git -C /home/jamiespa/odin3-ws/odin3 worktree add -b <branch> /home/jamiespa/odin3-ws/work/odin3-<branch-suffix> origin/main`.
+`git -C ~/odin3-ws/odin3 fetch -q && git -C ~/odin3-ws/odin3 worktree add -b <branch> ~/odin3-ws/work/odin3-<branch-suffix> origin/main`.
 
 ## File map
 

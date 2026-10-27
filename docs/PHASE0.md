@@ -228,7 +228,7 @@ Windows side: VS Code with the WSL extension opens `~/odin3-ws`; Windows Termina
                 "Bash(git log*)", "Bash(git add *)", "Bash(git commit *)", "Bash(gh pr *)",
                 "Bash(./tools/*)", "Bash(python3 *)", "Bash(lizard *)", "Bash(clang-tidy *)"],
       "ask":   ["Bash(git push *)", "Bash(rm -rf *)"],
-      "deny":  ["Read(./.env)", "Edit(//home/jamiespa/odin3-ws/external/**)", "Write(//home/jamiespa/odin3-ws/external/**)"]
+      "deny":  ["Read(./.env)", "Edit(~/odin3-ws/external/**)", "Write(~/odin3-ws/external/**)"]
     },
     "sandbox": { "enabled": true },
     "hooks": {

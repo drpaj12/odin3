@@ -1,4 +1,4 @@
-	Command being timed: "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/vtr_flow/scripts/blackbox_latches.pl --clk_list latch_^_re_^_clk_^_0 --input blink.parmys.blif --output 0_blink.parmys.blif"
+	Command being timed: "/ws/odin3-ws/external/vtr-verilog-to-routing/vtr_flow/scripts/blackbox_latches.pl --clk_list latch_^_re_^_clk_^_0 --input blink.parmys.blif --output 0_blink.parmys.blif"
 	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.00
 	Maximum resident set size (kbytes): 5788
 	Exit status: 0
