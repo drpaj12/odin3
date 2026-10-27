@@ -3,12 +3,15 @@
 
 Usage::
 
-    export_gate.py --odin3 O [--repeats N] [--json OUT] [--jsonl OUT] [--techlib FILE]
-                   [--lock FILE] [--workdir DIR] <design.v>...
+    export_gate.py --odin3 O [--repeats N] [--single] [--json OUT] [--jsonl OUT]
+                   [--techlib FILE] [--lock FILE] [--workdir DIR] <design.v>...
     export_gate.py --from-json RAW.json
     export_gate.py --from-jsonl RUNS.jsonl
 
-For each design, smallest first, N times (default 3), alternating the two ends of one flow
+``--single`` runs the flow once per design (ABC dominates the wall time) and then writes each end
+N times in the same ``-p`` script; the export times are the per-write pass timers and the peak RSS
+and VPR counts are those of that one invocation.  Without it, for each design, smallest first, N
+times (default 3), alternating the two ends of one flow
 (``v1`` and ``v2``): ``read_techlib TECHLIB; read_verilog --nolatches --vtr-compat --prov-ast refs
 F; proc; fsm; opt; flatten; opt -full; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr
 --name-style hash [--prov-map] OUT`` (``--prov-map`` for ``v2``).  Each process runs under
@@ -76,32 +79,47 @@ def one_run(
     extra = "--prov-map" if end == "v2" else ""
     script = FLOW.format(tech=tech, src=design, extra=extra, out=out)
     lock = ["flock", "-x", lock_file] if lock_file else []
+    # VPR processes running when the odin3 process starts (inside the lock) and when it ends.
+    count = 'echo "vpr-start $(pgrep -c vpr || true)" >&2; exec "$@"'
     proc = subprocess.run(
-        [*lock, "/usr/bin/time", "-v", odin3, "-p", script],
+        [*lock, "sh", "-c", count, "sh", "/usr/bin/time", "-v", odin3, "-p", script],
         capture_output=True, text=True, check=False)
+    vpr_end = subprocess.run(["pgrep", "-c", "vpr"], capture_output=True, text=True, check=False)
+    started = re.search(r"vpr-start (\d+)", proc.stderr)
     took, rss = PASS_RE.search(proc.stderr), RSS_RE.search(proc.stderr)
     if proc.returncode != 0 or took is None or rss is None:
         raise SystemExit(f"{design.name} {end}: exit {proc.returncode}\n{proc.stderr[-600:]}")
     shape = map_shape(Path(str(out) + ".names"))
     return {"ms": float(took.group(1)), "mb": int(rss.group(1)) / 1024.0,
-            "wall": wall_seconds(proc.stderr), **shape}
+            "wall": wall_seconds(proc.stderr), **shape,
+            "vpr_start": float(started.group(1)) if started else -1.0,
+            "vpr_end": float(vpr_end.stdout.strip() or 0)}
 
 
 def med(runs: list[dict[str, float]], key: str) -> float:
     return statistics.median(r[key] for r in runs)
 
 
+def vpr_label(runs: list[dict[str, float]]) -> str:
+    """Whether a vpr process ran at the start or end of any run (-1: not recorded)."""
+    if any(r.get("vpr_start", -1.0) < 0 for r in runs):
+        return "not recorded"
+    busy = sum(1 for r in runs if r["vpr_start"] > 0 or r.get("vpr_end", 0) > 0)
+    return f"{busy}/{len(runs)} runs"
+
+
 def report(raw: Raw) -> None:
     """Prints the table of the raw runs."""
     print("design            n  objects  R lines  C lines  v2 map bytes  v1 map bytes  "
-          "export v1 ms  export v2 ms  RSS v1 MB  RSS v2 MB  delta MB")
+          "export v1 ms  export v2 ms  RSS v1 MB  RSS v2 MB  delta MB  concurrent VPR")
     for name, ends in raw.items():
         v1, v2 = ends["v1"], ends["v2"]
         objects = med(v2, "O") + med(v2, "N")
         print(f"{Path(name).stem:<17}{len(v2):>2} {objects:>8.0f} {med(v2, 'R'):>8.0f} "
               f"{med(v2, 'C'):>8.0f} {med(v2, 'bytes'):>13.0f} {med(v1, 'bytes'):>13.0f} "
               f"{med(v1, 'ms'):>13.1f} {med(v2, 'ms'):>13.1f} {med(v1, 'mb'):>10.1f} "
-              f"{med(v2, 'mb'):>10.1f} {med(v2, 'mb') - med(v1, 'mb'):>9.1f}")
+              f"{med(v2, 'mb'):>10.1f} {med(v2, 'mb') - med(v1, 'mb'):>9.1f}  "
+              f"{vpr_label(v1 + v2)}")
 
 
 def from_jsonl(path: Path) -> Raw:
@@ -124,6 +142,45 @@ def append_run(path: Path, design: Path, end: str, run: dict[str, float]) -> Non
         os.fsync(out.fileno())
 
 
+def one_flow(
+    odin3: str, design: Path, repeats: int, env: tuple[Path, str | None, Path]
+) -> dict[str, list[dict[str, float]]]:
+    """One odin3 invocation: the flow once, then ``repeats`` writes of each end (v1, v2).
+
+    The export time of each write is its own pass timer; the peak RSS and the VPR counts are
+    those of the whole invocation (one value, so n counts writes, not flows).
+    """
+    tech, lock_file, workdir = env
+    head = FLOW.split("write_blif", 1)[0].format(tech=tech, src=design)
+    writes = []
+    for i in range(repeats):
+        for end in ("v1", "v2"):
+            extra = "--prov-map" if end == "v2" else ""
+            out = workdir / f"{design.stem}-{end}-{i}.blif"
+            writes.append(f"write_blif --vtr --name-style hash {extra} {out}")
+    script = head + "; ".join(writes)
+    lock = ["flock", "-x", lock_file] if lock_file else []
+    count = 'echo "vpr-start $(pgrep -c vpr || true)" >&2; exec "$@"'
+    proc = subprocess.run(
+        [*lock, "sh", "-c", count, "sh", "/usr/bin/time", "-v", odin3, "-p", script],
+        capture_output=True, text=True, check=False)
+    vpr_end = subprocess.run(["pgrep", "-c", "vpr"], capture_output=True, text=True, check=False)
+    started = re.search(r"vpr-start (\d+)", proc.stderr)
+    times, rss = PASS_RE.findall(proc.stderr), RSS_RE.search(proc.stderr)
+    if proc.returncode != 0 or len(times) != 2 * repeats or rss is None:
+        raise SystemExit(f"{design.name}: exit {proc.returncode}\n{proc.stderr[-600:]}")
+    common = {"mb": int(rss.group(1)) / 1024.0, "wall": wall_seconds(proc.stderr),
+              "vpr_start": float(started.group(1)) if started else -1.0,
+              "vpr_end": float(vpr_end.stdout.strip() or 0)}
+    ends: dict[str, list[dict[str, float]]] = {"v1": [], "v2": []}
+    for i in range(repeats):
+        for k, end in enumerate(("v1", "v2")):
+            out = workdir / f"{design.stem}-{end}-{i}.blif"
+            shape = map_shape(Path(str(out) + ".names"))
+            ends[end].append({"ms": float(times[2 * i + k]), **common, **shape})
+    return ends
+
+
 def measure(args: argparse.Namespace) -> Raw:
     designs = sorted((Path(d) for d in args.designs), key=lambda p: (p.stat().st_size, str(p)))
     techlib = Path(args.techlib or os.environ.get("ODIN3_TECHLIB") or DEFAULT_TECHLIB)
@@ -132,7 +189,15 @@ def measure(args: argparse.Namespace) -> Raw:
     env = (techlib, args.lock or os.environ.get("ODIN3_HEAVY_LOCK") or None, workdir)
     raw: Raw = {}
     for design in designs:
-        ends: dict[str, list[dict[str, float]]] = {"v1": [], "v2": []}
+        if args.single:
+            ends = one_flow(args.odin3, design, args.repeats, env)
+            for end in ("v1", "v2"):
+                for run in ends[end]:
+                    if args.jsonl:
+                        append_run(Path(args.jsonl), design, end, run)
+            raw[design.name] = ends
+            continue
+        ends = {"v1": [], "v2": []}
         for _ in range(args.repeats):
             for end in ("v1", "v2"):
                 run = one_run(args.odin3, design, end, env)
@@ -149,6 +214,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--json")
     ap.add_argument("--jsonl")
+    ap.add_argument("--single", action="store_true")
     ap.add_argument("--from-jsonl")
     ap.add_argument("--techlib")
     ap.add_argument("--lock")
