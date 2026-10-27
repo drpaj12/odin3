@@ -146,57 +146,70 @@ odin3_status odin3_xline_emit(const odin3_xline_nums *nums, const odin3_xline *l
     return status;
 }
 
+/* The end of the info word that starts at `start`: a blank outside double quotes (with backslash
+ * escapes inside them) ends it. */
+static size_t info_word_end(odin3_bytes info, size_t start) {
+    const char *text = info.ptr;
+    bool quoted = false;
+    size_t i = start;
+    while (i < info.len && (quoted || text[i] != ' ')) {
+        if (text[i] == '\\' && quoted) {
+            i++;
+        } else if (text[i] == '"') {
+            quoted = !quoted;
+        }
+        i++;
+    }
+    return i < info.len ? i : info.len;
+}
+
 /* The value of `key=` among the blank-separated words of a pass run's info (a value may be
- * double-quoted, with backslash escapes, and then holds blanks); false when the key is absent,
- * the value is quoted, or it does not fit in cap bytes with its NUL. */
+ * double-quoted and then holds blanks); false when the key is absent, the value is quoted, or it
+ * does not fit in cap bytes with its NUL. */
 static bool info_word(odin3_bytes info, const char *key, char *out, size_t cap) {
     const char *text = info.ptr;
     const size_t key_len = strlen(key);
-    size_t i = 0;
-    while (text != NULL && i < info.len) {
-        size_t start = i;
-        bool quoted = false;
-        while (i < info.len && (quoted || text[i] != ' ')) {
-            if (text[i] == '\\' && quoted) {
-                i++;
-            } else if (text[i] == '"') {
-                quoted = !quoted;
-            }
-            i++;
-        }
-        const size_t end = i < info.len ? i : info.len;
-        if (end - start > key_len + 1U && memcmp(text + start, key, key_len) == 0 &&
-            text[start + key_len] == '=' && text[start + key_len + 1U] != '"' &&
-            end - start - key_len - 1U < cap) {
-            memcpy(out, text + start + key_len + 1U, end - start - key_len - 1U);
-            out[end - start - key_len - 1U] = '\0';
+    size_t start = 0;
+    while (text != NULL && start < info.len) {
+        const size_t end = info_word_end(info, start);
+        const size_t value = start + key_len + 1U;
+        if (end > value && memcmp(text + start, key, key_len) == 0 &&
+            text[start + key_len] == '=' && text[value] != '"' && end - value < cap) {
+            memcpy(out, text + value, end - value);
+            out[end - value] = '\0';
             return true;
         }
-        i = end + 1U;
+        start = end + 1U;
     }
     return false;
 }
 
-/* The objective of a join made by `pass` and its basis letter: `r` (read as written: the pass
- * name, or a goal the script states), `i` (derived from the script by the rule of
- * src/passes/abc/objective.c) or `-` (none: an abc script that states no goal). abc records its
- * objective in its run information; any other pass is named. */
-static char objective_of(odin3_bytes pass, odin3_bytes info, char *out, size_t cap) {
+/* The pass that made a join and its run information. */
+typedef struct q_source {
+    odin3_bytes pass;
+    odin3_bytes info;
+} q_source;
+
+/* The objective of a join and its basis letter: `r` (read as written: the pass name, or a goal
+ * the script states), `i` (derived from the script by the rule of src/passes/abc/objective.c) or
+ * `-` (none: an abc script that states no goal). abc records its objective in its run
+ * information; any other pass is named. */
+static char objective_of(const q_source *src, char *out, size_t cap) {
     out[0] = '\0';
-    if (pass.len == 3U && memcmp(pass.ptr, "abc", 3U) == 0) {
-        char src[ID_TEXT] = "";
-        if (!info_word(info, "objective", out, cap)) {
+    if (src->pass.len == 3U && memcmp(src->pass.ptr, "abc", 3U) == 0) {
+        char how[ID_TEXT] = "";
+        if (!info_word(src->info, "objective", out, cap)) {
             return '-';
         }
-        return info_word(info, "objective_src", src, sizeof src) && strcmp(src, "stated") == 0
+        return info_word(src->info, "objective_src", how, sizeof how) && strcmp(how, "stated") == 0
                    ? 'r'
                    : 'i';
     }
-    if (pass.len == 0U || pass.len >= cap) {
+    if (src->pass.len == 0U || src->pass.len >= cap) {
         return '-';
     }
-    memcpy(out, pass.ptr, pass.len);
-    out[pass.len] = '\0';
+    memcpy(out, src->pass.ptr, src->pass.len);
+    out[src->pass.len] = '\0';
     return 'r';
 }
 
@@ -205,7 +218,8 @@ odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_byt
     char id[ID_TEXT];
     (void)snprintf(id, sizeof id, "r%u", (unsigned)rnum);
     char word[ODIN3_XLINE_OBJECTIVE_BYTES];
-    const char basis_letter = objective_of(pass, info, word, sizeof word);
+    const q_source source = {pass, info};
+    const char basis_letter = objective_of(&source, word, sizeof word);
     char basis[sizeof "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-"];
     (void)snprintf(basis, sizeof basis,
                    "why=-,objective=%c,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-", basis_letter);

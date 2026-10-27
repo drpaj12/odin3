@@ -176,12 +176,12 @@ void odin3_abc_script_free(odin3_abc_script *script);
 
 /*
  * The objective of a script, for the provenance map (V1.2.0 3.6). out gets, as a NUL-terminated
- * word, the first `# objective: <word>` comment of bytes (*stated true), else `area` or `depth`
+ * word, the first `# objective: <word>` comment of text (*stated true), else `area` or `depth`
  * from the last mapping command of cmds (`if`, `&if`, `map`, `&nf`; `area` when its `a` flags
  * are odd in number), else "" (a script that states none). Pure; never allocates.
  */
-void odin3_abc_objective(const uint8_t *bytes, size_t len, const odin3_abc_cmd *cmds,
-                         uint32_t n_cmds, char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated);
+void odin3_abc_objective(odin3_bytes text, const odin3_abc_cmd *cmds, uint32_t n_cmds,
+                         char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated);
 
 /* The command at index, or NULL for a NULL script or an index at or past n_cmds. */
 const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32_t index);

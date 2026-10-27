@@ -663,6 +663,8 @@ static odin3_status finish_info(odin3_abc_run *run) {
     const char *k_text = run->opts.lut_k != 0 ? number : "none";
     char depth_text[DEPTH_TEXT_BYTES];
     (void)snprintf(depth_text, sizeof depth_text, "%u", (unsigned)depth);
+    const bool has_objective = run->script.objective[0] != '\0';
+    const char *objective_src = run->script.objective_stated ? "stated" : "rule";
     const struct {
         const char *key;
         const char *value;
@@ -674,10 +676,8 @@ static odin3_status finish_info(odin3_abc_run *run) {
                  {"gates", run->opts.gates},
                  {"genlib", run->genlib_sha256_hex},
                  {"depth", depth_text},
-                 {"objective", run->script.objective[0] != '\0' ? run->script.objective : NULL},
-                 {"objective_src", run->script.objective[0] == '\0'
-                                       ? NULL
-                                       : (run->script.objective_stated ? "stated" : "rule")}};
+                 {"objective", has_objective ? run->script.objective : NULL},
+                 {"objective_src", has_objective ? objective_src : NULL}};
     for (size_t i = 0; st == ODIN3_OK && i < sizeof words / sizeof words[0]; i++) {
         if (words[i].value != NULL && (run->gates_mode || strcmp(words[i].key, "genlib") != 0)) {
             st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));

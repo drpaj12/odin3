@@ -17,6 +17,7 @@
  */
 #include "passes/abc/script.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -41,18 +42,22 @@ static bool word_byte(uint8_t ch) {
     return (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-';
 }
 
+/* Skips blanks. */
+static const uint8_t *skip_blanks(const uint8_t *at, const uint8_t *end) {
+    while (at < end && (*at == ' ' || *at == '\t')) {
+        at++;
+    }
+    return at;
+}
+
 /* The objective word of one comment line [at, end) (after its `#`), or false. */
 static bool stated_in_line(const uint8_t *at, const uint8_t *end, char *out) {
-    while (at < end && (*at == ' ' || *at == '\t')) {
-        at++;
-    }
-    if ((size_t)(end - at) <= OBJ_PREFIX_BYTES || memcmp(at, OBJ_PREFIX, OBJ_PREFIX_BYTES) != 0) {
+    at = skip_blanks(at, end);
+    const size_t left = (size_t)(end - at);
+    if (left < OBJ_PREFIX_BYTES || memcmp(at, OBJ_PREFIX, OBJ_PREFIX_BYTES) != 0) {
         return false;
     }
-    at += OBJ_PREFIX_BYTES;
-    while (at < end && (*at == ' ' || *at == '\t')) {
-        at++;
-    }
+    at = skip_blanks(at + OBJ_PREFIX_BYTES, end);
     size_t len = 0;
     while (at + len < end && word_byte(at[len])) {
         len++;
@@ -67,15 +72,13 @@ static bool stated_in_line(const uint8_t *at, const uint8_t *end, char *out) {
 
 /* A comment line is `#` as the first non-blank byte of the line (a `#` after a command ends the
  * command and is a comment too, but a stated goal is its own line). */
-static bool find_stated(const uint8_t *bytes, size_t len, char *out) {
+static bool find_stated(odin3_bytes text, char *out) {
+    const uint8_t *bytes = text.ptr;
     size_t pos = 0;
-    while (pos < len) {
-        const uint8_t *nl = memchr(bytes + pos, '\n', len - pos);
-        const uint8_t *end = nl != NULL ? nl : bytes + len;
-        const uint8_t *at = bytes + pos;
-        while (at < end && (*at == ' ' || *at == '\t')) {
-            at++;
-        }
+    while (bytes != NULL && pos < text.len) {
+        const uint8_t *nl = memchr(bytes + pos, '\n', text.len - pos);
+        const uint8_t *end = nl != NULL ? nl : bytes + text.len;
+        const uint8_t *at = skip_blanks(bytes + pos, end);
         if (at < end && *at == '#' && stated_in_line(at + 1, end, out)) {
             return true;
         }
@@ -84,21 +87,26 @@ static bool find_stated(const uint8_t *bytes, size_t len, char *out) {
     return false;
 }
 
+/* The `a` flags of one option word (`-abc`): letters up to the first valued letter, which takes
+ * the rest of the word or the next word as its value. */
+static unsigned word_area_flags(const char *word, int row) {
+    const char *valued = k_obj_cmds[row].valued;
+    unsigned count = 0;
+    for (const char *ch = word + 1; *ch != '\0' && *ch != ' ' && strchr(valued, *ch) == NULL;
+         ch++) {
+        count += *ch == 'a';
+    }
+    return count;
+}
+
 /* How many `a` flags the option words of a mapping command hold (words 1..). */
-static unsigned area_flags(const char *line, const char *valued) {
+static unsigned area_flags(const char *line, int row) {
     unsigned count = 0;
     const char *at = strchr(line, ' ');
     while (at != NULL) {
-        while (*at == ' ') {
-            at++;
-        }
-        if (at[0] == '-' && ((at[1] >= 'a' && at[1] <= 'z') || (at[1] >= 'A' && at[1] <= 'Z'))) {
-            for (const char *ch = at + 1; *ch != '\0' && *ch != ' '; ch++) {
-                if (strchr(valued, *ch) != NULL) {
-                    break; /* the rest of the cluster, or the next word, is its value */
-                }
-                count += *ch == 'a';
-            }
+        at += strspn(at, " ");
+        if (at[0] == '-' && isalpha((unsigned char)at[1]) != 0) {
+            count += word_area_flags(at, row);
         }
         at = strchr(at, ' ');
     }
@@ -108,7 +116,7 @@ static unsigned area_flags(const char *line, const char *valued) {
 /* The command row of a checked command line, or -1. */
 static int mapping_cmd(const char *line) {
     size_t name_len = strcspn(line, " ");
-    for (int i = 0; i < (int)OBJ_CMDS; i++) {
+    for (int i = 0; i < OBJ_CMDS; i++) {
         if (strlen(k_obj_cmds[i].name) == name_len &&
             strncmp(line, k_obj_cmds[i].name, name_len) == 0) {
             return i;
@@ -117,20 +125,18 @@ static int mapping_cmd(const char *line) {
     return -1;
 }
 
-void odin3_abc_objective(const uint8_t *bytes, size_t len, const odin3_abc_cmd *cmds,
-                         uint32_t n_cmds, char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated) {
+void odin3_abc_objective(odin3_bytes text, const odin3_abc_cmd *cmds, uint32_t n_cmds,
+                         char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated) {
     out[0] = '\0';
     *stated = false;
-    if (bytes != NULL && find_stated(bytes, len, out)) {
+    if (find_stated(text, out)) {
         *stated = true;
         return;
     }
     for (uint32_t i = n_cmds; i > 0; i--) {
         int row = mapping_cmd(cmds[i - 1U].line);
         if (row >= 0) {
-            const char *value = (area_flags(cmds[i - 1U].line, k_obj_cmds[row].valued) & 1U) != 0U
-                                    ? "area"
-                                    : "depth";
+            const char *value = (area_flags(cmds[i - 1U].line, row) & 1U) != 0U ? "area" : "depth";
             memcpy(out, value, strlen(value) + 1U);
             return;
         }

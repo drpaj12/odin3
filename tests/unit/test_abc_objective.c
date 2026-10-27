@@ -80,7 +80,7 @@ static void test_a_value_letter_takes_the_rest_of_its_cluster(void) {
     const odin3_abc_cmd cmd = {"if -Ka -K 6", 1, NULL};
     char got[ODIN3_ABC_OBJECTIVE_BYTES];
     bool stated = true;
-    odin3_abc_objective(NULL, 0, &cmd, 1, got, &stated);
+    odin3_abc_objective((odin3_bytes){NULL, 0}, &cmd, 1, got, &stated);
     TEST_ASSERT_EQUAL_STRING("depth", got);
 }
 
@@ -101,7 +101,7 @@ static void test_a_script_with_no_mapping_command_states_none(void) {
     const odin3_abc_cmd cmds[] = {{"strash", 1, NULL}, {"dc2 -v", 2, NULL}};
     char got[ODIN3_ABC_OBJECTIVE_BYTES] = "x";
     bool stated = true;
-    odin3_abc_objective(NULL, 0, cmds, 2, got, &stated);
+    odin3_abc_objective((odin3_bytes){NULL, 0}, cmds, 2, got, &stated);
     TEST_ASSERT_EQUAL_STRING("", got);
     TEST_ASSERT_FALSE(stated);
 }
