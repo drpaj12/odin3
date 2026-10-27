@@ -1,4 +1,4 @@
-	Command being timed: "/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/yosys -c synthesis.tcl"
+	Command being timed: "/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/yosys -c synthesis.tcl"
 	User time (seconds): 0.03
 	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.04
 	Maximum resident set size (kbytes): 27052

@@ -187,24 +187,24 @@
 -1 1
 .names \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.G[3] \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$321_Y \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$322_Y
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$321_Y \
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$or$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$322_Y
 1- 1
 -1 1
 .names \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$or$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$322_Y \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$324_Y \
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$or$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$322_Y \
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$324_Y \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.CO[3]
 1- 1
 -1 1
 .names \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.X[1] \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.CO[0] \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$318_Y
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$318_Y
 11 1
 .names $auto$simplemap.cc:125:simplemap_reduce$272[1] \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.CO[1] \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$324_Y
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$324_Y
 11 1
 .names \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.X[3] \
@@ -214,11 +214,11 @@
 .names \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.X[3] \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.G[2] \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$321_Y
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$321_Y
 11 1
 .names \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.G[1] \
-  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/home/jamiespa/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$318_Y \
+  $techmap$techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.lcu.$and$/ws/odin3-ws/external/vtr-verilog-to-routing/build/bin/../share/yosys/techmap.v:240$318_Y \
   $techmap$auto$hard_block.cc:122:cell_hard_block$83.$auto$alumacc.cc:495:replace_alu$197.CO[1]
 1- 1
 -1 1
