@@ -1,0 +1,6 @@
+== --check
+entries=234 bad_hash=0 duplicates=0 ignored=0
+== --lookup
+ansiportlist	net	h26muvurua7	ansiportlist/$n348@tests/micro/verilog/full/ansiportlist_2.v:28	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	28
+== --reverse
+h26muvurua7

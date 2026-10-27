@@ -1,0 +1,75 @@
+== --lookup h572v5k2vnq
+O	memory_controller	node	h572v5k2vnq	memory_controller/_str.b5@tests/micro/verilog/full/ch_intrinsics.v:32	memory_controller	tests/micro/verilog/full/ch_intrinsics.v	32	r2	word$
+  R	r2	D	word	rewrite:word	t2.2	r1			$
+    R	r1	S	instance	origin	t1.1		f1:32.17-38.2	c3	hier=memory_controller$
+  C	c3	INSTANCE	instance	c2	f1	32.17-38.2	_str$
+  C	c2	INSTANTIATION	instance	c1	f1	32.1-38.3	single_port_ram$
+  C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t2	hardmap		multiply=0 adder=0 chains=0 sp_slices=16 dp_slices=0 soft=0$
+== --chain h572v5k2vnq
+C	c3	INSTANCE	instance	c2	f1	32.17-38.2	_str$
+C	c2	INSTANTIATION	instance	c1	f1	32.1-38.3	single_port_ram$
+C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+== --lookup h7a3kmfhqzc
+O	memset	wire	h7a3kmfhqzc	memory_controller/memtroll.memory_controller_write_enable@tests/micro/verilog/full/ch_intrinsics.v:19	memory_controller	tests/micro/verilog/full/ch_intrinsics.v	19	r132	word$
+  R	r132	D	word	context:word	t8.1	r131,r127			hier=memset/memtroll,ctx=1$
+    R	r131	S	stmt	origin	t1.1		f1:19.1-19.38	c58	hier=memory_controller$
+    R	r127	S	instance	origin	t1.1		f1:131.19-131.137	c55	hier=memset$
+  C	c58	PORT_DECL	stmt	c1	f1	19.1-19.38	$
+  C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+  C	c55	INSTANCE	instance	c54	f1	131.19-131.137	memtroll$
+  C	c54	INSTANTIATION	instance	c12	f1	131.1-131.138	memory_controller$
+  C	c12	MODULE	module		f1	71.1-290.10	memset$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t8	flatten		roots=1 instances=1 kept=0 nodes=9 renamed=0$
+== --chain h7a3kmfhqzc
+C	c58	PORT_DECL	stmt	c1	f1	19.1-19.38	$
+C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+C	c55	INSTANCE	instance	c54	f1	131.19-131.137	memtroll$
+C	c54	INSTANTIATION	instance	c12	f1	131.1-131.138	memory_controller$
+C	c12	MODULE	module		f1	71.1-290.10	memset$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+== --lookup clk
+N	memory_controller	wire	clk	r149	stmt$
+  R	r149	S	stmt	origin	t1.1		f1:17.1-17.11	c77	hier=memory_controller$
+  C	c77	PORT_DECL	stmt	c1	f1	17.1-17.11	$
+  C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+N	memset	wire	clk	r155	stmt$
+  R	r155	S	stmt	origin	t1.1		f1:89.1-89.11	c82	hier=memset$
+  C	c82	PORT_DECL	stmt	c12	f1	89.1-89.11	$
+  C	c12	MODULE	module		f1	71.1-290.10	memset$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+== --chain clk
+C	c77	PORT_DECL	stmt	c1	f1	17.1-17.11	$
+C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+C	c82	PORT_DECL	stmt	c12	f1	89.1-89.11	$
+C	c12	MODULE	module		f1	71.1-290.10	memset$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+== --lookup hzh4s3lr774
+O	memset	wire	hzh4s3lr774	memory_controller/memtroll.memory_controller_out@tests/micro/verilog/full/ch_intrinsics.v:21	memory_controller	tests/micro/verilog/full/ch_intrinsics.v	21	r153	word$
+  R	r153	D	word	context:word	t8.1	r152,r127			hier=memset/memtroll,ctx=1$
+    R	r152	S	stmt	origin	t1.1		f1:21.1-21.66	c80	hier=memory_controller$
+    R	r127	S	instance	origin	t1.1		f1:131.19-131.137	c55	hier=memset$
+  C	c80	PORT_DECL	stmt	c1	f1	21.1-21.66	$
+  C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+  C	c55	INSTANCE	instance	c54	f1	131.19-131.137	memtroll$
+  C	c54	INSTANTIATION	instance	c12	f1	131.1-131.138	memory_controller$
+  C	c12	MODULE	module		f1	71.1-290.10	memset$
+  F	f1	tests/micro/verilog/full/ch_intrinsics.v$
+  T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ch_intrinsics.v	$
+  T	t8	flatten		roots=1 instances=1 kept=0 nodes=9 renamed=0$
+== --chain hzh4s3lr774
+C	c80	PORT_DECL	stmt	c1	f1	21.1-21.66	$
+C	c1	MODULE	module		f1	9.1-68.10	memory_controller$
+C	c55	INSTANCE	instance	c54	f1	131.19-131.137	memtroll$
+C	c54	INSTANTIATION	instance	c12	f1	131.1-131.138	memory_controller$
+C	c12	MODULE	module		f1	71.1-290.10	memset$
+F	f1	tests/micro/verilog/full/ch_intrinsics.v$

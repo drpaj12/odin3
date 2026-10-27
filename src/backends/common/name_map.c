@@ -20,19 +20,7 @@ enum {
     WIDTH_KEY_LEN = 6, /* strlen("width=") */
     BYTE_VALUES = 256,
     V1_HEADER_TOKENS = 3, /* after the version: hash=, width= ... */
-    V2_HEADER_TOKENS = 5, /* ... and prov=, ast= */
-    R_KIND = 1,
-    R_LEVEL = 2,
-    R_DIR = 3,
-    R_STEP = 4,
-    R_PARENTS = 5,
-    R_ORIGINS = 6,
-    R_CONS = 7,
-    R_FLAGS = 8,
-    C_PARENT = 3,
-    C_FILE = 4,
-    O_RECS = 7,
-    N_RECS = 3
+    V2_HEADER_TOKENS = 5  /* ... and prov=, ast= */
 };
 
 /* The sort order of `kind` is its enum order, which must equal the byte order of the words. */
@@ -922,7 +910,7 @@ odin3_status odin3_name_map_write_line_v2(odin3_strbuf *out, char type,
  */
 
 /* The number in a reference like `r12` (prefix r), false for anything else. */
-static bool ref_number(odin3_bytes tok, char prefix, uint32_t *num) {
+bool odin3_name_map_ref_number(odin3_bytes tok, char prefix, uint32_t *num) {
     if (tok.len < 2 || ((const char *)tok.ptr)[0] != prefix) {
         return false;
     }
@@ -954,7 +942,7 @@ enum { LIM_R, LIM_C, LIM_F, LIM_T };
 
 static void ref_elem(chk *ck, odin3_bytes tok, char prefix, uint32_t limit, bool before) {
     uint32_t num = 0;
-    if (!ref_number(tok, prefix, &num) || num > limit) {
+    if (!odin3_name_map_ref_number(tok, prefix, &num) || num > limit) {
         ck->res->bad_ref++;
     } else if (before && num >= ck->own) {
         ck->res->bad_order++;
@@ -1047,40 +1035,40 @@ static bool step_valid(const chk *ck, odin3_bytes step) {
     }
     odin3_bytes run = {step.ptr, (size_t)(dot - (const char *)step.ptr)};
     odin3_bytes op_text = {dot + 1, step.len - run.len - 1};
-    return ref_number(run, 't', &num) && num <= ck->limit[LIM_T] && parse_decimal(op_text, &op) &&
-           op > 0;
+    return odin3_name_map_ref_number(run, 't', &num) && num <= ck->limit[LIM_T] &&
+           parse_decimal(op_text, &op) && op > 0;
 }
 
 static void check_r(chk *ck, const odin3_nm_line *line) {
     const odin3_bytes *fld = line->f;
     char kind = '?';
-    if (fld[R_KIND].len == 1) {
-        kind = ((const char *)fld[R_KIND].ptr)[0];
+    if (fld[NM_R_KIND].len == 1) {
+        kind = ((const char *)fld[NM_R_KIND].ptr)[0];
     }
-    if ((kind != 'S' && kind != 'I' && kind != 'D') || fld[R_LEVEL].len == 0 ||
-        !dir_valid(fld[R_DIR], kind) || !step_valid(ck, fld[R_STEP])) {
+    if ((kind != 'S' && kind != 'I' && kind != 'D') || fld[NM_R_LEVEL].len == 0 ||
+        !dir_valid(fld[NM_R_DIR], kind) || !step_valid(ck, fld[NM_R_STEP])) {
         ck->res->bad_class++;
     }
-    check_list(ck, fld[R_PARENTS], 'r', true);
-    each_element(fld[R_ORIGINS], '|', origin_elem, ck);
-    check_list(ck, fld[R_CONS], 'c', false);
-    each_element(fld[R_FLAGS], ',', flag_elem, ck);
+    check_list(ck, fld[NM_R_PARENTS], 'r', true);
+    each_element(fld[NM_R_ORIGINS], '|', origin_elem, ck);
+    check_list(ck, fld[NM_R_CONS], 'c', false);
+    each_element(fld[NM_R_FLAGS], ',', flag_elem, ck);
 }
 
 static void check_c(chk *ck, const odin3_nm_line *line) {
-    if (line->f[C_PARENT].len > 0) {
-        ref_elem(ck, line->f[C_PARENT], 'c', ck->limit[LIM_C], true);
+    if (line->f[NM_C_PARENT].len > 0) {
+        ref_elem(ck, line->f[NM_C_PARENT], 'c', ck->limit[LIM_C], true);
     }
-    if (line->f[C_FILE].len > 0) {
-        ref_elem(ck, line->f[C_FILE], 'f', ck->limit[LIM_F], false);
+    if (line->f[NM_C_FILE].len > 0) {
+        ref_elem(ck, line->f[NM_C_FILE], 'f', ck->limit[LIM_F], false);
     }
 }
 
 static void check_object(chk *ck, const odin3_nm_line *line) {
-    odin3_bytes recs = line->type == 'O' ? line->f[O_RECS] : line->f[N_RECS];
+    odin3_bytes recs = line->type == 'O' ? line->f[NM_O_RECS] : line->f[NM_N_RECS];
     uint32_t before = ck->res->bad_ref;
     check_list(ck, recs, 'r', false);
-    if (ck->res->bad_ref != before) {
+    if (recs.len == 0 || ck->res->bad_ref != before) {
         ck->res->bad_ref = before;
         ck->res->no_record++;
     }
@@ -1099,7 +1087,7 @@ static void count_lines(const odin3_name_map *map, chk *ck) {
                 continue;
             }
             seen[k]++;
-            if (!ref_number(line->f[0], PREFIX[k], &num) || num != seen[k]) {
+            if (!odin3_name_map_ref_number(line->f[0], PREFIX[k], &num) || num != seen[k]) {
                 ck->res->bad_id++;
             }
         }

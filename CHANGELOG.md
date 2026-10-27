@@ -19,6 +19,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   cost gate failed on two designs, `docs/V1.2.0-task4-gate.txt`; the Python `Design` and the
   `ODIN3_PROV_AST` environment variable turn it on), `dump_locs --constructs`, `tools/construct-check`.
   ABI stays 7. Every writer output is byte-identical (the whole micro set, 539 designs).
+- V1.2.0 Task 6 (`docs/V1.2.0.md` 3.5): `names --lookup` prints the records and chain of an object of a
+  version 2 map, `names --chain` the chain, `names --check` the version 2 invariants; Python
+  `odin3.read_name_map`. Version 1 output is unchanged. No core, IR or ABI change.
 
 ### Fixed
 

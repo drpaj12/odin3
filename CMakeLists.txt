@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
+    src/passes/names_v2.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
@@ -3276,6 +3277,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_prov PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # V1.2.0 Task 6 (spec 3.5): odin3.read_name_map agrees with the C parse of `names`.
+    add_test(NAME python_names
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_names
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_names PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
     # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
     add_test(NAME python_sim
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
