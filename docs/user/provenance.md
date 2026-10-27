@@ -190,6 +190,69 @@ The full flag list, then, is `join`, `join=instance`, `lossy=bulk`, `lossy=cap`,
 `x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. The writers do not yet write `cell=<type>` (a record
 does not know the cell type of the hard object it made).
 
+### Examples of each line type
+
+These come from the worked example below (`bm_DL_BCD_adder`, a 4-bit BCD adder, taken through
+`odin3-flow --prov` and `odin3-prov-post`). The header, then the first `O` and `N` lines. The `level`
+of the last field is the level of the naming record: the net `Cout` is a `gate`, the renamed nets
+are `word`, `expr` or `stmt`:
+
+```{literalinclude} examples/provenance/out/map_header_o_n.txt
+:language: text
+```
+
+The `R` lines Odin III writes. `r9` is a source record: the expression `X + Y + Cin` (line 15, columns
+7 to 18) of the construct `c11`; `r10` is derived from it by `hardmap` (`rewrite:word`, operation 2 of the
+run `t4`) and names the adder net that the `O` line of the lookup below points at. `r12` is the `if`
+statement (`c5`, level `stmt`); `r13` is made from it by `proc` (`refine:stmt`, to level `word`), and `r14`
+by `lower` (`refine:word`, to level `gate`):
+
+```{literalinclude} examples/provenance/out/map_r_odin.txt
+:language: text
+```
+
+The `R` lines `odin3-prov-post` added. `r19` to `r21` are BLEs (`coarsen:lut`, step `t7.1`, the run
+`pack`) made from the adder record `r7`; `r22` is the cluster of the three (`coarsen:ble`, `t7.2`); `r23`
+is its place (`rewrite:clb`, step `t8.1`, the run `place`) with the `.place` coordinates. `r30` is a
+cluster whose six BLEs come from the records of the adder (`r10`) and of the `if` (`r14`, `r16`): its
+anchors are the `if` statement `c5` and the assignment `c10`, so it is a `join` and `cons` lists the two
+constructs. Records `r24` and `r31` are the BLE and the site around it:
+
+```{literalinclude} examples/provenance/out/map_r_post.txt
+:language: text
+```
+
+The `C` lines, all of them: the module `c1`, the `always` block `c2`, the `@(...)` timing statement `c3`
+and the `begin ... end` block `c4`, the `if` statement `c5` and its `else` arm `c6`, the assignments, the
+expressions and the port declarations. `parent` points up to the module. `IF_ELSE` is a synthesized kind:
+
+```{literalinclude} examples/provenance/out/map_c.txt
+:language: text
+```
+
+The `F` and `T` lines. `t1` is the read, `t5` `proc` and `t6` `lower`; `t7` and `t8` are the `pack` and
+`place` runs that `odin3-prov-post` added, with the `.net` and `.place` they read in `info`:
+
+```{literalinclude} examples/provenance/out/map_f_t.txt
+:language: text
+```
+
+The `A` lines: the atom as VPR sees it, then its BLE, CLB and site records, then `stale` (`-`, current).
+An atom with no object in the map (`gnd`, `vcc`, an output pad `out:Cout`) still has its `A` line:
+
+```{literalinclude} examples/provenance/out/map_a.txt
+:language: text
+```
+
+The `Q` and `K` lines of the join `r30`. This is stock VPR (no census): `why`, `gain` and `pcrit` are empty
+and `basis` says `-` for them. `objective` is the packer, found from the VPR log (`i`). `rho`, `slack`, `near`
+and `npaths` come from `timing/attribution.json` (`r`). `rho` is 1.000 because a member sits on the critical
+path; the slack, -4.619 ns, is the negative of this run's critical path delay (4.61929 ns):
+
+```{literalinclude} examples/provenance/out/map_q_k.txt
+:language: text
+```
+
 ### The numbering
 
 The numbers `r`, `c`, `f` and `t` depend on the contents of the file only, so equal designs give
@@ -219,6 +282,21 @@ the option. `odin3-flow --prov` does all of this for the VTR flow.
 
 A BLIF that already carries provenance names (`--name-style provenance`) joins to the map of a hash
 run of the same script by the `full` field of the `O` line, which is the same name.
+
+### An Odin III join
+
+`bm_DL_4_bit_comparator` has three `if` statements. After `abc --lut 6` two of the LUTs blend them. Each
+is a `coarsen:gate` record at level `lut` with `join`, and `cons` names the statements it blends (`c5`,
+`c7`, `c9`, below). Odin III writes the `Q` line for each, with the objective only: `depth`, derived from the
+script (`i`). The `T` row of the run carries the script's hash:
+
+```{literalinclude} examples/provenance/out/abc_joins.txt
+:language: text
+```
+
+```{literalinclude} examples/provenance/out/abc_cons.txt
+:language: text
+```
 
 ## Why a join was made: `Q` and `K` lines
 
@@ -267,6 +345,21 @@ one label. A class of a future packer is written `X-<name>`. A CLB of one member
 empty `why`. The word label of `OR` is the word of `--words FILE` (a Norns `words/members.json`)
 when given; otherwise it is the nearest `DECLARATOR` construct on the chain of the atom's first
 leaf, and then the `why` letter of `basis` is `i`.
+
+### Example
+
+No Norns packer is installed with Odin III, so this example runs `odin3-prov-post --census` on the
+hand-made flow directory of the tests (`tests/tools/fixtures/prov_why`: seven logic atoms in one
+CLB with a pair of every class, and a census file). It is a real run of the current tool on made-up
+input, not a VPR run. The first `Q` line is the CLB: 21 pairs, of which 16 are filler (0.762),
+2 series-critical (0.095), 1 series-noncritical, 1 shared-input and 1 orthogonal. `gain` says which
+packer terms pulled the molecules in, `pcrit` is 0.900, and `basis` says `why=i` because no
+`--words` file was given (the word label came from the construct chain) and `gain`, `pcrit` are `r`.
+The second `Q` line is a CLB of one LUT: no pair, so `why` is empty.
+
+```{literalinclude} examples/provenance/out/why_q_k.txt
+:language: text
+```
 
 ### Recorded or inferred
 
@@ -349,13 +442,15 @@ claim holds only if the reader reproduces its own writer's netlist first (Task 9
 and `write_verilog` with `read_verilog -netlist; proc` on 23 of 68. The results of the second write
 (the table is `tests/tools/data/restore/roundtrip.txt`; the modes are the `ast=` word of the header):
 
-| Pair | Modes | Netlists proven | Map identical on 2nd write | Write 2 = write 3 | Known gap |
+| Pair | Micros proven by step 0 | Netlist identical on 2nd write | Map identical on 2nd write | Write 2 = write 3 | Known gap |
 |---|---|---|---|---|---|
-| `blif` | `refs`, `full`, `constructs`, `none` | 68 of 68 | 18 of 68 | 68 of 68 | a port vector keeps the record of its first bit, and the map lists objects the netlist does not mention, so write 2 has fewer `N` and `R` lines |
-| `json` | all four | 4 of 4 | 4 of 4 | 4 of 4 | none for these 4 |
-| `v` | all four | 23 | 0 | 0 | the Verilog reader binds no records to cells or modules, so write 2 loses the `// file:line` comments of the module and the `assign`, and its map holds new `I` records |
+| `write_blif --vtr` and `read_blif` | 68 | 68 | 18 | 68 | a port vector keeps the record of its first bit, and the map lists objects the netlist does not mention, so write 2 has fewer `N` and `R` lines |
+| `write_json` and `read_json` | 4 | 4 | 4 | 4 | none for these 4 |
+| `write_verilog` and `read_verilog -netlist` | 23 | 0 | 0 | 0 | the Verilog reader binds no records to cells or modules, so write 2 loses the `// file:line` comments of the module and the `assign`, and its map holds new `I` records |
 
-Write 2 is the canonical form: every later generation is byte-identical to it, and the chain, the
+The rows are the same for the modes `refs`, `full`, `constructs` and `ast=none`.
+
+Write 2 is the canonical form: for the proven pairs of the table, every later generation is byte-identical to it, and the chain, the
 join flags and the `provenance()` answers of every object are unchanged by it. `constructs` mode
 collapses equal-span expression rows into one construct, so for it only write 2 = write 3 holds.
 What a restore does not bring back: records no listed object or extra line reaches, the AST node
@@ -364,6 +459,38 @@ that no cell uses is listed by the writer and cannot be bound). `read_blif` bind
 cell has no record); `read_json` binds netnames and cells; `read_verilog -netlist` binds
 module-level wires and nets. The cost is the size of the map: a read with a map takes 5.8 to 7.0
 times as long as one without, and for `LU64PEEng` (a map of 244 MB) adds about 1.1 GB.
+
+### Example
+
+The map of the worked example, read back with `read_blif --name-map` and written again with no pass
+between, then read back and written after `opt -full` (a pass that changes the netlist). The first
+write has 62 `R` lines; the second has fewer: this is the known gap of the table above, a BLIF
+cell is not a bound object and the map lists nets the netlist does not use. The `A`, `Q` and `K`
+lines are all kept:
+
+```{literalinclude} examples/provenance/out/restore_counts.txt
+:language: text
+```
+
+After `opt -full` the pass run `opt` is recorded as `t8`, the mutating run, and the restored post-Odin
+lines are marked stale with it. The `A` lines end in `t8`, the post-Odin `R` records have `stale=t8` as
+their last flag, and the `Q` and `K` lines end in `t8`:
+
+```{literalinclude} examples/provenance/out/restore_stale_t.txt
+:language: text
+```
+
+```{literalinclude} examples/provenance/out/restore_stale_a.txt
+:language: text
+```
+
+```{literalinclude} examples/provenance/out/restore_stale_r.txt
+:language: text
+```
+
+```{literalinclude} examples/provenance/out/restore_stale_qk.txt
+:language: text
+```
 
 ## Looking things up: `names`
 
@@ -406,6 +533,105 @@ record first, parents depth-first, each once), `chain(obj)` the constructs, `why
 `NameMap.atom(name, top)`, `leaf(obj)`, `location(record)` and the `SourceSpan` type, which the
 timing attribution uses. In a design, `Node.provenance()`, `Net.provenance()` and `chain()` give the
 same answers from the C readers ({doc}`python-api`).
+
+## A worked example
+
+The design is the micro `bm_DL_BCD_adder` (a 4-bit BCD adder, from `tests/micro`). Its source:
+
+```{literalinclude} examples/provenance/src/bm_DL_BCD_adder.v
+:language: verilog
+:linenos:
+```
+
+**1. Run the flow with provenance.** `--timing-attr` implies `--prov` (`read_verilog --prov-ast refs`,
+`write_blif --name-style hash --prov-map`); `--vpr --keep-results` runs VPR and keeps its `.net` and
+`.place`:
+
+```text
+odin3-flow bm_DL_BCD_adder.v --timing-attr --vpr --keep-results --out flow
+```
+
+This writes `flow/odin3/bm_DL_BCD_adder.blif` (hash names for VPR) and the version 2 map
+`flow/odin3/bm_DL_BCD_adder.blif.names`, whose header, `O` and `N` lines are shown above. At this point the map
+holds the `O`, `N`, `R`, `C`, `F` and `T` lines and no others (the lines `A`, `Q`, `K` and the
+`ble`, `clb` and `site` records come from the next step).
+
+**2. Extend it with what VPR did.**
+
+```text
+odin3-prov-post flow
+```
+
+```{literalinclude} examples/provenance/out/prov_post_summary.txt
+:language: text
+```
+
+The summary line says 36 atoms, of which 8 are not found in the map by name. The map gains `ble`, `clb`
+and `site` records for the 16 clusters, `A` lines for the atoms and `Q` and `K` lines for the three logic
+CLBs. One of them is a join by `pack`: the record `r30` above.
+
+**3. Ask a question of one net.** The net `h5j5t26zpp3` is a net `hardmap` made for the adder of line 15. `names --lookup` prints
+its `O` line, then its records (indented by depth: the naming record `r10`, then its parent `r9`), then
+its construct chain, bottom to top, from the expression `X + Y + Cin` to the `module`, and the `F` and `T`
+lines they name:
+
+```text
+odin3 -p "names --map flow/odin3/bm_DL_BCD_adder.blif.names --lookup h5j5t26zpp3"
+```
+
+```{literalinclude} examples/provenance/out/names_lookup.txt
+:language: text
+```
+
+`--chain` prints the chain alone. For the output port bit `Cout`, which keeps its name, the chain starts at
+the `if` statement (`c5`) and goes up through the sequential block, the timing statement and the `always`
+block to the module:
+
+```text
+odin3 -p "names --map flow/odin3/bm_DL_BCD_adder.blif.names --chain Cout"
+```
+
+```{literalinclude} examples/provenance/out/names_chain.txt
+:language: text
+```
+
+`--check` verifies the map. It counts the records, constructs, files and runs and each kind of problem
+(all zero here):
+
+```text
+odin3 -p "names --map flow/odin3/bm_DL_BCD_adder.blif.names --check"
+```
+
+```{literalinclude} examples/provenance/out/names_check.txt
+:language: text
+```
+
+**4. Read it from Python**, with the same answers (`tools/flow/name_map_v2.py`; `odin3.read_name_map` has the
+same interface):
+
+```{literalinclude} examples/provenance/out/python_reader.txt
+:language: text
+```
+
+**5. Read it back.** `read_blif --name-map` with the extended map, then a pass, then a write: see
+[Restore from a map](#restore-from-a-map) above for the output.
+
+The text in the files above is cut with `... trimmed ...`; the files in the build are whole.
+
+## Regenerating the examples
+
+Every file under `docs/user/examples/provenance/out/` is written by
+
+```text
+python3 docs/user/examples/provenance/make_examples.py [--odin3 PATH] [--work DIR]
+```
+
+from a release build and `VTR_ROOT` with VPR. The script runs the tools above on the designs in
+`docs/user/examples/provenance/src/` and on the test fixture, and writes only slices of what they
+made. The hash names of the flow example depend on the absolute path of the design, so the work
+directory has a fixed default (`/tmp/claude-1000/pdoc-example`) and the committed files are the output for that
+default; a run with another `--work` gives other hash names. Running the script twice gives
+byte-identical files. The work directory is never emptied.
 
 ## Limits: what the chain cannot give
 
