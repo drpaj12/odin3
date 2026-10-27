@@ -285,6 +285,16 @@ typedef struct plant {
     const char *needle;
 } plant;
 
+/* True when one of the logged errors contains the text. */
+static bool error_logged(const char *needle) {
+    for (unsigned k = 0; k < error_count && k < MSG_MAX; k++) {
+        if (strstr(errors[k], needle) != NULL) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static void expect_refused(plant plant_in) {
     const char *body = plant_in.body;
     const char *needle = plant_in.needle;
@@ -300,14 +310,7 @@ static void expect_refused(plant plant_in) {
                                   odin3_design_restore(design, &map, "t.names", &restore), needle);
     TEST_ASSERT_NULL(restore);
     TEST_ASSERT_TRUE_MESSAGE(error_count > 0, needle);
-    bool found = false;
-    for (unsigned k = 0; k < error_count && k < MSG_MAX; k++) {
-        found = found || strstr(errors[k], needle) != NULL;
-    }
-    if (!found) {
-        (void)fprintf(stderr, "want '%s' got '%s'\n", needle, errors[0]);
-    }
-    TEST_ASSERT_TRUE_MESSAGE(found, needle);
+    TEST_ASSERT_TRUE_MESSAGE(error_logged(needle), needle);
     TEST_ASSERT_EQUAL_UINT32(runs, odin3_passrun_end(design));
     TEST_ASSERT_EQUAL_UINT32(recs, odin3_prov_end(design));
     TEST_ASSERT_EQUAL_UINT32(rows, odin3_construct_end(design));
@@ -421,7 +424,6 @@ static void test_out_of_memory_returns_no_memory_without_a_crash(void) {
     }
 }
 
-
 /* --- Task 9 fix round 1 ----------------------------------------------------------------------- */
 
 /* The design's pass runs, records, construct rows, extra lines and mutating slot as text: what the
@@ -451,10 +453,11 @@ static void fingerprint(odin3_strbuf *out) {
         (void)odin3_strbuf_append(out, odin3_bytes_cstr("\n"));
     }
     for (uint32_t row = 1; row < odin3_construct_end(design); row++) {
-        const odin3_construct_row *c = odin3_construct_get(design, row);
-        (void)odin3_strbuf_appendf(out, "C%u %u %u %u %u %u %u %u %u:%u-%u:%u %u %u\n", row, c->run,
-                                   c->ast, c->call, c->parent, c->part, c->kind, c->level, c->line,
-                                   c->col, c->end_line, c->end_col, c->file, c->name);
+        const odin3_construct_row *crow = odin3_construct_get(design, row);
+        (void)odin3_strbuf_appendf(out, "C%u %u %u %u %u %u %u %u %u:%u-%u:%u %u %u\n", row,
+                                   crow->run, crow->ast, crow->call, crow->parent, crow->part,
+                                   crow->kind, crow->level, crow->line, crow->col, crow->end_line,
+                                   crow->end_col, crow->file, crow->name);
     }
     const odin3_extra_table *extra = odin3_design_extra(design);
     (void)odin3_strbuf_appendf(out, "X %d %u\n", extra != NULL ? 1 : 0,
@@ -517,6 +520,26 @@ static void test_a_repeated_arm_line_is_refused_at_the_plan(void) {
     odin3_restore_free(restore);
 }
 
+/* One restore with the allocation number `at` made to fail: true when it failed, after checking
+ * that the design is as `before` says. */
+static bool restore_fails_with_design_intact(int at, const odin3_strbuf *before) {
+    odin3_restore *restore = NULL;
+    odin3_util_set_alloc_fail_after(at);
+    odin3_status status = odin3_design_restore(design, &map, "t.names", &restore);
+    odin3_util_set_alloc_fail_after(-1);
+    if (status == ODIN3_OK) {
+        odin3_restore_free(restore);
+        return false;
+    }
+    odin3_strbuf after;
+    odin3_strbuf_init(&after);
+    fingerprint(&after);
+    TEST_ASSERT_NULL(restore);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE(before->data, after.data, "design changed by a failure");
+    odin3_strbuf_free(&after);
+    return true;
+}
+
 /* An injected failure at every allocation of the restore (stride 1) leaves the design as read. */
 static void test_a_failure_in_the_apply_phase_leaves_the_design_as_read(void) {
     char text[TEXT_BUF];
@@ -528,26 +551,13 @@ static void test_a_failure_in_the_apply_phase_leaves_the_design_as_read(void) {
     odin3_strbuf_init(&after);
     fingerprint(&before);
     int failures = 0;
-    bool done = false;
-    for (int at = 0; at < 5000 && !done; at++) {
-        odin3_restore *restore = NULL;
-        odin3_util_set_alloc_fail_after(at);
-        odin3_status status = odin3_design_restore(design, &map, "t.names", &restore);
-        odin3_util_set_alloc_fail_after(-1);
-        if (status == ODIN3_OK) {
-            odin3_restore_free(restore);
-            done = true;
-            break;
-        }
+    while (failures < 5000 && restore_fails_with_design_intact(failures, &before)) {
         failures++;
-        TEST_ASSERT_NULL(restore);
-        fingerprint(&after);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE(before.data, after.data, "design changed by a failure");
     }
-    TEST_ASSERT_TRUE(done);
     TEST_ASSERT_TRUE(failures > 50);
+    TEST_ASSERT_TRUE(failures < 5000);
     fingerprint(&after);
-    TEST_ASSERT_NOT_EQUAL_INT(0, strcmp(before.data, after.data)); /* and the success changed it */
+    TEST_ASSERT_NOT_EQUAL_INT(0, strcmp(before.data, after.data)); /* the success changed it */
     odin3_strbuf_free(&before);
     odin3_strbuf_free(&after);
 }
@@ -575,8 +585,8 @@ static void test_twin_records_inside_call_instances_stay_apart(void) {
     uint32_t first = odin3_prov_end(design);
     odin3_restore *restore = restore_body(HEADER, body);
     TEST_ASSERT_EQUAL_UINT32(first + 4U, odin3_prov_end(design));
-    for (uint32_t n = 1; n <= 4; n++) {
-        TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_construct_of_record(design, rec(first, n)));
+    for (uint32_t num = 1; num <= 4; num++) {
+        TEST_ASSERT_NOT_EQUAL_UINT32(0, odin3_construct_of_record(design, rec(first, num)));
     }
     /* each twin resolves to the call-instance row of its own call site */
     TEST_ASSERT_EQUAL_UINT32(odin3_construct_of_record(design, rec(first, 1)),
@@ -595,7 +605,7 @@ static void test_the_mutating_run_ignores_passes_that_only_look(void) {
     odin3_restore *restore = restore_body(HEADER, BODY);
     const odin3_extra_table *extra = odin3_design_extra(design);
     odin3_pass_ctx ctx;
-    static const char *const LOOKERS[] = {"check", "stats",     "hierarchy", "names",
+    static const char *const LOOKERS[] = {"check",     "stats",     "hierarchy", "names",
                                           "dump_locs", "write_dot", "read_arch", "sim"};
     for (size_t k = 0; k < sizeof LOOKERS / sizeof LOOKERS[0]; k++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, intern(LOOKERS[k]), &ctx));
@@ -635,12 +645,13 @@ static void test_capped_and_foreign_flags_go_to_the_flag_list(void) {
     TEST_ASSERT_EQUAL_UINT32(rec(first, 2).v, odin3_extra_flags_line(extra, 0, &text));
     TEST_ASSERT_EQUAL_UINT(strlen("capped,x=3,y=4"), text.len);
     TEST_ASSERT_EQUAL_MEMORY("capped,x=3,y=4", text.ptr, text.len);
-    TEST_ASSERT_EQUAL_STRING("top/u",
-                             text_of_str(odin3_prov_get(design, rec(first, 2))->hier));
+    TEST_ASSERT_EQUAL_STRING("top/u", text_of_str(odin3_prov_get(design, rec(first, 2))->hier));
     odin3_restore_free(restore);
 }
 
-static void refuse_with_flags(const char *flags, const char *needle) {
+static void refuse_with_flags(plant flags_and_needle) {
+    const char *flags = flags_and_needle.body;
+    const char *needle = flags_and_needle.needle;
     char body[TEXT_BUF];
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\t\t\nR\tr2\tD\tgate\tcontext:"
@@ -650,16 +661,16 @@ static void refuse_with_flags(const char *flags, const char *needle) {
 }
 
 static void test_flags_are_validated(void) {
-    refuse_with_flags("ctx=1x", "bad value");
-    refuse_with_flags("ctx=12345678901", "bad value");
-    refuse_with_flags("ctx=", "bad value");
-    refuse_with_flags("join,,bulk", "empty element");
-    refuse_with_flags("n=x", "bad value");
-    refuse_with_flags("lossy=maybe", "bad value");
-    refuse_with_flags("call=3", "name map");
-    refuse_with_flags("stale=7", "name map");
-    refuse_with_flags("cell=", "bad value");
-    refuse_with_flags("ctx=1,", "empty element");
+    refuse_with_flags((plant){"ctx=1x", "bad value"});
+    refuse_with_flags((plant){"ctx=12345678901", "bad value"});
+    refuse_with_flags((plant){"ctx=", "bad value"});
+    refuse_with_flags((plant){"join,,bulk", "empty element"});
+    refuse_with_flags((plant){"n=x", "bad value"});
+    refuse_with_flags((plant){"lossy=maybe", "bad value"});
+    refuse_with_flags((plant){"call=3", "name map"});
+    refuse_with_flags((plant){"stale=7", "name map"});
+    refuse_with_flags((plant){"cell=", "bad value"});
+    refuse_with_flags((plant){"ctx=1,", "empty element"});
     char body[TEXT_BUF];
     (void)snprintf(body, sizeof body,
                    "R\tr1\tS\tstmt\torigin\tt1.1\t\tf1:1.1-1.2\t\t\nR\tr2\tD\tgate\tcontext:"
@@ -694,6 +705,14 @@ static void test_lines_over_a_limit_are_refused(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_design_restore(design, &map, "t.names", &restore));
     TEST_ASSERT_NOT_NULL(strstr(errors[0], "longer than the limit"));
     odin3_util_free(text);
+}
+
+/* The restore swaps in copies of four tables; what a copy does not carry must be carried over. */
+static void test_the_read_mode_of_the_design_survives_a_restore(void) {
+    odin3_construct_set_read_mode(design, ODIN3_CONSTRUCT_MODE_FULL);
+    odin3_restore *restore = restore_body(HEADER, BODY);
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_FULL, odin3_construct_read_mode(design));
+    odin3_restore_free(restore);
 }
 
 /* An extra line that names a record the writer did not number is an error, not `r0`. */
@@ -741,5 +760,6 @@ int main(void) {
     RUN_TEST(test_a_derived_record_with_no_parent_is_refused);
     RUN_TEST(test_lines_over_a_limit_are_refused);
     RUN_TEST(test_an_extra_line_naming_an_unknown_record_is_an_error);
+    RUN_TEST(test_the_read_mode_of_the_design_survives_a_restore);
     return UNITY_END();
 }

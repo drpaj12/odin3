@@ -56,8 +56,7 @@ odin3_bytes odin3_extra_line(const odin3_extra_table *table, uint32_t index);
  */
 odin3_status odin3_extra_add_flags(odin3_extra_table *table, uint32_t record, odin3_bytes flags);
 uint32_t odin3_extra_flags_count(const odin3_extra_table *table);
-uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index,
-                                odin3_bytes *flags);
+uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index, odin3_bytes *flags);
 
 /* The mutating run, 0 for none (V1.2.0 4.5). */
 uint32_t odin3_extra_mutating(const odin3_extra_table *table);

@@ -15,6 +15,7 @@
 #include "ir/opclass.h"
 #include "ir/prov.h"
 #include "util/alloc.h"
+#include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/u64map.h"
@@ -30,7 +31,9 @@ enum {
     SPAN_NUMBERS = 4,
     MAX_DECIMAL_DIGITS = 10,
     DECIMAL_BASE = 10,
-    PASS_ARG_MAX = 3
+    PASS_ARG_MAX = 3,
+    ARM_KEY_SHIFT = 8, /* the part of an arm row fits a byte */
+    CELL_PREFIX = 5    /* strlen("cell=") */
 };
 
 static bool bytes_is(odin3_bytes field, const char *word) {
@@ -114,10 +117,10 @@ odin3_status odin3_extra_clone(odin3_design *dst, const odin3_design *src) {
              ? odin3_strbuf_append(&dst->extra->text,
                                    (odin3_bytes){src->extra->text.data, src->extra->text.len})
              : st;
-    st = st == ODIN3_OK ? odin3_strbuf_append(&dst->extra->flag_text,
-                                              (odin3_bytes){src->extra->flag_text.data,
-                                                            src->extra->flag_text.len})
-                        : st;
+    st = st == ODIN3_OK
+             ? odin3_strbuf_append(&dst->extra->flag_text, (odin3_bytes){src->extra->flag_text.data,
+                                                                         src->extra->flag_text.len})
+             : st;
     dst->extra->mutating = src->extra->mutating;
     return st;
 }
@@ -139,7 +142,8 @@ uint32_t odin3_extra_flags_count(const odin3_extra_table *table) {
     return table != NULL ? (uint32_t)table->flags.len : 0U;
 }
 
-uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index, odin3_bytes *flags) {
+uint32_t odin3_extra_flags_line(const odin3_extra_table *table, uint32_t index,
+                                odin3_bytes *flags) {
     if (table == NULL || index >= table->flags.len) {
         *flags = (odin3_bytes){NULL, 0};
         return 0;
@@ -187,9 +191,8 @@ const odin3_extra_table *odin3_design_extra(const odin3_design *design) {
  * on lines that are still right, never the other way).
  */
 static bool is_readonly_pass(const odin3_design *design, odin3_passrun_id run) {
-    static const char *const LOOKERS[] = {"check", "stats",        "stat",       "hierarchy",
-                                          "names", "dump_locs",    "dump_project", "sim",
-                                          "preprocess"};
+    static const char *const LOOKERS[] = {"check",     "stats",        "stat", "hierarchy", "names",
+                                          "dump_locs", "dump_project", "sim",  "preprocess"};
     const odin3_strtab *tab = odin3_design_strtab(design);
     uint32_t name = odin3_passrun_name(design, run);
     const odin3_bytes text = {odin3_strtab_get(tab, name), odin3_strtab_len(tab, name)};
@@ -476,9 +479,8 @@ static odin3_status make_kind_table(rs *st) {
         uint32_t code = kind < (uint32_t)ODIN3_AST_KIND_COUNT
                             ? kind
                             : synth[kind - (uint32_t)ODIN3_AST_KIND_COUNT];
-        if (odin3_u64map_put(st->kinds,
-                             (odin3_kv){word_hash(odin3_bytes_cstr(kind_name(code))), code}) !=
-            ODIN3_OK) {
+        if (odin3_u64map_put(st->kinds, (odin3_kv){word_hash(odin3_bytes_cstr(kind_name(code))),
+                                                   code}) != ODIN3_OK) {
             return ODIN3_ERR_NO_MEMORY;
         }
     }
@@ -568,7 +570,7 @@ static odin3_status plan_con_line(rs *st, const odin3_nm_line *line) {
         rs_error(st, line->lineno, "a C line with a bad kind, level, parent, file or span");
     } else if (con.part != ODIN3_CONSTRUCT_PART_NODE) {
         /* odin3_construct_add refuses a second arm row of one part under one IF row */
-        uint64_t key = ((uint64_t)con.parent << 8) | con.part;
+        uint64_t key = ((uint64_t)con.parent << ARM_KEY_SHIFT) | con.part;
         if (odin3_u64map_get(st->arms, key, NULL)) {
             rs_error(st, line->lineno, "a second IF_THEN or IF_ELSE C line under one IF");
         } else if (odin3_u64map_put(st->arms, (odin3_kv){key, 1}) != ODIN3_OK) {
@@ -617,9 +619,8 @@ static bool ref_after(odin3_bytes elem, const char *prefix, char letter) {
  * hier=<text>, call=c<n>, cell=<type>, ctx=<n>, stale=t<n>. A known prefix with a bad value is
  * not known: it is a located problem. */
 static bool known_flag(odin3_bytes elem) {
-    static const char *const WORDS[] = {"join",      "join=instance", "chain=span",
-                                        "lossy=bulk", "lossy=cap",     "capped",
-                                        "bulk"};
+    static const char *const WORDS[] = {"join",      "join=instance", "chain=span", "lossy=bulk",
+                                        "lossy=cap", "capped",        "bulk"};
     for (size_t k = 0; k < sizeof WORDS / sizeof WORDS[0]; k++) {
         if (bytes_is(elem, WORDS[k])) {
             return true;
@@ -627,7 +628,8 @@ static bool known_flag(odin3_bytes elem) {
     }
     return number_after(elem, "n=", NULL) || number_after(elem, "ctx=", NULL) ||
            ref_after(elem, "call=", 'c') || ref_after(elem, "stale=", 't') ||
-           (bytes_has_prefix(elem, "hier=")) || (bytes_has_prefix(elem, "cell=") && elem.len > 5U);
+           (bytes_has_prefix(elem, "hier=")) ||
+           (bytes_has_prefix(elem, "cell=") && elem.len > CELL_PREFIX);
 }
 
 /* True when the element has the form of a flag this version defines but its value is bad. */
@@ -1074,8 +1076,8 @@ static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id
     }
     odin3_strbuf line;
     odin3_strbuf_init(&line);
-    odin3_status status = rec->capped ? odin3_strbuf_append(&line, odin3_bytes_cstr("capped"))
-                                      : ODIN3_OK;
+    odin3_status status =
+        rec->capped ? odin3_strbuf_append(&line, odin3_bytes_cstr("capped")) : ODIN3_OK;
     status = status == ODIN3_OK && rec->capped && rec->foreign_len > 0
                  ? odin3_strbuf_append(&line, odin3_bytes_cstr(","))
                  : status;
@@ -1083,9 +1085,9 @@ static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id
                  ? odin3_strbuf_append(
                        &line, (odin3_bytes){st->foreign.data + rec->foreign_off, rec->foreign_len})
                  : status;
-    status = status == ODIN3_OK
-                 ? odin3_extra_add_flags(st->design->extra, id.v, (odin3_bytes){line.data, line.len})
-                 : status;
+    status = status == ODIN3_OK ? odin3_extra_add_flags(st->design->extra, id.v,
+                                                        (odin3_bytes){line.data, line.len})
+                                : status;
     odin3_strbuf_free(&line);
     return status;
 }
@@ -1409,8 +1411,8 @@ static void note_earlier_runs(odin3_design *design) {
         return;
     }
     for (uint32_t run = 1; run < odin3_passrun_end(design); run++) {
-        odin3_extra_note_run(design, (odin3_passrun_id){run}, odin3_passrun_restored(design,
-                                                                (odin3_passrun_id){run}));
+        odin3_extra_note_run(design, (odin3_passrun_id){run},
+                             odin3_passrun_restored(design, (odin3_passrun_id){run}));
     }
 }
 
@@ -1460,7 +1462,9 @@ static odin3_status shell_make(odin3_design *shell, const odin3_design *design) 
                               : ODIN3_ERR_NO_MEMORY;
     status = status == ODIN3_OK ? odin3_prov_store_clone(shell, design) : status;
     status = status == ODIN3_OK ? odin3_opclass_copy(shell->opclass, design->opclass) : status;
-    status = status == ODIN3_OK ? odin3_construct_copy(shell->construct, design->construct) : status;
+    status =
+        status == ODIN3_OK ? odin3_construct_copy(shell->construct, design->construct) : status;
+    odin3_construct_set_read_mode(shell, odin3_construct_read_mode(design)); /* not copied */
     status = status == ODIN3_OK ? odin3_extra_clone(shell, design) : status;
     if (status != ODIN3_OK) {
         shell_free_tables(shell);
@@ -1490,7 +1494,9 @@ odin3_status odin3_design_restore(odin3_design *design, odin3_name_map *map, con
     rs st;
     rs_init(&st, design, map, path);
     st.mode = mode_of_header(map->ast);
+    const double started = odin3_now_ms();
     odin3_status status = make_plan(&st);
+    const double planned = odin3_now_ms();
     odin3_design shell;
     bool have_shell = false;
     if (status == ODIN3_OK) {
@@ -1504,9 +1510,10 @@ odin3_status odin3_design_restore(odin3_design *design, odin3_name_map *map, con
         shell_commit(design, &shell);
         odin3_log(ODIN3_LOG_INFO,
                   "%s: name map restore: %zu record(s), %zu construct(s), %zu pass run(s), %u "
-                  "extra line(s)",
+                  "extra line(s) (plan %.1f ms, apply %.1f ms)",
                   path, st.recs.len, st.cons.len, st.runs.len,
-                  (unsigned)odin3_extra_count(design->extra));
+                  (unsigned)odin3_extra_count(design->extra), planned - started,
+                  odin3_now_ms() - planned);
     } else if (have_shell) {
         shell_free_tables(&shell);
     }

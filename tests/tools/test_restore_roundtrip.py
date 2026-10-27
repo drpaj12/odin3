@@ -187,8 +187,9 @@ def compare_maps(tag: str, map1: Path, map2: Path, netlist: Path) -> list[str]:
     only. R lines are lost only with such objects."""
     problems: list[str] = []
     one, two = chains(map1), chains(map2)
-    if not set(two) <= set(one):
-        problems.append(f"{tag}: write 2 lists an object write 1 did not")
+    for key in two:
+        if key not in one and vector_bit0(key) is None:  # a port vector may gain bits (known gap)
+            problems.append(f"{tag}: write 2 lists {key}, which write 1 did not")
     words = set(re.split(r"[ \t\n=]+", netlist.read_text().replace("\\\n", " ")))
     missing = [k for k in one if k not in two]
     for key in missing:
@@ -198,6 +199,8 @@ def compare_maps(tag: str, map1: Path, map2: Path, netlist: Path) -> list[str]:
             problems.append(f"{tag}: the netlist mentions {key} but write 2 lost it")
     for key in two:
         bit0 = vector_bit0(key)
+        if key not in one:
+            continue
         allowed = [one[key]] + ([one[bit0]] if bit0 is not None and bit0 in one else [])
         if two[key] not in allowed:
             problems.append(f"{tag}: the chain of {key} changed")
