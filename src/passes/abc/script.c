@@ -1270,6 +1270,8 @@ static odin3_status finish(abc_parse *ps, const abc_request *req, odin3_abc_scri
     out->n_cmds = (uint32_t)count;
     out->uses_k = ps->uses_k;
     out->final_space = ps->cur;
+    odin3_abc_objective(req->bytes, req->len, cmds, (uint32_t)count, out->objective,
+                        &out->objective_stated);
     out->arena = ps->arena;
     ps->arena = NULL;
     return ODIN3_OK;

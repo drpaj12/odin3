@@ -673,7 +673,11 @@ static odin3_status finish_info(odin3_abc_run *run) {
                  {"exchange", run->exchange == ODIN3_ABC_EXCHANGE_AIG ? "aig" : "blif"},
                  {"gates", run->opts.gates},
                  {"genlib", run->genlib_sha256_hex},
-                 {"depth", depth_text}};
+                 {"depth", depth_text},
+                 {"objective", run->script.objective[0] != '\0' ? run->script.objective : NULL},
+                 {"objective_src", run->script.objective[0] == '\0'
+                                       ? NULL
+                                       : (run->script.objective_stated ? "stated" : "rule")}};
     for (size_t i = 0; st == ODIN3_OK && i < sizeof words / sizeof words[0]; i++) {
         if (words[i].value != NULL && (run->gates_mode || strcmp(words[i].key, "genlib") != 0)) {
             st = odin3_passrun_info_append(&info, words[i].key, odin3_bytes_cstr(words[i].value));

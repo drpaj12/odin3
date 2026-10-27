@@ -255,6 +255,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/alias.c
     src/passes/abc/allow.c
     src/passes/abc/script.c
+    src/passes/abc/objective.c
     src/passes/abc/engine.c
     src/passes/abc/child.c
     src/passes/abc/args.c
@@ -1540,6 +1541,7 @@ if(BUILD_TESTING)
     # point (p)) and the embedded default script, compared with lib/abc/vtr.abc.
     odin3_add_unit_test(test_abc_script)
     target_sources(test_abc_script PRIVATE tests/unit/abc_script_cases.c)
+    odin3_add_unit_test(test_abc_objective)
     odin3_add_unit_test(test_abc_default_script)
     target_compile_definitions(test_abc_default_script PRIVATE
         ODIN3_SOURCE_DIR="${PROJECT_SOURCE_DIR}")

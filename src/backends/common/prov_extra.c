@@ -146,35 +146,85 @@ odin3_status odin3_xline_emit(const odin3_xline_nums *nums, const odin3_xline *l
     return status;
 }
 
-odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_strbuf *out) {
+/* The value of `key=` among the blank-separated words of a pass run's info (a value may be
+ * double-quoted, with backslash escapes, and then holds blanks); false when the key is absent,
+ * the value is quoted, or it does not fit in cap bytes with its NUL. */
+static bool info_word(odin3_bytes info, const char *key, char *out, size_t cap) {
+    const char *text = info.ptr;
+    const size_t key_len = strlen(key);
+    size_t i = 0;
+    while (text != NULL && i < info.len) {
+        size_t start = i;
+        bool quoted = false;
+        while (i < info.len && (quoted || text[i] != ' ')) {
+            if (text[i] == '\\' && quoted) {
+                i++;
+            } else if (text[i] == '"') {
+                quoted = !quoted;
+            }
+            i++;
+        }
+        const size_t end = i < info.len ? i : info.len;
+        if (end - start > key_len + 1U && memcmp(text + start, key, key_len) == 0 &&
+            text[start + key_len] == '=' && text[start + key_len + 1U] != '"' &&
+            end - start - key_len - 1U < cap) {
+            memcpy(out, text + start + key_len + 1U, end - start - key_len - 1U);
+            out[end - start - key_len - 1U] = '\0';
+            return true;
+        }
+        i = end + 1U;
+    }
+    return false;
+}
+
+/* The objective of a join made by `pass` and its basis letter: `r` (read as written: the pass
+ * name, or a goal the script states), `i` (derived from the script by the rule of
+ * src/passes/abc/objective.c) or `-` (none: an abc script that states no goal). abc records its
+ * objective in its run information; any other pass is named. */
+static char objective_of(odin3_bytes pass, odin3_bytes info, char *out, size_t cap) {
+    out[0] = '\0';
+    if (pass.len == 3U && memcmp(pass.ptr, "abc", 3U) == 0) {
+        char src[ID_TEXT] = "";
+        if (!info_word(info, "objective", out, cap)) {
+            return '-';
+        }
+        return info_word(info, "objective_src", src, sizeof src) && strcmp(src, "stated") == 0
+                   ? 'r'
+                   : 'i';
+    }
+    if (pass.len == 0U || pass.len >= cap) {
+        return '-';
+    }
+    memcpy(out, pass.ptr, pass.len);
+    out[pass.len] = '\0';
+    return 'r';
+}
+
+odin3_status odin3_xline_emit_fresh_q(uint32_t rnum, odin3_bytes pass, odin3_bytes info,
+                                      odin3_strbuf *out) {
     char id[ID_TEXT];
     (void)snprintf(id, sizeof id, "r%u", (unsigned)rnum);
-    static const char BASIS_STATED[] =
-        "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
-    static const char BASIS_NONE[] =
-        "why=-,objective=-,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-";
+    char word[ODIN3_XLINE_OBJECTIVE_BYTES];
+    const char basis_letter = objective_of(pass, info, word, sizeof word);
+    char basis[sizeof "why=-,objective=r,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-"];
+    (void)snprintf(basis, sizeof basis,
+                   "why=-,objective=%c,gain=-,pcrit=-,rho=-,slack=-,near=-,npaths=-", basis_letter);
     odin3_strbuf objective;
     odin3_strbuf_init(&objective);
-    /* abc: the objective is derived from its script (Task 10), so none is stated here */
-    const bool is_abc = pass.len == 3U && memcmp(pass.ptr, "abc", 3U) == 0;
-    if (is_abc) {
-        pass = (odin3_bytes){NULL, 0};
-    }
-    odin3_status status = odin3_name_map_escape(&objective, pass);
+    odin3_status status = odin3_name_map_escape(&objective, odin3_bytes_cstr(word));
     const odin3_bytes none = {NULL, 0};
-    const odin3_nm_field fields[] = {
-        {odin3_bytes_cstr(id), true},
-        {none, true},
-        {{objective.data, objective.len}, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {none, true},
-        {odin3_bytes_cstr(pass.len > 0 ? BASIS_STATED : BASIS_NONE), true},
-        {odin3_bytes_cstr("-"), true}};
+    const odin3_nm_field fields[] = {{odin3_bytes_cstr(id), true},
+                                     {none, true},
+                                     {{objective.data, objective.len}, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {none, true},
+                                     {odin3_bytes_cstr(basis), true},
+                                     {odin3_bytes_cstr("-"), true}};
     status = status == ODIN3_OK
                  ? odin3_name_map_write_line_v2(out, 'Q', fields, sizeof fields / sizeof fields[0])
                  : status;

@@ -13,6 +13,7 @@
 #include "util/sha256.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /* One `alias` line of abc.rc: `alias <name> <expansion>`, the expansion's words joined by one
@@ -34,6 +35,9 @@ uint32_t odin3_abc_alias_count(void);
 
 /* The alias at index in that table (file order), or NULL at or past odin3_abc_alias_count(). */
 const odin3_abc_alias *odin3_abc_alias_at(uint32_t index);
+
+/* The bytes of the objective word of a checked script, NUL included (see odin3_abc_objective). */
+enum { ODIN3_ABC_OBJECTIVE_BYTES = 32 };
 
 /* A command's class (§7.5): the four allowed P3-11 groups, then the refused ones. */
 typedef enum odin3_abc_class {
@@ -131,7 +135,9 @@ typedef struct odin3_abc_script {
     uint32_t n_cmds;
     bool uses_k;
     uint8_t final_space;
-    char sha256_hex[ODIN3_SHA256_HEX_CHARS]; /* 65: 64 digits and the NUL */
+    bool objective_stated; /* objective was a `# objective: <word>` comment, not the rule */
+    char objective[ODIN3_ABC_OBJECTIVE_BYTES]; /* "depth", "area", a stated word, or "" */
+    char sha256_hex[ODIN3_SHA256_HEX_CHARS];   /* 65: 64 digits and the NUL */
     odin3_arena *arena;
 } odin3_abc_script;
 
@@ -167,6 +173,15 @@ odin3_status odin3_abc_script_parse_mode(const odin3_abc_script_src *src,
 /* Frees what odin3_abc_script_parse filled and zeroes *script. NULL and a zeroed script are
  * no-ops. */
 void odin3_abc_script_free(odin3_abc_script *script);
+
+/*
+ * The objective of a script, for the provenance map (V1.2.0 3.6). out gets, as a NUL-terminated
+ * word, the first `# objective: <word>` comment of bytes (*stated true), else `area` or `depth`
+ * from the last mapping command of cmds (`if`, `&if`, `map`, `&nf`; `area` when its `a` flags
+ * are odd in number), else "" (a script that states none). Pure; never allocates.
+ */
+void odin3_abc_objective(const uint8_t *bytes, size_t len, const odin3_abc_cmd *cmds,
+                         uint32_t n_cmds, char out[ODIN3_ABC_OBJECTIVE_BYTES], bool *stated);
 
 /* The command at index, or NULL for a NULL script or an index at or past n_cmds. */
 const odin3_abc_cmd *odin3_abc_script_cmd(const odin3_abc_script *script, uint32_t index);
