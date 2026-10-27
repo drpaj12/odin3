@@ -44,7 +44,7 @@ wait on it.
 `feat/6.5a-dump-types`, `feat/6.5b-prov-cover`, `feat/6.5c-prov-cover-vpr` (each from `main`; later ones
 `git merge origin/main`, merge only). No PR from the lane; the controller reviews.
 
-**Build and test:** `cmake --preset debug`; `/home/jamiespa/odin3-ws/work/controller-scripts/build-mem.sh
+**Build and test:** `cmake --preset debug`; `~/odin3-ws/work/controller-scripts/build-mem.sh
 --preset debug`; `env -u ODIN3_HEAVY_OK ctest --preset debug -R <targeted> -j6`; full debug ctest and
 `tools/lint.sh` before the last push of each PR. Only Task 11 runs under `tools/heavy-run`.
 
