@@ -59,6 +59,36 @@ Output is the map's own text, so it can be read back by the same parse. In Pytho
 `odin3.read_name_map(path)` reads the file without a design: `NameMap.find(name)`, `provenance(obj)`
 and `chain(obj)` give what the pass prints. Version 1 maps behave as before (`--chain` needs version 2).
 
+### Reading a version 2 map back
+
+`read_blif --name-map`, `read_json --name-map` and `read_verilog -netlist -name-map`, given a map of
+version 2, rebuild what the map holds: the pass runs (the `T` lines), the provenance records with their
+classes (the `R` lines), the AST constructs the records come from (the `C` lines) and the post-Odin
+lines (`A`, `Q`, `K`), and bind every object the map lists (an `O` or `N` line) to its record. The
+design then answers `Node.provenance()`, `Net.provenance()` and `chain()` as the design that wrote the
+map did. The readers make no restored-location record when the map is version 2, and a version 1 map
+restores nothing, as before. A map that fails `names --check`, or one the restore cannot take (a
+construct or class that is not valid), is refused with a located error and nothing is restored.
+
+What a read-back does not bring back: a record no listed object or extra line reaches, the AST node IDs, the
+IR run numbers, and the records of objects the file does not mention (a net with a record that no cell
+uses is listed by the writer and cannot be bound). `read_blif` binds nets only (a cell has no record, a
+port vector's bits share the record of the first bit); `read_json` binds netnames and cells;
+`read_verilog -netlist` binds module-level wires and nets. A `clb` or `site` record that
+`odin3-prov-post` wrote with no parent (a cluster of pads alone, in a map from before this version) makes
+the restore fail with a located error: a derived record has a parent. The tool now writes no record for
+such a cluster. A restore is all or nothing: a map that fails restores nothing and leaves the design as
+it was read. A line over the limits of its type (more fields than the type has, or longer than 1 MiB) and
+a flag with a bad value are refused too.
+
+Lines of the map written after Odin III (`A`, `Q`, `K` and the `ble`, `clb`, `site` records only they
+reach) describe the netlist as it was. After a read-back the first pass that changes the netlist (not a reader, a writer, `check`, `stats`,
+`hierarchy`, `names`, `dump_locs`, `dump_project`, `sim` or `preprocess`)
+is the mutating run: when the map is written again those lines end in `t<n>`, the `T` line of that
+run, and those records carry `stale=t<n>` in their flags. They are history: still written, never
+presented as current. A join made after the restore gets a fresh `Q` line with stale `-` and the name
+of the pass as its objective. Writing the map again after an unchanged read-back keeps every line.
+
 ## HDL locations
 
 Every IR object carries provenance. Where the writer can express it, so does the file:

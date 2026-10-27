@@ -161,6 +161,8 @@ typedef struct blif_reader {
     odin3_u64map *formals; /* formal key -> port << 32 | bit (see TYPE_SHIFT) */
     blif_locs *locs;       /* the --hdl-locs state, NULL without the option */
     blif_names *nmap;      /* the --name-map state (H-6), NULL without the option */
+    odin3_blif_read_stats *stats; /* the read's counts (for the --hdl-locs half) */
+    bool v2; /* the map is of version 2: its records are restored (V1.2.0 4.5) */
 } blif_reader;
 
 /* --- errors ------------------------------------------------------------------------------ */
@@ -451,6 +453,13 @@ static odin3_status rd_prov(blif_reader *rd, const odin3_srcloc *where, odin3_pr
     return rd_fail(rd, odin3_prov_imported(&rd->ctx, &origin, out));
 }
 
+/* Version 2 map (V1.2.0 4.5): the record the map binds to the net or port bit `name` of `model`
+ * (0 for none). The reader makes no record of its own for a net, a port or a cell then. */
+static odin3_prov_id rd_bound(blif_reader *rd, const blif_model *model, odin3_bytes name) {
+    uint32_t record = blif_names_record(rd->nmap, odin3_bytes_cstr(rd_str(rd, model->name)), name);
+    return (odin3_prov_id){record};
+}
+
 /* True when cand continues first's run as bit `index` (same list, same directive, same base). */
 static bool next_bit(const odin3_strtab *tab, const blif_name *first, const blif_name *cand,
                      size_t base_len, uint32_t index) {
@@ -544,7 +553,8 @@ static odin3_status name_port_nets(odin3_module *module, odin3_wire_id wire,
     return st;
 }
 
-static odin3_status add_port(blif_reader *rd, odin3_module *module, const blif_group *group) {
+static odin3_status add_port(blif_reader *rd, odin3_module *module, const blif_group *group,
+                             const blif_model *model) {
     const blif_name *first = group->bits;
     rd->line = first->line;
     odin3_port_spec spec = {.dir = first->kind == BLIF_IN ? ODIN3_DIR_IN : ODIN3_DIR_OUT,
@@ -552,7 +562,12 @@ static odin3_status add_port(blif_reader *rd, odin3_module *module, const blif_g
                             .scalar = group->scalar};
     odin3_srcloc where = {
         .line = first->line, .col = first->col, .end_col = group->bits[group->width - 1].col};
-    odin3_status st = rd_prov(rd, &where, &spec.prov);
+    odin3_status st = ODIN3_OK;
+    if (rd->v2) {
+        spec.prov = rd_bound(rd, model, odin3_bytes_cstr(rd_str(rd, first->str)));
+    } else {
+        st = rd_prov(rd, &where, &spec.prov);
+    }
     if (st == ODIN3_OK) {
         st = port_wire_name(rd, module, group->name, &spec.name);
     }
@@ -609,7 +624,7 @@ static odin3_status build_module(blif_reader *rd, blif_model *model) {
         st = next_group(rd, model, at, &group);
         if (st == ODIN3_OK) {
             st = group.bits->kind == BLIF_CLOCK ? add_clock(rd, group.bits)
-                                                : add_port(rd, module, &group);
+                                                : add_port(rd, module, &group, model);
         }
     }
     if (st == ODIN3_OK && rd->clocks.len > 0) {
@@ -786,7 +801,10 @@ static odin3_status begin_run(blif_reader *rd) {
 static odin3_status build_all(blif_reader *rd) {
     rd->line = 1;
     odin3_status st = begin_run(rd);
-    if (st == ODIN3_OK && rd->locs != NULL) {
+    if (st == ODIN3_OK && rd->v2) {
+        st = rd_fail(rd, blif_names_restore(rd->nmap, rd->design, rd->path));
+    }
+    if (st == ODIN3_OK && rd->locs != NULL && !rd->v2) {
         odin3_prov_begin_op_class(
             &rd->ctx,
             &odin3_hdl_restore_class); /* the one operation of every restored record (D-1) */
@@ -838,7 +856,11 @@ static odin3_status get_net(blif_reader *rd, odin3_bytes name, uint32_t col, odi
     }
     if (st == ODIN3_OK && !odin3_net_valid(*out)) {
         odin3_prov_id prov = {0};
-        st = rd_prov(rd, &(odin3_srcloc){.line = rd->line, .col = col, .end_col = col}, &prov);
+        if (rd->v2) {
+            prov = rd_bound(rd, rd_model(rd, rd->model_at - 1U), name);
+        } else {
+            st = rd_prov(rd, &(odin3_srcloc){.line = rd->line, .col = col, .end_col = col}, &prov);
+        }
         if (st == ODIN3_OK && rd->locs != NULL) {
             st = blif_locs_create_net(rd->locs, &(blif_scope){rd->module, rd->model_at}, name, prov,
                                       out);
@@ -924,8 +946,11 @@ static odin3_status check_drivers(blif_reader *rd, odin3_node_id node, uint32_t 
 static odin3_status make_cell(blif_reader *rd, const blif_cell *cell) {
     rd->line = cell->line;
     odin3_node_spec spec = {.type = cell->type, .params = cell->params, .n_params = cell->n_params};
-    odin3_status st = rd_prov(
-        rd, &(odin3_srcloc){.line = cell->line, .col = 1, .end_col = cell->end_col}, &spec.prov);
+    odin3_status st =
+        rd->v2
+            ? ODIN3_OK /* a version 2 map binds nets only: a cell has no record (4.5) */
+            : rd_prov(rd, &(odin3_srcloc){.line = cell->line, .col = 1, .end_col = cell->end_col},
+                      &spec.prov);
     odin3_node_id node = {0};
     if (st == ODIN3_OK) {
         st = odin3_node_create_connected(rd->module, &spec, cell->ports, &node);
@@ -1801,6 +1826,14 @@ static odin3_status read_mapped(blif_reader *rd, const odin3_blif_read_opts *opt
         const blif_names_files files = {opts->name_map, rd->path, opts->hdl_locs};
         rd->nmap = blif_names_create(&files, &st);
     }
+    rd->v2 = rd->nmap != NULL && blif_names_v2(rd->nmap);
+    if (st == ODIN3_OK && (rd->v2 || (opts != NULL && opts->hdl_locs))) {
+        rd->locs = blif_locs_create(&rd->ctx, rd->stats, rd->path); /* a v2 map decodes names too */
+        st = rd->locs == NULL ? rd_fail(rd, ODIN3_ERR_NO_MEMORY) : st;
+    }
+    if (st == ODIN3_OK && rd->v2) {
+        blif_locs_bind(rd->locs);
+    }
     st = st == ODIN3_OK ? read_passes(rd) : st;
     if (st == ODIN3_OK && rd->nmap != NULL) {
         blif_names_report(rd->nmap, rd->path);
@@ -1830,10 +1863,7 @@ static odin3_status read_file(odin3_design *design, const char *path, odin3_pass
     odin3_blif_read_stats local;
     odin3_blif_read_stats *stats = opts != NULL && opts->stats != NULL ? opts->stats : &local;
     *stats = (odin3_blif_read_stats){0};
-    if (st == ODIN3_OK && opts != NULL && opts->hdl_locs) {
-        rd.locs = blif_locs_create(&rd.ctx, stats, path);
-        st = rd.locs == NULL ? rd_fail(&rd, ODIN3_ERR_NO_MEMORY) : st;
-    }
+    rd.stats = stats;
     st = st == ODIN3_OK ? read_mapped(&rd, opts) : st;
     if (ctx != NULL) {
         ctx->op = rd.ctx.op;

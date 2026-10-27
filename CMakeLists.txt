@@ -288,6 +288,7 @@ add_library(odin3_core OBJECT
     src/ir/opclass.c
     src/ir/construct.c
     src/ir/construct_snapshot.c
+    src/ir/restore.c
     src/ir/check.c
     src/ir/compact.c
     src/ir/proc.c
@@ -456,6 +457,7 @@ add_library(odin3_core OBJECT
     src/backends/common/hash_rows.c
     src/backends/common/name_map.c
     src/backends/common/prov_export.c
+    src/backends/common/prov_extra.c
     src/frontends/hdl_restore.c
     src/frontends/name_resolve.c
     src/frontends/blif/reader_names.c
@@ -976,6 +978,8 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_construct)
     odin3_add_unit_test(test_construct_snapshot)
     odin3_add_unit_test(test_construct_check)
+    odin3_add_unit_test(test_restore)
+    odin3_add_unit_test(test_restore_roundtrip)
     odin3_add_unit_test(test_prov_label)
     odin3_add_unit_test(test_prov_export)
     odin3_add_unit_test(test_opclass_passes)
@@ -3296,6 +3300,24 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_names PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
+    # V1.2.0 Task 9 (spec 4.5): a restored net answers Node.provenance() and chain() as the original
+    # (needs the library), the A/Q/K lines, the stale marks, ast=none, version 1 maps and the
+    # prov_post extension (need the CLI).
+    add_test(NAME python_restore
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env} "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_restore
+                tests.tools.test_restore_extra
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_restore PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '" TIMEOUT 600)
+    # V1.2.0 Task 9 step 0 and the round trip of the proven pairs in every AST mode over the micro
+    # set (the sweep: minutes; python_tools skips it without ODIN3_RESTORE_SWEEP).
+    add_test(NAME restore_roundtrip
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_RESTORE_SWEEP=1 "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_restore_step0
+                tests.tools.test_restore_roundtrip
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(restore_roundtrip PROPERTIES LABELS tools TIMEOUT 1800)
     # S1 Task 5 (spec 4): Simulation over odin3_simulation_*.
     add_test(NAME python_sim
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}

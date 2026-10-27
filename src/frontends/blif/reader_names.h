@@ -11,9 +11,11 @@
 #define ODIN3_FRONTENDS_BLIF_READER_NAMES_H
 
 #include "frontends/blif/lexer.h"
+#include "ir/design.h"
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct blif_names blif_names;
 
@@ -36,6 +38,19 @@ void blif_names_begin(blif_names *names, bool count);
 
 /* Rewrites ln in place (its tokens then view storage of names, valid until the next call). */
 odin3_status blif_names_apply(blif_names *names, odin3_blif_line *ln);
+
+/*
+ * Version 2 map (V1.2.0 4.5). blif_names_v2 is true when the map is of version 2: the reader then
+ * decodes the names as with --hdl-locs, makes no restored-location record, restores the map once
+ * its own pass run is open (blif_names_restore; ERR_PARSE for a map that fails, nothing restored)
+ * and gives each net the record the map binds to it. blif_names_record answers that for the net
+ * `name` (the token as the reader sees it, after the rewrite) of the model `model` (as written):
+ * the O entry whose full name that token is the VB-10 form of, else the N line of the name; 0 for
+ * none.
+ */
+bool blif_names_v2(const blif_names *names);
+odin3_status blif_names_restore(blif_names *names, odin3_design *design, const char *path);
+uint32_t blif_names_record(blif_names *names, odin3_bytes model, odin3_bytes name);
 
 /* The one WARNING of H-6 for the file read. */
 void blif_names_report(const blif_names *names, const char *path);

@@ -119,18 +119,35 @@ void odin3_netlist_begin(odin3_elab2 *e2) {
     }
 }
 
+bool odin3_netlist_restored(const odin3_elab2 *e2) {
+    return e2->opts.netlist && e2->opts.names != NULL && odin3_name_resolver_v2(e2->opts.names);
+}
+
+/* The module of the current declarator, as the map names it. */
+static odin3_bytes module_key(const odin3_elab2 *e2) {
+    const odin3_strtab *tab = odin3_design_strtab(e2->design);
+    return (odin3_bytes){odin3_strtab_get(tab, odin3_module_name(e2->mod)),
+                         odin3_strtab_len(tab, odin3_module_name(e2->mod))};
+}
+
 /* H-6: the full name of the hash name raw in the current module when the map holds it, else raw
- * (a hash-shaped name the map lacks is counted). */
-static odin3_bytes resolve_hash(odin3_elab2 *e2, odin3_bytes raw, odin3_loc at) {
-    if (e2->opts.names == NULL || !odin3_name_hash_shaped(raw)) {
+ * (a hash-shaped name the map lacks is counted). *rec is the record a version 2 map binds. */
+static odin3_bytes resolve_hash(odin3_elab2 *e2, odin3_bytes raw, odin3_loc at, uint32_t *rec) {
+    *rec = 0;
+    if (e2->opts.names == NULL) {
         return raw;
     }
-    const odin3_strtab *tab = odin3_design_strtab(e2->design);
-    odin3_bytes module = {odin3_strtab_get(tab, odin3_module_name(e2->mod)),
-                          odin3_strtab_len(tab, odin3_module_name(e2->mod))};
-    odin3_bytes full = {NULL, 0};
-    if (odin3_name_resolver_find_decl(e2->opts.names, module, raw, &full)) {
-        return full;
+    odin3_bytes module = module_key(e2);
+    if (!odin3_name_hash_shaped(raw)) {
+        *rec = odin3_name_resolver_named(e2->opts.names, module, ODIN3_NAME_WIRE, raw);
+        *rec = *rec != 0 ? *rec
+                         : odin3_name_resolver_named(e2->opts.names, module, ODIN3_NAME_NET, raw);
+        return raw;
+    }
+    const odin3_name_entry *entry = odin3_name_resolver_entry_decl(e2->opts.names, module, raw);
+    if (entry != NULL) {
+        *rec = odin3_name_resolver_record(e2->opts.names, entry);
+        return entry->full;
     }
     if (e2->nl_miss.count == 0) {
         e2->nl_miss_loc = at;
@@ -149,7 +166,7 @@ odin3_status odin3_netlist_name_decode(odin3_elab2 *e2, uint32_t raw_str, odin3_
     }
     /* the table never moves a string: the decoded views stay valid while the name is interned */
     odin3_bytes raw = {(const unsigned char *)odin3_strtab_get(tab, raw_str), len};
-    raw = resolve_hash(e2, raw, at);
+    raw = resolve_hash(e2, raw, at, &out->rec);
     odin3_hdl_name name;
     if (!odin3_hdl_name_decode(raw, &name)) {
         return ODIN3_OK;
@@ -313,6 +330,12 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
                                 odin3_prov_id *out) {
     *out = base;
     if (!e2->opts.netlist) {
+        return ODIN3_OK;
+    }
+    if (odin3_netlist_restored(e2)) { /* V1.2.0 4.5: the map's record, no restored-location one */
+        if (nl != NULL && nl->name != NULL) {
+            out->v = nl->name->rec;
+        }
         return ODIN3_OK;
     }
     odin3_hdl_loc locs[ODIN3_HDL_LOC_MAX];

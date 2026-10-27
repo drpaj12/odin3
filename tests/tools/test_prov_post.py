@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 from unittest import mock
 
@@ -77,9 +78,10 @@ class Records(unittest.TestCase):
         nm = name_map_v2.read_name_map(map_of(flow, "bm_DL_BCD_adder"))
         places = prov_post.read_place(next((flow / "vpr" / "run").glob("*.place")))
         sites = [r for r in nm.records if r.level == "site"]
-        self.assertEqual(len(sites), len(places))
-        got = sorted(tuple(r.flags) for r in sites)
-        self.assertEqual(got, sorted(places.values()))
+        # the clusters of pads with no record in the map (the output pads) get no CLB and no site
+        self.assertLess(len(sites), len(places))
+        got = Counter(tuple(r.flags) for r in sites)
+        self.assertEqual(got, got & Counter(places.values()))
         for rec in sites:
             clb = nm.records[rec.parents[0] - 1]
             self.assertEqual((clb.level, len(rec.parents)), ("clb", 1))
@@ -93,7 +95,10 @@ class Records(unittest.TestCase):
                 atoms = [a for cl in prov_post.read_net(net) for a in cl.atoms]
                 prov_post.extend_flow_dir(flow)
                 nm = name_map_v2.read_name_map(map_of(flow, design))
-                self.assertEqual([a[0] for a in nm.atoms], atoms)
+                # an atom of a cluster with no record to be a parent (an output pad) has no A line
+                have = [a[0] for a in nm.atoms]
+                self.assertEqual(have, [a for a in atoms if a in set(have)])
+                self.assertTrue(all(a.startswith("out:") for a in atoms if a not in set(have)))
                 for atom in nm.atoms:
                     self.assertEqual(atom[2], "-")
                     recs = [nm.records[int(r[1:]) - 1] for r in atom[1].split(",")]
@@ -351,12 +356,18 @@ class BuildEdges(unittest.TestCase):
         made, recs, unmatched = self.run_build([cl], {})
         self.assertEqual((made, recs, unmatched), ([], {}, 1))
 
-    def test_a_cluster_of_unmatched_pads_keeps_its_clb_and_site(self) -> None:
+    def test_a_cluster_of_unmatched_pads_gets_no_records(self) -> None:
         cl = prov_post.Cluster("io", "io", ["out:z"], ["out:z"])
-        made, recs, _ = self.run_build([cl], {})
-        self.assertEqual([r.level for r in made], ["clb", "site"])
-        self.assertEqual(made[0].parents, [])
-        self.assertEqual([r.level for r in recs["out:z"]], ["clb", "site"])
+        made, recs, unmatched = self.run_build([cl], {})
+        self.assertEqual((made, recs, unmatched), ([], {}, 1))
+
+    def test_every_record_made_has_a_parent(self) -> None:
+        cls = [prov_post.Cluster("io", "io", ["out:z"], ["out:z"]),
+               prov_post.Cluster("c", "clb", [prov_post.Ble(["w"])], ["w"])]
+        made, _, _ = self.run_build(cls, {"w": 3})
+        self.assertEqual([r.level for r in made], ["ble", "clb", "site"])
+        for rec in made:
+            self.assertTrue(rec.parents)
 
 
 class Writing(unittest.TestCase):

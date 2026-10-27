@@ -13,6 +13,8 @@
 #define ODIN3_FRONTENDS_NAME_RESOLVE_H
 
 #include "backends/common/name_map.h"
+#include "ir/design.h"
+#include "ir/restore.h"
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
@@ -26,6 +28,7 @@ enum {
 
 typedef struct odin3_name_resolver {
     odin3_name_map map;
+    odin3_restore *restore; /* the binding of a version 2 map after odin3_name_resolver_restore */
 } odin3_name_resolver;
 
 /*
@@ -50,6 +53,37 @@ bool odin3_name_hash_shaped(odin3_bytes text);
  */
 bool odin3_name_resolver_find(const odin3_name_resolver *res, odin3_bytes module,
                               odin3_name_kind kind, odin3_bytes name, odin3_bytes *full);
+
+/* The entry (an O line of the map) that find would answer from; NULL as find's false. */
+const odin3_name_entry *odin3_name_resolver_entry(const odin3_name_resolver *res,
+                                                  odin3_bytes module, odin3_name_kind kind,
+                                                  odin3_bytes name);
+
+/* The same for a name declared as a wire (WIRE entry first, then NET), as find_decl. */
+const odin3_name_entry *odin3_name_resolver_entry_decl(const odin3_name_resolver *res,
+                                                       odin3_bytes module, odin3_bytes name);
+
+/*
+ * Version 2 (V1.2.0 4.5). True when the map is of version 2: the reader then restores the records
+ * (odin3_name_resolver_restore, called once the reader's own pass run is open), binds each object
+ * to the record its O or N line names and makes no restored-location record of its own.
+ */
+bool odin3_name_resolver_v2(const odin3_name_resolver *res);
+
+/*
+ * Restores the version 2 map into the design (odin3_design_restore). A map of version 1 is a no-op.
+ * ODIN3_ERR_PARSE for a map that fails (nothing is restored, the problems are logged with the
+ * path); NO_MEMORY.
+ */
+odin3_status odin3_name_resolver_restore(odin3_name_resolver *res, odin3_design *design,
+                                         const char *path);
+
+/* The record bound to an O entry (from entry/entry_decl), 0 for none or before the restore. */
+uint32_t odin3_name_resolver_record(const odin3_name_resolver *res, const odin3_name_entry *entry);
+
+/* The record of the N line (module, kind, name), 0 for none or before the restore. */
+uint32_t odin3_name_resolver_named(const odin3_name_resolver *res, odin3_bytes module,
+                                   odin3_name_kind kind, odin3_bytes name);
 
 /*
  * The same for a name declared as a wire: a JSON netname or a Verilog declarator, which the writers

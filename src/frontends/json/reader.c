@@ -245,6 +245,10 @@ static odin3_status read_all(jr *rd) {
     if (st == ODIN3_OK) {
         st = begin_run(rd);
     }
+    if (st == ODIN3_OK && rd->have_names && odin3_name_resolver_v2(&rd->names)) {
+        st = jr_fail(rd, odin3_name_resolver_restore(&rd->names, rd->design, rd->path));
+        rd->restored = st == ODIN3_OK;
+    }
     if (st == ODIN3_OK) {
         st = note_creator(rd, rd->doc.root);
     }

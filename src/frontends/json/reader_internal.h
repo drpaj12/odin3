@@ -135,6 +135,7 @@ typedef struct jr {
     odin3_name_resolver names; /* the --name-map state (H-6), when have_names */
     odin3_name_miss name_miss; /* hash-shaped keys the map lacks */
     bool have_names;
+    bool restored;         /* the --name-map is of version 2 and has been restored (V1.2.0 4.5) */
     odin3_strbuf name_buf; /* scratch for unique decoded names (reader_names.c) */
     odin3_u64map
         *raw_names; /* (kind << 32 | name) of the keys of the module that stay as written */
@@ -216,6 +217,7 @@ typedef struct jr_restore_in {
  * takes when its `src` does not restore. */
 struct jr_named {
     uint32_t name, hier;
+    uint32_t rec; /* version 2 map: the record the map binds to the key, 0 for none */
     odin3_hdl_loc loc;
     bool decoded;
 };

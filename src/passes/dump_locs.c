@@ -18,6 +18,7 @@
 #include "ir/design.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "ir/restore.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
@@ -285,7 +286,10 @@ static odin3_status dump_constructs(const odin3_design *design, odin3_strbuf *te
         odin3_construct_mode mode = odin3_construct_run_mode(design, (odin3_passrun_id){run});
         st = mode == ODIN3_CONSTRUCT_MODE_OFF
                  ? ODIN3_OK
-                 : odin3_strbuf_appendf(text, "run|%u|%s\n", run, k_mode_names[mode]);
+                 : odin3_strbuf_appendf(text, "run|%u|%s%s\n", run, k_mode_names[mode],
+                                        odin3_passrun_restored(design, (odin3_passrun_id){run})
+                                            ? "|restored" /* its `ast` column is a map C number */
+                                            : "");
     }
     for (uint32_t i = 1; st == ODIN3_OK && i < odin3_construct_end(design); i++) {
         st = dump_construct_row(design, i, text);

@@ -256,6 +256,9 @@ odin3_status odin3_name_map_init(odin3_name_map *map) {
     map->arena = odin3_arena_create(0);
     map->width = ODIN3_HASH_NAME_WIDTH;
     map->ignored = 0;
+    map->over_limit = 0;
+    map->over_line = 0;
+    map->over_why = NULL;
     map->by_full = NULL;
     map->version = ODIN3_NAME_MAP_VERSION;
     map->ast = (odin3_bytes){NULL, 0};
@@ -287,6 +290,16 @@ static void parse_error(const nm_parser *ps, const char *msg, odin3_bytes detail
     }
     odin3_log(ODIN3_LOG_ERROR, "%s:%u: %s '%.*s'", ps->path, ps->lineno, msg, (int)detail.len,
               (const char *)detail.ptr);
+}
+
+/* A version 2 line over a limit (too long, more fields than its type has): the parse goes on as
+ * before (a warning for the lines it drops), and the map remembers the first, which a restore
+ * refuses. */
+static void note_over_limit(nm_parser *ps, const char *why) {
+    if (ps->map->over_limit++ == 0) {
+        ps->map->over_line = ps->lineno;
+        ps->map->over_why = why;
+    }
 }
 
 /* A located warning; the entry line is then ignored. */
@@ -580,7 +593,8 @@ static odin3_status parse_entry_v1(nm_parser *ps, odin3_bytes line) {
 
 /* --- parse, version 2 ------------------------------------------------------------------------ */
 
-/* The type letters of version 2 and the fewest fields each takes (after the letter). */
+/* The type letters of version 2 and the fields each takes (after the letter): fewer is a dropped
+ * line, more is noted (over_limit) and refused by a restore. */
 typedef struct nm2_type {
     char letter;
     uint32_t min_fields;
@@ -593,11 +607,13 @@ enum {
     C_FIELDS = 7,
     F_FIELDS = 2,
     T_FIELDS = 4,
-    A_FIELDS = 3
+    A_FIELDS = 3,
+    Q_FIELDS = 12,
+    K_FIELDS = 7
 };
 static const nm2_type NM2_TYPES[] = {{'O', O_FIELDS}, {'N', N_FIELDS}, {'R', R_FIELDS},
                                      {'C', C_FIELDS}, {'F', F_FIELDS}, {'T', T_FIELDS},
-                                     {'A', A_FIELDS}};
+                                     {'A', A_FIELDS}, {'Q', Q_FIELDS}, {'K', K_FIELDS}};
 
 static const nm2_type *nm2_type_of(char letter) {
     for (size_t k = 0; k < sizeof NM2_TYPES / sizeof NM2_TYPES[0]; k++) {
@@ -646,7 +662,12 @@ static odin3_status push_line(nm_parser *ps, char type, odin3_bytes line) {
     }
     *slot = (odin3_nm_line){.type = type, .lineno = ps->lineno};
     slot->nfields = have < ODIN3_NM2_MAX_FIELDS ? have : (uint32_t)ODIN3_NM2_MAX_FIELDS;
-    memcpy(slot->f, fields, sizeof fields);
+    slot->f = (odin3_bytes *)odin3_arena_alloc(ps->map->arena, slot->nfields * sizeof *slot->f);
+    if (slot->f == NULL) {
+        odin3_vec_pop(&ps->map->lines);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    memcpy(slot->f, fields, slot->nfields * sizeof *slot->f);
     return ODIN3_OK;
 }
 
@@ -674,6 +695,7 @@ static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
     }
     odin3_bytes raw[ODIN3_NM2_MAX_FIELDS] = {{NULL, 0}};
     if (line.len > ODIN3_NAME_MAP_MAX_LINE) {
+        note_over_limit(ps, "a line longer than the limit");
         ignore_line(ps, "line is too long");
         return ODIN3_OK;
     }
@@ -701,6 +723,9 @@ static odin3_status parse_entry(nm_parser *ps, odin3_bytes line) {
     if (nfields < type->min_fields) {
         ignore_line(ps, "too few fields for its type");
         return ODIN3_OK;
+    }
+    if (nfields > type->min_fields) {
+        note_over_limit(ps, "more fields than its line type has");
     }
     if (letter == 'O') {
         return parse_o_line(ps, line, raw);
@@ -1064,6 +1089,29 @@ static void check_c(chk *ck, const odin3_nm_line *line) {
     }
 }
 
+/* The stale field of an A, Q or K line: `-` or a run `t<n>` that resolves. */
+static void check_stale(chk *ck, odin3_bytes stale) {
+    if (stale.len == 1 && ((const char *)stale.ptr)[0] == '-') {
+        return;
+    }
+    ref_elem(ck, stale, 't', ck->limit[LIM_T], false);
+}
+
+/* A, Q and K lines (post-Odin data, V1.2.0 3.2): the record ids and the stale run resolve. */
+static void check_extra(chk *ck, const odin3_nm_line *line) {
+    const odin3_bytes *fld = line->f;
+    if (line->type == 'A') {
+        check_list(ck, fld[NM_A_RECS], 'r', false);
+        check_stale(ck, fld[NM_A_STALE]);
+    } else if (line->type == 'Q') {
+        ref_elem(ck, fld[NM_Q_ID], 'r', ck->limit[LIM_R], false);
+        check_stale(ck, fld[NM_Q_STALE]);
+    } else {
+        ref_elem(ck, fld[NM_K_ID], 'r', ck->limit[LIM_R], false);
+        check_stale(ck, fld[NM_K_STALE]);
+    }
+}
+
 static void check_object(chk *ck, const odin3_nm_line *line) {
     odin3_bytes recs = line->type == 'O' ? line->f[NM_O_RECS] : line->f[NM_N_RECS];
     uint32_t before = ck->res->bad_ref;
@@ -1121,6 +1169,8 @@ odin3_name_check_v2 odin3_name_map_check_v2(const odin3_name_map *map) {
             check_c(&ck, line);
         } else if (line->type == 'O' || line->type == 'N') {
             check_object(&ck, line);
+        } else if (line->type == 'A' || line->type == 'Q' || line->type == 'K') {
+            check_extra(&ck, line);
         }
     }
     return res;

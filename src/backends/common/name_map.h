@@ -14,9 +14,9 @@
  *
  * Version 2 (V1.2.0 3.2) begins `# odin3-names 2 hash=sha256 width=N prov=1 ast=<mode>` and every
  * later line starts with a one letter type and a TAB: O (an O line is the seven fields above, then
- * recs and level), N, R, C, F, T, A. The escapes are the four above plus %2C and %7C (list fields
- * are `,` and `|` separated, each element escaped on its own). This module writes the lines it is
- * given and parses and checks them; the numbering and the join rules are prov_export.c's.
+ * recs and level), N, R, C, F, T, A, Q, K. The escapes are the four above plus %2C and %7C (list
+ * fields are `,` and `|` separated, each element escaped on its own). This module writes the lines
+ * it is given and parses and checks them; the numbering and the join rules are prov_export.c's.
  */
 #ifndef ODIN3_BACKENDS_COMMON_NAME_MAP_H
 #define ODIN3_BACKENDS_COMMON_NAME_MAP_H
@@ -50,10 +50,18 @@ enum {
     NM_R_FLAGS = 8,
     NM_C_PARENT = 3,
     NM_C_FILE = 4,
+    NM_C_SPAN = 5,
+    NM_C_NAME = 6,
     NM_O_SHORT = 2,
     NM_O_RECS = 7,
     NM_N_NAME = 2,
-    NM_N_RECS = 3
+    NM_N_RECS = 3,
+    NM_A_RECS = 1, /* A: atom recs stale */
+    NM_A_STALE = 2,
+    NM_Q_ID = 0, /* Q: id why objective gain pcrit rho slack near npaths members basis stale */
+    NM_Q_STALE = 11,
+    NM_K_ID = 0, /* K: id member pcrit rho slack basis stale */
+    NM_K_STALE = 6
 };
 
 typedef enum odin3_name_kind {
@@ -93,7 +101,7 @@ typedef struct odin3_nm_line {
     char type;
     uint32_t lineno;
     uint32_t nfields;
-    odin3_bytes f[ODIN3_NM2_MAX_FIELDS];
+    odin3_bytes *f; /* nfields entries, in the map's arena (a line keeps only the fields it has) */
 } odin3_nm_line;
 
 /* A parsed map: entries sorted by (module, kind, short); every view lives until map_free. */
@@ -102,6 +110,9 @@ typedef struct odin3_name_map {
     struct odin3_arena *arena;
     uint32_t width;          /* the header's width (H-4) */
     uint32_t ignored;        /* entry lines the parse warned about and dropped */
+    uint32_t over_limit;     /* version 2: lines over the limits below (a restore refuses them) */
+    uint32_t over_line;      /* the line number of the first of them */
+    const char *over_why;    /* and what was wrong with it */
     odin3_name_ref *by_full; /* sorted by (module, kind, full): find_full */
     uint32_t version;        /* 1 or 2 */
     odin3_bytes ast;         /* version 2: the header's ast= word (refs, constructs, full, none) */
