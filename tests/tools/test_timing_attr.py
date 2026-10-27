@@ -26,10 +26,13 @@ from .helpers import run_main, scratch
 
 HERE = Path(__file__).resolve().parent
 FIXTURES = HERE / "fixtures" / "timing_attr"
+FIXTURES_V2 = HERE / "fixtures" / "timing_attr_v2"
+GOLDEN_V1 = HERE / "data" / "timing_attr_v1"
 ROOT = HERE.parents[1]
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 VTR_ROOT = os.environ.get("VTR_ROOT", "")
 ADDER, DFF = "bm_DL_BCD_adder", "bm_DL_logic_w_Dff"
+MICRO_DFF = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_logic_w_Dff.v"
 EPS = 1e-6
 
 
@@ -62,6 +65,13 @@ def copy_fixture(case: unittest.TestCase, name: str) -> Path:
     """A writable copy of fixture ``name`` (a flow output directory)."""
     dest = scratch(case, "ot-tattr-") / name
     shutil.copytree(FIXTURES / name, dest)
+    return dest
+
+
+def copy_fixture_v2(case: unittest.TestCase, name: str) -> Path:
+    """A writable copy of version 2 fixture ``name``."""
+    dest = scratch(case, "ot-tattr2-") / name
+    shutil.copytree(FIXTURES_V2 / name, dest)
     return dest
 
 
@@ -604,6 +614,232 @@ class Outputs(unittest.TestCase):
                           "nodes", "critical_delay_ns", "critical_share"})
 
 
+class NameMapAttribution(unittest.TestCase):
+    """The version 2 route (V1.2.0 Task 7): the join is by atom name through the map next to the
+    hash-name BLIF, with the full span, the construct chain and the DECLARATOR word. The fixtures
+    are the raw files of a real VPR run of `odin3-flow --prov --vpr --timing-attr` (VPR 9, the
+    pinned commit) on the two micros and `decl`, a design with a declarator initialiser; only the
+    absolute paths were made relative (the checkout prefix removed, VTR_ROOT as a placeholder),
+    and inputs.json lost its `designs` list."""
+
+    def paths(self, name: str) -> list[dict[str, object]]:
+        return ta.attribute_flow_dir(FIXTURES_V2 / name)["paths"]  # type: ignore[no-any-return]
+
+    def test_full_span_and_chain_of_a_statement(self) -> None:
+        report = ta.attribute_flow_dir(FIXTURES_V2 / DFF)
+        node = next(n for n in report["paths"][0]["nodes"] if n["atom"] == "g")
+        self.assertEqual(node["span"], "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:8")
+        self.assertTrue(node["loc"].endswith("bm_DL_logic_w_Dff.v:8.2-12.5"), node["loc"])
+        self.assertEqual(
+            node["chain_text"],
+            "block ALWAYS 8.2-12.5 < module MODULE bm_DL_logic_w_Dff 3.1-14.10")
+        first = report["critical_path"]["spans"][0]
+        self.assertEqual(first["loc"], node["loc"])
+        self.assertEqual([c["level"] for c in first["chain"]], ["block", "module"])
+        self.assertEqual(report["design"]["name_map"].rsplit("/", 1)[1], f"{DFF}.blif.names")
+        self.assertEqual(report["design"]["provenance_blif"], "")  # a string, empty
+
+    def test_same_spans_modules_and_words_as_the_older_route(self) -> None:
+        for name in (ADDER, DFF):
+            new = ta.attribute_flow_dir(FIXTURES_V2 / name)
+            old = ta.attribute_flow_dir(FIXTURES / name)
+            for key in ("matched", "port", "unmatched", "nodes"):
+                self.assertEqual(new["coverage"][key], old["coverage"][key], key)
+            for a, b in zip(new["paths"], old["paths"], strict=True):
+                for x, y in zip(a["nodes"], b["nodes"], strict=True):
+                    for key in ("category", "module", "word", "bit"):
+                        self.assertEqual(x[key], y[key], (name, x["atom"], key))
+                    # the files differ only in how the design path was spelled; line is the same
+                    self.assertEqual((x["span"] or "").rsplit(":", 1)[-1],
+                                     (y["span"] or "").rsplit(":", 1)[-1])
+
+    def test_generated_net_gets_the_word_of_its_declarator(self) -> None:
+        report = ta.attribute_flow_dir(FIXTURES_V2 / "decl")
+        nodes = {n["atom"]: n for n in report["paths"][0]["nodes"]}
+        adder = nodes["hkl77hbv7ad"]  # a carry of the adder in `wire [3:0] t = a + b` ($n21)
+        self.assertEqual((adder["word"], adder["bit"], adder["word_via"]),
+                         ("t", None, "declarator"))
+        self.assertTrue(adder["loc"].endswith("decl.v:4.17-4.22"), adder["loc"])
+        self.assertEqual(adder["chain_text"], "expr BINARY 4.17-4.22 < stmt DECLARATOR t "
+                         "4.13-4.22 < stmt NET_DECL 4.2-4.23 < module MODULE decl 1.1-6.10")
+        out = nodes["y[1]"]  # a source net: the word comes from its name, not the declarator
+        self.assertEqual((out["word"], out["bit"], out["word_via"]), ("y", 1, "name"))
+        cov = report["coverage"]
+        self.assertEqual((cov["generated_nodes"], cov["generated_word_nodes"],
+                          cov["generated_word_share"]), (10, 10, 1.0))
+        self.assertEqual((cov["net_nodes"], cov["span_share"], cov["loc_share"],
+                          cov["chain_share"]), (14, 1.0, 1.0, 1.0))
+
+    def test_real_vpr_atoms_all_join_the_map(self) -> None:
+        """VPR 9 keeps the BLIF's names as atom names (a .subckt atom is its first output net, a
+        latch its output, a pad its port): every atom of every reported path is in the map."""
+        for name in (ADDER, DFF, "decl"):
+            report = ta.attribute_flow_dir(FIXTURES_V2 / name)
+            self.assertEqual(report["coverage"]["unmatched"], 0, name)
+            self.assertEqual(report["coverage"]["unmatched_atoms"], [], name)
+            self.assertGreater(report["coverage"]["matched"], 0, name)
+
+    def test_generated_nets_without_a_declarator_have_no_word(self) -> None:
+        cov = ta.attribute_flow_dir(FIXTURES_V2 / ADDER)["coverage"]
+        self.assertGreater(cov["generated_nodes"], 0)
+        self.assertEqual(cov["generated_word_nodes"], 0)
+        self.assertEqual(cov["chain_share"], 1.0)
+
+    def test_atom_not_in_the_map_is_unmatched_and_listed(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        report = (flow_dir / "vpr/run/report_timing.setup.rpt")
+        report.write_text(report.read_text().replace("h3wiklgbylb", "zzunknown"))
+        cov = ta.attribute_flow_dir(flow_dir)["coverage"]
+        self.assertEqual([e["atom"] for e in cov["unmatched_atoms"]], ["zzunknown"])
+
+    def test_version_1_map_and_missing_map_are_refused(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        mp = flow_dir / "odin3" / f"{DFF}.blif.names"
+        mp.write_text("# odin3-names 1 hash=sha256 width=10\n")
+        with self.assertRaisesRegex(ta.AttributionError, "version 1"):
+            ta.attribute_flow_dir(flow_dir)
+        mp.with_name("gone").write_text("x")
+        inputs = json.loads((flow_dir / "timing/inputs.json").read_text())
+        inputs["name_map"] = "odin3/gone.names"
+        (flow_dir / "timing/inputs.json").write_text(json.dumps(inputs))
+        with self.assertRaisesRegex(ta.AttributionError, "missing input"):
+            ta.attribute_flow_dir(flow_dir)
+
+    def test_summary_shows_the_chain(self) -> None:
+        text = ta.summary_text(ta.attribute_flow_dir(FIXTURES_V2 / "decl"))
+        self.assertIn("      chain: expr BINARY 4.17-4.22 < stmt DECLARATOR t", text)
+
+    def test_schema_version_and_old_keys_stay(self) -> None:
+        new = ta.attribute_flow_dir(FIXTURES_V2 / DFF)
+        old = ta.attribute_flow_dir(FIXTURES / DFF)
+        self.assertEqual(new["schema_version"], 1)
+        for section in ("design", "timing", "coverage"):
+            self.assertLessEqual(set(old[section]), set(new[section]), section)
+        self.assertLessEqual(set(old["paths"][0]["nodes"][0]), set(new["paths"][0]["nodes"][0]))
+
+
+class MapResolution(unittest.TestCase):
+    """The version 2 join on small hand-written maps: the word and the location come from the
+    same leaf, a name is taken from the full name only when it is usable, and the map decides."""
+
+    HEAD = ("# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs\n"
+            "F\tf1\tf.v\nT\tt1\tread_verilog\t-\tinfo\n"
+            "C\tc1\tMODULE\tmodule\t\tf1\t1.1-9.10\tm\n"
+            "C\tc2\tASSIGN\tstmt\tc1\tf1\t3.5-3.20\t\n"
+            "C\tc3\tDECLARATOR\tstmt\tc1\tf1\t5.5-5.20\tzz\n"
+            "R\tr1\tD\tword\trewrite:word\tt1.1\tr2,r3\t\t\t\n"
+            "R\tr2\tS\tstmt\torigin\tt1.1\t\tf1:3.5-3.20\tc2\t\n"
+            "R\tr3\tS\tstmt\torigin\tt1.1\t\tf1:5.5-5.20\tc3\t\n"
+            "R\tr4\tD\tword\trewrite:word\tt1.1\tr3,r2\t\t\t\n"
+            "R\tr5\tD\tword\trewrite:word\tt1.1\t\t\t\t\n")
+
+    def resolver(self, lines: str, index: ta.JsonIndex | None = None) -> ta.Resolver:
+        tmp = scratch(self, "ot-tattr-res-")
+        path = tmp / "x.blif.names"
+        path.write_text(self.HEAD + lines)
+        return ta.Resolver(ta.read_map(path), index, "m")
+
+    def test_escaped_identifier_with_a_slash_keeps_its_whole_name(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/a/b@f.v:3\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.category, o.word, o.bit, o.module), (ta.MATCHED, "a/b", None, "m"))
+        self.assertEqual(o.word_via, "name")
+        self.assertFalse(o.generated)
+
+    def test_full_name_without_the_file_line_tail_is_still_used(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/q[2]\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.word, o.bit, o.word_via), ("q", 2, "name"))
+
+    def test_hash_is_never_the_word(self) -> None:
+        for full in ("", "haaa", "m/haaa", "m/@f.v:3"):
+            res = self.resolver(f"O\tm\tnet\thaaa\t{full}\tm\tf.v\t3\tr2\tstmt\n")
+            o = res.resolve("haaa", ".names")
+            self.assertEqual((o.category, o.word, o.generated), (ta.MATCHED, None, True), full)
+            self.assertEqual(o.word_via, "", full)
+
+    def test_generated_net_keeps_the_dollar_name_as_no_word(self) -> None:
+        res = self.resolver("O\tm\tnet\thaaa\tm/$n7@f.v:3\tm\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual((o.word, o.generated), (None, True))
+
+    def test_declarator_comes_from_the_leaf_of_the_location_only(self) -> None:
+        # r1 has the leaves r2 (an ASSIGN, no declarator) then r3 (a DECLARATOR named zz): the
+        # location and chain are r2's, so the word must not be zz. r4 has them the other way.
+        res = self.resolver("O\tm\tnet\thaaa\t\tm\tf.v\t3\tr1\tword\n"
+                            "O\tm\tnet\thbbb\t\tm\tf.v\t5\tr4\tword\n")
+        first, second = res.resolve("haaa", ".names"), res.resolve("hbbb", ".names")
+        self.assertEqual(first.loc, "f.v:3.5-3.20")
+        self.assertEqual([c.kind for c in first.chain], ["ASSIGN", "MODULE"])
+        self.assertEqual((first.word, first.word_via), (None, ""))
+        self.assertEqual(second.loc, "f.v:5.5-5.20")
+        self.assertEqual((second.word, second.word_via), ("zz", "declarator"))
+
+    def test_atom_not_in_the_map_is_unmatched_with_a_reason_and_no_json_fallback(self) -> None:
+        index = ta.JsonIndex("m", bits={"n": [5]}, drivers={5: ("f.v:3.1-3.9", "m")})
+        res = self.resolver("O\tm\tnet\thaaa\tm/x[0]@f.v:3\tm\tf.v\t3\tr2\tstmt\n", index)
+        o = res.resolve("n[0]", ".names")  # the JSON would find a driver: the map decides
+        self.assertEqual((o.category, o.reason), (ta.UNMATCHED, "not in the name map"))
+
+    def test_atom_held_only_by_another_module_is_unmatched(self) -> None:
+        res = self.resolver("O\tother\tnet\thaaa\tother/x@f.v:3\tother\tf.v\t3\tr2\tstmt\n")
+        o = res.resolve("haaa", ".names")
+        self.assertEqual(o.category, ta.UNMATCHED)
+        self.assertIn("another module", o.reason)
+        self.assertEqual(res.names.module_misses, 1)  # type: ignore[union-attr]
+
+    def test_n_line_without_a_leaf_falls_back_to_the_json_and_says_so(self) -> None:
+        index = ta.JsonIndex("m", bits={"n": [5]}, drivers={5: ("f.v:3.1-3.9", "m")})
+        res = self.resolver("N\tm\tnet\tn[0]\tr5\tword\nN\tm\tnet\tk[0]\tr5\tword\n", index)
+        o = res.resolve("n[0]", ".names")
+        self.assertEqual((o.category, o.via, o.word, o.bit),
+                         (ta.MATCHED, "netlist-json (map: no leaf)", "n", 0))
+        none = res.resolve("k[0]", ".names")  # the JSON has no driver either
+        self.assertEqual(none.category, ta.UNMATCHED)
+        self.assertIn("no source location", none.reason)
+
+    def test_unmatched_rows_carry_the_reason_on_the_map_route_only(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        report = flow_dir / "vpr/run/report_timing.setup.rpt"
+        report.write_text(report.read_text().replace("h3wiklgbylb", "zzunknown"))
+        rows = ta.attribute_flow_dir(flow_dir)["coverage"]["unmatched_atoms"]
+        self.assertEqual(rows[0]["reason"], "not in the name map")
+        older = ta.attribute_flow_dir(FIXTURES / DFF)["coverage"]["unmatched_atoms"]
+        self.assertTrue(all("reason" not in r for r in older))
+
+    def test_stale_map_is_refused_with_the_share(self) -> None:
+        flow_dir = copy_fixture_v2(self, DFF)
+        stale = (FIXTURES_V2 / ADDER / "odin3" / f"{ADDER}.blif.names").read_text()
+        (flow_dir / "odin3" / f"{DFF}.blif.names").write_text(stale)
+        with self.assertRaisesRegex(ta.AttributionError, r"does not match the BLIF.*only [0-9.]+%"):
+            ta.attribute_flow_dir(flow_dir)
+
+    def test_every_committed_map_holds_nearly_all_of_its_blif(self) -> None:
+        for name in (ADDER, DFF, "decl"):
+            base = FIXTURES_V2 / name / "odin3" / name
+            share = ta.check_map_matches(ta.read_map(base.with_suffix(".blif.names")),
+                                         base.with_suffix(".blif"), base)
+            self.assertGreaterEqual(share, ta.MAP_MATCH_MIN, name)
+
+
+class OlderFlowDirectory(unittest.TestCase):
+    """A flow directory made by v1.1.1 (a second provenance BLIF, no map) takes the older route:
+    its attribution.json and summary.txt are byte for byte what main (v1.1.1) wrote. The golden
+    files were made by main's tools/flow/timing_attr.py on these fixtures; the flow directory
+    path is replaced by <FLOW>."""
+
+    def test_byte_identical_to_main(self) -> None:
+        for name in (ADDER, DFF):
+            flow_dir = (FIXTURES / name).resolve()
+            report = ta.attribute_flow_dir(flow_dir)
+            js = (json.dumps(report, indent=1) + "\n").replace(str(flow_dir), "<FLOW>")
+            text = ta.summary_text(report).replace(str(flow_dir), "<FLOW>")
+            self.assertEqual(js, (GOLDEN_V1 / f"{name}.attribution.json").read_text(), name)
+            self.assertEqual(text, (GOLDEN_V1 / f"{name}.summary.txt").read_text(), name)
+            self.assertNotIn("loc", report["paths"][0]["nodes"][0])
+            self.assertNotIn("name_map", report["design"])
+
+
 class CommandLine(unittest.TestCase):
     def test_ok(self) -> None:
         flow_dir = copy_fixture(self, DFF)
@@ -669,8 +905,40 @@ class FlowOptions(unittest.TestCase):
         with self.assertRaises(flow.UsageError):
             flow.run_flow(zero)
 
-    def test_timing_script(self) -> None:
+    def test_timing_script_v2_writes_no_second_blif(self) -> None:
         text = flow.timing_script(6, Path("/o/timing"))
+        self.assertEqual(text, '; write_json --odin3 "/o/timing/netlist.odin3.json"')
+        self.assertNotIn("provenance", text)
+
+    def test_prov_script_names_the_blif_with_hashes_and_a_map(self) -> None:
+        base = qor_legs.odin3_script("O", "d.v", "o.blif", 6, "short")
+        text = flow.prov_script(base, 6)
+        self.assertIn("read_verilog --nolatches --vtr-compat --prov-ast refs d.v;", text)
+        self.assertIn("write_blif --vtr --lut-k 6 --name-style hash --prov-map o.blif", text)
+        self.assertEqual(text.count("write_blif"), 1)
+        with self.assertRaises(flow.UsageError):
+            flow.prov_script("read_blif x; write_blif y", 6)
+
+    def test_prov_options(self) -> None:
+        self.assertEqual(self.parse("--vpr", "--prov").prov, True)
+        self.assertEqual(self.parse("--vpr").prov, False)
+        v2 = self.parse("--vpr", "--timing-attr")
+        self.assertEqual((v2.prov, v2.timing_legacy), (True, False))  # --timing-attr uses the map
+        old = self.parse("--vpr", "--timing-attr", "--timing-legacy")
+        self.assertEqual((old.prov, old.timing_legacy), (False, True))
+        for bad in (flow.FlowArgs([MICRO_DFF], None, "lpm", None, "", False, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), prov=True),
+                    flow.FlowArgs([MICRO_DFF], None, "vtr", None, "", True, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), timing_attr=True,
+                                  prov=True, timing_legacy=True),
+                    flow.FlowArgs([MICRO_DFF], None, "vtr", None, "", True, False,
+                                  Path("odin3"), Path("/tmp/ot-never"), timing_legacy=True)):
+            with self.assertRaises(flow.UsageError) as caught:
+                flow.run_flow(bad)
+            self.assertNotIn("no such design", str(caught.exception))
+
+    def test_timing_script(self) -> None:
+        text = flow.timing_script(6, Path("/o/timing"), legacy=True)
         self.assertIn('write_blif --vtr --lut-k 6 --name-style provenance "/o/timing/prov.blif"',
                       text)
         self.assertIn('write_json --odin3 "/o/timing/netlist.odin3.json"', text)
@@ -694,6 +962,40 @@ class FlowOptions(unittest.TestCase):
             self.assertEqual("--timing_report_npaths" in seen[-1], expect)
             if expect:
                 self.assertEqual(seen[-1][-2:], ["--timing_report_npaths", "250"])
+
+
+@unittest.skipUnless(ODIN3, "needs ODIN3_CLI")
+class ProvFlow(unittest.TestCase):
+    """`odin3-flow --prov --no-vpr` through the real CLI: hash names and a version 2 map."""
+
+    def test_prov_writes_the_hash_blif_and_a_version_2_map(self) -> None:
+        tmp = scratch(self, "ot-tprov-")
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            code, text, err = run_main(flow.main, [str(MICRO_DFF), "--odin3", ODIN3, "--no-vpr",
+                                                   "--prov", "--out", str(tmp / "o")])
+        self.assertEqual(code, 0, text + err)
+        blif = tmp / "o" / "odin3" / f"{DFF}.blif"
+        names = blif.with_name(blif.name + ".names")
+        self.assertTrue(names.read_text().startswith("# odin3-names 2 "))
+        self.assertIn("step prov: ok", text)
+        self.assertRegex(blif.read_text(), r"\bh[0-9a-z]{10}\b")
+        self.assertNotIn("$n", blif.read_text())
+        self.assertFalse((tmp / "o" / "timing").exists())  # no second BLIF, no timing step
+
+    def test_prov_blif_equals_the_short_blif_up_to_names(self) -> None:
+        tmp = scratch(self, "ot-tprov-")
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            for sub, extra in (("plain", []), ("prov", ["--prov"])):
+                code, text, err = run_main(flow.main, [str(MICRO_DFF), "--odin3", ODIN3,
+                                                       "--no-vpr", "--out", str(tmp / sub),
+                                                       *extra])
+                self.assertEqual(code, 0, text + err)
+        short = [ln.split() for ln in ta.logical_lines(tmp / "plain/odin3" / f"{DFF}.blif")][2:]
+        hashed = [ln.split() for ln in ta.logical_lines(tmp / "prov/odin3" / f"{DFF}.blif")][2:]
+        self.assertEqual([len(x) for x in short], [len(x) for x in hashed])
+        self.assertEqual([x[0] for x in short], [x[0] for x in hashed])
 
 
 class PythonApi(unittest.TestCase):
@@ -730,31 +1032,48 @@ class Integration(unittest.TestCase):
     MICRO = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_BCD_adder.v"
 
     def run_flow(self, out: Path, *extra: str) -> int:
-        code, text, err = run_main(flow.main, [str(self.MICRO), "--odin3", ODIN3, "--out",
-                                               str(out), "--vpr", *extra])
+        # the CLI links its own sanitizer runtime: a CTest LD_PRELOAD would clash (as CLI_ENV)
+        env = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            code, text, err = run_main(flow.main, [str(self.MICRO), "--odin3", ODIN3, "--out",
+                                                   str(out), "--vpr", *extra])
         self.assertEqual(code, 0, text + err)
         return code
 
     def test_real_flow_and_report_only(self) -> None:
         tmp = scratch(self, "ot-tint-")
         self.run_flow(tmp / "plain")
-        self.run_flow(tmp / "attr", "--timing-attr")
-        # the extra writes and the report do not change what VPR reads or what it makes
-        self.assertEqual((tmp / "plain" / "odin3" / "bm_DL_BCD_adder.blif").read_bytes(),
-                         (tmp / "attr" / "odin3" / "bm_DL_BCD_adder.blif").read_bytes())
+        self.run_flow(tmp / "attr", "--timing-attr", "--timing-legacy")
+        self.run_flow(tmp / "map", "--timing-attr")
+        blif = "bm_DL_BCD_adder.blif"
+        # the v1.1.1 route: the extra writes and the report do not change what VPR reads
+        self.assertEqual((tmp / "plain" / "odin3" / blif).read_bytes(),
+                         (tmp / "attr" / "odin3" / blif).read_bytes())
+        self.assertTrue((tmp / "attr" / "timing" / "prov.blif").is_file())
+        # the v1.2.0 route: hash names and a map, no second BLIF, the same VPR figures
+        self.assertFalse((tmp / "map" / "timing" / "prov.blif").exists())
+        self.assertTrue((tmp / "map" / "odin3" / (blif + ".names")).is_file())
         a = json.loads((tmp / "plain" / "summary.json").read_text())
         b = json.loads((tmp / "attr" / "summary.json").read_text())
+        c = json.loads((tmp / "map" / "summary.json").read_text())
         for key in ("luts", "clbs", "min_chan_width", "crit_path_ns", "wirelength"):
             self.assertEqual(a[key], b[key], key)
+            self.assertEqual(a[key], c[key], key)
         report = json.loads((tmp / "attr" / "timing" / "attribution.json").read_text())
         self.assertEqual(report["schema_version"], 1)
         self.assertEqual(report["coverage"]["unmatched"], 0)
         self.assertIn("bm_DL_BCD_adder.v:15",
                       (tmp / "attr" / "timing" / "summary.txt").read_text())
+        mapped = json.loads((tmp / "map" / "timing" / "attribution.json").read_text())
+        self.assertEqual(mapped["schema_version"], 1)
+        self.assertEqual(mapped["coverage"]["unmatched"], 0)
+        self.assertEqual(mapped["coverage"]["chain_share"], 1.0)
+        self.assertEqual([s["span"] for s in mapped["critical_path"]["spans"]],
+                         [s["span"] for s in report["critical_path"]["spans"]])
         # the standalone command gives the same data
         again = ta.attribute_flow_dir(tmp / "attr")
         self.assertEqual(again["critical_path"]["spans"], report["critical_path"]["spans"])
-        proc = subprocess.run([str(ROOT / "tools" / "flow" / "odin3-timing"), str(tmp / "attr")],
+        proc = subprocess.run([str(ROOT / "tools" / "flow" / "odin3-timing"), str(tmp / "map")],
                               capture_output=True, text=True, check=False)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("Fmax", proc.stdout)

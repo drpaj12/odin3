@@ -1,0 +1,23 @@
+Critical path attribution for bm_DL_logic_w_Dff
+Fmax 689.17 MHz   CPD 1.451 ns   worst slack -1.451 ns   (4 setup paths)
+Critical path: g.Q[0] (.latch clocked by Clock)  to  out:g.outpad[0] (.output clocked by Clock)
+Matched to HDL: 60.0% of 10 path nodes (100.0% of the critical path delay); ports 40.0%; unmatched 0.0%
+
+These statements set your Fmax (critical path, in path order):
+  micro/bm_DL_logic_w_Dff.v:8  module bm_DL_logic_w_Dff  word g  1.409 ns (100.0%)
+  (I/O port)  module bm_DL_logic_w_Dff  word g  0.000 ns (0.0%)
+
+Top 10 statements by delay on the critical path (paths = of the top 4 through it):
+  micro/bm_DL_logic_w_Dff.v:8  module bm_DL_logic_w_Dff  word f,g  1.409 ns (100.0%)  slack -1.451  paths 4
+  micro/bm_DL_logic_w_Dff.v:10  module bm_DL_logic_w_Dff  word -  0.000 ns (0.0%)  slack -0.546  paths 1
+  micro/bm_DL_logic_w_Dff.v:11  module bm_DL_logic_w_Dff  word -  0.000 ns (0.0%)  slack -0.546  paths 1
+
+Modules (critical path delay):
+  bm_DL_logic_w_Dff                1.409 ns  100.0%  paths 4
+
+Words (critical path delay; port = an I/O pad of that port):
+  bm_DL_logic_w_Dff.g                          1.409 ns  100.0%  paths 2
+
+(word ~name: guessed from the assignment on that line; - : no source name)
+
+Source text unavailable: 1 of 1 source files could not be read (micro/bm_DL_logic_w_Dff.v): text and word ~name are missing

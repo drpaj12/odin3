@@ -1,0 +1,52 @@
+# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
+O	decl	net	h2y67v4u24i	decl/$n23@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	h4pmykbamze	decl/$n22@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	h5o4qb2asxm	decl/t[0]@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r3	stmt
+O	decl	net	h7ccsmxkz2w	decl/t[3]@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r3	stmt
+O	decl	net	hexwqpxb62r	decl/$n25@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	hidf2jz3dx6	decl/t[2]@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r3	stmt
+O	decl	net	hkl77hbv7ad	decl/$n21@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	hkpawgnswar	decl/$n26@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	hlpdfsaxqtf	decl/$n19@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	hq4snxqhqkf	decl/$n17@tests/tools/fixtures/timing_attr_v2/decl/decl.v:1	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	1	r4	module
+O	decl	net	hq67at46dv2	decl/$n20@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+O	decl	net	hu4vsg6bv73	decl/t[1]@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r3	stmt
+O	decl	net	hwm5wi7hvgj	decl/$n18@tests/tools/fixtures/timing_attr_v2/decl/decl.v:1	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	1	r4	module
+O	decl	net	hysissq33jo	decl/$n24@tests/tools/fixtures/timing_attr_v2/decl/decl.v:4	decl	tests/tools/fixtures/timing_attr_v2/decl/decl.v	4	r2	word
+N	decl	net	a[0]	r5	stmt
+N	decl	net	a[1]	r5	stmt
+N	decl	net	a[2]	r5	stmt
+N	decl	net	a[3]	r5	stmt
+N	decl	net	b[0]	r6	stmt
+N	decl	net	b[1]	r6	stmt
+N	decl	net	b[2]	r6	stmt
+N	decl	net	b[3]	r6	stmt
+N	decl	net	c[0]	r7	stmt
+N	decl	net	c[1]	r7	stmt
+N	decl	net	c[2]	r7	stmt
+N	decl	net	c[3]	r7	stmt
+N	decl	net	y[0]	r9	gate
+N	decl	net	y[1]	r9	gate
+N	decl	net	y[2]	r9	gate
+N	decl	net	y[3]	r9	gate
+R	r1	S	expr	origin	t1.1		f1:4.17-4.22	c4	hier=decl
+R	r2	D	word	rewrite:word	t2.1	r1			
+R	r3	S	stmt	origin	t1.1		f1:4.13-4.22	c3	hier=decl
+R	r4	S	module	origin	t1.1		f1:1.1-6.10	c1	hier=decl
+R	r5	S	stmt	origin	t1.1		f1:2.2-2.22	c5	hier=decl
+R	r6	S	stmt	origin	t1.1		f1:2.2-2.22	c5	hier=decl
+R	r7	S	stmt	origin	t1.1		f1:2.2-2.22	c5	hier=decl
+R	r8	S	expr	origin	t1.1		f1:5.13-5.18	c8	hier=decl
+R	r9	D	gate	refine:word	t3.1	r8			
+C	c1	MODULE	module		f1	1.1-6.10	decl
+C	c2	NET_DECL	stmt	c1	f1	4.2-4.23	
+C	c3	DECLARATOR	stmt	c2	f1	4.13-4.22	t
+C	c4	BINARY	expr	c3	f1	4.17-4.22	
+C	c5	PORT_DECL	stmt	c1	f1	2.2-2.22	
+C	c6	CONT_ASSIGN	block	c1	f1	5.2-5.19	
+C	c7	NET_ASSIGN	block	c6	f1	5.9-5.18	
+C	c8	BINARY	expr	c7	f1	5.13-5.18	
+F	f1	tests/tools/fixtures/timing_attr_v2/decl/decl.v
+T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "tests/tools/fixtures/timing_attr_v2/decl/decl.v"	
+T	t2	hardmap		multiply=0 adder=6 chains=1 sp_slices=0 dp_slices=0 soft=0
+T	t3	lower		modules=1 cells=1 nodes=4

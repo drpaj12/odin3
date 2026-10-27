@@ -1,0 +1,27 @@
+Critical path attribution for bm_DL_BCD_adder
+Fmax 216.48 MHz   CPD 4.619 ns   worst slack -4.619 ns   (10 setup paths)
+Critical path: X[0].inpad[0] (.input clocked by virtual_io_clock)  to  out:Cout.outpad[0] (.output clocked by virtual_io_clock)
+Matched to HDL: 70.6% of 68 path nodes (89.5% of the critical path delay); ports 29.4%; unmatched 0.0%
+
+These statements set your Fmax (critical path, in path order):
+  (I/O port)  module bm_DL_BCD_adder  word X  0.483 ns (10.5%)
+  micro/bm_DL_BCD_adder.v:15  module bm_DL_BCD_adder  word -  2.275 ns (49.3%)
+  micro/bm_DL_BCD_adder.v:19  module bm_DL_BCD_adder  word -  0.889 ns (19.2%)
+  micro/bm_DL_BCD_adder.v:16  module bm_DL_BCD_adder  word Cout  0.972 ns (21.0%)
+  (I/O port)  module bm_DL_BCD_adder  word Cout  0.000 ns (0.0%)
+
+Top 10 statements by delay on the critical path (paths = of the top 10 through it):
+  micro/bm_DL_BCD_adder.v:15  module bm_DL_BCD_adder  word -  2.275 ns (49.3%)  slack -4.619  paths 10
+  micro/bm_DL_BCD_adder.v:16  module bm_DL_BCD_adder  word Cout,S  0.972 ns (21.0%)  slack -4.619  paths 4
+  micro/bm_DL_BCD_adder.v:19  module bm_DL_BCD_adder  word -  0.889 ns (19.2%)  slack -4.619  paths 4
+
+Modules (critical path delay):
+  bm_DL_BCD_adder                  4.619 ns  100.0%  paths 10
+
+Words (critical path delay; port = an I/O pad of that port):
+  bm_DL_BCD_adder.Cout                       0.972 ns   21.0%  paths 1
+  bm_DL_BCD_adder.X (port)                   0.483 ns   10.5%  paths 10
+
+(word ~name: guessed from the assignment on that line; - : no source name)
+
+Source text unavailable: 1 of 1 source files could not be read (micro/bm_DL_BCD_adder.v): text and word ~name are missing

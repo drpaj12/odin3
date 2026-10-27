@@ -1,0 +1,37 @@
+# odin3-names 2 hash=sha256 width=10 prov=1 ast=refs
+O	bm_DL_logic_w_Dff	net	h3wiklgbylb	bm_DL_logic_w_Dff/$n8@tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:11	bm_DL_logic_w_Dff	tests/micro/verilog/micro/bm_DL_logic_w_Dff.v	11	r3	lut
+O	bm_DL_logic_w_Dff	net	hjykhhsi76m	bm_DL_logic_w_Dff/$n7@tests/micro/verilog/micro/bm_DL_logic_w_Dff.v:10	bm_DL_logic_w_Dff	tests/micro/verilog/micro/bm_DL_logic_w_Dff.v	10	r6	lut
+N	bm_DL_logic_w_Dff	net	Clock	r7	stmt
+N	bm_DL_logic_w_Dff	net	f	r10	gate
+N	bm_DL_logic_w_Dff	net	g	r11	gate
+N	bm_DL_logic_w_Dff	net	x1	r12	stmt
+N	bm_DL_logic_w_Dff	net	x2	r13	stmt
+N	bm_DL_logic_w_Dff	net	x3	r14	stmt
+R	r1	S	expr	origin	t1.1		f1:11.8-11.14	c6	hier=bm_DL_logic_w_Dff
+R	r2	D	gate	refine:word	t2.2	r1			
+R	r3	D	lut	coarsen:gate	t3.2	r2			
+R	r4	S	expr	origin	t1.1		f1:10.8-10.15	c8	hier=bm_DL_logic_w_Dff
+R	r5	D	gate	refine:word	t2.1	r4			
+R	r6	D	lut	coarsen:gate	t3.1	r5			
+R	r7	S	stmt	origin	t1.1		f1:4.2-4.26	c9	hier=bm_DL_logic_w_Dff
+R	r8	S	block	origin	t1.1		f1:8.2-12.5	c2	hier=bm_DL_logic_w_Dff
+R	r9	D	word	refine:stmt	t4.1	r8			
+R	r10	D	gate	refine:word	t2.3	r9			
+R	r11	D	gate	refine:word	t2.4	r9			
+R	r12	S	stmt	origin	t1.1		f1:4.2-4.26	c9	hier=bm_DL_logic_w_Dff
+R	r13	S	stmt	origin	t1.1		f1:4.2-4.26	c9	hier=bm_DL_logic_w_Dff
+R	r14	S	stmt	origin	t1.1		f1:4.2-4.26	c9	hier=bm_DL_logic_w_Dff
+C	c1	MODULE	module		f1	3.1-14.10	bm_DL_logic_w_Dff
+C	c2	ALWAYS	block	c1	f1	8.2-12.5	
+C	c3	TIMING_STMT	stmt	c2	f1	8.9-12.5	
+C	c4	SEQ_BLOCK	stmt	c3	f1	9.2-12.5	
+C	c5	NONBLOCKING_ASSIGN	stmt	c4	f1	11.3-11.15	
+C	c6	BINARY	expr	c5	f1	11.8-11.14	
+C	c7	NONBLOCKING_ASSIGN	stmt	c4	f1	10.3-10.16	
+C	c8	BINARY	expr	c7	f1	10.8-10.15	
+C	c9	PORT_DECL	stmt	c1	f1	4.2-4.26	
+F	f1	tests/micro/verilog/micro/bm_DL_logic_w_Dff.v
+T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs "tests/micro/verilog/micro/bm_DL_logic_w_Dff.v"	
+T	t2	lower		modules=1 cells=4 nodes=4
+T	t3	abc	--lut 6	script=builtin:lib/abc/vtr.abc sha256=0d0d27670d8c71d6ae62366f0588ef445008fa9e824dab79cb751d8f6edcab62 abc=a3001b72edc5de22442e942165487fddf150e3d0 K=6 exchange=blif depth=1
+T	t4	proc		

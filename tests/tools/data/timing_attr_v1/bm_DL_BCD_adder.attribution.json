@@ -1,0 +1,1579 @@
+{
+ "schema_version": 1,
+ "design": {
+  "top": "bm_DL_BCD_adder",
+  "flow_dir": "<FLOW>",
+  "report": "<FLOW>/vpr/run/report_timing.setup.rpt",
+  "blif": "<FLOW>/odin3/bm_DL_BCD_adder.blif",
+  "provenance_blif": "<FLOW>/timing/prov.blif",
+  "netlist_json": "<FLOW>/timing/netlist.odin3.json"
+ },
+ "timing": {
+  "cpd_ns": 4.61929,
+  "fmax_mhz": 216.483,
+  "paths_requested": 100,
+  "paths_limit": null,
+  "paths_in_report": 10,
+  "paths_kept": 10,
+  "paths_parsed": 10,
+  "paths_skipped": 0,
+  "paths_skipped_reasons": {},
+  "worst_slack_ns": -4.619,
+  "critical_data_delay_ns": 4.619
+ },
+ "coverage": {
+  "nodes": 68,
+  "matched": 48,
+  "port": 20,
+  "unmatched": 0,
+  "matched_share": 0.705882,
+  "port_share": 0.294118,
+  "unmatched_share": 0.0,
+  "matched_share_excl_port": 1.0,
+  "critical_matched_delay_share": 0.895432,
+  "critical_port_delay_share": 0.104568,
+  "critical_unmatched_delay_share": 0.0,
+  "unmatched_atoms": [],
+  "unmatched_atoms_total": 0,
+  "source_files": 1,
+  "source_files_unreadable": 1,
+  "source_files_unreadable_list": [
+   "micro/bm_DL_BCD_adder.v"
+  ]
+ },
+ "critical_path": {
+  "index": 1,
+  "slack_ns": -4.619,
+  "arrival_ns": 4.619,
+  "required_ns": 0.0,
+  "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+  "endpoint": "out:Cout.outpad[0] (.output clocked by virtual_io_clock)",
+  "data_delay_ns": 4.619,
+  "spans": [
+   {
+    "span": null,
+    "kind": "port",
+    "module": "bm_DL_BCD_adder",
+    "file": null,
+    "line": null,
+    "words": [
+     "X"
+    ],
+    "words_via": {
+     "X": [
+      "pad"
+     ]
+    },
+    "cell_delay_ns": 0.0,
+    "net_delay_ns": 0.483,
+    "atoms": [
+     "X[0]"
+    ],
+    "delay_ns": 0.483,
+    "share": 0.104568
+   },
+   {
+    "span": "micro/bm_DL_BCD_adder.v:15",
+    "kind": "matched",
+    "module": "bm_DL_BCD_adder",
+    "file": "micro/bm_DL_BCD_adder.v",
+    "line": 15,
+    "words": [],
+    "words_via": {},
+    "cell_delay_ns": 1.21,
+    "net_delay_ns": 1.065,
+    "atoms": [
+     "$n55",
+     "$n56",
+     "$n63",
+     "$n64",
+     "$n65"
+    ],
+    "delay_ns": 2.275,
+    "share": 0.492531
+   },
+   {
+    "span": "micro/bm_DL_BCD_adder.v:19",
+    "kind": "matched",
+    "module": "bm_DL_BCD_adder",
+    "file": "micro/bm_DL_BCD_adder.v",
+    "line": 19,
+    "words": [],
+    "words_via": {},
+    "cell_delay_ns": 0.6,
+    "net_delay_ns": 0.289,
+    "atoms": [
+     "$n73",
+     "$n74"
+    ],
+    "delay_ns": 0.889,
+    "share": 0.192466
+   },
+   {
+    "span": "micro/bm_DL_BCD_adder.v:16",
+    "kind": "matched",
+    "module": "bm_DL_BCD_adder",
+    "file": "micro/bm_DL_BCD_adder.v",
+    "line": 16,
+    "words": [
+     "Cout"
+    ],
+    "words_via": {
+     "Cout": [
+      "name"
+     ]
+    },
+    "cell_delay_ns": 0.235,
+    "net_delay_ns": 0.737,
+    "atoms": [
+     "Cout"
+    ],
+    "delay_ns": 0.972,
+    "share": 0.210435
+   },
+   {
+    "span": null,
+    "kind": "port",
+    "module": "bm_DL_BCD_adder",
+    "file": null,
+    "line": null,
+    "words": [
+     "Cout"
+    ],
+    "words_via": {
+     "Cout": [
+      "pad"
+     ]
+    },
+    "cell_delay_ns": 0.0,
+    "net_delay_ns": 0.0,
+    "atoms": [
+     "out:Cout"
+    ],
+    "delay_ns": 0.0,
+    "share": 0.0
+   }
+  ]
+ },
+ "spans": [
+  {
+   "id": "micro/bm_DL_BCD_adder.v:15",
+   "file": "micro/bm_DL_BCD_adder.v",
+   "line": 15,
+   "text": null,
+   "modules": [
+    "bm_DL_BCD_adder"
+   ],
+   "words": [],
+   "words_via": {},
+   "paths_through": 10,
+   "worst_slack_ns": -4.619,
+   "nodes": 37,
+   "critical_delay_ns": 2.275,
+   "critical_share": 0.492531,
+   "assigned_word": null
+  },
+  {
+   "id": "micro/bm_DL_BCD_adder.v:16",
+   "file": "micro/bm_DL_BCD_adder.v",
+   "line": 16,
+   "text": null,
+   "modules": [
+    "bm_DL_BCD_adder"
+   ],
+   "words": [
+    "Cout",
+    "S"
+   ],
+   "words_via": {
+    "Cout": [
+     "name"
+    ],
+    "S": [
+     "name"
+    ]
+   },
+   "paths_through": 4,
+   "worst_slack_ns": -4.619,
+   "nodes": 4,
+   "critical_delay_ns": 0.972,
+   "critical_share": 0.210435,
+   "assigned_word": null
+  },
+  {
+   "id": "micro/bm_DL_BCD_adder.v:19",
+   "file": "micro/bm_DL_BCD_adder.v",
+   "line": 19,
+   "text": null,
+   "modules": [
+    "bm_DL_BCD_adder"
+   ],
+   "words": [],
+   "words_via": {},
+   "paths_through": 4,
+   "worst_slack_ns": -4.619,
+   "nodes": 7,
+   "critical_delay_ns": 0.889,
+   "critical_share": 0.192466,
+   "assigned_word": null
+  }
+ ],
+ "modules": [
+  {
+   "module": "bm_DL_BCD_adder",
+   "words": [
+    "Cout",
+    "S",
+    "X",
+    "Z"
+   ],
+   "port_nodes": 20,
+   "paths_through": 10,
+   "worst_slack_ns": -4.619,
+   "nodes": 68,
+   "critical_delay_ns": 4.619,
+   "critical_share": 1.0
+  }
+ ],
+ "words": [
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "Cout",
+   "port": false,
+   "bits": [],
+   "word_via": [
+    "name"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -4.619,
+   "nodes": 1,
+   "critical_delay_ns": 0.972,
+   "critical_share": 0.210435
+  },
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "X",
+   "port": true,
+   "bits": [
+    0
+   ],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 10,
+   "worst_slack_ns": -4.619,
+   "nodes": 10,
+   "critical_delay_ns": 0.483,
+   "critical_share": 0.104568
+  },
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "Z",
+   "port": true,
+   "bits": [
+    0,
+    1,
+    2,
+    3,
+    4
+   ],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 5,
+   "worst_slack_ns": -2.941,
+   "nodes": 5,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "S",
+   "port": true,
+   "bits": [
+    0,
+    1,
+    2,
+    3
+   ],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 4,
+   "worst_slack_ns": -4.596,
+   "nodes": 4,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "S",
+   "port": false,
+   "bits": [
+    1,
+    2,
+    3
+   ],
+   "word_via": [
+    "name"
+   ],
+   "paths_through": 3,
+   "worst_slack_ns": -4.596,
+   "nodes": 3,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  },
+  {
+   "module": "bm_DL_BCD_adder",
+   "word": "Cout",
+   "port": true,
+   "bits": [],
+   "word_via": [
+    "pad"
+   ],
+   "paths_through": 1,
+   "worst_slack_ns": -4.619,
+   "nodes": 1,
+   "critical_delay_ns": 0.0,
+   "critical_share": 0.0
+  }
+ ],
+ "paths": [
+  {
+   "index": 1,
+   "slack_ns": -4.619,
+   "arrival_ns": 4.619,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Cout.outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n64",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.01,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.01,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n65",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.784,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n73",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.484,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n74",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.589,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "Cout",
+     "block_type": ".names",
+     "pins": [
+      "in[2]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.289,
+     "delay_ns": 0.972,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:16",
+     "module": "bm_DL_BCD_adder",
+     "word": "Cout",
+     "bit": null,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:Cout",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.737,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Cout",
+     "bit": null,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 2,
+   "slack_ns": -4.596,
+   "arrival_ns": 4.596,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:S[3].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n64",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.764,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n72",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.464,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n73",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.686,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "S[3]",
+     "block_type": ".names",
+     "pins": [
+      "in[2]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.386,
+     "delay_ns": 0.882,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:16",
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 3,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:S[3]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.647,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 3,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 3,
+   "slack_ns": -3.976,
+   "arrival_ns": 3.976,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:S[1].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.896,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n71",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.596,
+     "delay_ns": 0.613,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "S[1]",
+     "block_type": ".names",
+     "pins": [
+      "in[3]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.313,
+     "delay_ns": 0.803,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:16",
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 1,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:S[1]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.568,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 1,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 4,
+   "slack_ns": -3.872,
+   "arrival_ns": 3.872,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:S[2].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.896,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n71",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.596,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n72",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.57,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:19",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "S[2]",
+     "block_type": ".names",
+     "pins": [
+      "in[3]",
+      "out[0]"
+     ],
+     "cell_delay_ns": 0.235,
+     "net_delay_in_ns": 0.27,
+     "delay_ns": 0.441,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:16",
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 2,
+     "word_via": "name"
+    },
+    {
+     "atom": "out:S[2]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.206,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 2,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 5,
+   "slack_ns": -2.941,
+   "arrival_ns": 2.941,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Z[3].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n64",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.01,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.01,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n65",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.967,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:Z[3]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.667,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Z",
+     "bit": 3,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 6,
+   "slack_ns": -2.853,
+   "arrival_ns": 2.853,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Z[4].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n64",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.01,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.01,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n65",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.01,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.01,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n66",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.868,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:Z[4]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.568,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Z",
+     "bit": 4,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 7,
+   "slack_ns": -2.755,
+   "arrival_ns": 2.755,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Z[2].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n64",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.791,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:Z[2]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.491,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Z",
+     "bit": 2,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 8,
+   "slack_ns": -2.636,
+   "arrival_ns": 2.636,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Z[1].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "cout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.3,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n56",
+     "block_type": "adder",
+     "pins": [
+      "cin[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.881,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n63",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.581,
+     "delay_ns": 0.971,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:Z[1]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.671,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Z",
+     "bit": 1,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 9,
+   "slack_ns": -2.273,
+   "arrival_ns": 2.273,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:Z[0].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.808,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n62",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.508,
+     "delay_ns": 0.983,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:Z[0]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.683,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "Z",
+     "bit": 0,
+     "word_via": "pad"
+    }
+   ]
+  },
+  {
+   "index": 10,
+   "slack_ns": -1.894,
+   "arrival_ns": 1.894,
+   "required_ns": 0.0,
+   "startpoint": "X[0].inpad[0] (.input clocked by virtual_io_clock)",
+   "endpoint": "out:S[0].outpad[0] (.output clocked by virtual_io_clock)",
+   "nodes": [
+    {
+     "atom": "X[0]",
+     "block_type": ".input",
+     "pins": [
+      "inpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.0,
+     "delay_ns": 0.483,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "X",
+     "bit": 0,
+     "word_via": "pad"
+    },
+    {
+     "atom": "$n55",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.483,
+     "delay_ns": 0.808,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "$n62",
+     "block_type": "adder",
+     "pins": [
+      "a[0]",
+      "sumout[0]"
+     ],
+     "cell_delay_ns": 0.3,
+     "net_delay_in_ns": 0.508,
+     "delay_ns": 0.604,
+     "category": "matched",
+     "span": "micro/bm_DL_BCD_adder.v:15",
+     "module": "bm_DL_BCD_adder",
+     "word": null,
+     "bit": null,
+     "word_via": null
+    },
+    {
+     "atom": "out:S[0]",
+     "block_type": ".output",
+     "pins": [
+      "outpad[0]"
+     ],
+     "cell_delay_ns": 0.0,
+     "net_delay_in_ns": 0.304,
+     "delay_ns": 0.0,
+     "category": "port",
+     "span": null,
+     "module": "bm_DL_BCD_adder",
+     "word": "S",
+     "bit": 0,
+     "word_via": "pad"
+    }
+   ]
+  }
+ ]
+}

@@ -23,6 +23,20 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   version 2 map, `names --chain` the chain, `names --check` the version 2 invariants; Python
   `odin3.read_name_map`. Version 1 output is unchanged. No core, IR or ABI change.
 
+- V1.2.0 Task 7 (`docs/V1.2.0.md` 6, 7.2, 8): `odin3-flow --prov` (hash-name BLIF plus the version 2
+  name map), `--timing-legacy`, and `odin3-timing` reading the map (full span, construct chain, the
+  `DECLARATOR` word); `tools/flow/name_map_v2.py`, a stdlib reader that agrees with
+  `odin3.read_name_map`. `attribution.json` stays schema 1 (fields added only). No core, IR or ABI
+  change.
+
+### Changed
+
+- **`odin3-flow --timing-attr` now implies `--prov`** (V1.2.0 Task 7): VPR reads the BLIF with hash
+  names, so net names in VPR's own output files (`.net`, `.place`, `.route`, reports, logs) are hash
+  names where they were short names, and no second provenance BLIF is written. CPD, LUTs, channel
+  width and wirelength are unchanged. Use `--timing-legacy` for the version 1.1.1 behaviour (short
+  names for VPR, a second BLIF `timing/prov.blif`, line-level spans, no chain).
+
 ### Fixed
 
 - The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs

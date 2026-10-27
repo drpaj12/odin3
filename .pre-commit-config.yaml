@@ -8,10 +8,11 @@ repos:
     hooks:
       # tests/micro/ is verbatim upstream Verilog (some are whitespace/syntax tests): never rewrite it
       # tests/tools/fixtures/vtr_qor/ holds VTR's own output: parse rows end with a tab
+      # tests/tools/fixtures/timing_attr_v2/*.names are name maps: their last field may be empty (a tab)
       - id: trailing-whitespace
-        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$'
       - id: end-of-file-fixer
-        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/'
+        exclude: '^tests/micro/|^tests/tools/fixtures/vtr_qor/|^tests/tools/fixtures/timing_attr_v2/.*\.names$'
       - id: check-yaml
       - id: check-added-large-files
         args: ['--maxkb=500']

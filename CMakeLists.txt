@@ -578,7 +578,7 @@ file(GLOB _odin3_share_qor CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/tools/vtr-qor
 install(FILES ${_odin3_share_libs} DESTINATION ${_odin3_share_dir}/lib)
 install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/lib/abc)
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
-              tools/flow/timing_report.py
+              tools/flow/timing_report.py tools/flow/name_map_v2.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing
         DESTINATION ${_odin3_share_dir}/tools/flow)
@@ -2729,6 +2729,18 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     VTR_ROOT=$ENV{VTR_ROOT}
                     ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_vtr_abc_hardblocks)
         set_tests_properties(vtr_abc_hardblocks PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    endif()
+    # V1.2.0 Task 7: the real flow, `odin3-flow --prov --timing-attr` with VPR against the
+    # v1.1.1 route (same CPD and LUTs, no atom unmatched). Registered when VTR_ROOT has a built
+    # VPR and its Python venv; a heavy run (the micro takes a second; the lock is the point).
+    if(DEFINED ENV{VTR_ROOT} AND EXISTS $ENV{VTR_ROOT}/build/vpr/vpr
+       AND EXISTS $ENV{VTR_ROOT}/.venv/bin/python)
+        odin3_add_sweep_test(flow_prov_vpr LABEL sweep
+            COMMAND ${CMAKE_COMMAND} -E env --unset=LD_PRELOAD ODIN3_CLI=$<TARGET_FILE:odin3>
+                    VTR_ROOT=$ENV{VTR_ROOT}
+                    ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_timing_attr.Integration)
+        set_tests_properties(flow_prov_vpr PROPERTIES WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+                             SKIP_REGULAR_EXPRESSION "skipped '")
     endif()
     # 2F Task 16 (spec 20.1, plan points (f), (g)): one tiny source per opt rule (tests/opt/rules/
     # <sub>/<rule>.v or .blif, with its golden .il and the row in rules.txt). Odin III runs

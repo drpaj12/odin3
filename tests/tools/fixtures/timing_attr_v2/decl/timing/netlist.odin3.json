@@ -1,0 +1,369 @@
+{
+  "creator": "Odin III",
+  "odin3_version": 1,
+  "modules": {
+    "decl": {
+      "attributes": {
+        "top": "00000000000000000000000000000001",
+        "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:1.1-6.10"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2, 3, 4, 5 ]
+        },
+        "b": {
+          "direction": "input",
+          "bits": [ 6, 7, 8, 9 ]
+        },
+        "c": {
+          "direction": "input",
+          "bits": [ 10, 11, 12, 13 ]
+        },
+        "y": {
+          "direction": "output",
+          "bits": [ 28, 29, 30, 31 ]
+        }
+      },
+      "cells": {
+        "$c7": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:head",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "1" ],
+            "b": [ "0" ],
+            "cin": [ "0" ],
+            "cout": [ 20 ],
+            "sumout": [ 21 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c5.s0": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s0",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 2 ],
+            "b": [ 6 ],
+            "cin": [ 20 ],
+            "cout": [ 22 ],
+            "sumout": [ 14 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c5.s1": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s1",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 3 ],
+            "b": [ 7 ],
+            "cin": [ 22 ],
+            "cout": [ 23 ],
+            "sumout": [ 15 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c5.s2": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s2",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 4 ],
+            "b": [ 8 ],
+            "cin": [ 23 ],
+            "cout": [ 24 ],
+            "sumout": [ 16 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c5.s3": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:s3",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ 5 ],
+            "b": [ 9 ],
+            "cin": [ 24 ],
+            "cout": [ 25 ],
+            "sumout": [ 17 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c5.top": {
+          "hide_name": 1,
+          "type": "adder",
+          "parameters": {
+          },
+          "attributes": {
+            "hardmap": "adder:top",
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22"
+          },
+          "port_directions": {
+            "a": "input",
+            "b": "input",
+            "cin": "input",
+            "cout": "output",
+            "sumout": "output"
+          },
+          "connections": {
+            "a": [ "0" ],
+            "b": [ "0" ],
+            "cin": [ 25 ],
+            "cout": [ 26 ],
+            "sumout": [ 27 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.17-4.22" ]
+          }
+        },
+        "$c13": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000010",
+            "LUT": "1000"
+          },
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 10, 14 ],
+            "Y": [ 28 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18" ]
+          }
+        },
+        "$c14": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000010",
+            "LUT": "1000"
+          },
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 11, 15 ],
+            "Y": [ 29 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18" ]
+          }
+        },
+        "$c15": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000010",
+            "LUT": "1000"
+          },
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 12, 16 ],
+            "Y": [ 30 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18" ]
+          }
+        },
+        "$c16": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "WIDTH": "00000000000000000000000000000010",
+            "LUT": "1000"
+          },
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18"
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 13, 17 ],
+            "Y": [ 31 ]
+          },
+          "odin3_prov": {
+            "kind": "DERIVED",
+            "hier": "",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:5.13-5.18" ]
+          }
+        }
+      },
+      "netnames": {
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2, 3, 4, 5 ],
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "decl",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22" ]
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 6, 7, 8, 9 ],
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "decl",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22" ]
+          }
+        },
+        "c": {
+          "hide_name": 0,
+          "bits": [ 10, 11, 12, 13 ],
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "decl",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:2.2-2.22" ]
+          }
+        },
+        "y": {
+          "hide_name": 0,
+          "bits": [ 28, 29, 30, 31 ],
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:3.2-3.17"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "decl",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:3.2-3.17" ]
+          }
+        },
+        "t": {
+          "hide_name": 0,
+          "bits": [ 14, 15, 16, 17 ],
+          "attributes": {
+            "src": "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.13-4.22"
+          },
+          "odin3_prov": {
+            "kind": "SOURCE",
+            "hier": "decl",
+            "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:4.13-4.22" ]
+          }
+        }
+      },
+      "odin3_prov": {
+        "kind": "SOURCE",
+        "hier": "decl",
+        "hdl": [ "tests/tools/fixtures/timing_attr_v2/decl/decl.v:1.1-6.10" ]
+      }
+    }
+  }
+}
