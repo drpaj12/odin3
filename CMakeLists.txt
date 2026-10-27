@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
+    src/passes/names_v2.c
     src/passes/levelize/levelize.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c

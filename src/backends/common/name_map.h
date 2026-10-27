@@ -38,6 +38,24 @@ enum {
     ODIN3_NAME_MAP_MAX_ENTRIES = 1 << 24 /* most entries a parse keeps (over: an error) */
 };
 
+/* Field positions (after the type letter) of the version 2 lines that name each other. */
+enum {
+    NM_R_KIND = 1,
+    NM_R_LEVEL = 2,
+    NM_R_DIR = 3,
+    NM_R_STEP = 4,
+    NM_R_PARENTS = 5,
+    NM_R_ORIGINS = 6,
+    NM_R_CONS = 7,
+    NM_R_FLAGS = 8,
+    NM_C_PARENT = 3,
+    NM_C_FILE = 4,
+    NM_O_SHORT = 2,
+    NM_O_RECS = 7,
+    NM_N_NAME = 2,
+    NM_N_RECS = 3
+};
+
 typedef enum odin3_name_kind {
     ODIN3_NAME_NET,
     ODIN3_NAME_NODE,
@@ -152,6 +170,9 @@ int odin3_name_entry_cmp(const odin3_name_entry *lhs, const odin3_name_entry *rh
 /* Unescapes a version 2 element (all six escapes) into the map's arena. INVALID_ARG for a bad
  * escape; NO_MEMORY. */
 odin3_status odin3_name_map_unescape(odin3_name_map *map, odin3_bytes field, odin3_bytes *out);
+
+/* True and *num when tok is `<prefix><n>` with n a decimal number above 0 (`r12`, `c3`). */
+bool odin3_name_map_ref_number(odin3_bytes tok, char prefix, uint32_t *num);
 
 /* What the version 2 check counts; a map that parsed and is well formed has every problem at 0. */
 typedef struct odin3_name_check_v2 {

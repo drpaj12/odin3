@@ -4,6 +4,13 @@
  *   names --map <file> --lookup <short>   the map line(s) of a hash name (failure when absent)
  *   names --map <file> --reverse <full>   the hash name(s) of a full name (failure when absent)
  *   names --map <file> --check            counts; failure when an entry is bad
+ *   names --map <file> --chain <short>    version 2 maps: the HDL constructs of an object
+ *
+ * Version 2 maps (V1.2.0 3.5): --lookup prints the object's line, its records (indented by their
+ * depth in the parent walk), its chain of constructs and the F and T lines they name; --chain
+ * prints the chain only; --check adds the version 2 invariants (every reference resolves, parents
+ * before children, a class on every record) and a second line of counts. --lookup and --chain
+ * match an O line by its short name and an N line by its name. Version 1 output is unchanged.
  *
  * Status: OK; ODIN3_ERR_CHECK when --lookup or --reverse finds nothing; ODIN3_ERR_PARSE when
  * --check finds a bad entry or the map is malformed; ODIN3_ERR_INVALID_ARG for a usage error.
@@ -14,6 +21,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/names_v2.h"
 #include "util/file.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -26,7 +34,7 @@
 
 enum { MAP_MAX_BYTES = 1 << 30 };
 
-typedef enum names_action { ACTION_NONE, ACTION_LOOKUP, ACTION_REVERSE, ACTION_CHECK } names_action;
+typedef enum names_action { ACTION_NONE, ACTION_LOOKUP, ACTION_REVERSE, ACTION_CHECK, ACTION_CHAIN } names_action;
 
 typedef struct names_args {
     odin3_strbuf map; /* --map's path */
@@ -37,7 +45,7 @@ typedef struct names_args {
 /* Sets the action of word; one action only. */
 static odin3_status set_action(names_args *out, names_action action, odin3_bytes value) {
     if (out->action != ACTION_NONE) {
-        odin3_log(ODIN3_LOG_ERROR, "names: give one of --lookup, --reverse and --check");
+        odin3_log(ODIN3_LOG_ERROR, "names: give one of --lookup, --reverse, --chain and --check");
         return ODIN3_ERR_INVALID_ARG;
     }
     out->action = action;
@@ -64,7 +72,8 @@ static odin3_status names_option(odin3_bytes word, odin3_bytes *rest, names_args
     bool map = odin3_pass_arg_is(word, "--map");
     bool lookup = odin3_pass_arg_is(word, "--lookup");
     bool reverse = odin3_pass_arg_is(word, "--reverse");
-    if (!map && !lookup && !reverse) {
+    bool chain = odin3_pass_arg_is(word, "--chain");
+    if (!map && !lookup && !reverse && !chain) {
         odin3_log(ODIN3_LOG_ERROR, "names: unknown argument '%.*s'", (int)word.len,
                   (const char *)word.ptr);
         return ODIN3_ERR_INVALID_ARG;
@@ -77,7 +86,8 @@ static odin3_status names_option(odin3_bytes word, odin3_bytes *rest, names_args
         odin3_strbuf_clear(&out->map);
         return odin3_strbuf_append(&out->map, value);
     }
-    return set_action(out, lookup ? ACTION_LOOKUP : ACTION_REVERSE, value);
+    names_action action = lookup ? ACTION_LOOKUP : (reverse ? ACTION_REVERSE : ACTION_CHAIN);
+    return set_action(out, action, value);
 }
 
 static odin3_status names_parse(odin3_bytes args, names_args *out) {
@@ -89,7 +99,7 @@ static odin3_status names_parse(odin3_bytes args, names_args *out) {
     if (st == ODIN3_OK && (out->map.len == 0 || out->action == ACTION_NONE)) {
         odin3_log(ODIN3_LOG_ERROR,
                   "names: expects --map <file> and one of --lookup <short>, --reverse <full>, "
-                  "--check");
+                  "--chain <short>, --check");
         st = ODIN3_ERR_INVALID_ARG;
     }
     return st;
@@ -175,23 +185,70 @@ static odin3_status run_reverse(const odin3_name_map *map, odin3_bytes value, od
     return st;
 }
 
+/* The version 2 line of --check: the counts of the R, C, F, T and object lines and each problem
+ * (V1.2.0 3.5); *bad is set when a problem is not zero (the problems are logged). */
+static odin3_status append_check_v2(const odin3_name_map *map, const char *path, odin3_strbuf *out,
+                                    bool *bad) {
+    odin3_name_check_v2 check = odin3_name_map_check_v2(map);
+    *bad = !odin3_name_check_v2_report(&check, path) || *bad;
+    return odin3_strbuf_appendf(out,
+                                "records=%u constructs=%u files=%u runs=%u objects=%u bad_id=%u "
+                                "bad_ref=%u bad_order=%u bad_class=%u no_record=%u\n",
+                                (unsigned)check.records, (unsigned)check.constructs,
+                                (unsigned)check.files, (unsigned)check.runs,
+                                (unsigned)check.objects, (unsigned)check.bad_id,
+                                (unsigned)check.bad_ref, (unsigned)check.bad_order,
+                                (unsigned)check.bad_class, (unsigned)check.no_record);
+}
+
 /* --check: the counts (H-5); failure when an entry is bad. */
-static odin3_status run_check(const odin3_name_map *map, odin3_strbuf *out) {
+static odin3_status run_check(const odin3_name_map *map, const char *path, odin3_strbuf *out) {
     odin3_name_check check = odin3_name_map_check(map);
     odin3_status st = odin3_strbuf_appendf(out, "entries=%u bad_hash=%u duplicates=%u ignored=%u\n",
                                            (unsigned)check.entries, (unsigned)check.bad_hash,
                                            (unsigned)check.duplicates, (unsigned)map->ignored);
     bool bad = check.bad_hash != 0 || check.duplicates != 0 || map->ignored != 0;
+    if (st == ODIN3_OK && map->version == ODIN3_NAME_MAP_VERSION_2) {
+        st = append_check_v2(map, path, out, &bad);
+    }
     return st == ODIN3_OK && bad ? ODIN3_ERR_PARSE : st;
 }
 
-static odin3_status run_action(const names_args *args, const odin3_name_map *map,
-                               odin3_strbuf *out) {
-    if (args->action == ACTION_LOOKUP) {
-        return run_lookup(map, args->value, out);
+/* --lookup and --chain of a version 2 map: *found is the number of lines that matched. */
+static odin3_status run_v2(const names_args *args, const odin3_name_map *map, odin3_strbuf *out,
+                           uint32_t *found) {
+    names_v2 v2;
+    odin3_status st = names_v2_init(&v2, map);
+    if (st == ODIN3_OK) {
+        names_v2_mode mode = args->action == ACTION_CHAIN ? NV2_CHAIN : NV2_LOOKUP;
+        st = names_v2_print(&v2, args->value, mode, out, found);
+        names_v2_free(&v2);
     }
-    return args->action == ACTION_REVERSE ? run_reverse(map, args->value, out)
-                                          : run_check(map, out);
+    return st;
+}
+
+/* Runs the action; *found tells whether a --lookup, --reverse or --chain matched anything. */
+static odin3_status run_action(const names_args *args, const odin3_name_map *map, const char *path,
+                               odin3_strbuf *out, bool *found) {
+    bool v2 = map->version == ODIN3_NAME_MAP_VERSION_2;
+    odin3_status st = ODIN3_OK;
+    uint32_t matches = 0;
+    if (args->action == ACTION_CHAIN && !v2) {
+        odin3_log(ODIN3_LOG_ERROR, "names: --chain needs a version 2 map (written with --prov-map)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (args->action == ACTION_CHECK) {
+        return run_check(map, path, out);
+    }
+    if (v2 && args->action != ACTION_REVERSE) {
+        st = run_v2(args, map, out, &matches);
+        *found = matches > 0;
+        return st;
+    }
+    st = args->action == ACTION_LOOKUP ? run_lookup(map, args->value, out)
+                                       : run_reverse(map, args->value, out);
+    *found = out->len > 0;
+    return st;
 }
 
 static odin3_status names_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
@@ -206,8 +263,10 @@ static odin3_status names_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     odin3_strbuf_init(&text);
     odin3_status st = names_parse(args, &parsed);
     st = st == ODIN3_OK ? load_map(parsed.map.data, &map) : st;
-    odin3_status found = st == ODIN3_OK ? run_action(&parsed, &map, &text) : st;
-    if (st == ODIN3_OK && text.len == 0 && parsed.action != ACTION_CHECK && found == ODIN3_OK) {
+    bool matched = true; /* --check has no match to find */
+    odin3_status found =
+        st == ODIN3_OK ? run_action(&parsed, &map, parsed.map.data, &text, &matched) : st;
+    if (st == ODIN3_OK && !matched && found == ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "names: '%.*s' is not in %s", (int)parsed.value.len,
                   (const char *)parsed.value.ptr, parsed.map.data);
         found = ODIN3_ERR_CHECK; /* not a usage error: scripts tell "absent" from "bad call" */
@@ -224,9 +283,10 @@ static odin3_status names_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
 
 const odin3_pass_def odin3_pass_names = {
     "names",
-    "names --map <file> (--lookup <short> | --reverse <full> | --check): look hashed names up in "
-    "a name map written by `--name-style hash` (needs no design; fails with CHECK when the name is "
-    "absent, PARSE for a bad map, INVALID_ARG for a bad call)",
+    "names --map <file> (--lookup <short> | --reverse <full> | --chain <short> | --check): look "
+    "hashed names up in a name map written by `--name-style hash` (needs no design; fails with "
+    "CHECK when the name is absent, PARSE for a bad map, INVALID_ARG for a bad call); a version 2 "
+    "map (--prov-map) also gives the records and the HDL chain of an object (--lookup, --chain)",
     names_run,
     NULL,
     false,
