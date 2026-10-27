@@ -45,6 +45,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- Hash names (and provenance names) are build-independent for the soft primitive bodies. `read_verilog --vtr-compat`
+  gave the body it reads from `lib/soft_primitives/<name>.v` the absolute path of that directory (found per build:
+  `<exe>/../../lib`, the install tree or `ODIN3_SOFT_PRIMITIVES_DIR`) as its file name, so every object of the body had a
+  location, a full name and a hash name that depended on where the build lived. Only `adder_hard_block` and
+  `hard_adder_cin_propagation` read a soft body among the micros. The body is still read from that directory but
+  its file name is now `lib/soft_primitives/<name>.v` (`src/frontends/verilog/read_verilog_lib.c`, `soft_source`).
+  Test `cli_hash_name_soft_dir`. Names of objects of a soft body change once, in every writer; no committed golden
+  holds them. ABI stays 7.
 - The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs
   without git: `tools/release/make-tarball` writes `third_party/abc/.odin3-commit` and
   `third_party/unity/.odin3-commit` (the submodule HEADs; generated, not committed) and

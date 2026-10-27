@@ -1001,8 +1001,11 @@ hash_name_soft_dir)
             dir=$work/$run
             [[ $run == default ]] && dir=
             for kind in blif json v; do
-                w="write_$kind"
-                [[ $kind == blif ]] && w="write_blif --vtr"
+                case $kind in
+                blif) w="write_blif --vtr" ;;
+                json) w="write_json" ;;
+                v) w="write_verilog" ;;
+                esac
                 ODIN3_SOFT_PRIMITIVES_DIR=$dir "$odin3" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat $mic/$design.v; proc; opt; flatten; opt -full; wreduce; hardmap; lower; $w --name-style hash --prov-map $work/$run.$kind" \
                     >"$work/out" 2>"$work/err" || fail "$design: $run $kind: odin3 failed"
                 [[ -s $work/$run.$kind.names ]] || fail "$design: $run $kind: no name map"
