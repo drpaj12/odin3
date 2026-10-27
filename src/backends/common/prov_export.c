@@ -1008,6 +1008,7 @@ typedef struct pm {
     odin3_u64map *run_num;  /* run -> t number */
     odin3_vec run_ids;      /* uint32_t */
     odin3_u64map *op_rank;  /* run << 32 | op -> the op number in the T row */
+    size_t cons_skipped;    /* joined rows left out of a J list: no numbered construct */
 } pm;
 
 static void pm_free(pm *st) {
@@ -1266,7 +1267,8 @@ static odin3_status pm_take_cons(pm *st, const odin3_prov_label *label, pm_rec *
         odin3_status status =
             pm_con_of_row(st, *(const uint32_t *)odin3_vec_cat(&label->joined, i), &num);
         if (status == ODIN3_OK && num == 0) {
-            continue; /* ast=none: no construct is numbered, and `c0` would not resolve */
+            st->cons_skipped++; /* ast=none: no construct is numbered, `c0` would not resolve */
+            continue;
         }
         uint32_t *slot = status == ODIN3_OK ? odin3_vec_push(&st->cons_pool) : NULL;
         if (status != ODIN3_OK || slot == NULL) {
@@ -1899,6 +1901,16 @@ static bool records_valid(const odin3_design *design, const odin3_prov_obj *objs
     return true;
 }
 
+/* Says how many joined rows were left out of the c lists (none numbered: ast=none). */
+static void log_cons_skipped(size_t skipped) {
+    if (skipped > 0) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "name map: %zu joined row(s) have no numbered construct (ast=none) and are left "
+                  "out of the c lists, so n= can exceed a list's length",
+                  skipped);
+    }
+}
+
 odin3_status odin3_prov_map_text(const odin3_prov_map_req *req, const odin3_prov_obj *objs,
                                  size_t count, odin3_strbuf *out) {
     if (req == NULL || req->design == NULL || out == NULL || (objs == NULL && count > 0) ||
@@ -1929,6 +1941,7 @@ odin3_status odin3_prov_map_text(const odin3_prov_map_req *req, const odin3_prov
                   "name map: %zu object(s), %zu record(s); defaults: BLIF N lines are nets only, "
                   "cell= not written, %u locations and %u joined rows at most",
                   count, st.recs.len, (unsigned)ORIGIN_CAP, (unsigned)ODIN3_PROV_JOIN_CAP);
+        log_cons_skipped(st.cons_skipped);
     }
     odin3_vec_free(&sorted);
     if (st.num_of != NULL) {

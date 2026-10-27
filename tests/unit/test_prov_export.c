@@ -15,6 +15,8 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -454,6 +456,201 @@ static void test_instance_join_not_found_when_chains_hold_different_anchors(void
     parsed_free(&res);
 }
 
+/* --- the memoised instance join against a direct walk ---------------------------------------- */
+
+enum { REF_CHAIN_MAX = 8, REF_FRAMES = 256, REF_LEAVES = 64 };
+
+/* A context chain by its context records, outermost first. */
+typedef struct ref_chain {
+    uint32_t len;
+    uint32_t recs[REF_CHAIN_MAX];
+} ref_chain;
+
+typedef struct ref_frame {
+    uint32_t rec;
+    ref_chain chain;
+} ref_frame;
+
+typedef struct ref_leaf {
+    uint32_t anchor;
+    ref_chain chain;
+} ref_leaf;
+
+static uint32_t ref_anchor(uint32_t row) {
+    for (;;) {
+        const odin3_construct_row *cur = odin3_construct_get(design, row);
+        if (cur->level <= (uint8_t)ODIN3_LEVEL_STMT || cur->parent == 0) {
+            return row;
+        }
+        row = cur->parent;
+    }
+}
+
+static bool ref_chain_equal(const ref_chain *lhs, const ref_chain *rhs) {
+    return lhs->len == rhs->len && memcmp(lhs->recs, rhs->recs, lhs->len * sizeof(uint32_t)) == 0;
+}
+
+/* The tail length of a record's class (0 when it has no context class). */
+static uint32_t ref_tail(odin3_prov_id id, uint32_t count) {
+    odin3_opclass cls;
+    if (!odin3_prov_class_of(design, id, &cls) || cls.dir != ODIN3_DIR_CONTEXT) {
+        return 0;
+    }
+    return cls.context_tail < count ? cls.context_tail : count;
+}
+
+/* The leaves behind `record` with the chain each is reached with: data parents only, a context
+ * tail extends the chain.  Returns the number of leaves. */
+static size_t reference_leaves(odin3_prov_id record, ref_leaf *leaves) {
+    static ref_frame stack[REF_FRAMES];
+    size_t top = 0;
+    size_t n_leaves = 0;
+    stack[top++] = (ref_frame){record.v, {0, {0}}};
+    while (top > 0) {
+        ref_frame fr = stack[--top];
+        const odin3_prov_record *rec = odin3_prov_get(design, (odin3_prov_id){fr.rec});
+        uint32_t row = odin3_construct_of_record(design, (odin3_prov_id){fr.rec});
+        if (rec->kind != ODIN3_PROV_DERIVED && row != 0 && n_leaves < REF_LEAVES) {
+            leaves[n_leaves++] = (ref_leaf){ref_anchor(row), fr.chain};
+        }
+        if (rec->kind != ODIN3_PROV_DERIVED) {
+            continue;
+        }
+        uint32_t count = rec->parents.count;
+        uint32_t data = count - ref_tail((odin3_prov_id){fr.rec}, count);
+        ref_chain inner = fr.chain;
+        for (uint32_t k = data; k < count && inner.len < REF_CHAIN_MAX; k++) {
+            inner.recs[inner.len++] = rec->parents.ids[k].v;
+        }
+        for (uint32_t k = data; k > 0 && top < REF_FRAMES; k--) {
+            stack[top++] = (ref_frame){rec->parents.ids[k - 1U].v, inner};
+        }
+    }
+    return n_leaves;
+}
+
+/* The old logic, written out: an anchor reached with two different chains. */
+static bool reference_instance_join(odin3_prov_id record) {
+    ref_leaf leaves[REF_LEAVES];
+    size_t n_leaves = reference_leaves(record, leaves);
+    for (size_t i = 0; i < n_leaves; i++) {
+        for (size_t j = i + 1U; j < n_leaves; j++) {
+            bool clash = leaves[i].anchor == leaves[j].anchor &&
+                         !ref_chain_equal(&leaves[i].chain, &leaves[j].chain);
+            if (clash) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/* The exporter's join=instance flag on a record's own R line. */
+static bool exported_instance_join(odin3_prov_id record) {
+    parsed res;
+    one_object(&res, record, ODIN3_CONSTRUCT_MODE_REFS);
+    bool flag = has_flag(r_of_object(&res, 1), "join=instance");
+    parsed_free(&res);
+    return flag;
+}
+
+/* A graph with shared ancestors (a diamond over c1, a context under a context, a coarsen of
+ * coarsens): the memoised join equals the direct walk for every record, and the graph holds both
+ * answers. */
+static void test_memoised_instance_join_equals_a_direct_walk(void) {
+    odin3_prov_id orig_a = leaf_of(R_A1);
+    odin3_prov_id orig_b = leaf_of(R_B1);
+    odin3_prov_id c1 = context_of(orig_a, R_INST1);
+    odin3_prov_id c2 = context_of(orig_a, R_INST2);
+    odin3_prov_id c3 = context_of(orig_b, R_INST1);
+    odin3_prov_id nested = context_of(c1, R_INST2); /* c1 seen with a longer chain */
+    odin3_prov_id p1[2] = {c1, c2};
+    odin3_prov_id m1 = derive(&COARSEN, p1, 2);
+    odin3_prov_id p2[2] = {c1, c3};
+    odin3_prov_id m2 = derive(&COARSEN, p2, 2);
+    odin3_prov_id p3[2] = {m1, c3};
+    odin3_prov_id m3 = derive(&COARSEN, p3, 2);
+    odin3_prov_id p4[2] = {m2, leaf_of(R_E1)};
+    odin3_prov_id m4 = derive(&COARSEN, p4, 2);
+    odin3_prov_id p5[2] = {m2, m3};
+    odin3_prov_id m5 = derive(&COARSEN, p5, 2);
+    odin3_prov_id p6[2] = {nested, c1};
+    odin3_prov_id m6 = derive(&COARSEN, p6, 2);
+    odin3_prov_id p7[2] = {m4, m4};
+    odin3_prov_id m7 = derive(&COARSEN, p7, 2);
+    const odin3_prov_id all[] = {c1, c2, c3, nested, m1, m2, m3, m4, m5, m6, m7};
+    unsigned joins = 0;
+    for (size_t i = 0; i < sizeof all / sizeof all[0]; i++) {
+        bool want = reference_instance_join(all[i]);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(want ? 1 : 0, exported_instance_join(all[i]) ? 1 : 0,
+                                      want ? "reference joins" : "reference does not join");
+        joins += want ? 1U : 0U;
+    }
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT(4, joins); /* the graph has both answers */
+    TEST_ASSERT_LESS_THAN_UINT(sizeof all / sizeof all[0] - 3U, joins);
+}
+
+/* --- the label cache is for one thread at a time ---------------------------------------------- */
+
+enum { BUSY_PARENTS = 48, BUSY_ROUNDS = 200000, BUSY_THREADS = 2 };
+
+static void quiet_sink(odin3_log_level level, const char *msg, void *user) {
+    (void)level;
+    (void)msg;
+    (void)user;
+}
+
+typedef struct busy_job {
+    odin3_prov_id record;
+    atomic_uint *stop;
+    unsigned busy;  /* refusals seen */
+    unsigned other; /* any other failure */
+} busy_job;
+
+static void *busy_worker(void *arg) {
+    busy_job *job = arg;
+    odin3_prov_label label;
+    odin3_prov_label_init(&label);
+    for (unsigned i = 0; i < BUSY_ROUNDS && atomic_load(job->stop) == 0U; i++) {
+        odin3_status st = odin3_prov_label_compute(design, job->record.v, &label);
+        job->busy += st == ODIN3_ERR_INVALID_ARG ? 1U : 0U;
+        job->other += st != ODIN3_OK && st != ODIN3_ERR_INVALID_ARG ? 1U : 0U;
+        if (job->busy > 0) {
+            atomic_store(job->stop, 1U);
+        }
+    }
+    odin3_prov_label_free(&label);
+    return NULL;
+}
+
+/* Two threads computing labels of one design overlap: the one that finds the cache in use fails
+ * with INVALID_ARG (logged) instead of racing, and the cache works again afterwards. */
+static void test_overlapping_label_use_is_refused_not_raced(void) {
+    odin3_prov_id parents[BUSY_PARENTS];
+    for (uint32_t i = 0; i < BUSY_PARENTS; i++) {
+        parents[i] = leaf_of(i % 2U == 0U ? R_A1 : R_B1);
+    }
+    odin3_prov_id record = derive(&COARSEN, parents, BUSY_PARENTS);
+    odin3_prov_label warm;
+    odin3_prov_label_init(&warm);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_label_compute(design, record.v, &warm));
+    atomic_uint stop = 0;
+    busy_job jobs[BUSY_THREADS] = {{record, &stop, 0, 0}, {record, &stop, 0, 0}};
+    pthread_t threads[BUSY_THREADS];
+    odin3_log_set_sink(quiet_sink, NULL);
+    for (int i = 0; i < BUSY_THREADS; i++) {
+        TEST_ASSERT_EQUAL_INT(0, pthread_create(&threads[i], NULL, busy_worker, &jobs[i]));
+    }
+    for (int i = 0; i < BUSY_THREADS; i++) {
+        TEST_ASSERT_EQUAL_INT(0, pthread_join(threads[i], NULL));
+    }
+    odin3_log_set_sink(NULL, NULL);
+    TEST_ASSERT_EQUAL_UINT(0, jobs[0].other + jobs[1].other);
+    TEST_ASSERT_TRUE_MESSAGE(jobs[0].busy + jobs[1].busy > 0, "no overlap was seen");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_label_compute(design, record.v, &warm));
+    odin3_prov_label_free(&warm);
+}
+
 /* --- refusals and counts ---------------------------------------------------------------------- */
 
 static unsigned g_errors;
@@ -800,6 +997,8 @@ int main(void) {
     RUN_TEST(test_instance_join_found_through_nested_coarsen_records);
     RUN_TEST(test_one_context_chain_twice_is_no_instance_join);
     RUN_TEST(test_instance_join_not_found_when_chains_hold_different_anchors);
+    RUN_TEST(test_memoised_instance_join_equals_a_direct_walk);
+    RUN_TEST(test_overlapping_label_use_is_refused_not_raced);
     RUN_TEST(test_derived_record_without_a_class_is_refused_with_a_message);
     RUN_TEST(test_dropped_kept_names_are_counted_in_a_warning);
     RUN_TEST(test_capped_is_written_only_when_the_cap_bites);

@@ -1010,8 +1010,7 @@ static void add_classless_net(void) {
     odin3_pass_ctx ctx;
     uint32_t file = 0;
     uint32_t name = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_design_intern(design, odin3_bytes_cstr("d.v"), &file));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(design, odin3_bytes_cstr("d.v"), &file));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_design_intern(design, odin3_bytes_cstr("bad@d.v:9"), &name));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_run_begin(design, file, &ctx));

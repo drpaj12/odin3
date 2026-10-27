@@ -10,12 +10,18 @@ Usage::
 
 ``--single`` runs the flow once per design (ABC dominates the wall time) and then writes each end
 N times in the same ``-p`` script; the export times are the per-write pass timers and the peak RSS
-and VPR counts are those of that one invocation.  Without it, for each design, smallest first, N
+and VPR samples are those of that one invocation.  The rows of the 2N writes are appended to
+``--jsonl`` when that invocation ends (one process, so its writes end together); a stop before
+that loses the invocation, not part of it.  Without it, for each design, smallest first, N
 times (default 3), alternating the two ends of one flow
 (``v1`` and ``v2``): ``read_techlib TECHLIB; read_verilog --nolatches --vtr-compat --prov-ast refs
 F; proc; fsm; opt; flatten; opt -full; wreduce; hardmap; lower; abc --lut 6; write_blif --vtr
 --name-style hash [--prov-map] OUT`` (``--prov-map`` for ``v2``).  Each process runs under
-``flock -x LOCK`` (``--lock``, else ``ODIN3_HEAVY_LOCK``, else none) and ``/usr/bin/time -v``.
+an exclusive ``flock`` on LOCK (``--lock``, else ``ODIN3_HEAVY_LOCK``, else none), taken by this
+script and held until the process has ended, and ``/usr/bin/time -v``.  While it runs, a thread of
+this script counts ``vpr`` processes (``pgrep -c vpr``) at once and then every 5 s inside the lock,
+and once more before the lock is released; the table says in how many samples a ``vpr`` process
+was seen.
 The export time is the pass time odin3 logs for ``write_blif``; the peak RSS is ``Maximum resident
 set size``.  The files go to ``--workdir`` (a fresh directory; required with a run) and stay there.
 The table gives, per design, n, the number of objects (O and N lines) and R, C lines and bytes of
@@ -28,12 +34,14 @@ appends each finished run as one JSON line at once, so a stop loses nothing; ``-
 from __future__ import annotations
 
 import argparse
+import fcntl
 import json
 import os
 import re
 import statistics
 import subprocess
 import sys
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -78,22 +86,64 @@ def one_run(
     out = workdir / f"{design.stem}-{end}.blif"
     extra = "--prov-map" if end == "v2" else ""
     script = FLOW.format(tech=tech, src=design, extra=extra, out=out)
-    lock = ["flock", "-x", lock_file] if lock_file else []
-    # VPR processes running when the odin3 process starts (inside the lock) and when it ends.
-    count = 'echo "vpr-start $(pgrep -c vpr || true)" >&2; exec "$@"'
-    proc = subprocess.run(
-        [*lock, "sh", "-c", count, "sh", "/usr/bin/time", "-v", odin3, "-p", script],
-        capture_output=True, text=True, check=False)
-    vpr_end = subprocess.run(["pgrep", "-c", "vpr"], capture_output=True, text=True, check=False)
-    started = re.search(r"vpr-start (\d+)", proc.stderr)
+    proc, samples = run_locked(odin3, script, lock_file)
     took, rss = PASS_RE.search(proc.stderr), RSS_RE.search(proc.stderr)
     if proc.returncode != 0 or took is None or rss is None:
         raise SystemExit(f"{design.name} {end}: exit {proc.returncode}\n{proc.stderr[-600:]}")
     shape = map_shape(Path(str(out) + ".names"))
     return {"ms": float(took.group(1)), "mb": int(rss.group(1)) / 1024.0,
-            "wall": wall_seconds(proc.stderr), **shape,
-            "vpr_start": float(started.group(1)) if started else -1.0,
-            "vpr_end": float(vpr_end.stdout.strip() or 0)}
+            "wall": wall_seconds(proc.stderr), **shape, **vpr_fields(samples)}
+
+
+VPR_SAMPLE_S = 5.0
+
+
+def vpr_count() -> int:
+    """The number of running processes whose name matches ``vpr`` (0 when pgrep finds none)."""
+    found = subprocess.run(["pgrep", "-c", "vpr"], capture_output=True, text=True, check=False)
+    return int(found.stdout.strip() or 0)
+
+
+def run_locked(
+    odin3: str, script: str, lock_file: str | None
+) -> tuple[subprocess.CompletedProcess[str], list[int]]:
+    """Runs ``odin3 -p script`` under /usr/bin/time -v, holding an exclusive flock on lock_file.
+
+    A thread of this script samples ``vpr_count()`` when the lock is taken, every VPR_SAMPLE_S
+    seconds while the process runs, and once after it ended, all before the lock is released.
+    Returns the finished process and the samples.
+    """
+    fd = os.open(lock_file, os.O_RDWR | os.O_CREAT, 0o666) if lock_file else -1
+    try:
+        if fd >= 0:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        samples: list[int] = [vpr_count()]
+        done = threading.Event()
+
+        def sample() -> None:
+            while not done.wait(VPR_SAMPLE_S):
+                samples.append(vpr_count())
+
+        sampler = threading.Thread(target=sample, daemon=True)
+        sampler.start()
+        try:
+            proc = subprocess.run(
+                ["/usr/bin/time", "-v", odin3, "-p", script],
+                capture_output=True, text=True, check=False)
+        finally:
+            done.set()
+            sampler.join()
+        samples.append(vpr_count())
+        return proc, samples
+    finally:
+        if fd >= 0:
+            os.close(fd)  # closing the descriptor releases the flock
+
+
+def vpr_fields(samples: list[int]) -> dict[str, float]:
+    """The run fields for the samples: how many, and in how many a vpr process was seen."""
+    return {"vpr_samples": float(len(samples)),
+            "vpr_busy": float(sum(1 for n in samples if n > 0))}
 
 
 def med(runs: list[dict[str, float]], key: str) -> float:
@@ -101,17 +151,21 @@ def med(runs: list[dict[str, float]], key: str) -> float:
 
 
 def vpr_label(runs: list[dict[str, float]]) -> str:
-    """Whether a vpr process ran at the start or end of any run (-1: not recorded)."""
+    """The VPR column: samples with a vpr process over all samples, or how an old row was seen."""
+    sampled = [r for r in runs if "vpr_samples" in r]
+    if sampled:
+        seen = int(sum(r["vpr_busy"] for r in sampled))
+        return f"vpr seen in {seen}/{int(sum(r['vpr_samples'] for r in sampled))} samples"
     if any(r.get("vpr_start", -1.0) < 0 for r in runs):
         return "not recorded"
     busy = sum(1 for r in runs if r["vpr_start"] > 0 or r.get("vpr_end", 0) > 0)
-    return f"{busy}/{len(runs)} runs"
+    return f"vpr seen at the start or end of {busy}/{len(runs)} runs"
 
 
 def report(raw: Raw) -> None:
     """Prints the table of the raw runs."""
     print("design            n  objects  R lines  C lines  v2 map bytes  v1 map bytes  "
-          "export v1 ms  export v2 ms  RSS v1 MB  RSS v2 MB  delta MB  concurrent VPR")
+          "export v1 ms  export v2 ms  RSS v1 MB  RSS v2 MB  delta MB  VPR processes")
     for name, ends in raw.items():
         v1, v2 = ends["v1"], ends["v2"]
         objects = med(v2, "O") + med(v2, "N")
@@ -159,25 +213,19 @@ def one_flow(
             out = workdir / f"{design.stem}-{end}-{i}.blif"
             writes.append(f"write_blif --vtr --name-style hash {extra} {out}")
     script = head + "; ".join(writes)
-    lock = ["flock", "-x", lock_file] if lock_file else []
-    count = 'echo "vpr-start $(pgrep -c vpr || true)" >&2; exec "$@"'
-    proc = subprocess.run(
-        [*lock, "sh", "-c", count, "sh", "/usr/bin/time", "-v", odin3, "-p", script],
-        capture_output=True, text=True, check=False)
-    vpr_end = subprocess.run(["pgrep", "-c", "vpr"], capture_output=True, text=True, check=False)
-    started = re.search(r"vpr-start (\d+)", proc.stderr)
+    proc, samples = run_locked(odin3, script, lock_file)
     times, rss = PASS_RE.findall(proc.stderr), RSS_RE.search(proc.stderr)
     if proc.returncode != 0 or len(times) != 2 * repeats or rss is None:
         raise SystemExit(f"{design.name}: exit {proc.returncode}\n{proc.stderr[-600:]}")
-    common = {"mb": int(rss.group(1)) / 1024.0, "wall": wall_seconds(proc.stderr),
-              "vpr_start": float(started.group(1)) if started else -1.0,
-              "vpr_end": float(vpr_end.stdout.strip() or 0)}
+    common = {"mb": int(rss.group(1)) / 1024.0, "wall": wall_seconds(proc.stderr)}
     ends: dict[str, list[dict[str, float]]] = {"v1": [], "v2": []}
     for i in range(repeats):
         for k, end in enumerate(("v1", "v2")):
             out = workdir / f"{design.stem}-{end}-{i}.blif"
             shape = map_shape(Path(str(out) + ".names"))
-            ends[end].append({"ms": float(times[2 * i + k]), **common, **shape})
+            first = i == 0 and k == 0  # the samples belong to the invocation: count them once
+            ends[end].append({"ms": float(times[2 * i + k]), **common, **shape,
+                              **(vpr_fields(samples) if first else {})})
     return ends
 
 
