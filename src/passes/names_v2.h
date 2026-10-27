@@ -48,7 +48,7 @@ void names_v2_free(names_v2 *v2);
  * out, and sets *matches to how many lines matched. NO_MEMORY on failure. Never fails on a map
  * that does not pass the check: a reference that does not resolve is skipped.
  */
-odin3_status names_v2_print(names_v2 *v2, odin3_bytes value, names_v2_mode mode,
-                            odin3_strbuf *out, uint32_t *matches);
+odin3_status names_v2_print(names_v2 *v2, odin3_bytes value, names_v2_mode mode, odin3_strbuf *out,
+                            uint32_t *matches);
 
 #endif

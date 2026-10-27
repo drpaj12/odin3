@@ -47,8 +47,8 @@ static odin3_status marks_init(names_v2_marks *mk, const odin3_vec tab[NV2_TABS]
 /* Clears the marks set since the last reset, and only those. */
 static void marks_reset(names_v2_marks *mk) {
     for (size_t i = 0; i < mk->touched.len; i++) {
-        const touch *t = odin3_vec_cat(&mk->touched, i);
-        mk->seen[t->tab][t->num] = 0;
+        const touch *mark = odin3_vec_cat(&mk->touched, i);
+        mk->seen[mark->tab][mark->num] = 0;
     }
     mk->touched.len = 0;
 }
@@ -154,11 +154,11 @@ static bool mark_new(const names_v2 *v2, names_v2_marks *mk, names_v2_tab tab, u
     if (num < 1 || num > v2->tab[tab].len || mk->seen[tab][num] != 0) {
         return false;
     }
-    touch *t = odin3_vec_push(&mk->touched);
-    if (t == NULL) {
+    touch *slot = odin3_vec_push(&mk->touched);
+    if (slot == NULL) {
         return false; /* out of memory: treated as already reached, so the walk ends */
     }
-    *t = (touch){(uint32_t)tab, num};
+    *slot = (touch){(uint32_t)tab, num};
     mk->seen[tab][num] = 1;
     return true;
 }
@@ -229,7 +229,8 @@ static uint32_t leaf_construct(const odin3_nm_line *line) {
 }
 
 /* Adds construct num and its ancestors (module last) not yet reached to chain. */
-static odin3_status chain_up(const names_v2 *v2, names_v2_marks *mk, uint32_t num, odin3_vec *chain) {
+static odin3_status chain_up(const names_v2 *v2, names_v2_marks *mk, uint32_t num,
+                             odin3_vec *chain) {
     for (size_t steps = v2->tab[NV2_C].len; num != 0 && steps > 0; steps--) {
         const odin3_nm_line *line = line_at(v2, NV2_C, num);
         if (line == NULL || !mark_new(v2, mk, NV2_C, num)) {
@@ -270,7 +271,8 @@ static void mark_file(const names_v2 *v2, names_v2_marks *mk, odin3_bytes tok) {
     }
 }
 
-static odin3_status mark_origins(const names_v2 *v2, names_v2_marks *mk, const odin3_nm_line *line) {
+static odin3_status mark_origins(const names_v2 *v2, names_v2_marks *mk,
+                                 const odin3_nm_line *line) {
     odin3_vec parts;
     odin3_vec_init(&parts, sizeof(odin3_bytes));
     odin3_status st = split_list(line->f[NM_R_ORIGINS], '|', &parts);
@@ -364,8 +366,8 @@ static odin3_status print_object(names_v2 *v2, const odin3_nm_line *obj, names_v
     return st;
 }
 
-odin3_status names_v2_print(names_v2 *v2, odin3_bytes value, names_v2_mode mode,
-                            odin3_strbuf *out, uint32_t *matches) {
+odin3_status names_v2_print(names_v2 *v2, odin3_bytes value, names_v2_mode mode, odin3_strbuf *out,
+                            uint32_t *matches) {
     odin3_strbuf want;
     odin3_strbuf_init(&want);
     *matches = 0;
