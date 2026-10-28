@@ -96,8 +96,12 @@ static void sweep_case(const oom_case *cs) {
     }
     TEST_ASSERT_TRUE_MESSAGE(step < MAX_STEPS, cs->type);
     /* A Release build makes fewer tracked allocations than Debug (no check before and after), so
-     * only the first step must fail: the sweep did inject a failure. */
+     * there only the first step must fail; Debug keeps the stronger bound. */
+#ifdef NDEBUG
     TEST_ASSERT_TRUE_MESSAGE(step > 0, "the sweep injected no failure");
+#else
+    TEST_ASSERT_TRUE_MESSAGE(step > 3, "the sweep injected no failure");
+#endif
 }
 
 static void test_oom_at_every_allocation_shifts_and_pmux(void) {
