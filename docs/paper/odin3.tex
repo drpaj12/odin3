@@ -4,7 +4,7 @@
 % Figures are TikZ (IMAGE/fig_*.tex, sharing IMAGE/odin3-tikz-styles.tex) except fig_ast, a
 % hand-drawn SVG converted to IMAGE/fig_ast.pdf (see README.md). Every number below is taken
 % from the repository's docs (DESIGN.md, IR.md, PHASE0-7.md, specs/, RELEASE-NOTES-1.0.md, CHANGELOG.md, and ADR D10 and D11 for the v1.0 scope) and git log as of
-% v1.0.0 (tagged 2026-10-21; the cost is as of the v1.0 close). The M2 QoR ratios come from the vtr-qor table
+% v1.0.0 (tagged 2026-10-21; the cost is as of the v1.0 close); the release status is v1.2.0 (2026-10-28, CHANGELOG.md, docs/V1.1.1.md, docs/V1.2.0.md). The M2 QoR ratios come from the vtr-qor table
 % 20261020-1642-M2 (published to odin3-golden, qor/3c9a4d23b27d/M2), the cost from
 % docs/log_cost_of_tokens_and_time-v1.0.md (the frozen v1.0 count).
 % Structure: Part I (Sections I-VI, then the references) is the 8-page FCCM paper; Part II
@@ -61,7 +61,7 @@ jamiespa@miamioh.edu}}
 \maketitle
 
 \begin{abstract}
-I wrote Odin in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build Odin~III, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. Odin~III (MIT license) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, and, in v1.1.0, a SystemVerilog front end over the slang library whose gate flow runs 144 of the 156 VerilogEval references, behind a versioned C ABI for plugins and AI tools. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the Yggdrasil III ecosystem, now made possible by this approach.
+I wrote Odin in 2005 and Odin~II in 2010. Odin~II became the Verilog front end of the VTR FPGA CAD flow, and Yosys with the Parmys plugin has since displaced it. After the ``MAIking software'' moment of December 2025, when AI coding agents began to make real software, and after the first agent-evolved EDA tools, I asked the final-frontier question: could a Dark Factory, in which agents turn a human's specification into software, build Odin~III, matching Odin~II's good ideas and plugging into the VTR flow? This paper tells that story and reports what was built and how it was tested. Odin~III (MIT license) is a C17 framework with one provenance-tracked IR, two-stage elaboration, re-implementations of Yosys~0.55's \code{proc}, \code{opt}, \code{fsm}, \code{wreduce} and \code{flatten}, architecture-driven partial mapping, linked ABC and VPR-ready BLIF, and, in v1.1.0, a SystemVerilog front end over the slang library whose gate flow runs 144 of the 156 VerilogEval references, behind a versioned C ABI for plugins and AI tools. v1.2.0 (2026-10-28) records provenance at every granularity. Every netlist it produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and wirelength ratios against the Parmys flow inside a 1.20 gate. Checking against oracles also found defects in the Parmys flow. I state the caveats of this MAIking: a human watched every day, the code has not been deeply read by a human, and testing covers a subset of scenarios. I also report the time and token cost and what the process suggests for CAD research.  Finally, we present the Yggdrasil III ecosystem, now made possible by this approach.
 \end{abstract}
 
 \begin{IEEEkeywords}
@@ -903,7 +903,7 @@ Writers & Yosys-schema JSON, structural Verilog, Graphviz with focus and node bu
   & 1F, 2D-1 \\
 Simulator & cycle-based, event-free, 2-state; hard cells through library functions & \code{sim}
   & 1E \\
-C ABI, plugins & \code{odin3.h} ABI v4; \code{.so} plugins; Python through cffi; pass manager and
+C ABI, plugins & \code{odin3.h} ABI v7 (v4 at v1.0); \code{.so} plugins; Python through cffi; pass manager and
   script CLI & \code{libodin3} & 1D \\
 Source manager, AST & Clang-style locations; 24-byte node record; symbol table; printer
   & \code{write\_verilog\_ast} & 2A \\
@@ -1471,7 +1471,7 @@ exposes only IDs and an opaque handle, versions the ABI, refuses a plugin that a
 version, and keeps room in its structures for later hooks.
 
 \code{include/odin3/odin3.h} is the only header plugins see (Fig.~\ref{fig:abi}; 1D spec,
-DESIGN \S15.3). ABI version~4 declares its functions over an opaque design handle; IR objects
+DESIGN \S15.3). ABI version~4 at v1.0 (7 in v1.2.0) declares its functions over an opaque design handle; IR objects
 are raw 32-bit IDs passed with their module handle, every function returns
 \code{odin3\_status} with results through out-pointers, NULL handles are rejected at the
 boundary, and every declaration has a paragraph on purpose, ownership and failure modes.
@@ -2246,6 +2246,16 @@ through the C ABI, leaving the core untouched (Fig.~\ref{fig:sv}). The gate path
 \code{write\_verilog} writes the structural gate netlist back as structural Verilog, the synthesis
 path from SystemVerilog with no VTR required. The VerilogEval corpus test pins all 156 references
 (Part~I, Sec.~\ref{sec:verify-evidence}), and a clang-tidy C++ profile covers the adapter in CI.
+Version 1.1.1 (tools and Python layer only, ABI 6 unchanged) adds critical-path attribution to HDL:
+\code{odin3-flow --timing-attr} joins VPR's setup timing report to the provenance names and
+\code{odin3-timing} reports which statements, modules and words set the critical path. Version
+1.2.0 (released 2026-10-28, ABI~7; plugins built for ABI~6 must be rebuilt) makes provenance exact
+at every granularity as a two-way DAG (ADR D14): an object keeps the chain of HDL constructs it came
+from, a step that blends two constructs is labelled a join, and the record is exported through
+the version~2 hash name map, read back by \code{names --lookup} and \code{names --chain}, and extended
+after place and route by \code{odin3-prov-post}. The same release makes hash names independent of the
+build. After the tag, \code{odin3-flow} on \code{main} passes design paths relative to their common
+directory, so that one design gives the same names in any directory.
 VHDL (ADR D11) and FF feature matching (4.6) still come later.
 
 \begin{figure}[t]
@@ -2300,7 +2310,27 @@ Loki~III recovers, as VPR placement constraints (\code{--read\_vpr\_constraints}
 design was (the provenance hierarchy), Verdandi what is recovered now (Loki~III clusters), and Skuld
 what shall be (the placement they constrain); they run as Wyrd~III steps. It revisits the study of
 system-level information and FPGA
-placement~\citeall{gharibian2010finding,gharibian2013analyzing}. It comes after the projects above.
+placement~\citeall{gharibian2010finding,gharibian2013analyzing}. It has its own repository
+(\url{https://github.com/drpaj12/nornsIII}) and paper, a placement corpus and run records that
+Odin~III's hub snapshot v1.2.0 pins by commit, and it changes none of the pieces it runs.
+
+\emph{Verdandi~III} (\url{https://github.com/drpaj12/verdandiIII}) is the Micro through the Macro,
+a desktop app in the Wyrd~III style (PySide6). It runs a micro design through the real, current
+Odin~III through the Python binding, records every stage, pass and logged event, and replays the run
+as a playthrough: the code that ran, the data structures before and after, and where in the Verilog
+the touched objects came from. It never changes the core. (It is a different tool from the
+Verdandi step of The Norns~III above, which only shares the name of the second Norn.)
+
+\emph{M\'{\i}mir~III} (\url{https://github.com/drpaj12/mimirIII}) is the fruit of the tree: the
+circuit knowledge base and dataset to be mined. It reads the output of Odin~III, VTR, The Norns~III
+and Loki~III into one store, records for every value how it was obtained, measures the designs
+(Hutton-style structure statistics and Rent's rule), and keeps design meta, lineage and the flow
+configurations and runs behind each result. It changes none of the pieces that feed it.
+
+The hub (\url{https://github.com/drpaj12/YggdrasilIII}) pins one commit of every component per
+snapshot. Its snapshot for Odin~III v1.2.0 (2026-10-28) pins Wyrd~III, Loki~III, Verdandi~III and
+M\'{\i}mir~III at their package version 0.1.0 and The Norns~III by commit; only Odin~III has releases
+of its own.
 
 % Full reference list (Parts I and II): the keys cited in Part I are listed by \nociteall right after
 % \begin{document}, in Part I citation order, so both lists number them alike. multibib writes
