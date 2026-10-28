@@ -1,9 +1,5 @@
-% AnonSuite drawn as a tree. Roots (dark brown) at the bottom: what AnonSynth reads and writes, and the
-% tools it links to. The trunk (brown) is AnonSynth, its steps running DOWN from parse to the roots. A small
-% forest of mini trees on the right holds the oracles, to compare against. The canopy (green oval) is the
-% tree-top: AnonGUI, AnonSim (the arrow to AnonGame) and AnonGame (verilogTown). AnonRE,
-% AnonHT, AnonPlace and AnonTrace III are side branches off the trunk, tools and experiments.
-% No status; the GitHub links are in the caption.
+\definecolor{o3wel1}{HTML}{E8F1F8}     % well water
+\definecolor{o3wel8}{HTML}{3B6E99}     % well rim
 \begin{tikzpicture}[odin, node distance=3mm,
   leaf/.style={ellipse, draw=o3grn8, fill=o3grn1, align=center, line width=0.6pt, inner xsep=1pt,
                inner ysep=1pt, minimum width=15mm, minimum height=8.5mm, font=\scriptsize},
@@ -16,7 +12,25 @@
   stp/.style={font=\scriptsize\bfseries, text=white, inner sep=0pt, align=center},
   mini/.style={ellipse, draw=o3grn8, fill=o3grn3, line width=0.5pt, align=center, inner sep=0pt,
                minimum width=17mm, minimum height=12mm, font=\scriptsize}]
-  % ---- roots (drawn first, behind the trunk) ----------------------------------------------
+  \foreach \fx/\gx/\wx in {3.9/4.4/4.9, 5.9/6.6/6.0, 7.9/8.75/7.1}{
+    \draw[line width=1.6pt, draw=o3brn5, line cap=round]
+      (\fx,0.3) .. controls (\fx,-1.0) and (\gx,-1.2) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.4) .. (\wx,-4.15);
+  }
+  \foreach \tx/\gx/\wx in {-0.9/-4.4/-5.9, 0.0/0.0/0.0, 0.9/2.2/5.9}{
+    \draw[line width=5.2pt, draw=o3brn9, line cap=round]
+      (\tx,0.3) .. controls (\tx,-1.2) and (\gx,-1.0) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.2) .. (\wx,-4.0);
+    \draw[line width=2.6pt, draw=o3brn7, line cap=round]
+      (\tx,0.3) .. controls (\tx,-1.2) and (\gx,-1.0) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.2) .. (\wx,-4.0);
+  }
+  \foreach \wx/\name/\gloss/\items/\feeds in {
+    -5.9/Well 1/{prior work, benchmarks}/{VerilogEval, netlist-to-RTL baseline, HAL (DANA),\\CIRCT, TPEKO, LogikBench, fusesoc-cores}/{AnonRE, AnonPlace, AnonSynth},
+    0.0/Well 2/{FPGA CAD and its views}/{VTR and VPR, nextpnr,\\DREAMPlaceFPGA, OpenPARF, netlistsvg}/{AnonPlace, AnonGUI},
+    5.9/Well 3/{synthesis sources}/{Yosys, ABC, slang, mockturtle,\\Wildebeest scripts, FuseSoC and Edalize}/{AnonSynth and the oracle forest}}{
+    \node[ellipse, draw=o3wel8, fill=o3wel1, line width=0.8pt, minimum width=56mm, minimum height=30mm,
+          inner sep=0pt] at (\wx,-5.55) {};
+    \node[align=center, font=\scriptsize, text width=46mm] at (\wx,-5.55)
+      {\textbf{\small\name}\\\odinsub{\gloss}\\[2pt]\items\\[2pt]\odinsub{feeds: \feeds}};
+  }
   \foreach \i/\t in {0/Input:\\Verilog, 1/Input:\\BLIF, 2/Input:\\Yosys JSON, 3/Input:\\gate Verilog,
                      4/Output:\\BLIF for VPR, 5/Output:\\Verilog, 6/Links:\\ABC, 7/{Links:\\VTR, VPR}}{
     \pgfmathsetmacro{\x}{-7.7+2.2*\i}
@@ -25,31 +39,25 @@
     \draw[rootin] (\tx,0.3) .. controls (\tx,-0.9) and (\x,-0.8) .. (\x,-1.85);
     \node[tip, text width=18mm] at (\x,-2.45) {\t};
   }
-  % ---- ground line ---------------------------------------------------------------------
   \draw[o3brn5, line width=0.6pt] (-8.8,0.3) -- (8.8,0.3);
-  % ---- the oracle forest: two rows of mini trees, no overlaps ----------------------------------
   \foreach \x/\y/\t/\c in {4.9/2.5/Parmys/o3grn3, 6.9/2.5/{VTR\\golden}/o3grn3,
                             3.9/0.3/Yosys/o3grn4, 5.9/0.3/{Odin~II}/o3grn4, 7.9/0.3/ABC/o3grn4}{
     \draw[line width=3pt, draw=o3brn5, line cap=round] (\x,\y) -- (\x,\y+0.75);
     \node[mini, fill=\c] at (\x,\y+1.3) {\t};
   }
-  \node[regionlabel] at (5.9,5.1) {Forest of Oracles to compare against};
-  % ---- canopy: the oval is the tree-top (low) ------------------------------------------------
+  \node[regionlabel] at (5.9,4.75) {Forest of Oracles to compare against};
   \node[ellipse, fill=o3grn3, draw=o3grn7, line width=0.8pt, minimum width=176mm,
         minimum height=44mm, inner sep=0pt] at (0,9.4) {};
-  % ---- limbs to the canopy pieces (behind the trunk) --------------------------------------------
   \draw[limb]   (-1.0,7.2) .. controls (-2.0,7.7) and (-3.8,7.9) .. (-4.8,8.8);
   \draw[limbin] (-1.0,7.2) .. controls (-2.0,7.7) and (-3.8,7.9) .. (-4.8,8.8);
   \draw[limb]   (1.0,7.2) .. controls (2.0,7.7) and (4.2,7.9) .. (5.6,8.8);
   \draw[limbin] (1.0,7.2) .. controls (2.0,7.7) and (4.2,7.9) .. (5.6,8.8);
   \draw[limb]   (0.2,7.2) .. controls (0.2,7.9) and (0.3,8.3) .. (0.4,8.8);
   \draw[limbin] (0.2,7.2) .. controls (0.2,7.9) and (0.3,8.3) .. (0.4,8.8);
-  % ---- side branches off the trunk: tools and experiments ---------------------------------------
   \foreach \y in {6.4, 4.7, 3.0, 1.3}{
     \draw[limb]   (-1.8,\y) .. controls (-2.6,\y) and (-3.2,\y+0.1) .. (-4.1,\y);
     \draw[limbin] (-1.8,\y) .. controls (-2.6,\y) and (-3.2,\y+0.1) .. (-4.1,\y);
   }
-  % ---- trunk: AnonSynth on top, its steps going down to the roots --------------------------------
   \path[draw=o3brn8, fill=o3brn6, line width=0.9pt]
     (-2.3,0.1) .. controls (-1.6,0.7) and (-1.9,1.3) .. (-1.85,2.5)
     .. controls (-1.8,4.5) and (-1.95,6.0) .. (-1.7,7.5)
@@ -63,12 +71,17 @@
   \foreach \a/\b in {1/2, 2/3, 3/4, 4/5, 5/6, 6/7}{
     \draw[->, draw=o3brn3, line width=0.5pt] (st\a.south) -- (st\b.north);
   }
-  % ---- canopy pieces ----------------------------------------------------------------------------
+  \foreach \x/\y in {4.9/6.75, 6.0/6.5, 7.1/6.75}{
+    \draw[line width=1.6pt, draw=o3brn5, line cap=round] (\x,8.2) -- (\x,\y+0.35);
+    \node[fruit] at (\x,\y) {};
+    \fill[o3fru1] (\x-0.1,\y+0.1) circle (0.07);
+  }
+  \node[font=\scriptsize, text width=62mm, align=center, inner sep=1pt, anchor=north] at (6.0,6.05)
+    {\textbf{\small AnonData}\\\odinsub{the knowledge base: the dataset harvested from every run}};
   \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-4.8,9.4) {\textbf{AnonGUI}\\\odinsub{experiments, GUI}};
   \node[leaf, text width=30mm, minimum height=10mm] (mid) at (5.6,9.4) {\textbf{AnonGame}\\\odinsub{(Verilog teaching game)}};
   \draw[->, line width=1.6pt, draw=o3grn8] (wyrd.east) -- (mid.west)
     node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{AnonSim}\\\odinsub{simulation bridge}};
-  % ---- tools and experiments on side branches ---------------------------------------------------------
   \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.4) {\textbf{AnonRE}\\\odinsub{Tool \& Experiment: reverse engineering}};
   \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.7) {\textbf{AnonHT}\\\odinsub{Tool \& Experiment: HT detection tools}};
   \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,3.0) {\textbf{AnonPlace}\\\odinsub{Tool \& Experiment: Placement with Provenance}};

@@ -27,6 +27,9 @@
 \definecolor{o3brn3}{HTML}{E0D3C6}
 \definecolor{o3brn2}{HTML}{F1E9DF}
 \definecolor{o3brn1}{HTML}{F8F4EE}
+\definecolor{o3fru8}{HTML}{BF360C}     % fruit rim (Mimir III)
+\definecolor{o3fru2}{HTML}{FFCC80}     % fruit flesh
+\definecolor{o3fru1}{HTML}{FFF3E0}     % fruit highlight
 
 % ---- text helpers -------------------------------------------------------------------------
 % A second, smaller line in a node: \odinsub{2C}.
@@ -65,6 +68,8 @@
   light/.style={fill=o3grn1, draw=o3grn7, solid},
   external/.style={fill=o3brn2, draw=o3brn6, dash pattern=on 3pt off 1.2pt on 0.6pt off 1.2pt},
   emph/.style={line width=1.3pt},
+  % a fruit hanging from the canopy (Mimir III, the harvest)
+  fruit/.style={circle, draw=o3fru8, fill=o3fru2, line width=0.8pt, inner sep=0pt, minimum size=7.5mm},
   % grouped regions, drawn on the background layer
   region/.style={draw=o3brn4, fill=o3brn1, rounded corners=3pt, line width=0.5pt,
                  inner sep=4pt},

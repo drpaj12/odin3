@@ -21,9 +21,11 @@ NAMES = [("Leman~Russ~III", "AnonHT"), ("Leman Russ III", "AnonHT"), ("The Norns
          ("Wyrd III", "AnonGUI"), ("Loki~III", "AnonRE"), ("Loki III", "AnonRE"),
          ("Verdandi~III", "AnonTrace~III"), ("Verdandi III", "AnonTrace III"),
          ("Midgard~III", "AnonGame"), ("Midgard III", "AnonGame"), ("Bifrost~III", "AnonSim"),
-         ("Bifrost III", "AnonSim")]
+         ("Bifrost III", "AnonSim"), ("M\\'{\\i}mir~III", "AnonData"), ("M\\'{i}mir~III", "AnonData"),
+         ("M\\'{\\i}mir III", "AnonData"), ("M\\'{i}mir III", "AnonData"), ("M\u00edmir~III", "AnonData"),
+         ("M\u00edmir III", "AnonData"), ("Mimir~III", "AnonData"), ("Mimir III", "AnonData")]
 THEME = ("Yggdrasil", "Wyrd", "Loki", "Midgard", "Bifrost", "Leman", "Norns", "Norse", "world tree",
-         "Verdandi")
+         "Verdandi", "Mimir", "M\\'{\\i}mir", "M\u00edmir", "Mimisbrunnr", "Urdarbrunnr", "Hvergelmir", "Gate-Breaker")
 def rename(t):
     t = t.replace("Odin~III", NAME).replace("Odin III", NAME)
     for a, b in NAMES:
@@ -69,6 +71,7 @@ sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and O
 sub("the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.", "the original creation of Odin and Odin~II, which humans verified at high cost.")
 sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
 sub("Yggdrasil~III, the world tree (Fig.", "Yggdrasil~III (Fig.")
+sub(" (Mimisbrunnr, Urdarbrunnr and Hvergelmir)", "")
 sub("Verilog Synthesis for FPGAs - again\\\\", "Verilog Synthesis for FPGAs\\\\")
 sub("Our latest paper applies", "Later work applies")
 for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):
@@ -77,6 +80,19 @@ for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):
             sys.exit("name left: " + src[m.start() - 60:m.start() + 40])
 for k, a in amap.items():
     src = re.sub(r"(?<=[{,\s])%s(?=[,}\s])" % re.escape(k), a, src)
+# Wells of the tree figure: the Norse well names, glosses and the self-cited baseline are withheld.
+WELLS = [("Mimisbrunnr", "Well 1"), ("Urdarbrunnr", "Well 2"), ("Hvergelmir", "Well 3"),
+         ("{Mimir's well of wisdom: prior work, benchmarks}", "{prior work, benchmarks}"),
+         ("{the Norns' well: FPGA CAD and its views}", "{FPGA CAD and its views}"),
+         ("{the spring of all rivers: synthesis sources}", "{synthesis sources}"),
+         ("Gate-Breaker", "netlist-to-RTL baseline")]
+def blind_tree(t):
+    t = "\n".join(ln for ln in t.splitlines() if not ln.lstrip().startswith("%")) + "\n"
+    for a, b in WELLS:
+        if a not in t:
+            sys.exit("tree: missing " + a)
+        t = t.replace(a, b)
+    return t
 # placeholder name and blind figure copies
 src = rename(src)
 os.makedirs("IMAGE/blind", exist_ok=True)
@@ -85,6 +101,8 @@ figs.append("fig_flow_base")
 for f in figs:
     t = rename(open("IMAGE/%s.tex" % f).read())
     t = t.replace("\\odinsub{(verilogTown)}", "\\odinsub{(Verilog teaching game)}")
+    if f == "fig_yggdrasil":
+        t = blind_tree(t)
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
