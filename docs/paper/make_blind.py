@@ -106,9 +106,9 @@ for f in figs:
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
-# Odin and Odin II stay cited, so the tree is scaled to 88% to keep 8 pages.
+# Odin and Odin II stay cited, so the tree is scaled to 66% to keep 8 pages.
 sub("\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}",
-    "\\scalebox{0.88}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
+    "\\scalebox{0.66}{\\odinfit{\\textwidth}{\\input{IMAGE/blind/fig_yggdrasil}}}")
 body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
 for f in figs:
     body += "\n".join(ln for ln in open("IMAGE/blind/%s.tex" % f).read().splitlines() if not ln.lstrip().startswith("%"))
