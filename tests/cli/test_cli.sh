@@ -38,7 +38,8 @@
 # memory_merge (4.7 G-1: the registered-read RAM micro through memory_merge has the read register merged into the `$mem`; with partial_map after it the BLIF equals partial_map alone).
 # memory_merge_soft (4.7, review M-1: memories partial_map leaves soft, chained after memory_merge, are equivalent to partial_map alone: equiv-check on the BLIFs for a variable read enable and OFFSET != 0, sim vectors for a falling-edge read, the same lower error for write ports on two clocks).
 # hash_name_soft_dir (hash names do not depend on where lib/soft_primitives is found: BLIF, JSON, Verilog and name maps byte-identical for three soft directories).
-# hash_name_ids (the IDs of nets after lower do not depend on the build type: Debug's opt_expr sweep made no constant IDs).
+# hash_name_ids (the Verilog and name map of a few micros are byte-identical between the Debug and the Release build; skipped when the other build is missing or older than the sources).
+# hash_name_lib_path (a user file at lib/soft_primitives/<name>.v and the library copy of the same text get different hash names).
 # pm_carry (4.5 C-4: `partial_map --min-add N` leaves smaller adds soft; bad arguments are refused with a located message).
 # pm_carry_arch (4.5, needs VTR_ROOT: the adder micros through partial_map on the k6 and COFFE records give the same sim vectors as before the pass; the k4 arch (no adder) leaves them to lower).
 # pm_ramstyle (4.7 G-3: a ram_style attribute gives one warning and the same BLIF as without it).
@@ -1019,23 +1020,68 @@ hash_name_soft_dir)
             done
         done
         if grep -qF "$work" "$work"/s1.*.names; then fail "$design: a name map holds the soft directory"; fi
-        grep -qF "lib/soft_primitives/adder.v" "$work/s1.blif.names" || fail "$design: no stable soft body name"
+        grep -qF "<odin3>/soft_primitives/adder.v" "$work/s1.blif.names" || fail "$design: no stable soft body name"
     done
     ;;
 hash_name_ids)
-    # The IDs, and so the `$n<ID>` names, do not depend on the build type. A Debug build sweeps
-    # opt_expr cells again to check the dirty set (settle); a constant a rule made there used up a
-    # net and a node ID although it was dropped, so Debug and Release named the objects after
-    # `lower` differently. The expected IDs are those of a build with no Debug sweep (opt_expr makes no constant for a
-    # cell it does not rewrite), whatever build runs this test.
+    # IDs, and so the `$n<ID>` names and the hash names, do not depend on the build type: a Debug
+    # build sweeps opt_expr cells again to check the dirty set (settle), and an object a rule made
+    # there used up an ID although it was dropped. The Debug and the Release binary give byte-identical
+    # Verilog and name maps on a few micros. The other build is the one of the other preset next
+    # to this one; the test is skipped (77) when it is missing or older than a source file (a stale
+    # binary says nothing about this commit).
     mic=$fixtures/../../micro/verilog
     lib=$fixtures/../../../lib/vtr.o3lib
-    "$odin3" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat $mic/micro/bm_DL_logic_w_Dff.v; proc; opt; flatten; opt -full; wreduce; hardmap; lower; write_verilog --name-style provenance $work/ids.v" \
-        >"$work/out" 2>"$work/err" || fail "odin3 failed"
-    for id in 11 12; do
-        grep -q "wire .bm_DL_logic_w_Dff/\$n$id@" "$work/ids.v" || fail "no net \$n$id: IDs depend on the build"
+    root=$fixtures/../../..
+    here=$(cd "$(dirname "$odin3")" && pwd)
+    case $here in
+    */build/debug) other=$root/build/release/odin3 ;;
+    *) other=$root/build/debug/odin3 ;;
+    esac
+    if [[ ! -x $other ]]; then
+        echo "test_cli hash_name_ids: no $other, skipped" >&2
+        exit 77
+    fi
+    if [[ -n $(find "$root/src" "$root/include" -name '*.[ch]' -newer "$other" -print -quit) ]]; then
+        echo "test_cli hash_name_ids: $other is older than the sources, skipped" >&2
+        exit 77
+    fi
+    for design in micro/bm_DL_logic_w_Dff micro/adder_hard_block micro/hard_adder_cin_propagation; do
+        for run in this other; do
+            bin=$odin3
+            [[ $run == other ]] && bin=$other
+            "$bin" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat $mic/$design.v; proc; opt; flatten; opt -full; wreduce; hardmap; lower; write_verilog --name-style hash --prov-map $work/$run.v" \
+                >"$work/out" 2>"$work/err" || fail "$design: $run build: odin3 failed"
+        done
+        cmp -s "$work/this.v" "$work/other.v" || fail "$design: the Verilog differs between the Debug and the Release build"
+        cmp -s "$work/this.v.names" "$work/other.v.names" || fail "$design: the name map differs between the Debug and the Release build"
     done
-    if grep -q '\$n1[3-9]@' "$work/ids.v"; then fail "IDs past 12: a dropped constant used up IDs"; fi
+    ;;
+hash_name_lib_path)
+    # A user file at lib/soft_primitives/<name>.v is a legal path; the library's own copy carries
+    # another file name, so the two give different hash names to the objects of the same text.
+    # Design 1 reads the library adder (the 2-bit instance does not fit the 1-bit hard cell); design
+    # 2 is a user copy of the same file at that relative path, read before the tech library.
+    mic=$fixtures/../../micro/verilog
+    lib=$fixtures/../../../lib/vtr.o3lib
+    mkdir -p "$work/lib/soft_primitives"
+    cp "$fixtures"/../../../lib/soft_primitives/adder.v "$work/lib/soft_primitives/adder.v"
+    cp "$mic/micro/adder_hard_block.v" "$work/top.v"
+    tail="proc; opt; flatten; opt -full; wreduce; hardmap; lower; write_verilog --name-style hash --prov-map"
+    (cd "$work" && "$odin3" -p "read_techlib $lib; read_verilog --nolatches --vtr-compat top.v; $tail lib1.v") \
+        >"$work/out" 2>"$work/err" || fail "the library run failed"
+    (cd "$work" && "$odin3" -p "read_verilog --nolatches lib/soft_primitives/adder.v top.v; read_techlib $lib; $tail user1.v") \
+        >"$work/out" 2>"$work/err" || fail "the user-file run failed"
+    grep -qF "<odin3>/soft_primitives/adder.v" "$work/lib1.v.names" || fail "the library copy has no fixed name"
+    grep -qF "lib/soft_primitives/adder.v" "$work/user1.v.names" || fail "the user file has its own name"
+    if grep -F "lib/soft_primitives/adder.v" "$work/lib1.v.names" | grep -qvF "<odin3>/soft_primitives/adder.v"; then
+        fail "the library copy carries the user form of the name"
+    fi
+    for run in lib1 user1; do
+        awk -F'\t' '$1 == "O" && index($0, "soft_primitives/adder.v") { print $4 }' "$work/$run.v.names" | sort >"$work/$run.hashes"
+        [[ -s $work/$run.hashes ]] || fail "$run: no hash name of the adder body"
+    done
+    [[ -z $(comm -12 "$work/lib1.hashes" "$work/user1.hashes") ]] || fail "a user file and the library copy share hash names"
     ;;
 sv_compound_assign)
     # #264 semantics: a compound assignment to a bit-select must lower to `q[i] = q[i] op rhs` with

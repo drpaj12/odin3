@@ -1884,6 +1884,37 @@ static void test_eqneq_resize(void) {
     TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_EQNEQ_RESIZE));
 }
 
+/* IDs are a function of the design and the options, not of the build: a Debug build sweeps cells a
+ * Release build never revisits, and an object a rule made there would use up an ID (IR-6) even when
+ * the rule rewrote nothing. A rule that rewrites nothing makes no object: node_end and net_end are
+ * the same after. An $eq of 2 bits against 1 unsigned bit pads B with 0 and drops no pair, a
+ * fine.neutral port of one neutral bit stays, and no constant exists in the module to find. */
+static const char K_NO_REWRITE[] = "module \\m\n"
+                                   "  wire width 2 input 1 \\a\n"
+                                   "  wire input 2 \\b\n"
+                                   "  wire output 3 \\y\n"
+                                   "  cell $eq \\c\n"
+                                   "    parameter \\A_WIDTH 2\n"
+                                   "    parameter \\B_WIDTH 1\n"
+                                   "    parameter \\Y_WIDTH 1\n"
+                                   "    connect \\A \\a\n"
+                                   "    connect \\B \\b\n"
+                                   "    connect \\Y \\y\n"
+                                   "  end\n"
+                                   "end\n";
+
+static void test_no_rewrite_no_ids(void) {
+    fx.opts.fine = true;
+    build(K_NO_REWRITE);
+    const size_t nodes = odin3_module_node_end(fx.res.module);
+    const size_t nets = odin3_module_net_end(fx.res.module);
+    run_expr();
+    TEST_ASSERT_EQUAL_UINT32(0, rules_total());
+    TEST_ASSERT_EQUAL_UINT32(1, count_type("$eq"));
+    TEST_ASSERT_EQUAL_UINT64(nodes, odin3_module_node_end(fx.res.module));
+    TEST_ASSERT_EQUAL_UINT64(nets, odin3_module_net_end(fx.res.module));
+}
+
 /* yosys -p "read_rtlil eqneq_swapconst_isnot.il; opt_expr": $eq(1'0, a) is $not(a) */
 static void test_eqneq_swapconst_isnot(void) {
     build_run(K_EQNEQ_SWAPCONST_ISNOT);
@@ -4608,6 +4639,7 @@ static void run_mux_and_driver_tests(void) {
     RUN_TEST(test_mux_undef_all_x);
     RUN_TEST(test_mux_sel01_empty);
     RUN_TEST(test_eqneq_resize_resumes);
+    RUN_TEST(test_no_rewrite_no_ids);
     RUN_TEST(test_mux_reduce_resumes);
     RUN_TEST(test_undriven);
     RUN_TEST(test_undriven_kinds);

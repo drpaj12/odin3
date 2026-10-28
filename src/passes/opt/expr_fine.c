@@ -103,11 +103,16 @@ static odin3_status drop_neutral(odin3_expr_ctx *ec, odin3_opt_rule rule, odin3_
             kept.net[kept.n++] = sig.net[k];
         }
     }
+    /* decide first: the neutral bit is made only when the port gets shorter (an empty result is one
+     * neutral bit, so a port of one neutral bit is left as it is, and no constant is made) */
+    if (kept.n >= sig.n || (kept.n == 0 && sig.n == 1)) {
+        return st;
+    }
     if (kept.n == 0) {
         st = odin3_opt_const_net(ec->oc, neutral, &kept.net[0]);
         kept.n = 1;
     }
-    return st == ODIN3_OK && kept.n < sig.n ? rebuild_port(ec, rule, port, &kept) : st;
+    return st == ODIN3_OK ? rebuild_port(ec, rule, port, &kept) : st;
 }
 
 odin3_status odin3_expr_rule_fine_neutral_a(odin3_expr_ctx *ec) {
