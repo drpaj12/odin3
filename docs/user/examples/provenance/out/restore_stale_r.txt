@@ -1,0 +1,4 @@
+R	r16	D	ble	coarsen:lut	t7.1	r7			stale=t8
+R	r17	D	clb	coarsen:ble	t7.2	r16			stale=t8
+R	r18	D	site	rewrite:clb	t9.1	r17			x=1,y=1,sub=0,layer=0,stale=t8
+... trimmed ...

@@ -22,6 +22,9 @@ A file name of `-` writes to standard output for the formats that say so in {doc
   translate in both directions, and `read_blif --name-map` or `read_json --name-map` puts the full
   names back on read.
 
+What provenance is, the levels, the record chain and the full format of the map are on
+{doc}`provenance`.
+
 `--prov-map [refs|constructs|full]` (with `--name-style hash`, on `write_blif --vtr`,
 `write_json` and `write_verilog`) writes the name map in version 2: the same `O` lines, then one
 `R` line per provenance record behind the named objects (class, parents, source locations, the
@@ -44,10 +47,8 @@ netlist with its BLE, CLB and site records. A cluster whose atoms blend distinct
 refuses a BLIF written with short names, and refuses a map that it has already extended. The `.net` is trusted local VPR output, parsed with ElementTree. `names
 --check` accepts the extended map.
 
-The flags of an `R` line are `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`, `chain=span`,
-`capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, and, written by `odin3-prov-post` and the
-restore, `stale=t<n>` (a post-Odin record that a later pass made stale) and the site flags `x=`, `y=`, `sub=` and
-`layer=`.
+The flags of an `R` line (`join`, `lossy=`, `chain=span`, `stale=t<n>`, the site flags and the rest), every
+line type, the levels and the join labels are described on {doc}`provenance`.
 
 Why a join was made, and how critical it was (`Q` and `K` lines). Odin III writes one `Q` line per join record with
 its objective (the name of the pass; for `abc` the goal its script states, or `area` or `depth` from the script's last

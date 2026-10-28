@@ -1,0 +1,2 @@
+entries=67 bad_hash=0 duplicates=0 ignored=0
+records=62 constructs=14 files=1 runs=8 objects=80 bad_id=0 bad_ref=0 bad_order=0 bad_class=0 no_record=0

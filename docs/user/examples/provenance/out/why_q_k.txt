@@ -1,0 +1,7 @@
+Q	r28	FL:0.762,SC:0.095,SN:0.048,SI:0.048,OR:0.047	norns-pack	connectivity_timing:0.333,unrelated:0.333,seed:0.167,affinity_group:0.167	0.900	1.000	-1.000	5:1,10:1	5:2,10:3	7	why=i,objective=i,gain=r,pcrit=r,rho=r,slack=r,near=r,npaths=r	-
+K	r28	n1	0.100	1.000	-1.000	pcrit=r,rho=r,slack=r	-
+K	r28	n2	0.900	1.000	-1.000	pcrit=r,rho=r,slack=r	-
+K	r28	n3	0.200	1.000	-1.000	pcrit=r,rho=r,slack=r	-
+K	r28	q1	0.700	1.000	-1.000	pcrit=r,rho=r,slack=r	-
+... trimmed ...
+Q	r31		norns-pack	seed:1.000	0.600	0.970	-0.700	5:1,10:1	5:1,10:1	1	why=-,objective=i,gain=r,pcrit=r,rho=r,slack=r,near=r,npaths=r	-

@@ -1,0 +1,2 @@
+atoms 36 (not in the map: 8); bles 12, clbs 16, sites 16; joins by pack 1, of instances 0, lossy 0; Q lines 3, K lines 23
+wrote ./flow/odin3/bm_DL_BCD_adder.blif.names (+4458 bytes, 108 lines)

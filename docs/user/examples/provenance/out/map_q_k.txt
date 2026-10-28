@@ -1,0 +1,6 @@
+Q	r30		vpr-pack			1.000	-4.619	5:1,10:1	5:2,10:2	10	why=-,objective=i,gain=-,pcrit=-,rho=r,slack=r,near=r,npaths=r	-
+K	r30	Cout		1.000	-4.619	pcrit=-,rho=r,slack=r	-
+K	r30	hhwglkqct3r		1.000	-4.619	pcrit=-,rho=r,slack=r	-
+K	r30	hpt2o5nq3dh		1.000	-4.619	pcrit=-,rho=r,slack=r	-
+K	r30	htcum4sr5zy		1.000	-4.619	pcrit=-,rho=r,slack=r	-
+... trimmed ...

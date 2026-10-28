@@ -1,0 +1,9 @@
+R	r19	D	ble	coarsen:lut	t7.1	r7			
+R	r20	D	ble	coarsen:lut	t7.1	r7			
+R	r21	D	ble	coarsen:lut	t7.1	r7			
+R	r22	D	clb	coarsen:ble	t7.2	r19,r20,r21			
+R	r23	D	site	rewrite:clb	t8.1	r22			x=1,y=1,sub=0,layer=0
+R	r24	D	ble	coarsen:lut	t7.1	r10			
+... trimmed ...
+R	r30	D	clb	coarsen:ble	t7.2	r24,r25,r26,r27,r28,r29		c10,c5	join
+R	r31	D	site	rewrite:clb	t8.1	r30			x=1,y=2,sub=0,layer=0
