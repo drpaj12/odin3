@@ -64,6 +64,22 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- Hash names (and provenance names) no longer depend on the build. Two causes, found by comparing independent builds
+  of one commit on the micros. (1) `read_verilog --vtr-compat` gave the soft body it reads from
+  `lib/soft_primitives/<name>.v` the absolute path of the directory the build found (`<exe>/../../lib`, the install
+  tree or `ODIN3_SOFT_PRIMITIVES_DIR`) as its file name, so every object of the body had a location, a full name and
+  a hash name that depended on where the build lived (`adder_hard_block`, `hard_adder_cin_propagation`). The body is
+  still read from that directory, but its file name is now `<odin3>/soft_primitives/<name>.v` (a form no design path has; `lib/soft_primitives/<name>.v` is a legal user path)
+  (`src/frontends/verilog/read_verilog_lib.c`, `soft_source`). Test `cli_hash_name_soft_dir` (and `cli_hash_name_lib_path`: a user file at `lib/soft_primitives/<name>.v` gets other hash names). The `// file:line` comments `write_verilog` writes for library cells, and the `F` lines of the name map, carry the fixed name now (documented in `docs/user/outputs.md`). (2) The Debug-only
+  full sweep in `opt_expr` `settle` (`src/passes/opt/expr.c`) re-ran the rules on cells a Release build never
+  revisits; the `fine.group` and `fine.addsub` rules made the canonical constants 0 and 1 before knowing they would
+  rewrite anything, and the sweep dropped them again, but IDs are never reused (IR-6), so a Debug build numbered the
+  nets and nodes after `opt_expr` higher than a Release build (two per dropped constant) and every `$n<ID>` name
+  built on them, hence the hash names, differed (522 of 1224 writer files on the micros, Debug against Release; the count is `python3 tools/flow/hash_name_compare.py build/debug/odin3 build/release/odin3`, which runs both on every micro in 9 writer/map variants and compares every output and name map byte for byte, and gives 1224 of 1224 identical after the fix). The
+  rules (`src/passes/opt/expr_fine.c`) now make a constant only when they rewrite. Test `cli_hash_name_ids`. IDs, and
+  so names, of objects made after such a rule change in every build (fewer IDs used). Goldens regenerated for that
+  (IDs only): `tests/opt/rules/expr/fine.group.il`, `tests/tools/data/names_v2/{ansiportlist_2.blif,v1_ansiportlist_2}.txt`,
+  `tests/tools/data/restore/roundtrip.txt` (the BLIF rows' `map_identical` count rises). ABI stays 7.
 - The source tarball (`odin3-<ver>.tar.gz`) now configures, builds, passes `ctest` and installs
   without git: `tools/release/make-tarball` writes `third_party/abc/.odin3-commit` and
   `third_party/unity/.odin3-commit` (the submodule HEADs; generated, not committed) and

@@ -3,9 +3,9 @@ module \t
   wire width 4 input 1 \a
   wire width 2 input 2 \b
   wire width 4 output 3 \y
+  wire $n12
   wire $n13
-  wire $n14
-  cell $and $c7
+  cell $and $c6
     parameter \A_SIGNED 0
     parameter \B_SIGNED 0
     parameter \A_WIDTH 2
@@ -13,7 +13,7 @@ module \t
     parameter \Y_WIDTH 2
     connect \A \a [3:2]
     connect \B \b
-    connect \Y { $n14 $n13 }
+    connect \Y { $n13 $n12 }
   end
-  connect \y { $n14 $n13 \a [1:0] }
+  connect \y { $n13 $n12 \a [1:0] }
 end

@@ -1,20 +1,20 @@
-== --lookup h26muvurua7
-O	ansiportlist	net	h26muvurua7	ansiportlist/$n348@tests/micro/verilog/full/ansiportlist_2.v:28	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	28	r3	gate$
-  R	r3	D	gate	refine:word	t3.12	r2			$
-    R	r2	D	word	rewrite:word	t2.6	r1			$
-      R	r1	S	expr	origin	t1.1		f1:28.18-28.30	c4	hier=ansiportlist$
-  C	c4	BINARY	expr	c3	f1	28.18-28.30	$
-  C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30	$
-  C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31	$
+== --lookup h25334sckqj
+O	ansiportlist	net	h25334sckqj	ansiportlist/$n211@tests/micro/verilog/full/ansiportlist_2.v:22	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	22	r3	gate$
+  R	r3	D	gate	refine:word	t3.7	r2			$
+    R	r2	D	word	rewrite:word	t2.1	r1			$
+      R	r1	S	expr	origin	t1.1		f1:22.18-22.30	c4	hier=ansiportlist$
+  C	c4	BINARY	expr	c3	f1	22.18-22.30	$
+  C	c3	NET_ASSIGN	block	c2	f1	22.8-22.30	$
+  C	c2	CONT_ASSIGN	block	c1	f1	22.1-22.31	$
   C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
   F	f1	tests/micro/verilog/full/ansiportlist_2.v$
   T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v	$
   T	t2	wreduce		$
   T	t3	lower		modules=1 cells=16 nodes=166$
-== --chain h26muvurua7
-C	c4	BINARY	expr	c3	f1	28.18-28.30	$
-C	c3	NET_ASSIGN	block	c2	f1	28.8-28.30	$
-C	c2	CONT_ASSIGN	block	c1	f1	28.1-28.31	$
+== --chain h25334sckqj
+C	c4	BINARY	expr	c3	f1	22.18-22.30	$
+C	c3	NET_ASSIGN	block	c2	f1	22.8-22.30	$
+C	c2	CONT_ASSIGN	block	c1	f1	22.1-22.31	$
 C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
 F	f1	tests/micro/verilog/full/ansiportlist_2.v$
 == --lookup and_o[0]
@@ -45,20 +45,22 @@ C	c35	UNARY	expr	c34	f1	13.18-13.30	$
 C	c34	NET_ASSIGN	block	c33	f1	13.8-13.30	$
 C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31	$
 F	f1	tests/micro/verilog/full/ansiportlist_2.v$
-== --lookup hzwqeu7rhfh
-O	ansiportlist	net	hzwqeu7rhfh	ansiportlist/$n170@tests/micro/verilog/full/ansiportlist_2.v:17	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	17	r21	word$
-  R	r21	D	word	rewrite:word	t4.2	r20			$
-    R	r20	S	expr	origin	t1.1		f1:17.18-17.30	c23	hier=ansiportlist$
-  C	c23	BINARY	expr	c22	f1	17.18-17.30	$
-  C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30	$
-  C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31	$
+== --lookup hzi35ajswu5
+O	ansiportlist	net	hzi35ajswu5	ansiportlist/$n228@tests/micro/verilog/full/ansiportlist_2.v:25	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	25	r6	gate$
+  R	r6	D	gate	refine:word	t3.9	r5			$
+    R	r5	D	word	rewrite:word	t2.3	r4			$
+      R	r4	S	expr	origin	t1.1		f1:25.18-25.30	c7	hier=ansiportlist$
+  C	c7	BINARY	expr	c6	f1	25.18-25.30	$
+  C	c6	NET_ASSIGN	block	c5	f1	25.8-25.30	$
+  C	c5	CONT_ASSIGN	block	c1	f1	25.1-25.31	$
   C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
   F	f1	tests/micro/verilog/full/ansiportlist_2.v$
   T	t1	read_verilog	--nolatches --vtr-compat --prov-ast refs tests/micro/verilog/full/ansiportlist_2.v	$
-  T	t4	hardmap		multiply=1 adder=12 chains=2 sp_slices=0 dp_slices=0 soft=0$
-== --chain hzwqeu7rhfh
-C	c23	BINARY	expr	c22	f1	17.18-17.30	$
-C	c22	NET_ASSIGN	block	c21	f1	17.8-17.30	$
-C	c21	CONT_ASSIGN	block	c1	f1	17.1-17.31	$
+  T	t2	wreduce		$
+  T	t3	lower		modules=1 cells=16 nodes=166$
+== --chain hzi35ajswu5
+C	c7	BINARY	expr	c6	f1	25.18-25.30	$
+C	c6	NET_ASSIGN	block	c5	f1	25.8-25.30	$
+C	c5	CONT_ASSIGN	block	c1	f1	25.1-25.31	$
 C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
 F	f1	tests/micro/verilog/full/ansiportlist_2.v$

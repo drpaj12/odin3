@@ -108,12 +108,43 @@ static bool is_eq(const odin3_expr_ctx *ec) {
     return ec->kind == ODIN3_EXPR_T_EQ;
 }
 
+/* The value of an operand bit; the invalid net is the zero pad of a narrower unsigned operand,
+ * which is made only when the rule rewrites (eq_pad_fix): a constant made by a rule that ends up
+ * rewriting nothing would still use up a net and a node ID (IR-6), and a Debug build revisits
+ * cells a Release build does not, so the IDs would depend on the build. */
+static odin3_const eq_val(const odin3_expr_ctx *ec, odin3_net_id net) {
+    return odin3_net_valid(net) ? odin3_expr_cval(ec, net) : ODIN3_CONST_0;
+}
+
 /* Two constant bits that are 0 and 1 (Yosys: both non-wire, different, both <= S1). */
 static bool bits_differ(const odin3_expr_ctx *ec, odin3_net_id lhs, odin3_net_id rhs) {
-    odin3_const lc = odin3_expr_cval(ec, lhs);
-    odin3_const rc = odin3_expr_cval(ec, rhs);
+    odin3_const lc = eq_val(ec, lhs);
+    odin3_const rc = eq_val(ec, rhs);
     return (lc == ODIN3_CONST_0 && rc == ODIN3_CONST_1) ||
            (lc == ODIN3_CONST_1 && rc == ODIN3_CONST_0);
+}
+
+/* Yosys's same-bit test: the same net, or the same constant. */
+static bool bits_same(const odin3_expr_ctx *ec, odin3_net_id lhs, odin3_net_id rhs) {
+    if (lhs.v == rhs.v && odin3_net_valid(lhs)) {
+        return true;
+    }
+    odin3_const value = eq_val(ec, lhs);
+    return value != ODIN3_CONST_NONE && value == eq_val(ec, rhs);
+}
+
+/* in extended to width: by its sign bit when is_signed, else by the zero pad (the invalid net). */
+static odin3_status eq_extend(odin3_expr_ctx *ec, const odin3_expr_sig *in, uint32_t width,
+                              bool is_signed, odin3_expr_sig *out) {
+    odin3_net_id pad = {0};
+    if (is_signed && in->n > 0) {
+        pad = in->net[in->n - 1];
+    }
+    odin3_status st = odin3_expr_sig_new(ec, width, out);
+    for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
+        out->net[k] = k < in->n ? in->net[k] : pad;
+    }
+    return st;
 }
 
 /* A and B extended to a common width (signed when both are), as Yosys does when the widths differ.
@@ -128,8 +159,8 @@ static odin3_status eq_operands(odin3_expr_ctx *ec, odin3_expr_sig *lhs, odin3_e
     }
     uint32_t width = raw_a.n > raw_b.n ? raw_a.n : raw_b.n;
     bool both_signed = odin3_expr_both_signed(ec);
-    st = odin3_expr_extend(ec, &raw_a, width, both_signed, lhs);
-    return st == ODIN3_OK ? odin3_expr_extend(ec, &raw_b, width, both_signed, rhs) : st;
+    st = eq_extend(ec, &raw_a, width, both_signed, lhs);
+    return st == ODIN3_OK ? eq_extend(ec, &raw_b, width, both_signed, rhs) : st;
 }
 
 /* The operands, and the bit pairs left once the equal ones are dropped. */
@@ -152,7 +183,7 @@ static bool eq_scan_pairs(const odin3_expr_ctx *ec, eq_scan *scan) {
         if (bits_differ(ec, scan->lhs.net[bit], scan->rhs.net[bit])) {
             return true;
         }
-        if (!odin3_expr_same(ec, scan->lhs.net[bit], scan->rhs.net[bit])) {
+        if (!bits_same(ec, scan->lhs.net[bit], scan->rhs.net[bit])) {
             scan->keep_a.net[scan->keep_a.n++] = scan->lhs.net[bit];
             scan->keep_b.net[scan->keep_b.n++] = scan->rhs.net[bit];
         }
@@ -160,8 +191,30 @@ static bool eq_scan_pairs(const odin3_expr_ctx *ec, eq_scan *scan) {
     return false;
 }
 
+/* The zero pad (the invalid net) among the kept pairs becomes the canonical 0 net, made now that
+ * the rule rewrites. */
+static odin3_status eq_pad_fix(odin3_expr_ctx *ec, eq_scan *scan) {
+    odin3_expr_sig *sides[2] = {&scan->keep_a, &scan->keep_b};
+    odin3_net_id zero = {0};
+    odin3_status st = ODIN3_OK;
+    for (uint32_t side = 0; side < 2; side++) {
+        for (uint32_t k = 0; st == ODIN3_OK && k < sides[side]->n; k++) {
+            if (!odin3_net_valid(sides[side]->net[k])) {
+                st = odin3_net_valid(zero) ? ODIN3_OK
+                                           : odin3_opt_const_net(ec->oc, ODIN3_BIT_0, &zero);
+                sides[side]->net[k] = zero;
+            }
+        }
+    }
+    return st;
+}
+
 /* The cell on the pairs that stay (Yosys goes on with it in the same visit). */
 static odin3_status eq_resize(odin3_expr_ctx *ec, eq_scan *scan) {
+    odin3_status fixed = eq_pad_fix(ec, scan);
+    if (fixed != ODIN3_OK) {
+        return fixed;
+    }
     odin3_expr_cell spec = {.type = ec->kind,
                             .n_params = ODIN3_EXPR_P_BIN_YW + 1,
                             .in = {&scan->keep_a, &scan->keep_b}};
