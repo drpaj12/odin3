@@ -10,4 +10,13 @@
 # Start is inclusive, end is exclusive. "open" means the window has not closed yet.
 # Only the backend "deepseek" is known. Requests outside every window are "anthropic".
 # Blank lines and lines starting with # are ignored.
-deepseek 2026-10-22T20:00:00Z open
+# Window 1 (one window, no Anthropic request inside it). Evidence from the transcripts, checked
+# 2026-10-28: requests served by DeepSeek carry no requestId and a message id that is not
+# "msg_01...", while every Anthropic request has requestId "req_011..." and id "msg_01...".
+# 28,760 requests (non-synthetic) have the DeepSeek form; they run from 2026-10-22T21:17:40Z
+# (sessions 7e7cbad8, 37ad7aaa, then b579490c) to 2026-10-24T15:22:53Z (end of session b579490c).
+# The last Anthropic request before is 2026-10-22T21:12:53Z, the first after is
+# 2026-10-24T15:24:15Z (session c97be8f2). No Anthropic request falls inside the window.
+# Start and end are placed in those two gaps. The ledger's "DeepSeek stop 22:45Z / Claude resume
+# 23:45Z" times do not match the transcripts: the DeepSeek session b579490c kept running.
+deepseek 2026-10-22T21:15:00Z 2026-10-24T15:23:00Z
