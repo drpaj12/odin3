@@ -93,8 +93,8 @@ cut("\\begin{figure*}[t]\n\\centering\n\\odinfit{\\textwidth}{\\input{IMAGE/fig_
 cut("\\emph{Technical.} Figure~\\ref{fig:flow-verify} marks which technique checks which stage:", "\n\n\\subsection{One provenance-tracked IR}",
     "\\emph{Technical.} The techniques are refinement proofs by SAT (\\code{lower-equiv}, \\code{opt-equiv}), random module generators checked against Yosys \\code{techmap}, "
     "Verilator random vectors (\\code{fcheck}), golden BLIFs, and the exit-code convention of Sec.~\\ref{sec:abi-summary}.")
-# cost: v1.0 table only (the open version also has the after-v1.0 table and the DeepSeek window).
-cut("After v1.0 the suite work continued on the same process.", "\n% ------------------------------------------------------------------------------------------\n\\section{Experiments}",
+# cost: v1.0 numbers only (the open version adds the separate extension-to-Yggdrasil table and the DeepSeek window).
+cut("\\emph{Second, separate: the extension to Yggdrasil~III.}", "\n% ------------------------------------------------------------------------------------------\n\\section{Experiments}",
     "")
 # the companion Norns work is a sibling paper: no citation in the blind copy.
 sub(" The companion work on The Norns~III placement experiment~\\cite{nornsIII}, which uses the attribution, reports that it agreed with VPR's critical-path delay within 0.5\\% in 999 of 999 runs (a different property, not part of this verdict).", "")
