@@ -89,7 +89,8 @@ void setUp(void) {
 }
 
 /* The files a test may leave in tmp (and p1.v .. p25.v). */
-static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v", "u.v", "f.v", "l.o3proj"};
+static const char *const k_outputs[] = {"e1.v", "e2.v", "e3.v", "out.v",
+                                        "u.v",  "f.v",  "g.v",  "l.o3proj"};
 
 void tearDown(void) {
     char path[PATH_BUF];

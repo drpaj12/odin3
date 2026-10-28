@@ -149,18 +149,40 @@ def lpm_script(designs: Sequence[Path], out: Path, family: str) -> str:
     return text.replace("@FAMILY@", fam).replace("@OUT@", quote(out)).replace("  ", " ")
 
 
+def design_root(designs: Sequence[Path]) -> Path:
+    """The common parent directory of the (absolute) ``designs``: the working directory of the
+    odin3 step, so that the file names in hash names and provenance are relative to it and do not
+    depend on where the checkout lives."""
+    return Path(os.path.commonpath([str(d.parent) for d in designs]))
+
+
+def relative_designs(designs: Sequence[Path]) -> list[Path]:
+    """Each design as a path relative to :func:`design_root`."""
+    root = design_root(designs)
+    return [Path(os.path.relpath(d, root)) for d in designs]
+
+
+def name_root_note(designs: Sequence[Path]) -> str:
+    """The run-log line that records the name root: relative names only, never an absolute path."""
+    return "name_root=. designs=" + " ".join(os.fspath(d) for d in relative_designs(designs))
+
+
 def run_step(name: str, argv: Sequence[str], step_dir: Path, env: dict[str, str] | None = None,
-             timeout: int = STEP_TIMEOUT_S) -> StepResult:
-    """Run ``argv`` in ``step_dir``; stdout and stderr go to its log. A timeout is a failure."""
+             timeout: int = STEP_TIMEOUT_S, cwd: Path | None = None,
+             note: str = "") -> StepResult:
+    """Run ``argv`` in ``cwd`` (default ``step_dir``); stdout and stderr go to the log in
+    ``step_dir``, after ``note`` when given. A timeout is a failure."""
     step_dir.mkdir(parents=True, exist_ok=True)
     log = step_dir / f"{name}.log"
     start = time.monotonic()
     try:
         with log.open("w") as handle:
             handle.write("$ " + " ".join(argv) + "\n")
+            if note:
+                handle.write(note + "\n")
             handle.flush()
-            proc = subprocess.run(list(argv), cwd=step_dir, stdout=handle, stderr=subprocess.STDOUT,
-                                  env=env, timeout=timeout, check=False)
+            proc = subprocess.run(list(argv), cwd=cwd or step_dir, stdout=handle,
+                                  stderr=subprocess.STDOUT, env=env, timeout=timeout, check=False)
         ok = proc.returncode == 0
     except (OSError, subprocess.TimeoutExpired) as exc:
         log.write_text(f"{log.read_text()}\n{exc}\n")
@@ -461,7 +483,7 @@ def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: Flo
               "vpr_run_dir": os.path.relpath(run_dir, args.out),
               "paths_requested": args.timing_paths,
               # where the provenance file names point: odin3 ran in odin3/ with these designs
-              "source_cwd": os.path.relpath(args.out / "odin3", args.out),
+              "source_cwd": os.path.relpath(design_root(args.designs), args.out),
               "designs": [str(d) for d in args.designs]}
     (tdir / timing_attr.INPUTS_NAME).write_text(json.dumps(inputs, indent=1) + "\n")
     try:
@@ -486,7 +508,7 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     vtr_root = vtr_root_from_env()
     k = lut_k(args, vtr_root, step_dir / "k.log")
     blif = step_dir / f"{top}.blif"
-    design = " ".join(quote(d) for d in args.designs)
+    design = " ".join(quote(d) for d in relative_designs(args.designs))
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     if args.prov:
         script = prov_script(script, k)
@@ -497,7 +519,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     if args.timing_attr:
         (args.out / timing_attr.TIMING_DIR).mkdir(parents=True, exist_ok=True)
         script += timing_script(k, args.out / timing_attr.TIMING_DIR, args.timing_legacy)
-    step = run_step("odin3", odin3_command(args, top, script), step_dir)
+    step = run_step("odin3", odin3_command(args, top, script), step_dir,
+                    cwd=design_root(args.designs), note=name_root_note(args.designs))
     result.steps.append(step)
     if not step.ok:
         return None
@@ -522,8 +545,9 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     """The odin3 step and the read-back lint of target ``lpm``."""
     step_dir = args.out / "odin3"
     written = step_dir / f"{top}.v"
-    script = lpm_script(args.designs, written, args.family)
-    step = run_step("odin3", odin3_command(args, top, script), step_dir)
+    script = lpm_script(relative_designs(args.designs), written, args.family)
+    step = run_step("odin3", odin3_command(args, top, script), step_dir,
+                    cwd=design_root(args.designs), note=name_root_note(args.designs))
     result.steps.append(step)
     if not step.ok:
         return None

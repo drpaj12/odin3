@@ -104,7 +104,7 @@ def check_ok(path: Path) -> bool:
 @unittest.skipUnless(SWEEP, "set ODIN3_RESTORE_SWEEP=1 (CTest restore_roundtrip)")
 class RoundTrip(unittest.TestCase):
     def test_round_trip_of_every_proven_pair_in_every_ast_mode(self) -> None:
-        work = workdir("roundtrip")
+        work = workdir(self, "roundtrip")
         passing = step0_passing()
         names = micros()[:LIMIT] if LIMIT else micros()
         rows: dict[tuple[str, str], list[int]] = {}

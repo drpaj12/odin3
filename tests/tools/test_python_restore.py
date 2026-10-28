@@ -12,6 +12,7 @@ without cffi or the library, unless ODIN3_REQUIRE_CFFI=1.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -143,6 +144,7 @@ class RestoredProvenanceTest(unittest.TestCase):
 
     def test_a_restored_net_answers_provenance_and_chain_as_the_original(self) -> None:
         work = Path(tempfile.mkdtemp(prefix="restore-py-"))
+        self.addCleanup(shutil.rmtree, work, True)
         compared = 0
         for name in NAMES:
             out = work / f"{name}.blif"

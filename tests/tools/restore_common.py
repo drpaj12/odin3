@@ -6,8 +6,10 @@ test_names_v2.py). Work directories are made under TMPDIR and left in place."""
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
+import unittest
 from pathlib import Path
 
 from .helpers import REPO_ROOT
@@ -41,8 +43,11 @@ def micros() -> list[str]:
     return sorted(p.stem for p in MICRO_DIR.glob("*.v"))
 
 
-def workdir(tag: str) -> Path:
-    return Path(tempfile.mkdtemp(prefix=f"restore-{tag}-"))
+def workdir(case: unittest.TestCase, tag: str) -> Path:
+    """A new work directory that ``case`` removes when it finishes, pass or fail."""
+    path = Path(tempfile.mkdtemp(prefix=f"restore-{tag}-"))
+    case.addCleanup(shutil.rmtree, path, True)
+    return path
 
 
 def run_cli(script: str) -> subprocess.CompletedProcess[str]:

@@ -368,7 +368,7 @@ report() {
 }
 
 main() {
-    local jobs=2 root="" list="" out="" keep=0 order=n repo techlibs="" fixtures=0
+    local made=0 jobs=2 root="" list="" out="" keep=0 order=n repo techlibs="" fixtures=0
     local -a fixture_paths=()
     repo=$(dirname "$(dirname "$HERE")")
     SC_DRIVER=$repo/build/release/odin3-sim-vectors
@@ -415,7 +415,7 @@ main() {
         command -v "$tool" >/dev/null || { echo "sim-check: tool not found: $tool" >&2; exit 2; }
     done
     [ $((fixtures + (${#list} > 0 ? 1 : 0) + (${#root} > 0 ? 1 : 0))) -le 1 ] || usage
-    [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/sim-check.XXXXXX")
+    if [ -z "$out" ]; then out=$(mktemp -d "${TMPDIR:-/tmp}/sim-check.XXXXXX"); made=1; fi
     mkdir -p "$out/res" "$out/tmp"
     rm -rf "$out"/res/* 2>/dev/null || true
     export SC_DRIVER SC_ABC SC_YOSYS SC_IVERILOG SC_VVP SC_TIMEOUT SC_MEM_KB SC_SEEDS SC_CYCLES
@@ -464,6 +464,8 @@ main() {
     rc=${PIPESTATUS[0]}
     set -e
     [ "$keep" = 1 ] || rm -rf "$out/tmp"
+    # a work directory this run made itself goes with a clean run (report already on stdout)
+    if [ "$made" = 1 ] && [ "$keep" = 0 ] && [ "$rc" = 0 ]; then rm -rf "$out"; fi
     return "$rc"
 }
 

@@ -11,6 +11,7 @@ ODIN3_REQUIRE_CFFI=1.
 from __future__ import annotations
 
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,6 +62,7 @@ class ReadNameMapTest(unittest.TestCase):
             raise AssertionError("ODIN3_REQUIRE_CFFI=1 but cffi is not installed")
         base = Path("/tmp/claude-1000")
         cls.work = Path(tempfile.mkdtemp(prefix="names-py-", dir=base if base.is_dir() else None))
+        cls.addClassCleanup(shutil.rmtree, cls.work, True)
 
     def test_counts_agree_with_check(self) -> None:
         for micro, writer in CASES:

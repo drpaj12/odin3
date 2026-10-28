@@ -39,6 +39,7 @@ import argparse
 import concurrent.futures
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -146,7 +147,7 @@ def cmd_bytes(args: argparse.Namespace) -> int:
     else:
         off = Side(args.odin3, None, "off")
         pairs += [(off, Side(args.odin3, None, m)) for m in MODES[1:]]
-    # the run directory is left in place (the controller cleans /tmp/claude-1000)
+    # the run directory is removed after a clean run; a difference or --keep leaves it
     work = Path(tempfile.mkdtemp(prefix="ops-cc-", dir=args.out))
     jobs: list[tuple[Path, Side, Side, tuple[Path, int]]] = []
     for p, (base, other) in enumerate(pairs):
@@ -162,6 +163,8 @@ def cmd_bytes(args: argparse.Namespace) -> int:
     files = sum(1 for p in work.rglob("*") if p.is_file())
     print(f"{len(designs)} designs, {len(pairs)} comparison(s), {bad} with differences "
           f"({files} files compared, both sides)")
+    if not bad and not args.keep:
+        shutil.rmtree(work, ignore_errors=True)
     return 1 if bad else 0
 
 
@@ -309,6 +312,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     b.add_argument("--out", default=None)
     b.add_argument("--no-sv", action="store_true")
     b.add_argument("--no-abc", action="store_true")
+    b.add_argument("--keep", action="store_true",
+                   help="keep the work directory (default: only after a difference)")
     b.add_argument("paths", nargs="+")
     args = top.parse_args(argv)
     args.odin3 = str(Path(args.odin3).resolve())

@@ -75,7 +75,7 @@ def last_field(line: str) -> str:
 @unittest.skipUnless(ODIN3, "ODIN3_CLI is not set")
 class RestoreExtra(unittest.TestCase):
     def test_a_q_k_lines_round_trip_verbatim_and_write_2_equals_write_3(self) -> None:
-        work = workdir("extra")
+        work = workdir(self, "extra")
         first = work / "mux.blif"
         write_first("bm_DL_2_1_mux", "blif", first)
         extras = [
@@ -95,7 +95,7 @@ class RestoreExtra(unittest.TestCase):
         )
 
     def test_restore_opt_write_marks_stale_and_a_new_join_has_a_fresh_q(self) -> None:
-        work = workdir("stale")
+        work = workdir(self, "stale")
         first = work / "cmp.json"
         write_first(
             "bm_stmt_compare_padding", "json", first, steps="proc; flatten; hardmap; lower; "
@@ -161,7 +161,7 @@ class RestoreExtra(unittest.TestCase):
         stale. An unchanged restore then write keeps the enriched line; restore, opt, write gives
         the restored Q (and its K) with the stale run of opt, plus a fresh objective-only Q with
         stale `-` for each join opt made."""
-        work = workdir("task10")
+        work = workdir(self, "task10")
         first = work / "cmp.json"
         write_first(
             "bm_stmt_compare_padding", "json", first, steps="proc; flatten; hardmap; lower; "
@@ -199,7 +199,7 @@ class RestoreExtra(unittest.TestCase):
             self.assertNotEqual(fields[1], "r3")
 
     def test_a_pass_that_only_looks_leaves_the_lines_current(self) -> None:
-        work = workdir("look")
+        work = workdir(self, "look")
         first = work / "mux.blif"
         write_first("bm_DL_2_1_mux", "blif", first)
         with names_of(first).open("a") as handle:
@@ -217,7 +217,7 @@ class RestoreExtra(unittest.TestCase):
         )
 
     def test_ast_none_restores_and_writes_no_construct(self) -> None:
-        work = workdir("none")
+        work = workdir(self, "none")
         first = work / "enc.blif"
         write_first("bm_DL_2_4_encoder", "blif", first, ast="")
         self.assertIn("ast=none", lines(names_of(first))[0])
@@ -229,7 +229,7 @@ class RestoreExtra(unittest.TestCase):
         self.assertEqual(first.read_bytes(), second.read_bytes())
 
     def test_a_version_1_map_restores_nothing_and_changes_nothing(self) -> None:
-        work = workdir("v1")
+        work = workdir(self, "v1")
         first = work / "mux.blif"
         script = flow("bm_DL_2_1_mux", "") + f"write_blif --vtr --name-style hash {first}"
         self.assertEqual(0, run_cli(script).returncode)
@@ -247,7 +247,7 @@ class RestoreExtra(unittest.TestCase):
     def v1_map_changes_nothing(self, kind: str, micro: str, reader: str, suffix: str) -> None:
         """A version 1 map: the reader restores nothing, and the second write equals the first
         (netlist and map), for a micro the pair proved idempotent (step 0)."""
-        work = workdir(f"v1{kind}")
+        work = workdir(self, f"v1{kind}")
         first = work / f"{micro}.{suffix}"
         writer = "write_json" if kind == "json" else "write_verilog"
         script = flow(micro, "") + f"{writer} --name-style hash {first}"
@@ -274,7 +274,7 @@ class RestoreExtra(unittest.TestCase):
         )
 
     def test_prov_post_extension_restores_and_rewrites_the_same_lines(self) -> None:
-        work = workdir("post")
+        work = workdir(self, "post")
         for design in ("bm_DL_logic_w_Dff", "bm_DL_BCD_adder"):
             flow_dir = work / design
             shutil.copytree(FIXTURES / "prov_post" / design, flow_dir)

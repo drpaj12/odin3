@@ -562,7 +562,7 @@ require_heavy() {
 }
 
 main() {
-    local jobs="" root="" fixtures="" out="" keep=0 order=n repo techlibs= vtr=0 report="" equiv=""
+    local made=0 jobs="" root="" fixtures="" out="" keep=0 order=n repo techlibs= vtr=0 report="" equiv=""
     local no_equiv=0 mem_gb=""
     local -a orig=("$@")
     repo=$(dirname "$(dirname "$HERE")")
@@ -618,7 +618,7 @@ main() {
         fi
         [ "$no_equiv" = 0 ] || equiv=""
     fi
-    [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/blif-roundtrip.XXXXXX")
+    if [ -z "$out" ]; then out=$(mktemp -d "${TMPDIR:-/tmp}/blif-roundtrip.XXXXXX"); made=1; fi
     out=$(readlink -f "$out")
     mkdir -p "$out/res" "$out/tmp"
     rm -f "$out"/res/* 2>/dev/null || true
@@ -674,6 +674,8 @@ main() {
         set -e
     fi
     [ "$keep" = 1 ] || rm -rf "$out/tmp"
+    # a work directory this run made itself goes with a clean run (report already on stdout)
+    if [ "$made" = 1 ] && [ "$keep" = 0 ] && [ "$rc" = 0 ]; then rm -rf "$out"; fi
     return "$rc"
 }
 

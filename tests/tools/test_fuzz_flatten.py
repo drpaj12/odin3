@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -57,6 +58,7 @@ def args(cases: int, repro: Path) -> argparse.Namespace:
 class FuzzTests(unittest.TestCase):
     def _run(self, mode: str, cases: int = 3) -> tuple[ff.Tally, FakeOdin, Path]:
         tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
         fake = FakeOdin(mode)
         with mock.patch.object(fc, "run_capped", fake), mock.patch("builtins.print"):
             tally = ff.fuzz(args(cases, tmp / "repro"))
