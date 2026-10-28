@@ -1,0 +1,165 @@
+.model m
+.inputs add_A[0] add_A[1] add_A[2] add_A[3] add_B[0] add_B[1] add_B[2] add_B[3]
+.outputs add_Y[0] add_Y[1] add_Y[2] add_Y[3]
+.inputs and_A[0] and_A[1] and_A[2] and_A[3] and_B[0] and_B[1] and_B[2] and_B[3]
+.outputs and_Y[0] and_Y[1] and_Y[2] and_Y[3]
+.inputs lt_A[0] lt_A[1] lt_A[2] lt_A[3] lt_B[0] lt_B[1] lt_B[2] lt_B[3]
+.outputs lt_Y[0] lt_Y[1] lt_Y[2] lt_Y[3]
+.inputs shl_A[0] shl_A[1] shl_A[2] shl_A[3] shl_B[0] shl_B[1] shl_B[2] shl_B[3]
+.outputs shl_Y[0] shl_Y[1] shl_Y[2] shl_Y[3]
+.names gnd
+.names vcc
+1
+.subckt $_XOR_ A=add_A[0] B=add_B[0] Y=$n50
+.cname $add.xor0
+.subckt $_AND_ A=add_A[0] B=add_B[0] Y=$n51
+.cname $add.and1
+.subckt $_XOR_ A=add_A[1] B=add_B[1] Y=$n52
+.cname $add.xor2
+.subckt $_AND_ A=add_A[1] B=add_B[1] Y=$n53
+.cname $add.and3
+.subckt $_XOR_ A=add_A[2] B=add_B[2] Y=$n54
+.cname $add.xor4
+.subckt $_AND_ A=add_A[2] B=add_B[2] Y=$n55
+.cname $add.and5
+.subckt $_XOR_ A=add_A[3] B=add_B[3] Y=$n56
+.cname $add.xor6
+.subckt $_AND_ A=add_A[3] B=add_B[3] Y=$n57
+.cname $add.and7
+.subckt $_AND_ A=$n50 B=gnd Y=$n58
+.cname $add.and8
+.subckt $_OR_ A=$n51 B=$n58 Y=$n59
+.cname $add.or9
+.subckt $_AND_ A=$n52 B=$n59 Y=$n60
+.cname $add.and10
+.subckt $_OR_ A=$n53 B=$n60 Y=$n61
+.cname $add.or11
+.subckt $_AND_ A=$n52 B=$n50 Y=$n62
+.cname $add.and12
+.subckt $_AND_ A=$n56 B=$n55 Y=$n63
+.cname $add.and13
+.subckt $_OR_ A=$n57 B=$n63 Y=$n64
+.cname $add.or14
+.subckt $_AND_ A=$n56 B=$n54 Y=$n65
+.cname $add.and15
+.subckt $_AND_ A=$n65 B=$n61 Y=$n66
+.cname $add.and16
+.subckt $_OR_ A=$n64 B=$n66 Y=$n67
+.cname $add.or17
+.subckt $_AND_ A=$n65 B=$n62 Y=$n68
+.cname $add.and18
+.subckt $_AND_ A=$n54 B=$n61 Y=$n69
+.cname $add.and19
+.subckt $_OR_ A=$n55 B=$n69 Y=$n70
+.cname $add.or20
+.subckt $_AND_ A=$n54 B=$n62 Y=$n71
+.cname $add.and21
+.subckt $_XOR_ A=$n50 B=gnd Y=add_Y[0]
+.cname $add.xor22
+.subckt $_XOR_ A=$n52 B=$n59 Y=add_Y[1]
+.cname $add.xor23
+.subckt $_XOR_ A=$n54 B=$n61 Y=add_Y[2]
+.cname $add.xor24
+.subckt $_XOR_ A=$n56 B=$n70 Y=add_Y[3]
+.cname $add.xor25
+.subckt $_AND_ A=and_A[0] B=and_B[0] Y=and_Y[0]
+.cname $and.and0
+.subckt $_AND_ A=and_A[1] B=and_B[1] Y=and_Y[1]
+.cname $and.and1
+.subckt $_AND_ A=and_A[2] B=and_B[2] Y=and_Y[2]
+.cname $and.and2
+.subckt $_AND_ A=and_A[3] B=and_B[3] Y=and_Y[3]
+.cname $and.and3
+.subckt $_NOT_ A=lt_B[0] Y=$n81
+.cname $lt.not0
+.subckt $_NOT_ A=lt_B[1] Y=$n82
+.cname $lt.not1
+.subckt $_NOT_ A=lt_B[2] Y=$n83
+.cname $lt.not2
+.subckt $_NOT_ A=lt_B[3] Y=$n84
+.cname $lt.not3
+.subckt $_XOR_ A=lt_A[0] B=$n81 Y=$n85
+.cname $lt.xor4
+.subckt $_AND_ A=lt_A[0] B=$n81 Y=$n86
+.cname $lt.and5
+.subckt $_XOR_ A=lt_A[1] B=$n82 Y=$n87
+.cname $lt.xor6
+.subckt $_AND_ A=lt_A[1] B=$n82 Y=$n88
+.cname $lt.and7
+.subckt $_XOR_ A=lt_A[2] B=$n83 Y=$n89
+.cname $lt.xor8
+.subckt $_AND_ A=lt_A[2] B=$n83 Y=$n90
+.cname $lt.and9
+.subckt $_XOR_ A=lt_A[3] B=$n84 Y=$n91
+.cname $lt.xor10
+.subckt $_AND_ A=lt_A[3] B=$n84 Y=$n92
+.cname $lt.and11
+.subckt $_AND_ A=$n85 B=vcc Y=$n93
+.cname $lt.and12
+.subckt $_OR_ A=$n86 B=$n93 Y=$n94
+.cname $lt.or13
+.subckt $_AND_ A=$n87 B=$n94 Y=$n95
+.cname $lt.and14
+.subckt $_OR_ A=$n88 B=$n95 Y=$n96
+.cname $lt.or15
+.subckt $_AND_ A=$n87 B=$n85 Y=$n97
+.cname $lt.and16
+.subckt $_AND_ A=$n91 B=$n90 Y=$n98
+.cname $lt.and17
+.subckt $_OR_ A=$n92 B=$n98 Y=$n99
+.cname $lt.or18
+.subckt $_AND_ A=$n91 B=$n89 Y=$n100
+.cname $lt.and19
+.subckt $_AND_ A=$n100 B=$n96 Y=$n101
+.cname $lt.and20
+.subckt $_OR_ A=$n99 B=$n101 Y=$n102
+.cname $lt.or21
+.subckt $_AND_ A=$n100 B=$n97 Y=$n103
+.cname $lt.and22
+.subckt $_AND_ A=$n89 B=$n96 Y=$n104
+.cname $lt.and23
+.subckt $_OR_ A=$n90 B=$n104 Y=$n105
+.cname $lt.or24
+.subckt $_AND_ A=$n89 B=$n97 Y=$n106
+.cname $lt.and25
+.subckt $_NOT_ A=$n102 Y=lt_Y[0]
+.cname $lt.not26
+.subckt $_MUX_ A=shl_A[0] B=gnd S=shl_B[3] Y=$n108
+.cname $shl.mux0
+.subckt $_MUX_ A=shl_A[1] B=gnd S=shl_B[3] Y=$n109
+.cname $shl.mux1
+.subckt $_MUX_ A=shl_A[2] B=gnd S=shl_B[3] Y=$n110
+.cname $shl.mux2
+.subckt $_MUX_ A=shl_A[3] B=gnd S=shl_B[3] Y=$n111
+.cname $shl.mux3
+.subckt $_MUX_ A=$n108 B=gnd S=shl_B[0] Y=$n112
+.cname $shl.mux4
+.subckt $_MUX_ A=$n109 B=$n108 S=shl_B[0] Y=$n113
+.cname $shl.mux5
+.subckt $_MUX_ A=$n110 B=$n109 S=shl_B[0] Y=$n114
+.cname $shl.mux6
+.subckt $_MUX_ A=$n111 B=$n110 S=shl_B[0] Y=$n115
+.cname $shl.mux7
+.subckt $_MUX_ A=$n112 B=gnd S=shl_B[1] Y=$n116
+.cname $shl.mux8
+.subckt $_MUX_ A=$n113 B=gnd S=shl_B[1] Y=$n117
+.cname $shl.mux9
+.subckt $_MUX_ A=$n114 B=$n112 S=shl_B[1] Y=$n118
+.cname $shl.mux10
+.subckt $_MUX_ A=$n115 B=$n113 S=shl_B[1] Y=$n119
+.cname $shl.mux11
+.subckt $_MUX_ A=$n116 B=gnd S=shl_B[2] Y=shl_Y[0]
+.cname $shl.mux12
+.subckt $_MUX_ A=$n117 B=gnd S=shl_B[2] Y=shl_Y[1]
+.cname $shl.mux13
+.subckt $_MUX_ A=$n118 B=gnd S=shl_B[2] Y=shl_Y[2]
+.cname $shl.mux14
+.subckt $_MUX_ A=$n119 B=gnd S=shl_B[2] Y=shl_Y[3]
+.cname $shl.mux15
+.names gnd lt_Y[1]
+1 1
+.names gnd lt_Y[2]
+1 1
+.names gnd lt_Y[3]
+1 1
+.end

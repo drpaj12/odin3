@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(odin3 VERSION 1.1.1 LANGUAGES C)
+project(odin3 VERSION 1.2.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"

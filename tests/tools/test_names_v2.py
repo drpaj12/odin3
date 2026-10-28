@@ -13,6 +13,7 @@ Work files go to a fresh temporary directory that is left in place.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -326,7 +327,13 @@ class NamesV1UnchangedTest(unittest.TestCase):
                 out = Path(str(names)[: -len(".names")])
                 for path in (out, names):
                     key = path.name.replace("_v1", "")
-                    got[key] = hashlib.sha256(path.read_bytes()).hexdigest()
+                    # The BLIF header names the release; the digests are those of 1.1.1.
+                    data = re.sub(
+                        rb"# Odin III \d+\.\d+\.\d+ write_blif",
+                        b"# Odin III 1.1.1 write_blif",
+                        path.read_bytes(),
+                    )
+                    got[key] = hashlib.sha256(data).hexdigest()
         self.assertEqual(sorted(got), sorted(want))
         self.assertEqual({k: v for k, v in got.items() if v != want[k]}, {})
 

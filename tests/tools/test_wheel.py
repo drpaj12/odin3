@@ -91,7 +91,7 @@ class WheelTest(unittest.TestCase):
             env = dict(os.environ, CMAKE_BUILD_PARALLEL_LEVEL="4")
             run([py, "-m", "build", "--wheel", "--no-isolation", "--outdir", str(out),
                  str(helpers.REPO_ROOT)], work / "build.log", env)
-            wheels = sorted(out.glob("odin3-1.1.1-*.whl"))
+            wheels = sorted(out.glob("odin3-1.2.0-*.whl"))
             self.assertEqual(len(wheels), 1, wheels)
             install_venv = work / "installvenv"
             run([sys.executable, "-m", "venv", str(install_venv)], work / "venv2.log")
@@ -122,7 +122,7 @@ class WheelTest(unittest.TestCase):
             found = list(cli.glob("python*/site-packages/odin3/bin/odin3"))
             self.assertEqual(len(found), 1)
             ver = run([str(found[0]), "--version"], work / "cli.log")
-            self.assertIn("odin3 1.1.1", ver)
+            self.assertIn("odin3 1.2.0", ver)
 
 
 if __name__ == "__main__":
