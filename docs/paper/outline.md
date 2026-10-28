@@ -1,23 +1,22 @@
-# Proposed new main-paper outline: Odin III
+# Main-paper outline: Odin III (step 2, applied)
 
-Order requested in the brief. Odin III is a systems paper whose evidence is acceptance gates and checks; the register (hypotheses.md) says which are pre-registered (O1, O3, O16) and which reconstructed. Paper text is not edited in this step. Branched from origin/docs/paper-tree because odin3 #295 is open.
+Order requested in the brief. Odin III is a systems paper whose evidence is acceptance gates and checks; the register (hypotheses.md) gives each hypothesis a verdict. Step 2 applies Peter's decisions of 2026-10-28: no pre-registration wording in the paper; O13 (Dark Factory) is method, not a hypothesis; POSSIBLY GOOD for narrow rows; untested ideas go to Future work (one paragraph each); a Glossary subsection built from terms.md (make_glossary.py) in dependency order after the thesis of Jamieson 2007 and of Luu 2014; the research log (every hypothesis, one row, make_register.py) is Appendix A.
 
 ## New structure
 
 0. Abstract: the plain-English story, the innovations with their USEFUL hypotheses, one sentence on the failed cost gate (O16) and the unproven items.
-1. Introduction: problem in plain English (a Verilog front end for the open FPGA flow that keeps track of where every gate came from); the innovations in plain English (innovations.md 1 to 5); contributions = innovations with USEFUL hypotheses (O1, O2, O4, O6, O7, O8, O9, O13, O14, O17) and the honest INCONCLUSIVE and DISMISSED items (O3, O5, O15, O16).
+1. Introduction: problem in plain English (a Verilog front end for the open FPGA flow that keeps track of where every gate came from); the innovations in plain English (innovations.md 1 to 4, then the build process as method); contributions = innovations with the hypotheses that confirmed them (USEFUL O1, O2, O4, O6, O7, O8, O9, O14; POSSIBLY GOOD O17, with its fragility) and the honest INCONCLUSIVE and DISMISSED items (O3, O5, O15, O16).
 2. Background (terms in dependency order, terms.md): FPGA, Verilog/HDL, netlist, LUT, CLB, flip-flop, packing/placement/routing, VTR/VPR, front end, elaboration, AST, Odin II/Yosys/Parmys, ABC, provenance, IR, oracle, golden.
 3. The innovation (plain English, then technical): the front end and flow; oracle checking; the provenance IR; the ABI; the Dark Factory process.
-4. Methodology: setup (laptop, WSL2, heavy lock, 15 designs, the five shipped out), metrics: area (LUTs, CLBs, channel width W), speed (CPD, routed WL; near-critical timing is a tool feature from v1.1.1, not a measured result), power (not measured); gates and checks (QoR gate 1.20 / 1.50, exit-code discipline, proof outcomes, byte equality); what is pre-registered versus reconstructed; data: the VTR benchmark designs and golden results, the micro suite, and provenance as the enabler for Mimir (see below).
-5. Experiments, one subsection per USEFUL/INCONCLUSIVE/DISMISSED row kept in the main paper:
+4. Methodology (including how it was built: the Dark Factory as method, with its limits and cost): setup (laptop, WSL2, heavy lock, 15 designs, the five shipped out), metrics: area (LUTs, CLBs, channel width W), speed (CPD, routed WL; near-critical timing is a tool feature from v1.1.1, not a measured result), power (not measured); gates and checks (QoR gate 1.20 / 1.50, exit-code discipline, proof outcomes, byte equality); data: the VTR benchmark designs and golden results, the micro suite, and provenance as the enabler for Mimir (see below).
+5. Experiments, one subsection per USEFUL / POSSIBLY GOOD row (INCONCLUSIVE and DISMISSED only where the question needs the honest answer): Hypothesis / Experiment / Result / Verdict:
    - 5.1 Quality of results against Parmys (O1, O2; O3 as the parity decision).
    - 5.2 Equivalence and function (O4, O5, O6, O7, O8).
    - 5.3 Defects found in the Parmys flow (O9).
    - 5.4 Provenance exact at every granularity and what it costs (O14, O15, O16, O17).
-   - 5.5 Process, time and token cost (O13).
-6. Discussion and limits: not a lights-out factory; code not deeply read; five largest designs untested; Oprov not measured; parity retired; path-dependent hash names; no power.
+6. Discussion and limits (untested ideas move to Future work, with the experiment each needs): not a lights-out factory; code not deeply read; five largest designs untested; Oprov not measured; parity retired; path-dependent hash names; no power.
 7. Conclusion.
-Appendix A (Part II of the current paper, shortened): system detail; research log with every row of hypotheses.md.
+Part II (after the references): system detail, unchanged. Appendix A: research log with every row of hypotheses.md (including DISMISSED and the untested ideas).
 
 ## Mapping of the current paper
 
