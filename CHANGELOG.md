@@ -66,7 +66,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   revisits; the `fine.group` and `fine.addsub` rules made the canonical constants 0 and 1 before knowing they would
   rewrite anything, and the sweep dropped them again, but IDs are never reused (IR-6), so a Debug build numbered the
   nets and nodes after `opt_expr` higher than a Release build (two per dropped constant) and every `$n<ID>` name
-  built on them, hence the hash names, differed (522 of 1224 writer files on the micros, Debug against Release). The
+  built on them, hence the hash names, differed (522 of 1224 writer files on the micros, Debug against Release; the count is `python3 tools/flow/hash_name_compare.py build/debug/odin3 build/release/odin3`, which runs both on every micro in 9 writer/map variants and compares every output and name map byte for byte, and gives 1224 of 1224 identical after the fix). The
   rules (`src/passes/opt/expr_fine.c`) now make a constant only when they rewrite. Test `cli_hash_name_ids`. IDs, and
   so names, of objects made after such a rule change in every build (fewer IDs used). Goldens regenerated for that
   (IDs only): `tests/opt/rules/expr/fine.group.il`, `tests/tools/data/names_v2/{ansiportlist_2.blif,v1_ansiportlist_2}.txt`,
