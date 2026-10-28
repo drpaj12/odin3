@@ -4,10 +4,22 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## [Unreleased]
+## 1.2.0 (unreleased, tag on Peter's go)
+
+Release notes: [docs/V1.2.0.md](docs/V1.2.0.md). Provenance as a two-way granularity DAG (ADR D14).
+**C ABI 7** (6 in 1.1.1): plugins built for ABI 6 must be rebuilt. Version strings are 1.2.0.
 
 ### Added
 
+- V1.2.0 Task 8 (`docs/V1.2.0.md` 6; #284): `odin3-prov-post FLOW_DIR` adds BLE, CLB and site provenance records
+  and `A` lines to a version 2 map from VPR's `.net` and `.place`; `odin3-flow --keep-results` keeps those files.
+  Tools only.
+- V1.2.0 Task 5 (`docs/V1.2.0.md` 3.2; #281): the version 2 name map writers. `--prov-map [refs|constructs|full]` on
+  `write_blif --vtr`, `write_json` and `write_verilog` write the lines `O N R C F T A` atomically with the netlist
+  (`src/backends/common/prov_export.c`, `name_map.c`). ABI stays 7.
+- V1.2.0 Task 2 (`docs/V1.2.0.md` 3.1; #276): the provenance operation-class table (`src/ir/opclass.{h,c}`,
+  `docs/IR.md` IR-12a, `check` rule 13), `odin3_prov_begin_op_class`, and a lint rule that rejects a raw
+  `odin3_prov_begin_op` outside the readers and `src/ir/`. No behaviour change in any output.
 - V1.2.0 Task 3 (`docs/V1.2.0.md` 4.3, `docs/ADR/D14.md`): the construct table (`docs/IR.md` IR-12a),
   check rule 12, and ABI 7: `odin3_level` and `odin3_prov_dir` public, `odin3_design_construct_count`,
   `odin3_design_get_construct`, `odin3_obj_get_prov`, `odin3_prov_get_info`,
