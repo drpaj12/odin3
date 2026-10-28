@@ -25,7 +25,8 @@ def overleaf_files() -> list[str]:
     (odin3_blind.tex, blind.bib, the blinded figure copies and the script that makes them)."""
     figs = sorted(f for f in glob.glob("IMAGE/fig_*.tex"))
     blind_figs = sorted(f for f in glob.glob("IMAGE/blind/fig_*.tex"))
-    return ["odin3.tex", "odin3_blind.tex", "joined.bib", "blind.bib", "make_blind.py",
+    return ["odin3.tex", "odin3_blind.tex", "glossary.tex", "register.tex", "joined.bib", "blind.bib",
+            "make_blind.py",
             "IMAGE/odin3-tikz-styles.tex", *figs, *blind_figs, "IMAGE/fig_ast.pdf"]
 
 
