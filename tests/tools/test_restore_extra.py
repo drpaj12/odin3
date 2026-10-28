@@ -23,7 +23,7 @@ from pathlib import Path
 import prov_post
 
 from .helpers import FIXTURES
-from .restore_common import LIB, MICRO_DIR, ODIN3, flow, run_cli, workdir
+from .restore_common import LIB, MICRO_DIR, MICRO_REL, ODIN3, flow, run_cli, workdir
 
 BLIF_READ = "read_techlib {lib}; read_blif --name-map {names} {src}; "
 JSON_READ = "read_techlib {lib}; read_json --name-map {names} {src}; "
@@ -51,7 +51,7 @@ def write_first(
     if steps:
         script = (
             f"read_techlib {LIB}; read_verilog --nolatches --vtr-compat {ast} "
-            f"{MICRO_DIR / (micro + '.v')}; {steps}"
+            f"{MICRO_REL / (micro + '.v')}; {steps}"
         )
     writer = "write_blif --vtr" if kind == "blif" else "write_json"
     run = run_cli(f"{script}{writer} --name-style hash {prov} {out}")
@@ -197,6 +197,38 @@ class RestoreExtra(unittest.TestCase):
             self.assertTrue(all(f == "" for f in [fields[2], *fields[4:11]]))
             self.assertIn("objective=r", fields[11])
             self.assertNotEqual(fields[1], "r3")
+
+    def test_record_numbers_do_not_depend_on_the_directory_name(self) -> None:
+        """The same design read by a relative path from two directories with different names gives
+        byte-identical O, R, Q and K lines, also after a restore and `opt` (the numbers follow the
+        hash names, which carry the design's file name: an absolute path would carry the directory
+        name into them)."""
+        results = []
+        for name in ("odin3", "odin3-x"):
+            work = workdir(self, "pathdep") / name
+            work.mkdir()
+            shutil.copy(MICRO_DIR / "bm_stmt_compare_padding.v", work)
+            design = "bm_stmt_compare_padding.v"
+            first, after = work / "cmp.json", work / "cmp.2.json"
+            steps = "proc; flatten; hardmap; lower; "
+            script = f"read_techlib {LIB}; read_verilog --nolatches --vtr-compat --prov-ast refs "
+            run = run_cli(
+                f"{script}{design}; {steps}write_json --name-style hash --prov-map {first.name}",
+                cwd=work,
+            )
+            assert run.returncode == 0, run.stderr
+            with names_of(first).open("a") as handle:
+                handle.write("Q\tr3\t\topt\t\t\t\t\t\t\t\tbasis\t-\nK\tr3\tm\t\t\t\tbasis\t-\n")
+            run = run_cli(
+                f"read_techlib {LIB}; read_json --name-map {names_of(first).name} {first.name}; "
+                f"opt -full; write_json --name-style hash --prov-map {after.name}",
+                cwd=work,
+            )
+            assert run.returncode == 0, run.stderr
+            keep = ("O\t", "R\t", "Q\t", "K\t")
+            results.append([x for x in lines(names_of(after)) if x.startswith(keep)])
+        self.assertTrue(results[0])
+        self.assertEqual(results[0], results[1])
 
     def test_a_pass_that_only_looks_leaves_the_lines_current(self) -> None:
         work = workdir(self, "look")
