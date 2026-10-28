@@ -14,6 +14,11 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 CHUNK = 12
+# Section of odin3.tex (Experiments is V, Future Work is VII) where each hypothesis is reported.
+SECTION = {"O1": "V-A", "O2": "V-A", "O3": "V-A", "O4": "V-B", "O10": "V-B", "O6": "V-C",
+           "O7": "V-D", "O8": "V-E", "O5": "V-F", "O9": "V-G", "O14": "V-H", "O15": "V-H",
+           "O16": "V-I",
+           "O17": "V-J", "O11": "V-K", "O12": "V-K"}
 SPECIAL = str.maketrans({"&": r"\&", "%": r"\%", "#": r"\#", "$": r"\$", "{": r"\{", "}": r"\}",
                          "^": r"\^{}", "~": r"\~{}"})
 
@@ -54,10 +59,9 @@ def rows() -> list[tuple[str, str, str, str, str]]:
             continue
         c = [x.strip() for x in raw.strip().strip("|").split("|")]
         if untested and len(c) == 3:
-            out.append((c[0], "-", c[1], "not run; needs: " + c[2], "UNTESTED"))
+            out.append((c[0], "VII", c[1], "not run; needs: " + c[2], "UNTESTED"))
         elif len(c) == 11:
-            found = re.match(r"[A-Za-z]+\d*[a-z]?", c[1])
-            rnd = found.group(0) if found else c[1]
+            rnd = SECTION.get(c[0], "-")
             out.append((c[0], rnd, c[3], c[7], verdict_word(c[9])))
     return out
 
@@ -75,14 +79,15 @@ def main() -> None:
             "every hypothesis, one row each, with the verdict.}\n",
             f"\\label{{tab:register-{n // CHUNK + 1}}}\n",
             "\\centering\\scriptsize\n",
-            "\\begin{tabular}{@{}p{0.9cm}p{0.7cm}p{5.2cm}p{8.0cm}p{1.9cm}@{}}\n",
-            "\\toprule\nID & Round & Hypothesis & Result & Verdict \\\\\n\\midrule\n",
+            "\\begin{tabular}{@{}p{0.9cm}p{0.9cm}p{5.0cm}p{8.0cm}p{1.9cm}@{}}\n",
+            "\\toprule\nID & Sec. & Hypothesis & Result & Verdict \\\\\n\\midrule\n",
         ]
         for hid, rnd, hyp, res, ver in part:
             cells = f"{esc(hid)} & {esc(rnd)} & {esc(hyp)} & {esc(res)}"
             lines.append(f"{cells} & \\textsc{{{ver.lower()}}} \\\\\n")
         lines += ["\\bottomrule\n\\end{tabular}\n\\end{table*}\n\n"]
-    (HERE / "register.tex").write_text("".join(lines), encoding="utf-8", newline="\n")
+    text = "".join(lines).rstrip("\n") + "\n"
+    (HERE / "register.tex").write_text(text, encoding="utf-8", newline="\n")
     print(len(data), "rows")
 
 

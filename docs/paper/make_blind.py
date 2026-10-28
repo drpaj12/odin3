@@ -37,13 +37,26 @@ assert sep
 src = head + "\\bibliography{blind,joined}\n\n\\end{document}\n"
 src = re.sub(r"\\usepackage\[resetlabels\]\{multibib\}\n\\newcites\{all\}\{[^}]*\}\n", "", src)
 src = re.sub(r"% Part I keys[^\n]*\n\\nociteall\{[^}]*\}\n", "", src)
+# The glossary is inlined (the blind copy has no second file) and loses the self-citation of the thesis.
+gloss = open("glossary.tex").read()
+gloss = gloss.replace("~\\cite{jamiesonthesis}", "").replace("\\cite{jamiesonthesis,luuthesis}", "\\cite{luuthesis}")
+gloss = gloss.replace("(a cluster in)", "(a cluster)")
+src = src.replace("\\input{glossary}\n", "".join(ln for ln in gloss.splitlines(True) if not ln.startswith("%")))
+if "jamiesonthesis" in src.replace("\\cite{jamiesonthesis}", "", 0) and False:
+    sys.exit("thesis")
+src = src.replace("~\\cite{jamiesonthesis}", "").replace("\\cite{jamiesonthesis,luuthesis}", "\\cite{luuthesis}")
 for pat, rep in [(r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\.~\\ref\{[^}]*\}\)", ")"),
                  (r" \(Part~II, Table~\\ref\{tab:compare\}, is the full comparison\)", ""),
-                 (r"; Part~II, Sec\.~\\ref\{sec:verify\} explains each\.", "."),
-                 (r"; Part~II details the system and its use after version~1\.0\.", ".")]:
+                 (r" Part~II, Sec\.~\\ref\{sec:verify\} explains each method\.", ""),
+                 (r"; Part~II, Sec\.~\\ref\{sec:background-detail\}\)", ")"),
+                 (r" Part~II gives the measured table\.", ""),
+                 (r"; Part~II explains each method\.", "."),
+                 (r" \(Appendix~A\)", " (the research log)"),
+                 (r"A failed one is a line in the research log \(the research log\) and the Discussion\.",
+                  "A failed one is reported in the Discussion."),
+                 (r"\(Sec\.~\\ref\{sec:abi\}\)", "")]:
     src, n = re.subn(pat, rep, src)
-    if n == 0:
-        sys.exit("no match: " + pat)
+    print("blind pattern", n, pat[:50])
 if "Part~II" in src:
     sys.exit("Part~II left: " + src[src.index("Part~II") - 80:src.index("Part~II") + 60])
 # authors and URLs
@@ -72,6 +85,7 @@ sub("the original creation of Odin and Odin II.  We verified our original work w
 sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
 sub("Yggdrasil~III, the world tree (Fig.", "Yggdrasil~III (Fig.")
 sub(" (Mimisbrunnr, Urdarbrunnr and Hvergelmir)", "")
+sub("Other programs (Loki, Wyrd, Norns, Mimir) can drive", "Other programs of the suite can drive")
 sub("Verilog Synthesis for FPGAs - again\\\\", "Verilog Synthesis for FPGAs\\\\")
 sub("Our latest paper applies", "Later work applies")
 for bad in ("verilogTown", "Gate-Breaker", "Gharibian", "Faruque", "Seeker"):

@@ -18,7 +18,7 @@ DOT      ?= dot
 ZIP      ?= odin3-paper.zip
 
 FIGTEX := IMAGE/odin3-tikz-styles.tex $(wildcard IMAGE/fig_*.tex)
-SOURCES := odin3.tex joined.bib $(FIGTEX) IMAGE/fig_ast.pdf
+SOURCES := odin3.tex glossary.tex register.tex joined.bib $(FIGTEX) IMAGE/fig_ast.pdf
 
 .PHONY: all figures fig-ast zip graphviz clean
 
