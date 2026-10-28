@@ -6,7 +6,7 @@ Plain English first, then the technical paragraph, then the H-IDs (hypotheses.md
 
 Plain English. A program that reads Verilog and hands a netlist to the open-source FPGA flow, so the rest of the flow (ABC, then VPR's pack, place and route) works as before and the result is about as good as with the Yosys-based front end.
 Technical. C17 framework: two-stage elaboration, re-implementations of Yosys 0.55 `proc`, `opt`, `fsm`, `wreduce`, `flatten`, architecture-driven partial mapping, `lower`, linked ABC and VPR-ready BLIF (odin3.tex:129-210).
-Proves its value: O1 (all 15 designs route; geomeans against Parmys: LUT 1.041, CLB 1.012, W 0.985, CPD 0.986, WL 1.034 inside the 1.20 gate), O2 (valid baseline), O6 (fcheck 12 of 15 pass, Parmys fails 8 of 15), O7 (byte-identical reruns 15 of 15), O10 (random generator for `lower`). POSSIBLY GOOD, stated with the fragility: O11, O12 (component checks).
+Proves its value, with a stated gap: O1 (POSSIBLY GOOD: all 15 designs route; geomeans against Parmys: LUT 1.041, CLB 1.012, W 0.985, CPD 0.986, WL 1.034 inside the 1.20 gate, but two designs differ in multiplier count and five lose adders), O2 (valid baseline), O6 (fcheck 12 of 15 pass, Parmys fails 8 of 15), O7 (byte-identical reruns 15 of 15), O10 (random generator for `lower`). POSSIBLY GOOD, stated with the fragility: O11, O12 (component checks).
 Still unproven: parity per design (O3 INCONCLUSIVE, retired by decision 53); the five largest VTR designs (U2); power (not measured); the cost of provenance names in VPR (U1).
 
 ## 2. Checking against oracles instead of trusting them
