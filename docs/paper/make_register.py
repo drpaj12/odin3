@@ -79,7 +79,7 @@ def main() -> None:
             "every hypothesis, one row each, with the verdict.}\n",
             f"\\label{{tab:register-{n // CHUNK + 1}}}\n",
             "\\centering\\scriptsize\n",
-            "\\begin{tabular}{@{}p{0.9cm}p{0.9cm}p{5.0cm}p{8.0cm}p{1.9cm}@{}}\n",
+            "\\begin{tabular}{@{}p{0.9cm}p{0.9cm}p{5.0cm}p{7.6cm}p{1.9cm}@{}}\n",
             "\\toprule\nID & Sec. & Hypothesis & Result & Verdict \\\\\n\\midrule\n",
         ]
         for hid, rnd, hyp, res, ver in part:
