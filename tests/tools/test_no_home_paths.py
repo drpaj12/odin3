@@ -26,6 +26,7 @@ ALLOWED = {
 
 
 class NoHomePathsTest(unittest.TestCase):
+    @unittest.skipUnless((helpers.REPO_ROOT / ".git").exists(), "not a git checkout (tarball)")
     def test_tracked_files_have_no_home_path(self) -> None:
         listing = subprocess.run(
             ["git", "-C", str(helpers.REPO_ROOT), "ls-files", "-z"],
