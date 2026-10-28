@@ -13,12 +13,7 @@ Release notes: [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
 
-Odin III is the trunk of **Yggdrasil III**, a suite of research tools that use it as a package
-without changing its core: Wyrd III (experiment runner and GUI, <https://github.com/drpaj12/wyrd>),
-Loki III (reverse engineering of structural netlists, <https://github.com/drpaj12/loki>), Verdandi III
-(the Micro through the Macro, <https://github.com/drpaj12/verdandiIII>), The Norns III (placement with
-provenance, <https://github.com/drpaj12/nornsIII>), Bifrost III (the simulation bridge) and Midgard III
-(the Verilog Town game).
+Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.2.0 (`pyproject.toml`; the latest release tag is v1.1.1). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 ## Documentation
 
