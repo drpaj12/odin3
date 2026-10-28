@@ -1,0 +1,7 @@
+line type             first  second
+O lines                 67     38
+N lines                 13     10
+R lines                 62     38
+A lines                 36     36
+Q lines                  3      3
+K lines                 23     23

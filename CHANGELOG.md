@@ -23,6 +23,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   version 2 map, `names --chain` the chain, `names --check` the version 2 invariants; Python
   `odin3.read_name_map`. Version 1 output is unchanged. No core, IR or ABI change.
 
+- V1.2.0 Task 11 (`docs/V1.2.0.md` 9): the provenance user docs. New page `docs/user/provenance.md` (what a
+  record is, the levels and operation classes, the construct table, joins and their labels, the version 2 map
+  line by line with the full flag list, `odin3-prov-post`, the `Q` and `K` lines with the pair classes and
+  the recorded/inferred table, restore from a map with its stale marks and round-trip results, `names
+  --lookup/--chain/--check`, the Python readers, a worked example and the limits). The flag list moved out of
+  `docs/user/outputs.md`, which links to the page, as does `odin3-flow`. Every example is written by
+  `docs/user/examples/provenance/make_examples.py` from the current build. Documentation only; no code,
+  ABI or output change.
+
 - V1.2.0 Task 10 (`docs/V1.2.0.md` 3.6): the `Q` and `K` lines. `odin3-prov-post` writes the N17 pair classes (shares by
   largest-remainder rounding), gain terms and pack-time criticality (with a Norns census), post-route `rho`, `slack` and
   near-critical flags and counts, and `basis` letters; the Odin III writers write an objective-only `Q` for every join
