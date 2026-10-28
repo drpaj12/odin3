@@ -17,6 +17,10 @@ from .helpers import REPO_ROOT
 ODIN3 = os.environ.get("ODIN3_CLI")
 CLI_ENV = {k: v for k, v in os.environ.items() if k not in ("LD_PRELOAD", "LD_AUDIT")}
 MICRO_DIR = REPO_ROOT / "tests" / "micro" / "verilog" / "micro"
+# The design path a script gives the CLI: relative to REPO_ROOT (where run_cli runs), so the file
+# name of a design, and with it the hash names and the record numbers, do not depend on where the
+# tree sits.
+MICRO_REL = MICRO_DIR.relative_to(REPO_ROOT)
 DATA = Path(__file__).resolve().parent / "data" / "restore"
 UPDATE = os.environ.get("ODIN3_UPDATE_GOLDEN") == "1"
 LIB = REPO_ROOT / "lib" / "vtr.o3lib"
@@ -50,12 +54,12 @@ def workdir(case: unittest.TestCase, tag: str) -> Path:
     return path
 
 
-def run_cli(script: str) -> subprocess.CompletedProcess[str]:
-    """One `odin3 -p script` from the repository root."""
+def run_cli(script: str, cwd: Path = REPO_ROOT) -> subprocess.CompletedProcess[str]:
+    """One `odin3 -p script` from the repository root (or cwd)."""
     assert ODIN3 is not None, "ODIN3_CLI is not set"
     return subprocess.run(
         [ODIN3, "-p", script],
-        cwd=REPO_ROOT,
+        cwd=cwd,
         capture_output=True,
         text=True,
         check=False,
@@ -64,7 +68,7 @@ def run_cli(script: str) -> subprocess.CompletedProcess[str]:
 
 
 def flow(micro: str, ast: str = "") -> str:
-    return FLOW.format(ast=ast, src=MICRO_DIR / f"{micro}.v")
+    return FLOW.format(ast=ast, src=MICRO_REL / f"{micro}.v")
 
 
 def ok(script: str) -> bool:

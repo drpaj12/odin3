@@ -126,6 +126,11 @@ class TokenCostTest(unittest.TestCase):
     def _section(text: str, title: str) -> str:
         return text.split(f"## {title}\n", 1)[1].split("\n## ", 1)[0]
 
+    def test_span_covers_all_backends(self) -> None:
+        self._two_requests()
+        text = self._report("deepseek 2026-10-23T07:00:00Z open\n")
+        self.assertIn("Span: 2026-10-23 06:00 → 2026-10-23 09:00 UTC (all backends)", text)
+
     def test_open_window(self) -> None:
         self._two_requests()
         text = self._report("deepseek 2026-10-23T07:00:00Z open\n")
