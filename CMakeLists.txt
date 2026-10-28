@@ -2312,7 +2312,8 @@ if(BUILD_TESTING)
     # Negative check: a deliberately corrupted output must make the gate fail.
     add_test(NAME blif_roundtrip_detects_corruption
              COMMAND ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/blif-roundtrip
-                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt --fixtures
+                     --rt ${PROJECT_SOURCE_DIR}/tools/blif-roundtrip/rt-corrupt --out
+                     ${PROJECT_BINARY_DIR}/negative_tmp/blif_roundtrip --fixtures
                      ${PROJECT_SOURCE_DIR}/tests/golden/blif)
     set_tests_properties(blif_roundtrip_detects_corruption PROPERTIES LABELS unit WILL_FAIL TRUE
         ENVIRONMENT BRT_REAL_RT=$<TARGET_FILE:odin3-blif-rt>)
@@ -2366,7 +2367,8 @@ if(BUILD_TESTING)
     # Negative check: damaged JSON and Verilog must be caught by both gates.
     add_test(NAME writer_check_detects_corruption
              COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
-                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt
+                     --out ${PROJECT_BINARY_DIR}/negative_tmp/writer_check_corrupt)
     set_tests_properties(writer_check_detects_corruption PROPERTIES LABELS unit
         SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
         PASS_REGULAR_EXPRESSION "json: identical [0-9]+, ref-excluded [0-9]+, refused \\(multi-driver\\) [0-9]+, different [1-9][^\n]*\nverilog iverilog[^\n]*\nverilog equiv: equivalent [0-9]+, excluded [0-9]+, NOT-equivalent [1-9]"
@@ -2374,7 +2376,8 @@ if(BUILD_TESTING)
     # Negative check: a black box only the writer's side has is an error, not an exclusion.
     add_test(NAME writer_check_bbox_not_excluded
              COMMAND ${PROJECT_SOURCE_DIR}/tools/writer-check/writer-check -j 2 ${_wc_args}
-                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt)
+                     --write ${PROJECT_SOURCE_DIR}/tools/writer-check/write-corrupt
+                     --out ${PROJECT_BINARY_DIR}/negative_tmp/writer_check_bbox)
     set_tests_properties(writer_check_bbox_not_excluded PROPERTIES LABELS unit
         SKIP_REGULAR_EXPRESSION "writer-check: missing tools"
         PASS_REGULAR_EXPRESSION "verilog equiv: equivalent 0, excluded [0-9]+, NOT-equivalent 0, yosys-error 0, error [1-9]"
