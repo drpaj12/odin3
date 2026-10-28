@@ -638,8 +638,11 @@ python3 docs/user/examples/provenance/make_examples.py [--odin3 PATH] [--work DI
 
 from a release build and `VTR_ROOT` with VPR. The script runs the tools above on the designs in
 `docs/user/examples/provenance/src/` and on the test fixture, and writes only slices of what they
-made. The hash names of the flow example depend on the absolute path of the design (a known issue,
-under investigation), so the work
+made. Since the fix after 1.2.0, `odin3-flow` runs `odin3` in the common
+directory of the design files and passes them relative to it, so names use the path relative to
+the design's common directory and do not depend on where the checkout lives (the run log has a
+`name_root=` line). The committed examples were written before that fix and are regenerated with
+the next release; until then the work
 directory has a fixed default (`/tmp/claude-1000/pdoc-example`) and the committed files are the output for that
 default, with the work directory written as `<work>` in every file; a run with another `--work` gives
 other hash names. Running the script twice gives

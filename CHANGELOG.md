@@ -4,6 +4,16 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
+## Unreleased
+
+### Fixed
+
+- `odin3-flow` runs `odin3` with the working directory set to the common parent directory of the design
+  files and passes each design relative to it, so hash names, the version 2 name map and the BLIF are
+  identical for one design in any directory (the known gap of `docs/V1.2.0.md`). The run log (`odin3/odin3.log`)
+  records `name_root=`. No change under `src/` or `include/`. Tools only.
+- Tests no longer leave temporary directories in `/tmp`.
+
 ## 1.2.0 (unreleased, tag on Peter's go)
 
 Release notes: [docs/V1.2.0.md](docs/V1.2.0.md). Provenance as a two-way granularity DAG (ADR D14).

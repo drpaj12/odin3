@@ -51,6 +51,12 @@ two `vpr/` directories with a `.net`.
 with `--timing-attr` without rerunning anything (same exit codes); {doc}`timing-attribution` has the
 outputs and the JSON schema.
 
+**Names do not depend on where the design lives.** `odin3` runs with its working directory set to the
+common parent directory of the design files, and each design is passed relative to it. The file names in hash
+names and in the name map are therefore relative to that directory: one design in two different
+directories gives byte-identical BLIF and name map. The line `name_root=. designs=...` in
+`odin3/odin3.log` records the relative names. Output, architecture and log paths stay absolute.
+
 The `vtr` target reuses the Odin III script of the QoR flow (`tools/vtr-qor/qor_legs.py`), so the
 script here and the benchmark runs are one definition. The module can be imported as well:
 `odin3_flow.run_flow(FlowArgs) -> FlowResult`, with `tools/vtr-qor` on `PYTHONPATH` (the wrapper
