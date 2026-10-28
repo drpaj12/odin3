@@ -3,7 +3,12 @@
 % forest of mini trees on the right holds the oracles, to compare against. The canopy (green oval) is the
 % tree-top: Wyrd III, Bifrost III (the arrow to Midgard III) and Midgard III (verilogTown). Loki III,
 % Leman Russ III, The Norns III and Verdandi III are side branches off the trunk, tools and experiments.
-% No status; the GitHub links are in the caption.
+% Mimir III is the fruit: three round fruits hang from the canopy on short stems; it is the harvest of
+% the trunk and the branches (Odin III, The Norns III, Loki III feed it with every run).
+% Three deep roots reach three wells (Mimisbrunnr, Urdarbrunnr, Hvergelmir): the outside work the suite
+% draws on; the oracle trees root into Hvergelmir too. No status; the GitHub links are in the caption.
+\definecolor{o3wel1}{HTML}{E8F1F8}     % well water
+\definecolor{o3wel8}{HTML}{3B6E99}     % well rim
 \begin{tikzpicture}[odin, node distance=3mm,
   leaf/.style={ellipse, draw=o3grn8, fill=o3grn1, align=center, line width=0.6pt, inner xsep=1pt,
                inner ysep=1pt, minimum width=15mm, minimum height=8.5mm, font=\scriptsize},
@@ -16,6 +21,29 @@
   stp/.style={font=\scriptsize\bfseries, text=white, inner sep=0pt, align=center},
   mini/.style={ellipse, draw=o3grn8, fill=o3grn3, line width=0.5pt, align=center, inner sep=0pt,
                minimum width=17mm, minimum height=12mm, font=\scriptsize}]
+  % ---- deep roots to the three wells (drawn first, behind everything): the outside work the suite
+  % ---- draws on. Hvergelmir (synthesis sources), Urdarbrunnr (FPGA CAD and its views), Mimisbrunnr
+  % ---- (prior work and benchmarks). Each well names the pieces it feeds. The oracle trees send their
+  % ---- own roots into Hvergelmir: the other trees drink from the same well. -----------------------
+  \foreach \fx/\gx/\wx in {3.9/4.4/4.9, 5.9/6.6/6.0, 7.9/8.75/7.1}{
+    \draw[line width=1.6pt, draw=o3brn5, line cap=round]
+      (\fx,0.3) .. controls (\fx,-1.0) and (\gx,-1.2) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.4) .. (\wx,-4.15);
+  }
+  \foreach \tx/\gx/\wx in {-0.9/-4.4/-5.9, 0.0/0.0/0.0, 0.9/2.2/5.9}{
+    \draw[line width=5.2pt, draw=o3brn9, line cap=round]
+      (\tx,0.3) .. controls (\tx,-1.2) and (\gx,-1.0) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.2) .. (\wx,-4.0);
+    \draw[line width=2.6pt, draw=o3brn7, line cap=round]
+      (\tx,0.3) .. controls (\tx,-1.2) and (\gx,-1.0) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.2) .. (\wx,-4.0);
+  }
+  \foreach \wx/\name/\gloss/\items/\feeds in {
+    -5.9/Mimisbrunnr/{Mimir's well of wisdom: prior work, benchmarks}/{VerilogEval, Gate-Breaker, HAL (DANA),\\CIRCT, TPEKO, LogikBench, fusesoc-cores}/{Loki~III, The Norns~III, Odin~III},
+    0.0/Urdarbrunnr/{the Norns' well: FPGA CAD and its views}/{VTR and VPR, nextpnr,\\DREAMPlaceFPGA, OpenPARF, netlistsvg}/{The Norns~III, Wyrd~III},
+    5.9/Hvergelmir/{the spring of all rivers: synthesis sources}/{Yosys, ABC, slang, mockturtle,\\Wildebeest scripts, FuseSoC and Edalize}/{Odin~III and the oracle forest}}{
+    \node[ellipse, draw=o3wel8, fill=o3wel1, line width=0.8pt, minimum width=56mm, minimum height=30mm,
+          inner sep=0pt] at (\wx,-5.55) {};
+    \node[align=center, font=\scriptsize, text width=46mm] at (\wx,-5.55)
+      {\textbf{\small\name}\\\odinsub{\gloss}\\[2pt]\items\\[2pt]\odinsub{feeds: \feeds}};
+  }
   % ---- roots (drawn first, behind the trunk) ----------------------------------------------
   \foreach \i/\t in {0/Input:\\Verilog, 1/Input:\\BLIF, 2/Input:\\Yosys JSON, 3/Input:\\gate Verilog,
                      4/Output:\\BLIF for VPR, 5/Output:\\Verilog, 6/Links:\\ABC, 7/{Links:\\VTR, VPR}}{
@@ -33,7 +61,7 @@
     \draw[line width=3pt, draw=o3brn5, line cap=round] (\x,\y) -- (\x,\y+0.75);
     \node[mini, fill=\c] at (\x,\y+1.3) {\t};
   }
-  \node[regionlabel] at (5.9,5.1) {Forest of Oracles to compare against};
+  \node[regionlabel] at (5.9,4.75) {Forest of Oracles to compare against};
   % ---- canopy: the oval is the tree-top (low) ------------------------------------------------
   \node[ellipse, fill=o3grn3, draw=o3grn7, line width=0.8pt, minimum width=176mm,
         minimum height=44mm, inner sep=0pt] at (0,9.4) {};
@@ -63,6 +91,14 @@
   \foreach \a/\b in {1/2, 2/3, 3/4, 4/5, 5/6, 6/7}{
     \draw[->, draw=o3brn3, line width=0.5pt] (st\a.south) -- (st\b.north);
   }
+  % ---- the fruit: Mimir III hangs from the canopy ----------------------------------------------------
+  \foreach \x/\y in {4.9/6.75, 6.0/6.5, 7.1/6.75}{
+    \draw[line width=1.6pt, draw=o3brn5, line cap=round] (\x,8.2) -- (\x,\y+0.35);
+    \node[fruit] at (\x,\y) {};
+    \fill[o3fru1] (\x-0.1,\y+0.1) circle (0.07);
+  }
+  \node[font=\scriptsize, text width=62mm, align=center, inner sep=1pt, anchor=north] at (6.0,6.05)
+    {\textbf{\small M\'{\i}mir~III}\\\odinsub{the knowledge base: the dataset harvested from every run}};
   % ---- canopy pieces ----------------------------------------------------------------------------
   \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-4.8,9.4) {\textbf{Wyrd~III}\\\odinsub{experiments, GUI}};
   \node[leaf, text width=30mm, minimum height=10mm] (mid) at (5.6,9.4) {\textbf{Midgard~III}\\\odinsub{(verilogTown)}};
