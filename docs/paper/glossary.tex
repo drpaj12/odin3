@@ -8,7 +8,7 @@
 \par\noindent\textbf{netlist.} The list of the gates, LUTs and other cells of a design and the wires (nets) between them~\cite{jamiesonthesis}. % ref:netlist
 \par\noindent\textbf{synthesis front end.} The program that reads the HDL and produces a netlist for the rest of the flow~\cite{jamiesonthesis}. % ref:front
 \par\noindent\textbf{elaboration.} The first step of a front end: turn the parsed HDL into a design graph by resolving parameters, generate loops and hierarchy~\cite{jamiesonthesis}. % ref:elab
-\par\noindent\textbf{ABC.} The logic-synthesis program that maps the gates of a netlist onto LUTs (technology mapping)~\cite{jamiesonthesis}. % ref:abc
+\par\noindent\textbf{ABC.} ABC is a public-domain system for logic synthesis of binary logic circuits; its technology mapping matches the logic of a netlist with LUTs~\cite{brayton2010abc}. % ref:abc
 \par\noindent\textbf{packing, placement, routing.} Packing groups LUTs and flip-flops into CLBs; placement chooses a site on the chip for each CLB; routing chooses the wires between them~\cite{jamiesonthesis}. % ref:prp
 \par\noindent\textbf{VTR / VPR.} The open-source FPGA CAD flow (Verilog-to-Routing, VTR) and its packing, placement and routing program (VPR)~\cite{luuthesis}. % ref:vtr
 \par\noindent\textbf{Odin II / Yosys / Parmys.} Odin II was the front end of VTR; Yosys is an open synthesis tool and Parmys the Yosys plugin that now serves VTR as its front end. % ref:odin2
@@ -23,9 +23,9 @@
 \par\noindent\textbf{power.} The energy the circuit uses. This paper does not measure it. % ref:power
 \par\noindent\textbf{hypothesis / verdict.} A hypothesis is a claim that an experiment can confirm or fail to confirm. The verdict is USEFUL (confirmed under the stated gate or check), POSSIBLY GOOD (confirmed but narrow or fragile), INCONCLUSIVE (neither confirmed nor failed) or DISMISSED (failed). % ref:hyp
 \par\noindent\textbf{IR.} Intermediate representation: Odin III's one internal design graph, with a view of multi-bit words and a view of single bits. % ref:ir
-\par\noindent\textbf{oracle.} A trusted reference tool whose output we compare against (Yosys with Parmys, and Odin II). % ref:oracle
+\par\noindent\textbf{oracle.} A trusted reference tool whose output we compare against. Here the oracles are the forest of Yosys with Parmys, Odin II, ABC and VTR's stored results. % ref:oracle
 \par\noindent\textbf{C ABI / plugin.} The application binary interface (ABI) is the stable C interface through which a plugin, a separately built program that adds passes or cell types, and AI tools drive Odin III without changing it. % ref:abi
-\par\noindent\textbf{AST.} Abstract syntax tree: the parsed form of the HDL text~\cite{jamiesonthesis}. % def:ast
+\par\noindent\textbf{AST.} Abstract syntax tree: the parsed form of the HDL text, a tree of the declarations, statements and expressions with their source locations. % def:ast
 \par\noindent\textbf{golden.} The stored result of an oracle for a design, kept so that later runs compare against it. % def:golden
 \par\noindent\textbf{partial mapping.} Binding the parts of a design that fit the architecture's dedicated blocks (multipliers, adders, memories) to those blocks and leaving the rest as gates for ABC~\cite{jamiesonthesis}. % def:pmap
 \par\noindent\textbf{word cell / bit cell / lower.} A word cell is a multi-bit operator in the IR; a bit cell is a one-bit gate; the pass lower turns word cells into bit cells. % def:word

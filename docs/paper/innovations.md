@@ -1,6 +1,6 @@
 # Innovations of the Odin III paper
 
-Plain English first, then the technical paragraph, then the H-IDs (hypotheses.md) whose USEFUL verdict proves the value, then what is still unproven. Odin III is a systems paper; its proof is acceptance gates and checks against oracles, not statistical tests. Verdicts follow the register (hypotheses.md): O11, O12 and O17 are POSSIBLY GOOD (narrow).
+Plain English first, then the technical paragraph, then the H-IDs (hypotheses.md) whose USEFUL verdict proves the value, then what is still unproven. Odin III is a systems paper; its proof is acceptance gates and checks against oracles, not statistical tests. Verdicts follow the register (hypotheses.md): O1, O11, O12 and O17 are POSSIBLY GOOD (narrow or with a stated gap).
 
 ## 1. A Yosys-class FPGA synthesis front end that plugs into VTR (comparable quality, not parity)
 
