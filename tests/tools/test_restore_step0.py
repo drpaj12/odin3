@@ -62,7 +62,7 @@ def table(rows: dict[str, dict[str, str]]) -> str:
 
 class Step0(unittest.TestCase):
     def test_step0_idempotence_of_the_three_pairs_on_every_micro(self) -> None:
-        work = workdir("step0")
+        work = workdir(self, "step0")
         rows = {m: pair_result(m, work) for m in micros()}
         text = table(rows)
         totals = {p: sum(1 for m in rows if rows[m][p] == "pass") for p in PAIRS}

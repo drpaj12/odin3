@@ -107,6 +107,7 @@ class NamesV2Test(unittest.TestCase):
     def setUpClass(cls) -> None:
         base = Path("/tmp/claude-1000")
         cls.work = Path(tempfile.mkdtemp(prefix="names-v2-", dir=base if base.is_dir() else None))
+        cls.addClassCleanup(shutil.rmtree, cls.work, True)
         cls.maps = {case: write_map(cls.work, case[0], case[1], 2) for case in CASES}
 
     def golden(self, name: str, text: str) -> None:
@@ -218,6 +219,7 @@ class NamesV2CheckTest(unittest.TestCase):
         base = Path("/tmp/claude-1000")
         cls.work = Path(
             tempfile.mkdtemp(prefix="names-v2-bad-", dir=base if base.is_dir() else None))
+        cls.addClassCleanup(shutil.rmtree, cls.work, True)
         cls.text = write_map(cls.work, "ch_intrinsics", "blif", 2).read_text()
 
     def rejected(self, label: str, text: str, want: str, stdout: str = "") -> None:

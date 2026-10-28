@@ -43,6 +43,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -341,6 +342,7 @@ def _config(args: argparse.Namespace) -> Config:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    cfg: Config | None = None
     try:
         check_golden(args.paths)
         cfg = _config(args)
@@ -348,8 +350,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         designs = collect(args.paths)
     except UsageError as exc:
         print(f"{TOOL}: {exc}", file=sys.stderr)
+        _drop_own_dir(cfg, args)
         return EXIT_USAGE
-    return run_all(cfg, designs, entries)
+    code = run_all(cfg, designs, entries)
+    if code == EXIT_OK:
+        _drop_own_dir(cfg, args)
+    return code
+
+
+def _drop_own_dir(cfg: Config | None, args: argparse.Namespace) -> None:
+    """Remove the work directory this run made itself (no --keep); a failed run keeps it."""
+    if cfg is not None and not args.keep:
+        shutil.rmtree(cfg.keep, ignore_errors=True)
 
 
 if __name__ == "__main__":

@@ -520,7 +520,7 @@ find_tools() {
 }
 
 main() {
-    local jobs=2 root="" fixtures="" out="" keep=0 order=n resume=0
+    local made=0 jobs=2 root="" fixtures="" out="" keep=0 order=n resume=0
     WC_WRITE=$REPO/build/release/odin3-write
     [ -x "$WC_WRITE" ] || WC_WRITE=$REPO/build/debug/odin3-write
     WC_YOSYS=""
@@ -562,7 +562,7 @@ main() {
     [ -x "$WC_WRITE" ] || { echo "writer-check: no driver at $WC_WRITE (build odin3-write)" >&2; exit 2; }
     if [ -n "$fixtures" ]; then root=$fixtures; else root=${root:-$HOME/odin3-ws/golden}; fi
     [ -d "$root" ] || { echo "writer-check: not a directory: $root" >&2; exit 2; }
-    [ -n "$out" ] || out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX")
+    if [ -z "$out" ]; then out=$(mktemp -d "${TMPDIR:-/tmp}/writer-check.XXXXXX"); made=1; fi
     mkdir -p "$out/res" "$out/tmp"
     if [ "$resume" != 1 ]; then rm -f "$out"/res/* 2>/dev/null || true; fi
     export WC_WRITE WC_YOSYS WC_SIMLIB WC_NC WC_EC WC_IVERILOG WC_DOT WC_NOP WC_TIMEOUT WC_MEM_KB WC_MAX_NODES \
@@ -602,6 +602,8 @@ main() {
     rc=${PIPESTATUS[0]}
     set -e
     [ "$keep" = 1 ] || rm -rf "$out/tmp"
+    # a work directory this run made itself goes with a clean run (report already on stdout)
+    if [ "$made" = 1 ] && [ "$keep" = 0 ] && [ "$rc" = 0 ]; then rm -rf "$out"; fi
     return "$rc"
 }
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import dataclasses
 import importlib.util
+import shutil
 import sys
 import tempfile
 import unittest
@@ -87,6 +88,7 @@ class SyntheticMaps(Agreement, unittest.TestCase):
         base = Path("/tmp/claude-1000")
         cls.work = Path(tempfile.mkdtemp(prefix="flowprov-nm2-",
                                          dir=base if base.is_dir() else None))
+        cls.addClassCleanup(shutil.rmtree, cls.work, True)
         cls.odin3 = load_odin3()
 
     def write(self, name: str, text: str | bytes) -> Path:
@@ -203,6 +205,7 @@ class Helpers(unittest.TestCase):
 
     def load(self) -> nm2.NameMap:
         tmp = Path(tempfile.mkdtemp(prefix="flowprov-nm2h-", dir="/tmp/claude-1000"))
+        self.addCleanup(shutil.rmtree, tmp, True)
         path = tmp / "h.names"
         path.write_text(self.TEXT)
         return nm2.read_name_map(path)
@@ -254,6 +257,7 @@ class MicroMaps(Agreement, unittest.TestCase):
         base = Path("/tmp/claude-1000")
         cls.work = Path(tempfile.mkdtemp(prefix="flowprov-nm2m-",
                                          dir=base if base.is_dir() else None))
+        cls.addClassCleanup(shutil.rmtree, cls.work, True)
         cls.odin3 = load_odin3()
 
     def test_task6_cases(self) -> None:
