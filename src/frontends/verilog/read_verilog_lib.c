@@ -122,11 +122,18 @@ static odin3_status read_library(odin3_rv *rv, const odin3_pp_source *src) {
     return st != ODIN3_OK ? st : sweep(rv, true);
 }
 
+/* The file name a library soft body carries (its `given` path). It starts with `<odin3>/`, a form
+ * like `<o3lib>` that is no path a design names (a relative `lib/soft_primitives/<name>.v` is a
+ * legal user path, and a user file there at the same line would get the same locations and hash
+ * names). `<` and `>` need no escape in a name map field (only TAB, LF, `\`, `%`, `,`, `|` do),
+ * in the location key (file id and line), in the JSON, Verilog comment and Python parsers. */
+#define SOFT_STABLE_FMT "<odin3>/soft_primitives/%s.v"
+
 /* The source of primitive name's body in dir, for read_library: the library "work", the file read
- * from dir (resolved) but named "lib/soft_primitives/<name>.v" (given), the name every location,
- * diagnostic and hash name carries. dir depends on the build (<exe>/../../lib, the install tree,
- * $ODIN3_SOFT_PRIMITIVES_DIR); a name made from it would differ between two builds of one
- * commit, so no object of the body could be joined across builds. */
+ * from dir (resolved) but named "<odin3>/soft_primitives/<name>.v" (given), the name every
+ * location, diagnostic and hash name carries. dir depends on the build (<exe>/../../lib, the
+ * install tree, $ODIN3_SOFT_PRIMITIVES_DIR); a name made from it would differ between two builds of
+ * one commit, so no object of the body could be joined across builds. */
 static odin3_status soft_source(odin3_rv *rv, const char *name, const char *dir, odin3_loc at,
                                 odin3_pp_source *src) {
     odin3_strbuf path;
@@ -141,7 +148,7 @@ static odin3_status soft_source(odin3_rv *rv, const char *name, const char *dir,
     odin3_strbuf_free(&path);
     odin3_strbuf stable;
     odin3_strbuf_init(&stable);
-    st = st != ODIN3_OK ? st : odin3_strbuf_appendf(&stable, "lib/soft_primitives/%s.v", name);
+    st = st != ODIN3_OK ? st : odin3_strbuf_appendf(&stable, SOFT_STABLE_FMT, name);
     st = st != ODIN3_OK
              ? st
              : odin3_design_intern(rv->design, (odin3_bytes){stable.data, stable.len}, &src->given);

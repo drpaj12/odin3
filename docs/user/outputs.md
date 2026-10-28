@@ -118,7 +118,12 @@ Every IR object carries provenance. Where the writer can express it, so does the
 - `write_json` writes a `src` attribute on modules and objects; `read_json` turns it back into
   provenance (`--keep-src-attr` keeps it as a plain attribute too).
 - `write_verilog` writes `(* src = "..." *)` attributes and a trailing `//` comment per line, as the
-  LPM output of the flow script shows.
+  LPM output of the flow script shows. For a cell or net made from a library body the tool reads
+  itself (the soft bodies of `--vtr-compat`, `lib/soft_primitives/<name>.v` in the source tree) the
+  file in these locations, in the `// file:line` comment and in the name map is the fixed name
+  `<odin3>/soft_primitives/<name>.v`, not the directory the build found them in, so the names do
+  not depend on where Odin III is installed. `--diag-paths resolved` still prints the real
+  directory in messages.
 - `read_blif --hdl-locs` restores the locations from the BLIF.
 
 The dump of every location of a run is `dump_locs`; `tools/prov-cover` reports how many objects
