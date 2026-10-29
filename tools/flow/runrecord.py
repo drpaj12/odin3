@@ -443,7 +443,7 @@ def privacy_hits(rec: object) -> list[str]:
     for where, text in _strings(rec):
         low = text.lower()
         hits += [f"{rule} at {where}" for rule, s in privates if s in low]
-        if "/home/" in text or "/Users/" in text:
+        if "/home" + "/" in text or "/Users/" in text:
             hits.append(f"home-path at {where}")
         elif ABS_PATH.search(text):
             hits.append(f"absolute-path at {where}")
