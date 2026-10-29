@@ -150,8 +150,7 @@ typedef struct vw_ref {
     uint32_t wire; /* REF_WIRE: the wire */
     uint32_t bit;  /* REF_WIRE: the vector position; REF_CONST: the literal character */
     uint8_t kind;  /* vw_ref_kind */
-    bool reg;      /* declared `reg`: REF_OWN driven by a bit-level storage cell, REF_WIRE a scalar
-                      wire driven by a one-bit $dff (it is that flop's reg) */
+    bool reg;      /* REF_OWN: declared `reg` (driven by a bit-level storage cell) */
 } vw_ref;
 
 /* Kinds of named things in a module's one Verilog namespace. */
@@ -166,6 +165,8 @@ typedef struct vw_module {
     odin3_u64map *vectors;         /* names ID of a vector wire -> 1 */
     vw_ref *refs;                  /* by net ID */
     uint32_t *wire_port;           /* by wire ID: port index + 1, 0 for a non-port wire */
+    uint32_t *regwire; /* by net ID: the scalar non-port wire that is the reg of the one-bit $dff
+                          driving the net, 0 for none */
 } vw_module;
 
 typedef struct verilog_writer {
@@ -526,18 +527,51 @@ static void consider(const verilog_writer *wr, vw_pick *pick, odin3_wirebit wb, 
     }
 }
 
-/* Whether the scalar, non-port wire holds only the Q of a one-bit $dff: the wire is then the flop's
- * `reg`, as a bit-level flop's own net is. This is how a reader that makes a $dff out of `always`
- * and a one-bit reg gets the file back as it was. */
-static bool wire_is_ff_reg(const verilog_writer *wr, odin3_net_id net, uint32_t wire) {
+/* The scalar non-port wire on net when a one-bit $dff drives it alone: that wire is the flop's
+ * `reg` (a reader makes a $dff out of `always @(...) w <= d;` and a one-bit `reg w;`, so the file
+ * is written back the way a bit-level flop's own reg is). 0 when there is none. */
+static uint32_t flop_reg_wire(const verilog_writer *wr, odin3_net_id net) {
     const odin3_module *module = wr->mod.module;
-    if (wire_port(wr, (odin3_wire_id){wire}) != 0 || !wire_scalar(wr, (odin3_wire_id){wire}) ||
-        odin3_net_driver_count(module, net) != 1) {
-        return false;
+    if (odin3_net_driver_count(module, net) != 1) {
+        return 0;
     }
     odin3_node_id node = odin3_pin_node(module, odin3_net_driver(module, net));
     const vw_builtin *bi = node_builtin(wr, node);
-    return bi != NULL && bi->form == FORM_FF && out_port(wr, node).count == 1;
+    if (bi == NULL || bi->form != FORM_FF || out_port(wr, node).count != 1) {
+        return 0;
+    }
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    odin3_wirebit wb = odin3_net_primary(module, net);
+    bool more = true;
+    while (more) {
+        if (odin3_wire_valid(wb.wire) && odin3_wire_live(module, wb.wire) &&
+            wire_port(wr, wb.wire) == 0 && wire_scalar(wr, wb.wire)) {
+            return wb.wire.v;
+        }
+        more = odin3_net_alias_next(module, net, &cursor, &alias);
+        wb = alias.wb;
+    }
+    return 0;
+}
+
+/* Uses of a flop's Q net name its output port when it has one, as a bit-level flop's are. */
+static void prefer_port(const verilog_writer *wr, odin3_net_id net, vw_ref *ref) {
+    const odin3_module *module = wr->mod.module;
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    odin3_wirebit wb = odin3_net_primary(module, net);
+    bool more = true;
+    while (more) {
+        uint32_t port = odin3_wire_valid(wb.wire) ? wire_port(wr, wb.wire) : 0;
+        if (port != 0 && odin3_wire_live(module, wb.wire) &&
+            wr->mod.def->ports[port - 1].dir == ODIN3_DIR_OUT) {
+            *ref = (vw_ref){wb.wire.v, wb.bit, REF_WIRE, false};
+            return;
+        }
+        more = odin3_net_alias_next(module, net, &cursor, &alias);
+        wb = alias.wb;
+    }
 }
 
 /* Chooses how net is written: its input/inout port bit, primary wire bit, first alias wire bit,
@@ -555,10 +589,11 @@ static void classify_net(verilog_writer *wr, odin3_net_id net) {
         (void)vw_refuse(wr, "a net is on two input/inout port bits, one of them",
                         str_bytes(wr, odin3_wire_name(module, (odin3_wire_id){pick.ref.wire})));
     }
-    if (pick.rank != 0 && pick.ref.kind == REF_WIRE) {
-        pick.ref.reg = wire_is_ff_reg(wr, net, pick.ref.wire);
-    }
     wr->mod.refs[net.v] = pick.rank != 0 ? pick.ref : own_ref(wr, net);
+    wr->mod.regwire[net.v] = pick.rank != 0 ? flop_reg_wire(wr, net) : 0;
+    if (wr->mod.regwire[net.v] != 0 && pick.ref.wire == wr->mod.regwire[net.v]) {
+        prefer_port(wr, net, &wr->mod.refs[net.v]);
+    }
 }
 
 static vw_ref net_ref(const verilog_writer *wr, odin3_net_id net) {
@@ -568,7 +603,8 @@ static vw_ref net_ref(const verilog_writer *wr, odin3_net_id net) {
 /* True when the Q net of a bit-level storage cell is declared as its `reg`. */
 static bool q_is_reg(const verilog_writer *wr, odin3_node_id node) {
     odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
-    return odin3_net_valid(net) && net_ref(wr, net).reg;
+    return odin3_net_valid(net) && ((net_ref(wr, net).kind == REF_OWN && net_ref(wr, net).reg) ||
+                                    wr->mod.regwire[net.v] != 0);
 }
 
 /* True when a node is written under its name: instances and storage cells with their own reg. */
@@ -905,6 +941,7 @@ static void end_module(verilog_writer *wr) {
     odin3_u64map_destroy(wr->mod.vectors);
     odin3_util_free(wr->mod.refs);
     odin3_util_free(wr->mod.wire_port);
+    odin3_util_free(wr->mod.regwire);
     wr->mod = (vw_module){0};
 }
 
@@ -932,6 +969,10 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
     mod->vectors = odin3_u64map_create(0);
     mod->refs = odin3_util_calloc(sizeof(vw_ref) * odin3_module_net_end(module));
     mod->wire_port = odin3_util_calloc(sizeof(uint32_t) * odin3_module_wire_end(module));
+    mod->regwire = odin3_util_calloc(sizeof(uint32_t) * odin3_module_net_end(module));
+    if (mod->regwire == NULL) {
+        return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
     if (mod->names == NULL || mod->obj_names == NULL || mod->vectors == NULL || mod->refs == NULL ||
         mod->wire_port == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
@@ -1374,50 +1415,31 @@ static void write_lut(verilog_writer *wr, odin3_node_id node, const vw_builtin *
 
 /* The reg a storage cell assigns: its Q net when declared `reg`, else the cell's own reg. */
 static void put_target(verilog_writer *wr, odin3_node_id node, bool q_reg) {
-    if (q_reg) {
+    odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
+    if (q_reg && odin3_net_valid(net) && wr->mod.regwire[net.v] != 0) {
+        vw_name(wr, OBJ_WIRE, wr->mod.regwire[net.v]);
+    } else if (q_reg) {
         put_pin(wr, out_port(wr, node).first);
     } else {
         vw_name(wr, OBJ_NODE, node.v);
     }
 }
 
-/* `  assign <wire bit> = <Q reg>;` for each other wire the Q net of a flop whose reg is a wire is
- * on (write_wire_aliases leaves these bits to the flop, as a bit-level flop's connection is). */
-static void connect_wire_aliases(verilog_writer *wr, odin3_node_id node) {
-    const odin3_module *module = wr->mod.module;
-    odin3_net_id net = odin3_pin_net(module, out_port(wr, node).first);
-    vw_ref ref = net_ref(wr, net);
-    uint32_t cursor = 0;
-    odin3_net_alias alias;
-    odin3_wirebit wb = odin3_net_primary(module, net);
-    bool more = true;
-    while (more) {
-        if (odin3_wire_valid(wb.wire) && odin3_wire_live(module, wb.wire) &&
-            wb.wire.v != ref.wire) {
-            vw_puts(wr, "  assign ");
-            put_wire_bits(wr, wb.wire, wb.bit, wb.bit);
-            vw_puts(wr, " = ");
-            vw_items items = wire_items((odin3_wire_id){ref.wire}, ref.bit, ref.bit);
-            put_items(wr, &items, false);
-            vw_line_end(wr, ";\n");
-        }
-        more = odin3_net_alias_next(module, net, &cursor, &alias);
-        wb = alias.wb;
-    }
-}
-
 /* `  assign <Q> = <cell reg>;` when the cell has its own reg. */
 static void connect_reg(verilog_writer *wr, odin3_node_id node, bool q_reg) {
-    if (q_reg) {
-        if (net_ref(wr, odin3_pin_net(wr->mod.module, out_port(wr, node).first)).kind == REF_WIRE) {
-            connect_wire_aliases(wr, node);
-        }
+    odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
+    uint32_t regwire = odin3_net_valid(net) ? wr->mod.regwire[net.v] : 0;
+    if (q_reg && (regwire == 0 || net_ref(wr, net).wire == regwire)) {
         return;
     }
     vw_puts(wr, "  assign ");
     put_port(wr, node, node_def(wr, node)->n_ports - 1, false);
     vw_puts(wr, " = ");
-    vw_name(wr, OBJ_NODE, node.v);
+    if (regwire != 0) {
+        vw_name(wr, OBJ_WIRE, regwire);
+    } else {
+        vw_name(wr, OBJ_NODE, node.v);
+    }
     vw_line_end(wr, ";\n");
 }
 
@@ -1819,16 +1841,6 @@ static void write_header(verilog_writer *wr) {
     vw_puts(wr, ports == 0 ? "" : ");\n");
 }
 
-/* Whether a scalar wire is declared `reg`: its one net is a one-bit $dff's reg (wire_is_ff_reg). */
-static bool wire_declared_reg(const verilog_writer *wr, odin3_wire_id wire) {
-    if (!wire_scalar(wr, wire)) {
-        return false;
-    }
-    odin3_net_id net = odin3_wire_net(wr->mod.module, wire, 0);
-    vw_ref ref = odin3_net_valid(net) ? net_ref(wr, net) : (vw_ref){0, 0, REF_NONE, false};
-    return ref.kind == REF_WIRE && ref.wire == wire.v && ref.reg;
-}
-
 /* Non-port wires, then nets declared by themselves (`reg` for a storage cell's Q). */
 static void declare_wires_and_nets(verilog_writer *wr) {
     const odin3_module *module = wr->mod.module;
@@ -1838,7 +1850,9 @@ static void declare_wires_and_nets(verilog_writer *wr) {
             vw_puts(wr, "  ");
             put_attrs(wr, (odin3_objref){ODIN3_OBJ_WIRE, i},
                       (vw_attr_frame){"", " ", odin3_wire_prov(module, wire)});
-            vw_puts(wr, wire_declared_reg(wr, wire) ? "reg " : "wire ");
+            odin3_net_id net = odin3_wire_net(module, wire, 0);
+            bool reg = wire_scalar(wr, wire) && odin3_net_valid(net) && wr->mod.regwire[net.v] == i;
+            vw_puts(wr, reg ? "reg " : "wire ");
             put_wire_range(wr, wire);
             vw_name(wr, OBJ_WIRE, i);
             vw_char(wr, ';');
@@ -1891,11 +1905,12 @@ static void declare_cell_extras(verilog_writer *wr) {
     }
 }
 
-/* A wire bit that needs no `assign` in the alias section: it is the net's reference, or the net is
- * a flop's reg wire and the flop connects the other wires (connect_wire_aliases). */
 static bool canonical(const verilog_writer *wr, odin3_wire_id wire, uint32_t bit) {
-    vw_ref ref = net_ref(wr, odin3_wire_net(wr->mod.module, wire, bit));
-    return ref.kind == REF_WIRE && ((ref.wire == wire.v && ref.bit == bit) || ref.reg);
+    odin3_net_id net = odin3_wire_net(wr->mod.module, wire, bit);
+    vw_ref ref = net_ref(wr, net);
+    /* the flop's reg wire is connected by the flop (connect_reg), as a bit-level flop's reg is */
+    return (ref.kind == REF_WIRE && ref.wire == wire.v && ref.bit == bit) ||
+           wr->mod.regwire[net.v] == wire.v;
 }
 
 /* `assign w[hi:lo] = <refs>;` for each run of wire bits whose nets are written elsewhere. */
