@@ -259,6 +259,7 @@ class RunRecorder:
         self.roots = {k: v.resolve() for k, v in roots.items()}
         self.roles = {k.resolve(): v for k, v in (roles or {}).items()}
         self.top = top
+        self.literals: dict[str, str] = {}  # exact text (a design's own file name) -> placeholder
         self.missing: list[tuple[str, str]] = []  # (table, role) of files absent at record time
 
     # paths
@@ -274,7 +275,10 @@ class RunRecorder:
 
     def ph(self, text: str) -> str:
         """`text` with every absolute path a placeholder and the top module `<top>`."""
-        out = _PATH_IN_TEXT.sub(lambda m: self._one(m.group(0)), text)
+        out = text
+        for literal, holder in self.literals.items():
+            out = out.replace(literal, holder)
+        out = _PATH_IN_TEXT.sub(lambda m: self._one(m.group(0)), out)
         top = self.top
         if top and (out == top or out.endswith("=" + top)):
             return out[: len(out) - len(top)] + "<top>"

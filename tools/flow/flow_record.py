@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import odin3_flow as flow
 import runrecord as rr
 
 if TYPE_CHECKING:
@@ -178,6 +179,8 @@ def build_record(args: FlowArgs, result: FlowResult, top: str, share: Path,
     arch_file = Path(vpr_argv[3]) if len(vpr_argv) > 3 else args.arch
     rec = rr.RunRecorder(SOURCE, top, arm, 0, arch_file.stem if arch_file else "none", roots,
                          {args.odin3: "<odin3>"}, top)
+    for i, rel in enumerate(flow.relative_designs(args.designs)):  # the odin3 script names them
+        rec.literals[f'"{rel}"'] = f'"<design_{i}>"'
     add_steps(rec, result)
     otree = share if (share / ".git").exists() else None
     ocommit = rr.git(otree, "rev-parse", "HEAD") if otree else ""

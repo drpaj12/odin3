@@ -20,6 +20,7 @@ from .helpers import run_main
 ROOT = Path(__file__).resolve().parents[2]
 ODIN3 = os.environ.get("ODIN3_CLI", "")
 DFF = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_logic_w_Dff.v"
+OTHER = ROOT / "tests" / "micro" / "verilog" / "micro" / "bm_DL_2_1_mux.v"
 needs_odin3 = unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
 
 
@@ -87,12 +88,12 @@ class Privacy(TmpCase):
 
 @needs_odin3
 class FlowRecord(TmpCase):
-    def run_flow(self, *extra: str) -> dict[str, object]:
+    def run_flow(self, *extra: str, design: Path = DFF) -> dict[str, object]:
         env = {k: v for k, v in os.environ.items() if k != "VTR_ROOT"}
         env["MIMIR_HOST_MAP"] = str(self.tmp / "missing.toml")
-        out = self.tmp / "out"
+        out = self.tmp / design.stem
         with mock.patch.dict(os.environ, env, clear=True):
-            code, so, se = run_main(flow.main, [str(DFF), *extra, "--odin3", ODIN3, "--out",
+            code, so, se = run_main(flow.main, [str(design), *extra, "--odin3", ODIN3, "--out",
                                                 str(out)])
         self.assertEqual(code, 0, so + se)
         data: dict[str, object] = json.loads((out / "mimir-run.json").read_text(encoding="utf-8"))
@@ -124,9 +125,10 @@ class FlowRecord(TmpCase):
         self.assertNotIn("odin3.cmd.top", params)
 
     def test_command_text_does_not_depend_on_the_design(self) -> None:
-        rec = self.run_flow()
-        steps = rec["steps"]
-        assert isinstance(steps, list)
-        self.assertIn("<top>", steps[0]["argv"])
-        self.assertNotIn("bm_DL_logic_w_Dff", json.dumps(steps[0]["argv"]).replace(
-            "<designs>", ""))
+        texts = []
+        for design in (DFF, OTHER):
+            steps = self.run_flow(design=design)["steps"]
+            assert isinstance(steps, list)
+            texts.append(steps[0]["argv"])
+        self.assertEqual(texts[0], texts[1])
+        self.assertIn("<top>", texts[0])
