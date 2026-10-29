@@ -94,6 +94,12 @@ class RelativeNames(unittest.TestCase):
         self.assertEqual(flow.design_root(designs), Path("/x/y"))
         self.assertEqual(flow.design_root(designs[:1]), Path("/x/y"))
 
+    def test_unrelated_roots_warn(self) -> None:
+        designs = [Path("/x/y/a.v"), Path("/z/b.v")]
+        self.assertEqual(flow.design_root(designs), Path("/"))
+        self.assertIn("WARNING", flow.root_warning(designs))
+        self.assertEqual(flow.root_warning([Path("/x/y/a.v"), Path("/x/y/lib/b.v")]), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -56,6 +56,9 @@ common parent directory of the design files, and each design is passed relative 
 names and in the name map are therefore relative to that directory: one design in two different
 directories gives byte-identical BLIF and name map. The line `name_root=. designs=...` in
 `odin3/odin3.log` records the relative names. Output, architecture and log paths stay absolute.
+If the designs sit under unrelated directories the common parent is `/`: the names then carry the
+path minus its leading slash, so they depend on where the files live, and the flow prints a
+`WARNING` (put the designs under one directory to avoid it).
 
 The `vtr` target reuses the Odin III script of the QoR flow (`tools/vtr-qor/qor_legs.py`), so the
 script here and the benchmark runs are one definition. The module can be imported as well:

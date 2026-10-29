@@ -242,7 +242,10 @@ map.
   counted.
 - The source text is read from the file name the provenance carries. The flow records the design
   paths and the directory odin3 ran in in `timing/inputs.json` (`designs`, `source_cwd`), and
-  `odin3-timing` looks there, never in the directory it is started from. A file it cannot read is
+  `odin3-timing` looks there, never in the directory it is started from. `source_cwd` is relative to
+  the flow directory; `source_cwd_abs` records the absolute directory as a fallback, used when the
+  relative one does not exist (flow directory moved without the design tree). `timing/inputs.json`
+  is a run output and holds absolute paths. A file it cannot read is
   counted in `coverage.source_files_unreadable` and named in `summary.txt`.
 - With a name map, `loc` is the full span of the first source leaf and `span` stays `file:line` (the
   aggregates, `spans`, are by line, as before). A flow directory from version 1.1.1 has line-level

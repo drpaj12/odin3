@@ -162,6 +162,17 @@ def relative_designs(designs: Sequence[Path]) -> list[Path]:
     return [Path(os.path.relpath(d, root)) for d in designs]
 
 
+def root_warning(designs: Sequence[Path]) -> str:
+    """A WARNING line when the design root is the filesystem root (designs under unrelated
+    directories: names then carry the path minus its leading slash), else an empty string."""
+    if design_root(designs) != Path(designs[0].anchor):
+        return ""
+    return ("WARNING: the designs share no parent directory below the filesystem root: names in "
+            "hash names, the name map and provenance carry the path minus its leading slash, so "
+            "they depend on where the files live; put the designs under one directory for "
+            "location-independent names")
+
+
 def name_root_note(designs: Sequence[Path]) -> str:
     """The run-log line that records the name root: relative names only, never an absolute path."""
     return "name_root=. designs=" + " ".join(os.fspath(d) for d in relative_designs(designs))
@@ -484,6 +495,8 @@ def timing_step(args: FlowArgs, top: str, blif: Path, run_dir: Path, result: Flo
               "paths_requested": args.timing_paths,
               # where the provenance file names point: odin3 ran in odin3/ with these designs
               "source_cwd": os.path.relpath(design_root(args.designs), args.out),
+              # fallback when the flow dir moved without the design tree
+              "source_cwd_abs": str(design_root(args.designs)),
               "designs": [str(d) for d in args.designs]}
     (tdir / timing_attr.INPUTS_NAME).write_text(json.dumps(inputs, indent=1) + "\n")
     try:
@@ -581,6 +594,9 @@ def run_flow(args: FlowArgs) -> FlowResult:
         raise UsageError(f"no odin3 binary at {args.odin3}: build it, put it on PATH or give "
                          f"--odin3")
     top = resolve_top(args.designs, args.top)
+    warning = root_warning(args.designs)
+    if warning:
+        print(warning, file=sys.stderr)
     qor_legs.REPO_ROOT = resource_root()  # the module seam: where $LIB (lib/vtr.o3lib) is
     result = FlowResult(ok=False)
     args.out.mkdir(parents=True, exist_ok=True)
