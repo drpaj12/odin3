@@ -73,7 +73,8 @@ class HostAlias(TmpCase):
 
 class Privacy(TmpCase):
     def test_hits_name_the_rule_and_key_not_the_value(self) -> None:
-        rec = {"a": {"b": "/home" + "/someone/x"}, "c": ["ok", "x=/abs/path"], "d": "vpr/src/a.cpp:3"}
+        home = "/home" + "/someone/x"
+        rec = {"a": {"b": home}, "c": ["ok", "x=/abs/path"], "d": "vpr/src/a.cpp:3"}
         hits = rr.privacy_hits(rec)
         self.assertIn("home-path at record.a.b", hits)
         self.assertIn("absolute-path at record.c[1]", hits)
