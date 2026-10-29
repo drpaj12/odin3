@@ -101,9 +101,6 @@ module top (  // tests/flatten/mem.v:10
   assign {\$n62 , \$n61 , \$n60 , \$n59 , \$n58 , \$n57 , \$n56 , \$n55 } = we ? d : 8'bxxxxxxxx;  // tests/flatten/mem.v:6
   // (* full_case = 1 *)
   assign {\$n70 , \$n69 , \$n68 , \$n67 , \$n66 , \$n65 , \$n64 , \$n63 } = we ? 8'b11111111 : 8'b00000000;  // tests/flatten/mem.v:6
-  (* src = "tests/flatten/mem.v:5.3-8.6|tests/flatten/mem.v:11.7-11.58" *)
-  always @(posedge clk) \$c18 <= {\$n50 , \$n49 , \$n48 , \$n47 , \$n46 , \$n45 , \$n44 , \$n43 };  // tests/flatten/mem.v:5
-  assign q1 = \$c18 ;
   (* src = "tests/flatten/mem.v:4.13-4.23|tests/flatten/mem.v:12.7-12.60" *)
   \$mem #(.MEMID("u2.mem"), .SIZE(16), .OFFSET(0), .ABITS(4), .WIDTH(8), .RD_PORTS(1), .WR_PORTS(1), .RD_CLK_ENABLE(1'b0), .RD_CLK_POLARITY(1'b0), .RD_TRANSPARENT(1'b0), .WR_CLK_ENABLE(1'b1), .WR_CLK_POLARITY(1'b1), .INIT("")) \$c19 (  // tests/flatten/mem.v:4
     .RD_CLK(1'bx),
@@ -121,6 +118,9 @@ module top (  // tests/flatten/mem.v:10
   assign {\$n90 , \$n89 , \$n88 , \$n87 , \$n86 , \$n85 , \$n84 , \$n83 } = \u2.we ? \u2.d : 8'bxxxxxxxx;  // tests/flatten/mem.v:6
   // (* full_case = 1 *)
   assign {\$n98 , \$n97 , \$n96 , \$n95 , \$n94 , \$n93 , \$n92 , \$n91 } = \u2.we ? 8'b11111111 : 8'b00000000;  // tests/flatten/mem.v:6
+  (* src = "tests/flatten/mem.v:5.3-8.6|tests/flatten/mem.v:11.7-11.58" *)
+  always @(posedge clk) \$c18 <= {\$n50 , \$n49 , \$n48 , \$n47 , \$n46 , \$n45 , \$n44 , \$n43 };  // tests/flatten/mem.v:5
+  assign q1 = \$c18 ;
   (* src = "tests/flatten/mem.v:5.3-8.6|tests/flatten/mem.v:12.7-12.60" *)
   always @(posedge clk) \$c23 <= {\$n78 , \$n77 , \$n76 , \$n75 , \$n74 , \$n73 , \$n72 , \$n71 };  // tests/flatten/mem.v:5
   assign q2 = \$c23 ;

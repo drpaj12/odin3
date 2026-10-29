@@ -2280,6 +2280,19 @@ static odin3_status enable_prov_map(verilog_writer *wr, const odin3_verilog_opts
     return odin3_hash_rows_prov_enable(&wr->rows, wr->design, opts->prov_map, "write_verilog");
 }
 
+/* Every module the file holds (mark_reachable), in module ID order. */
+static odin3_status write_modules(verilog_writer *wr) {
+    const uint32_t end = odin3_design_module_end(wr->design);
+    uint8_t *keep = odin3_util_calloc((size_t)end + 1);
+    odin3_status st =
+        vw_fail(wr, keep != NULL ? mark_reachable(wr, keep, end) : ODIN3_ERR_NO_MEMORY);
+    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
+        st = keep[i] ? write_module(wr, i) : ODIN3_OK;
+    }
+    odin3_util_free(keep);
+    return st;
+}
+
 odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
                                  const odin3_verilog_opts *opts) {
     if (design == NULL || path == NULL ||
@@ -2298,14 +2311,7 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
     st = st == ODIN3_OK ? vw_fail(&wr, enable_prov_map(&wr, opts)) : st;
     odin3_hash_map_file map = {.open = false};
     st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
-    const uint32_t end = odin3_design_module_end(design);
-    uint8_t *keep = odin3_util_calloc((size_t)end + 1);
-    st =
-        st == ODIN3_OK ? (keep != NULL ? mark_reachable(&wr, keep, end) : ODIN3_ERR_NO_MEMORY) : st;
-    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
-        st = keep[i] ? write_module(&wr, i) : ODIN3_OK;
-    }
-    odin3_util_free(keep);
+    st = st == ODIN3_OK ? write_modules(&wr) : st;
     if (st == ODIN3_OK) {
         (void)write_stubs(&wr);
     }

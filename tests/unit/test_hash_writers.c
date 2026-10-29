@@ -673,11 +673,11 @@ static const char *hash_after(const char *map, const char *prefix) {
 }
 
 static void two_modules_case(const writer_case *wc) {
-    load_text(".model sub\n.inputs a\n.outputs y\n"
-              ".names a top/u1/w@d.v:3\n1 1\n.cname g1\n.names top/u1/w@d.v:3 y\n1 1\n.end\n"
-              ".model top\n.inputs a\n.outputs y\n"
+    load_text(".model top\n.inputs a\n.outputs y\n"
               ".names a top/u1/w@d.v:3\n1 1\n.cname g1\n"
-              ".subckt sub a=top/u1/w@d.v:3 y=y\n.end\n");
+              ".subckt sub a=top/u1/w@d.v:3 y=y\n.end\n"
+              ".model sub\n.inputs a\n.outputs y\n"
+              ".names a top/u1/w@d.v:3\n1 1\n.cname g1\n.names top/u1/w@d.v:3 y\n1 1\n.end\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, write_hash(wc, "two"), log_text);
     written one = read_written(wc, "two");
     TEST_ASSERT_NULL_MESSAGE(strstr(one.net, "@d.v"), one.net);

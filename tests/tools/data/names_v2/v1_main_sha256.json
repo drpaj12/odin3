@@ -1,17 +1,17 @@
 {
- "note": "SHA-256 of every file of the version 1 map end (write_* --name-style hash, no --prov-map) of two micros, written by main 0f66eb2f (Task 9); Task 10 must not change one byte. Micros whose hash names do not depend on the build type (Debug against Release).",
+ "note": "SHA-256 of every file of the version 1 map end (write_* --name-style hash, no --prov-map) of two micros, written by main 0f66eb2f (Task 9); Task 10 must not change one byte. Digests of the .json and .v files (and ch_intrinsics.v.names) were renewed 2026-10-29 by the round-trip fix (dense JSON bit numbers, Verilog cell order and flop regs). Micros whose hash names do not depend on the build type (Debug against Release).",
  "files": {
   "bm_base_memory.blif": "276a6aaec64de53718ae083606d60ca098462663bc73e601304f5a7a0933e944",
   "bm_base_memory.blif.names": "153cba96222f9d745fa4a86efbdfe62efcd027f5dfc6e2900e37b60e73dc3679",
-  "bm_base_memory.json": "0b432dedbdb8b87a5e88c3066aaf127df92c3fac0c5f30661a9bd6d2db06c9f3",
+  "bm_base_memory.json": "ad5230318b69cb5349f35152f6c0141e0163fa28e794c11a08dec11a4677f490",
   "bm_base_memory.json.names": "31197c700700d76b08059975318eda76391f4a1350c0828a3b42166541768ada",
-  "bm_base_memory.v": "5a4ae0e93fff6a8cde933e12c039f970c60f4dadf15f783da6964277db027309",
+  "bm_base_memory.v": "39c8858728a8afe86db64c28bd4293ba80700ce3e4446ca6dbeaccfc58e2e291",
   "bm_base_memory.v.names": "fe69769612ed345f7a4babf9ddcb7011cc21c603bead233da23ffaa49f9c4b54",
   "ch_intrinsics.blif": "694d8c1b2bd400ce24804ec504a87a3a30b6acfeb90c4f833df51d3ddd7714c5",
   "ch_intrinsics.blif.names": "a0f7cbedf51b684deef6db1b94722a6be2e2eab210d125629b1759ccece35ecb",
-  "ch_intrinsics.json": "f8e31e2c522e640d0b4b65eac9e8abf90e7f81094af33a3a1b97a55804442195",
+  "ch_intrinsics.json": "68940ac157642ecf71782ffbf03da7c9214d0e3e629406484e13b4ac6d413bbf",
   "ch_intrinsics.json.names": "5e1197b304435dc9d4933222d15508c4537fbd7d231f5a6fcdcb14371db22416",
-  "ch_intrinsics.v": "de257c4d2e5ae1ed850094da8661fb1ded73458a4d4124b28ad3f979d86129e5",
-  "ch_intrinsics.v.names": "7ef58bcd6067496af55e6a9cd5bcd5af0c75265a93fd8c797e9aa064c1c3a22f"
+  "ch_intrinsics.v": "9ae816e29211f3513003bb71df36896997ec8bf9f4d4157b2d0dc76e8e0dfce3",
+  "ch_intrinsics.v.names": "0dcdd5ea7d8ed708b1eee476ca829a5cb1cd1ac3200f38dd46d8873952bcf50f"
  }
 }

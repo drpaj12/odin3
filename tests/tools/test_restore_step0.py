@@ -32,6 +32,24 @@ from .restore_common import (
 
 LIST = DATA / "step0.txt"
 
+# The passes per pair the list must hold (V1.2.0 fix round: write_json numbers its nets the way
+# the reader makes them, write_verilog writes the reachable modules and the cells in the reader's
+# order).
+EXPECTED = {"blif": 68, "json": 68, "v": 58}
+# Why each micro that fails a pair still fails it (one line each).
+REASONS = {
+    "bm_DL_BCD_adder": "v: write 1 connects constants as literals, the reader makes named nets",
+    "bm_expr_all_mod": "v: write 2 declares extra `$n<ID>$1` wires that write 1 does not",
+    "bm_functional_test": "v: write 2 refers to a shared sign bit by another wire (`$n1403`)",
+    "bm_if_collapse": "v: the reader folds `x ^ 1'b0` and `x | 1'b0` into an alias assign",
+    "bm_if_common": "v: the reader folds a constant operand into an alias assign",
+    "bm_stmt_all_mod": "v: the reader folds a constant operand into an alias assign",
+    "bm_stmt_compare_padding": "v: the reader folds a constant operand into an alias assign",
+    "bm_tester": "v: the reader folds `x ^ 1'b0` into an alias assign",
+    "case_generate": "v: the // file:line of a constant assign becomes line 1 on the second read",
+    "if_generate": "v: the // file:line of a constant assign becomes line 1 on the second read",
+}
+
 
 def pair_result(micro: str, work: Path) -> dict[str, str]:
     """pass/fail per pair for one micro ('error' when a step could not run)."""
@@ -71,6 +89,17 @@ class Step0(unittest.TestCase):
             DATA.mkdir(parents=True, exist_ok=True)
             LIST.write_text(text)
         self.assertEqual(LIST.read_text(), text, "tests/tools/data/restore/step0.txt differs")
+
+    def test_the_committed_list_has_the_expected_passes_and_every_failure_a_reason(self) -> None:
+        rows = {}
+        for line in LIST.read_text().splitlines():
+            name, *cells = line.split()
+            rows[name] = dict(c.split("=") for c in cells)
+        for pair, count in EXPECTED.items():
+            passing = sorted(m for m in rows if rows[m][pair] == "pass")
+            self.assertEqual(count, len(passing), f"passes of {pair}")
+        failing = sorted(m for m in rows if any(v != "pass" for v in rows[m].values()))
+        self.assertEqual(sorted(REASONS), failing, "a failing micro needs a one-line reason")
 
     def test_the_list_covers_every_micro(self) -> None:
         names = {line.split()[0] for line in LIST.read_text().splitlines()}

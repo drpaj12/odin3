@@ -20,7 +20,7 @@ module top (  // tests/flatten/feed.v:9
   assign \d.y = p;
   assign \e.a = x;
   assign \e.k = \d.k ;
-  assign \d.k = 1'b1;  // tests/flatten/feed.v:11
   assign p = ~x;  // tests/flatten/feed.v:6
   assign \e.y = ~x;  // tests/flatten/feed.v:6
+  assign \d.k = 1'b1;  // tests/flatten/feed.v:11
 endmodule
