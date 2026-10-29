@@ -37,6 +37,23 @@ W=<relaxed> failed (VPR); routed at W=<W>` and adds `route_retry` (`min_chan_wid
 `failed_width`, `used_width`) to `summary.json`; `min_chan_width` stays the true minimum. If every
 width fails, the VPR step fails and its log lists the widths tried.
 
+**Run record.** Every run writes `mimir-run.json` (`record_version` 1, kind `odin3-flow-run`) into
+`--out`: the how-obtained data that Mimir III imports as a `full` flow configuration without
+reconstruction. It holds the tool commits (Odin III, VPR from `VTR_ROOT`, and the ABC commit the
+Odin III binary states) with how each was found and whether the tree was clean, the sha256 and
+`--version` text of each binary, the exact command line of every step (paths as placeholders such as
+`<out>`, `<vtr>` and `<top>`, so one setup has one command text for every design), every parameter as
+`{value, conf, source}` (the Odin III pass options given in the script, the initial value of each
+pass's other options cited `file:line` at the source tree's commit, VPR's own echo of its effective
+options, the VPR default seed cited from `read_options.cpp`), the time and peak RSS of each step, and
+the sha256 of the design files, the architecture and the artifacts. The host is the alias from
+`$MIMIR_HOST_MAP` (`unknown` without the map; the real name is never written). A commit that the
+binary cannot be shown to come from (the Odin III `--version` text names no commit) is recorded
+`unknown`, so Mimir marks the configuration `partial` and names that parameter. A record that would hold an
+absolute path, a home path, the user name or the host name is not written (a line on stderr names the
+rule and the key). The format is Mimir's `docs/specs/2026-10-28-mimir-run-record.md`; the flow does
+not import Mimir.
+
 Exit codes: 0 all steps passed, 1 a step failed (the `timing` step too), 2 usage error.
 
 `--keep-results` keeps VPR's `.net`, `.place` and `.route` in `vpr/run` (the flow deletes them by
