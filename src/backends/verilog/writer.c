@@ -1876,6 +1876,26 @@ static void write_aliases(verilog_writer *wr) {
     }
 }
 
+/* Whether the cell is a constant that gets a statement (`assign w = 1'b0;`). */
+static bool const_statement(const verilog_writer *wr, odin3_node_id node) {
+    const vw_builtin *bi = node_builtin(wr, node);
+    return bi != NULL && bi->form == FORM_CONST;
+}
+
+/* The live cells in node order: the non-constant ones, or (consts) the constant ones. The
+ * constants come last because a reader makes the cell of an `assign w = 1'b0;` after the others,
+ * so a file read and written again keeps its order. */
+static void write_cells(verilog_writer *wr, bool consts) {
+    const odin3_module *module = wr->mod.module;
+    for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
+        odin3_node_id node = {i};
+        if (odin3_node_live(module, node) && !is_port_node(wr, node) &&
+            const_statement(wr, node) == consts) {
+            write_cell(wr, node);
+        }
+    }
+}
+
 static odin3_status write_module(verilog_writer *wr, uint32_t id) {
     const odin3_module *module =
         odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id});
@@ -1884,17 +1904,68 @@ static odin3_status write_module(verilog_writer *wr, uint32_t id) {
         declare_wires_and_nets(wr);
         declare_cell_extras(wr);
         write_aliases(wr);
-        for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
-            odin3_node_id node = {i};
-            if (odin3_node_live(module, node) && !is_port_node(wr, node)) {
-                write_cell(wr, node);
-            }
-        }
+        write_cells(wr, false);
+        write_cells(wr, true);
         vw_puts(wr, "endmodule\n");
         vw_flush(wr);
     }
     end_module(wr);
     return wr->st;
+}
+
+/* --- the modules a file holds --------------------------------------------------------------- */
+
+/* The ID of the module a node of `module` instantiates, 0 when it instantiates none. */
+static uint32_t instance_module(const verilog_writer *wr, const odin3_module *module,
+                                odin3_node_id node) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, odin3_node_type(module, node));
+    uint32_t name = 0;
+    if (def == NULL || def->gran != ODIN3_GRAN_MODULE ||
+        !odin3_strtab_find(wr->tab, odin3_bytes_cstr(def->name), &name)) {
+        return 0;
+    }
+    for (uint32_t i = 1; i < odin3_design_module_end(wr->design); i++) {
+        const odin3_module *other =
+            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){i});
+        if (other != NULL && odin3_module_name(other) == name) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* Marks in `keep` (one byte per module ID) the top and the modules it instantiates, directly or
+ * not; a module nothing reaches is a leftover (a flattened child) that a reader would not
+ * elaborate, so the file does not hold it and write, read, write is idempotent. All stay when no
+ * top is set. */
+static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint32_t end) {
+    uint32_t top = odin3_design_top(wr->design).v;
+    uint32_t *work = odin3_util_calloc(((size_t)end + 1) * sizeof *work);
+    uint32_t depth = 0;
+    if (work == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (top == 0) {
+        memset(keep, 1, end);
+    } else {
+        keep[top] = 1;
+        work[depth++] = top;
+    }
+    while (depth > 0) {
+        const odin3_module *module =
+            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){work[--depth]});
+        for (uint32_t i = 1; module != NULL && i < odin3_module_node_end(module); i++) {
+            uint32_t child = odin3_node_live(module, (odin3_node_id){i})
+                                 ? instance_module(wr, module, (odin3_node_id){i})
+                                 : 0;
+            if (child != 0 && !keep[child]) {
+                keep[child] = 1;
+                work[depth++] = child;
+            }
+        }
+    }
+    odin3_util_free(work);
+    return ODIN3_OK;
 }
 
 /* --- black-box stubs ----------------------------------------------------------------------- */
@@ -2136,9 +2207,14 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
     st = st == ODIN3_OK ? vw_fail(&wr, enable_prov_map(&wr, opts)) : st;
     odin3_hash_map_file map = {.open = false};
     st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = write_module(&wr, i);
+    const uint32_t end = odin3_design_module_end(design);
+    uint8_t *keep = odin3_util_calloc((size_t)end + 1);
+    st =
+        st == ODIN3_OK ? (keep != NULL ? mark_reachable(&wr, keep, end) : ODIN3_ERR_NO_MEMORY) : st;
+    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
+        st = keep[i] ? write_module(&wr, i) : ODIN3_OK;
     }
+    odin3_util_free(keep);
     if (st == ODIN3_OK) {
         (void)write_stubs(&wr);
     }
