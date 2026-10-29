@@ -82,6 +82,20 @@ typedef enum odin3_status {
 const char *odin3_version_string(void);
 
 /*
+ * Returns the Git commit the library was built from: 40 lowercase hex digits, or "unknown" when the
+ * build had neither a Git checkout nor a source-release stamp file (.odin3-commit). Fixed at
+ * CMake configure time. The string is static; the caller must not free it. Never fails.
+ */
+const char *odin3_version_commit(void);
+
+/*
+ * Returns 1 when the sources had uncommitted changes to tracked files at configure time (the
+ * commit then does not describe the build exactly), else 0. Always 0 for "unknown" and for stamp
+ * builds. Never fails.
+ */
+int odin3_version_commit_dirty(void);
+
+/*
  * Returns ODIN3_ABI_VERSION as compiled into the library, so a plugin or
  * binding built against one header can detect a library built from another.
  * Never fails.

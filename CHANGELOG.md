@@ -6,6 +6,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added
+
+- `odin3 --version` prints a second line `commit <sha>[-dirty]`; line 1 (`odin3 1.2.0 (ABI 7)`) is unchanged.
+  The commit is recorded at CMake configure time (`cmake/odin3_commit.cmake`: `git -C`, else the stamp file
+  `.odin3-commit` that `tools/release/make-tarball` writes, else `unknown`) so run records can name the Odin III
+  commit (provenance completeness). New C API `odin3_version_commit()` and `odin3_version_commit_dirty()`
+  (`include/odin3/odin3.h`; Python `Odin3.commit()`). Purely additive, so the ABI stays 7 (no removed or changed
+  symbol or struct; callers built for ABI 7 run unchanged). 2026-10-29.
+
 ### Fixed
 
 - `odin3-flow` runs `odin3` with the working directory set to the common parent directory of the design

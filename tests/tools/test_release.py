@@ -29,7 +29,8 @@ class VersionTest(unittest.TestCase):
     def test_version_is_1_2_0(self) -> None:
         out = run([CLI, "--version"])
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertRegex(out.stdout, r"^odin3 1\.2\.0 \(ABI \d+\)")
+        self.assertRegex(out.stdout, r"^odin3 1\.2\.0 \(ABI \d+\)\n")
+        self.assertRegex(out.stdout.split("\n")[1], r"^commit ([0-9a-f]{40}|unknown)(-dirty)?$")
 
     def test_header_version_is_1_2_0(self) -> None:
         # odin3_version_string() is built from these three macros (src/api/version.c).

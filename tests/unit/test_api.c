@@ -5,6 +5,7 @@
 #include "unity.h"
 
 #include <dlfcn.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -33,6 +34,15 @@ static void test_version_string_matches_macros(void) {
 static void test_abi_version_matches_header(void) {
     TEST_ASSERT_EQUAL_UINT32((uint32_t)ODIN3_ABI_VERSION, odin3_abi_version());
     TEST_ASSERT_EQUAL_UINT32(7, odin3_abi_version()); /* v1.2.0: the provenance chain readers */
+}
+
+static void test_version_commit_is_sha_or_unknown(void) {
+    const char *commit = odin3_version_commit();
+    TEST_ASSERT_NOT_NULL(commit);
+    bool is_sha = strlen(commit) == 40 && strspn(commit, "0123456789abcdef") == 40;
+    TEST_ASSERT_TRUE(is_sha || strcmp(commit, "unknown") == 0);
+    int dirty = odin3_version_commit_dirty();
+    TEST_ASSERT_TRUE(dirty == 0 || dirty == 1);
 }
 
 static void test_check_status_has_a_name(void) {
@@ -114,6 +124,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_version_string_matches_macros);
     RUN_TEST(test_abi_version_matches_header);
+    RUN_TEST(test_version_commit_is_sha_or_unknown);
     RUN_TEST(test_check_status_has_a_name);
     RUN_TEST(test_every_status_has_a_name);
     RUN_TEST(test_out_of_range_status_is_unknown);

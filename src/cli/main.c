@@ -147,9 +147,11 @@ static int bad_value(const char *option, const char *value, const char *why) {
     return EXIT_USAGE;
 }
 
-/* --version: the version and ABI lines, then the linked ABC's commit when it is registered. */
+/* --version: version and ABI line, commit line, then the linked ABC's commit if registered. */
 static void print_version(const cli_state *state) {
     (void)printf("odin3 %s (ABI %u)\n", odin3_version_string(), odin3_abi_version());
+    (void)printf("commit %s%s\n", odin3_version_commit(),
+                 odin3_version_commit_dirty() != 0 ? "-dirty" : "");
 #ifdef ODIN3_HAVE_SLANG
     (void)printf("SystemVerilog via slang (adapters/slang, third_party/slang)\n");
 #endif

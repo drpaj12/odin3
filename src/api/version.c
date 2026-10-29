@@ -14,6 +14,21 @@ ODIN3_EXPORT const char *odin3_version_string(void) {
         ODIN3_VERSION_PATCH);
 }
 
+#ifndef ODIN3_COMMIT_STR
+#define ODIN3_COMMIT_STR "unknown"
+#endif
+#ifndef ODIN3_COMMIT_DIRTY_FLAG
+#define ODIN3_COMMIT_DIRTY_FLAG 0
+#endif
+
+ODIN3_EXPORT const char *odin3_version_commit(void) {
+    return ODIN3_COMMIT_STR;
+}
+
+ODIN3_EXPORT int odin3_version_commit_dirty(void) {
+    return ODIN3_COMMIT_DIRTY_FLAG;
+}
+
 ODIN3_EXPORT uint32_t odin3_abi_version(void) {
     return (uint32_t)ODIN3_ABI_VERSION;
 }
