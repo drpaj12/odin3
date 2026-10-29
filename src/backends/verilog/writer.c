@@ -1958,22 +1958,32 @@ static void write_aliases(verilog_writer *wr) {
     }
 }
 
-/* Whether the cell is a constant that gets a statement (`assign w = 1'b0;`). */
-static bool const_statement(const verilog_writer *wr, odin3_node_id node) {
+/* Write order of the cells: 0 all others, 1 storage cells, 2 constants (`assign w = 1'b0;`). */
+enum { GROUP_PLAIN = 0, GROUP_STORAGE = 1, GROUP_CONST = 2, GROUP_COUNT = 3 };
+
+static uint32_t cell_group(const verilog_writer *wr, odin3_node_id node) {
     const vw_builtin *bi = node_builtin(wr, node);
-    return bi != NULL && bi->form == FORM_CONST;
+    if (bi == NULL) {
+        return GROUP_PLAIN;
+    }
+    if (bi->form == FORM_CONST) {
+        return GROUP_CONST;
+    }
+    return bi->form == FORM_FF || bi->form == FORM_LATCH ? GROUP_STORAGE : GROUP_PLAIN;
 }
 
-/* The live cells in node order: the non-constant ones, or (consts) the constant ones. The
- * constants come last because a reader makes the cell of an `assign w = 1'b0;` after the others,
- * so a file read and written again keeps its order. */
-static void write_cells(verilog_writer *wr, bool consts) {
+/* The live cells in node order, one group at a time: the others, the storage cells, the constants.
+ * A reader makes the cells of the `assign` and instance items first, those of the `always` items
+ * (proc) next and the constants last, so a file read and written again keeps its order. */
+static void write_cells(verilog_writer *wr) {
     const odin3_module *module = wr->mod.module;
-    for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
-        odin3_node_id node = {i};
-        if (odin3_node_live(module, node) && !is_port_node(wr, node) &&
-            const_statement(wr, node) == consts) {
-            write_cell(wr, node);
+    for (uint32_t group = 0; group < GROUP_COUNT; group++) {
+        for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
+            odin3_node_id node = {i};
+            if (odin3_node_live(module, node) && !is_port_node(wr, node) &&
+                cell_group(wr, node) == group) {
+                write_cell(wr, node);
+            }
         }
     }
 }
@@ -1986,8 +1996,7 @@ static odin3_status write_module(verilog_writer *wr, uint32_t id) {
         declare_wires_and_nets(wr);
         declare_cell_extras(wr);
         write_aliases(wr);
-        write_cells(wr, false);
-        write_cells(wr, true);
+        write_cells(wr);
         vw_puts(wr, "endmodule\n");
         vw_flush(wr);
     }
