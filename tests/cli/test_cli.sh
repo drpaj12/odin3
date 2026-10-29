@@ -474,10 +474,13 @@ abc_script_project)
     ;;
 version_abc)
     "$odin3" --version >"$work/out" 2>"$work/err" || fail "odin3 --version failed"
-    # The version line, then (when the build has it) the SystemVerilog adapter line, then the
-    # linked ABC line, which is always the last.
+    # The version line, the commit line, then (when the build has it) the SystemVerilog adapter
+    # line, then the linked ABC line, which is always the last.
     lines=$(wc -l <"$work/out")
-    [[ $lines -ge 2 && $lines -le 3 ]] || fail "--version printed $lines lines, not 2 or 3"
+    [[ $lines -ge 3 && $lines -le 4 ]] || fail "--version printed $lines lines, not 3 or 4"
+    sed -n 1p "$work/out" | grep -qE '^odin3 [0-9.]+ \(ABI [0-9]+\)$' || fail "bad version line: $(sed -n 1p "$work/out")"
+    sed -n 2p "$work/out" | grep -qE '^commit ([0-9a-f]{40}|unknown)(-dirty)?$' ||
+        fail "bad commit line: $(sed -n 2p "$work/out")"
     [[ $(grep -cE '^linked ABC [0-9a-f]{40} \(adapters/abc/NOTICE\)$' "$work/out") -eq 1 ]] ||
         fail "no single 'linked ABC <commit> (adapters/abc/NOTICE)' line: $(cat "$work/out")"
     tail -1 "$work/out" | grep -qE '^linked ABC ' || fail "the linked ABC line is not the last"
