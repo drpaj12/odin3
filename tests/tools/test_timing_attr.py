@@ -442,6 +442,24 @@ class Attribution(unittest.TestCase):
         again = ta.attribute_flow_dir(flow_dir)
         self.assertEqual(again["coverage"]["source_files_unreadable"], 0)
 
+    def test_source_cwd_abs_used_when_relative_path_is_gone(self) -> None:
+        flow_dir = copy_fixture(self, DFF)
+        src = scratch(self, "ot-tabs-")
+        (src / "micro").mkdir()
+        (src / "micro" / "bm_DL_logic_w_Dff.v").write_text(
+            "\n" * 7 + "always @(posedge Clock)\n\n  f <= x1 & x2;\n  g <= f | x3;\n")
+        inputs = flow_dir / "timing" / "inputs.json"
+        data = json.loads(inputs.read_text())
+        data["source_cwd"] = "../no/such/dir"  # the flow dir moved without the design tree
+        data["source_cwd_abs"], data["designs"] = str(src), []
+        inputs.write_text(json.dumps(data))
+        cov = ta.attribute_flow_dir(flow_dir)["coverage"]
+        self.assertEqual((cov["source_files"], cov["source_files_unreadable"]), (1, 0))
+        del data["source_cwd_abs"]
+        inputs.write_text(json.dumps(data))
+        cov = ta.attribute_flow_dir(flow_dir)["coverage"]
+        self.assertEqual(cov["source_files_unreadable"], 1)
+
     def test_word_via_says_how_the_word_was_found(self) -> None:
         report = ta.attribute_flow_dir(FIXTURES / ADDER)
         nodes = [n for p in report["paths"] for n in p["nodes"]]

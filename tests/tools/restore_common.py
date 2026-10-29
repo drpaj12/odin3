@@ -1,7 +1,8 @@
 """Shared helpers of the V1.2.0 Task 9 restore tests: the micro set, the VTR flow script and the
 CLI runner. The CLI links its own sanitizer runtime, so LD_PRELOAD and LD_AUDIT (which CTest
 python_names sets for a sanitized libodin3) are stripped from its environment (CLI_ENV, as in
-test_names_v2.py). Work directories are made under TMPDIR and left in place."""
+test_names_v2.py). Work directories are made under TMPDIR and removed when the test finishes
+(see workdir)."""
 
 from __future__ import annotations
 

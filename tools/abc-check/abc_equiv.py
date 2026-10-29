@@ -334,8 +334,6 @@ def _config(args: argparse.Namespace) -> Config:
     if args.step != "all" and not args.keep:
         raise UsageError(f"--step {args.step} needs --keep DIR")
     keep = Path(args.keep) if args.keep else Path(tempfile.mkdtemp(prefix="abc-equiv."))
-    if not args.keep:
-        print(f"{TOOL}: files in {keep}", file=sys.stderr)
     return Config(args.odin3, args.equiv_check, args.step, args.lut, args.via_blif, args.exchange,
                   args.vtr, keep, args.timeout)
 
@@ -355,6 +353,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     code = run_all(cfg, designs, entries)
     if code == EXIT_OK:
         _drop_own_dir(cfg, args)
+    elif cfg is not None and not args.keep:
+        print(f"{TOOL}: files in {cfg.keep}", file=sys.stderr)
     return code
 
 

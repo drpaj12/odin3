@@ -912,6 +912,10 @@ def source_files(flow: Path, inputs: Mapping[str, Any]) -> SourceFiles:
     (``source_cwd``) and the design files the flow recorded (``designs``)."""
     roots = [flow]
     cwd = absolute(flow, inputs.get("source_cwd"))
+    if cwd is None or not cwd.is_dir():  # flow dir moved without the design tree
+        fallback = absolute(flow, inputs.get("source_cwd_abs"))
+        if fallback is not None and fallback.is_dir():
+            cwd = fallback
     if cwd is not None:
         roots.insert(0, cwd)
     designs = [Path(d) for d in inputs.get("designs", []) if isinstance(d, str)]
