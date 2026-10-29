@@ -47,6 +47,8 @@ if(ODIN3_FUZZ)
     target_compile_options(odin3_flags INTERFACE -fsanitize=fuzzer-no-link)
 endif()
 
+include(${PROJECT_SOURCE_DIR}/cmake/odin3_commit.cmake)
+
 # --- libodin3: the shared library behind include/odin3/odin3.h -----------------
 # All of src/ except src/cli/ compiles into odin3_core; libodin3 re-links those objects and
 # exports only what carries ODIN3_EXPORT. To add a module, append its .c file to this list.
@@ -472,6 +474,8 @@ target_include_directories(odin3_core
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
+set_source_files_properties(src/api/version.c PROPERTIES COMPILE_DEFINITIONS
+    "ODIN3_COMMIT_STR=\"${ODIN3_COMMIT}\";ODIN3_COMMIT_DIRTY_FLAG=${ODIN3_COMMIT_DIRTY}")
 
 # --- The abc pass's default script, embedded (3D spec §7.7, AB-23) ----------------------------
 # lib/abc/vtr.abc becomes the byte array odin3_abc_default_script in
@@ -2420,7 +2424,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # v1.1.0's SystemVerilog reader seam makes it v6.
     add_test(NAME cli_version COMMAND odin3 --version)
     set_tests_properties(cli_version PROPERTIES
-        LABELS unit PASS_REGULAR_EXPRESSION "^odin3 ${PROJECT_VERSION} \\(ABI 7\\)")
+        LABELS unit PASS_REGULAR_EXPRESSION
+        "^odin3 ${PROJECT_VERSION} \\(ABI 7\\)\ncommit ([0-9a-f]+|unknown)(-dirty)?\n")
     add_test(NAME cli_example_plugin COMMAND odin3 --plugin $<TARGET_FILE:example_plugin>)
     set_tests_properties(cli_example_plugin PROPERTIES LABELS unit)
     if(ODIN3_WITH_ABC)

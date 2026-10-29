@@ -53,6 +53,9 @@ class ConstructDesignTest(unittest.TestCase):
     def design(self) -> Design:
         return Design(self.odin3, handle=self.odin3.lib.odin3_test_construct_design())
 
+    def test_commit_is_sha_or_unknown(self) -> None:
+        self.assertRegex(self.odin3.commit(), r"^([0-9a-f]{40}|unknown)(-dirty)?$")
+
     def test_abi_version_is_7(self) -> None:
         self.assertEqual(self.odin3.abi_version(), 7)
 

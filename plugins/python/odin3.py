@@ -142,6 +142,12 @@ class Odin3:
     def version(self) -> str:
         return str(self.ffi.string(self.lib.odin3_version_string()).decode())
 
+    def commit(self) -> str:
+        """The Git commit libodin3 was built from (40 hex digits or "unknown"), plus "-dirty" if
+        the sources had uncommitted changes."""
+        sha = str(self.ffi.string(self.lib.odin3_version_commit()).decode())
+        return sha + ("-dirty" if self.lib.odin3_version_commit_dirty() else "")
+
     def abi_version(self) -> int:
         return int(self.lib.odin3_abi_version())
 
