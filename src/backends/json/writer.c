@@ -383,21 +383,65 @@ static void write_module_body(jw *out, jw_list *entry) {
                   odin3_module_prov(out->module));
 }
 
+/* Whether the file mentions net: a pin, a name, a wire or an alias holds it. A net nothing holds
+ * is not written, and a reader makes no net for it. */
+static bool net_mentioned(const jw *out, odin3_net_id net) {
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    return odin3_net_pins(out->module, net).count > 0 || odin3_net_name(out->module, net) != 0 ||
+           odin3_wire_valid(odin3_net_primary(out->module, net).wire) ||
+           odin3_net_alias_next(out->module, net, &cursor, &alias);
+}
+
+/* Gives net the next bit number when it has none and is a mentioned live non-constant. */
+static void number_net(jw *out, odin3_net_id net, uint32_t *next) {
+    if (odin3_net_valid(net) && out->code[net.v] == 0 && odin3_net_live(out->module, net) &&
+        odin3_net_const_value(out->module, net) == ODIN3_CONST_NONE && net_mentioned(out, net)) {
+        out->code[net.v] = (*next)++;
+    }
+}
+
+/* Bit numbers of the nets: 2, 3, ... first the nets of the port bits in port order, then the other
+ * live non-constant nets in net ID order. A file read back makes its nets in that order (ports as
+ * the file lists them, then the other labels ascending), so it gets the same numbers again.
+ * Returns the next free number. */
+static uint32_t number_nets(jw *out, uint32_t net_end) {
+    uint32_t next = 2;
+    const uint32_t count = odin3_module_port_count(out->module);
+    for (uint32_t i = 0; i < count; i++) {
+        odin3_pinslice pins = odin3_node_pins(out->module, odin3_module_port(out->module, i));
+        for (uint32_t k = 0; k < pins.count; k++) {
+            number_net(out, odin3_pin_net(out->module, (odin3_pin_id){pins.first.v + k}), &next);
+        }
+    }
+    for (uint32_t i = 1; i < net_end; i++) {
+        number_net(out, (odin3_net_id){i}, &next);
+    }
+    return next;
+}
+
 static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     const uint32_t net_end = odin3_module_net_end(mod);
     jw_list entry = {false, SECTION_DEPTH};
     out->module = mod;
     out->init = odin3_util_calloc((size_t)net_end + 1);
-    if (out->init == NULL) {
+    out->code = odin3_util_calloc(((size_t)net_end + 1) * sizeof *out->code);
+    if (out->init == NULL || out->code == NULL) {
+        odin3_util_free(out->init);
+        odin3_util_free(out->code);
+        out->init = NULL;
+        out->code = NULL;
         return ODIN3_ERR_NO_MEMORY;
     }
     out->written = odin3_strtab_create();
     if (out->written == NULL) {
         odin3_util_free(out->init);
+        odin3_util_free(out->code);
         out->init = NULL;
+        out->code = NULL;
         return ODIN3_ERR_NO_MEMORY;
     }
-    out->extra_bit = net_end + 1;
+    out->extra_bit = number_nets(out, net_end);
     mark_inits(out);
     out->module_rows = odin3_hash_rows_count(&out->rows);
     jw_item(out, modules);
@@ -409,6 +453,8 @@ static odin3_status write_module(jw *out, jw_list *modules, odin3_module *mod) {
     jw_names_module_end(out);
     odin3_util_free(out->init);
     out->init = NULL;
+    odin3_util_free(out->code);
+    out->code = NULL;
     odin3_strtab_destroy(out->written);
     out->written = NULL;
     return out->status;

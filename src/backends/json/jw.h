@@ -44,7 +44,9 @@ typedef struct jw {
     odin3_design *design;
     const odin3_strtab *strtab;
     odin3_module *module;
-    uint8_t *init;          /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
+    uint8_t *init; /* per net ID: 0 = none, else '0', '1' or 'x' (latch Q initial value) */
+    uint32_t *
+        code; /* per net ID: its bit number (dense, in ID order, constants and dead nets skipped) */
     uint32_t extra_bit;     /* next bit number no net uses (helper nets of OFF-set $sop) */
     odin3_status status;    /* first failure; later output is skipped */
     int write_errno;        /* errno of the failed write when status is ODIN3_ERR_IO */
