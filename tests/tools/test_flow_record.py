@@ -88,6 +88,44 @@ class Privacy(TmpCase):
 
 
 @needs_odin3
+class VersionCommit(TmpCase):
+    def binary(self, text: str) -> Path:
+        path = self.tmp / "fake-odin3"
+        path.write_text(f"#!/bin/sh\ncat <<'EOF'\n{text}\nEOF\n", encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def conf_of(self, text: str) -> str:
+        rec = rr.RunRecorder("odin3-flow", "d", "a", 0, "arch", {"tmp": self.tmp})
+        rec.add_tool("odin3", rr.tool_entry(None, self.binary(text)))
+        params = rec.rec["params"]
+        assert isinstance(params, dict)
+        return str(params["tool.odin3_commit"]["conf"])
+
+    def test_conf_given_unknown_dirty(self) -> None:
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        self.assertEqual(self.conf_of(f"odin3 1.2.0 (ABI 7)\ncommit {sha}"), "given")
+        self.assertEqual(self.conf_of(f"odin3 1.2.0 (ABI 7)\ncommit {sha}-dirty"), "unknown")
+        self.assertEqual(self.conf_of("odin3 1.2.0 (ABI 7)\ncommit unknown"), "unknown")
+
+    def test_commit_line_is_given_without_a_tree(self) -> None:
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        entry = rr.tool_entry(None, self.binary(f"odin3 1.2.0 (ABI 7)\ncommit {sha}"))
+        self.assertEqual(entry["commit"], sha)
+        self.assertTrue(entry["version_names_commit"])
+        self.assertIs(entry["built_dirty"], False)
+
+    def test_dirty_commit_line_is_not_given(self) -> None:
+        sha = "0123456789abcdef0123456789abcdef01234567"
+        entry = rr.tool_entry(None, self.binary(f"odin3 1.2.0 (ABI 7)\ncommit {sha}-dirty"))
+        self.assertIs(entry["built_dirty"], True)
+
+    def test_unknown_stays_unknown(self) -> None:
+        entry = rr.tool_entry(None, self.binary("odin3 1.2.0 (ABI 7)\ncommit unknown"))
+        self.assertEqual(entry["commit"], "")
+        self.assertFalse(entry["version_names_commit"])
+
+
 class FlowRecord(TmpCase):
     def run_flow(self, *extra: str, design: Path = DFF) -> dict[str, object]:
         env = {k: v for k, v in os.environ.items() if k != "VTR_ROOT"}

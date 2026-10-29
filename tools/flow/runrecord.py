@@ -189,8 +189,13 @@ def tool_entry(tree: Path | None, binary: Path | None, version_args: Sequence[st
         res = subprocess.run([str(binary), *version_args], capture_output=True, text=True,
                              check=False, timeout=60, cwd=tempfile.gettempdir())
         version = (res.stdout + res.stderr).strip()
-    return {"commit": head, "commit_how": "git rev-parse HEAD of the source tree" if head
-            else "no git source tree", "clean": clean, "dirty_diff_sha256": diff_sha,
+    how = "git rev-parse HEAD of the source tree" if head else "no git source tree"
+    # Without a source tree, the `commit <sha>[-dirty]` line of the binary's own --version
+    # (odin3 since v1.2.0 post-release) names the commit it was built from.
+    stated = re.search(r"(?m)^commit ([0-9a-f]{40})(-dirty)?$", version)
+    if not head and stated:
+        head, how = stated.group(1), "the commit line of the binary's --version"
+    return {"commit": head, "commit_how": how, "clean": clean, "dirty_diff_sha256": diff_sha,
             "binary_sha256": file_sha256(binary) if binary is not None and is_file else "",
             "binary_version": version,
             "built_dirty": (re.search(r"-dirty\b", version) is not None) if version else None,
