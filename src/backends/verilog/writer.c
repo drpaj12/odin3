@@ -555,19 +555,27 @@ static uint32_t flop_reg_wire(const verilog_writer *wr, odin3_net_id net) {
     return 0;
 }
 
-/* Uses of a flop's Q net name its output port when it has one, as a bit-level flop's are. */
-static void prefer_port(const verilog_writer *wr, odin3_net_id net, vw_ref *ref) {
+/* Uses of a flop's Q net name another wire of the net when it has one (an output port first), as
+ * those of a bit-level flop do; only the reg wire itself is left otherwise. */
+static void prefer_other(const verilog_writer *wr, odin3_net_id net, vw_ref *ref) {
     const odin3_module *module = wr->mod.module;
     uint32_t cursor = 0;
     odin3_net_alias alias;
     odin3_wirebit wb = odin3_net_primary(module, net);
+    bool found = false;
     bool more = true;
     while (more) {
-        uint32_t port = odin3_wire_valid(wb.wire) ? wire_port(wr, wb.wire) : 0;
-        if (port != 0 && odin3_wire_live(module, wb.wire) &&
-            wr->mod.def->ports[port - 1].dir == ODIN3_DIR_OUT) {
-            *ref = (vw_ref){wb.wire.v, wb.bit, REF_WIRE, false};
-            return;
+        if (odin3_wire_valid(wb.wire) && odin3_wire_live(module, wb.wire) &&
+            wb.wire.v != wr->mod.regwire[net.v]) {
+            uint32_t port = wire_port(wr, wb.wire);
+            bool out = port != 0 && wr->mod.def->ports[port - 1].dir == ODIN3_DIR_OUT;
+            if (out || !found) {
+                *ref = (vw_ref){wb.wire.v, wb.bit, REF_WIRE, false};
+                found = true;
+            }
+            if (out) {
+                return;
+            }
         }
         more = odin3_net_alias_next(module, net, &cursor, &alias);
         wb = alias.wb;
@@ -592,7 +600,7 @@ static void classify_net(verilog_writer *wr, odin3_net_id net) {
     wr->mod.refs[net.v] = pick.rank != 0 ? pick.ref : own_ref(wr, net);
     wr->mod.regwire[net.v] = pick.rank != 0 ? flop_reg_wire(wr, net) : 0;
     if (wr->mod.regwire[net.v] != 0 && pick.ref.wire == wr->mod.regwire[net.v]) {
-        prefer_port(wr, net, &wr->mod.refs[net.v]);
+        prefer_other(wr, net, &wr->mod.refs[net.v]);
     }
 }
 
