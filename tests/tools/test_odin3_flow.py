@@ -157,7 +157,8 @@ class Analysis(FlowCase):
 
 SHARE_FILES = ("lib/lpm.o3lib", "lib/vtr.o3lib", "lib/abc/vtr.abc", "tools/flow/lpm.script",
                "tools/flow/odin3_flow.py", "tools/flow/timing_attr.py",
-               "tools/flow/timing_report.py", "tools/flow/name_map_v2.py")
+               "tools/flow/timing_report.py", "tools/flow/name_map_v2.py",
+               "tools/flow/runrecord.py", "tools/flow/flow_record.py")
 
 
 def share_tree(dest: Path) -> Path:

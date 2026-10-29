@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -77,12 +78,16 @@ class StepResult:
     ok: bool
     log: Path
     seconds: float
+    argv: tuple[str, ...] = ()  # the command of a tool step (empty for a check made in-process)
+    exit_code: int | None = None
+    rss_mib: float | None = None  # peak RSS of the tool and its children (wait4)
 
 
 @dataclass
 class FlowResult:
     ok: bool
     steps: list[StepResult] = field(default_factory=list)
+    runs: list[StepResult] = field(default_factory=list)  # every tool run, retries included
     summary: dict[str, object] = field(default_factory=dict)
     vpr_run_dir: Path | None = None  # the VPR run directory of the routed result
 
@@ -186,19 +191,38 @@ def run_step(name: str, argv: Sequence[str], step_dir: Path, env: dict[str, str]
     step_dir.mkdir(parents=True, exist_ok=True)
     log = step_dir / f"{name}.log"
     start = time.monotonic()
+    code: int | None = None
+    rss: float | None = None
     try:
         with log.open("w") as handle:
             handle.write("$ " + " ".join(argv) + "\n")
             if note:
                 handle.write(note + "\n")
             handle.flush()
-            proc = subprocess.run(list(argv), cwd=cwd or step_dir, stdout=handle,
-                                  stderr=subprocess.STDOUT, env=env, timeout=timeout, check=False)
-        ok = proc.returncode == 0
-    except (OSError, subprocess.TimeoutExpired) as exc:
+            proc = subprocess.Popen(list(argv), cwd=cwd or step_dir, stdout=handle,
+                                    stderr=subprocess.STDOUT, env=env)
+            expired: list[bool] = []
+
+            def expire() -> None:
+                expired.append(True)
+                proc.kill()
+
+            timer = threading.Timer(timeout, expire)
+            timer.start()
+            try:
+                _, status, usage = os.wait4(proc.pid, 0)
+            finally:
+                timer.cancel()
+            code = os.waitstatus_to_exitcode(status)
+            proc.returncode = code
+            rss = usage.ru_maxrss / 1024.0  # KiB on Linux
+            if expired:
+                handle.write(f"\ntimeout after {timeout} s\n")
+        ok = code == 0 and not expired
+    except OSError as exc:
         log.write_text(f"{log.read_text()}\n{exc}\n")
         ok = False
-    return StepResult(name, ok, log, time.monotonic() - start)
+    return StepResult(name, ok, log, time.monotonic() - start, tuple(argv), code, rss)
 
 
 def lut_k(args: FlowArgs, vtr_root: Path | None, log: Path) -> int:
@@ -360,6 +384,7 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
     job_dir = args.out / "vpr"
     ctx, step, started = vpr_run(args, vtr_root, arch, k, blif, job_dir, None)
     result.steps.append(step)
+    result.runs.append(step)
     retry: dict[str, int] | None = None
     if not step.ok:
         failure = route_failure(job_dir / "run")
@@ -378,6 +403,7 @@ def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
             tried.append(width)
             rctx, rstep, rstarted = vpr_run(args, vtr_root, arch, k, blif,
                                             job_dir / f"retry-{width}", width, math.ceil(remaining))
+            result.runs.append(rstep)
             if rstep.ok:
                 print(f"NOTE: route at W={relaxed} failed (VPR); routed at W={width}")
                 ctx, step, started = rctx, rstep, rstarted
@@ -535,6 +561,7 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     step = run_step("odin3", odin3_command(args, top, script), step_dir,
                     cwd=design_root(args.designs), note=name_root_note(args.designs))
     result.steps.append(step)
+    result.runs.append(step)
     if not step.ok:
         return None
     result.summary["luts"] = count_luts(blif)
@@ -562,12 +589,14 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     step = run_step("odin3", odin3_command(args, top, script), step_dir,
                     cwd=design_root(args.designs), note=name_root_note(args.designs))
     result.steps.append(step)
+    result.runs.append(step)
     if not step.ok:
         return None
     back = f"read_techlib {quote(resource_root() / LPM_LIB_REL)}; " \
            f"read_verilog -icells {quote(written)}"
     lint = run_step("readback", [str(args.odin3), "--check", "-p", back], args.out / "readback")
     result.steps.append(lint)
+    result.runs.append(lint)
     return written if lint.ok else None
 
 
@@ -604,6 +633,9 @@ def run_flow(args: FlowArgs) -> FlowResult:
     result.ok = step_fn(args, top, result) is not None
     result.summary["seconds"] = {st.name: round(st.seconds, 3) for st in result.steps}
     (args.out / "summary.json").write_text(json.dumps(result.summary, indent=2) + "\n")
+    import flow_record  # the run record (mimir-run.json); after summary.json, which it hashes
+
+    flow_record.write_record(args, result, top, qor_legs.REPO_ROOT, vtr_root_from_env())
     return result
 
 
