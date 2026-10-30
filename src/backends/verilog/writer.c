@@ -165,6 +165,8 @@ typedef struct vw_module {
     odin3_u64map *vectors;         /* names ID of a vector wire -> 1 */
     vw_ref *refs;                  /* by net ID */
     uint32_t *wire_port;           /* by wire ID: port index + 1, 0 for a non-port wire */
+    uint32_t *regwire; /* by net ID: the scalar non-port wire that is the reg of the one-bit $dff
+                          driving the net, 0 for none */
 } vw_module;
 
 typedef struct verilog_writer {
@@ -525,6 +527,61 @@ static void consider(const verilog_writer *wr, vw_pick *pick, odin3_wirebit wb, 
     }
 }
 
+/* The scalar non-port wire on net when a one-bit $dff drives it alone: that wire is the flop's
+ * `reg` (a reader makes a $dff out of `always @(...) w <= d;` and a one-bit `reg w;`, so the file
+ * is written back the way a bit-level flop's own reg is). 0 when there is none. */
+static uint32_t flop_reg_wire(const verilog_writer *wr, odin3_net_id net) {
+    const odin3_module *module = wr->mod.module;
+    if (odin3_net_driver_count(module, net) != 1) {
+        return 0;
+    }
+    odin3_node_id node = odin3_pin_node(module, odin3_net_driver(module, net));
+    const vw_builtin *bi = node_builtin(wr, node);
+    if (bi == NULL || bi->form != FORM_FF || out_port(wr, node).count != 1) {
+        return 0;
+    }
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    odin3_wirebit wb = odin3_net_primary(module, net);
+    bool more = true;
+    while (more) {
+        if (odin3_wire_valid(wb.wire) && odin3_wire_live(module, wb.wire) &&
+            wire_port(wr, wb.wire) == 0 && wire_scalar(wr, wb.wire)) {
+            return wb.wire.v;
+        }
+        more = odin3_net_alias_next(module, net, &cursor, &alias);
+        wb = alias.wb;
+    }
+    return 0;
+}
+
+/* Uses of a flop's Q net name another wire of the net when it has one (an output port first), as
+ * those of a bit-level flop do; only the reg wire itself is left otherwise. */
+static void prefer_other(const verilog_writer *wr, odin3_net_id net, vw_ref *ref) {
+    const odin3_module *module = wr->mod.module;
+    uint32_t cursor = 0;
+    odin3_net_alias alias;
+    odin3_wirebit wb = odin3_net_primary(module, net);
+    bool found = false;
+    bool more = true;
+    while (more) {
+        if (odin3_wire_valid(wb.wire) && odin3_wire_live(module, wb.wire) &&
+            wb.wire.v != wr->mod.regwire[net.v]) {
+            uint32_t port = wire_port(wr, wb.wire);
+            bool out = port != 0 && wr->mod.def->ports[port - 1].dir == ODIN3_DIR_OUT;
+            if (out || !found) {
+                *ref = (vw_ref){wb.wire.v, wb.bit, REF_WIRE, false};
+                found = true;
+            }
+            if (out) {
+                return;
+            }
+        }
+        more = odin3_net_alias_next(module, net, &cursor, &alias);
+        wb = alias.wb;
+    }
+}
+
 /* Chooses how net is written: its input/inout port bit, primary wire bit, first alias wire bit,
  * else itself (or a literal). */
 static void classify_net(verilog_writer *wr, odin3_net_id net) {
@@ -541,6 +598,10 @@ static void classify_net(verilog_writer *wr, odin3_net_id net) {
                         str_bytes(wr, odin3_wire_name(module, (odin3_wire_id){pick.ref.wire})));
     }
     wr->mod.refs[net.v] = pick.rank != 0 ? pick.ref : own_ref(wr, net);
+    wr->mod.regwire[net.v] = pick.rank != 0 ? flop_reg_wire(wr, net) : 0;
+    if (wr->mod.regwire[net.v] != 0 && pick.ref.wire == wr->mod.regwire[net.v]) {
+        prefer_other(wr, net, &wr->mod.refs[net.v]);
+    }
 }
 
 static vw_ref net_ref(const verilog_writer *wr, odin3_net_id net) {
@@ -550,7 +611,8 @@ static vw_ref net_ref(const verilog_writer *wr, odin3_net_id net) {
 /* True when the Q net of a bit-level storage cell is declared as its `reg`. */
 static bool q_is_reg(const verilog_writer *wr, odin3_node_id node) {
     odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
-    return odin3_net_valid(net) && net_ref(wr, net).kind == REF_OWN && net_ref(wr, net).reg;
+    return odin3_net_valid(net) && ((net_ref(wr, net).kind == REF_OWN && net_ref(wr, net).reg) ||
+                                    wr->mod.regwire[net.v] != 0);
 }
 
 /* True when a node is written under its name: instances and storage cells with their own reg. */
@@ -562,7 +624,7 @@ static bool needs_name(const verilog_writer *wr, odin3_node_id node) {
     if (!has_output(wr, node)) {
         return false;
     }
-    return bi->form == FORM_FF || (bi->form == FORM_LATCH && !q_is_reg(wr, node));
+    return (bi->form == FORM_FF || bi->form == FORM_LATCH) && !q_is_reg(wr, node);
 }
 
 /* --- module setup: references and the namespace -------------------------------------------- */
@@ -887,6 +949,7 @@ static void end_module(verilog_writer *wr) {
     odin3_u64map_destroy(wr->mod.vectors);
     odin3_util_free(wr->mod.refs);
     odin3_util_free(wr->mod.wire_port);
+    odin3_util_free(wr->mod.regwire);
     wr->mod = (vw_module){0};
 }
 
@@ -914,6 +977,10 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
     mod->vectors = odin3_u64map_create(0);
     mod->refs = odin3_util_calloc(sizeof(vw_ref) * odin3_module_net_end(module));
     mod->wire_port = odin3_util_calloc(sizeof(uint32_t) * odin3_module_wire_end(module));
+    mod->regwire = odin3_util_calloc(sizeof(uint32_t) * odin3_module_net_end(module));
+    if (mod->regwire == NULL) {
+        return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
     if (mod->names == NULL || mod->obj_names == NULL || mod->vectors == NULL || mod->refs == NULL ||
         mod->wire_port == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
@@ -1356,7 +1423,10 @@ static void write_lut(verilog_writer *wr, odin3_node_id node, const vw_builtin *
 
 /* The reg a storage cell assigns: its Q net when declared `reg`, else the cell's own reg. */
 static void put_target(verilog_writer *wr, odin3_node_id node, bool q_reg) {
-    if (q_reg) {
+    odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
+    if (q_reg && odin3_net_valid(net) && wr->mod.regwire[net.v] != 0) {
+        vw_name(wr, OBJ_WIRE, wr->mod.regwire[net.v]);
+    } else if (q_reg) {
         put_pin(wr, out_port(wr, node).first);
     } else {
         vw_name(wr, OBJ_NODE, node.v);
@@ -1365,13 +1435,19 @@ static void put_target(verilog_writer *wr, odin3_node_id node, bool q_reg) {
 
 /* `  assign <Q> = <cell reg>;` when the cell has its own reg. */
 static void connect_reg(verilog_writer *wr, odin3_node_id node, bool q_reg) {
-    if (q_reg) {
+    odin3_net_id net = odin3_pin_net(wr->mod.module, out_port(wr, node).first);
+    uint32_t regwire = odin3_net_valid(net) ? wr->mod.regwire[net.v] : 0;
+    if (q_reg && (regwire == 0 || net_ref(wr, net).wire == regwire)) {
         return;
     }
     vw_puts(wr, "  assign ");
     put_port(wr, node, node_def(wr, node)->n_ports - 1, false);
     vw_puts(wr, " = ");
-    vw_name(wr, OBJ_NODE, node.v);
+    if (regwire != 0) {
+        vw_name(wr, OBJ_WIRE, regwire);
+    } else {
+        vw_name(wr, OBJ_NODE, node.v);
+    }
     vw_line_end(wr, ";\n");
 }
 
@@ -1431,21 +1507,22 @@ static void write_ff(verilog_writer *wr, odin3_node_id node, const vw_builtin *b
         put_edge(wr, param_int(wr, node, FF_CTRL_POLARITY) != 0, (odin3_pin_id){clk.v + 1});
     }
     vw_puts(wr, ") ");
+    bool q_reg = q_is_reg(wr, node);
     if ((bi->flags & (VB_EN | VB_ARST | VB_SRST)) != 0) {
         put_condition(wr, node);
     }
     if ((bi->flags & (VB_ARST | VB_SRST)) != 0) {
         const odin3_value *reset = odin3_node_param(wr->mod.module, node, FF_RESET_VALUE);
-        vw_name(wr, OBJ_NODE, node.v);
+        put_target(wr, node, q_reg);
         vw_puts(wr, " <= ");
         put_bits(wr, reset->bits, reset->len);
         vw_puts(wr, "; else ");
     }
-    vw_name(wr, OBJ_NODE, node.v);
+    put_target(wr, node, q_reg);
     vw_puts(wr, " <= ");
     put_port(wr, node, data, false);
     end_stmt(wr, node);
-    connect_reg(wr, node, false);
+    connect_reg(wr, node, q_reg);
 }
 
 typedef void (*vw_cell_writer)(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi);
@@ -1781,7 +1858,9 @@ static void declare_wires_and_nets(verilog_writer *wr) {
             vw_puts(wr, "  ");
             put_attrs(wr, (odin3_objref){ODIN3_OBJ_WIRE, i},
                       (vw_attr_frame){"", " ", odin3_wire_prov(module, wire)});
-            vw_puts(wr, "wire ");
+            odin3_net_id net = odin3_wire_net(module, wire, 0);
+            bool reg = wire_scalar(wr, wire) && odin3_net_valid(net) && wr->mod.regwire[net.v] == i;
+            vw_puts(wr, reg ? "reg " : "wire ");
             put_wire_range(wr, wire);
             vw_name(wr, OBJ_WIRE, i);
             vw_char(wr, ';');
@@ -1835,8 +1914,11 @@ static void declare_cell_extras(verilog_writer *wr) {
 }
 
 static bool canonical(const verilog_writer *wr, odin3_wire_id wire, uint32_t bit) {
-    vw_ref ref = net_ref(wr, odin3_wire_net(wr->mod.module, wire, bit));
-    return ref.kind == REF_WIRE && ref.wire == wire.v && ref.bit == bit;
+    odin3_net_id net = odin3_wire_net(wr->mod.module, wire, bit);
+    vw_ref ref = net_ref(wr, net);
+    /* the flop's reg wire is connected by the flop (connect_reg), as a bit-level flop's reg is */
+    return (ref.kind == REF_WIRE && ref.wire == wire.v && ref.bit == bit) ||
+           wr->mod.regwire[net.v] == wire.v;
 }
 
 /* `assign w[hi:lo] = <refs>;` for each run of wire bits whose nets are written elsewhere. */
@@ -1876,6 +1958,36 @@ static void write_aliases(verilog_writer *wr) {
     }
 }
 
+/* Write order of the cells: 0 all others, 1 storage cells, 2 constants (`assign w = 1'b0;`). */
+enum { GROUP_PLAIN = 0, GROUP_STORAGE = 1, GROUP_CONST = 2, GROUP_COUNT = 3 };
+
+static uint32_t cell_group(const verilog_writer *wr, odin3_node_id node) {
+    const vw_builtin *bi = node_builtin(wr, node);
+    if (bi == NULL) {
+        return GROUP_PLAIN;
+    }
+    if (bi->form == FORM_CONST) {
+        return GROUP_CONST;
+    }
+    return bi->form == FORM_FF || bi->form == FORM_LATCH ? GROUP_STORAGE : GROUP_PLAIN;
+}
+
+/* The live cells in node order, one group at a time: the others, the storage cells, the constants.
+ * A reader makes the cells of the `assign` and instance items first, those of the `always` items
+ * (proc) next and the constants last, so a file read and written again keeps its order. */
+static void write_cells(verilog_writer *wr) {
+    const odin3_module *module = wr->mod.module;
+    for (uint32_t group = 0; group < GROUP_COUNT; group++) {
+        for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
+            odin3_node_id node = {i};
+            if (odin3_node_live(module, node) && !is_port_node(wr, node) &&
+                cell_group(wr, node) == group) {
+                write_cell(wr, node);
+            }
+        }
+    }
+}
+
 static odin3_status write_module(verilog_writer *wr, uint32_t id) {
     const odin3_module *module =
         odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id});
@@ -1884,17 +1996,67 @@ static odin3_status write_module(verilog_writer *wr, uint32_t id) {
         declare_wires_and_nets(wr);
         declare_cell_extras(wr);
         write_aliases(wr);
-        for (uint32_t i = 1; wr->st == ODIN3_OK && i < odin3_module_node_end(module); i++) {
-            odin3_node_id node = {i};
-            if (odin3_node_live(module, node) && !is_port_node(wr, node)) {
-                write_cell(wr, node);
-            }
-        }
+        write_cells(wr);
         vw_puts(wr, "endmodule\n");
         vw_flush(wr);
     }
     end_module(wr);
     return wr->st;
+}
+
+/* --- the modules a file holds --------------------------------------------------------------- */
+
+/* The ID of the module a node of `module` instantiates, 0 when it instantiates none. */
+static uint32_t instance_module(const verilog_writer *wr, const odin3_module *module,
+                                odin3_node_id node) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, odin3_node_type(module, node));
+    uint32_t name = 0;
+    if (def == NULL || def->gran != ODIN3_GRAN_MODULE ||
+        !odin3_strtab_find(wr->tab, odin3_bytes_cstr(def->name), &name)) {
+        return 0;
+    }
+    for (uint32_t i = 1; i < odin3_design_module_end(wr->design); i++) {
+        const odin3_module *other =
+            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){i});
+        if (other != NULL && odin3_module_name(other) == name) {
+            return i;
+        }
+    }
+    return 0;
+}
+
+/* Marks in `keep` (one byte per module ID) the top and the modules it instantiates, directly or
+ * not; a module nothing reaches is a leftover (a flattened child) that a reader would not
+ * elaborate, so the file does not hold it and write, read, write is idempotent. All stay when no
+ * top is set. */
+static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint32_t end) {
+    uint32_t top = odin3_design_top(wr->design).v;
+    uint32_t *work = odin3_util_calloc(((size_t)end + 1) * sizeof *work);
+    uint32_t depth = 0;
+    if (work == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (top == 0) {
+        memset(keep, 1, end);
+    } else {
+        keep[top] = 1;
+        work[depth++] = top;
+    }
+    while (depth > 0) {
+        const odin3_module *module =
+            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){work[--depth]});
+        for (uint32_t i = 1; module != NULL && i < odin3_module_node_end(module); i++) {
+            uint32_t child = odin3_node_live(module, (odin3_node_id){i})
+                                 ? instance_module(wr, module, (odin3_node_id){i})
+                                 : 0;
+            if (child != 0 && !keep[child]) {
+                keep[child] = 1;
+                work[depth++] = child;
+            }
+        }
+    }
+    odin3_util_free(work);
+    return ODIN3_OK;
 }
 
 /* --- black-box stubs ----------------------------------------------------------------------- */
@@ -2118,6 +2280,19 @@ static odin3_status enable_prov_map(verilog_writer *wr, const odin3_verilog_opts
     return odin3_hash_rows_prov_enable(&wr->rows, wr->design, opts->prov_map, "write_verilog");
 }
 
+/* Every module the file holds (mark_reachable), in module ID order. */
+static odin3_status write_modules(verilog_writer *wr) {
+    const uint32_t end = odin3_design_module_end(wr->design);
+    uint8_t *keep = odin3_util_calloc((size_t)end + 1);
+    odin3_status st =
+        vw_fail(wr, keep != NULL ? mark_reachable(wr, keep, end) : ODIN3_ERR_NO_MEMORY);
+    for (uint32_t i = 1; st == ODIN3_OK && i < end; i++) {
+        st = keep[i] ? write_module(wr, i) : ODIN3_OK;
+    }
+    odin3_util_free(keep);
+    return st;
+}
+
 odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
                                  const odin3_verilog_opts *opts) {
     if (design == NULL || path == NULL ||
@@ -2136,9 +2311,7 @@ odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
     st = st == ODIN3_OK ? vw_fail(&wr, enable_prov_map(&wr, opts)) : st;
     odin3_hash_map_file map = {.open = false};
     st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
-    for (uint32_t i = 1; st == ODIN3_OK && i < odin3_design_module_end(design); i++) {
-        st = write_module(&wr, i);
-    }
+    st = st == ODIN3_OK ? write_modules(&wr) : st;
     if (st == ODIN3_OK) {
         (void)write_stubs(&wr);
     }

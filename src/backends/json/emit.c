@@ -217,7 +217,7 @@ uint32_t jw_net_code(const jw *out, odin3_net_id net) {
         return JW_BIT_Z;
     case ODIN3_CONST_NONE:
     default:
-        return net.v + 1;
+        return out->code[net.v];
     }
 }
 
