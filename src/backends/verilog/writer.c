@@ -978,11 +978,8 @@ static odin3_status begin_module(verilog_writer *wr, const odin3_module *module)
     mod->refs = odin3_util_calloc(sizeof(vw_ref) * odin3_module_net_end(module));
     mod->wire_port = odin3_util_calloc(sizeof(uint32_t) * odin3_module_wire_end(module));
     mod->regwire = odin3_util_calloc(sizeof(uint32_t) * odin3_module_net_end(module));
-    if (mod->regwire == NULL) {
-        return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
-    }
     if (mod->names == NULL || mod->obj_names == NULL || mod->vectors == NULL || mod->refs == NULL ||
-        mod->wire_port == NULL) {
+        mod->wire_port == NULL || mod->regwire == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
     if (claim_ports(wr) != ODIN3_OK) {
@@ -2006,34 +2003,59 @@ static odin3_status write_module(verilog_writer *wr, uint32_t id) {
 
 /* --- the modules a file holds --------------------------------------------------------------- */
 
-/* The ID of the module a node of `module` instantiates, 0 when it instantiates none. */
-static uint32_t instance_module(const verilog_writer *wr, const odin3_module *module,
-                                odin3_node_id node) {
-    const odin3_celltype_def *def = odin3_celltype_get(wr->design, odin3_node_type(module, node));
-    uint32_t name = 0;
-    if (def == NULL || def->gran != ODIN3_GRAN_MODULE ||
-        !odin3_strtab_find(wr->tab, odin3_bytes_cstr(def->name), &name)) {
-        return 0;
-    }
-    for (uint32_t i = 1; i < odin3_design_module_end(wr->design); i++) {
+/* Map of module name (strtab ID) to module ID, built once per file; NULL on out of memory. */
+static odin3_u64map *module_names(const verilog_writer *wr) {
+    odin3_u64map *map = odin3_u64map_create(0);
+    for (uint32_t i = 1; map != NULL && i < odin3_design_module_end(wr->design); i++) {
         const odin3_module *other =
             odin3_module_get((odin3_design *)wr->design, (odin3_module_id){i});
-        if (other != NULL && odin3_module_name(other) == name) {
-            return i;
+        if (other != NULL && odin3_u64map_put(map, (odin3_kv){odin3_module_name(other), i}) !=
+                                 ODIN3_OK) {
+            odin3_u64map_destroy(map);
+            map = NULL;
         }
     }
-    return 0;
+    return map;
+}
+
+/* Where an instance of `node` in `module` goes: the module ID it instantiates in `child` (0 when it
+ * instantiates none, or when no module of that name exists). Sets *dangling when the cell type is a
+ * module type but no module of its name is in the design. */
+static uint32_t instance_module(const verilog_writer *wr, const odin3_u64map *names,
+                                const odin3_module *module, odin3_node_id node, bool *dangling) {
+    const odin3_celltype_def *def = odin3_celltype_get(wr->design, odin3_node_type(module, node));
+    uint32_t name = 0;
+    uint64_t child = 0;
+    if (def == NULL || def->gran != ODIN3_GRAN_MODULE) {
+        return 0;
+    }
+    if (!odin3_strtab_find(wr->tab, odin3_bytes_cstr(def->name), &name) ||
+        !odin3_u64map_get(names, name, &child)) {
+        const char *inst = odin3_strtab_get(wr->tab, odin3_node_name(module, node));
+        odin3_log(ODIN3_LOG_WARN,
+                  "verilog_write: instance '%s' has cell type '%s' that no module of the design "
+                  "defines; all modules are written",
+                  inst != NULL ? inst : "", def->name);
+        *dangling = true;
+        return 0;
+    }
+    return (uint32_t)child;
 }
 
 /* Marks in `keep` (one byte per module ID) the top and the modules it instantiates, directly or
  * not; a module nothing reaches is a leftover (a flattened child) that a reader would not
  * elaborate, so the file does not hold it and write, read, write is idempotent. All stay when no
- * top is set. */
+ * top is set, and when an instance names a module the design lacks (a dangling instance: nothing
+ * is dropped silently). */
 static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint32_t end) {
     uint32_t top = odin3_design_top(wr->design).v;
     uint32_t *work = odin3_util_calloc(((size_t)end + 1) * sizeof *work);
+    odin3_u64map *names = module_names(wr);
     uint32_t depth = 0;
-    if (work == NULL) {
+    bool dangling = false;
+    if (work == NULL || names == NULL) {
+        odin3_util_free(work);
+        odin3_u64map_destroy(names);
         return ODIN3_ERR_NO_MEMORY;
     }
     if (top == 0) {
@@ -2046,15 +2068,20 @@ static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint
         const odin3_module *module =
             odin3_module_get((odin3_design *)wr->design, (odin3_module_id){work[--depth]});
         for (uint32_t i = 1; module != NULL && i < odin3_module_node_end(module); i++) {
-            uint32_t child = odin3_node_live(module, (odin3_node_id){i})
-                                 ? instance_module(wr, module, (odin3_node_id){i})
-                                 : 0;
+            uint32_t child =
+                odin3_node_live(module, (odin3_node_id){i})
+                    ? instance_module(wr, names, module, (odin3_node_id){i}, &dangling)
+                    : 0;
             if (child != 0 && !keep[child]) {
                 keep[child] = 1;
                 work[depth++] = child;
             }
         }
     }
+    if (dangling) {
+        memset(keep, 1, end);
+    }
+    odin3_u64map_destroy(names);
     odin3_util_free(work);
     return ODIN3_OK;
 }

@@ -1757,6 +1757,27 @@ static void test_portless_module(void) {
     TEST_ASSERT_EQUAL_STRING("module empty;\nendmodule\n", text);
 }
 
+/* A module-type cell whose module the design lacks: the unreached module is still written (no
+ * silent drop) and a warning names the instance and its type. */
+static void test_dangling_instance_keeps_all_modules(void) {
+    odin3_celltype_def def = {.name = "ghost", .gran = ODIN3_GRAN_MODULE};
+    odin3_celltype_id ghost = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_celltype_add_local(design, &def, &ghost));
+    new_module("other");
+    odin3_module_id top_id = {0};
+    new_module("top");
+    top_id = odin3_module_id_of(module);
+    odin3_node_spec spec = {ghost, intern("u_ghost"), {0}, NULL, 0};
+    odin3_node_id node = {0};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_create_connected(module, &spec, NULL, &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, top_id));
+    last_warning[0] = '\0';
+    (void)write_text();
+    expect_in(text, "module other;");
+    expect_in(text, "module top;");
+    TEST_ASSERT_NOT_NULL(strstr(last_warning, "instance 'u_ghost' has cell type 'ghost'"));
+}
+
 static void test_empty_design(void) {
     (void)write_text();
     TEST_ASSERT_EQUAL_STRING("", text);
@@ -2118,6 +2139,7 @@ int main(void) {
     RUN_TEST(test_all_fixtures_compile_and_deterministic);
     RUN_TEST(test_portless_module);
     RUN_TEST(test_empty_design);
+    RUN_TEST(test_dangling_instance_keeps_all_modules);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_io_errors);
     RUN_TEST(test_write_failure);
