@@ -2093,6 +2093,11 @@ static void test_name_style_provenance(void) {
     expect_has("module pn (\n  input a,\n  output y\n);\n");
 }
 
+static void run_name_style_tests(void) {
+    RUN_TEST(test_name_style_short);
+    RUN_TEST(test_name_style_provenance);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_ident_kinds);
@@ -2151,7 +2156,6 @@ int main(void) {
     RUN_TEST(test_backtick_names);
     RUN_TEST(test_bit_select_lookalike_renamed);
     RUN_TEST(test_pmux_simulates);
-    RUN_TEST(test_name_style_short);
-    RUN_TEST(test_name_style_provenance);
+    run_name_style_tests();
     return UNITY_END();
 }

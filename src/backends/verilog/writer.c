@@ -2009,8 +2009,8 @@ static odin3_u64map *module_names(const verilog_writer *wr) {
     for (uint32_t i = 1; map != NULL && i < odin3_design_module_end(wr->design); i++) {
         const odin3_module *other =
             odin3_module_get((odin3_design *)wr->design, (odin3_module_id){i});
-        if (other != NULL && odin3_u64map_put(map, (odin3_kv){odin3_module_name(other), i}) !=
-                                 ODIN3_OK) {
+        if (other != NULL &&
+            odin3_u64map_put(map, (odin3_kv){odin3_module_name(other), i}) != ODIN3_OK) {
             odin3_u64map_destroy(map);
             map = NULL;
         }
@@ -2042,6 +2042,29 @@ static uint32_t instance_module(const verilog_writer *wr, const odin3_u64map *na
     return (uint32_t)child;
 }
 
+/* The work list of mark_reachable: modules to scan, and the flags that rule the walk. */
+typedef struct reach {
+    const odin3_u64map *names;
+    uint8_t *keep;
+    uint32_t *work;
+    uint32_t depth;
+    bool dangling;
+} reach;
+
+/* Marks and queues the modules the live nodes of `module` instantiate. */
+static void mark_children(const verilog_writer *wr, reach *walk, const odin3_module *module) {
+    for (uint32_t i = 1; module != NULL && i < odin3_module_node_end(module); i++) {
+        odin3_node_id node = {i};
+        uint32_t child = odin3_node_live(module, node)
+                             ? instance_module(wr, walk->names, module, node, &walk->dangling)
+                             : 0;
+        if (child != 0 && !walk->keep[child]) {
+            walk->keep[child] = 1;
+            walk->work[walk->depth++] = child;
+        }
+    }
+}
+
 /* Marks in `keep` (one byte per module ID) the top and the modules it instantiates, directly or
  * not; a module nothing reaches is a leftover (a flattened child) that a reader would not
  * elaborate, so the file does not hold it and write, read, write is idempotent. All stay when no
@@ -2049,12 +2072,10 @@ static uint32_t instance_module(const verilog_writer *wr, const odin3_u64map *na
  * is dropped silently). */
 static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint32_t end) {
     uint32_t top = odin3_design_top(wr->design).v;
-    uint32_t *work = odin3_util_calloc(((size_t)end + 1) * sizeof *work);
     odin3_u64map *names = module_names(wr);
-    uint32_t depth = 0;
-    bool dangling = false;
-    if (work == NULL || names == NULL) {
-        odin3_util_free(work);
+    reach walk = {names, keep, odin3_util_calloc(((size_t)end + 1) * sizeof(uint32_t)), 0, false};
+    if (walk.work == NULL || names == NULL) {
+        odin3_util_free(walk.work);
         odin3_u64map_destroy(names);
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -2062,27 +2083,18 @@ static odin3_status mark_reachable(const verilog_writer *wr, uint8_t *keep, uint
         memset(keep, 1, end);
     } else {
         keep[top] = 1;
-        work[depth++] = top;
+        walk.work[walk.depth++] = top;
     }
-    while (depth > 0) {
-        const odin3_module *module =
-            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){work[--depth]});
-        for (uint32_t i = 1; module != NULL && i < odin3_module_node_end(module); i++) {
-            uint32_t child =
-                odin3_node_live(module, (odin3_node_id){i})
-                    ? instance_module(wr, names, module, (odin3_node_id){i}, &dangling)
-                    : 0;
-            if (child != 0 && !keep[child]) {
-                keep[child] = 1;
-                work[depth++] = child;
-            }
-        }
+    while (walk.depth > 0) {
+        mark_children(wr, &walk,
+                      odin3_module_get((odin3_design *)wr->design,
+                                       (odin3_module_id){walk.work[--walk.depth]}));
     }
-    if (dangling) {
+    if (walk.dangling) {
         memset(keep, 1, end);
     }
     odin3_u64map_destroy(names);
-    odin3_util_free(work);
+    odin3_util_free(walk.work);
     return ODIN3_OK;
 }
 
