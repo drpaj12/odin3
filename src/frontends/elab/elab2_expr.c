@@ -419,7 +419,9 @@ static odin3_status ex_unary_logic(ex_run *run, const ex_frame *frame, const ex_
     odin3_etype fin = ex_final(e2, frame->node);
     odin3_sig arg = ex_self_operand(e2, frame, 0);
     uint32_t width = ex_max(fin.width, 1);
-    if (!op->negated || ex_foldable(&arg)) {
+    /* Under -netlist only ex_binop folding is off; ex_case_eq, ex_ternary_fold and ex_pow
+     * const*const still follow their own rules. A negated op on a constant folds only in RTL. */
+    if (!op->negated || (!e2->opts.netlist && ex_foldable(&arg))) {
         return ex_binop(run, frame->node,
                         &(ex_bin){op->cop, op->type, &arg, NULL, width, fin.is_signed}, out);
     }

@@ -79,6 +79,29 @@ class NetlistReader(unittest.TestCase):
         self.assertEqual(1, len(const))
         self.assertTrue(const[0].endswith("t.v:1"), const[0])
 
+    def test_negated_reduction_of_a_constant_keeps_its_negation_under_netlist(self) -> None:
+        src = self.work / "r.v"
+        src.write_text(
+            "module t (output z, output y);\n  assign z = ~&2'b11;\n"
+            "  assign y = ~|2'b00;\nendmodule\n"
+        )
+        out = write_back(src, self.work / "r1.v", "-netlist")
+        self.assertNotIn("assign z = &2'b11", out)
+        self.assertNotIn("assign y = |2'b00", out)
+        self.assertEqual(out, write_back(self.work / "r1.v", self.work / "r2.v", "-netlist"))
+        plain = write_back(src, self.work / "rp.v", "")
+        self.assertIn("assign z = 1'b0;", plain)
+        self.assertIn("assign y = 1'b1;", plain)
+
+    def test_multi_bit_xnor_is_not_a_gate_under_netlist(self) -> None:
+        src = self.work / "x.v"
+        src.write_text(
+            "module t (input [1:0] a, input [1:0] b, output [1:0] k);\n"
+            "  assign k = ~(a ^ b);\nendmodule\n"
+        )
+        out = write_back(src, self.work / "x1.v", "-netlist")
+        self.assertNotIn("_XNOR_", out)
+
 
 if __name__ == "__main__":
     unittest.main()
