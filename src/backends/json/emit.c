@@ -3,6 +3,7 @@
 #include "ir/prov.h"
 #include "util/log.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -217,8 +218,17 @@ uint32_t jw_net_code(const jw *out, odin3_net_id net) {
         return JW_BIT_Z;
     case ODIN3_CONST_NONE:
     default:
-        return out->code[net.v];
+        break;
     }
+    if (out->code[net.v] == 0) {
+        /* number_net skipped this net (dead, or nothing else mentions it): code 0 would write the
+         * constant "0", a silent wrong value. Write "x" and say so. */
+        assert(false && "jw_net_code: net has no bit number");
+        odin3_log(ODIN3_LOG_WARN, "write_json: net %u has no bit number, written as \"x\"",
+                  (unsigned)net.v);
+        return JW_BIT_X;
+    }
+    return out->code[net.v];
 }
 
 void jw_bit(jw *out, uint32_t code) {
