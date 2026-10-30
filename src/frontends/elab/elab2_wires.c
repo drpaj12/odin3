@@ -194,15 +194,28 @@ odin3_status odin3_elab2_attrs(odin3_elab2 *e2, odin3_ast_id node, odin3_objref 
 
 /* --- constants (IR-4) ------------------------------------------------------------------------ */
 
+/* The record of the constant cell about to be made: the module's, except under -netlist, where a
+ * constant that is the whole rhs of `assign w = 1'bX; // LOC` is that line's cell (a constant met
+ * inside an expression is the module's). */
+static odin3_status const_prov(odin3_elab2 *e2, odin3_prov_id *prov) {
+    *prov = odin3_module_prov(e2->mod);
+    if (!e2->asg_const || e2->asg_loc == NULL) {
+        return ODIN3_OK;
+    }
+    const odin3_elab2_prov_req req = {{0}, {0}, e2->scope.v};
+    return odin3_netlist_prov(e2, &req, NULL, *prov, prov);
+}
+
 odin3_status odin3_elab2_const_net(odin3_elab2 *e2, odin3_bit bit, odin3_net_id *out) {
     if (e2->mod == NULL || (unsigned)bit >= (unsigned)ODIN3_E2_CONSTS) {
         odin3_log(ODIN3_LOG_ERROR, "odin3_elab2_const_net: no module or no such constant");
         return ODIN3_ERR_INVALID_ARG;
     }
     if (e2->const_net[bit].v == 0) {
-        odin3_prov_id prov = odin3_module_prov(e2->mod);
+        odin3_prov_id prov = {0};
         odin3_net_id net = {0};
-        odin3_status st = odin3_net_create(e2->mod, 0, prov, &net);
+        odin3_status st = const_prov(e2, &prov);
+        st = st != ODIN3_OK ? st : odin3_net_create(e2->mod, 0, prov, &net);
         odin3_node_spec spec = {.type = e2->types[(unsigned)ODIN3_E2T_CONST0 + (unsigned)bit],
                                 .prov = prov};
         odin3_netvec port = {&net, 1};

@@ -156,6 +156,7 @@ typedef enum odin3_elab2_type {
     ODIN3_E2T_CONST1,
     ODIN3_E2T_CONSTX,
     ODIN3_E2T_CONSTZ,
+    ODIN3_E2T_G_XNOR, /* $_XNOR_: only read_verilog -netlist makes it (netlist_gates.c) */
     ODIN3_E2T_COUNT
 } odin3_elab2_type;
 
@@ -216,6 +217,7 @@ struct odin3_elab2 {
     uint32_t ports_made; /* ports created (the refuse_port test hook counts them) */
     /* read_verilog -netlist (5.4c; netlist_locs.c) */
     const char *asg_loc;     /* the `// LOC` text of the CONT_ASSIGN being emitted; NULL: none */
+    bool asg_const;          /* the NET_ASSIGN being emitted has a bare number as its rhs */
     odin3_u64map *nl_raw;    /* (module, strtab ID) of every raw declarator name, made on use */
     uint32_t nl_capped;      /* `src` attributes holding more than 8 locations (INFO; X-3) */
     uint32_t nl_bad;         /* `src` attributes that are not locations (kept; L-6) */

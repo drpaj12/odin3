@@ -90,6 +90,7 @@ static const char *const k_type_names[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_CONST1] = "$_CONST1_",
     [ODIN3_E2T_CONSTX] = "$_CONSTX_",
     [ODIN3_E2T_CONSTZ] = "$_CONSTZ_",
+    [ODIN3_E2T_G_XNOR] = "$_XNOR_",
 };
 
 const char *odin3_elab2_str_of(const odin3_elab2 *e2, uint32_t id) {
@@ -500,7 +501,12 @@ static odin3_status carry_on(odin3_elab2 *e2, odin3_loc loc, odin3_status st) {
 
 /* One net assignment (a continuous assignment or a declarator's initialiser), carried on. */
 static odin3_status assign_one(odin3_elab2 *e2, odin3_ast_id node) {
-    return carry_on(e2, odin3_ast_loc(e2->elab, node), odin3_elab2_assign(e2, node));
+    e2->asg_const =
+        e2->opts.netlist && odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_NET_ASSIGN &&
+        odin3_ast_kind_of(e2->elab, odin3_ast_child(e2->elab, node, 1)) == ODIN3_AST_NUMBER;
+    odin3_status st = carry_on(e2, odin3_ast_loc(e2->elab, node), odin3_elab2_assign(e2, node));
+    e2->asg_const = false;
+    return st;
 }
 
 /* One declarator's initialiser: a net's is a continuous assignment (Task 18); a variable's is an

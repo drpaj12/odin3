@@ -322,8 +322,31 @@ static void add_expr_counts(odin3_opt_expr_counts *total, const odin3_opt_expr_c
     }
 }
 
+/* True when the module was read from a netlist file by `read_verilog -netlist`: its record is
+ * IMPORTED, or DERIVED from an IMPORTED one when the file's locations were restored
+ * (netlist_locs.c). Source modules, and every module another reader or pass makes, are never so. */
+static bool module_from_netlist(const odin3_proc_mctx *mctx) {
+    const odin3_prov_record *rec = odin3_prov_get(mctx->design, odin3_module_prov(mctx->module));
+    if (rec == NULL) {
+        return false;
+    }
+    if (rec->kind == ODIN3_PROV_IMPORTED) {
+        return true;
+    }
+    for (uint32_t i = 0; rec->kind == ODIN3_PROV_DERIVED && i < rec->parents.count; i++) {
+        const odin3_prov_record *parent = odin3_prov_get(mctx->design, rec->parents.ids[i]);
+        if (parent != NULL && parent->kind == ODIN3_PROV_IMPORTED) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static odin3_status proc_step_f(const odin3_proc_mctx *mctx) {
     if (mctx->opts->noopt || mctx->opts->stop_after != ODIN3_PROC_STOP_NONE) {
+        return ODIN3_OK;
+    }
+    if (module_from_netlist(mctx)) { /* a netlist keeps the structure the file describes */
         return ODIN3_OK;
     }
     if (g_hooks.on_step_f != NULL) {

@@ -36,34 +36,12 @@ LIST = DATA / "step0.txt"
 # The passes per pair the list must hold (V1.2.0 fix round: write_json numbers its nets the way
 # the reader makes them, write_verilog writes the reachable modules and the cells in the reader's
 # order).
-EXPECTED = {"blif": 68, "json": 68, "v": 58}
-# Why each micro that fails a pair still fails it (one line each).
-REASONS = {
-    "bm_DL_BCD_adder": "v: write 1 connects constants as literals, the reader makes named nets",
-    "bm_expr_all_mod": "v: write 2 declares extra `$n<ID>$1` wires that write 1 does not",
-    "bm_functional_test": "v: write 2 refers to a shared sign bit by another wire (`$n1403`)",
-    "bm_if_collapse": "v: the reader folds `x ^ 1'b0` and `x | 1'b0` into an alias assign",
-    "bm_if_common": "v: the reader folds a constant operand into an alias assign",
-    "bm_stmt_all_mod": "v: the reader folds a constant operand into an alias assign",
-    "bm_stmt_compare_padding": "v: the reader folds a constant operand into an alias assign",
-    "bm_tester": "v: the reader folds `x ^ 1'b0` into an alias assign",
-    "case_generate": "v: the // file:line of a constant assign becomes line 1 on the second read",
-    "if_generate": "v: the // file:line of a constant assign becomes line 1 on the second read",
-}
+EXPECTED = {"blif": 68, "json": 68, "v": 68}
+# Why each micro that fails a pair still fails it (one line each): none now.
+REASONS: dict[str, str] = {}
 # The failure signature of each remaining micro: the kind of its first differing line between
 # write 1 and write 2 (failure_kind), so a micro that starts failing for another reason is noticed.
-SIGNATURES = {
-    "bm_DL_BCD_adder": "alias-assign",
-    "bm_expr_all_mod": "extra-wire",
-    "bm_functional_test": "rewritten-line",
-    "bm_if_collapse": "alias-assign",
-    "bm_if_common": "alias-assign",
-    "bm_stmt_all_mod": "alias-assign",
-    "bm_stmt_compare_padding": "alias-assign",
-    "bm_tester": "alias-assign",
-    "case_generate": "location",
-    "if_generate": "location",
-}
+SIGNATURES: dict[str, str] = {}
 
 
 ALIAS_ASSIGN = re.compile(r"^\s*assign \S+ = [^\s{]\S* ?;$")
