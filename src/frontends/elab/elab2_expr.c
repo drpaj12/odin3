@@ -16,6 +16,7 @@
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/elab/elab_internal.h"
+#include "frontends/elab/netlist_locs.h"
 #include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
@@ -247,9 +248,10 @@ static const odin3_net_id *ex_dest(const ex_run *run, odin3_ast_id node, uint32_
                                                                                      : NULL;
 }
 
-/* An operator: folded when its operands are constant, else one cell. */
+/* An operator: folded when its operands are constant, else one cell. Under -netlist it is one
+ * cell always: the file is a netlist, and `assign w = ~1'b0;` names the cell's output w. */
 static odin3_status ex_binop(ex_run *run, odin3_ast_id node, const ex_bin *bin, odin3_sig *out) {
-    if (ex_foldable(bin->a) && (bin->b == NULL || ex_foldable(bin->b))) {
+    if (!run->e2->opts.netlist && ex_foldable(bin->a) && (bin->b == NULL || ex_foldable(bin->b))) {
         return ex_fold(run->e2, bin, out);
     }
     odin3_elab2_cell_req req = {
@@ -379,6 +381,13 @@ static const ex_uop k_unary[ODIN3_AST_UNARY_COUNT] = {
     [ODIN3_AST_UNARY_XNOR] = {ODIN3_COP_RXNOR, ODIN3_E2T_REDUCE_XNOR, false, false},
 };
 
+/* Whether the operand of the unary node is a binary ^ (the shape of `~(a ^ b)`). */
+static bool ex_xor_child(const odin3_elab2 *e2, odin3_ast_id node) {
+    odin3_ast_id kid = odin3_ast_child(e2->elab, node, 0);
+    return e2->opts.netlist && odin3_ast_kind_of(e2->elab, kid) == ODIN3_AST_BINARY &&
+           odin3_ast_sub(e2->elab, kid) == ODIN3_AST_BINARY_XOR;
+}
+
 /* ~a, -a, +a: the operand extended to the node's width by wiring (by its own sign) first. */
 static odin3_status ex_unary_context(ex_run *run, const ex_frame *frame, const ex_uop *op,
                                      odin3_sig *out) {
@@ -390,6 +399,14 @@ static odin3_status ex_unary_context(ex_run *run, const ex_frame *frame, const e
     if (st != ODIN3_OK || op->cop == ODIN3_COP_POS) {
         *out = arg;
         return st;
+    }
+    if (op->cop == ODIN3_COP_NOT && arg.width == 1 && ex_xor_child(e2, frame->node)) {
+        bool made = false;
+        const odin3_netlist_xnor_req xr = {frame->node, &arg, ex_dest(run, frame->node, 1)};
+        st = odin3_netlist_xnor(e2, &xr, out, &made);
+        if (st != ODIN3_OK || made) {
+            return st;
+        }
     }
     return ex_binop(run, frame->node,
                     &(ex_bin){op->cop, op->type, &arg, NULL, arg.width, fin.is_signed}, out);

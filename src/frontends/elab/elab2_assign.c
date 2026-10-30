@@ -93,7 +93,7 @@ odin3_status odin3_elab2_to_nets(odin3_elab2 *e2, const odin3_sig *sig, odin3_ne
 
 /* --- word cells (EL-30, EL-31) --------------------------------------------------------------- */
 
-enum { CELL_NONE, CELL_BINARY, CELL_UNARY, CELL_MUX };
+enum { CELL_NONE, CELL_BINARY, CELL_UNARY, CELL_MUX, CELL_GATE2 };
 enum {
     CELL_MAX_PARAMS = 5, /* a binary cell's: A_SIGNED B_SIGNED A_WIDTH B_WIDTH Y_WIDTH */
     CELL_UNARY_PARAMS = 3,
@@ -122,7 +122,7 @@ static const uint8_t k_shape[ODIN3_E2T_COUNT] = {
     [ODIN3_E2T_REDUCE_XOR] = CELL_UNARY,  [ODIN3_E2T_REDUCE_XNOR] = CELL_UNARY,
     [ODIN3_E2T_REDUCE_BOOL] = CELL_UNARY, [ODIN3_E2T_LOGIC_NOT] = CELL_UNARY,
     [ODIN3_E2T_LOGIC_AND] = CELL_BINARY,  [ODIN3_E2T_LOGIC_OR] = CELL_BINARY,
-    [ODIN3_E2T_MUX] = CELL_MUX,
+    [ODIN3_E2T_MUX] = CELL_MUX,           [ODIN3_E2T_G_XNOR] = CELL_GATE2,
 };
 
 /* One cell being made: the request, its shape, the nets of each port and the parameters. */
@@ -144,6 +144,30 @@ static odin3_status cell_bad(const char *why) {
     return ODIN3_ERR_INVALID_ARG;
 }
 
+/* The widths of B and S, and what the operands of a binary, gate or mux shape must be. */
+static odin3_status cell_plan_ports(cell_ctx *cx) {
+    const odin3_elab2_cell_req *req = cx->req;
+    if (cx->shape == CELL_BINARY) {
+        if (req->b == NULL || req->b->width == 0) {
+            return cell_bad("a binary cell needs two operands");
+        }
+        cx->count[PORT_B] = req->b->width;
+    } else if (cx->shape == CELL_GATE2) {
+        if (req->b == NULL || req->a->width != 1 || req->b->width != 1 || req->y_width != 1) {
+            return cell_bad("a bit-level gate needs two one-bit operands and a one-bit Y");
+        }
+        cx->count[PORT_B] = 1;
+    } else if (cx->shape == CELL_MUX) {
+        if (req->b == NULL || req->s == NULL || req->s->width != 1 ||
+            req->a->width != req->y_width || req->b->width != req->y_width) {
+            return cell_bad("a $mux needs A and B as wide as Y and a one-bit S");
+        }
+        cx->count[PORT_B] = req->y_width;
+        cx->count[PORT_S] = 1;
+    }
+    return ODIN3_OK;
+}
+
 /* The shape, the port widths and the pin count; the operands must fit the type. */
 static odin3_status cell_plan(cell_ctx *cx) {
     const odin3_elab2_cell_req *req = cx->req;
@@ -153,21 +177,9 @@ static odin3_status cell_plan(cell_ctx *cx) {
     }
     cx->count[PORT_A] = req->a->width;
     cx->count[PORT_Y] = req->y_width;
-    if (cx->shape == CELL_BINARY) {
-        if (req->b == NULL || req->b->width == 0) {
-            return cell_bad("a binary cell needs two operands");
-        }
-        cx->count[PORT_B] = req->b->width;
-    } else if (cx->shape == CELL_MUX) {
-        if (req->b == NULL || req->s == NULL || req->s->width != 1 ||
-            req->a->width != req->y_width || req->b->width != req->y_width) {
-            return cell_bad("a $mux needs A and B as wide as Y and a one-bit S");
-        }
-        cx->count[PORT_B] = req->y_width;
-        cx->count[PORT_S] = 1;
-    }
+    odin3_status st = cell_plan_ports(cx);
     cx->pins = (uint64_t)cx->count[PORT_A] + cx->count[PORT_B] + cx->count[PORT_S] + req->y_width;
-    return ODIN3_OK;
+    return st;
 }
 
 /* Point (aa): the pins of one cell. Fatal; nothing has been made. */
@@ -227,7 +239,9 @@ static odin3_status cell_fresh_nets(cell_ctx *cx) {
 static void cell_params(cell_ctx *cx) {
     const odin3_elab2_cell_req *req = cx->req;
     odin3_value *param = cx->params;
-    if (cx->shape == CELL_MUX) {
+    if (cx->shape == CELL_GATE2) {
+        cx->n_params = 0; /* a gate has no parameters */
+    } else if (cx->shape == CELL_MUX) {
         param[0] = odin3_value_int((int64_t)req->y_width);
         cx->n_params = CELL_MUX_PARAMS;
     } else if (cx->shape == CELL_UNARY) {

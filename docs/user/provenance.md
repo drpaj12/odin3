@@ -442,7 +442,7 @@ every line.
 (the cells match it for all four `ast=` modes). For each pair of writer and reader the
 claim holds only if the reader reproduces its own writer's netlist first (Task 9, step 0).
 `write_blif --vtr` with `read_blif` passes on 68 of 68 micros, `write_json` with `read_json` on 68 of 68,
-and `write_verilog` with `read_verilog -netlist; proc` on 58 of 68. The results of the second write
+and `write_verilog` with `read_verilog -netlist; proc` on 68 of 68. The results of the second write
 (the table is `tests/tools/data/restore/roundtrip.txt`; the modes are the `ast=` word of the header):
 
 | Pair | Micros proven by step 0 | Netlist identical on 2nd write | Map identical on 2nd write | Write 2 = write 3 | Known gap |

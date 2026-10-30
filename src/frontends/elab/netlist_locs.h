@@ -108,6 +108,23 @@ odin3_status odin3_netlist_prov(odin3_elab2 *e2, const odin3_elab2_prov_req *req
 void odin3_netlist_assign_begin(odin3_elab2 *e2, odin3_ast_id cont_assign);
 void odin3_netlist_assign_end(odin3_elab2 *e2);
 
+typedef struct odin3_netlist_xnor_req {
+    odin3_ast_id node;        /* the `~` node */
+    const odin3_sig *arg;     /* its operand */
+    const odin3_net_id *dest; /* the nets of the gate's Y, NULL for a new one */
+} odin3_netlist_xnor_req;
+
+/*
+ * `~(a ^ b)` of one-bit operands is how write_verilog spells a $_XNOR_ gate (it has no gate syntax
+ * for it). Called by the `~` operator with req->arg, its operand: the $xor cell the child just
+ * made. This replaces that cell by one $_XNOR_ gate on the same inputs (driving req->dest, or a
+ * new net, with the `~` node's record), so the netlist is read back as the gate it was written
+ * from. *made is false, and nothing changes, when the reader is not under -netlist or req->arg is
+ * not such a cell. Any other status is the failure of the replacement.
+ */
+odin3_status odin3_netlist_xnor(odin3_elab2 *e2, const odin3_netlist_xnor_req *req, odin3_sig *out,
+                                bool *made);
+
 /* The one WARNING of L-6: how many `src` attributes were not locations and the first. */
 void odin3_netlist_finish(odin3_elab2 *e2);
 
