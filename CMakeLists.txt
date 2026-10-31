@@ -110,6 +110,7 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/read_json_pass.c
     src/passes/sim_pass.c
+    src/passes/sim_tb_pass.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
@@ -454,6 +455,12 @@ add_library(odin3_core OBJECT
     src/sim/vectors.c
     src/sim/vectors_in.c
     src/sim/word.c
+    src/sim/tb_lex.c
+    src/sim/tb_parse.c
+    src/sim/tb_expr.c
+    src/sim/tb_fmt.c
+    src/sim/tb_dut.c
+    src/sim/tb_run.c
     src/sim/signals.c
     src/sim/vcd.c
     src/sim/gate_truth.c

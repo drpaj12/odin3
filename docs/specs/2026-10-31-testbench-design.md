@@ -138,3 +138,30 @@ testbench regs (the DUT internals are in the `sim` pass's VCD, not here).
 
 Next step (updated at each stop): implement section 2 in `src/sim/tb_*.c`, then the pass,
 generator, tool, micros, docs.
+
+## 9. Stretch target: BRISC-V timer core (Arduino-on-RISC-V, `quartus_project_revert_timer`)
+
+Controller request (read-only external tree; the future processor benchmark, Seeker-Proc base).
+Static analysis of `tb_single_cycle_BRAM_top_gcd.v` against this subset, 2026-10-31:
+it does NOT run in the v1 subset. Blocking constructs, in order of source:
+(1) `` `define REGISTER_FILE dut.core.ID.registers.register_file `` and `` `CURRENT_PC `` macros
+(the lexer rejects every directive but `` `timescale ``); (2) hierarchical references into DUT
+internals (`dut.core.FI.PC_reg`, `dut.memory.memory.BYTE_LOOP[byte].ELSE_INIT.BRAM_byte.ram[x] = ...`,
+a hierarchical WRITE into the DUT's BRAM): the DUT is a separate elaborated netlist whose internals
+only exist as flat names, so this needs a name-resolved peek/poke into the simulator (S1 signal
+find/get exists; poke of state bits does not); (3) `generate for` with a genvar named `byte`, and
+`parameter` overrides on the DUT instance (`#(.DATA_WIDTH(..))`: rejected, the DUT is elaborated
+first with its own defaults); (4) `$time()` with empty parens and `$stop`; (5) a Windows path in
+`PROGRAM` for `$readmemh` (the file itself would need `.vmh` words that `$readmemh` accepts, they
+are plain hex words, so the reader copes); (6) DUT side: `pll_clock.v` instantiates `altpll`
+(Quartus primitive, no model: treat as a black box or bypass with a clock buffer), the dual-port
+BRAM uses `$readmemh(INIT_FILE, ram)` in an `initial` block (Odin III front end handles
+`$readmemh` in RTL, the `.mif` is not read by the RTL path), and a 14-bit-address 32-bit word
+memory (16K x 32 bits, so memory lowering size limits apply: `lower --max-mem-bits`).
+iverilog check: `iverilog -g2005` fails at `$time()` ("Empty function argument list requires
+SystemVerilog"); `-g2012` fails at `byte` used as a genvar (SV keyword). So iverilog cannot run
+the testbench unchanged either; a patched copy (rename `byte`, `$time` without parens, PROGRAM
+path) would be needed, plus an `altpll` model. Next steps for this target, in order: preprocessor
+`` `define `` object macros in the testbench lexer; hierarchical read of DUT signals in testbench
+expressions (S1 find_signal); poke into memory contents; parameter override on the DUT instance
+by elaborating the DUT with `read_verilog` parameters; wide-value support. Not started in v1.
