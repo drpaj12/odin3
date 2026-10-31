@@ -123,6 +123,15 @@ typedef struct pg_callrec {
     uint32_t fsyms_mark;
 } pg_callrec;
 
+/* A block that writes a scratch variable (pg_scratch.c), and the shared wire swapped out. */
+typedef struct pg_scratch_w {
+    uint32_t always, sym;
+} pg_scratch_w;
+typedef struct pg_scratch_old {
+    uint32_t sym;
+    odin3_wire_id wire;
+} pg_scratch_old;
+
 /* An unnamed wire a call frame made for one of the callee's variables, and its module. */
 typedef struct pg_fwire {
     odin3_module_id mod;
@@ -246,12 +255,16 @@ struct odin3_pg {
     odin3_elab2_reads hooks; /* the walker's hooks over this generator (pg_reads) */
     odin3_elab2_lvalue slv;  /* a synthetic target: a switch's exit, a select write's case */
     /* loops and calls (Task 23) */
-    odin3_vec loops;   /* pg_loop, innermost last */
-    odin3_vec calls;   /* pg_callrec, innermost last */
-    odin3_vec walks;   /* odin3_elab2_walk: the PG_F_GEN frames' expressions, innermost last */
-    odin3_vec cruns;   /* pg_crun *: the PG_F_CALL frames' records, innermost last */
-    odin3_vec fwires;  /* pg_fwire: the wires call frames made in the module (kept across blocks) */
-    odin3_sig gen_sig; /* the value of the expression a PG_F_GEN frame generated */
+    odin3_vec loops;  /* pg_loop, innermost last */
+    odin3_vec calls;  /* pg_callrec, innermost last */
+    odin3_vec walks;  /* odin3_elab2_walk: the PG_F_GEN frames' expressions, innermost last */
+    odin3_vec cruns;  /* pg_crun *: the PG_F_CALL frames' records, innermost last */
+    odin3_vec fwires; /* pg_fwire: the wires call frames made in the module (kept across blocks) */
+    odin3_u64map *scratch;  /* symbol -> 1: a block scratch variable (pg_scratch.c) */
+    odin3_vec scratch_w;    /* pg_scratch_w: the always blocks that write a scratch variable */
+    odin3_vec scratch_old;  /* pg_scratch_old: the shared wires swapped out in the open block */
+    bool scratch_ready;     /* scratch is built for the module */
+    odin3_sig gen_sig;      /* the value of the expression a PG_F_GEN frame generated */
     odin3_sig call_sig;     /* the value of the function call a PG_F_CALL frame inlined */
     uint32_t cdepth;        /* calls inlined by C recursion (an index or selector holds them) */
     odin3_vec fsyms;        /* uint32_t: the symbols whose ir_wire a call frame set */
@@ -437,6 +450,19 @@ odin3_status pg_loop_step(odin3_pg *pg);
 /* Whether the variable of a for statement of the module (a symbol) is read outside the loops it is
  * the variable of, which makes it an output of the block (EL-35); *out. */
 odin3_status pg_loopvar_is_output(odin3_pg *pg, odin3_sym_id sym, bool *out);
+
+/* An unnamed IR wire of the symbol's size made and set as its ir_wire (the caller restores it);
+ * *width is the wire's. The module's end deletes it when nothing used it. */
+odin3_status pg_unnamed_wire(odin3_pg *pg, odin3_sym_id id, uint32_t *width_out);
+
+/* Block scratch variables (pg_scratch.c): a plain variable that two or more always blocks assign
+ * and that carries no value between statements outside one block (every read follows a
+ * whole-variable blocking assignment in an enclosing begin/end of the same block). Yosys gives the
+ * blocks flip-flops that nothing reads; each block here gets a private wire for it instead, so the
+ * blocks drive different nets. pg_scratch_enter swaps the wires in for always_node,
+ * pg_scratch_leave restores the module's wire. */
+odin3_status pg_scratch_enter(odin3_pg *pg, odin3_ast_id always_node);
+void pg_scratch_leave(odin3_pg *pg);
 
 /* The symbol a loop's init or step assignment writes (0: its target is no plain name). */
 odin3_sym_id pg_assign_symbol(const odin3_pg *pg, odin3_ast_id assign);

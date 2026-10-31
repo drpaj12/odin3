@@ -197,13 +197,9 @@ static odin3_status fwire_note(odin3_pg *pg, odin3_wire_id wire) {
     return ODIN3_OK;
 }
 
-/* The unnamed wire of one symbol of the callee. */
-static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
+odin3_status pg_unnamed_wire(odin3_pg *pg, odin3_sym_id id, uint32_t *width_out) {
     odin3_elab2 *e2 = pg->e2;
     const odin3_symbol *rec = odin3_symbol_get(e2->st, id);
-    if ((rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR) || rec->n_unpacked > 0) {
-        return ODIN3_OK;
-    }
     uint32_t width = rec->has_packed ? (uint32_t)odin3_elab2_dim_size(&rec->packed) : 1U;
     odin3_wire_spec spec = {.msb = rec->has_packed ? rec->packed.msb : 0,
                             .lsb = rec->has_packed ? rec->packed.lsb : 0,
@@ -215,11 +211,26 @@ static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     st = st != ODIN3_OK ? st : odin3_elab2_prov(e2, &req, &spec.prov);
     st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, &spec, NULL, &wire);
     st = st != ODIN3_OK ? st : fwire_note(pg, wire);
-    st = st != ODIN3_OK ? st : frame_note(pg, id);
     odin3_elab2_counts made = {0, 0, width, 1};
     st = st != ODIN3_OK ? st : odin3_symbol_set_ir(e2->st, id, e2->mod_id, wire);
     st = st != ODIN3_OK ? st : odin3_elab2_account(e2, &made);
-    return st != ODIN3_OK ? st : frame_nets(pg, wire, width);
+    *width_out = width;
+    return st;
+}
+
+/* The unnamed wire of one symbol of the callee. */
+static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
+    const odin3_symbol *rec = odin3_symbol_get(pg->e2->st, id);
+    if ((rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR) || rec->n_unpacked > 0) {
+        return ODIN3_OK;
+    }
+    uint32_t width = 0;
+    odin3_status st = frame_note(pg, id);
+    st = st != ODIN3_OK ? st : pg_unnamed_wire(pg, id, &width);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    return frame_nets(pg, odin3_symbol_get(pg->e2->st, id)->ir_wire, width);
 }
 
 /* The symbols of one scope get their wires; its child scopes join the worklist. */
