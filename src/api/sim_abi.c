@@ -33,12 +33,86 @@ _Static_assert((uint32_t)ODIN3_SIMULATION_INTERNAL == (uint32_t)ODIN3_SIM_KIND_I
 /* The widest signal odin3_simulation_set and odin3_simulation_get take (one uint64_t). */
 enum { SIM_ABI_WORD_BITS = 64 };
 
+/* Toggle counting (spec 4.3): per signal ID, bit transitions between consecutive cycle ends. */
+typedef struct toggle_state {
+    uint64_t *count;  /* per signal ID 0..n, summed over the signal's bits */
+    uint8_t *prev;    /* the last sample, one byte per bit, signals back to back */
+    uint8_t *scratch; /* max_width bytes */
+    uint32_t *first;  /* per signal ID: offset of its bit 0 in prev */
+    uint32_t n;       /* signals tracked: IDs 1..n */
+} toggle_state;
+
 struct odin3_simulation {
     odin3_design *design;
     odin3_sim *sim;
     odin3_sim_signals *signals;
+    toggle_state *toggles;
     uint64_t cycle;
 };
+
+/* Frees the toggle state, if any. */
+static void toggles_free(odin3_simulation *sim) {
+    toggle_state *tog = sim->toggles;
+    if (tog != NULL) {
+        odin3_util_free(tog->count);
+        odin3_util_free(tog->prev);
+        odin3_util_free(tog->scratch);
+        odin3_util_free(tog->first);
+        odin3_util_free(tog);
+        sim->toggles = NULL;
+    }
+}
+
+/* Reads every tracked signal; with count_it, adds the bits that differ from the last sample. */
+static void toggles_sample(odin3_simulation *sim, bool count_it) {
+    toggle_state *tog = sim->toggles;
+    for (uint32_t id = 1; id <= tog->n; id++) {
+        const odin3_sim_signal *item = odin3_sim_signals_at(sim->signals, id);
+        if (odin3_sim_signals_read(sim->signals, id, tog->scratch, item->width) != ODIN3_OK) {
+            continue;
+        }
+        uint8_t *prev = tog->prev + tog->first[id];
+        for (uint32_t bit = 0; bit < item->width; bit++) {
+            if (count_it && prev[bit] != tog->scratch[bit]) {
+                tog->count[id]++;
+            }
+            prev[bit] = tog->scratch[bit];
+        }
+    }
+}
+
+/* Allocates the toggle state for the signals known now and takes the first sample. */
+static odin3_status toggles_start(odin3_simulation *sim) {
+    uint32_t known = odin3_sim_signals_total(sim->signals);
+    toggle_state *tog = odin3_util_calloc(sizeof *tog);
+    if (tog == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    sim->toggles = tog;
+    tog->n = known;
+    tog->count = odin3_util_calloc(((size_t)known + 1) * sizeof *tog->count);
+    tog->first = odin3_util_calloc(((size_t)known + 2) * sizeof *tog->first);
+    uint64_t bits = 0;
+    uint32_t widest = 1;
+    for (uint32_t id = 1; tog->first != NULL && id <= known; id++) {
+        uint32_t width = odin3_sim_signals_at(sim->signals, id)->width;
+        tog->first[id] = (uint32_t)bits;
+        bits += width;
+        widest = width > widest ? width : widest;
+    }
+    if (bits > UINT32_MAX) {
+        bits = UINT32_MAX; /* forces the allocation below to be refused as too large */
+    }
+    tog->prev = odin3_util_calloc((size_t)bits + 1);
+    tog->scratch = odin3_util_calloc(widest);
+    if (tog->count == NULL || tog->first == NULL || tog->prev == NULL || tog->scratch == NULL ||
+        bits == UINT32_MAX) {
+        toggles_free(sim);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    toggles_sample(sim, false);
+    return ODIN3_OK;
+}
 
 /* The top when module is 0; ID 0 (logged) when there is none or module is not a module. */
 static odin3_module_id open_module(const odin3_design *design, uint32_t module) {
@@ -108,6 +182,7 @@ ODIN3_EXPORT void odin3_simulation_close(odin3_simulation *sim) {
     if (sim == NULL) {
         return;
     }
+    toggles_free(sim);
     odin3_sim_signals_destroy(sim->signals);
     odin3_sim_destroy(sim->sim);
     odin3_design_sim_release(sim->design);
@@ -290,6 +365,9 @@ ODIN3_EXPORT odin3_status odin3_simulation_step(odin3_simulation *sim, uint32_t 
     }
     for (uint32_t k = 0; k < cycles; k++) {
         odin3_sim_cycle(sim->sim);
+        if (sim->toggles != NULL) {
+            toggles_sample(sim, true);
+        }
     }
     sim->cycle += cycles;
     return ODIN3_OK;
@@ -309,5 +387,85 @@ ODIN3_EXPORT odin3_status odin3_simulation_reset(odin3_simulation *sim) {
     }
     odin3_sim_reset(sim->sim);
     sim->cycle = 0;
+    if (sim->toggles != NULL) {
+        for (uint32_t id = 0; id <= sim->toggles->n; id++) {
+            sim->toggles->count[id] = 0;
+        }
+        toggles_sample(sim, false);
+    }
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_simulation_set_toggle_counting(odin3_simulation *sim, int enable) {
+    if (sim == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    toggles_free(sim);
+    if (enable == 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = toggles_start(sim);
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: out of memory", __func__);
+    }
+    return st;
+}
+
+ODIN3_EXPORT odin3_status odin3_simulation_get_toggles(const odin3_simulation *sim, uint32_t signal,
+                                                       uint64_t *count) {
+    if (sim == NULL || count == NULL) {
+        return odin3_api_invalid(__func__);
+    }
+    if (sim->toggles == NULL) {
+        return odin3_api_invalid_why(__func__, "toggle counting is not on");
+    }
+    if (signal == 0 || signal > sim->toggles->n) {
+        return odin3_api_invalid_why(__func__,
+                                     "unknown signal, or one added after counting was turned on");
+    }
+    *count = sim->toggles->count[signal];
+    return ODIN3_OK;
+}
+
+/* Sets the inputs of vector `row` (a row of in_values), width <= 64 each. */
+static odin3_status vectors_apply(odin3_simulation *sim, const odin3_simulation_run *run,
+                                  uint32_t row) {
+    for (uint32_t i = 0; i < run->n_in; i++) {
+        odin3_status st = odin3_simulation_set(sim, run->in_signals[i],
+                                               run->in_values[(uint64_t)row * run->n_in + i]);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}
+
+/* True when run is a usable odin3_simulation_run: size and reserved, and non-NULL arrays. */
+static bool vectors_valid(const odin3_simulation_run *run) {
+    if (run->size < sizeof(odin3_simulation_run) || run->reserved != 0) {
+        return false;
+    }
+    return (run->n_in == 0 || (run->in_signals != NULL && run->in_values != NULL)) &&
+           (run->n_out == 0 || (run->out_signals != NULL && run->out_values != NULL));
+}
+
+ODIN3_EXPORT odin3_status odin3_simulation_run_vectors(odin3_simulation *sim,
+                                                       const odin3_simulation_run *run) {
+    if (sim == NULL || run == NULL || !vectors_valid(run)) {
+        return odin3_api_invalid(__func__);
+    }
+    for (uint32_t row = 0; row < run->n_vectors; row++) {
+        odin3_status st = vectors_apply(sim, run, row);
+        if (st == ODIN3_OK) {
+            st = odin3_simulation_step(sim, 1);
+        }
+        for (uint32_t i = 0; st == ODIN3_OK && i < run->n_out; i++) {
+            st = odin3_simulation_get(sim, run->out_signals[i],
+                                      &run->out_values[(uint64_t)row * run->n_out + i]);
+        }
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
     return ODIN3_OK;
 }

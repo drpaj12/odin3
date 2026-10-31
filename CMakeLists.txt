@@ -55,6 +55,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/odin3_commit.cmake)
 add_library(odin3_core OBJECT
     src/api/version.c
     src/api/graphlets.c
+    src/api/edit.c
     src/api/sv.c
     src/api/plugin.c
     src/api/common.c
@@ -2238,6 +2239,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
     add_test(NAME test_ast_abi COMMAND test_ast_abi)
     set_tests_properties(test_ast_abi PROPERTIES LABELS unit)
+    add_executable(test_edit tests/unit/test_edit.c)
+    target_link_libraries(test_edit PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_edit PRIVATE ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit")
+    add_test(NAME test_edit COMMAND test_edit)
+    set_tests_properties(test_edit PROPERTIES LABELS unit)
     add_executable(test_sim_abi tests/unit/test_sim_abi.c)
     target_link_libraries(test_sim_abi PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_sim_abi PRIVATE ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim"
@@ -3373,6 +3379,32 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_graphlets PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # netlist editing through the Python binding.
+    add_test(NAME python_edit
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_edit
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_edit PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # run_vectors outputs and toggle counts against hand-worked values; needs no oracle.
+    add_test(NAME netlist_edit_sim_vectors
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} tools/netlist-edit-sim/check_vs_oracle.py --selftest
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(netlist_edit_sim_vectors PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Gate: every simulated net, before and after edits, equals the independent evaluator (Leman
+    # Russ blif_sim.py, an external oracle named by $ODIN3_LEMANRUSS). Leman Russ III is private, so
+    # CI cannot fetch it: the test then skips (code 77) and prints a SKIP line (see the script).
+    add_test(NAME netlist_edit_sim_oracle
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} tools/netlist-edit-sim/check_vs_oracle.py
+                --odin3 $<TARGET_FILE:odin3>
+                tests/golden/blif/hand_wide.blif tests/micro/verilog/full/ansiportlist.v
+                tests/micro/verilog/full/binops.v
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(netlist_edit_sim_oracle PROPERTIES
+        LABELS tools SKIP_RETURN_CODE 77 SKIP_REGULAR_EXPRESSION "SKIP: netlist-edit-sim")
     # scoap: Design.scoap through the Python binding.
     add_test(NAME python_scoap
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}

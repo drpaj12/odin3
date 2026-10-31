@@ -28,6 +28,7 @@ outputs
 provenance
 analysis
 graphlets
+edit
 scoap
 timing-attribution
 python-api

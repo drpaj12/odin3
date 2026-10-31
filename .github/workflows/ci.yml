@@ -96,6 +96,8 @@ jobs:
           cmake --preset debug
           cmake --build --preset debug
           ctest --preset debug --output-on-failure
+      - name: Oracle gate status (skipped in CI, Leman Russ III is private; prints a SKIP warning)
+        run: ctest --preset debug -R '^netlist_edit_sim_oracle$' -V
       - name: Fuzz smoke (clang libFuzzer, ASan + UBSan; 2B §10.5, 2C §7.5, 3D §13.7)
         if: matrix.cc == 'clang'
         run: |
