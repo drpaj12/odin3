@@ -3373,6 +3373,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_graphlets PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # scoap: Design.scoap through the Python binding.
+    add_test(NAME python_scoap
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_scoap
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_scoap PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
     add_test(NAME python_copy
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
