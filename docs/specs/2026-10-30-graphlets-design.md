@@ -31,9 +31,11 @@ Per module (a design with several modules is counted module by module; no flatte
 `flatten` first for a whole design).
 
 - Nodes: every live node of the module: cells (including instances and black boxes) and port nodes
-  (`$port_in`, `$port_out`, `$port_inout`, one node per port, not per bit). Nodes whose cell type
-  has a `const_value` hook (constants) are not nodes, and nets they drive are skipped (E-4: constants
-  are not nodes).
+  (`$port_in`, `$port_out`, `$port_inout`, one node per port, not per bit). Constant drivers are
+  not nodes, and nets they drive are skipped (E-4: constants are not nodes). A constant driver is a
+  cell with at least one pin, no reading pin and every pin on a net whose `odin3_net_const_value` is
+  0, 1, x or z (`$_CONST0_`, `$_CONST1_`, a zero-input `$sop` or `$lut`); this is the test the JSON
+  writer uses to leave such a cell out. A live `$sop`, `$lut` or gate is a node.
 - Directed edges: for every net with a driver, for every driver pin (direction OUT or INOUT, or the
   pin of a `$port_in`) and every reading pin (IN or INOUT, or the pin of a `$port_out`) on that net,
   an edge driver node -> reader node. Pins are `odin3_pin_drives` / `odin3_pin_reads`.
@@ -321,3 +323,22 @@ Each check reports a pass count in the PR.
   wrapper raises "libodin3 too old: needs odin3_graphlets_count, Odin III > v1.2.0". The Python
   `max_work` default is the CLI bound, 2e10. No post-1.2.0 patch notes file exists yet; this entry
   is the record.
+- `$sop`/`$lut` fix (2026-10-31, found by the Loki lane). The merged pass (#304) took every cell
+  whose type defines a `const_value` hook for a constant, so every `$sop` and `$lut` (all LUTs and
+  gates read from BLIF) was dropped: `.names a b y` / `11 1` gave 3 nodes and 0 edges. The test is
+  now the net-level one of section 2 (all pins non-reading and on constant nets), the same as the
+  JSON writer's. Second finding of the same gate: an inout pin was its own sink, so a black-box
+  cell with inout pins (`$_DFFSR_PPP_` read from BLIF) counted one self-loop per pin; E-4 skips
+  driver == sink and the pass now does too (the simple graph is unchanged, only `self_loops` fell).
+  Lesson: the ORCA gate compares counts on the pass's own exported graph, so it tests counting, not
+  construction. `tools/graphlets/construction_gate.py` (CTest `graphlets_construction`) compares
+  the counted graph (nodes, simple edges, self-loops, directed edges, degree sequence) with an
+  independent E-4 build from `write_json` through `plugins/python/odin3_graph.py`, on LUT form
+  (BLIF as read) and gate form (`abc --gates cmos6`). Results (main 0a44260b plus the fix, EArch
+  parmys goldens): 68 micros and the 14 small VTR
+  designs, LUT and gate form, 164 of 164 identical. Negative control: the unfixed binary fails the
+  gate on 3 of the 4 smallest LUT-form micros with logic (for example `bm_DL_2_1_mux`: 4 nodes and
+  0 edges against 5 nodes and 4 edges in the E-4 build). ORCA gate on the pass's graphs: 904 of 904
+  identical over 452 designs (LU32PEEng, LU64PEEng and mcml are above `--max-nodes` 200000, as
+  designed); directed checks all pass (Python reference 701/701, relabelling 752/752, reversal 752/752,
+  projection to the undirected counter 556/556 and to ORCA 556/556).

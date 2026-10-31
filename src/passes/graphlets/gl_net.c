@@ -11,13 +11,36 @@
 
 enum { LOW_MAX = 8 };
 
+/*
+ * A constant driver: a cell with at least one pin, no reading pin, and every pin on a constant net
+ * (odin3_net_const_value): $_CONST0_ / $_CONST1_, a zero-input $sop or $lut. The same test the JSON
+ * writer uses to leave such a cell out (backends/json/cells.c), so the graph matches
+ * plugins/python/odin3_graph.py (E-4). A live $sop, $lut or gate is not constant even though its
+ * type defines a const_value hook: the hook answers per parameters, and the net test decides.
+ */
+static bool node_is_constant(const odin3_module *mod, odin3_node_id node) {
+    odin3_pinslice pins = odin3_node_pins(mod, node);
+    if (pins.count == 0) {
+        return false;
+    }
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_pin_id pin = {pins.first.v + i};
+        odin3_net_id net = odin3_pin_net(mod, pin);
+        if (odin3_pin_reads(mod, pin) || !odin3_net_valid(net) ||
+            odin3_net_const_value(mod, net) == ODIN3_CONST_NONE) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool node_eligible(const odin3_module *mod, odin3_node_id node) {
     if (!odin3_node_live(mod, node)) {
         return false;
     }
     const odin3_celltype_def *def =
         odin3_celltype_get(odin3_module_design(mod), odin3_node_type(mod, node));
-    return def != NULL && def->const_value == NULL;
+    return def != NULL && !node_is_constant(mod, node);
 }
 
 static bool name_is_clock(const char *name) {
@@ -62,23 +85,32 @@ static bool net_is_global(const odin3_module *mod, odin3_net_id net, const gl_op
     return readers >= opts->global_fanout;
 }
 
+/* One edge from node from to node to; none unless both are eligible (not constant drivers). */
+static odin3_status add_edge(gl_mod *gm, uint32_t from, uint32_t to) {
+    if (gm->eligible[from] == 0 || gm->eligible[to] == 0) {
+        return ODIN3_OK;
+    }
+    glet_edge *slot = odin3_vec_push(&gm->edges);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (glet_edge){from, to};
+    return ODIN3_OK;
+}
+
 static odin3_status add_net(gl_mod *gm, odin3_net_id net) {
     odin3_pinlist pins = odin3_net_pins(gm->mod, net);
     uint32_t drivers = odin3_net_driver_count(gm->mod, net);
     for (uint32_t dd = 0; dd < drivers; dd++) {
         uint32_t from = odin3_pin_node(gm->mod, pins.pins[dd]).v;
         for (uint32_t rr = 0; rr < pins.count; rr++) {
-            if (!odin3_pin_reads(gm->mod, pins.pins[rr])) {
+            /* an inout pin is not its own sink (E-4: driver == sink is skipped) */
+            if (rr == dd || !odin3_pin_reads(gm->mod, pins.pins[rr])) {
                 continue;
             }
-            uint32_t to = odin3_pin_node(gm->mod, pins.pins[rr]).v;
-            glet_edge *slot = gm->eligible[from] != 0 && gm->eligible[to] != 0
-                                  ? odin3_vec_push(&gm->edges)
-                                  : NULL;
-            if (slot != NULL) {
-                *slot = (glet_edge){from, to};
-            } else if (gm->eligible[from] != 0 && gm->eligible[to] != 0) {
-                return ODIN3_ERR_NO_MEMORY;
+            odin3_status st = add_edge(gm, from, odin3_pin_node(gm->mod, pins.pins[rr]).v);
+            if (st != ODIN3_OK) {
+                return st;
             }
         }
     }
