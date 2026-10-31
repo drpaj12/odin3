@@ -29,6 +29,7 @@ provenance
 analysis
 graphlets
 edit
+scoap
 timing-attribution
 python-api
 re-workflow
