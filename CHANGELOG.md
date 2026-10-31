@@ -8,6 +8,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `scoap` pass: SCOAP testability measures (CC0, CC1, CO; with `--sequential` SC0, SC1, SO) of every net, signal
+  probability from random simulation (`--sigprob`), module attributes `odin3:scoap_*`, versioned JSON, Python
+  `Design.scoap()`. Spec `docs/specs/2026-10-31-scoap-design.md`, manual `docs/user/scoap.md`. 2026-10-31.
 - `odin3 --version` prints a second line `commit <sha>[-dirty]`; line 1 (`odin3 1.2.0 (ABI 7)`) is unchanged.
   The commit is recorded at CMake configure time (`cmake/odin3_commit.cmake`: `git -C`, else the stamp file
   `.odin3-commit` that `tools/release/make-tarball` writes, else `unknown`) so run records can name the Odin III

@@ -1140,7 +1140,7 @@ static void test_builtin_processes_values(void) {
         "write_blif", "write_json",  "write_verilog", "write_dot",    "flatten",    "lower",
         "hardmap",    "partial_map", "memory_merge",  "lpmmap",       "sim",        "abc",
         "fsm_detect", "fsm",         "levelize",      "submod",       "cone_check", "raise",
-        "dfflibmap",  "unmap",       "sim_tb",        "testbench_gen"};
+        "dfflibmap",  "unmap",       "sim_tb",        "testbench_gen", "scoap"};
     for (size_t i = 0; i < sizeof ok / sizeof ok[0]; i++) {
         const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr(ok[i]));
         TEST_ASSERT_NOT_NULL_MESSAGE(def, ok[i]);

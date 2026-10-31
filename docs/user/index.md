@@ -28,6 +28,7 @@ outputs
 provenance
 analysis
 graphlets
+scoap
 timing-attribution
 testbench
 python-api
