@@ -158,6 +158,53 @@ static void test_edits_are_refused_while_simulating(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "x", "t", &net));
 }
 
+static const char K_SEQ[] = ".model s\n.inputs clk en\n.outputs q\n.names en q d\n10 1\n01 1\n"
+                            ".latch d q re clk 0\n.end\n";
+
+/* Net visibility without keep, run_vectors and toggle counts on a BLIF with a latch. */
+static void test_sequences_net_visibility_and_toggles(void) {
+    FILE *file = fopen(ODIN3_TEST_TMP ".seq.blif", "w");
+    TEST_ASSERT_NOT_NULL(file);
+    (void)fputs(K_SEQ, file);
+    (void)fclose(file);
+    odin3_design *seq = odin3_design_create();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_run_pass(seq, "read_blif", ODIN3_TEST_TMP ".seq.blif"));
+    odin3_simulation *sim = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_open(seq, 0, &sim));
+    uint32_t en = 0;
+    uint32_t q = 0;
+    uint32_t d = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "en", &en));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "q", &q));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "d", &d));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, d);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_set_toggle_counting(sim, 1));
+    const uint64_t in_values[] = {1, 1, 0, 1};
+    const uint32_t outs[] = {q, d};
+    uint64_t out_values[8] = {0};
+    odin3_simulation_run run = {.in_signals = &en,
+                                .n_in = 1,
+                                .in_values = in_values,
+                                .n_vectors = 4,
+                                .out_signals = outs,
+                                .n_out = 2,
+                                .out_values = out_values};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_run_vectors(sim, &run));
+    const uint64_t want[] = {1, 0, 0, 1, 0, 0, 1, 0};
+    TEST_ASSERT_EQUAL_UINT64_ARRAY(want, out_values, 8);
+    uint64_t toggles = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, q, &toggles));
+    TEST_ASSERT_EQUAL_UINT64(3, toggles);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, d, &toggles));
+    TEST_ASSERT_EQUAL_UINT64(2, toggles);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_reset(sim));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, q, &toggles));
+    TEST_ASSERT_EQUAL_UINT64(0, toggles);
+    odin3_simulation_close(sim);
+    odin3_design_destroy(seq);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_add_net_and_sop_carry_the_tag);
@@ -166,5 +213,6 @@ int main(void) {
     RUN_TEST(test_set_cover_keeps_pins_and_name);
     RUN_TEST(test_remove_and_noop_sequence_round_trips);
     RUN_TEST(test_edits_are_refused_while_simulating);
+    RUN_TEST(test_sequences_net_visibility_and_toggles);
     return UNITY_END();
 }

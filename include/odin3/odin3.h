@@ -2259,6 +2259,43 @@ odin3_status odin3_simulation_get_cycle(const odin3_simulation *sim, uint64_t *c
 odin3_status odin3_simulation_reset(odin3_simulation *sim);
 
 /*
+ * Toggle counts (spec docs/specs/2026-10-31-netlist-edit-sim-design.md 4.3), the energy proxy.
+ * set_toggle_counting(sim, 1) tracks every signal known at that moment (the listed ones and any
+ * find_signal appended: look up the unlisted nets you want first), takes the current values as
+ * the baseline and zeroes the counts; 0 turns counting off and frees it. While on, every cycle
+ * of odin3_simulation_step compares each tracked signal with its value at the end of the previous
+ * cycle; get_toggles gives, for one signal, the number of bit changes summed over its bits since
+ * counting was turned on or the last reset (odin3_simulation_reset zeroes the counts and takes the
+ * new baseline). A clock input toggles twice per cycle inside a cycle but is sampled once per
+ * cycle, so it reads 0. Settles outside a step are not sampled. Off by default; costs nothing
+ * when off. ODIN3_ERR_INVALID_ARG (logged) for NULL arguments, counting off, or a signal not
+ * tracked; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_simulation_set_toggle_counting(odin3_simulation *sim, int enable);
+odin3_status odin3_simulation_get_toggles(const odin3_simulation *sim, uint32_t signal,
+                                          uint64_t *count);
+
+/* A multi-cycle input sequence (odin3_simulation_run_vectors). in_values has n_vectors rows of
+ * n_in values (LSB first, width <= 64), row-major; out_values gets n_vectors rows of n_out values.
+ */
+typedef struct odin3_simulation_run {
+    const uint32_t *in_signals; /* n_in INPUT signal IDs */
+    uint32_t n_in;
+    const uint64_t *in_values; /* n_vectors * n_in */
+    uint32_t n_vectors;
+    const uint32_t *out_signals; /* n_out signal IDs of any kind */
+    uint32_t n_out;
+    uint64_t *out_values; /* n_vectors * n_out, written */
+} odin3_simulation_run;
+
+/*
+ * For each vector in order: set the inputs (as odin3_simulation_set), step one cycle, read the
+ * outputs into out_values. Stops at the first failure with the rows before it written
+ * (ODIN3_ERR_INVALID_ARG, logged, as for set and get). Several calls continue the same run.
+ */
+odin3_status odin3_simulation_run_vectors(odin3_simulation *sim, const odin3_simulation_run *run);
+
+/*
  * A plain graph for odin3_graphlets_count: n nodes (0 .. n-1) and n_edges directed edges
  * from[i] -> to[i].
  */
