@@ -95,6 +95,28 @@ onto the undirected ones (and ORCA) for graphs without anti-parallel pairs; rela
 the orbit vectors unchanged and reversing every arc maps orbit o to its reverse orbit with equal
 counts.
 
+## Runtime and memory
+
+Release build, one run per cell, measured with `/usr/bin/time` on the undirected simple graph of the
+netlist after `--exclude-global` (wall seconds, peak resident MiB; the machine was also running
+other jobs, so read the times as rough). ORCA is the external oracle program.
+
+| Design (nodes, edges) | Size | Odin III s | ORCA s | Odin III MiB | ORCA MiB |
+| --- | --- | --- | --- | --- | --- |
+| ex2PM16_fir_119 (15552, 21554) | 4 | 0.08 | 0.08 | 4.4 | 55 |
+| ex2PM16_fir_119 | 5 | 0.19 | 0.21 | 11 | 58 |
+| stereovision2 (28471, 44418) | 4 | 0.22 | 0.15 | 6.0 | 130 |
+| stereovision2 | 5 | 1.73 | 0.64 | 17 | 147 |
+| mcml (77501, 40161) | 4 | 0.22 | 0.24 | 7.1 | 77 |
+| mcml | 5 | 0.55 | 0.50 | 22 | 81 |
+| LU64PEEng (73259, 54098) | 4 | 0.16 | 0.17 | 11 | 82 |
+| LU64PEEng | 5 | 0.64 | 0.53 | 40 | 85 |
+
+Directed (2 to 4 nodes, 129 orbits) on the same designs: 0.21 s and 18 MiB, 0.61 s and 27 MiB,
+0.71 s and 37 MiB, 0.75 s and 68 MiB. Over the 473 gate netlists the 5-node total is 7.8 s for Odin
+III and 2.9 s for ORCA (a graph with a very uneven degree is where ORCA's counting by equations wins;
+Odin III enumerates every subgraph, so a node of high degree, a clock or reset, must be excluded).
+
 ## Directed catalogue
 
 Canonical labels, one node of each orbit, and the orbit size. Orbit ids and graphlet numbers are
