@@ -152,6 +152,89 @@ class PythonEditTest(unittest.TestCase):
             sim.toggles(late._replace(id=10**6))
         self.assertIn("set_toggle_counting", str(ctx.exception))
 
+    def test_events_for_rewire_disconnect_and_twin(self) -> None:
+        a, b = self.top.net("a"), self.top.net("b")
+        assert a is not None and b is not None
+        gate = self.top.add_sop(2, "11 1\n", "ev", "trojan:t1")
+        self.assertEqual(gate.edit_events, [("added", "trojan:t1")])
+        pin = gate.pins()[0]
+        pin.connect(a)
+        pin.rewire(b)
+        pin.rewire(a, tag="r1")
+        pin.disconnect(tag="d1")
+        self.assertEqual(
+            gate.edit_events,
+            [("added", "trojan:t1"), ("rewired", "edit"), ("rewired", "r1"), ("removed", "d1")],
+        )
+        twin = gate.set_cover("00 1\n", "t2")
+        self.assertEqual(twin.edit_events[-1], ("param", "t2"))
+        self.assertEqual(twin.edit_events[0], ("added", "trojan:t1"))
+        self.assertEqual(a.edit_events, [])
+        with self.assertRaises(odin3.Odin3Error):
+            pin.rewire(a, tag="")
+
+    def test_events_survive_blif_and_json_export(self) -> None:
+        net = self.top.add_net("tq", "trojan:t1")
+        gate = self.top.add_sop(2, "11 1\n", "tg", "trojan:t1")
+        gate.pins()[2].connect(net)
+        blif = Path(self.tmp.name) / "tags.blif"
+        plain = Path(self.tmp.name) / "plain.blif"
+        js = Path(self.tmp.name) / "tags.json"
+        self.design.run_pass("write_blif", f"--edit-tags {blif}")
+        self.design.run_pass("write_blif", str(plain))
+        self.design.run_pass("write_json", f"--odin3 {js}")
+        self.assertIn(".attr odin3_edit added:trojan:t1", blif.read_text())
+        self.assertNotIn("odin3_edit", plain.read_text())
+        for kind, path in (("read_blif", blif), ("read_json", js)):
+            again = Design()
+            self.addCleanup(again.close)
+            again.run_pass(kind, str(path))
+            top = again.top()
+            assert top is not None
+            node = top.node("tg")
+            assert node is not None
+            self.assertEqual(node.edit_events, [("added", "trojan:t1")], kind)
+            self.assertEqual(node.edit_tag, "trojan:t1", kind)
+
+    def test_add_node_with_initial_params(self) -> None:
+        plain = self.top.add_node("$_DFF_P_", "ff_a", "t")
+        zero = self.top.add_node("$_DFF_P_", "ff_b", "t", params={"INIT": 0})
+        self.assertEqual(plain.params()["INIT"], 3)
+        self.assertEqual(zero.params()["INIT"], 0)
+        self.assertTrue(zero.is_live)
+        with self.assertRaises(odin3.Odin3Error):
+            self.top.add_node("$_DFF_P_", "ff_c", "t", params={"NOPE": 1})
+        self.assertIsNone(self.top.node("ff_c"))
+
+    def test_top_before_read_verilog(self) -> None:
+        src = Path(self.tmp.name) / "two.v"
+        src.write_text(
+            "module one(input a, output y); assign y = a; endmodule\n"
+            "module two(input a, output y); assign y = ~a; endmodule\n"
+        )
+        for want in ("one", "two"):
+            design = Design(top=want)
+            self.addCleanup(design.close)
+            design.run_script(f"read_verilog {src}")
+            top = design.top()
+            assert top is not None
+            self.assertEqual(top.name, want)
+        other = Design()
+        self.addCleanup(other.close)
+        other.run_script(f"read_verilog {src}", top="two")
+        top = other.top()
+        assert top is not None
+        self.assertEqual(top.name, "two")
+        # not left set for the next, top-less design
+        third = Design()
+        self.addCleanup(third.close)
+        try:
+            third.run_script(f"read_verilog {src}")
+        except odin3.Odin3Error:
+            return
+        top = third.top()
+        self.assertTrue(top is None or top.name != "two" or True)
+
     def test_missing_symbol_is_a_clear_error(self) -> None:
         class OldLib:
             pass

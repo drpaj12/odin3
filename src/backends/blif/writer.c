@@ -10,6 +10,7 @@
 #include "frontends/arch/arch.h"
 #include "frontends/blif/attrs.h"
 #include "ir/celltype.h"
+#include "ir/edit_events.h"
 #include "ir/ids.h"
 #include "ir/lut.h"
 #include "ir/module.h"
@@ -2080,6 +2081,28 @@ static void write_src_attr(blif_writer *wr, odin3_node_id node) {
     }
 }
 
+/* `.attr odin3_edit <events>` under --edit-tags: the cell's edit events as one blank-free token
+ * (edit_events.h), after any `blif.attr:` extras of its own so a read-back keeps their order. */
+static void write_edit_events(blif_writer *wr, odin3_node_id node) {
+    if (!wr->opts->edit_tags) {
+        return;
+    }
+    const char *raw = odin3_edit_events_raw(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v});
+    if (raw == NULL) {
+        return;
+    }
+    odin3_strbuf_clear(&wr->token);
+    odin3_status st = odin3_edit_events_encode(raw, &wr->token);
+    if (st != ODIN3_OK) {
+        (void)wr_fail(wr, st);
+    } else if (wr->token.len > 0) {
+        wr_begin(wr, ".attr");
+        wr_token(wr, odin3_bytes_cstr(ODIN3_ATTR_EDIT_EVENTS));
+        wr_token_built(wr);
+        wr_end(wr);
+    }
+}
+
 /* `.cname` with the node's name, then its `.param` lines, then its `.attr`/`.param` extras in
  * recorded order. */
 static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
@@ -2090,6 +2113,7 @@ static void write_cell_extras(blif_writer *wr, odin3_node_id node) {
         wr_end(wr);
     }
     write_src_attr(wr, node);
+    write_edit_events(wr, node);
     write_cell_params(wr, node);
     const odin3_value *extras =
         string_attr(wr->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, wr->keys.extras);
@@ -2704,6 +2728,9 @@ static const char *plain_only_option(const odin3_blif_write_opts *opts) {
     if (opts->src_attr) {
         return "odin3_blif_write_with: src_attr applies to the PLAIN dialect only";
     }
+    if (opts->edit_tags) {
+        return "odin3_blif_write_with: edit_tags applies to the PLAIN dialect only";
+    }
     return opts->gates_as_names
                ? "odin3_blif_write_with: gates_as_names applies to the PLAIN dialect only"
                : NULL;
@@ -2896,11 +2923,15 @@ odin3_status odin3_blif_write_with(const odin3_design *design, const char *path,
     if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
-    odin3_blif_write_opts use =
-        opts != NULL ? *opts
-                     : (odin3_blif_write_opts){
-                           ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false, NULL, false,
-                           ODIN3_PROV_MAP_NONE};
+    odin3_blif_write_opts use = opts != NULL ? *opts
+                                             : (odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN,
+                                                                       ODIN3_BLIF_NAMES_SHORT,
+                                                                       0,
+                                                                       false,
+                                                                       NULL,
+                                                                       false,
+                                                                       ODIN3_PROV_MAP_NONE,
+                                                                       false};
     odin3_status st = check_opts(&use);
     odin3_blif_vtr_plan plan = {0};
     if (st == ODIN3_OK && use.dialect == ODIN3_BLIF_DIALECT_VTR) {

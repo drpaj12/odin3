@@ -20,6 +20,7 @@ pins[1].connect(top.net("b"))
 pins[2].connect(net)
 victim_pin.rewire(net)       # move a sink onto the new net
 gate = gate.set_cover("10 1\n", tag="trojan:t1")                # returns the twin node
+ff = top.add_node("$_DFF_P_", "t_ff", "trojan:t1", params={"INIT": 0})   # starts at 0, no twin
 gate.remove()                # refused if it drives a net with other pins; remove(allow_undriven=True)
 ```
 
@@ -52,6 +53,49 @@ A twin made by `set_cover` or `set_param_int` keeps the old node's ancestry: its
 DERIVED record (class rewrite, in a new run `edit` with your tag) whose parents are the old node's
 record, first, and the edit's IMPORTED record. Source locations and the construct chain of the
 old node are still reached through it, and `edit_tag` still reads your tag.
+
+### Edit events: moved pins, and export
+
+Creation is not the only edit. Each node and net carries a list of edit events, `(kind, tag)`, oldest
+first, read with `obj.edit_events` (C: `odin3_edit_get_events`):
+
+| kind | recorded on | when |
+| --- | --- | --- |
+| `added` | node or net | an `add_*` call made it |
+| `param` | the twin node | `set_cover` or `set_param_int` replaced the node |
+| `rewired` | the node of the pin | `Pin.rewire` moved the pin to another net (or onto a net from none) |
+| `removed` | the node of the pin | `Pin.disconnect` took a connected pin off its net |
+
+`rewire` and `disconnect` take an optional `tag`; without one the event carries the tag `edit`. An
+identical event is recorded once. `connect`, `remove_node` and `remove_net` record nothing (use
+`rewire(net, tag=...)` to mark a connect on a clean node). A twin keeps the events of the node it
+replaced. Tags may not contain a newline.
+
+The events are not printed by default, so every default output is unchanged. To keep them visible
+after export, ask for them:
+
+- `write_json --odin3` adds `"odin3_edit": "added:trojan:t1,rewired:t2"` to each cell and netname
+  that has events; `read_json` restores them (older readers skip the member).
+- `write_blif --edit-tags` (plain dialect; the VTR dialect has no `.attr`) writes
+  `.attr odin3_edit added:trojan:t1,rewired:t2` after the cell. It is Yosys extended BLIF: the VTR BLIF
+  parser reads `.attr name value` with one value token, and VPR accepts it only in extended BLIF, like
+  `--src-attr`. `read_blif` restores the events. BLIF has no net attributes, so a net's `added` event is
+  carried by the cell that drives it; JSON carries net events too.
+- The value is one token: each tag is percent-encoded for blanks, control bytes, `%`, `,`, `#`, `"`
+  and `\`. After a read-back the provenance record is gone, so `edit_tag` returns the tag of the first
+  `added` event (else the first event).
+
+```python
+pin.rewire(net, tag="trojan:t1")          # the pin's node gets "rewired trojan:t1"
+design.run_script("write_json --odin3 out.json; write_blif --edit-tags out.blif")
+```
+
+## Setting the top before `read_verilog` (Python)
+
+`Design(top="name")`, `design.run_script(text, top="name")` and `design.run_pass(name, args,
+top="name")` set the requested top module name for the run, as the CLI `--top` does, so a script that
+reads Verilog needs no separate step. The name is set around each call and cleared afterwards (the C
+setting is process-wide, so it never leaks into another design).
 
 ## Simulating every net
 

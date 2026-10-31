@@ -121,6 +121,7 @@ typedef struct jr {
     uint32_t n_ext;                   /* odin3_-prefixed members skipped (J-9) */
     uint32_t n_prov;                  /* odin3_prov objects validated (6.3 E-3) */
     const odin3_json_node *ext_level; /* the odin3_level member of the object being read */
+    const odin3_json_node *ext_edit;  /* its odin3_edit member (edit events), or NULL */
     uint32_t n_scopeinfo;             /* $scopeinfo cells dropped */
     uint32_t n_bad_src;               /* `src` texts that are no location list (L-6) */
     uint32_t n_capped_src;            /* restored texts of over 8 locations (D-7) */

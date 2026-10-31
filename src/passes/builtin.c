@@ -263,6 +263,7 @@ enum {
     WB_NAME_MAP = 1U << 4,
     WB_GATES_AS_NAMES = 1U << 5,
     WB_PROV_MAP = 1U << 6,
+    WB_EDIT_TAGS = 1U << 7,
     WB_DECIMAL = 10,
     WB_MAX_DIGITS = 9, /* more digits than this are out of range anyway (no overflow) */
 };
@@ -325,7 +326,8 @@ static uint8_t wb_bit_of(odin3_bytes word) {
                    {"--src-attr", WB_SRC_ATTR},
                    {"--name-map", WB_NAME_MAP},
                    {"--gates-as-names", WB_GATES_AS_NAMES},
-                   {"--prov-map", WB_PROV_MAP}};
+                   {"--prov-map", WB_PROV_MAP},
+                   {"--edit-tags", WB_EDIT_TAGS}};
     for (size_t k = 0; k < sizeof OPTIONS / sizeof OPTIONS[0]; k++) {
         if (odin3_pass_arg_is(word, OPTIONS[k].name)) {
             return OPTIONS[k].bit;
@@ -364,6 +366,10 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
         wb_prov_map(rest, out);
         return ODIN3_OK;
     }
+    if (bit == WB_EDIT_TAGS) {
+        out->opts.edit_tags = true;
+        return ODIN3_OK;
+    }
     if (bit == WB_SRC_ATTR || bit == WB_GATES_AS_NAMES) {
         out->opts.src_attr = out->opts.src_attr || bit == WB_SRC_ATTR;
         out->opts.gates_as_names = out->opts.gates_as_names || bit == WB_GATES_AS_NAMES;
@@ -393,6 +399,9 @@ static odin3_status wb_check_options(const write_blif_args *out) {
         why = "write_blif: --prov-map needs --name-style hash";
     } else if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
         why = "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines";
+    } else if ((out->seen & WB_EDIT_TAGS) != 0 && (out->seen & WB_VTR) != 0) {
+        why =
+            "write_blif: --edit-tags is for the plain dialect; the VTR dialect has no .attr lines";
     } else if ((out->seen & WB_GATES_AS_NAMES) != 0 && (out->seen & WB_VTR) != 0) {
         why = "write_blif: --gates-as-names is for the plain dialect";
     }
@@ -800,11 +809,14 @@ static const odin3_pass_def READ_TECHLIB = {
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif",
     "write_blif [--vtr] [--lut-k K] [--name-style short|provenance|hash [--name-map <file>]] "
-    "[--prov-map [refs|constructs|full]] [--src-attr] [--gates-as-names] <file>: write the design "
+    "[--prov-map [refs|constructs|full]] [--src-attr] [--edit-tags] [--gates-as-names] <file>: "
+    "write the design "
     "as BLIF (the top first); --prov-map (hash names only) writes the version 2 name map; --vtr "
     "writes the top alone in the dialect VPR reads; hash names write the name map to "
     "<file>.names or --name-map; --src-attr (plain dialect only) writes each cell's HDL "
-    "locations as `.attr src \"SRC\"`; --gates-as-names (plain dialect only) writes gate cells "
+    "locations as `.attr src \"SRC\"`; --edit-tags (plain dialect only) writes the edit events of "
+    "each cell as `.attr odin3_edit KIND:TAG,...`; --gates-as-names (plain dialect only) writes "
+    "gate cells "
     "as `.names` and library state cells as `.latch`",
     write_blif_run,
     NULL,

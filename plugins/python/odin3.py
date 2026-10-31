@@ -466,12 +466,17 @@ def _design_destructor(lib: Any, open_sims: dict[int, Any]) -> Any:
 class Design:
     """An odin3_design: create it empty, run passes on it, walk its modules."""
 
-    def __init__(self, odin3: Odin3 | None = None, *, handle: Any = None) -> None:
+    def __init__(
+        self, odin3: Odin3 | None = None, *, handle: Any = None, top: str | None = None
+    ) -> None:
         """A new empty design; or, given handle (an odin3_design * that C code made with the same
         library, e.g. a host program or a test fixture), that design, which this object then owns
         and destroys. MemoryError when a new design cannot be created, ValueError for a NULL
-        handle."""
+        handle. top names the module that read_verilog, read_blif and hierarchy make the design's
+        top, as the CLI's --top does (it wins over a file's own top); it is applied around every
+        run_pass and run_script of this design."""
         self.odin3 = odin3 or default()
+        self.top_name = top
         # The CLI keeps no construct table by default (V1.2.0 5.3); a Python design wants the chain
         # of Node.chain(), so run_pass and run_script give a read_verilog that names no mode
         # `--prov-ast refs`, per read; the process environment is never changed (a user's
@@ -491,10 +496,15 @@ class Design:
 
     @classmethod
     def read_blif(
-        cls, path: str | Path, *, techlibs: Sequence[str | Path] = (), odin3: Odin3 | None = None
+        cls,
+        path: str | Path,
+        *,
+        techlibs: Sequence[str | Path] = (),
+        odin3: Odin3 | None = None,
+        top: str | None = None,
     ) -> Design:
         """A new design holding the BLIF at path, after reading the given tech libraries."""
-        design = cls(odin3)
+        design = cls(odin3, top=top)
         for lib in techlibs:
             design.run_pass("read_techlib", _quote(lib))
         design.run_pass("read_blif", _quote(path))
@@ -535,7 +545,21 @@ class Design:
     def get_text(self, function: str, *args: Any) -> str:
         return self.odin3.text(self.get(function, "const char *", *args))
 
-    def run_pass(self, name: str, args: str = "") -> None:
+    @contextmanager
+    def _top_scope(self, top: str | None) -> Iterator[None]:
+        """Set the requested top name (odin3_pass_set_top_name, process-wide) for one run and clear
+        it afterwards, so it never leaks into another design."""
+        name = top if top is not None else self.top_name
+        if name is None:
+            yield
+            return
+        self.odin3.call("odin3_pass_set_top_name", name.encode())
+        try:
+            yield
+        finally:
+            self.odin3.call("odin3_pass_set_top_name", self.odin3.ffi.NULL)
+
+    def run_pass(self, name: str, args: str = "", *, top: str | None = None) -> None:
         """Run one pass (odin3_design_run_pass); raises Odin3Error with its status.
 
         After a failed pass the design is valid but may no longer compute what its input did:
@@ -543,17 +567,21 @@ class Design:
         """
         if name == "read_verilog":
             args = _with_prov_ast(args)
-        self.call("odin3_design_run_pass", name.encode(), args.encode())
+        with self._top_scope(top):
+            self.call("odin3_design_run_pass", name.encode(), args.encode())
 
-    def run_script(self, text: str, origin: str = "python") -> None:
-        """Run a pass script, its errors located by command (odin3_design_run_script).
+    def run_script(self, text: str, origin: str = "python", *, top: str | None = None) -> None:
+        """Run a pass script, its errors located by command (odin3_design_run_script). top: the
+        requested top module name for the whole script, set before its first command (the
+        CLI's --top); default: the Design's top argument, else none.
 
         After a failed pass the design must be discarded, as for run_pass.
         """
         text = _script_with_prov_ast(text)
         keep = self.odin3.ffi.new("char[]", origin.encode())  # alive during the call
         src = (keep, self.odin3.lib.ODIN3_SCRIPT_BY_COMMAND)
-        self.call("odin3_design_run_script", text.encode(), src)
+        with self._top_scope(top):
+            self.call("odin3_design_run_script", text.encode(), src)
 
     def graphlets(
         self,
@@ -1050,6 +1078,17 @@ class _Named:
         value = self.design.get("odin3_edit_get_tag", "const char *", self.obj())
         return None if value == self.design.odin3.ffi.NULL else self.design.odin3.text(value)
 
+    @property
+    def edit_events(self) -> list[tuple[str, str]]:
+        """The edit events of this node or net, oldest first, as (kind, tag): "added", "param",
+        "rewired", "removed" (odin3_edit_get_events). Empty for an object no edit touched."""
+        _edit_probe(self.design, "odin3_edit_get_events")
+        value = self.design.get("odin3_edit_get_events", "const char *", self.obj())
+        if value == self.design.odin3.ffi.NULL:
+            return []
+        lines = self.design.odin3.text(value).split("\n")
+        return [(kind, tag) for kind, _, tag in (ln.partition(" ") for ln in lines if ln)]
+
     def attr(self, key: str) -> str | None:
         """The string attribute key, None when absent."""
         value = self.design.get("odin3_attr_get_string", "const char *", self.obj(), key.encode())
@@ -1125,7 +1164,9 @@ class Module(_Named):
     def _lookup(self, store: str, name: str) -> int:
         return self._get(f"odin3_module_lookup_{store}", name.encode())
 
-    def _add(self, function: str, tag: str, **fields: Any) -> tuple[int, int]:
+    def _add(
+        self, function: str, tag: str, params: dict[str, int] | None = None, **fields: Any
+    ) -> tuple[int, int]:
         ffi = self.design.odin3.ffi
         fields["tag"] = tag
         keep = {k: ffi.new("char[]", v.encode()) for k, v in fields.items() if isinstance(v, str)}
@@ -1135,6 +1176,11 @@ class Module(_Named):
                 setattr(what, key, keep[key])
             elif value is not None:
                 setattr(what, key, value)
+        names = [ffi.new("char[]", name.encode()) for name in params or {}]
+        pnames = ffi.new("const char *[]", names or 1)
+        pvalues = ffi.new("int64_t[]", list((params or {}).values()) or 1)
+        if names:
+            what.param_names, what.param_values, what.n_params = pnames, pvalues, len(names)
         _edit_probe(self.design, function)
         return _edit_ref(self.design, function, self.id, what)
 
@@ -1142,9 +1188,14 @@ class Module(_Named):
         """A new net (odin3_edit_add_net). tag marks the edit in the provenance (edit_tag)."""
         return Net(self.design, *self._add("odin3_edit_add_net", tag, name=name))
 
-    def add_node(self, cell_type: str, name: str | None, tag: str) -> Node:
-        """A new node of a registered or built-in cell type, default parameters, pins open."""
-        ref = self._add("odin3_edit_add_node", tag, name=name, cell_type=cell_type)
+    def add_node(
+        self, cell_type: str, name: str | None, tag: str, params: dict[str, int] | None = None
+    ) -> Node:
+        """A new node of a registered or built-in cell type, pins open. Its parameters are the
+        type's defaults except the integer ones in params, e.g. {"INIT": 0} for a flip-flop
+        that starts at 0 (no twin node is made). Odin3Error for an unknown or non-integer
+        parameter name."""
+        ref = self._add("odin3_edit_add_node", tag, params, name=name, cell_type=cell_type)
         return Node(self.design, *ref)
 
     def add_sop(self, n_inputs: int, cover: str, name: str | None, tag: str) -> Node:
@@ -1393,12 +1444,21 @@ class Pin(_Local):
         """Connect this unconnected pin to net (odin3_edit_connect)."""
         _edit_call(self.design, "odin3_edit_connect", self.ref(), net.ref())
 
-    def disconnect(self) -> None:
-        _edit_call(self.design, "odin3_edit_disconnect", self.ref())
+    def disconnect(self, tag: str | None = None) -> None:
+        """Disconnect this pin. The pin's node gets the edit event "removed" with tag (default
+        "edit"; odin3_edit_disconnect[_tagged])."""
+        if tag is None:
+            _edit_call(self.design, "odin3_edit_disconnect", self.ref())
+        else:
+            _edit_call(self.design, "odin3_edit_disconnect_tagged", self.ref(), tag.encode())
 
-    def rewire(self, net: Net) -> None:
-        """Move this pin to net in one step (odin3_edit_rewire)."""
-        _edit_call(self.design, "odin3_edit_rewire", self.ref(), net.ref())
+    def rewire(self, net: Net, tag: str | None = None) -> None:
+        """Move this pin to net in one step. The pin's node gets the edit event "rewired" with tag
+        (default "edit"; odin3_edit_rewire[_tagged]); works on an unconnected pin too."""
+        if tag is None:
+            _edit_call(self.design, "odin3_edit_rewire", self.ref(), net.ref())
+        else:
+            _edit_call(self.design, "odin3_edit_rewire_tagged", self.ref(), net.ref(), tag.encode())
 
     def net(self) -> Net | None:
         """The net the pin is connected to, None when unconnected."""

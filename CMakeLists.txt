@@ -304,6 +304,7 @@ add_library(odin3_core OBJECT
     src/ir/pinpool.c
     src/ir/wire.c
     src/ir/attr.c
+    src/ir/edit_events.c
     src/ir/prov.c
     src/ir/opclass.c
     src/ir/construct.c
@@ -2252,6 +2253,12 @@ if(BUILD_TESTING)
     target_compile_definitions(test_edit PRIVATE ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit")
     add_test(NAME test_edit COMMAND test_edit)
     set_tests_properties(test_edit PROPERTIES LABELS unit)
+    add_executable(test_edit_gaps tests/unit/test_edit_gaps.c)
+    target_link_libraries(test_edit_gaps PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_edit_gaps PRIVATE
+                               ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit_gaps")
+    add_test(NAME test_edit_gaps COMMAND test_edit_gaps)
+    set_tests_properties(test_edit_gaps PROPERTIES LABELS unit)
     add_executable(test_sim_abi tests/unit/test_sim_abi.c)
     target_link_libraries(test_sim_abi PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_sim_abi PRIVATE ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim"
