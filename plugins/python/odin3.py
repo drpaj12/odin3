@@ -592,6 +592,39 @@ class Design:
             result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
             return result
 
+    def scoap(
+        self,
+        *,
+        sequential: bool = False,
+        top: int = 10,
+        focus: Sequence[str] = (),
+        sigprob: int = 0,
+        seed: int = 1,
+        threshold: float = 0.01,
+    ) -> dict[str, Any]:
+        """Run the scoap pass and return its JSON (schema odin3-scoap, version 1).
+
+        Per module and net: cc0, cc1, co (and sc0, sc1, so with sequential=True; p1_ppm with
+        sigprob=<vectors>), keyed by the module-local net id and name; "top" holds the `top`
+        hardest-to-control and hardest-to-observe nets, "rare" (with sigprob) the nets whose
+        probability of 1 or 0 is below `threshold`. INF (1000000000) means unreachable. Module
+        summaries are also stored as module attributes odin3:scoap_*. See docs/user/scoap.md.
+        """
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "scoap.json"
+            words = ["--out", _quote(out), "--top", str(top)] + ["--sequential"] * sequential
+            if sigprob > 0:
+                words += ["--sigprob", str(sigprob), "--seed", str(seed)]
+                words += ["--threshold", repr(threshold)]
+            for item in focus:
+                words += ["--focus", _quote(item)]
+            self.run_pass("scoap", " ".join(words))
+            result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+            return result
+
     def simulate(self, top: str | None = None) -> Simulation:
         """Open a Simulation of module `top` (default: the design's top); see Simulation."""
         return Simulation(self, top)
