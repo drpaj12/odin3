@@ -211,3 +211,14 @@ path) would be needed, plus an `altpll` model. Next steps for this target, in or
 `` `define `` object macros in the testbench lexer; hierarchical read of DUT signals in testbench
 expressions (S1 find_signal); poke into memory contents; parameter override on the DUT instance
 by elaborating the DUT with `read_verilog` parameters; wide-value support. Not started in v1.
+
+Fix round (PR #308 review, 2026-10-31): nonblocking assignments resolve their lvalue indices when
+the statement runs; a DUT's clock edges are recorded at every write of the clock and replayed in
+the NBA region (register outputs appear after the active processes ran, independent of process
+order), and the active region runs again after any NBA or edge; the DUT clock starts at 0
+(2-state), so `initial clk = 1` is a posedge at time 0; `#0` loops fail after 100000 steps at one
+time; `$monitor` fires on non-`$time` argument changes; output lines are unbounded; a signed
+negative `repeat` count is 0; evaluation errors fail the run. Regression tests: `tests/tb/micro`
+(`nba_idx`, `nba_dut`, `ord_a`, `ord_b`, `pulse`, `seed`, `mon`, `longline`, `repeat`, `redxnor`),
+`tests/tb/errors` (`delta`, `fopen`, ctest `tb_errors`), `tests/tools/test_testbench_gen.py`,
+`tests/tools/test_tb_compare.py`.

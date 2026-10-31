@@ -9,10 +9,15 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum { EDGE_CAP = 64 /* clock edges recorded between two NBA regions */ };
+
 struct tb_dut {
     odin3_sim *sim;
     tb_inst *inst;
-    int clock_conn; /* index in inst->conns, -1 none */
+    int clock_conn;       /* index in inst->conns, -1 none */
+    uint64_t clock_last;  /* clock value at the last observation (starts at 0) */
+    bool edges[EDGE_CAP]; /* recorded edges in order: true posedge, false negedge */
+    uint32_t nedges;
 };
 
 static bool find_module(odin3_design *design, const char *name, odin3_module_id *out) {
@@ -136,20 +141,22 @@ static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     return changed;
 }
 
-static void clock_step(tb_ev *ev, tb_dut *dut) {
-    if (dut->clock_conn < 0) {
+void tb_dut_observe(tb_ev *ev, tb_dut *dut) {
+    if (dut->clock_conn < 0 || dut->inst->conns[dut->clock_conn].expr == NULL) {
         return;
     }
-    tb_conn *conn = &dut->inst->conns[dut->clock_conn];
-    if (conn->expr == NULL) {
+    const tb_expr *clk = dut->inst->conns[dut->clock_conn].expr;
+    uint64_t val = tb_eval(ev, clk, clk->width, false) & 1U;
+    if (val == dut->clock_last) {
         return;
     }
-    uint64_t val = tb_eval(ev, conn->expr, conn->expr->width, false) & 1U;
-    if (conn->seen && val != conn->last) {
-        (void)odin3_sim_clock_edge(dut->sim, val != 0 ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE);
+    dut->clock_last = val;
+    if (dut->nedges == EDGE_CAP) {
+        ev->failed = true;
+        ev->why = "more than 64 clock edges between two NBA regions";
+        return;
     }
-    conn->last = val;
-    conn->seen = true;
+    dut->edges[dut->nedges++] = val != 0;
 }
 
 static bool publish(tb_ev *ev, tb_dut *dut) {
@@ -176,10 +183,21 @@ static bool publish(tb_ev *ev, tb_dut *dut) {
     return changed;
 }
 
-bool tb_dut_sync(tb_ev *ev, tb_dut *dut) {
+bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
     if (apply_inputs(ev, dut)) {
         odin3_sim_settle(dut->sim);
     }
-    clock_step(ev, dut);
     return publish(ev, dut);
+}
+
+bool tb_dut_edges(tb_ev *ev, tb_dut *dut) {
+    if (dut->nedges == 0) {
+        return false;
+    }
+    for (uint32_t i = 0; i < dut->nedges; i++) {
+        (void)odin3_sim_clock_edge(dut->sim, dut->edges[i] ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE);
+    }
+    dut->nedges = 0;
+    (void)publish(ev, dut);
+    return true;
 }

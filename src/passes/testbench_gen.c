@@ -68,11 +68,20 @@ static void lower_copy(char *dst, size_t cap, const char *name) {
     dst[len] = '\0';
 }
 
+/* True when `low` ends with `suffix`. */
+static bool ends_with(const char *low, const char *suffix) {
+    size_t len = strlen(low);
+    size_t tail = strlen(suffix);
+    return len >= tail && strcmp(low + len - tail, suffix) == 0;
+}
+
+/* The name-based clock fallback: exactly clk, clock or ck, or a suffix _clk or _clock (any case);
+ * `clk_en` and `clock_gate` are data. */
 static bool name_is_clock(const char *name) {
     char low[NAME_BUF];
     lower_copy(low, sizeof low, name);
-    return strstr(low, "clk") != NULL || strstr(low, "clock") != NULL ||
-           strcasecmp(name, "ck") == 0;
+    return strcmp(low, "clk") == 0 || strcmp(low, "clock") == 0 || strcmp(low, "ck") == 0 ||
+           ends_with(low, "_clk") || ends_with(low, "_clock");
 }
 
 static bool name_is_reset(const char *name, bool *low) {
@@ -303,6 +312,10 @@ static int classify(const odin3_sim *sim, in_port *ins, bool *have_clk) {
             name_is_clock(odin3_sim_input_name(sim, i))) {
             ins[i].kind = ROLE_CLOCK;
             clk_found = true;
+            odin3_log(ODIN3_LOG_INFO,
+                      "testbench_gen: no clock input in the netlist; taking `%s` as the clock "
+                      "by its name",
+                      odin3_sim_input_name(sim, i));
         }
     }
     for (uint32_t i = 0; i < nin; i++) {

@@ -28,16 +28,43 @@ static unsigned digits_of(uint64_t val, unsigned base) {
 }
 
 typedef struct sbuf {
-    char *buf;
+    char *buf; /* always NUL-terminated once the first byte is stored; NULL after an allocation
+                  failure */
     size_t cap, len;
 } sbuf;
 
-static void put(sbuf *out, const char *text, size_t count) {
-    for (size_t i = 0; i < count && out->len + 1 < out->cap; i++) {
-        out->buf[out->len++] = text[i];
+enum { SBUF_CAP0 = 256 };
+
+static bool sbuf_reserve(sbuf *out, size_t extra) {
+    if (out->buf == NULL) {
+        return false;
     }
-    size_t end = out->len < out->cap ? out->len : out->cap - 1U;
-    out->buf[end] = '\0';
+    size_t need = out->len + extra + 1U;
+    if (need <= out->cap) {
+        return true;
+    }
+    size_t cap = out->cap;
+    while (cap < need) {
+        cap *= 2U;
+    }
+    char *grown = realloc(out->buf, cap);
+    if (grown == NULL) {
+        free(out->buf);
+        out->buf = NULL;
+        return false;
+    }
+    out->buf = grown;
+    out->cap = cap;
+    return true;
+}
+
+static void put(sbuf *out, const char *text, size_t count) {
+    if (!sbuf_reserve(out, count)) {
+        return;
+    }
+    memcpy(out->buf + out->len, text, count);
+    out->len += count;
+    out->buf[out->len] = '\0';
 }
 
 typedef struct radix {
@@ -212,9 +239,12 @@ static uint32_t format_string(tb_ev *ev, sbuf *out, const char *fmt, tb_expr *co
     return fa.next;
 }
 
-void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *buf, size_t cap) {
-    sbuf out = {buf, cap, 0};
-    buf[0] = '\0';
+char *tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs) {
+    sbuf out = {malloc(SBUF_CAP0), SBUF_CAP0, 0};
+    if (out.buf == NULL) {
+        return NULL;
+    }
+    out.buf[0] = '\0';
     uint32_t first = 0;
     if (nargs > 0 && args[0]->kind == E_STR) {
         first = 1U + format_string(ev, &out, args[0]->str, args + 1, nargs - 1U);
@@ -223,6 +253,7 @@ void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *buf, size_
         spec sp = {'d', -1, false};
         put_arg(ev, &out, args[i], sp);
     }
+    return out.buf;
 }
 
 /* --- $readmem --- */

@@ -2776,6 +2776,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     endif()
+    add_test(NAME tb_errors
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_errors.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(tb_errors PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

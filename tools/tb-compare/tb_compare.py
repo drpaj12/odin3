@@ -16,7 +16,8 @@ from pathlib import Path
 
 def run_side(odin3: str, script: str, tb: str, out: Path, extra: Sequence[str]) -> str | None:
     """Runs one side; returns an error text, or None on success."""
-    cmd = [odin3, "-p", f"{script}; sim_tb --out {out} {' '.join(extra)} {tb}"]
+    # The argv is a list; inside odin3's -p script the paths are double-quoted, which keeps blanks.
+    cmd = [odin3, "-p", f'{script}; sim_tb --out "{out}" {" ".join(extra)} "{tb}"']
     proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         errors = [ln for ln in proc.stderr.splitlines() if "error" in ln]
@@ -56,7 +57,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             if err is not None:
                 print(f"tb-compare: design {name} failed: {err}", file=sys.stderr)
                 return 2
-        report = first_mismatch(outs[0].read_text().splitlines(), outs[1].read_text().splitlines())
+        a_lines = outs[0].read_text().splitlines()
+        b_lines = outs[1].read_text().splitlines()
+        if not a_lines and not b_lines:
+            print(
+                "tb-compare: both runs printed nothing (an empty or non-printing testbench, or "
+                "--max-time reached first): nothing was compared",
+                file=sys.stderr,
+            )
+            return 2
+        report = first_mismatch(a_lines, b_lines)
     if report is None:
         print("tb-compare: identical")
         return 0

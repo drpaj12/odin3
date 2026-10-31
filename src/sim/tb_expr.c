@@ -310,8 +310,9 @@ static uint64_t finish_random(tb_ev *ev, const ev_frame *fr) {
 }
 
 static uint64_t finish_fopen(tb_ev *ev, const tb_expr *expr) {
-    ev->failed = ev->failed || ev->const_only || expr->n < 1 || expr->list[0]->kind != E_STR;
-    if (ev->failed) {
+    if (ev->const_only || expr->n < 1 || expr->list[0]->kind != E_STR) {
+        ev->failed = true;
+        ev->why = "$fopen needs a constant file name string in a procedural statement";
         return 0;
     }
     const char *mode = expr->n > 1 && expr->list[1]->kind == E_STR ? expr->list[1]->str : "w";
@@ -568,33 +569,49 @@ static uint64_t index_value(tb_ev *ev, const tb_expr *lv) {
     return index != NULL ? tb_eval(ev, index, index->width, false) : 0;
 }
 
-enum { WRITE_STACK = 2 * TB_MAX_WIDTH };
-
-void tb_write(tb_ev *ev, const tb_expr *lv, uint64_t val) {
+uint32_t tb_wr_resolve(tb_ev *ev, const tb_expr *lv, uint64_t val, tb_wr *out) {
     /* A concatenation takes its parts from the right; nested ones flatten in place, so the leaves
-     * are written last to first from a worklist (at most TB_MAX_WIDTH leaves: each is one bit). */
-    const tb_expr *work[WRITE_STACK];
+     * are taken last to first from a worklist (each leaf is at least one bit). */
+    const tb_expr *work[TB_WR_MAX];
     uint32_t top = 0;
+    uint32_t count = 0;
     work[top++] = lv;
     while (top > 0) {
         const tb_expr *cur = work[--top];
         if (cur->kind != E_CONCAT) {
-            write_leaf(ev, cur, val, index_value(ev, cur));
+            if (count == TB_WR_MAX) {
+                ev->failed = true;
+                return 0;
+            }
+            out[count++] = (tb_wr){cur, val, index_value(ev, cur)};
             val = cur->width >= TB_MAX_WIDTH ? 0 : val >> cur->width;
             continue;
         }
-        if (top + cur->n > WRITE_STACK) {
+        if (top + cur->n > TB_WR_MAX) {
             ev->failed = true;
-            return;
+            return 0;
         }
         for (uint32_t i = 0; i < cur->n; i++) {
             work[top++] = cur->list[i];
         }
     }
+    return count;
+}
+
+void tb_wr_apply(tb_ev *ev, const tb_wr *wr) {
+    write_leaf(ev, wr->leaf, wr->val, wr->idx);
+}
+
+void tb_write(tb_ev *ev, const tb_expr *lv, uint64_t val) {
+    tb_wr wrs[TB_WR_MAX];
+    uint32_t count = tb_wr_resolve(ev, lv, val, wrs);
+    for (uint32_t i = 0; i < count; i++) {
+        tb_wr_apply(ev, &wrs[i]);
+    }
 }
 
 bool tb_const(tb_module *tb, const tb_expr *expr, int64_t *out) {
-    tb_ev ev = {tb, 0, 0, true, false};
+    tb_ev ev = {tb, 0, 0, true, false, NULL};
     uint64_t val = tb_eval(&ev, expr, TB_MAX_WIDTH, expr->sgn);
     *out =
         sx(val, max_u32(expr->width, 1U) < TB_MAX_WIDTH && !expr->sgn ? TB_MAX_WIDTH : expr->width);

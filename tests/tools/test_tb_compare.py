@@ -35,6 +35,31 @@ class TbCompareTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
         self.assertIn("MISMATCH line 1 (time/cycle t=26)", proc.stdout)
 
+    def test_path_with_spaces(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            spaced = Path(tmp) / "a dir"
+            spaced.mkdir()
+            tb = spaced / "counter tb.v"
+            tb.write_text((MICRO / "counter_tb.v").read_text())
+            script = "read_verilog {}; proc; opt; lower".format(MICRO / "counter.v")
+            proc = subprocess.run(
+                [sys.executable, str(TOOL), "--odin3", CLI, "--tb", str(tb),
+                 "--a", script, "--b", script],
+                capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_empty_outputs_are_an_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tb = Path(tmp) / "quiet_tb.v"
+            tb.write_text("module quiet_tb;\n  initial #1 $finish;\nendmodule\n")
+            script = "read_verilog {}; proc; opt; lower".format(MICRO / "counter.v")
+            proc = subprocess.run(
+                [sys.executable, str(TOOL), "--odin3", CLI, "--tb", str(tb),
+                 "--a", script, "--b", script],
+                capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 2, proc.stdout + proc.stderr)
+        self.assertIn("nothing was compared", proc.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

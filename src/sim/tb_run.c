@@ -7,9 +7,9 @@
 #include <string.h>
 
 enum {
-    LINE_MAX = 1024,
     STEP_LIMIT = 20000000,
-    DEFAULT_DELTA_LIMIT = 100000,
+    DEFAULT_DELTA_LIMIT = 100000, /* active-region rounds in one region pass */
+    TIME_DELTA_LIMIT = 100000,    /* consecutive time steps at one time (#0 loops) */
     ERR_BUF = 256,
     STROBE_CAP0 = 8,
     NBA_CAP0 = 16,
@@ -34,11 +34,6 @@ typedef struct proc {
     const tb_stmt *waiting;
 } proc;
 
-typedef struct nba {
-    const tb_expr *lv;
-    uint64_t val;
-} nba;
-
 typedef struct run {
     tb_module *tb;
     tb_ev ev;
@@ -46,11 +41,11 @@ typedef struct run {
     uint32_t np;
     tb_dut **duts;
     uint32_t nd;
-    nba *nbas;
+    tb_wr *nbas; /* pending nonblocking writes, indices already evaluated */
     uint32_t nnba, cap_nba;
     const tb_stmt *monitor;
     bool mon_on;
-    char mon_last[LINE_MAX];
+    uint64_t mon_prev[TB_MAX_ARGS]; /* last values of the $monitor arguments except $time */
     bool mon_pending;
     const tb_stmt **strobes;
     uint32_t nstrobe, cap_strobe;
@@ -121,7 +116,19 @@ static void settle_assigns(run *rt) {
 
 static void post_write(run *rt) {
     settle_assigns(rt);
+    for (uint32_t i = 0; i < rt->nd; i++) {
+        tb_dut_observe(&rt->ev, rt->duts[i]);
+    }
     check_waiters(rt);
+}
+
+/* Fails the run when an evaluation reported an error; false when the run has failed. */
+static bool run_ok(run *rt) {
+    if (rt->ev.failed && !rt->failed) {
+        rfail(rt, NULL,
+              rt->ev.why != NULL ? rt->ev.why : "expression could not be evaluated or written");
+    }
+    return !rt->failed;
 }
 
 /* --- system tasks --- */
@@ -133,14 +140,19 @@ static FILE *fd_stream(run *rt, uint64_t fd) {
 }
 
 static void print_to(run *rt, FILE *fp, const tb_expr *call, uint32_t first, bool newline) {
-    char line[LINE_MAX];
-    tb_format(&rt->ev, call->list + first, call->n - first, line, sizeof line);
+    char *line = tb_format(&rt->ev, call->list + first, call->n - first);
+    if (line == NULL) {
+        rt->failed = true;
+        odin3_log(ODIN3_LOG_ERROR, "testbench: out of memory formatting output");
+        return;
+    }
     if (fp != NULL) {
         (void)fputs(line, fp);
         if (newline) {
             (void)fputc('\n', fp);
         }
     }
+    free(line);
 }
 
 static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
@@ -222,9 +234,15 @@ static void do_systask(run *rt, const tb_stmt *stmt) {
 
 /* --- process stepping --- */
 static void push_nba(run *rt, const tb_stmt *stmt) {
-    if (rt->nnba == rt->cap_nba) {
-        uint32_t cap = rt->cap_nba == 0 ? (uint32_t)NBA_CAP0 : rt->cap_nba * 2U;
-        nba *grown = realloc(rt->nbas, cap * sizeof *grown);
+    tb_wr wrs[TB_WR_MAX];
+    uint64_t val = tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width);
+    uint32_t count = tb_wr_resolve(&rt->ev, stmt->lhs, val, wrs);
+    if (rt->nnba + count > rt->cap_nba) {
+        uint32_t cap = rt->cap_nba == 0 ? (uint32_t)NBA_CAP0 : rt->cap_nba;
+        while (cap < rt->nnba + count) {
+            cap *= 2U;
+        }
+        tb_wr *grown = realloc(rt->nbas, cap * sizeof *grown);
         if (grown == NULL) {
             rt->failed = true;
             return;
@@ -232,7 +250,9 @@ static void push_nba(run *rt, const tb_stmt *stmt) {
         rt->nbas = grown;
         rt->cap_nba = cap;
     }
-    rt->nbas[rt->nnba++] = (nba){stmt->lhs, tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width)};
+    for (uint32_t i = 0; i < count; i++) {
+        rt->nbas[rt->nnba++] = wrs[i];
+    }
 }
 
 static bool push(run *rt, proc *pr, const tb_stmt *stmt) {
@@ -341,6 +361,13 @@ static bool step_for(run *rt, proc *pr, frame *frm) {
     return push(rt, pr, stmt->a);
 }
 
+/* The repeat count; a signed negative count is 0 (IEEE 1364-2005 9.6). */
+static uint64_t repeat_count(run *rt, const tb_expr *expr) {
+    uint64_t cnt = tb_eval(&rt->ev, expr, expr->width, expr->sgn) & tb_mask(expr->width);
+    bool negative = expr->sgn && expr->width > 0 && ((cnt >> (expr->width - 1U)) & 1U) != 0;
+    return negative ? 0 : cnt;
+}
+
 static bool step_loop_kind(run *rt, proc *pr, frame *frm) {
     const tb_stmt *stmt = frm->stmt;
     if (stmt->kind == S_WHILE) {
@@ -353,7 +380,7 @@ static bool step_loop_kind(run *rt, proc *pr, frame *frm) {
     if (stmt->kind == S_REPEAT) {
         if (frm->pc == 0) {
             frm->pc = 1;
-            frm->cnt = tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false);
+            frm->cnt = repeat_count(rt, stmt->rhs);
         }
         if (frm->cnt == 0) {
             pr->sp--;
@@ -391,7 +418,7 @@ static bool step_loop(run *rt, proc *pr, frame *frm) {
 }
 
 static void run_proc(run *rt, proc *pr) {
-    for (long steps = 0; pr->state == P_RUN && !rt->finished && !rt->failed; steps++) {
+    for (long steps = 0; pr->state == P_RUN && !rt->finished && run_ok(rt); steps++) {
         if (steps > STEP_LIMIT) {
             rfail(rt, pr->sp > 0 ? pr->st[pr->sp - 1].stmt : NULL,
                   "process runs without waiting (infinite zero-delay loop)");
@@ -422,31 +449,60 @@ static bool any_runnable(const run *rt) {
 }
 
 static void active_region(run *rt) {
-    for (uint32_t guard = 0; guard < DEFAULT_DELTA_LIMIT && !rt->finished && !rt->failed; guard++) {
+    for (uint32_t guard = 0; guard < DEFAULT_DELTA_LIMIT && !rt->finished && run_ok(rt); guard++) {
         for (uint32_t i = 0; i < rt->np; i++) {
             run_proc(rt, &rt->procs[i]);
         }
         bool changed = false;
         for (uint32_t dev_no = 0; dev_no < rt->nd; dev_no++) {
-            changed = tb_dut_sync(&rt->ev, rt->duts[dev_no]) || changed;
+            changed = tb_dut_comb(&rt->ev, rt->duts[dev_no]) || changed;
         }
         post_write(rt);
         if (!any_runnable(rt) && !changed) {
             return;
         }
     }
-    if (!rt->finished) {
+    if (!rt->finished && run_ok(rt)) {
         rfail(rt, NULL,
               "time step does not converge (combinational feedback through the testbench)");
     }
 }
 
-static void nba_region(run *rt) {
-    for (uint32_t i = 0; i < rt->nnba; i++) {
-        tb_write(&rt->ev, rt->nbas[i].lv, rt->nbas[i].val);
+/* The NBA region: the DUTs' recorded clock edges first (they sample the inputs as the active
+ * region left them, and their register outputs are published here), then the testbench's
+ * nonblocking assignments. True when anything happened, so the active region must run again. */
+static bool nba_region(run *rt) {
+    bool progress = false;
+    for (uint32_t i = 0; i < rt->nd; i++) {
+        progress = tb_dut_edges(&rt->ev, rt->duts[i]) || progress;
     }
+    for (uint32_t i = 0; i < rt->nnba; i++) {
+        tb_wr_apply(&rt->ev, &rt->nbas[i]);
+    }
+    progress = progress || rt->nnba > 0;
     rt->nnba = 0;
     post_write(rt);
+    return progress;
+}
+
+static bool mon_arg_is_time(const tb_expr *arg) {
+    return arg->kind == E_SYS && strcmp(arg->str, "$time") == 0;
+}
+
+/* $monitor fires when an argument other than $time (and the format string) changes. */
+static bool mon_changed(run *rt) {
+    const tb_expr *call = rt->monitor->sys;
+    bool changed = rt->mon_pending;
+    for (uint32_t i = 0; i < call->n && i < TB_MAX_ARGS; i++) {
+        const tb_expr *arg = call->list[i];
+        if (arg->kind == E_STR || mon_arg_is_time(arg)) {
+            continue;
+        }
+        uint64_t val = tb_eval(&rt->ev, arg, arg->width, arg->sgn) & tb_mask(arg->width);
+        changed = changed || val != rt->mon_prev[i];
+        rt->mon_prev[i] = val;
+    }
+    return changed;
 }
 
 static void postponed(run *rt) {
@@ -454,23 +510,20 @@ static void postponed(run *rt) {
         print_to(rt, rt->tb->out, rt->strobes[i]->sys, 0, true);
     }
     rt->nstrobe = 0;
-    if (rt->monitor != NULL && rt->mon_on) {
-        char line[LINE_MAX];
-        tb_format(&rt->ev, rt->monitor->sys->list, rt->monitor->sys->n, line, sizeof line);
-        if (rt->mon_pending || strcmp(line, rt->mon_last) != 0) {
-            (void)fprintf(rt->tb->out, "%s\n", line);
-            (void)snprintf(rt->mon_last, sizeof rt->mon_last, "%s", line);
-            rt->mon_pending = false;
-        }
+    if (rt->monitor != NULL && rt->mon_on && mon_changed(rt)) {
+        print_to(rt, rt->tb->out, rt->monitor->sys, 0, true);
+        rt->mon_pending = false;
     }
 }
 
 static void time_step(run *rt) {
+    bool progress = false;
     do {
         active_region(rt);
-        nba_region(rt);
-    } while ((any_runnable(rt) || rt->nnba > 0) && !rt->finished && !rt->failed);
+        progress = nba_region(rt);
+    } while ((any_runnable(rt) || progress) && !rt->finished && run_ok(rt));
     postponed(rt);
+    (void)run_ok(rt);
 }
 
 static bool next_time(run *rt, uint64_t *next) {
@@ -520,6 +573,30 @@ static void teardown(run *rt) {
     free((void *)rt->strobes);
 }
 
+static void wake_at(run *rt, uint64_t when) {
+    for (uint32_t i = 0; i < rt->np; i++) {
+        if (rt->procs[i].state == P_TIME && rt->procs[i].wake == when) {
+            rt->procs[i].state = P_RUN;
+        }
+    }
+}
+
+/* Advances time from wake to wake; fails when time stays put for TIME_DELTA_LIMIT steps. */
+static void event_loop(run *rt) {
+    uint64_t next = 0;
+    uint32_t same_time = 0;
+    while (!rt->finished && !rt->failed && next_time(rt, &next)) {
+        same_time = next == rt->ev.time ? same_time + 1U : 0U;
+        if (same_time > TIME_DELTA_LIMIT) {
+            rfail(rt, NULL, "time does not advance (a zero-delay `#0` loop)");
+            return;
+        }
+        rt->ev.time = next;
+        wake_at(rt, next);
+        time_step(rt);
+    }
+}
+
 odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
                     uint64_t *finish_time) {
     run rt = {0};
@@ -533,16 +610,7 @@ odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
     if (st == ODIN3_OK) {
         settle_assigns(&rt);
         time_step(&rt);
-        uint64_t next = 0;
-        while (!rt.finished && !rt.failed && next_time(&rt, &next)) {
-            rt.ev.time = next;
-            for (uint32_t i = 0; i < rt.np; i++) {
-                if (rt.procs[i].state == P_TIME && rt.procs[i].wake == next) {
-                    rt.procs[i].state = P_RUN;
-                }
-            }
-            time_step(&rt);
-        }
+        event_loop(&rt);
         st = rt.failed ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
     }
     *finish_time = rt.ev.time;
