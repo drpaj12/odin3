@@ -55,6 +55,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/odin3_commit.cmake)
 add_library(odin3_core OBJECT
     src/api/version.c
     src/api/graphlets.c
+    src/api/edit.c
     src/api/sv.c
     src/api/plugin.c
     src/api/common.c
@@ -2233,6 +2234,11 @@ if(BUILD_TESTING)
     target_link_libraries(test_ast_abi PRIVATE libodin3 unity odin3_flags)
     add_test(NAME test_ast_abi COMMAND test_ast_abi)
     set_tests_properties(test_ast_abi PROPERTIES LABELS unit)
+    add_executable(test_edit tests/unit/test_edit.c)
+    target_link_libraries(test_edit PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_edit PRIVATE ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit")
+    add_test(NAME test_edit COMMAND test_edit)
+    set_tests_properties(test_edit PROPERTIES LABELS unit)
     add_executable(test_sim_abi tests/unit/test_sim_abi.c)
     target_link_libraries(test_sim_abi PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_sim_abi PRIVATE ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim"

@@ -2294,6 +2294,61 @@ typedef struct odin3_graphlet_opts {
 odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
                                    const odin3_graphlet_opts *opts, int64_t *out, uint64_t out_len);
 
+/* --- netlist editing (spec docs/specs/2026-10-31-netlist-edit-sim-design.md) --------------------
+ *
+ * Additive, ABI stays 7. Every call takes the design and refuses (ODIN3_ERR_INVALID_ARG, logged,
+ * nothing changed) while the design has an open simulation, for an unknown module, object or
+ * cell type, a dead object, or a name already used in the module. Debug builds run the fast IR
+ * check after every successful edit (ODIN3_ERR_CHECK, logged, if it fails). IDs: new objects take
+ * fresh IDs at the end of their store; dead IDs are not reused before compact. `tag` is the
+ * caller's non-empty edit tag: every object an edit creates carries an IMPORTED provenance leaf
+ * in a pass run named "edit" whose arguments are the tag (odin3_edit_get_tag reads it back), so
+ * inserted logic is traceable and distinguishable in the provenance DAG. No undo. Pins are named
+ * by odin3_ref from odin3_node_get_pins; nets and nodes by the refs these calls return.
+ */
+
+/* New net `name` (NULL or "": unnamed) in `module`. *net gets its ref. */
+odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const char *name,
+                                const char *tag, odin3_ref *net);
+
+/* New node of the registered or built-in cell type `cell_type` (default parameters), all pins
+ * unconnected. Parameterised types: use odin3_edit_add_sop or odin3_edit_set_param_int. */
+odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const char *cell_type,
+                                 const char *name, const char *tag, odin3_ref *node);
+
+/* New $sop (BLIF .names) of n_inputs inputs. `cover` is the BLIF cover text: rows "01- 1" separated
+ * by newlines (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0,
+ * and a zero-input cover is one output char per row. */
+odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, uint32_t n_inputs,
+                                const char *cover, const char *name, const char *tag,
+                                odin3_ref *node);
+
+/* Replaces the cover of a $sop (same width). The node is replaced by a twin that takes over its
+ * pins and name; its ID changes (the old one is dead) and attributes are not carried over. The
+ * twin's provenance is the edit record. Use odin3_edit_set_param_int the same way. */
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const char *cover,
+                                  const char *tag);
+odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node, uint32_t index,
+                                      int64_t value, const char *tag);
+
+/* Connects an unconnected pin to a net of the same module. An output pin may not join a net that
+ * already has a driver. */
+odin3_status odin3_edit_connect(odin3_design *design, odin3_ref pin, odin3_ref net);
+
+/* Disconnects a pin (a no-op when unconnected). */
+odin3_status odin3_edit_disconnect(odin3_design *design, odin3_ref pin);
+
+/* Moves a pin to another net in one step (nothing changes on failure). */
+odin3_status odin3_edit_rewire(odin3_design *design, odin3_ref pin, odin3_ref net);
+
+/* Removes a node (not a port node) or a net with no pins, wire membership or aliases. */
+odin3_status odin3_edit_remove_node(odin3_design *design, odin3_ref node);
+odin3_status odin3_edit_remove_net(odin3_design *design, odin3_ref net);
+
+/* *tag gets the edit tag of the node, net or wire `obj` (string owned by the design), or NULL
+ * when the object was not made by an edit call. */
+odin3_status odin3_edit_get_tag(const odin3_design *design, odin3_obj obj, const char **tag);
+
 /* ODIN3_CDEF_END */
 
 #ifdef __cplusplus

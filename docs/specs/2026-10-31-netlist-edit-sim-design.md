@@ -36,8 +36,9 @@ odin3_status odin3_edit_add_node(odin3_design*, uint32_t module, const char *cel
 odin3_status odin3_edit_add_sop(odin3_design*, uint32_t module, uint32_t n_inputs,
                                 const char *cover, const char *name, const char *tag,
                                 odin3_ref *node);
-odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const char *cover);
-odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, uint32_t index, int64_t v);
+odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const char *cover, const char *tag);
+odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, uint32_t index, int64_t v,
+                                      const char *tag);
 odin3_status odin3_edit_connect(odin3_design*, odin3_ref pin, odin3_ref net);
 odin3_status odin3_edit_disconnect(odin3_design*, odin3_ref pin);
 odin3_status odin3_edit_rewire(odin3_design*, odin3_ref pin, odin3_ref net);   /* move a sink */
@@ -72,12 +73,11 @@ under one tag shares it (hash-consing). Reading it: `odin3_obj_get_prov` then
 ```
 odin3_status odin3_edit_get_tag(const odin3_design*, odin3_obj obj, const char **tag); /* NULL tag: not an edit */
 ```
-Rewired or reparameterised objects keep their existing record (the object is the same); the
-edit is recorded by the tag run being opened: `set_cover` and `rewire` open the run and attach a
-`DERIVED` record (parent: the object's old record, class: "edit") only when the object is a node
-or net (no pin records exist). Agent default: `set_cover` re-records the node's provenance as
-DERIVED from the old record under the edit run, so a Trojan-altered original cell is traceable
-to both its HDL line and the edit.
+Rewire, connect and disconnect change no object, so they record nothing. `set_cover` and
+`set_param_int` replace the node by a twin (IR-15 `odin3_node_replace`: the twin takes the pins and
+the name; the ID changes; attributes are not carried) and the twin carries the edit record
+(agent default: the old record is not kept as a parent; a DERIVED record needs an op class and
+adds nothing the tag does not already say).
 
 No IR invariant is changed: records stay immutable, hash-consed, parents have smaller IDs, nodes
 and nets keep one record each.
@@ -128,5 +128,8 @@ symbol and raises a clear "built against an older libodin3" error.
 4. Oracle (blif_sim.py) is an external tools-script dependency, never vendored.
 
 ## 9. Progress and next step
-Spec committed first. Next step: implement `src/api/edit.c` (section 2) with the tag provenance,
-then `tests/unit/test_edit.c`, then Python wrapper, then section 4, then the gate.
+Done (commit 2): `src/api/edit.c` (section 2 complete incl. tag provenance), `odin3.h`
+declarations, `tests/unit/test_edit.c` (6 tests green in debug).
+Next step: Python wrapper (sec. 7) and its test; then section 4 (net visibility without keep,
+toggle counts, `run_vectors`) in `src/sim/signals.c` / `build_names.c` and `src/api/sim_abi.c`;
+then the oracle gate script (sec. 5); `docs/user/edit.md`; lint; PR.
