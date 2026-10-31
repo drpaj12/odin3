@@ -13,7 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { FILE_MAX = 64 * 1024 * 1024, LINE_MAX_LEN = 4096, DECIMAL = 10 };
+enum { FILE_MAX = 64 * 1024 * 1024, LINE_MAX_LEN = 4096, DECIMAL = 10, GROW = 8 };
 
 static void group_free(gl_group *grp) {
     odin3_strbuf_free(&grp->name);
@@ -32,7 +32,7 @@ void gl_groups_free(gl_groups *groups) {
 static odin3_status groups_add(gl_groups *gs, const char *name, uint32_t module, const char *source,
                                uint8_t *mask) {
     if (gs->count == gs->cap) {
-        size_t cap = gs->cap * 2 + 8;
+        size_t cap = gs->cap * 2 + GROW;
         gl_group *items = odin3_util_realloc(gs->items, cap * sizeof *items);
         if (items == NULL) {
             odin3_util_free(mask);
@@ -169,7 +169,9 @@ static odin3_status cells_flush(cells_state *cs) {
     return st;
 }
 
-static odin3_status cells_header(cells_state *cs, const char *name, const char *module) {
+static odin3_status cells_header(cells_state *cs, const char *tok) {
+    const char *name = tok + 1;
+    const char *module = strtok(NULL, " \t\r\n");
     odin3_status st = cells_flush(cs);
     cs->mod = module != NULL ? find_module(cs->design, module) : default_module(cs->design);
     if (st == ODIN3_OK && (name[0] == '\0' || cs->mod == NULL)) {
@@ -191,7 +193,7 @@ static odin3_status cells_line(cells_state *cs, char *line) {
         return ODIN3_OK;
     }
     if (tok[0] == '@') {
-        return cells_header(cs, tok + 1, strtok(NULL, " \t\r\n"));
+        return cells_header(cs, tok);
     }
     if (cs->mask == NULL) {
         cs->mod = default_module(cs->design);
@@ -264,9 +266,11 @@ static odin3_status part_slot(part_state *ps, const char *text, const odin3_modu
         }
     }
     if (ps->count == ps->cap) {
-        size_t cap = ps->cap * 2 + 8;
+        size_t cap = ps->cap * 2 + GROW;
         odin3_strbuf *names = odin3_util_realloc(ps->names, cap * sizeof *names);
-        uint8_t **masks = names != NULL ? odin3_util_realloc(ps->masks, cap * sizeof *masks) : NULL;
+        uint8_t **masks =
+            names != NULL ? (uint8_t **)odin3_util_realloc((void *)ps->masks, cap * sizeof *masks)
+                          : NULL;
         if (masks == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
@@ -284,9 +288,8 @@ static odin3_status part_slot(part_state *ps, const char *text, const odin3_modu
     return st;
 }
 
-static odin3_status partition_module(const odin3_design *design, const odin3_module *mod,
-                                     uint32_t key, gl_groups *gs) {
-    part_state ps = {NULL, NULL, 0, 0};
+static odin3_status partition_assign(const odin3_design *design, const odin3_module *mod,
+                                     uint32_t key, part_state *ps) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
     odin3_status st = ODIN3_OK;
@@ -297,10 +300,18 @@ static odin3_status partition_module(const odin3_design *design, const odin3_mod
         st = val != NULL ? value_text(design, val, &text) : st;
         size_t slot = 0;
         if (st == ODIN3_OK && val != NULL && text.len > 0) {
-            st = part_slot(&ps, text.data, mod, &slot);
-            ps.masks[slot][id] = st == ODIN3_OK ? 1 : 0;
+            st = part_slot(ps, text.data, mod, &slot);
+            ps->masks[slot][id] = st == ODIN3_OK ? 1 : 0;
         }
     }
+    odin3_strbuf_free(&text);
+    return st;
+}
+
+static odin3_status partition_module(const odin3_design *design, const odin3_module *mod,
+                                     uint32_t key, gl_groups *gs) {
+    part_state ps = {NULL, NULL, 0, 0};
+    odin3_status st = partition_assign(design, mod, key, &ps);
     for (size_t i = 0; i < ps.count; i++) {
         if (st == ODIN3_OK) {
             st = groups_add(gs, ps.names[i].data, odin3_module_id_of(mod).v, "partition",
@@ -311,8 +322,7 @@ static odin3_status partition_module(const odin3_design *design, const odin3_mod
         odin3_strbuf_free(&ps.names[i]);
     }
     odin3_util_free(ps.names);
-    odin3_util_free(ps.masks);
-    odin3_strbuf_free(&text);
+    odin3_util_free((void *)ps.masks);
     return st;
 }
 

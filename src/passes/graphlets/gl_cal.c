@@ -14,6 +14,8 @@
 #include <string.h>
 
 enum { FILE_MAX = 512 * 1024 * 1024, PERMILLE = 1000 };
+static const double k_ppm = 1e6;
+static const double k_half = 0.5;
 
 struct gl_cal {
     odin3_json_doc doc;
@@ -70,9 +72,9 @@ static int64_t nth_int(const odin3_json_node *arr, size_t index) {
     return item != NULL ? odin3_json_int(item) : 0;
 }
 
-static const odin3_json_node *path2(const odin3_json_node *obj, const char *a, const char *b) {
-    const odin3_json_node *first = odin3_json_member(obj, a);
-    return first != NULL ? odin3_json_member(first, b) : NULL;
+static const odin3_json_node *path2(const odin3_json_node *obj, const char *xa, const char *xb) {
+    const odin3_json_node *first = odin3_json_member(obj, xa);
+    return first != NULL ? odin3_json_member(first, xb) : NULL;
 }
 
 /* Likelihood of the bin among counts (Laplace smoothing). */
@@ -101,7 +103,7 @@ static bool cal_mode(const gl_cal *cal, const char *mode, cal_view *view) {
     const odin3_json_node *diff = odin3_json_member(prior, "different");
     double ps = same != NULL ? (double)odin3_json_int(same) : 0;
     double pd = diff != NULL ? (double)odin3_json_int(diff) : 0;
-    view->prior_same = ps + pd > 0 ? ps / (ps + pd) : 0.5;
+    view->prior_same = ps + pd > 0 ? ps / (ps + pd) : k_half;
     view->prior_diff = 1.0 - view->prior_same;
     return true;
 }
@@ -120,10 +122,10 @@ static bool metric_likelihoods(const cal_view *view, const char *metric, double 
     if (odin3_json_count(same) != bins || odin3_json_count(diff) != bins) {
         return false;
     }
-    int64_t v = (int64_t)lround(value * PERMILLE);
+    int64_t vn = (int64_t)lround(value * PERMILLE);
     size_t bin = 0;
     for (size_t i = 0; i < bins; i++) {
-        bin = v >= nth_int(edges, i) ? i : bin;
+        bin = vn >= nth_int(edges, i) ? i : bin;
     }
     *ls = likelihood(same, bin, bins);
     *ld = likelihood(diff, bin, bins);
@@ -154,13 +156,13 @@ bool gl_cal_posterior_both(const gl_cal *cal, const char *mode, const double *va
         return false;
     }
     for (int i = 0; i < 2; i++) {
-        double a = 0;
-        double b = 0;
-        if (!metric_likelihoods(&view, k_metrics[i], values[i], &a, &b)) {
+        double xa = 0;
+        double xb = 0;
+        if (!metric_likelihoods(&view, k_metrics[i], values[i], &xa, &xb)) {
             return false;
         }
-        ls *= a;
-        ld *= b;
+        ls *= xa;
+        ld *= xb;
     }
     double num = ls * view.prior_same;
     *post = num / (num + ld * view.prior_diff);
@@ -169,8 +171,7 @@ bool gl_cal_posterior_both(const gl_cal *cal, const char *mode, const double *va
 
 static odin3_status put_value(odin3_strbuf *out, const char *key, double value, bool ints) {
     if (ints) {
-        return odin3_strbuf_appendf(out, ", \"%s_ppm\": %lld", key,
-                                    (long long)llround(value * 1e6));
+        return odin3_strbuf_appendf(out, ", \"%s_ppm\": %lld", key, llround(value * k_ppm));
     }
     return odin3_strbuf_appendf(out, ", \"%s\": %.6f", key, value);
 }
@@ -197,11 +198,12 @@ odin3_status gl_compare_json(odin3_strbuf *out, const gl_cmp_in *in, bool ints) 
 /* --- reading a signature ------------------------------------------------------------------- */
 
 static const odin3_json_node *find_group(const odin3_json_node *groups, const char *name) {
-    for (const odin3_json_node *g = odin3_json_first(groups); g != NULL; g = odin3_json_next(g)) {
-        const odin3_json_node *nm = odin3_json_member(g, "name");
+    for (const odin3_json_node *gr = odin3_json_first(groups); gr != NULL;
+         gr = odin3_json_next(gr)) {
+        const odin3_json_node *nm = odin3_json_member(gr, "name");
         const char *text = nm != NULL ? odin3_json_string(nm, NULL) : NULL;
         if (name == NULL || (text != NULL && strcmp(text, name) == 0)) {
-            return g;
+            return gr;
         }
     }
     return NULL;
@@ -219,8 +221,8 @@ static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, gl
     sig->norb = norb;
     sig->nodes = rep != NULL ? (uint64_t)odin3_json_int(rep) : 0;
     size_t pairs = 0;
-    for (const odin3_json_node *o = odin3_json_first(gdd); o != NULL; o = odin3_json_next(o)) {
-        pairs += odin3_json_count(o);
+    for (const odin3_json_node *ob = odin3_json_first(gdd); ob != NULL; ob = odin3_json_next(ob)) {
+        pairs += odin3_json_count(ob);
     }
     sig->totals = odin3_util_calloc((size_t)norb * sizeof *sig->totals);
     sig->off = odin3_util_calloc(((size_t)norb + 1) * sizeof *sig->off);
@@ -232,24 +234,27 @@ static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, gl
     }
     uint32_t j = 0;
     uint32_t used = 0;
-    const odin3_json_node *t = odin3_json_first(totals);
-    for (const odin3_json_node *o = odin3_json_first(gdd); o != NULL; o = odin3_json_next(o), j++) {
-        sig->totals[j] = odin3_json_int(t);
-        t = odin3_json_next(t);
+    const odin3_json_node *tt = odin3_json_first(totals);
+    for (const odin3_json_node *ob = odin3_json_first(gdd); ob != NULL;
+         ob = odin3_json_next(ob), j++) {
+        sig->totals[j] = odin3_json_int(tt);
+        tt = odin3_json_next(tt);
         sig->off[j] = used;
-        for (const odin3_json_node *p = odin3_json_first(o); p != NULL; p = odin3_json_next(p)) {
-            sig->deg[used] = nth_int(p, 0);
-            sig->num[used++] = (uint64_t)nth_int(p, 1);
+        for (const odin3_json_node *ps = odin3_json_first(ob); ps != NULL;
+             ps = odin3_json_next(ps)) {
+            sig->deg[used] = nth_int(ps, 0);
+            sig->num[used++] = (uint64_t)nth_int(ps, 1);
         }
     }
     sig->off[norb] = used;
     return ODIN3_OK;
 }
 
-static odin3_status take_names(const odin3_json_node *md, const odin3_json_node *grp,
+static odin3_status take_names(const odin3_json_doc *doc, const odin3_json_node *grp,
                                odin3_strbuf *mode, odin3_strbuf *group) {
     odin3_strbuf_clear(mode);
     odin3_strbuf_clear(group);
+    const odin3_json_node *md = odin3_json_member(doc->root, "mode");
     odin3_status st = odin3_strbuf_append(mode, odin3_bytes_cstr(odin3_json_string(md, NULL)));
     const odin3_json_node *gname = odin3_json_member(grp, "name");
     return gname != NULL && st == ODIN3_OK
@@ -268,7 +273,7 @@ static odin3_status sig_from_doc(const odin3_json_doc *doc, const char *name, gl
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_status st = sig_from_group(grp, (uint32_t)odin3_json_int(nm), sig);
-    return st == ODIN3_OK ? take_names(md, grp, mode, group) : st;
+    return st == ODIN3_OK ? take_names(doc, grp, mode, group) : st;
 }
 
 odin3_status gl_sig_load(const char *path_hash_name, glet_sig *sig, odin3_strbuf *mode,
@@ -293,9 +298,9 @@ odin3_status gl_sig_load(const char *path_hash_name, glet_sig *sig, odin3_strbuf
     return st;
 }
 
-static odin3_status save_text(const char *path, const char *text) {
+static odin3_status save_text(const char *path, const odin3_strbuf *text) {
     FILE *fp = fopen(path, "w");
-    odin3_status st = fp != NULL && fprintf(fp, "%s\n", text) > 0 ? ODIN3_OK : ODIN3_ERR_IO;
+    odin3_status st = fp != NULL && fprintf(fp, "%s\n", text->data) > 0 ? ODIN3_OK : ODIN3_ERR_IO;
     if (fp != NULL) {
         (void)fclose(fp);
     }
@@ -334,7 +339,7 @@ odin3_status gl_run_compare(const gl_opts *opts) {
                       "graphlets: uncalibrated (no --calibration): similarity only");
         }
     }
-    st = st == ODIN3_OK && opts->out.len > 0 ? save_text(opts->out.data, out.data) : st;
+    st = st == ODIN3_OK && opts->out.len > 0 ? save_text(opts->out.data, &out) : st;
     glet_sig_free(&sa);
     glet_sig_free(&sb);
     gl_cal_free(cal);

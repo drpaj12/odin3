@@ -31,14 +31,14 @@ ODIN3_EXPORT odin3_status odin3_graphlets_count(const odin3_graphlet_graph *grap
     for (uint64_t i = 0; i < graph->n_edges; i++) {
         edges[i] = (glet_edge){graph->from[i], graph->to[i]};
     }
-    glet_graph g;
-    odin3_status st = glet_graph_build(&g, graph->n, edges, (size_t)graph->n_edges);
+    glet_graph gr;
+    odin3_status st = glet_graph_build(&gr, graph->n, edges, (size_t)graph->n_edges);
     odin3_util_free(edges);
     if (st != ODIN3_OK) {
         return st;
     }
     memset(out, 0, (size_t)graph->n * norb * sizeof *out);
-    st = glet_count(&g, &(glet_spec){dir, opts->size, opts->max_work}, out, NULL);
-    glet_graph_free(&g);
+    st = glet_count(&gr, &(glet_spec){dir, opts->size, opts->max_work}, out, NULL);
+    glet_graph_free(&gr);
     return st;
 }

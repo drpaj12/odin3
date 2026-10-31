@@ -14,7 +14,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { MAX_PERMS = 120, MAX_PAIRS = 10, NONE_ORBIT = 0xFF, MAX_CODES_U = 1024, MAX_CODES_D = 4096 };
+enum {
+    MAX_PERMS = 120,
+    MAX_CANON = 64,
+    MAX_PAIRS = 10,
+    NONE_ORBIT = 0xFF,
+    MAX_CODES_U = 1024,
+    MAX_CODES_D = 4096
+};
 
 typedef struct perm_set {
     unsigned count;
@@ -32,36 +39,36 @@ typedef struct tab_ctx {
 glet_tables g_glet_tab;
 static bool g_built;
 
-static unsigned pair_index(unsigned i, unsigned j) {
-    return j * (j - 1) / 2 + i;
+static unsigned pair_index(unsigned ii, unsigned jj) {
+    return jj * (jj - 1) / 2 + ii;
 }
 
 static void perms_gen(perm_set *set, unsigned size) {
     uint8_t cur[GLET_MAX_SIZE] = {0};
-    for (unsigned i = 0; i < size; i++) {
-        cur[i] = (uint8_t)i;
+    for (unsigned ii = 0; ii < size; ii++) {
+        cur[ii] = (uint8_t)ii;
     }
     set->count = 0;
     for (;;) {
         memcpy(set->perm[set->count++], cur, size);
-        int i = (int)size - 2;
-        while (i >= 0 && cur[i] > cur[i + 1]) {
-            i--;
+        int ii = (int)size - 2;
+        while (ii >= 0 && cur[ii] > cur[ii + 1]) {
+            ii--;
         }
-        if (i < 0) {
+        if (ii < 0) {
             return;
         }
-        int j = (int)size - 1;
-        while (cur[j] < cur[i]) {
-            j--;
+        int jj = (int)size - 1;
+        while (cur[jj] < cur[ii]) {
+            jj--;
         }
-        uint8_t tmp = cur[i];
-        cur[i] = cur[j];
-        cur[j] = tmp;
-        for (int a = i + 1, b = (int)size - 1; a < b; a++, b--) {
-            tmp = cur[a];
-            cur[a] = cur[b];
-            cur[b] = tmp;
+        uint8_t tmp = cur[ii];
+        cur[ii] = cur[jj];
+        cur[jj] = tmp;
+        for (int xa = ii + 1, xb = (int)size - 1; xa < xb; xa++, xb--) {
+            tmp = cur[xa];
+            cur[xa] = cur[xb];
+            cur[xb] = tmp;
         }
     }
 }
@@ -69,18 +76,18 @@ static void perms_gen(perm_set *set, unsigned size) {
 static unsigned permute_code(const tab_ctx *tc, unsigned code, const uint8_t *perm) {
     unsigned mask = (1U << tc->bits) - 1U;
     unsigned out = 0;
-    for (unsigned j = 1; j < tc->size; j++) {
-        for (unsigned i = 0; i < j; i++) {
-            unsigned st = (code >> (tc->bits * pair_index(i, j))) & mask;
-            unsigned a = perm[i];
-            unsigned b = perm[j];
-            if (a > b) {
-                unsigned tmp = a;
-                a = b;
-                b = tmp;
+    for (unsigned jj = 1; jj < tc->size; jj++) {
+        for (unsigned ii = 0; ii < jj; ii++) {
+            unsigned st = (code >> (tc->bits * pair_index(ii, jj))) & mask;
+            unsigned xa = perm[ii];
+            unsigned xb = perm[jj];
+            if (xa > xb) {
+                unsigned tmp = xa;
+                xa = xb;
+                xb = tmp;
                 st = tc->bits == 2 ? ((st & 1U) << 1) | (st >> 1) : st;
             }
-            out |= st << (tc->bits * pair_index(a, b));
+            out |= st << (tc->bits * pair_index(xa, xb));
         }
     }
     return out;
@@ -88,8 +95,8 @@ static unsigned permute_code(const tab_ctx *tc, unsigned code, const uint8_t *pe
 
 /* True when the code has no state 3 (directed) . */
 static bool code_oriented(const tab_ctx *tc, unsigned code) {
-    for (unsigned p = 0; tc->bits == 2 && p < tc->pairs; p++) {
-        if (((code >> (2 * p)) & 3U) == 3U) {
+    for (unsigned ps = 0; tc->bits == 2 && ps < tc->pairs; ps++) {
+        if (((code >> (2 * ps)) & 3U) == 3U) {
             return false;
         }
     }
@@ -101,13 +108,13 @@ static bool code_connected(const tab_ctx *tc, unsigned code) {
     unsigned seen = 1U;
     for (bool grew = true; grew;) {
         grew = false;
-        for (unsigned j = 1; j < tc->size; j++) {
-            for (unsigned i = 0; i < j; i++) {
-                bool edge = ((code >> (tc->bits * pair_index(i, j))) & mask) != 0;
-                bool si = ((seen >> i) & 1U) != 0;
-                bool sj = ((seen >> j) & 1U) != 0;
+        for (unsigned jj = 1; jj < tc->size; jj++) {
+            for (unsigned ii = 0; ii < jj; ii++) {
+                bool edge = ((code >> (tc->bits * pair_index(ii, jj))) & mask) != 0;
+                bool si = ((seen >> ii) & 1U) != 0;
+                bool sj = ((seen >> jj) & 1U) != 0;
                 if (edge && si != sj) {
-                    seen |= (1U << i) | (1U << j);
+                    seen |= (1U << ii) | (1U << jj);
                     grew = true;
                 }
             }
@@ -117,15 +124,16 @@ static bool code_connected(const tab_ctx *tc, unsigned code) {
 }
 
 static unsigned code_edges(const tab_ctx *tc, unsigned code) {
-    unsigned n = 0;
-    for (unsigned b = 0; b < tc->bits * tc->pairs; b++) {
-        n += (code >> b) & 1U;
+    unsigned nn = 0;
+    for (unsigned xb = 0; xb < tc->bits * tc->pairs; xb++) {
+        nn += (code >> xb) & 1U;
     }
-    return n;
+    return nn;
 }
 
 /* One graphlet of one size: its canonical code and the orbit of each canonical position. */
 typedef struct canon_entry {
+    unsigned size;
     unsigned code;
     unsigned edges;
     uint8_t local[GLET_MAX_SIZE]; /* local orbit index of each position */
@@ -136,38 +144,41 @@ typedef struct canon_entry {
 } canon_entry;
 
 static int canon_cmp(const void *lhs, const void *rhs) {
-    const canon_entry *a = lhs;
-    const canon_entry *b = rhs;
-    if (a->edges != b->edges) {
-        return a->edges < b->edges ? -1 : 1;
+    const canon_entry *xa = lhs;
+    const canon_entry *xb = rhs;
+    if (xa->edges != xb->edges) {
+        return xa->edges < xb->edges ? -1 : 1;
     }
-    return a->code < b->code ? -1 : (a->code > b->code ? 1 : 0);
+    if (xa->code != xb->code) {
+        return xa->code < xb->code ? -1 : 1;
+    }
+    return 0;
 }
 
 static void canon_orbits(const tab_ctx *tc, canon_entry *ce) {
     uint8_t rep[GLET_MAX_SIZE];
-    for (unsigned p = 0; p < tc->size; p++) {
-        rep[p] = (uint8_t)p;
+    for (unsigned ps = 0; ps < tc->size; ps++) {
+        rep[ps] = (uint8_t)ps;
     }
     for (unsigned k = 0; k < tc->perms.count; k++) {
         const uint8_t *perm = tc->perms.perm[k];
         if (permute_code(tc, ce->code, perm) != ce->code) {
             continue;
         }
-        for (unsigned p = 0; p < tc->size; p++) {
-            rep[p] = perm[p] < rep[p] ? perm[p] : rep[p];
+        for (unsigned ps = 0; ps < tc->size; ps++) {
+            rep[ps] = perm[ps] < rep[ps] ? perm[ps] : rep[ps];
         }
     }
     ce->n_local = 0;
-    for (unsigned p = 0; p < tc->size; p++) {
-        if (rep[p] == p) {
-            ce->local[p] = (uint8_t)ce->n_local;
+    for (unsigned ps = 0; ps < tc->size; ps++) {
+        if (rep[ps] == ps) {
+            ce->local[ps] = (uint8_t)ce->n_local;
             ce->mult[ce->n_local++] = 0;
         }
     }
-    for (unsigned p = 0; p < tc->size; p++) {
-        ce->local[p] = ce->local[rep[p]];
-        ce->mult[ce->local[p]]++;
+    for (unsigned ps = 0; ps < tc->size; ps++) {
+        ce->local[ps] = ce->local[rep[ps]];
+        ce->mult[ce->local[ps]]++;
     }
 }
 
@@ -189,7 +200,7 @@ static unsigned max_code(const tab_ctx *tc) {
 }
 
 typedef struct size_build {
-    canon_entry ents[64];
+    canon_entry ents[MAX_CANON];
     unsigned n_ents;
 } size_build;
 
@@ -202,6 +213,7 @@ static void collect_canon(const tab_ctx *tc, size_build *sb) {
             continue;
         }
         canon_entry *ce = &sb->ents[sb->n_ents++];
+        ce->size = tc->size;
         ce->code = code;
         ce->edges = code_edges(tc, code);
     }
@@ -213,35 +225,40 @@ static unsigned rename_orbit(bool directed, unsigned orbit) {
     return directed ? orbit : k_przulj[orbit];
 }
 
-static unsigned first_pos(const canon_entry *ce, unsigned local, unsigned size) {
-    for (unsigned p = 0; p < size; p++) {
-        if (ce->local[p] == local) {
-            return p;
+static unsigned first_pos(const canon_entry *ce, unsigned local) {
+    for (unsigned ps = 0; ps < ce->size; ps++) {
+        if (ce->local[ps] == local) {
+            return ps;
         }
     }
     return 0;
 }
 
-static void fill_size(tab_ctx *tc, size_build *sb, unsigned *graphlet, unsigned *orbit) {
-    unsigned n_g = *graphlet;
-    for (unsigned g = 0; g < sb->n_ents; g++) {
-        canon_orbits(tc, &sb->ents[g]);
-        sb->ents[g].first_graphlet = *graphlet + g;
-        sb->ents[g].first_orbit = *orbit;
-        for (unsigned l = 0; l < sb->ents[g].n_local; l++) {
+typedef struct next_ids {
+    unsigned graphlet;
+    unsigned orbit;
+} next_ids;
+
+static void fill_size(tab_ctx *tc, size_build *sb, next_ids *next) {
+    unsigned n_g = next->graphlet;
+    for (unsigned gr = 0; gr < sb->n_ents; gr++) {
+        canon_orbits(tc, &sb->ents[gr]);
+        sb->ents[gr].first_graphlet = next->graphlet + gr;
+        sb->ents[gr].first_orbit = next->orbit;
+        for (unsigned lv = 0; lv < sb->ents[gr].n_local; lv++) {
             glet_orbit_info *info = tc->directed
-                                        ? &g_glet_tab.info_d[*orbit + l]
-                                        : &g_glet_tab.info_u[rename_orbit(false, *orbit + l)];
-            info->graphlet = *graphlet + g;
+                                        ? &g_glet_tab.info_d[next->orbit + lv]
+                                        : &g_glet_tab.info_u[rename_orbit(false, next->orbit + lv)];
+            info->graphlet = next->graphlet + gr;
             info->nodes = tc->size;
-            info->edges = sb->ents[g].edges;
-            info->mult = sb->ents[g].mult[l];
-            info->code = sb->ents[g].code;
-            info->pos = first_pos(&sb->ents[g], l, tc->size);
+            info->edges = sb->ents[gr].edges;
+            info->mult = sb->ents[gr].mult[lv];
+            info->code = sb->ents[gr].code;
+            info->pos = first_pos(&sb->ents[gr], lv);
         }
-        *orbit += sb->ents[g].n_local;
+        next->orbit += sb->ents[gr].n_local;
     }
-    *graphlet = n_g + sb->n_ents;
+    next->graphlet = n_g + sb->n_ents;
 }
 
 static void fill_codes(const tab_ctx *tc, const size_build *sb, uint8_t *table) {
@@ -253,36 +270,35 @@ static void fill_codes(const tab_ctx *tc, const size_build *sb, uint8_t *table) 
             continue;
         }
         unsigned canon = canon_of(tc, code, &perm);
-        for (unsigned g = 0; g < sb->n_ents; g++) {
-            if (sb->ents[g].code != canon) {
+        for (unsigned gr = 0; gr < sb->n_ents; gr++) {
+            if (sb->ents[gr].code != canon) {
                 continue;
             }
-            for (unsigned i = 0; i < tc->size; i++) {
-                unsigned loc = sb->ents[g].local[perm[i]];
-                row[i] = (uint8_t)rename_orbit(tc->directed, sb->ents[g].first_orbit + loc);
+            for (unsigned ii = 0; ii < tc->size; ii++) {
+                unsigned loc = sb->ents[gr].local[perm[ii]];
+                row[ii] = (uint8_t)rename_orbit(tc->directed, sb->ents[gr].first_orbit + loc);
             }
         }
     }
 }
 
 static void build_mode(bool directed, unsigned max_size, uint8_t *tables[]) {
-    unsigned graphlet = 0;
-    unsigned orbit = 0;
-    for (unsigned s = 2; s <= max_size; s++) {
+    next_ids next = {0, 0};
+    for (unsigned sz = 2; sz <= max_size; sz++) {
         tab_ctx tc;
         memset(&tc, 0, sizeof tc);
         tc.directed = directed;
         tc.bits = directed ? 2U : 1U;
-        tc.size = s;
-        tc.pairs = s * (s - 1) / 2;
-        perms_gen(&tc.perms, s);
+        tc.size = sz;
+        tc.pairs = sz * (sz - 1) / 2;
+        perms_gen(&tc.perms, sz);
         size_build *sb = calloc(1, sizeof *sb);
         if (sb == NULL) {
             return;
         }
         collect_canon(&tc, sb);
-        fill_size(&tc, sb, &graphlet, &orbit);
-        fill_codes(&tc, sb, tables[s]);
+        fill_size(&tc, sb, &next);
+        fill_codes(&tc, sb, tables[sz]);
         free(sb);
     }
 }
@@ -293,11 +309,11 @@ void glet_tables_init(void) {
     }
     uint8_t *ut[GLET_MAX_SIZE + 1];
     uint8_t *dt[GLET_MAX_DIR_SIZE + 1];
-    for (unsigned s = 2; s <= GLET_MAX_SIZE; s++) {
-        ut[s] = g_glet_tab.u_orb[s];
+    for (unsigned sz = 2; sz <= GLET_MAX_SIZE; sz++) {
+        ut[sz] = g_glet_tab.u_orb[sz];
     }
-    for (unsigned s = 2; s <= GLET_MAX_DIR_SIZE; s++) {
-        dt[s] = g_glet_tab.d_orb[s];
+    for (unsigned sz = 2; sz <= GLET_MAX_DIR_SIZE; sz++) {
+        dt[sz] = g_glet_tab.d_orb[sz];
     }
     build_mode(false, GLET_MAX_SIZE, ut);
     build_mode(true, GLET_MAX_DIR_SIZE, dt);
@@ -308,16 +324,20 @@ uint32_t glet_orbit_count(bool directed, unsigned size) {
     if (directed) {
         return size >= 2 && size <= GLET_MAX_DIR_SIZE ? GLET_ORBITS_D4 : 0;
     }
-    return size == GLET_MAX_SIZE ? GLET_ORBITS_U5
-                                 : (size == GLET_MAX_SIZE - 1 ? GLET_ORBITS_U4 : 0);
+    if (size == GLET_MAX_SIZE) {
+        return GLET_ORBITS_U5;
+    }
+    return size == GLET_MAX_SIZE - 1 ? GLET_ORBITS_U4 : 0;
 }
 
 uint32_t glet_graphlet_count(bool directed, unsigned size) {
     if (directed) {
         return size >= 2 && size <= GLET_MAX_DIR_SIZE ? GLET_GRAPHLETS_D4 : 0;
     }
-    return size == GLET_MAX_SIZE ? GLET_GRAPHLETS_U5
-                                 : (size == GLET_MAX_SIZE - 1 ? GLET_GRAPHLETS_U4 : 0);
+    if (size == GLET_MAX_SIZE) {
+        return GLET_GRAPHLETS_U5;
+    }
+    return size == GLET_MAX_SIZE - 1 ? GLET_GRAPHLETS_U4 : 0;
 }
 
 bool glet_orbit_describe(bool directed, uint32_t orbit, glet_orbit_info *out) {

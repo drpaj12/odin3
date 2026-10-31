@@ -9,6 +9,8 @@
 #include <ctype.h>
 #include <string.h>
 
+enum { LOW_MAX = 8 };
+
 static bool node_eligible(const odin3_module *mod, odin3_node_id node) {
     if (!odin3_node_live(mod, node)) {
         return false;
@@ -19,7 +21,7 @@ static bool node_eligible(const odin3_module *mod, odin3_node_id node) {
 }
 
 static bool name_is_clock(const char *name) {
-    char low[8] = {0};
+    char low[LOW_MAX] = {0};
     size_t len = strlen(name);
     if (len == 0 || len >= sizeof low) {
         return false;
@@ -63,13 +65,13 @@ static bool net_is_global(const odin3_module *mod, odin3_net_id net, const gl_op
 static odin3_status add_net(gl_mod *gm, odin3_net_id net) {
     odin3_pinlist pins = odin3_net_pins(gm->mod, net);
     uint32_t drivers = odin3_net_driver_count(gm->mod, net);
-    for (uint32_t d = 0; d < drivers; d++) {
-        uint32_t from = odin3_pin_node(gm->mod, pins.pins[d]).v;
-        for (uint32_t r = 0; r < pins.count; r++) {
-            if (!odin3_pin_reads(gm->mod, pins.pins[r])) {
+    for (uint32_t dd = 0; dd < drivers; dd++) {
+        uint32_t from = odin3_pin_node(gm->mod, pins.pins[dd]).v;
+        for (uint32_t rr = 0; rr < pins.count; rr++) {
+            if (!odin3_pin_reads(gm->mod, pins.pins[rr])) {
                 continue;
             }
-            uint32_t to = odin3_pin_node(gm->mod, pins.pins[r]).v;
+            uint32_t to = odin3_pin_node(gm->mod, pins.pins[rr]).v;
             glet_edge *slot = gm->eligible[from] != 0 && gm->eligible[to] != 0
                                   ? odin3_vec_push(&gm->edges)
                                   : NULL;

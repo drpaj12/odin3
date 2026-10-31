@@ -948,7 +948,12 @@ odin3_status odin3_dot_focus_parse(odin3_bytes value, odin3_strbuf *text,
     const char *colon = st == ODIN3_OK ? strrchr(text->data, ':') : NULL;
     bool line = !cone && colon != NULL && colon[1] != '\0' &&
                 strspn(colon + 1, "0123456789") == strlen(colon + 1);
-    *kind = cone ? ODIN3_DOT_FOCUS_CONE : (line ? ODIN3_DOT_FOCUS_LOC : ODIN3_DOT_FOCUS_PATH);
+    *kind = ODIN3_DOT_FOCUS_PATH;
+    if (cone) {
+        *kind = ODIN3_DOT_FOCUS_CONE;
+    } else if (line) {
+        *kind = ODIN3_DOT_FOCUS_LOC;
+    }
     return st;
 }
 
@@ -956,7 +961,7 @@ void odin3_dot_selection_free(odin3_dot_selection *sel) {
     for (uint32_t i = 0; sel->mask != NULL && i < sel->mod_end; i++) {
         odin3_util_free(sel->mask[i]);
     }
-    odin3_util_free(sel->mask);
+    odin3_util_free((void *)sel->mask);
     sel->mask = NULL;
     sel->mod_end = 0;
 }
@@ -979,7 +984,7 @@ odin3_status odin3_dot_select(const odin3_design *design, odin3_dot_focus_kind k
         return st;
     }
     out->mod_end = dc.mod_end;
-    out->mask = odin3_util_calloc(sizeof(uint8_t *) * dc.mod_end);
+    out->mask = (uint8_t **)odin3_util_calloc(sizeof(uint8_t *) * dc.mod_end);
     if (out->mask == NULL) {
         dot_masks_free(&dc);
         return ODIN3_ERR_NO_MEMORY;

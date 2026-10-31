@@ -77,3 +77,68 @@ with odin3.Design.read_blif("ff.blif") as design:
     print(design.top().attr("odin3:glet_orbit_totals"))
 print(odin3.graphlet_compare("a.json", "b.json#cone"))                  # similarity (+ posterior)
 ```
+
+## How it was checked
+
+Undirected counts are identical to the ORCA oracle (4 and 5 nodes) on 473 netlists, 946 runs, with
+no difference: every micro netlist of the `k6_frac_N10_frac_chain_mem32K_40nm` golden set and the 14
+small VTR designs (`tools/graphlets/oracle_gate.py`), on random graphs (80 runs), and against a brute
+force on random graphs in the unit tests (`test_graphlets_count`).
+
+The directed counter has no oracle. It is checked five ways (`tools/graphlets/directed_checks.py`,
+`test_graphlets_count`, `tests/tools/test_python_graphlets.py`): an independent plain-Python brute
+force (every connected 2 to 4 node set, every anti-parallel resolution, canonical form and orbits by
+exhaustive permutation) equals the fast counter; a C brute force equals it on 600 random digraphs;
+the catalogue has exactly 40 graphlets and 129 orbits and every connected oriented graph of up to
+four nodes is isomorphic to exactly one of them; dropping the directions maps the directed counts
+onto the undirected ones (and ORCA) for graphs without anti-parallel pairs; relabelling nodes leaves
+the orbit vectors unchanged and reversing every arc maps orbit o to its reverse orbit with equal
+counts.
+
+## Directed catalogue
+
+Canonical labels, one node of each orbit, and the orbit size. Orbit ids and graphlet numbers are
+Odin III's own.
+
+| Graphlet | Nodes | Arcs (canonical labels 0..n-1) | Orbits (id: size, a node of the orbit) |
+| --- | --- | --- | --- |
+| G0 | 2 | 0>1 | 0: 1, node 0, 1: 1, node 1 |
+| G1 | 3 | 0>1 0>2 | 2: 1, node 0, 3: 2, node 1 |
+| G2 | 3 | 1>0 0>2 | 4: 1, node 0, 5: 1, node 1, 6: 1, node 2 |
+| G3 | 3 | 1>0 2>0 | 7: 1, node 0, 8: 2, node 1 |
+| G4 | 3 | 0>1 0>2 1>2 | 9: 1, node 0, 10: 1, node 1, 11: 1, node 2 |
+| G5 | 3 | 0>1 2>0 1>2 | 12: 3, node 0 |
+| G6 | 4 | 0>1 0>2 0>3 | 13: 1, node 0, 14: 3, node 1 |
+| G7 | 4 | 1>0 0>2 0>3 | 15: 1, node 0, 16: 1, node 1, 17: 2, node 2 |
+| G8 | 4 | 1>0 2>0 0>3 | 18: 1, node 0, 19: 2, node 1, 20: 1, node 3 |
+| G9 | 4 | 0>1 1>2 0>3 | 21: 1, node 0, 22: 1, node 1, 23: 1, node 2, 24: 1, node 3 |
+| G10 | 4 | 0>2 1>2 0>3 | 25: 1, node 0, 26: 1, node 1, 27: 1, node 2, 28: 1, node 3 |
+| G11 | 4 | 2>0 1>2 0>3 | 29: 1, node 0, 30: 1, node 1, 31: 1, node 2, 32: 1, node 3 |
+| G12 | 4 | 1>0 2>0 3>0 | 33: 1, node 0, 34: 3, node 1 |
+| G13 | 4 | 0>2 1>2 3>0 | 35: 1, node 0, 36: 1, node 1, 37: 1, node 2, 38: 1, node 3 |
+| G14 | 4 | 0>1 0>2 1>2 0>3 | 39: 1, node 0, 40: 1, node 1, 41: 1, node 2, 42: 1, node 3 |
+| G15 | 4 | 1>0 0>2 1>2 0>3 | 43: 1, node 0, 44: 1, node 1, 45: 1, node 2, 46: 1, node 3 |
+| G16 | 4 | 0>1 2>0 1>2 0>3 | 47: 1, node 0, 48: 1, node 1, 49: 1, node 2, 50: 1, node 3 |
+| G17 | 4 | 1>0 2>0 1>2 0>3 | 51: 1, node 0, 52: 1, node 1, 53: 1, node 2, 54: 1, node 3 |
+| G18 | 4 | 0>1 0>2 1>2 3>0 | 55: 1, node 0, 56: 1, node 1, 57: 1, node 2, 58: 1, node 3 |
+| G19 | 4 | 1>0 0>2 1>2 3>0 | 59: 1, node 0, 60: 1, node 1, 61: 1, node 2, 62: 1, node 3 |
+| G20 | 4 | 0>1 2>0 1>2 3>0 | 63: 1, node 0, 64: 1, node 1, 65: 1, node 2, 66: 1, node 3 |
+| G21 | 4 | 1>0 2>0 1>2 3>0 | 67: 1, node 0, 68: 1, node 1, 69: 1, node 2, 70: 1, node 3 |
+| G22 | 4 | 0>2 1>2 0>3 1>3 | 71: 2, node 0, 72: 2, node 2 |
+| G23 | 4 | 2>0 1>2 0>3 1>3 | 73: 1, node 0, 74: 1, node 1, 75: 1, node 2, 76: 1, node 3 |
+| G24 | 4 | 2>0 2>1 0>3 1>3 | 77: 2, node 0, 78: 1, node 2, 79: 1, node 3 |
+| G25 | 4 | 0>2 2>1 3>0 1>3 | 80: 4, node 0 |
+| G26 | 4 | 0>1 0>2 1>2 0>3 1>3 | 81: 1, node 0, 82: 1, node 1, 83: 2, node 2 |
+| G27 | 4 | 0>1 2>0 1>2 0>3 1>3 | 84: 1, node 0, 85: 1, node 1, 86: 1, node 2, 87: 1, node 3 |
+| G28 | 4 | 1>0 2>0 1>2 0>3 1>3 | 88: 1, node 0, 89: 1, node 1, 90: 1, node 2, 91: 1, node 3 |
+| G29 | 4 | 0>1 2>0 2>1 0>3 1>3 | 92: 1, node 0, 93: 1, node 1, 94: 1, node 2, 95: 1, node 3 |
+| G30 | 4 | 0>1 2>0 1>2 3>0 1>3 | 96: 1, node 0, 97: 1, node 1, 98: 2, node 2 |
+| G31 | 4 | 1>0 2>0 1>2 3>0 1>3 | 99: 1, node 0, 100: 1, node 1, 101: 2, node 2 |
+| G32 | 4 | 0>1 0>2 2>1 3>0 1>3 | 102: 1, node 0, 103: 1, node 1, 104: 1, node 2, 105: 1, node 3 |
+| G33 | 4 | 0>1 2>0 2>1 3>0 1>3 | 106: 1, node 0, 107: 1, node 1, 108: 1, node 2, 109: 1, node 3 |
+| G34 | 4 | 1>0 2>0 2>1 3>0 1>3 | 110: 1, node 0, 111: 1, node 1, 112: 1, node 2, 113: 1, node 3 |
+| G35 | 4 | 0>1 2>0 2>1 3>0 3>1 | 114: 1, node 0, 115: 1, node 1, 116: 2, node 2 |
+| G36 | 4 | 0>1 0>2 1>2 0>3 1>3 2>3 | 117: 1, node 0, 118: 1, node 1, 119: 1, node 2, 120: 1, node 3 |
+| G37 | 4 | 0>1 2>0 1>2 0>3 1>3 2>3 | 121: 3, node 0, 122: 1, node 3 |
+| G38 | 4 | 0>1 0>2 1>2 3>0 1>3 2>3 | 123: 1, node 0, 124: 1, node 1, 125: 1, node 2, 126: 1, node 3 |
+| G39 | 4 | 1>0 0>2 1>2 3>0 1>3 2>3 | 127: 3, node 0, 128: 1, node 1 |

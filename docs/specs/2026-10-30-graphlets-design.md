@@ -291,3 +291,22 @@ Each check reports a pass count in the PR.
 6. Public data: Sarajlic et al. 2016 publish no per-orbit counts for a public network in the text
    read; if the supplementary data gives one it is reproduced, otherwise this check is reported as
    not available.
+
+## 18. As built: changes to the sections above (2026-10-30)
+
+- Clock rule (section 3): a reading pin is a clock pin when it is port 0 of a type with the
+  `CLOCK_PIN0` flag, or a port named `C`, `CLK` or `clock` (case-insensitive) of any cell; a net that
+  reaches one is global, as is a net with at least F reading pins.
+- Files hold integers only (the repository JSON reader is integer-only): the per-group time is
+  `us` (microseconds), and comparisons written inside a signature file use `_ppm` keys
+  (similarity in millionths). The result of `--compare` (its own `--out` file) holds decimals.
+- `--compare` takes quoted words (`"a.json#NAME"`): an unquoted `#` starts a script comment.
+- ABI: `odin3_graphlets_count(const odin3_graphlet_graph *, const odin3_graphlet_opts *, int64_t
+  *out, uint64_t out_len)` (two small structs keep it at four parameters); ABI number unchanged
+  (a function was added, nothing changed).
+- `--edges-out` writes the directed simple graph (`N M`, then `u v` per arc, dense node numbers)
+  of the first group; the undirected tools symmetrise it.
+- Orbit catalogue: `glet_count [--directed] --catalogue` prints `orbit graphlet nodes edges mult
+  code pos`; `docs/user/graphlets.md` lists the 40 directed graphlets.
+- Directed graphlet and orbit ids are our own numbering (section 4), not Sarajlic's labels.
+- Sarajlic et al. publish no per-orbit counts for a public network in the text read (check 17.6).

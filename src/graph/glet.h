@@ -46,8 +46,8 @@ typedef struct glet_graph {
 
 /* Builds g from n nodes and the directed edges (ids < n; parallel edges collapse). NO_MEMORY;
  * INVALID_ARG for an id >= n. */
-odin3_status glet_graph_build(glet_graph *g, uint32_t n, const glet_edge *edges, size_t count);
-void glet_graph_free(glet_graph *g);
+odin3_status glet_graph_build(glet_graph *gr, uint32_t n, const glet_edge *edges, size_t count);
+void glet_graph_free(glet_graph *gr);
 
 /* Orbit count for the mode: undirected size 4 or 5, directed (size ignored, 4). 0 when invalid. */
 uint32_t glet_orbit_count(bool directed, unsigned size);
@@ -76,7 +76,7 @@ typedef struct glet_spec {
 /* Exact node orbit counts. counts is n * glet_orbit_count(...) int64, zeroed by the caller.
  * spec->max_work bounds the connected node sets visited (0: no bound); exceeding it is
  * ODIN3_ERR_INVALID_ARG (logged) with counts partial. *work receives the sets visited. */
-odin3_status glet_count(const glet_graph *g, const glet_spec *spec, int64_t *counts,
+odin3_status glet_count(const glet_graph *gr, const glet_spec *spec, int64_t *counts,
                         uint64_t *work);
 
 /* --- signatures (spec sections 6 and 13) ---------------------------------------------------- */
@@ -93,9 +93,15 @@ typedef struct glet_sig {
     uint64_t *num;
 } glet_sig;
 
-/* Signature of rows of counts (n x norb, row-major) whose mask byte is nonzero (mask NULL: all). */
-odin3_status glet_sig_make(glet_sig *sig, const int64_t *counts, uint32_t n, uint32_t norb,
-                           const uint8_t *mask);
+/* Rows of orbit counts: n x norb int64, row-major. */
+typedef struct glet_rows {
+    const int64_t *counts;
+    uint32_t n;
+    uint32_t norb;
+} glet_rows;
+
+/* Signature of the rows whose mask byte is nonzero (mask NULL: all rows). */
+odin3_status glet_sig_make(glet_sig *sig, const glet_rows *rows, const uint8_t *mask);
 void glet_sig_free(glet_sig *sig);
 
 /* GDD agreement (Przulj 2007; arithmetic mean over orbits) of two signatures of equal norb, in

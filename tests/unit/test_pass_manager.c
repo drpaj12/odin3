@@ -1135,7 +1135,7 @@ static void test_builtin_processes_values(void) {
         "dump_locs",     "preprocess", "write_rtlil",       "proc",         "read_verilog",
         "opt",           "opt_expr",   "opt_merge",         "opt_muxtree",  "opt_reduce",
         "opt_share",     "opt_dff",    "opt_clean",         "wreduce",      "read_arch",
-        "write_techlib", "names"};
+        "write_techlib", "names",      "graphlets"};
     static const char *const refuse[] = {
         "write_blif", "write_json", "write_verilog", "write_dot",    "flatten",
         "lower",      "hardmap",    "partial_map",   "memory_merge", "lpmmap",
