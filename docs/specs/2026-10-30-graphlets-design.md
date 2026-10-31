@@ -145,8 +145,98 @@ Every orbit vector is keyed by the module-local node ID plus the name, so a cons
 provenance chain and the HDL location of the cell with the existing API. The pass writes no
 provenance records and creates no IDs.
 
-## 11. Next step (resume note)
+## 11. Next step (resume note, updated at the end of the file)
 
 Written first so a weekly stop loses nothing: (1) tables + counters + tests, (2) pass + CLI + JSON,
 (3) oracle gate and timing table, (4) Python method, docs, PASSES.md row, lint, PR. Mimir measurer
 only after merge.
+
+## 12. Subgraph input (Peter 2026-10-30, scope addition)
+
+Peter, verbatim: "This should be possible as a subgraph input such as a cone or some partition as
+this tells us if the signatures have similarity suggesting (Bayesian condideance) that they are the
+same".
+
+The unit of work is a group: a set of nodes of one module, counted on the subgraph induced by it.
+Sources of groups (several may be combined; each gives one or more groups):
+
+- none of the options below: one group per module (the whole module);
+- `--focus F` (repeatable): the syntax and the resolver are write_dot's `--focus` (the code is
+  shared: `odin3_dot_select` in src/backends/dot/writer.c, same parser as `write_dot --focus`):
+  `cone(<net>)` / `cone(<module>:<net>)` (the fan-in cone, stops at instance nodes), a hierarchical
+  path `module/inst/...` (the module's subtree, one group per module the subtree reaches), or
+  `<file>:<line>` (provenance forward index). One group per module with a selected node, named by F.
+- `--cells FILE`: a partition file. Lines are node IDs (decimal) or node names; `#` starts a comment;
+  a line `@NAME [MODULE]` starts a group (MODULE defaults to the top module, or the only module).
+  Lines before the first header form the group `default`. Unknown names are an error.
+- `--partition KEY`: groups by the text of node attribute KEY (section 4).
+
+`--halo 0|1` (default 0). Halo 0: orbits are counted inside the induced subgraph only. Halo 1: the
+subgraph is the group plus its one-hop neighbours (the halo), orbits are counted on that larger
+induced subgraph but reported (vectors, totals, GDD) for the group's own nodes only, so a graphlet
+cut by the boundary still counts at the group members it touches. Default is 0 because the question
+is whether two subgraphs have the same pattern: halo counts depend on the surroundings, which differ
+between two instances of one pattern and would lower the similarity of true matches. Halo 1 is for
+looking for a pattern cut by a partition boundary. Both modes work undirected and directed. Graphlets
+that need a node more than one hop away from the group are never counted.
+
+## 13. Signature comparison
+
+A signature is the pair (orbit totals over the group's reported nodes, GDD per orbit). Two metrics,
+computed on two signatures of the same mode:
+
+1. GDD agreement (Przulj 2007, doi:10.1093/bioinformatics/btl301; restated in Sarajlic 2016 for the
+   directed case, read there): for orbit j, d_j(k) is the number of nodes that touch orbit j exactly
+   k times (k >= 1), scaled S_j(k) = d_j(k)/k, normalised N_j(k) = S_j(k)/T_j with T_j = sum_k S_j(k),
+   distance D_j = (1/sqrt 2) sqrt(sum_k (N_j^A(k) - N_j^B(k))^2), agreement A_j = 1 - D_j in [0, 1];
+   the GDD agreement is the arithmetic mean of A_j over all orbits (Sarajlic restates this). Note: the
+   Bioinformatics 2007 text is not open access and was not read here; the per-orbit distance formula
+   above is the published definition as known from the literature and is checked only by its
+   properties (identical signatures give 1, disjoint support gives 0). Orbit with T_j = 0 on both
+   sides: A_j = 1; on one side only: A_j = 0. Why: it is the standard, published measure of
+   network similarity from graphlets, size-independent, and comparable with the literature.
+2. Cosine similarity of the vectors log(1 + orbit total) over orbits. Why: GDD agreement looks only
+   at per-node degree distributions and ignores how many subgraphs there are; the log-total cosine
+   sees the overall graphlet mix, is cheap and bounded in [0, 1] (counts are non-negative), and the
+   log damps the dominance of the big orbits. Zero vectors on both sides give 1, on one side 0.
+
+`graphlets --compare A.json B.json [--calibration C.json] [--out R.json]` reads two signature files
+written by this pass (suffix `#NAME` picks a group by name; default the first group) and reports both
+metrics. In a run with two or more groups the same comparison is done for all pairs (at most 32
+groups) and written to `compare` in the output file. Modes must match (else an error). The reader
+is the repository's JSON parser, which takes integers only, so signature files hold integers only;
+results written for readers may hold decimals.
+
+## 14. Bayesian confidence
+
+P(same | s) = L(s | same) P(same) / ( L(s | same) P(same) + L(s | different) P(different) ), per
+metric, with s the similarity value. The likelihoods and the prior come from a calibration file
+(`--calibration C.json`), versioned, integers only (so it parses with the repository's reader):
+
+    {"schema": "odin3-graphlet-calibration", "version": 1, "source": "<where the labels came from>",
+     "modes": {"undirected-5": {
+         "prior": {"same": 30, "different": 70},
+         "metrics": {"gdd_agreement": {"edges": [0, 500, 800, 900, 1000],
+                                      "same": [1, 4, 10, 15], "different": [40, 20, 8, 2]},
+                     "cosine_log": { ... }}}}}
+
+Similarity is scaled to per-mille and binned by `edges` (bin i is [edges[i], edges[i+1]), the last
+bin includes 1000). Binned density: L = (count_in_bin + 1) / (total + n_bins) (Laplace smoothing, so
+no likelihood is zero). The prior is its two counts normalised. If the file has no entry for the
+mode or metric, or `--calibration` is not given, the pass reports the similarities only and logs
+"uncalibrated". The combined posterior (both metrics, naive Bayes, which assumes the metrics are
+independent given the label; they are not, so it is reported next to, never instead of, the
+single-metric posteriors). The real calibration comes from Loki's labelled composites later and is
+not built here; a tiny file ships for unit tests only (tests/data/graphlet_calibration_test.json).
+
+## 15. Changes to earlier sections
+
+Section 6's file layout is `groups: [...]` (one entry per group) instead of `modules: {...}`; each
+group has `name, module, source, nodes, edges, self_loops, global_nets, halo, reported,
+orbit_totals, gdd, ms` and with `--per-node` a `node_vectors` list. Section 8's pass line gains
+`--focus F` (repeatable), `--cells FILE`, `--halo 0|1`, `--compare A B`, `--calibration C`.
+Python gets `Design.graphlets(..., focus=None, cells=None, halo=0)` and `graphlet_compare(a, b,
+calibration=None)`. Unit tests (section 9) gain: identical subgraphs give GDD agreement 1 and cosine
+1; the posterior rises with similarity under the test calibration; a focus equals brute force on the
+induced subgraph; a halo-1 run equals brute force on the group-plus-neighbours subgraph reported for
+the group.
