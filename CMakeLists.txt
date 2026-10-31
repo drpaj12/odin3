@@ -2893,6 +2893,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_pp_properties
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(pp_properties PROPERTIES LABELS tools)
+    # graphlets: the pass's counted graph equals an independent E-4 build (tools/graphlets).
+    add_test(NAME graphlets_construction
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_graphlets_construction
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(graphlets_construction PROPERTIES LABELS tools TIMEOUT 600)
 
     if(ODIN3_FUZZ)
         # The seeds (`pp-fuzz seeds`): the preprocessor micros, every micro holding a backtick
