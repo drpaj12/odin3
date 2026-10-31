@@ -13,7 +13,18 @@
 #include <stdint.h>
 #include <stdio.h>
 
-enum { TB_NAME = 64, TB_MAX_WIDTH = 64, TB_MAX_STACK = 48, TB_MAX_ARGS = 16, TB_MAX_FILES = 8 };
+enum {
+    TB_NAME = 64,
+    TB_MAX_WIDTH = 64,
+    TB_MAX_STACK = 48,
+    TB_MAX_ARGS = 16,
+    TB_MAX_FILES = 8,
+    TB_INT_BITS = 32,         /* integer, $random and $fopen results */
+    TB_FD_BASE = 3,           /* first $fopen descriptor (0 to 2 are reserved) */
+    TB_RAND_MULT = 16807,     /* Park-Miller minimal standard generator */
+    TB_RAND_MOD = 2147483647, /* 2^31 - 1 */
+    TB_OP_CHARS = 4           /* operator text, with its terminator */
+};
 
 /* --- tokens --- */
 typedef enum { TK_EOF, TK_ID, TK_NUM, TK_STR, TK_SYS, TK_OP } tb_tok_kind;
@@ -47,7 +58,7 @@ typedef enum {
 
 typedef struct tb_expr {
     tb_ekind kind;
-    char op[4];
+    char op[TB_OP_CHARS];
     uint32_t width; /* self-determined */
     bool sgn;
     uint64_t num; /* E_NUM; E_PART: msb in num, lsb in aux; E_REPL: count */
@@ -152,9 +163,15 @@ typedef struct tb_module {
     FILE *files[TB_MAX_FILES]; /* $fopen descriptors 3.. */
 } tb_module;
 
-/* Parses text (file name for messages) and picks the top: name, or the first module when NULL.
+/* Source text and the file name used in messages. */
+typedef struct tb_source {
+    const char *file;
+    const char *text;
+} tb_source;
+
+/* Parses src and picks the top: name, or the first module when NULL.
  * ODIN3_ERR_INVALID_ARG (logged "file:line: unsupported: ...") for a parse failure. */
-odin3_status tb_parse(const char *file, const char *text, const char *top, tb_module **out);
+odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out);
 void tb_module_free(tb_module *tb);
 
 /* --- run --- */

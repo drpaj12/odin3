@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { PATH_MAX_LEN = 1024, DECIMAL = 10, DEFAULT_MAX_TIME = 10000000 };
+enum { PATH_MAX_LEN = 1024, DECIMAL = 10, DEFAULT_MAX_TIME = 10000000, NUM_BUF = 32 };
 
 typedef struct tb_args {
     char file[PATH_MAX_LEN];
@@ -40,7 +40,7 @@ static bool take(odin3_bytes *args, char *dst, size_t cap) {
 }
 
 static bool take_number(odin3_bytes *args, uint64_t *out) {
-    char text[32] = "";
+    char text[NUM_BUF] = "";
     char *end = NULL;
     if (!take(args, text, sizeof text)) {
         return false;
@@ -117,7 +117,8 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         return ODIN3_ERR_IO;
     }
     tb_module *tb = NULL;
-    st = tb_parse(parsed.file, text, parsed.top[0] != '\0' ? parsed.top : NULL, &tb);
+    tb_source src = {parsed.file, text};
+    st = tb_parse(&src, parsed.top[0] != '\0' ? parsed.top : NULL, &tb);
     free(text);
     if (st != ODIN3_OK) {
         return st;

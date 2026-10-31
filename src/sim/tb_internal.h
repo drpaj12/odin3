@@ -11,7 +11,7 @@ typedef struct tb_lexed {
 
 void *tb_alloc(tb_module *tb, size_t size);
 void tb_error(const char *file, uint32_t line, const char *what);
-bool tb_lex(const char *file, const char *text, tb_module *tb, tb_lexed *out);
+bool tb_lex(const tb_source *src, tb_module *tb, tb_lexed *out);
 
 /* Evaluation state: the module, the current time and the random seed; run may be NULL for a
  * constant expression (no $time). */
@@ -25,16 +25,16 @@ typedef struct tb_ev {
 
 uint64_t tb_mask(uint32_t width);
 /* Value of e in a context of w bits and signedness sg (spec section 2). */
-uint64_t tb_eval(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg);
+uint64_t tb_eval(tb_ev *ev, const tb_expr *expr, uint32_t width, bool sgn);
 /* Value of e assigned to a target of `width` bits. */
-uint64_t tb_eval_assign(tb_ev *ev, const tb_expr *e, uint32_t width);
+uint64_t tb_eval_assign(tb_ev *ev, const tb_expr *expr, uint32_t width);
 /* Writes val to the lvalue; returns false on an index out of range (the write is dropped). */
 void tb_write(tb_ev *ev, const tb_expr *lv, uint64_t val);
-bool tb_const(tb_module *tb, const tb_expr *e, int64_t *out);
+bool tb_const(tb_module *tb, const tb_expr *expr, int64_t *out);
 int32_t tb_random(int32_t *seed);
 
 /* Display formatting (tb_fmt.c): formats args (first may be a format string) into out. */
-void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *out, size_t cap);
+void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *buf, size_t cap);
 bool tb_fmt_valid(const char *fmt, char *bad);
 typedef struct tb_readmem_req {
     const char *file;

@@ -1,104 +1,152 @@
-/* tb_parse.c — the testbench parser: module items, statements, expressions (spec section 2). */
+/* tb_parse.c — the testbench parser: module items, statements, expressions (spec section 2).
+ *
+ * The repository forbids recursion, so nesting is kept on explicit stacks: expressions by an
+ * operator-precedence parser (operators, open parentheses, argument lists, concatenations, selects
+ * and conditionals sit on one context stack, finished operands on a value stack), statements by a
+ * stack of open compound statements. */
 #include "sim/tb_internal.h"
 #include "util/log.h"
+#include "util/vec.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct ps {
+enum {
+    MSG_LEN = 64,
+    ARRAY_MAX_LOG2 = 20,
+    UNARY_ARITH_COUNT = 3, /* + - ~ come first in the unary table */
+    PREC_LOGIC_AND = 2,
+    PREC_EQUALITY = 6,
+    PREC_RELATION = 7,
+    PREC_SHIFT = 8,
+    CASE_MAX_ITEMS = 64,
+    BLOCK_CAP0 = 8,
+    INST_CONNS_MAX = 16,
+    VARS_CAP0 = 32,
+    OP_KEEP = 3, /* operator characters kept in tb_expr.op */
+    MSG_EXTRA = 32,
+    CHAR_BITS = 8
+};
+
+typedef struct parser {
     tb_module *tb;
-    const tb_tok *t;
+    const tb_tok *toks;
     uint32_t pos;
     const char *file;
     bool failed;
-} ps;
+    size_t efloor;     /* expression engine: context stack height at entry */
+    bool primary_only; /* expression engine: stop after one primary */
+    odin3_vec ents;    /* xent: open expression contexts */
+    odin3_vec vals;    /* tb_expr *: finished operands */
+    odin3_vec frames;  /* sframe: open compound statements */
+} parser;
 
-static const tb_tok *cur(const ps *p) {
-    return &p->t[p->pos];
+static const tb_tok *cur(const parser *pr) {
+    return &pr->toks[pr->pos];
 }
 
-static bool fail(ps *p, const char *what) {
-    if (!p->failed) {
-        tb_error(p->file, cur(p)->line, what);
+static bool fail(parser *pr, const char *what) {
+    if (!pr->failed) {
+        tb_error(pr->file, cur(pr)->line, what);
     }
-    p->failed = true;
+    pr->failed = true;
     return false;
 }
 
-static bool is_op(const ps *p, const char *op) {
-    return cur(p)->kind == TK_OP && strcmp(cur(p)->text, op) == 0;
+static bool is_op(const parser *pr, const char *op) {
+    return cur(pr)->kind == TK_OP && strcmp(cur(pr)->text, op) == 0;
 }
 
-static bool is_kw(const ps *p, const char *kw) {
-    return cur(p)->kind == TK_ID && strcmp(cur(p)->text, kw) == 0;
+static bool is_kw(const parser *pr, const char *kw) {
+    return cur(pr)->kind == TK_ID && strcmp(cur(pr)->text, kw) == 0;
 }
 
-static bool accept_op(ps *p, const char *op) {
-    if (is_op(p, op)) {
-        p->pos++;
+static bool accept_op(parser *pr, const char *op) {
+    if (is_op(pr, op)) {
+        pr->pos++;
         return true;
     }
     return false;
 }
 
-static bool accept_kw(ps *p, const char *kw) {
-    if (is_kw(p, kw)) {
-        p->pos++;
+static bool accept_kw(parser *pr, const char *kw) {
+    if (is_kw(pr, kw)) {
+        pr->pos++;
         return true;
     }
     return false;
 }
 
-static bool expect_op(ps *p, const char *op) {
-    if (accept_op(p, op)) {
+static bool expect_op(parser *pr, const char *op) {
+    if (accept_op(pr, op)) {
         return true;
     }
-    char msg[TB_NAME + 32];
+    char msg[TB_NAME + MSG_EXTRA];
     (void)snprintf(msg, sizeof msg, "expected `%s`", op);
-    return fail(p, msg);
+    return fail(pr, msg);
 }
 
-static void *pnew(ps *p, size_t size) {
-    void *ptr = tb_alloc(p->tb, size);
+static void *pnew(parser *pr, size_t size) {
+    void *ptr = tb_alloc(pr->tb, size);
     if (ptr == NULL) {
-        fail(p, "out of memory");
+        fail(pr, "out of memory");
     }
     return ptr;
 }
 
-static tb_expr *new_expr(ps *p, tb_ekind kind) {
-    tb_expr *e = pnew(p, sizeof *e);
-    if (e != NULL) {
-        e->kind = kind;
-        e->line = cur(p)->line;
+/* A fresh array of count pointers (all NULL). */
+static void *pnew_ptrs(parser *pr, size_t count) {
+    return pnew(pr, count * sizeof(void *));
+}
+
+/* A copy of the first count pointers of src in parse memory. */
+static void *pdup_ptrs(parser *pr, const void *src, size_t count) {
+    void *dst = pnew_ptrs(pr, count + 1U);
+    if (dst != NULL && count > 0) {
+        memcpy(dst, src, count * sizeof(void *));
     }
-    return e;
+    return dst;
+}
+
+static tb_expr *new_expr(parser *pr, tb_ekind kind) {
+    tb_expr *expr = pnew(pr, sizeof *expr);
+    if (expr != NULL) {
+        expr->kind = kind;
+        expr->line = cur(pr)->line;
+    }
+    return expr;
 }
 
 /* --- variables --- */
-static int find_var(const ps *p, const char *name) {
-    for (uint32_t i = 0; i < p->tb->nvars; i++) {
-        if (strcmp(p->tb->vars[i].name, name) == 0) {
+static int find_var(const parser *pr, const char *name) {
+    for (uint32_t i = 0; i < pr->tb->nvars; i++) {
+        if (strcmp(pr->tb->vars[i].name, name) == 0) {
             return (int)i;
         }
     }
     return -1;
 }
 
-static int add_var(ps *p, const char *name, uint32_t width, bool sgn, bool is_wire) {
-    tb_module *tb = p->tb;
-    if (find_var(p, name) >= 0) {
-        fail(p, "redeclared name");
+typedef struct var_shape {
+    uint32_t width;
+    bool sgn;
+    bool is_wire;
+} var_shape;
+
+static int add_var(parser *pr, const char *name, var_shape shape) {
+    tb_module *tb = pr->tb;
+    if (find_var(pr, name) >= 0) {
+        fail(pr, "redeclared name");
         return -1;
     }
     if (tb->nvars == tb->cap_vars) {
-        uint32_t cap = tb->cap_vars == 0 ? 32U : tb->cap_vars * 2U;
-        tb_var *grown = pnew(p, cap * sizeof *grown);
+        uint32_t cap = tb->cap_vars == 0 ? (uint32_t)VARS_CAP0 : tb->cap_vars * 2U;
+        tb_var *grown = pnew(pr, (size_t)cap * sizeof *grown);
         if (grown == NULL) {
             return -1;
         }
         if (tb->nvars > 0) {
-            memcpy(grown, tb->vars, tb->nvars * sizeof *grown);
+            memcpy(grown, tb->vars, (size_t)tb->nvars * sizeof *grown);
         }
         tb->vars = grown;
         tb->cap_vars = cap;
@@ -106,303 +154,123 @@ static int add_var(ps *p, const char *name, uint32_t width, bool sgn, bool is_wi
     tb_var *var = &tb->vars[tb->nvars];
     memset(var, 0, sizeof *var);
     (void)snprintf(var->name, sizeof var->name, "%s", name);
-    var->width = width;
-    var->sgn = sgn;
-    var->is_wire = is_wire;
+    var->width = shape.width;
+    var->sgn = shape.sgn;
+    var->is_wire = shape.is_wire;
     return (int)tb->nvars++;
 }
 
-/* --- expressions --- */
-static tb_expr *parse_expr(ps *p);
+/* --- expressions: leaf helpers --- */
+static tb_expr *parse_expr(parser *pr);
 
-static bool const_int(ps *p, int64_t *out) {
-    const tb_expr *e = parse_expr(p);
-    if (e == NULL) {
+static bool const_int(parser *pr, int64_t *out) {
+    const tb_expr *expr = parse_expr(pr);
+    if (expr == NULL) {
         return false;
     }
-    if (!tb_const(p->tb, e, out)) {
-        return fail(p, "non-constant expression where a constant is required");
+    if (!tb_const(pr->tb, expr, out)) {
+        return fail(pr, "non-constant expression where a constant is required");
     }
     return true;
 }
 
 /* `[h:0]` after the cursor is on `[`; width of the range. */
-static bool parse_range(ps *p, uint32_t *width) {
+static bool parse_range(parser *pr, uint32_t *width) {
     int64_t high = 0;
     int64_t low = 0;
-    if (!expect_op(p, "[") || !const_int(p, &high) || !expect_op(p, ":") || !const_int(p, &low) ||
-        !expect_op(p, "]")) {
+    if (!expect_op(pr, "[") || !const_int(pr, &high) || !expect_op(pr, ":") ||
+        !const_int(pr, &low) || !expect_op(pr, "]")) {
         return false;
     }
     if (low != 0 || high < 0) {
-        return fail(p, "range other than [h:0]");
+        return fail(pr, "range other than [h:0]");
     }
     if (high >= TB_MAX_WIDTH) {
-        return fail(p, "signal wider than 64 bits");
+        return fail(pr, "signal wider than 64 bits");
     }
     *width = (uint32_t)high + 1U;
     return true;
 }
 
-static bool parse_args(ps *p, tb_expr *e) {
+/* Argument list of a system task statement: `(` expr {, expr} `)` or nothing. */
+static bool parse_args(parser *pr, tb_expr *call) {
     tb_expr *list[TB_MAX_ARGS];
-    uint32_t n = 0;
-    if (accept_op(p, "(") && !accept_op(p, ")")) {
+    uint32_t count = 0;
+    if (accept_op(pr, "(") && !accept_op(pr, ")")) {
         do {
-            if (n == TB_MAX_ARGS) {
-                return fail(p, "too many arguments");
+            if (count == TB_MAX_ARGS) {
+                return fail(pr, "too many arguments");
             }
-            list[n] = parse_expr(p);
-            if (list[n++] == NULL) {
+            list[count] = parse_expr(pr);
+            if (list[count++] == NULL) {
                 return false;
             }
-        } while (accept_op(p, ","));
-        if (!expect_op(p, ")")) {
+        } while (accept_op(pr, ","));
+        if (!expect_op(pr, ")")) {
             return false;
         }
     }
-    e->list = pnew(p, (n + 1U) * sizeof *list);
-    if (e->list == NULL) {
-        return false;
-    }
-    memcpy(e->list, list, n * sizeof *list);
-    e->n = n;
-    return true;
+    call->list = (tb_expr **)pdup_ptrs(pr, (const void *)list, count);
+    call->n = count;
+    return call->list != NULL;
 }
 
 static const char *const SYS_EXPR[] = {"$time",     "$random", "$urandom", "$signed",
                                        "$unsigned", "$clog2",  "$fopen",   NULL};
 
-static tb_expr *parse_sys_expr(ps *p) {
-    tb_expr *e = new_expr(p, E_SYS);
-    if (e == NULL) {
-        return NULL;
+/* Width and signedness of a system function call whose arguments are in place. */
+static bool sys_finish(parser *pr, tb_expr *call) {
+    bool is_cast = strcmp(call->str, "$signed") == 0 || strcmp(call->str, "$unsigned") == 0;
+    if ((is_cast || strcmp(call->str, "$clog2") == 0) && call->n != 1) {
+        return fail(pr, "wrong argument count");
     }
-    e->str = pnew(p, TB_NAME);
-    if (e->str == NULL) {
-        return NULL;
-    }
-    (void)snprintf(e->str, TB_NAME, "%s", cur(p)->text);
-    bool known = false;
-    for (size_t i = 0; SYS_EXPR[i] != NULL; i++) {
-        known = known || strcmp(SYS_EXPR[i], e->str) == 0;
-    }
-    p->pos++;
-    if (!known) {
-        fail(p, "system function");
-        return NULL;
-    }
-    if (!parse_args(p, e)) {
-        return NULL;
-    }
-    bool is_cast = strcmp(e->str, "$signed") == 0 || strcmp(e->str, "$unsigned") == 0;
-    if ((is_cast || strcmp(e->str, "$clog2") == 0) && e->n != 1) {
-        fail(p, "wrong argument count");
-        return NULL;
-    }
-    e->width = strcmp(e->str, "$time") == 0 ? TB_MAX_WIDTH : 32U;
-    e->sgn = strcmp(e->str, "$random") == 0 || strcmp(e->str, "$signed") == 0 ||
-             strcmp(e->str, "$clog2") == 0;
+    call->width = strcmp(call->str, "$time") == 0 ? (uint32_t)TB_MAX_WIDTH : (uint32_t)TB_INT_BITS;
+    call->sgn = strcmp(call->str, "$random") == 0 || strcmp(call->str, "$signed") == 0 ||
+                strcmp(call->str, "$clog2") == 0;
     if (is_cast) {
-        e->width = e->list[0]->width;
+        call->width = call->list[0]->width;
     }
-    return e;
-}
-
-static tb_expr *parse_number(ps *p) {
-    tb_expr *e = new_expr(p, E_NUM);
-    if (e == NULL) {
-        return NULL;
-    }
-    const tb_tok *t = cur(p);
-    e->num = t->num;
-    e->width = t->width == 0 ? 32U : t->width;
-    e->sgn = t->is_signed;
-    if (e->width > TB_MAX_WIDTH) {
-        fail(p, "literal wider than 64 bits");
-        return NULL;
-    }
-    e->num &= tb_mask(e->width);
-    p->pos++;
-    return e;
-}
-
-/* After the first item: `{n{...}}` makes it a replication. */
-static bool concat_replication(ps *p, tb_expr *e, const tb_expr *first, uint64_t *reps) {
-    int64_t count = 0;
-    if (!tb_const(p->tb, first, &count) || count <= 0) {
-        return fail(p, "replication count");
-    }
-    *reps = (uint64_t)count;
-    e->kind = E_REPL;
-    p->pos++;
     return true;
 }
 
-static bool concat_items(ps *p, tb_expr *e, tb_expr **list, uint32_t *count, uint64_t *reps) {
-    uint32_t n = 0;
-    do {
-        if (n + 1U >= TB_MAX_ARGS) {
-            return fail(p, "concatenation too long");
-        }
-        list[n] = parse_expr(p);
-        if (list[n++] == NULL) {
-            return false;
-        }
-        if (n == 1 && is_op(p, "{")) {
-            if (!concat_replication(p, e, list[0], reps)) {
-                return false;
-            }
-            n = 0;
-        }
-    } while (accept_op(p, ","));
-    *count = n;
-    return true;
-}
-
-static tb_expr *parse_concat(ps *p) {
-    tb_expr *e = new_expr(p, E_CONCAT);
-    tb_expr *list[TB_MAX_ARGS];
-    uint32_t n = 0;
-    uint64_t reps = 1;
-    if (e == NULL) {
+static tb_expr *parse_number(parser *pr) {
+    tb_expr *expr = new_expr(pr, E_NUM);
+    if (expr == NULL) {
         return NULL;
     }
-    p->pos++;
-    if (!concat_items(p, e, list, &n, &reps) || !expect_op(p, "}") ||
-        (e->kind == E_REPL && !expect_op(p, "}"))) {
+    const tb_tok *tok = cur(pr);
+    expr->num = tok->num;
+    expr->width = tok->width == 0 ? (uint32_t)TB_INT_BITS : tok->width;
+    expr->sgn = tok->is_signed;
+    if (expr->width > TB_MAX_WIDTH) {
+        fail(pr, "literal wider than 64 bits");
         return NULL;
     }
-    e->list = pnew(p, n * sizeof *list);
-    if (e->list == NULL) {
-        return NULL;
-    }
-    memcpy(e->list, list, n * sizeof *list);
-    e->n = n;
-    e->num = reps;
-    uint64_t width = 0;
-    for (uint32_t i = 0; i < n; i++) {
-        width += list[i]->width;
-    }
-    width *= reps;
-    if (width > TB_MAX_WIDTH) {
-        return fail(p, "concatenation wider than 64 bits"), NULL;
-    }
-    e->width = (uint32_t)width;
-    return e;
-}
-
-static tb_expr *parse_part_select(ps *p, tb_expr *sel, const tb_expr *idx, const tb_var *v) {
-    int64_t high = 0;
-    int64_t low = 0;
-    if (!tb_const(p->tb, idx, &high) || !const_int(p, &low) || high < low || low < 0 ||
-        high >= (int64_t)v->width) {
-        return fail(p, "part select (constants within the declared width)"), NULL;
-    }
-    sel->kind = E_PART;
-    sel->aux = (uint32_t)low;
-    sel->width = (uint32_t)(high - low) + 1U;
-    return sel;
-}
-
-static tb_expr *parse_select(ps *p, tb_expr *base, int var) {
-    tb_var *v = &p->tb->vars[var];
-    if (!accept_op(p, "[")) {
-        return base;
-    }
-    tb_expr *idx = parse_expr(p);
-    tb_expr *sel = idx != NULL ? new_expr(p, v->depth > 0 ? E_MEM : E_BITSEL) : NULL;
-    if (sel == NULL) {
-        return NULL;
-    }
-    sel->var = var;
-    sel->a = v->depth > 0 ? idx : base;
-    sel->b = idx;
-    sel->width = v->depth > 0 ? v->width : 1U;
-    sel->sgn = v->depth > 0 && v->sgn;
-    if (v->depth == 0 && accept_op(p, ":")) {
-        sel = parse_part_select(p, sel, idx, v);
-    } else if (v->depth == 0 && (is_op(p, "+") || is_op(p, "-"))) {
-        return fail(p, "indexed part select"), NULL;
-    }
-    return sel != NULL && expect_op(p, "]") ? sel : NULL;
-}
-
-static tb_expr *parse_ident(ps *p) {
-    int var = find_var(p, cur(p)->text);
-    if (var < 0) {
-        return fail(p, "undeclared identifier (declare before use)"), NULL;
-    }
-    tb_expr *e = new_expr(p, E_VAR);
-    if (e == NULL) {
-        return NULL;
-    }
-    p->pos++;
-    e->var = var;
-    e->width = p->tb->vars[var].width;
-    e->sgn = p->tb->vars[var].sgn;
-    return parse_select(p, e, var);
-}
-
-static tb_expr *parse_primary(ps *p) {
-    const tb_tok *t = cur(p);
-    if (t->kind == TK_NUM) {
-        return parse_number(p);
-    }
-    if (t->kind == TK_STR) {
-        tb_expr *e = new_expr(p, E_STR);
-        if (e != NULL) {
-            e->str = t->str;
-            e->width = 8;
-            p->pos++;
-        }
-        return e;
-    }
-    if (t->kind == TK_SYS) {
-        return parse_sys_expr(p);
-    }
-    if (t->kind == TK_ID) {
-        return parse_ident(p);
-    }
-    if (accept_op(p, "(")) {
-        tb_expr *e = parse_expr(p);
-        return e != NULL && expect_op(p, ")") ? e : NULL;
-    }
-    if (is_op(p, "{")) {
-        return parse_concat(p);
-    }
-    return fail(p, "expression syntax"), NULL;
+    expr->num &= tb_mask(expr->width);
+    pr->pos++;
+    return expr;
 }
 
 static void copy_op(char *dst, const char *op) {
-    size_t n = strlen(op) < 3 ? strlen(op) : 3;
-    memcpy(dst, op, n);
-    dst[n] = '\0';
+    size_t len = strlen(op) < OP_KEEP ? strlen(op) : (size_t)OP_KEEP;
+    memcpy(dst, op, len);
+    dst[len] = '\0';
     if (strcmp(dst, "^~") == 0) {
-        memcpy(dst, "~^", 3);
+        memcpy(dst, "~^", OP_KEEP);
     }
 }
 
-static tb_expr *parse_unary(ps *p) {
-    static const char *const UNOPS[] = {"+", "-",  "~",  "!",  "&",  "|",
-                                        "^", "~&", "~|", "~^", "^~", NULL};
+static const char *const UNOPS[] = {"+", "-",  "~",  "!",  "&",  "|",
+                                    "^", "~&", "~|", "~^", "^~", NULL};
+
+/* Index of the unary operator at the cursor, or -1. */
+static int unary_index(const parser *pr) {
     for (size_t i = 0; UNOPS[i] != NULL; i++) {
-        if (is_op(p, UNOPS[i])) {
-            tb_expr *e = new_expr(p, E_UN);
-            p->pos++;
-            tb_expr *operand = e != NULL ? parse_unary(p) : NULL;
-            if (operand == NULL) {
-                return NULL;
-            }
-            copy_op(e->op, UNOPS[i]);
-            e->a = operand;
-            bool arith = i < 3;
-            e->width = arith ? operand->width : 1U;
-            e->sgn = arith && operand->sgn;
-            return e;
+        if (is_op(pr, UNOPS[i])) {
+            return (int)i;
         }
     }
-    return parse_primary(p);
+    return -1;
 }
 
 static int bin_prec(const char *op) {
@@ -421,120 +289,552 @@ static int bin_prec(const char *op) {
     return 0;
 }
 
-static void set_bin_shape(tb_expr *e) {
-    int prec = bin_prec(e->op);
-    e->sgn = false;
-    if (prec == 8) {
-        e->width = e->a->width;
-        e->sgn = e->a->sgn;
-    } else if (prec == 6 || prec == 7 || prec <= 2) {
-        e->width = 1;
+static void set_bin_shape(tb_expr *expr) {
+    int prec = bin_prec(expr->op);
+    expr->sgn = false;
+    if (prec == PREC_SHIFT) {
+        expr->width = expr->a->width;
+        expr->sgn = expr->a->sgn;
+    } else if (prec == PREC_EQUALITY || prec == PREC_RELATION || prec <= PREC_LOGIC_AND) {
+        expr->width = 1;
     } else {
-        e->width = e->a->width > e->b->width ? e->a->width : e->b->width;
-        e->sgn = e->a->sgn && e->b->sgn;
+        expr->width = expr->a->width > expr->b->width ? expr->a->width : expr->b->width;
+        expr->sgn = expr->a->sgn && expr->b->sgn;
     }
 }
 
-static tb_expr *parse_bin(ps *p, int min_prec) {
-    tb_expr *lhs = parse_unary(p);
-    while (lhs != NULL && cur(p)->kind == TK_OP) {
-        int prec = bin_prec(cur(p)->text);
-        if (strcmp(cur(p)->text, "**") == 0) {
-            return fail(p, "operator **"), NULL;
-        }
-        if (prec == 0 || prec < min_prec) {
-            break;
-        }
-        tb_expr *e = new_expr(p, E_BIN);
-        if (e == NULL) {
-            return NULL;
-        }
-        copy_op(e->op, cur(p)->text);
-        p->pos++;
-        e->a = lhs;
-        e->b = parse_bin(p, prec + 1);
-        if (e->b == NULL) {
-            return NULL;
-        }
-        set_bin_shape(e);
-        lhs = e;
+/* --- expressions: the context stack --- */
+typedef enum {
+    X_BIN,    /* a binary operator waiting for its right operand */
+    X_UN,     /* a unary operator waiting for its operand */
+    X_COND_Q, /* `cond ? ...` waiting for `:` */
+    X_COND_E, /* `cond ? a : ...` waiting for the else expression */
+    X_PAREN,
+    X_ARGS,   /* system function arguments */
+    X_CONCAT, /* `{ ... }`, possibly a replication */
+    X_INDEX,  /* `name[ ...` */
+    X_LOW     /* `name[high : ...` */
+} xkind;
+
+typedef struct xent {
+    xkind kind;
+    tb_expr *node;
+    int prec;    /* X_BIN: precedence; X_UN: index in UNOPS */
+    size_t base; /* X_ARGS, X_CONCAT: height of the value stack before the first item */
+    bool repl;   /* X_CONCAT: the replication count was consumed */
+} xent;
+
+typedef enum { XR_CONT, XR_DONE, XR_FAIL } xres;
+
+static xent *push_ent(parser *pr, xkind kind, tb_expr *node) {
+    xent *ent = odin3_vec_push(&pr->ents);
+    if (ent == NULL) {
+        fail(pr, "out of memory");
+        return NULL;
     }
-    return lhs;
+    ent->kind = kind;
+    ent->node = node;
+    ent->base = pr->vals.len;
+    return ent;
 }
 
-static tb_expr *parse_expr(ps *p) {
-    tb_expr *cond = parse_bin(p, 1);
-    if (cond == NULL || !accept_op(p, "?")) {
-        return cond;
+static xent *top_ent(parser *pr) {
+    return pr->ents.len > pr->efloor ? odin3_vec_at(&pr->ents, pr->ents.len - 1U) : NULL;
+}
+
+static bool push_val(parser *pr, tb_expr *expr) {
+    tb_expr **slot = (tb_expr **)odin3_vec_push(&pr->vals);
+    if (slot == NULL) {
+        return fail(pr, "out of memory");
     }
-    tb_expr *e = new_expr(p, E_COND);
-    if (e == NULL) {
+    *slot = expr;
+    return true;
+}
+
+static tb_expr *pop_val(parser *pr) {
+    tb_expr *expr = *(tb_expr **)odin3_vec_at(&pr->vals, pr->vals.len - 1U);
+    odin3_vec_pop(&pr->vals);
+    return expr;
+}
+
+static void truncate_vec(odin3_vec *vec, size_t len) {
+    while (vec->len > len) {
+        odin3_vec_pop(vec);
+    }
+}
+
+/* Operand of every pending unary operator on top of the stack. */
+static bool reduce_unary(parser *pr) {
+    for (xent *top = top_ent(pr); top != NULL && top->kind == X_UN; top = top_ent(pr)) {
+        tb_expr *node = top->node;
+        node->a = pop_val(pr);
+        copy_op(node->op, UNOPS[top->prec]);
+        bool arith = top->prec < UNARY_ARITH_COUNT;
+        node->width = arith ? node->a->width : 1U;
+        node->sgn = arith && node->a->sgn;
+        odin3_vec_pop(&pr->ents);
+        if (!push_val(pr, node)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Binary operators on top of the stack that bind at least as tight as prec. */
+static bool reduce_binary(parser *pr, int prec) {
+    for (xent *top = top_ent(pr); top != NULL && top->kind == X_BIN && top->prec >= prec;
+         top = top_ent(pr)) {
+        tb_expr *node = top->node;
+        node->b = pop_val(pr);
+        node->a = pop_val(pr);
+        set_bin_shape(node);
+        odin3_vec_pop(&pr->ents);
+        if (!push_val(pr, node)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* --- expressions: starting an operand --- */
+static bool begin_sys(parser *pr, bool *want) {
+    tb_expr *call = new_expr(pr, E_SYS);
+    if (call == NULL) {
+        return false;
+    }
+    call->str = pnew(pr, TB_NAME);
+    if (call->str == NULL) {
+        return false;
+    }
+    (void)snprintf(call->str, TB_NAME, "%s", cur(pr)->text);
+    bool known = false;
+    for (size_t i = 0; SYS_EXPR[i] != NULL; i++) {
+        known = known || strcmp(SYS_EXPR[i], call->str) == 0;
+    }
+    pr->pos++;
+    if (!known) {
+        return fail(pr, "system function");
+    }
+    if (accept_op(pr, "(") && !accept_op(pr, ")")) {
+        *want = true;
+        return push_ent(pr, X_ARGS, call) != NULL;
+    }
+    call->list = (tb_expr **)pnew_ptrs(pr, 1);
+    *want = false;
+    return call->list != NULL && sys_finish(pr, call) && push_val(pr, call);
+}
+
+static bool begin_ident(parser *pr, bool *want) {
+    int var = find_var(pr, cur(pr)->text);
+    if (var < 0) {
+        return fail(pr, "undeclared identifier (declare before use)");
+    }
+    tb_expr *expr = new_expr(pr, E_VAR);
+    if (expr == NULL) {
+        return false;
+    }
+    pr->pos++;
+    expr->var = var;
+    expr->width = pr->tb->vars[var].width;
+    expr->sgn = pr->tb->vars[var].sgn;
+    if (accept_op(pr, "[")) {
+        *want = true;
+        return push_ent(pr, X_INDEX, expr) != NULL;
+    }
+    *want = false;
+    return push_val(pr, expr);
+}
+
+static bool begin_string(parser *pr) {
+    tb_expr *expr = new_expr(pr, E_STR);
+    if (expr == NULL) {
+        return false;
+    }
+    expr->str = cur(pr)->str;
+    expr->width = CHAR_BITS;
+    pr->pos++;
+    return push_val(pr, expr);
+}
+
+static bool begin_concat(parser *pr) {
+    tb_expr *expr = new_expr(pr, E_CONCAT);
+    if (expr == NULL) {
+        return false;
+    }
+    pr->pos++;
+    return push_ent(pr, X_CONCAT, expr) != NULL;
+}
+
+/* One step at a position that needs an operand. */
+static xres step_operand(parser *pr, bool *want) {
+    bool ok = true;
+    int unary = unary_index(pr);
+    const tb_tok *tok = cur(pr);
+    *want = true;
+    if (unary >= 0 && !(pr->primary_only && pr->ents.len == pr->efloor)) {
+        tb_expr *node = new_expr(pr, E_UN);
+        pr->pos++;
+        xent *ent = node != NULL ? push_ent(pr, X_UN, node) : NULL;
+        ok = ent != NULL;
+        if (ok) {
+            ent->prec = unary;
+        }
+    } else if (tok->kind == TK_NUM) {
+        tb_expr *node = parse_number(pr);
+        *want = false;
+        ok = node != NULL && push_val(pr, node);
+    } else if (tok->kind == TK_STR) {
+        *want = false;
+        ok = begin_string(pr);
+    } else if (tok->kind == TK_SYS) {
+        ok = begin_sys(pr, want);
+    } else if (tok->kind == TK_ID) {
+        ok = begin_ident(pr, want);
+    } else if (accept_op(pr, "(")) {
+        ok = push_ent(pr, X_PAREN, NULL) != NULL;
+    } else if (is_op(pr, "{")) {
+        ok = begin_concat(pr);
+    } else {
+        ok = fail(pr, "expression syntax");
+    }
+    return ok ? XR_CONT : XR_FAIL;
+}
+
+/* --- expressions: ending an operand --- */
+static bool close_cond(parser *pr, xent *top) {
+    tb_expr *node = top->node;
+    node->c = pop_val(pr);
+    node->width = node->b->width > node->c->width ? node->b->width : node->c->width;
+    node->sgn = node->b->sgn && node->c->sgn;
+    odin3_vec_pop(&pr->ents);
+    return push_val(pr, node);
+}
+
+static bool open_cond(parser *pr, bool *want) {
+    pr->pos++;
+    tb_expr *node = new_expr(pr, E_COND);
+    if (node == NULL) {
+        return false;
+    }
+    node->a = pop_val(pr);
+    *want = true;
+    return push_ent(pr, X_COND_Q, node) != NULL;
+}
+
+static bool close_args(parser *pr, xent *top) {
+    tb_expr *call = top->node;
+    size_t count = pr->vals.len - top->base;
+    call->list = (tb_expr **)pdup_ptrs(pr, odin3_vec_at(&pr->vals, top->base), count);
+    call->n = (uint32_t)count;
+    truncate_vec(&pr->vals, top->base);
+    odin3_vec_pop(&pr->ents);
+    return call->list != NULL && sys_finish(pr, call) && push_val(pr, call);
+}
+
+static bool start_replication(parser *pr, xent *top) {
+    int64_t count = 0;
+    const tb_expr *first = *(tb_expr **)odin3_vec_at(&pr->vals, top->base);
+    if (!tb_const(pr->tb, first, &count) || count <= 0) {
+        return fail(pr, "replication count");
+    }
+    top->node->num = (uint64_t)count;
+    top->node->kind = E_REPL;
+    top->repl = true;
+    truncate_vec(&pr->vals, top->base);
+    pr->pos++;
+    return true;
+}
+
+static bool close_concat(parser *pr, xent *top) {
+    tb_expr *node = top->node;
+    size_t count = pr->vals.len - top->base;
+    if (!expect_op(pr, "}") || (top->repl && !expect_op(pr, "}"))) {
+        return false;
+    }
+    node->list = (tb_expr **)pdup_ptrs(pr, odin3_vec_at(&pr->vals, top->base), count);
+    node->n = (uint32_t)count;
+    if (!top->repl) {
+        node->num = 1;
+    }
+    uint64_t width = 0;
+    for (size_t i = 0; node->list != NULL && i < count; i++) {
+        width += node->list[i]->width;
+    }
+    width *= node->num;
+    truncate_vec(&pr->vals, top->base);
+    odin3_vec_pop(&pr->ents);
+    if (node->list == NULL) {
+        return false;
+    }
+    if (width > TB_MAX_WIDTH) {
+        return fail(pr, "concatenation wider than 64 bits");
+    }
+    node->width = (uint32_t)width;
+    return push_val(pr, node);
+}
+
+/* A comma after count items of a concatenation or argument list: room for one more? */
+static bool list_next(parser *pr, bool is_concat, size_t count) {
+    if (is_concat && count + 1U >= TB_MAX_ARGS) {
+        return fail(pr, "concatenation too long");
+    }
+    if (!is_concat && count == TB_MAX_ARGS) {
+        return fail(pr, "too many arguments");
+    }
+    pr->pos++;
+    return true;
+}
+
+/* The state of one concatenation or argument list after an item: continue or close. */
+static xres step_list(parser *pr, xent *top, bool *want) {
+    size_t count = pr->vals.len - top->base;
+    bool is_concat = top->kind == X_CONCAT;
+    if (is_concat && count == 1 && !top->repl && is_op(pr, "{")) {
+        *want = true;
+        return start_replication(pr, top) ? XR_CONT : XR_FAIL;
+    }
+    if (is_op(pr, ",")) {
+        *want = true;
+        return list_next(pr, is_concat, count) ? XR_CONT : XR_FAIL;
+    }
+    *want = false;
+    if (is_concat) {
+        return close_concat(pr, top) ? XR_CONT : XR_FAIL;
+    }
+    return expect_op(pr, ")") && close_args(pr, top) ? XR_CONT : XR_FAIL;
+}
+
+/* Builds the select node `name[index]` (bit or array word) from the base and the index. */
+static tb_expr *make_select(parser *pr, tb_expr *base, tb_expr *index) {
+    const tb_var *var = &pr->tb->vars[base->var];
+    tb_expr *sel = new_expr(pr, var->depth > 0 ? E_MEM : E_BITSEL);
+    if (sel == NULL) {
         return NULL;
     }
-    e->a = cond;
-    e->b = parse_expr(p);
-    if (e->b == NULL || !expect_op(p, ":")) {
-        return NULL;
+    sel->var = base->var;
+    sel->a = var->depth > 0 ? index : base;
+    sel->b = index;
+    sel->width = var->depth > 0 ? var->width : 1U;
+    sel->sgn = var->depth > 0 && var->sgn;
+    return sel;
+}
+
+/* After `name[ index`: `]` closes a bit or word select, `:` starts a part select. */
+static xres step_index(parser *pr, xent *top, bool *want) {
+    tb_expr *base = top->node;
+    const tb_var *var = &pr->tb->vars[base->var];
+    tb_expr *index = pop_val(pr);
+    tb_expr *sel = make_select(pr, base, index);
+    if (sel == NULL) {
+        return XR_FAIL;
     }
-    e->c = parse_expr(p);
-    if (e->c == NULL) {
-        return NULL;
+    if (var->depth == 0 && is_op(pr, ":")) {
+        int64_t high = 0;
+        if (!tb_const(pr->tb, index, &high)) {
+            fail(pr, "part select (constants within the declared width)");
+            return XR_FAIL;
+        }
+        pr->pos++;
+        top->kind = X_LOW;
+        top->node = sel;
+        sel->num = (uint64_t)high;
+        *want = true;
+        return XR_CONT;
     }
-    e->width = e->b->width > e->c->width ? e->b->width : e->c->width;
-    e->sgn = e->b->sgn && e->c->sgn;
-    return e;
+    odin3_vec_pop(&pr->ents);
+    *want = false;
+    return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
+}
+
+/* After `name[high : low`: the part select is complete at `]`. */
+static xres step_low(parser *pr, xent *top, bool *want) {
+    tb_expr *sel = top->node;
+    const tb_var *var = &pr->tb->vars[sel->var];
+    int64_t low = 0;
+    int64_t high = (int64_t)sel->num;
+    const tb_expr *low_expr = pop_val(pr);
+    if (!tb_const(pr->tb, low_expr, &low)) {
+        fail(pr, "non-constant expression where a constant is required");
+        return XR_FAIL;
+    }
+    if (high < low || low < 0 || high >= (int64_t)var->width) {
+        fail(pr, "part select (constants within the declared width)");
+        return XR_FAIL;
+    }
+    sel->kind = E_PART;
+    sel->num = 0;
+    sel->aux = (uint32_t)low;
+    sel->width = (uint32_t)(high - low) + 1U;
+    sel->sgn = false;
+    odin3_vec_pop(&pr->ents);
+    *want = false;
+    return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
+}
+
+/* After a finished sub-expression with nothing left to reduce: act on the innermost context. */
+static xres step_close(parser *pr, bool *want) {
+    xent *top = top_ent(pr);
+    *want = false;
+    if (is_op(pr, "?")) {
+        return open_cond(pr, want) ? XR_CONT : XR_FAIL;
+    }
+    if (top == NULL) {
+        return XR_DONE;
+    }
+    switch (top->kind) {
+    case X_COND_Q:
+        if (!is_op(pr, ":")) {
+            return expect_op(pr, ":") ? XR_CONT : XR_FAIL;
+        }
+        pr->pos++;
+        top->node->b = pop_val(pr);
+        top->kind = X_COND_E;
+        *want = true;
+        return XR_CONT;
+    case X_COND_E:
+        return close_cond(pr, top) ? XR_CONT : XR_FAIL;
+    case X_PAREN:
+        odin3_vec_pop(&pr->ents);
+        return expect_op(pr, ")") ? XR_CONT : XR_FAIL;
+    case X_ARGS:
+    case X_CONCAT:
+        return step_list(pr, top, want);
+    case X_INDEX:
+        return step_index(pr, top, want);
+    default:
+        return step_low(pr, top, want);
+    }
+}
+
+/* The binary operator at the cursor (precedence prec): reduce tighter ones, push this one. */
+static bool push_binary(parser *pr, int prec) {
+    if (!reduce_binary(pr, prec)) {
+        return false;
+    }
+    tb_expr *node = new_expr(pr, E_BIN);
+    xent *ent = node != NULL ? push_ent(pr, X_BIN, node) : NULL;
+    if (ent == NULL) {
+        return false;
+    }
+    ent->prec = prec;
+    copy_op(node->op, cur(pr)->text);
+    pr->pos++;
+    return true;
+}
+
+/* One step at a position just after an operand. */
+static xres step_after(parser *pr, bool *want) {
+    if (pr->primary_only && pr->ents.len == pr->efloor) {
+        return XR_DONE;
+    }
+    if (!reduce_unary(pr)) {
+        return XR_FAIL;
+    }
+    int prec = cur(pr)->kind == TK_OP ? bin_prec(cur(pr)->text) : 0;
+    if (cur(pr)->kind == TK_OP && strcmp(cur(pr)->text, "**") == 0) {
+        fail(pr, "operator **");
+        return XR_FAIL;
+    }
+    if (prec > 0) {
+        *want = true;
+        return push_binary(pr, prec) ? XR_CONT : XR_FAIL;
+    }
+    if (!reduce_binary(pr, 0)) {
+        return XR_FAIL;
+    }
+    return step_close(pr, want);
+}
+
+/* The expression engine: a full expression, or only a primary (no operators outside brackets). */
+static tb_expr *parse_expr_mode(parser *pr, bool primary_only) {
+    size_t floor_len = pr->ents.len;
+    pr->efloor = floor_len;
+    pr->primary_only = primary_only;
+    size_t val_floor = pr->vals.len;
+    bool want = true;
+    xres res = XR_CONT;
+    while (res == XR_CONT && !pr->failed) {
+        res = want ? step_operand(pr, &want) : step_after(pr, &want);
+    }
+    tb_expr *result = NULL;
+    if (res == XR_DONE && !pr->failed && pr->vals.len == val_floor + 1U) {
+        result = pop_val(pr);
+    }
+    truncate_vec(&pr->ents, floor_len);
+    truncate_vec(&pr->vals, val_floor);
+    return result;
+}
+
+static tb_expr *parse_expr(parser *pr) {
+    return parse_expr_mode(pr, false);
+}
+
+static tb_expr *parse_primary(parser *pr) {
+    return parse_expr_mode(pr, true);
 }
 
 /* --- statements --- */
-static tb_stmt *parse_stmt(ps *p);
-
-static tb_stmt *new_stmt(ps *p, tb_skind kind) {
-    tb_stmt *s = pnew(p, sizeof *s);
-    if (s != NULL) {
-        s->kind = kind;
-        s->line = cur(p)->line;
+static tb_stmt *new_stmt(parser *pr, tb_skind kind) {
+    tb_stmt *stmt = pnew(pr, sizeof *stmt);
+    if (stmt != NULL) {
+        stmt->kind = kind;
+        stmt->line = cur(pr)->line;
     }
-    return s;
+    return stmt;
 }
 
-static bool valid_lvalue(const ps *p, const tb_expr *lv) {
-    switch (lv->kind) {
-    case E_VAR:
-        return !p->tb->vars[lv->var].is_param && p->tb->vars[lv->var].depth == 0;
-    case E_BITSEL:
-    case E_PART:
-        return valid_lvalue(p, lv->a);
-    case E_MEM:
-        return true;
-    case E_CONCAT:
-        for (uint32_t i = 0; i < lv->n; i++) {
-            if (!valid_lvalue(p, lv->list[i])) {
-                return false;
-            }
+/* A plain name that may be assigned: not a parameter, not an array. */
+static bool assignable_var(const parser *pr, const tb_expr *name) {
+    const tb_var *var = &pr->tb->vars[name->var];
+    return !var->is_param && var->depth == 0;
+}
+
+/* A target is a reg or integer, a select of one, an array word, or a concatenation of those. A
+ * concatenation holds at most TB_MAX_WIDTH leaves (each is one bit or more), so the worklist is
+ * bounded. */
+static bool valid_lvalue(const parser *pr, const tb_expr *lvalue) {
+    enum { WORK_MAX = 2 * TB_MAX_WIDTH };
+    const tb_expr *work[WORK_MAX];
+    uint32_t top = 0;
+    work[top++] = lvalue;
+    while (top > 0) {
+        const tb_expr *cur_lv = work[--top];
+        if (cur_lv->kind == E_CONCAT && top + cur_lv->n > WORK_MAX) {
+            return false;
         }
-        return true;
-    default:
-        return false;
+        if (cur_lv->kind == E_CONCAT) {
+            for (uint32_t i = 0; i < cur_lv->n; i++) {
+                work[top++] = cur_lv->list[i];
+            }
+        } else if (cur_lv->kind == E_BITSEL || cur_lv->kind == E_PART) {
+            work[top++] = cur_lv->a;
+        } else if (cur_lv->kind != E_MEM &&
+                   !(cur_lv->kind == E_VAR && assignable_var(pr, cur_lv))) {
+            return false;
+        }
     }
+    return true;
 }
 
-static tb_stmt *parse_assign(ps *p, bool semi) {
-    tb_stmt *s = new_stmt(p, S_ASSIGN);
-    tb_expr *lv = s != NULL ? parse_primary(p) : NULL;
-    if (lv == NULL || !valid_lvalue(p, lv)) {
-        return fail(p, "assignment target (a reg, integer, select or concatenation of them)"), NULL;
-    }
-    s->lhs = lv;
-    if (accept_op(p, "<=")) {
-        s->kind = S_NBA;
-    } else if (!expect_op(p, "=")) {
+static tb_stmt *parse_assign(parser *pr, bool semi) {
+    tb_stmt *stmt = new_stmt(pr, S_ASSIGN);
+    tb_expr *lvalue = stmt != NULL ? parse_primary(pr) : NULL;
+    if (lvalue == NULL || !valid_lvalue(pr, lvalue)) {
+        fail(pr, "assignment target (a reg, integer, select or concatenation of them)");
         return NULL;
     }
-    if (is_op(p, "#") || is_kw(p, "repeat") || is_op(p, "@")) {
-        return fail(p, "intra-assignment delay or event control"), NULL;
+    stmt->lhs = lvalue;
+    if (accept_op(pr, "<=")) {
+        stmt->kind = S_NBA;
+    } else if (!expect_op(pr, "=")) {
+        return NULL;
     }
-    s->rhs = parse_expr(p);
-    return s->rhs != NULL && (!semi || expect_op(p, ";")) ? s : NULL;
+    if (is_op(pr, "#") || is_kw(pr, "repeat") || is_op(pr, "@")) {
+        fail(pr, "intra-assignment delay or event control");
+        return NULL;
+    }
+    stmt->rhs = parse_expr(pr);
+    return stmt->rhs != NULL && (!semi || expect_op(pr, ";")) ? stmt : NULL;
 }
 
 static const char *const SYS_TASKS[] = {
@@ -542,580 +842,721 @@ static const char *const SYS_TASKS[] = {
     "$fdisplay", "$fwrite",   "$fclose",   "$finish",  "$stop",       "$readmemh",
     "$readmemb", "$dumpfile", "$dumpvars", "$fopen",   NULL};
 
-static tb_expr *parse_sys_task_expr(ps *p) {
-    tb_expr *e = new_expr(p, E_SYS);
-    if (e == NULL) {
+static tb_expr *parse_sys_task_expr(parser *pr) {
+    tb_expr *call = new_expr(pr, E_SYS);
+    if (call == NULL) {
         return NULL;
     }
-    e->str = pnew(p, TB_NAME);
-    if (e->str == NULL) {
+    call->str = pnew(pr, TB_NAME);
+    if (call->str == NULL) {
         return NULL;
     }
-    (void)snprintf(e->str, TB_NAME, "%s", cur(p)->text);
-    p->pos++;
-    return parse_args(p, e) ? e : NULL;
+    (void)snprintf(call->str, TB_NAME, "%s", cur(pr)->text);
+    pr->pos++;
+    return parse_args(pr, call) ? call : NULL;
 }
 
 /* Rejects a format string with a specifier outside the subset (the format is the first argument,
  * or the second for the $f* tasks). */
-static bool check_format(ps *p, const tb_expr *call) {
+static bool check_format(parser *pr, const tb_expr *call) {
     bool file_task = strncmp(call->str, "$f", 2) == 0 && strcmp(call->str, "$finish") != 0;
     uint32_t at = file_task ? 1U : 0U;
-    bool no_fmt = strncmp(call->str, "$read", 5) == 0 || strcmp(call->str, "$dumpfile") == 0 ||
-                  strcmp(call->str, "$fopen") == 0;
+    bool no_fmt = strncmp(call->str, "$read", sizeof "$read" - 1U) == 0 ||
+                  strcmp(call->str, "$dumpfile") == 0 || strcmp(call->str, "$fopen") == 0;
     char bad = 0;
     if (no_fmt || call->n <= at || call->list[at]->kind != E_STR ||
         tb_fmt_valid(call->list[at]->str, &bad)) {
         return true;
     }
-    char msg[64];
+    char msg[MSG_LEN];
     (void)snprintf(msg, sizeof msg, "format specifier %%%c", bad);
-    return fail(p, msg);
+    return fail(pr, msg);
 }
 
-static tb_stmt *parse_systask(ps *p) {
-    tb_stmt *s = new_stmt(p, S_SYS);
+static tb_stmt *parse_systask(parser *pr) {
+    tb_stmt *stmt = new_stmt(pr, S_SYS);
     bool known = false;
     for (size_t i = 0; SYS_TASKS[i] != NULL; i++) {
-        known = known || strcmp(SYS_TASKS[i], cur(p)->text) == 0;
+        known = known || strcmp(SYS_TASKS[i], cur(pr)->text) == 0;
     }
-    if (s == NULL || !known) {
-        return fail(p, "system task"), NULL;
-    }
-    s->sys = parse_sys_task_expr(p);
-    if (s->sys == NULL || !expect_op(p, ";") || !check_format(p, s->sys)) {
+    if (stmt == NULL || !known) {
+        fail(pr, "system task");
         return NULL;
     }
-    return s;
+    stmt->sys = parse_sys_task_expr(pr);
+    if (stmt->sys == NULL || !expect_op(pr, ";") || !check_format(pr, stmt->sys)) {
+        return NULL;
+    }
+    return stmt;
 }
 
-static tb_stmt *parse_block(ps *p) {
-    tb_stmt *s = new_stmt(p, S_BLOCK);
-    uint32_t cap = 8;
-    if (s == NULL) {
-        return NULL;
-    }
-    s->list = pnew(p, cap * sizeof *s->list);
-    if (accept_op(p, ":") && cur(p)->kind == TK_ID) {
-        p->pos++;
-    }
-    if (s->list == NULL) {
-        return NULL;
-    }
-    while (!accept_kw(p, "end")) {
-        if (cur(p)->kind == TK_EOF) {
-            return fail(p, "missing `end`"), NULL;
-        }
-        if (s->n == cap) {
-            tb_stmt **grown = pnew(p, cap * 2U * sizeof *grown);
-            if (grown == NULL) {
-                return NULL;
-            }
-            memcpy(grown, s->list, cap * sizeof *grown);
-            s->list = grown;
-            cap *= 2U;
-        }
-        tb_stmt *child = parse_stmt(p);
-        if (child == NULL) {
-            return NULL;
-        }
-        s->list[s->n++] = child;
-    }
-    return s;
-}
-
-static tb_stmt *parse_paren_stmt(ps *p, tb_skind kind) {
-    tb_stmt *s = new_stmt(p, kind);
-    p->pos++;
-    if (s == NULL || !expect_op(p, "(")) {
-        return NULL;
-    }
-    s->rhs = parse_expr(p);
-    if (s->rhs == NULL || !expect_op(p, ")")) {
-        return NULL;
-    }
-    s->a = parse_stmt(p);
-    return s->a != NULL ? s : NULL;
-}
-
-static tb_stmt *parse_if(ps *p) {
-    tb_stmt *s = parse_paren_stmt(p, S_IF);
-    if (s != NULL && accept_kw(p, "else")) {
-        s->b = parse_stmt(p);
-        return s->b != NULL ? s : NULL;
-    }
-    return s;
-}
-
-static tb_stmt *parse_for(ps *p) {
-    tb_stmt *s = new_stmt(p, S_FOR);
-    p->pos++;
-    if (s == NULL || !expect_op(p, "(")) {
-        return NULL;
-    }
-    s->init = parse_assign(p, false);
-    if (s->init == NULL || !expect_op(p, ";")) {
-        return NULL;
-    }
-    s->rhs = parse_expr(p);
-    if (s->rhs == NULL || !expect_op(p, ";")) {
-        return NULL;
-    }
-    s->step = parse_assign(p, false);
-    if (s->step == NULL || !expect_op(p, ")")) {
-        return NULL;
-    }
-    s->a = parse_stmt(p);
-    return s->a != NULL ? s : NULL;
-}
-
-static bool parse_event_terms(ps *p, tb_stmt *s) {
+static bool parse_event_terms(parser *pr, tb_stmt *stmt) {
     tb_event_term terms[TB_MAX_ARGS];
-    uint32_t n = 0;
+    uint32_t count = 0;
     do {
-        if (n == TB_MAX_ARGS) {
-            return fail(p, "too many event terms");
+        if (count == TB_MAX_ARGS) {
+            return fail(pr, "too many event terms");
         }
-        terms[n].edge = accept_kw(p, "posedge") ? 1 : (accept_kw(p, "negedge") ? 2 : 0);
-        terms[n].sig = parse_expr(p);
-        if (terms[n++].sig == NULL) {
+        terms[count].edge = 0;
+        if (accept_kw(pr, "posedge")) {
+            terms[count].edge = 1;
+        } else if (accept_kw(pr, "negedge")) {
+            terms[count].edge = 2;
+        }
+        terms[count].sig = parse_expr(pr);
+        if (terms[count++].sig == NULL) {
             return false;
         }
-    } while (accept_kw(p, "or") || accept_op(p, ","));
-    s->terms = pnew(p, n * sizeof *terms);
-    if (s->terms == NULL) {
+    } while (accept_kw(pr, "or") || accept_op(pr, ","));
+    stmt->terms = pnew(pr, count * sizeof *terms);
+    if (stmt->terms == NULL) {
         return false;
     }
-    memcpy(s->terms, terms, n * sizeof *terms);
-    s->nterms = n;
+    memcpy(stmt->terms, terms, count * sizeof *terms);
+    stmt->nterms = count;
     return true;
 }
 
-static tb_stmt *parse_body_or_nop(ps *p, tb_stmt *s) {
-    if (accept_op(p, ";")) {
-        s->a = new_stmt(p, S_NOP);
-    } else {
-        s->a = parse_stmt(p);
-    }
-    return s->a != NULL ? s : NULL;
-}
-
-static tb_stmt *parse_event(ps *p) {
-    tb_stmt *s = new_stmt(p, S_EVENT);
-    p->pos++;
-    if (s == NULL) {
-        return NULL;
-    }
-    if (is_op(p, "*") || (is_op(p, "(") && p->t[p->pos + 1].kind == TK_OP &&
-                          strcmp(p->t[p->pos + 1].text, "*") == 0)) {
-        return fail(p, "@* event control (list the signals)"), NULL;
-    }
-    if (!expect_op(p, "(") || !parse_event_terms(p, s) || !expect_op(p, ")")) {
-        return NULL;
-    }
-    return parse_body_or_nop(p, s);
-}
-
-static tb_stmt *parse_delay(ps *p) {
-    tb_stmt *s = new_stmt(p, S_DELAY);
-    p->pos++;
-    if (s == NULL) {
-        return NULL;
-    }
-    s->rhs = parse_primary(p);
-    return s->rhs != NULL ? parse_body_or_nop(p, s) : NULL;
-}
-
-static bool case_item_labels(ps *p, tb_stmt *s, tb_expr **labels, uint32_t *nlab) {
-    if (accept_kw(p, "default")) {
-        (void)accept_op(p, ":");
+static bool case_item_labels(parser *pr, tb_expr **labels, uint32_t *nlab) {
+    if (accept_kw(pr, "default")) {
+        (void)accept_op(pr, ":");
         return true;
     }
     do {
         if (*nlab == TB_MAX_ARGS) {
-            return fail(p, "too many case labels");
+            return fail(pr, "too many case labels");
         }
-        labels[*nlab] = parse_expr(p);
+        labels[*nlab] = parse_expr(pr);
         if (labels[(*nlab)++] == NULL) {
             return false;
         }
-    } while (accept_op(p, ","));
-    (void)s;
-    return expect_op(p, ":");
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ":");
 }
 
-static tb_stmt *parse_case(ps *p) {
-    tb_stmt *s = new_stmt(p, S_CASE);
-    if (strcmp(cur(p)->text, "case") != 0) {
-        return fail(p, "casez/casex (no x/z in a 2-state simulator)"), NULL;
-    }
-    p->pos++;
-    enum { MAX_ITEMS = 64 };
-    s->list = pnew(p, MAX_ITEMS * sizeof *s->list);
-    s->nlab = pnew(p, MAX_ITEMS * sizeof *s->nlab);
-    s->labels = pnew(p, MAX_ITEMS * TB_MAX_ARGS * sizeof *s->labels);
-    if (!expect_op(p, "(") || (s->rhs = parse_expr(p)) == NULL || !expect_op(p, ")")) {
+static bool parse_decl(parser *pr);
+
+/* --- statements: the frame stack --- */
+typedef enum {
+    SF_BLOCK,   /* begin ... end */
+    SF_IF_THEN, /* the then branch of an if */
+    SF_IF_ELSE,
+    SF_BODY, /* the single body of while, repeat, wait, for, forever, a delay or an event */
+    SF_CASE
+} sfkind;
+
+typedef struct sframe {
+    sfkind kind;
+    tb_stmt *stmt;
+    uint32_t cap; /* SF_BLOCK: capacity of the child list */
+} sframe;
+
+/* What starting a statement produced: a finished statement, or an open compound one. */
+typedef enum {
+    ST_LEAF,  /* *out holds the finished statement */
+    ST_WANT,  /* a frame was pushed and its first child statement is next */
+    ST_CHECK, /* a frame was pushed; look for its end (or next item) before any child */
+    ST_FAIL
+} sstart;
+
+static sframe *push_frame(parser *pr, sfkind kind, tb_stmt *stmt) {
+    sframe *frm = odin3_vec_push(&pr->frames);
+    if (frm == NULL) {
+        fail(pr, "out of memory");
         return NULL;
     }
-    while (!accept_kw(p, "endcase")) {
-        if (s->n == MAX_ITEMS || s->list == NULL || cur(p)->kind == TK_EOF) {
-            return fail(p, "case with more than 64 items"), NULL;
-        }
-        uint32_t nlab = 0;
-        if (!case_item_labels(p, s, &s->labels[s->n * TB_MAX_ARGS], &nlab)) {
-            return NULL;
-        }
-        s->nlab[s->n] = nlab;
-        s->list[s->n] = parse_stmt(p);
-        if (s->list[s->n++] == NULL) {
-            return NULL;
-        }
+    frm->kind = kind;
+    frm->stmt = stmt;
+    return frm;
+}
+
+static sstart start_block(parser *pr) {
+    pr->pos++;
+    tb_stmt *stmt = new_stmt(pr, S_BLOCK);
+    if (stmt == NULL) {
+        return ST_FAIL;
     }
-    return s;
+    stmt->list = (tb_stmt **)pnew_ptrs(pr, BLOCK_CAP0);
+    if (accept_op(pr, ":") && cur(pr)->kind == TK_ID) {
+        pr->pos++;
+    }
+    sframe *frm = stmt->list != NULL ? push_frame(pr, SF_BLOCK, stmt) : NULL;
+    if (frm == NULL) {
+        return ST_FAIL;
+    }
+    frm->cap = BLOCK_CAP0;
+    return ST_CHECK;
 }
 
-static bool parse_decl(ps *p);
-
-static tb_stmt *parse_begin(ps *p) {
-    p->pos++;
-    return parse_block(p);
+/* `kw ( expr )` header of if, while, repeat and wait. */
+static sstart start_paren(parser *pr, tb_skind kind) {
+    tb_stmt *stmt = new_stmt(pr, kind);
+    pr->pos++;
+    if (stmt == NULL || !expect_op(pr, "(")) {
+        return ST_FAIL;
+    }
+    stmt->rhs = parse_expr(pr);
+    if (stmt->rhs == NULL || !expect_op(pr, ")")) {
+        return ST_FAIL;
+    }
+    return push_frame(pr, kind == S_IF ? SF_IF_THEN : SF_BODY, stmt) != NULL ? ST_WANT : ST_FAIL;
 }
 
-static tb_stmt *parse_while(ps *p) {
-    return parse_paren_stmt(p, S_WHILE);
+static sstart start_for(parser *pr) {
+    tb_stmt *stmt = new_stmt(pr, S_FOR);
+    pr->pos++;
+    if (stmt == NULL || !expect_op(pr, "(")) {
+        return ST_FAIL;
+    }
+    stmt->init = parse_assign(pr, false);
+    if (stmt->init == NULL || !expect_op(pr, ";")) {
+        return ST_FAIL;
+    }
+    stmt->rhs = parse_expr(pr);
+    if (stmt->rhs == NULL || !expect_op(pr, ";")) {
+        return ST_FAIL;
+    }
+    stmt->step = parse_assign(pr, false);
+    if (stmt->step == NULL || !expect_op(pr, ")")) {
+        return ST_FAIL;
+    }
+    return push_frame(pr, SF_BODY, stmt) != NULL ? ST_WANT : ST_FAIL;
 }
 
-static tb_stmt *parse_repeat(ps *p) {
-    return parse_paren_stmt(p, S_REPEAT);
+static sstart start_forever(parser *pr) {
+    tb_stmt *stmt = new_stmt(pr, S_FOREVER);
+    pr->pos++;
+    return stmt != NULL && push_frame(pr, SF_BODY, stmt) != NULL ? ST_WANT : ST_FAIL;
 }
 
-static tb_stmt *parse_wait(ps *p) {
-    return parse_paren_stmt(p, S_WAIT);
+/* A delay or event statement whose control part is parsed: its body is `;` or a statement. */
+static sstart start_body_or_nop(parser *pr, tb_stmt *stmt, tb_stmt **out) {
+    if (accept_op(pr, ";")) {
+        stmt->a = new_stmt(pr, S_NOP);
+        *out = stmt;
+        return stmt->a != NULL ? ST_LEAF : ST_FAIL;
+    }
+    return push_frame(pr, SF_BODY, stmt) != NULL ? ST_WANT : ST_FAIL;
 }
 
-static tb_stmt *parse_forever(ps *p) {
-    tb_stmt *s = new_stmt(p, S_FOREVER);
-    p->pos++;
-    s->a = parse_stmt(p);
-    return s->a != NULL ? s : NULL;
+static sstart start_event(parser *pr, tb_stmt **out) {
+    tb_stmt *stmt = new_stmt(pr, S_EVENT);
+    pr->pos++;
+    if (stmt == NULL) {
+        return ST_FAIL;
+    }
+    if (is_op(pr, "*") || (is_op(pr, "(") && pr->toks[pr->pos + 1U].kind == TK_OP &&
+                           strcmp(pr->toks[pr->pos + 1U].text, "*") == 0)) {
+        fail(pr, "@* event control (list the signals)");
+        return ST_FAIL;
+    }
+    if (!expect_op(pr, "(") || !parse_event_terms(pr, stmt) || !expect_op(pr, ")")) {
+        return ST_FAIL;
+    }
+    return start_body_or_nop(pr, stmt, out);
 }
 
-static tb_stmt *parse_local_decl(ps *p) {
-    return parse_decl(p) ? new_stmt(p, S_NOP) : NULL;
+static sstart start_delay(parser *pr, tb_stmt **out) {
+    tb_stmt *stmt = new_stmt(pr, S_DELAY);
+    pr->pos++;
+    if (stmt == NULL) {
+        return ST_FAIL;
+    }
+    stmt->rhs = parse_primary(pr);
+    return stmt->rhs != NULL ? start_body_or_nop(pr, stmt, out) : ST_FAIL;
 }
 
-static tb_stmt *parse_rejected(ps *p) {
-    return fail(p, cur(p)->text), NULL;
+static sstart start_case(parser *pr) {
+    tb_stmt *stmt = new_stmt(pr, S_CASE);
+    if (stmt == NULL) {
+        return ST_FAIL;
+    }
+    if (strcmp(cur(pr)->text, "case") != 0) {
+        fail(pr, "casez/casex (no x/z in a 2-state simulator)");
+        return ST_FAIL;
+    }
+    pr->pos++;
+    stmt->list = (tb_stmt **)pnew_ptrs(pr, CASE_MAX_ITEMS);
+    stmt->nlab = pnew(pr, CASE_MAX_ITEMS * sizeof *stmt->nlab);
+    stmt->labels = (tb_expr **)pnew_ptrs(pr, (size_t)CASE_MAX_ITEMS * TB_MAX_ARGS);
+    if (!expect_op(pr, "(")) {
+        return ST_FAIL;
+    }
+    stmt->rhs = parse_expr(pr);
+    if (stmt->rhs == NULL || !expect_op(pr, ")")) {
+        return ST_FAIL;
+    }
+    return push_frame(pr, SF_CASE, stmt) != NULL ? ST_CHECK : ST_FAIL;
 }
 
-static tb_stmt *parse_kw_stmt(ps *p) {
+typedef enum {
+    KW_NONE,
+    KW_BEGIN,
+    KW_IF,
+    KW_CASE,
+    KW_FOR,
+    KW_WHILE,
+    KW_REPEAT,
+    KW_WAIT,
+    KW_FOREVER,
+    KW_DECL,
+    KW_REJECTED
+} stmt_kw;
+
+static stmt_kw keyword_of(const parser *pr) {
     static const struct {
-        const char *kw;
-        tb_stmt *(*fn)(ps *);
-    } TABLE[] = {{"begin", parse_begin},
-                 {"if", parse_if},
-                 {"case", parse_case},
-                 {"casez", parse_case},
-                 {"casex", parse_case},
-                 {"for", parse_for},
-                 {"while", parse_while},
-                 {"repeat", parse_repeat},
-                 {"wait", parse_wait},
-                 {"forever", parse_forever},
-                 {"reg", parse_local_decl},
-                 {"integer", parse_local_decl},
-                 {"disable", parse_rejected},
-                 {"fork", parse_rejected},
-                 {"task", parse_rejected},
-                 {"deassign", parse_rejected},
-                 {"force", parse_rejected},
-                 {"release", parse_rejected},
-                 {NULL, NULL}};
-    for (size_t i = 0; TABLE[i].kw != NULL; i++) {
-        if (is_kw(p, TABLE[i].kw)) {
-            return TABLE[i].fn(p);
+        const char *text;
+        stmt_kw kw;
+    } TABLE[] = {{"begin", KW_BEGIN},      {"if", KW_IF},
+                 {"case", KW_CASE},        {"casez", KW_CASE},
+                 {"casex", KW_CASE},       {"for", KW_FOR},
+                 {"while", KW_WHILE},      {"repeat", KW_REPEAT},
+                 {"wait", KW_WAIT},        {"forever", KW_FOREVER},
+                 {"reg", KW_DECL},         {"integer", KW_DECL},
+                 {"disable", KW_REJECTED}, {"fork", KW_REJECTED},
+                 {"task", KW_REJECTED},    {"deassign", KW_REJECTED},
+                 {"force", KW_REJECTED},   {"release", KW_REJECTED},
+                 {NULL, KW_NONE}};
+    for (size_t i = 0; TABLE[i].text != NULL; i++) {
+        if (is_kw(pr, TABLE[i].text)) {
+            return TABLE[i].kw;
         }
     }
-    return parse_assign(p, true);
+    return KW_NONE;
 }
 
-static tb_stmt *parse_stmt(ps *p) {
-    const tb_tok *t = cur(p);
-    if (is_op(p, ";")) {
-        tb_stmt *s = new_stmt(p, S_NOP);
-        p->pos++;
-        return s;
+static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
+    switch (kw) {
+    case KW_BEGIN:
+        return start_block(pr);
+    case KW_IF:
+        return start_paren(pr, S_IF);
+    case KW_CASE:
+        return start_case(pr);
+    case KW_FOR:
+        return start_for(pr);
+    case KW_WHILE:
+        return start_paren(pr, S_WHILE);
+    case KW_REPEAT:
+        return start_paren(pr, S_REPEAT);
+    case KW_WAIT:
+        return start_paren(pr, S_WAIT);
+    case KW_FOREVER:
+        return start_forever(pr);
+    case KW_DECL:
+        *out = parse_decl(pr) ? new_stmt(pr, S_NOP) : NULL;
+        return *out != NULL ? ST_LEAF : ST_FAIL;
+    default:
+        fail(pr, cur(pr)->text);
+        return ST_FAIL;
     }
-    if (is_op(p, "#")) {
-        return parse_delay(p);
-    }
-    if (is_op(p, "@")) {
-        return parse_event(p);
-    }
-    if (t->kind == TK_SYS) {
-        return parse_systask(p);
-    }
-    return t->kind == TK_ID ? parse_kw_stmt(p) : parse_assign(p, true);
 }
 
-/* --- module items --- */
-static bool parse_array_range(ps *p, int var) {
-    int64_t high = 0;
-    int64_t low = 0;
-    p->pos++;
-    if (!const_int(p, &low) || !expect_op(p, ":") || !const_int(p, &high) || !expect_op(p, "]") ||
-        low != 0 || high < 0 || high > (1 << 20)) {
-        return fail(p, "array range (use [0:N])");
+/* Starts the statement at the cursor. */
+static sstart start_stmt(parser *pr, tb_stmt **out) {
+    const tb_tok *tok = cur(pr);
+    if (is_op(pr, ";")) {
+        *out = new_stmt(pr, S_NOP);
+        pr->pos++;
+        return *out != NULL ? ST_LEAF : ST_FAIL;
     }
-    tb_var *v = &p->tb->vars[var];
-    v->depth = (uint32_t)high + 1U;
-    v->mem = pnew(p, v->depth * sizeof *v->mem);
-    return v->mem != NULL;
+    if (is_op(pr, "#")) {
+        return start_delay(pr, out);
+    }
+    if (is_op(pr, "@")) {
+        return start_event(pr, out);
+    }
+    if (tok->kind == TK_SYS) {
+        *out = parse_systask(pr);
+    } else if (tok->kind == TK_ID && keyword_of(pr) != KW_NONE) {
+        return start_keyword(pr, keyword_of(pr), out);
+    } else {
+        *out = parse_assign(pr, true);
+    }
+    return *out != NULL ? ST_LEAF : ST_FAIL;
 }
 
-static bool add_assign(ps *p, int var, tb_expr *rhs) {
-    tb_assign *grown = pnew(p, (p->tb->nassigns + 1U) * sizeof *grown);
-    if (grown == NULL) {
-        return false;
+/* A block: add the finished child (if any), then close at `end` or make room for the next. */
+static bool step_block(parser *pr, sframe *frm, tb_stmt *child, bool *done) {
+    tb_stmt *stmt = frm->stmt;
+    if (child != NULL) {
+        stmt->list[stmt->n++] = child;
     }
-    if (p->tb->nassigns > 0) {
-        memcpy(grown, p->tb->assigns, p->tb->nassigns * sizeof *grown);
+    *done = accept_kw(pr, "end");
+    if (*done) {
+        return true;
     }
-    grown[p->tb->nassigns] = (tb_assign){var, rhs};
-    p->tb->assigns = grown;
-    p->tb->nassigns++;
+    if (cur(pr)->kind == TK_EOF) {
+        return fail(pr, "missing `end`");
+    }
+    if (stmt->n == frm->cap) {
+        tb_stmt **wider = (tb_stmt **)pnew_ptrs(pr, (size_t)frm->cap * 2U);
+        if (wider == NULL) {
+            return false;
+        }
+        memcpy((void *)wider, (const void *)stmt->list, (size_t)stmt->n * sizeof(void *));
+        stmt->list = wider;
+        frm->cap *= 2U;
+    }
     return true;
 }
 
-static bool parse_decl_item(ps *p, const char *kw, uint32_t width, bool sgn) {
-    bool is_wire = strcmp(kw, "wire") == 0;
+/* A case: add the finished item body (if any), then close at `endcase` or read the next labels. */
+static bool step_case(parser *pr, sframe *frm, tb_stmt *child, bool *done) {
+    tb_stmt *stmt = frm->stmt;
+    if (child != NULL) {
+        stmt->list[stmt->n++] = child;
+    }
+    *done = accept_kw(pr, "endcase");
+    if (*done) {
+        return true;
+    }
+    if (stmt->n == CASE_MAX_ITEMS || stmt->list == NULL || cur(pr)->kind == TK_EOF) {
+        return fail(pr, "case with more than 64 items");
+    }
+    uint32_t nlab = 0;
+    if (!case_item_labels(pr, &stmt->labels[(size_t)stmt->n * TB_MAX_ARGS], &nlab)) {
+        return false;
+    }
+    stmt->nlab[stmt->n] = nlab;
+    return true;
+}
+
+/* A finished child reaches the open statement on top: store it; *done when that one is finished
+ * too, *again when the open statement wants another child. */
+static bool deliver_child(parser *pr, tb_stmt *child, bool *done) {
+    sframe *frm = odin3_vec_at(&pr->frames, pr->frames.len - 1U);
+    tb_stmt *stmt = frm->stmt;
+    *done = true;
+    switch (frm->kind) {
+    case SF_BODY:
+        stmt->a = child;
+        return true;
+    case SF_IF_THEN:
+        stmt->a = child;
+        if (accept_kw(pr, "else")) {
+            frm->kind = SF_IF_ELSE;
+            *done = false;
+        }
+        return true;
+    case SF_IF_ELSE:
+        stmt->b = child;
+        return true;
+    case SF_BLOCK:
+        return step_block(pr, frm, child, done);
+    default:
+        return step_case(pr, frm, child, done);
+    }
+}
+
+/* Progress of parse_stmt: *have says a finished statement (or the start of a frame) waits in
+ * *result; the step either starts a statement or hands the finished one to its parent. */
+static bool stmt_step(parser *pr, tb_stmt **result, bool *have) {
+    if (!*have) {
+        sstart st = start_stmt(pr, result);
+        *have = st == ST_LEAF || st == ST_CHECK;
+        *result = st == ST_LEAF ? *result : NULL;
+        return st != ST_FAIL;
+    }
+    bool done = false;
+    bool ok = deliver_child(pr, *result, &done);
+    *have = ok && done;
+    *result = NULL;
+    if (*have) {
+        *result = ((sframe *)odin3_vec_at(&pr->frames, pr->frames.len - 1U))->stmt;
+        odin3_vec_pop(&pr->frames);
+    }
+    return ok;
+}
+
+/* Parses one statement; NULL on failure (reported). */
+static tb_stmt *parse_stmt(parser *pr) {
+    size_t floor_len = pr->frames.len;
+    tb_stmt *result = NULL;
+    bool have = false;
+    bool ok = true;
+    while (ok && !pr->failed && !(have && pr->frames.len == floor_len)) {
+        ok = stmt_step(pr, &result, &have);
+    }
+    bool good = ok && !pr->failed && have && result != NULL;
+    truncate_vec(&pr->frames, floor_len);
+    return good ? result : NULL;
+}
+
+/* --- module items --- */
+static bool parse_array_range(parser *pr, int var_index) {
+    int64_t high = 0;
+    int64_t low = 0;
+    pr->pos++;
+    if (!const_int(pr, &low) || !expect_op(pr, ":") || !const_int(pr, &high) ||
+        !expect_op(pr, "]") || low != 0 || high < 0 || high > (1 << ARRAY_MAX_LOG2)) {
+        return fail(pr, "array range (use [0:N])");
+    }
+    tb_var *var = &pr->tb->vars[var_index];
+    var->depth = (uint32_t)high + 1U;
+    var->mem = pnew(pr, (size_t)var->depth * sizeof *var->mem);
+    return var->mem != NULL;
+}
+
+static bool add_assign(parser *pr, int var, tb_expr *rhs) {
+    tb_assign *grown = pnew(pr, ((size_t)pr->tb->nassigns + 1U) * sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    if (pr->tb->nassigns > 0) {
+        memcpy(grown, pr->tb->assigns, (size_t)pr->tb->nassigns * sizeof *grown);
+    }
+    grown[pr->tb->nassigns] = (tb_assign){var, rhs};
+    pr->tb->assigns = grown;
+    pr->tb->nassigns++;
+    return true;
+}
+
+static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
-    if (cur(p)->kind != TK_ID) {
-        return fail(p, "declaration syntax");
+    if (cur(pr)->kind != TK_ID) {
+        return fail(pr, "declaration syntax");
     }
     char name[TB_NAME];
-    (void)snprintf(name, sizeof name, "%s", cur(p)->text);
-    p->pos++;
-    int var = add_var(p, name, width, sgn, is_wire);
+    (void)snprintf(name, sizeof name, "%s", cur(pr)->text);
+    pr->pos++;
+    shape.is_wire = strcmp(kw, "wire") == 0;
+    int var = add_var(pr, name, shape);
     if (var < 0) {
         return false;
     }
-    p->tb->vars[var].is_param = is_param;
-    if (is_op(p, "[")) {
-        return parse_array_range(p, var);
+    pr->tb->vars[var].is_param = is_param;
+    if (is_op(pr, "[")) {
+        return parse_array_range(pr, var);
     }
-    if (!accept_op(p, "=")) {
-        return !is_param || fail(p, "parameter without a value");
+    if (!accept_op(pr, "=")) {
+        return !is_param || fail(pr, "parameter without a value");
     }
-    tb_expr *init = parse_expr(p);
+    tb_expr *init = parse_expr(pr);
     int64_t val = 0;
     if (init == NULL) {
         return false;
     }
-    if (is_wire) {
-        return add_assign(p, var, init);
+    if (shape.is_wire) {
+        return add_assign(pr, var, init);
     }
-    if (!tb_const(p->tb, init, &val)) {
-        return fail(p, "non-constant initialiser");
+    if (!tb_const(pr->tb, init, &val)) {
+        return fail(pr, "non-constant initialiser");
     }
-    p->tb->vars[var].val = (uint64_t)val & tb_mask(width);
+    pr->tb->vars[var].val = (uint64_t)val & tb_mask(shape.width);
     return true;
 }
 
-static bool parse_decl(ps *p) {
+static bool parse_decl(parser *pr) {
     char kw[TB_NAME];
-    (void)snprintf(kw, sizeof kw, "%s", cur(p)->text);
-    p->pos++;
-    uint32_t width = strcmp(kw, "integer") == 0 ? 32U : 1U;
-    bool sgn = strcmp(kw, "integer") == 0;
-    if (accept_kw(p, "signed")) {
-        sgn = true;
+    (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
+    pr->pos++;
+    bool is_int = strcmp(kw, "integer") == 0;
+    var_shape shape = {is_int ? (uint32_t)TB_INT_BITS : 1U, is_int, false};
+    if (accept_kw(pr, "signed")) {
+        shape.sgn = true;
     }
-    if (is_op(p, "[") && !parse_range(p, &width)) {
+    if (is_op(pr, "[") && !parse_range(pr, &shape.width)) {
         return false;
     }
     do {
-        if (!parse_decl_item(p, kw, width, sgn)) {
+        if (!parse_decl_item(pr, kw, shape)) {
             return false;
         }
-    } while (accept_op(p, ","));
-    return expect_op(p, ";");
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ";");
 }
 
-static bool add_proc(ps *p, tb_stmt *body, bool always) {
-    tb_module *tb = p->tb;
-    tb_proc_def *grown = pnew(p, (tb->nprocs + 1U) * sizeof *grown);
+static bool add_proc(parser *pr, tb_stmt *body, bool always) {
+    tb_module *tb = pr->tb;
+    tb_proc_def *grown = pnew(pr, ((size_t)tb->nprocs + 1U) * sizeof *grown);
     if (grown == NULL || body == NULL) {
         return false;
     }
     if (tb->nprocs > 0) {
-        memcpy(grown, tb->procs, tb->nprocs * sizeof *grown);
+        memcpy(grown, tb->procs, (size_t)tb->nprocs * sizeof *grown);
     }
     grown[tb->nprocs++] = (tb_proc_def){body, always};
     tb->procs = grown;
     return true;
 }
 
-static bool starts_with_wait(const tb_stmt *s) {
-    while (s->kind == S_BLOCK && s->n > 0) {
-        s = s->list[0];
+static bool starts_with_wait(const tb_stmt *stmt) {
+    while (stmt->kind == S_BLOCK && stmt->n > 0) {
+        stmt = stmt->list[0];
     }
-    return s->kind == S_DELAY || s->kind == S_EVENT || s->kind == S_WAIT;
+    return stmt->kind == S_DELAY || stmt->kind == S_EVENT || stmt->kind == S_WAIT;
 }
 
-static bool parse_always(ps *p) {
-    p->pos++;
-    tb_stmt *body = parse_stmt(p);
+static bool parse_always(parser *pr) {
+    pr->pos++;
+    tb_stmt *body = parse_stmt(pr);
     if (body != NULL && !starts_with_wait(body)) {
-        return fail(p, "always block that does not start with #, @ or wait (zero-delay loop)");
+        return fail(pr, "always block that does not start with #, @ or wait (zero-delay loop)");
     }
-    return add_proc(p, body, true);
+    return add_proc(pr, body, true);
 }
 
-static bool parse_assign_item(ps *p) {
-    p->pos++;
-    const tb_expr *lhs = parse_primary(p);
-    if (lhs == NULL || lhs->kind != E_VAR || !p->tb->vars[lhs->var].is_wire) {
-        return fail(p, "assign to anything but a whole wire");
+static bool parse_assign_item(parser *pr) {
+    pr->pos++;
+    const tb_expr *lhs = parse_primary(pr);
+    if (lhs == NULL || lhs->kind != E_VAR || !pr->tb->vars[lhs->var].is_wire) {
+        return fail(pr, "assign to anything but a whole wire");
     }
-    if (!expect_op(p, "=")) {
+    if (!expect_op(pr, "=")) {
         return false;
     }
-    tb_expr *rhs = parse_expr(p);
-    return rhs != NULL && expect_op(p, ";") && add_assign(p, lhs->var, rhs);
+    tb_expr *rhs = parse_expr(pr);
+    return rhs != NULL && expect_op(pr, ";") && add_assign(pr, lhs->var, rhs);
 }
 
-static bool parse_inst_conns(ps *p, tb_inst *inst) {
-    uint32_t cap = 16;
-    inst->conns = pnew(p, cap * sizeof *inst->conns);
-    if (inst->conns == NULL || !expect_op(p, "(")) {
+/* One port connection: `.port(expr)`, `.port()` or an ordered `expr`. */
+static bool parse_conn(parser *pr, tb_conn *conn) {
+    if (accept_op(pr, ".")) {
+        (void)snprintf(conn->port, sizeof conn->port, "%s", cur(pr)->text);
+        pr->pos++;
+        if (!expect_op(pr, "(")) {
+            return false;
+        }
+        conn->expr = is_op(pr, ")") ? NULL : parse_expr(pr);
+        if ((conn->expr == NULL && !is_op(pr, ")")) || !expect_op(pr, ")")) {
+            return false;
+        }
+    } else {
+        conn->expr = parse_expr(pr);
+    }
+    if ((conn->expr == NULL && conn->port[0] == '\0') || (!accept_op(pr, ",") && !is_op(pr, ")"))) {
+        return fail(pr, "port connection syntax");
+    }
+    return true;
+}
+
+static bool parse_inst_conns(parser *pr, tb_inst *inst) {
+    uint32_t cap = INST_CONNS_MAX;
+    inst->conns = pnew(pr, (size_t)cap * sizeof *inst->conns);
+    if (inst->conns == NULL || !expect_op(pr, "(")) {
         return false;
     }
-    while (!accept_op(p, ")")) {
+    while (!accept_op(pr, ")")) {
         if (inst->nconns == cap) {
-            return fail(p, "more than 16 port connections");
+            return fail(pr, "more than 16 port connections");
         }
-        tb_conn *c = &inst->conns[inst->nconns++];
-        if (accept_op(p, ".")) {
-            (void)snprintf(c->port, sizeof c->port, "%s", cur(p)->text);
-            p->pos++;
-            if (!expect_op(p, "(")) {
-                return false;
-            }
-            c->expr = is_op(p, ")") ? NULL : parse_expr(p);
-            if ((c->expr == NULL && !is_op(p, ")")) || !expect_op(p, ")")) {
-                return false;
-            }
-        } else {
-            c->expr = parse_expr(p);
-        }
-        if ((c->expr == NULL && !c->port[0]) || (!accept_op(p, ",") && !is_op(p, ")"))) {
-            return fail(p, "port connection syntax");
+        if (!parse_conn(pr, &inst->conns[inst->nconns++])) {
+            return false;
         }
     }
     return true;
 }
 
-static bool parse_instance(ps *p) {
-    tb_module *tb = p->tb;
-    tb_inst *grown = pnew(p, (tb->ninsts + 1U) * sizeof *grown);
+static bool parse_instance(parser *pr) {
+    tb_module *tb = pr->tb;
+    tb_inst *grown = pnew(pr, ((size_t)tb->ninsts + 1U) * sizeof *grown);
     if (grown == NULL) {
         return false;
     }
     if (tb->ninsts > 0) {
-        memcpy(grown, tb->insts, tb->ninsts * sizeof *grown);
+        memcpy(grown, tb->insts, (size_t)tb->ninsts * sizeof *grown);
     }
     tb->insts = grown;
     tb_inst *inst = &grown[tb->ninsts++];
-    inst->line = cur(p)->line;
-    (void)snprintf(inst->module, sizeof inst->module, "%s", cur(p)->text);
-    p->pos++;
-    if (is_op(p, "#")) {
-        return fail(p, "parameter override on a DUT instance (the DUT is already elaborated)");
+    inst->line = cur(pr)->line;
+    (void)snprintf(inst->module, sizeof inst->module, "%s", cur(pr)->text);
+    pr->pos++;
+    if (is_op(pr, "#")) {
+        return fail(pr, "parameter override on a DUT instance (the DUT is already elaborated)");
     }
-    if (cur(p)->kind != TK_ID) {
-        return fail(p, "module item");
+    if (cur(pr)->kind != TK_ID) {
+        return fail(pr, "module item");
     }
-    (void)snprintf(inst->name, sizeof inst->name, "%s", cur(p)->text);
-    p->pos++;
-    return parse_inst_conns(p, inst) && expect_op(p, ";");
+    (void)snprintf(inst->name, sizeof inst->name, "%s", cur(pr)->text);
+    pr->pos++;
+    return parse_inst_conns(pr, inst) && expect_op(pr, ";");
 }
 
-static bool parse_item(ps *p) {
-    const tb_tok *t = cur(p);
-    if (t->kind != TK_ID) {
-        return fail(p, "module item");
+static bool parse_item(parser *pr) {
+    const tb_tok *tok = cur(pr);
+    if (tok->kind != TK_ID) {
+        return fail(pr, "module item");
     }
-    if (is_kw(p, "reg") || is_kw(p, "wire") || is_kw(p, "integer") || is_kw(p, "parameter") ||
-        is_kw(p, "localparam")) {
-        return parse_decl(p);
+    if (is_kw(pr, "reg") || is_kw(pr, "wire") || is_kw(pr, "integer") || is_kw(pr, "parameter") ||
+        is_kw(pr, "localparam")) {
+        return parse_decl(pr);
     }
-    if (is_kw(p, "initial")) {
-        p->pos++;
-        return add_proc(p, parse_stmt(p), false);
+    if (is_kw(pr, "initial")) {
+        pr->pos++;
+        return add_proc(pr, parse_stmt(pr), false);
     }
-    if (is_kw(p, "always")) {
-        return parse_always(p);
+    if (is_kw(pr, "always")) {
+        return parse_always(pr);
     }
-    if (is_kw(p, "assign")) {
-        return parse_assign_item(p);
+    if (is_kw(pr, "assign")) {
+        return parse_assign_item(pr);
     }
     static const char *const REJECT[] = {
         "genvar", "generate", "task",    "function", "real",   "time",  "string",
         "event",  "defparam", "specify", "input",    "output", "inout", "and",
         "or",     "nand",     "nor",     "xor",      "not",    "buf",   NULL};
     for (size_t i = 0; REJECT[i] != NULL; i++) {
-        if (is_kw(p, REJECT[i])) {
-            return fail(p, t->text);
+        if (is_kw(pr, REJECT[i])) {
+            return fail(pr, tok->text);
         }
     }
-    return parse_instance(p);
+    return parse_instance(pr);
 }
 
-static bool parse_header(ps *p, const char *top) {
-    if (!accept_kw(p, "module") || cur(p)->kind != TK_ID) {
-        return fail(p, "file does not start with a module");
+static bool parse_header(parser *pr, const char *top) {
+    if (!accept_kw(pr, "module") || cur(pr)->kind != TK_ID) {
+        return fail(pr, "file does not start with a module");
     }
-    (void)snprintf(p->tb->name, sizeof p->tb->name, "%s", cur(p)->text);
-    p->pos++;
-    if (top != NULL && strcmp(top, p->tb->name) != 0) {
-        return fail(p,
+    (void)snprintf(pr->tb->name, sizeof pr->tb->name, "%s", cur(pr)->text);
+    pr->pos++;
+    if (top != NULL && strcmp(top, pr->tb->name) != 0) {
+        return fail(pr,
                     "--top names a module that is not the first (one testbench module per file)");
     }
-    if (accept_op(p, "(") && !expect_op(p, ")")) {
+    if (accept_op(pr, "(") && !expect_op(pr, ")")) {
         return false;
     }
-    return expect_op(p, ";");
+    return expect_op(pr, ";");
 }
 
-odin3_status tb_parse(const char *file, const char *text, const char *top, tb_module **out) {
+static void parse_items(parser *pr) {
+    while (!pr->failed && !accept_kw(pr, "endmodule")) {
+        if (cur(pr)->kind == TK_EOF) {
+            fail(pr, "missing endmodule");
+        } else if (is_kw(pr, "module")) {
+            fail(pr, "more than one module in the file");
+        } else {
+            (void)parse_item(pr);
+        }
+    }
+}
+
+odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out) {
     *out = NULL;
     tb_module *tb = calloc(1, sizeof *tb);
     tb_lexed lexed = {0};
     if (tb == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    ps p = {tb, NULL, 0, file, false};
-    if (!tb_lex(file, text, tb, &lexed)) {
+    if (!tb_lex(src, tb, &lexed)) {
         tb_module_free(tb);
         return ODIN3_ERR_INVALID_ARG;
     }
-    p.t = lexed.toks;
-    if (parse_header(&p, top)) {
-        while (!p.failed && !accept_kw(&p, "endmodule")) {
-            bool bad = cur(&p)->kind == TK_EOF || is_kw(&p, "module");
-            if (bad) {
-                fail(&p, cur(&p)->kind == TK_EOF ? "missing endmodule"
-                                                 : "more than one module in the file");
-            } else {
-                (void)parse_item(&p);
-            }
-        }
+    parser pr = {.tb = tb, .toks = lexed.toks, .file = src->file};
+    odin3_vec_init(&pr.ents, sizeof(xent));
+    odin3_vec_init(&pr.vals, sizeof(tb_expr *));
+    odin3_vec_init(&pr.frames, sizeof(sframe));
+    if (parse_header(&pr, top)) {
+        parse_items(&pr);
     }
-    if (!p.failed && cur(&p)->kind != TK_EOF) {
-        fail(&p, "more than one module in the file");
+    if (!pr.failed && cur(&pr)->kind != TK_EOF) {
+        fail(&pr, "more than one module in the file");
     }
-    if (p.failed) {
+    odin3_vec_free(&pr.ents);
+    odin3_vec_free(&pr.vals);
+    odin3_vec_free(&pr.frames);
+    if (pr.failed) {
         tb_module_free(tb);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -1130,6 +1571,6 @@ void tb_module_free(tb_module *tb) {
     for (uint32_t i = 0; i < tb->nallocs; i++) {
         free(tb->allocs[i]);
     }
-    free(tb->allocs);
+    free((void *)tb->allocs);
     free(tb);
 }

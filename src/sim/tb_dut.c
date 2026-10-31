@@ -117,20 +117,20 @@ void tb_dut_close(tb_dut *dut) {
 static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     bool changed = false;
     for (uint32_t i = 0; i < dut->inst->nconns; i++) {
-        tb_conn *c = &dut->inst->conns[i];
-        if (c->is_out || (int)i == dut->clock_conn || c->expr == NULL) {
+        tb_conn *conn = &dut->inst->conns[i];
+        if (conn->is_out || (int)i == dut->clock_conn || conn->expr == NULL) {
             continue;
         }
-        uint64_t val = tb_eval_assign(ev, c->expr, c->width);
-        if (c->seen && val == c->last) {
+        uint64_t val = tb_eval_assign(ev, conn->expr, conn->width);
+        if (conn->seen && val == conn->last) {
             continue;
         }
-        for (uint32_t b = 0; b < c->width; b++) {
-            odin3_sim_bit bit = {c->sim_port, b};
-            (void)odin3_sim_set_input(dut->sim, bit, ((val >> b) & 1U) != 0);
+        for (uint32_t bit_no = 0; bit_no < conn->width; bit_no++) {
+            odin3_sim_bit bit = {conn->sim_port, bit_no};
+            (void)odin3_sim_set_input(dut->sim, bit, ((val >> bit_no) & 1U) != 0);
         }
-        c->last = val;
-        c->seen = true;
+        conn->last = val;
+        conn->seen = true;
         changed = true;
     }
     return changed;
@@ -140,36 +140,36 @@ static void clock_step(tb_ev *ev, tb_dut *dut) {
     if (dut->clock_conn < 0) {
         return;
     }
-    tb_conn *c = &dut->inst->conns[dut->clock_conn];
-    if (c->expr == NULL) {
+    tb_conn *conn = &dut->inst->conns[dut->clock_conn];
+    if (conn->expr == NULL) {
         return;
     }
-    uint64_t val = tb_eval(ev, c->expr, c->expr->width, false) & 1U;
-    if (c->seen && val != c->last) {
+    uint64_t val = tb_eval(ev, conn->expr, conn->expr->width, false) & 1U;
+    if (conn->seen && val != conn->last) {
         (void)odin3_sim_clock_edge(dut->sim, val != 0 ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE);
     }
-    c->last = val;
-    c->seen = true;
+    conn->last = val;
+    conn->seen = true;
 }
 
 static bool publish(tb_ev *ev, tb_dut *dut) {
     bool changed = false;
     for (uint32_t i = 0; i < dut->inst->nconns; i++) {
-        tb_conn *c = &dut->inst->conns[i];
-        if (!c->is_out || c->expr == NULL) {
+        tb_conn *conn = &dut->inst->conns[i];
+        if (!conn->is_out || conn->expr == NULL) {
             continue;
         }
         uint64_t val = 0;
-        for (uint32_t b = 0; b < c->width; b++) {
+        for (uint32_t bit_no = 0; bit_no < conn->width; bit_no++) {
             bool bit = false;
-            odin3_sim_bit at = {c->sim_port, b};
+            odin3_sim_bit at = {conn->sim_port, bit_no};
             (void)odin3_sim_get_output(dut->sim, at, &bit);
-            val |= bit ? (uint64_t)1 << b : 0;
+            val |= bit ? (uint64_t)1 << bit_no : 0;
         }
-        if (!c->seen || val != c->last) {
-            tb_write(ev, c->expr, val);
-            c->last = val;
-            c->seen = true;
+        if (!conn->seen || val != conn->last) {
+            tb_write(ev, conn->expr, val);
+            conn->last = val;
+            conn->seen = true;
             changed = true;
         }
     }
