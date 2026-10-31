@@ -2258,6 +2258,39 @@ odin3_status odin3_simulation_get_cycle(const odin3_simulation *sim, uint64_t *c
  */
 odin3_status odin3_simulation_reset(odin3_simulation *sim);
 
+/*
+ * A plain graph for odin3_graphlets_count: n nodes (0 .. n-1) and n_edges directed edges
+ * from[i] -> to[i].
+ */
+typedef struct odin3_graphlet_graph {
+    uint32_t n;
+    uint64_t n_edges;
+    const uint32_t *from;
+    const uint32_t *to;
+} odin3_graphlet_graph;
+
+/* What to count: directed (nonzero) or undirected, the largest undirected graphlet size (4 or 5),
+ * and a bound on the connected node sets visited (0: none). */
+typedef struct odin3_graphlet_opts {
+    int directed;
+    uint32_t size;
+    uint64_t max_work;
+} odin3_graphlet_opts;
+
+/*
+ * Graphlet orbit counts of a plain graph, with no design (graph-generic core, src/graph/, spec
+ * docs/specs/2026-10-30-graphlets-design.md). Ids at or above n are ODIN3_ERR_INVALID_ARG;
+ * self-loops are dropped and parallel edges collapse. Undirected: the simple undirected graph (both
+ * directions merged), size 4 (15 orbits) or 5 (73 orbits, Przulj's numbering 0..72). Directed:
+ * 2 to 4 node directed graphlets, 129 orbits (size is ignored); an anti-parallel pair counts once
+ * per direction (Sarajlic 2016). out receives n * n_orbits int64 values, row-major (node, orbit),
+ * and out_len is its capacity in values (less than needed is ODIN3_ERR_INVALID_ARG). Exceeding
+ * max_work is ODIN3_ERR_INVALID_ARG (logged). The caller owns all memory. ODIN3_ERR_NO_MEMORY when
+ * the counter cannot allocate.
+ */
+odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
+                                   const odin3_graphlet_opts *opts, int64_t *out, uint64_t out_len);
+
 /* ODIN3_CDEF_END */
 
 #ifdef __cplusplus

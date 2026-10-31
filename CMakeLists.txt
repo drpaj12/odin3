@@ -54,6 +54,7 @@ include(${PROJECT_SOURCE_DIR}/cmake/odin3_commit.cmake)
 # exports only what carries ODIN3_EXPORT. To add a module, append its .c file to this list.
 add_library(odin3_core OBJECT
     src/api/version.c
+    src/api/graphlets.c
     src/api/sv.c
     src/api/plugin.c
     src/api/common.c
@@ -117,6 +118,11 @@ add_library(odin3_core OBJECT
     src/graph/tables.c
     src/graph/przulj.c
     src/graph/count.c
+    src/graph/sig.c
+    src/passes/graphlets/graphlets.c
+    src/passes/graphlets/gl_net.c
+    src/passes/graphlets/gl_group.c
+    src/passes/graphlets/gl_cal.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
     src/passes/submod/busattr.c
@@ -477,7 +483,7 @@ set_target_properties(odin3_core PROPERTIES
 target_include_directories(odin3_core
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} PRIVATE odin3_flags)
+target_link_libraries(odin3_core PUBLIC ${CMAKE_DL_LIBS} m PRIVATE odin3_flags)
 set_source_files_properties(src/api/version.c PROPERTIES COMPILE_DEFINITIONS
     "ODIN3_COMMIT_STR=\"${ODIN3_COMMIT}\";ODIN3_COMMIT_DIRTY_FLAG=${ODIN3_COMMIT_DIRTY}")
 
@@ -1981,6 +1987,15 @@ if(BUILD_TESTING)
     set_tests_properties(levelize_micro_word_refused PROPERTIES LABELS unit)
     # graphlets: the counters.
     odin3_add_unit_test(test_graphlets_count)
+    odin3_add_unit_test(test_graphlets_sig)
+    target_compile_definitions(test_graphlets_sig PRIVATE ODIN3_GL_ROOT="${PROJECT_SOURCE_DIR}")
+    foreach(_m IN ITEMS ff.parmys adder_hard_block.parmys ansiportlist_2.parmys)
+        add_test(NAME graphlets_cli_${_m}
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/cli/graphlets_cli.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/golden/blif/${_m}.blif
+                    ${PROJECT_BINARY_DIR}/graphlets_cli)
+        set_tests_properties(graphlets_cli_${_m} PROPERTIES LABELS unit)
+    endforeach()
     add_executable(glet_count tools/graphlets/glet_count.c)
     target_include_directories(glet_count PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(glet_count PRIVATE odin3_core odin3_flags)
@@ -3315,6 +3330,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_ast
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_ast PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # graphlets: the graph-generic counts and the pass through the Python binding.
+    add_test(NAME python_graphlets
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env} ODIN3_GLET_COUNT=$<TARGET_FILE:glet_count>
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_graphlets
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_graphlets PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
     add_test(NAME python_copy

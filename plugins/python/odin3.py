@@ -154,6 +154,34 @@ class Odin3:
     def status_string(self, status: int) -> str:
         return str(self.ffi.string(self.lib.odin3_status_string(status)).decode())
 
+    def graphlet_counts(
+        self,
+        n: int,
+        edges: Sequence[tuple[int, int]],
+        directed: bool = False,
+        size: int = 5,
+        max_work: int = 0,
+    ) -> list[list[int]]:
+        """Graphlet orbit counts of any graph, no design needed (odin3_graphlets_count).
+
+        The graph has nodes 0..n-1 and the directed edges (u, v). Undirected (default): the simple
+        undirected graph, size 4 (15 orbits) or 5 (73 orbits, Przulj numbering). Directed: 2 to 4
+        node directed graphlets, 129 orbits (size is ignored). Returns n rows of orbit counts.
+        """
+        n_orbits = 129 if directed else {4: 15, 5: 73}.get(size, 0)
+        if n_orbits == 0:
+            raise ValueError("size must be 4 or 5")
+        src = self.ffi.new("uint32_t[]", [u for u, _ in edges] or [0])
+        dst = self.ffi.new("uint32_t[]", [v for _, v in edges] or [0])
+        out = self.ffi.new("int64_t[]", max(n * n_orbits, 1))
+        graph = self.ffi.new("odin3_graphlet_graph *", {
+            "n": n, "n_edges": len(edges), "from": src, "to": dst})
+        opts = self.ffi.new("odin3_graphlet_opts *", {
+            "directed": int(directed), "size": size, "max_work": max_work})
+        status = self.lib.odin3_graphlets_count(graph, opts, out, n * n_orbits)
+        self.check("odin3_graphlets_count", status)
+        return [list(out[row * n_orbits:(row + 1) * n_orbits]) for row in range(n)]
+
     def check(self, function: str, status: int) -> None:
         """Raise Odin3Error unless status is ODIN3_OK."""
         if status != self.lib.ODIN3_OK:
@@ -511,6 +539,52 @@ class Design:
         keep = self.odin3.ffi.new("char[]", origin.encode())  # alive during the call
         src = (keep, self.odin3.lib.ODIN3_SCRIPT_BY_COMMAND)
         self.call("odin3_design_run_script", text.encode(), src)
+
+    def graphlets(
+        self,
+        *,
+        directed: bool = False,
+        size: int = 5,
+        exclude_global: bool = False,
+        global_fanout: int = 16,
+        per_node: bool = False,
+        halo: int = 0,
+        focus: Sequence[str] = (),
+        cells: str | Path | None = None,
+        partition: str | None = None,
+        max_nodes: int | None = None,
+        max_work: int | None = None,
+        force: bool = False,
+    ) -> dict[str, Any]:
+        """Run the graphlets pass and return its JSON (schema odin3-graphlets, version 1).
+
+        Groups (whole modules, foci, cell partitions) each have orbit_totals and gdd; with
+        per_node=True also node_vectors keyed by the module-local node id and name. Whole-module
+        summaries are also stored as module attributes odin3:glet_* (Module.attr). See
+        docs/user/graphlets.md.
+        """
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "graphlets.json"
+            words = ["--out", _quote(out), "--size", str(size), "--halo", str(halo)]
+            words += ["--directed"] * directed + ["--per-node"] * per_node + ["--force"] * force
+            if exclude_global:
+                words += ["--exclude-global", "--global-fanout", str(global_fanout)]
+            for item in focus:
+                words += ["--focus", _quote(item)]
+            if cells is not None:
+                words += ["--cells", _quote(cells)]
+            if partition is not None:
+                words += ["--partition", _quote(partition)]
+            if max_nodes is not None:
+                words += ["--max-nodes", str(max_nodes)]
+            if max_work is not None:
+                words += ["--max-work", str(max_work)]
+            self.run_pass("graphlets", " ".join(words))
+            result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+            return result
 
     def simulate(self, top: str | None = None) -> Simulation:
         """Open a Simulation of module `top` (default: the design's top); see Simulation."""
@@ -1611,3 +1685,33 @@ def timing_attribution(flow_dir: str | Path, paths: int | None = None) -> dict[s
                 Path(flow_dir), paths)
             return report
     raise RuntimeError("timing_attr.py not found: the install has no tools/flow data")
+
+
+def graphlet_counts(
+    n: int,
+    edges: Sequence[tuple[int, int]],
+    directed: bool = False,
+    size: int = 5,
+    max_work: int = 0,
+) -> list[list[int]]:
+    """Graphlet orbit counts of a plain edge list (see Odin3.graphlet_counts)."""
+    return default().graphlet_counts(n, edges, directed, size, max_work)
+
+
+def graphlet_compare(
+    a: str | Path, b: str | Path, calibration: str | Path | None = None
+) -> dict[str, Any]:
+    """Compare two graphlet signatures (files written by the graphlets pass; `FILE#NAME` picks a
+    group). Returns gdd_agreement and cosine_log, and the Bayesian posterior(s) when a
+    calibration file is given (otherwise only the similarities: uncalibrated)."""
+    import json
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp, Design() as design:
+        out = Path(tmp) / "compare.json"
+        words = ["--compare", _quote(a), _quote(b), "--out", _quote(out)]
+        if calibration is not None:
+            words += ["--calibration", _quote(calibration)]
+        design.run_pass("graphlets", " ".join(words))
+        result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+        return result

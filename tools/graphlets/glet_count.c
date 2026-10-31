@@ -36,9 +36,25 @@ static int load(const char *path, glet_graph *g) {
     return bad;
 }
 
+/* Prints the orbit catalogue: orbit graphlet nodes edges mult code pos, one line per orbit. */
+static int catalogue(bool directed) {
+    for (uint32_t o = 0; o < glet_orbit_count(directed, directed ? GLET_MAX_DIR_SIZE : 5); o++) {
+        glet_orbit_info in;
+        if (!glet_orbit_describe(directed, o, &in)) {
+            return 1;
+        }
+        printf("%u %u %u %u %u %u %u\n", (unsigned)o, (unsigned)in.graphlet, (unsigned)in.nodes,
+               (unsigned)in.edges, (unsigned)in.mult, (unsigned)in.code, (unsigned)in.pos);
+    }
+    return 0;
+}
+
 int main(int argc, char **argv) {
     bool directed = argc > 1 && strcmp(argv[1], "--directed") == 0;
     int base = directed ? 2 : 1;
+    if (argc == base + 1 && strcmp(argv[base], "--catalogue") == 0) {
+        return catalogue(directed);
+    }
     if (argc != base + 3) {
         return usage();
     }

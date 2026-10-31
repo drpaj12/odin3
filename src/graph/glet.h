@@ -60,6 +60,8 @@ typedef struct glet_orbit_info {
     uint32_t nodes;
     uint32_t edges; /* edges of the graphlet (directed: oriented edges) */
     uint32_t mult;
+    uint32_t code; /* canonical adjacency code of the graphlet (tables.c layout) */
+    uint32_t pos;  /* a position of the orbit in that canonical labelling */
 } glet_orbit_info;
 bool glet_orbit_describe(bool directed, uint32_t orbit, glet_orbit_info *out);
 
@@ -76,5 +78,31 @@ typedef struct glet_spec {
  * ODIN3_ERR_INVALID_ARG (logged) with counts partial. *work receives the sets visited. */
 odin3_status glet_count(const glet_graph *g, const glet_spec *spec, int64_t *counts,
                         uint64_t *work);
+
+/* --- signatures (spec sections 6 and 13) ---------------------------------------------------- */
+
+/* The design-level signature of a set of nodes: orbit totals and the graphlet degree distribution
+ * (GDD): for orbit j, the pairs (degree k >= 1, number of nodes that touch the orbit k times),
+ * sorted by k, stored flat in deg / num with off[j] .. off[j+1]. */
+typedef struct glet_sig {
+    uint32_t norb;
+    uint64_t nodes; /* nodes the signature covers */
+    int64_t *totals;
+    uint32_t *off;
+    int64_t *deg;
+    uint64_t *num;
+} glet_sig;
+
+/* Signature of rows of counts (n x norb, row-major) whose mask byte is nonzero (mask NULL: all). */
+odin3_status glet_sig_make(glet_sig *sig, const int64_t *counts, uint32_t n, uint32_t norb,
+                           const uint8_t *mask);
+void glet_sig_free(glet_sig *sig);
+
+/* GDD agreement (Przulj 2007; arithmetic mean over orbits) of two signatures of equal norb, in
+ * [0, 1]; agreement of the single orbit j in per_orbit when non-NULL (norb doubles). */
+double glet_gdd_agreement(const glet_sig *lhs, const glet_sig *rhs, double *per_orbit);
+
+/* Cosine similarity of log(1 + orbit total) vectors, in [0, 1]. Two zero vectors give 1. */
+double glet_cosine_log(const glet_sig *lhs, const glet_sig *rhs);
 
 #endif

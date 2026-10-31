@@ -285,7 +285,7 @@ static odin3_status esu_open(esu *es, const glet_graph *g, bool directed, unsign
 odin3_status glet_count(const glet_graph *g, const glet_spec *spec, int64_t *counts,
                         uint64_t *work) {
     bool directed = spec->directed;
-    unsigned size = spec->size;
+    unsigned size = directed ? (unsigned)GLET_MAX_DIR_SIZE : spec->size;
     uint64_t max_work = spec->max_work;
     uint32_t norb = glet_orbit_count(directed, size);
     if (norb == 0 || counts == NULL) {

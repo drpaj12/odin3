@@ -328,13 +328,13 @@ static void test_orbits_per_size(void) {
 }
 
 static void test_undirected4_vs_bruteforce(void) {
-    run_compare(false, 4, 4, 30);
+    run_compare(false, 4, 4, 150);
 }
 static void test_undirected5_vs_bruteforce(void) {
     run_compare(false, 5, 5, 20);
 }
 static void test_directed_vs_bruteforce(void) {
-    run_compare(true, 4, 4, 40);
+    run_compare(true, 4, 4, 600);
 }
 
 /* --- hand-worked directed examples ---------------------------------------------------------- */
@@ -432,6 +432,149 @@ static void test_work_bound(void) {
     glet_graph_free(&g);
 }
 
+/* --- catalogue checks (spec section 17, check 3) ---------------------------------------------- */
+
+static void mat_from_code(bool directed, unsigned s, unsigned code, uint8_t m[MAXK][MAXK]) {
+    memset(m, 0, (size_t)MAXK * MAXK);
+    for (unsigned j = 1; j < s; j++) {
+        for (unsigned i = 0; i < j; i++) {
+            unsigned pi = j * (j - 1) / 2 + i;
+            if (directed) {
+                m[i][j] = (uint8_t)((code >> (2 * pi)) & 1U);
+                m[j][i] = (uint8_t)((code >> (2 * pi + 1)) & 1U);
+            } else {
+                m[i][j] = m[j][i] = (uint8_t)((code >> pi) & 1U);
+            }
+        }
+    }
+}
+
+/* Smallest image of position p under the automorphisms of m. */
+static unsigned aut_class(unsigned s, uint8_t m[MAXK][MAXK], unsigned p) {
+    unsigned perm[MAXK];
+    unsigned ident[MAXK];
+    for (unsigned i = 0; i < s; i++) {
+        ident[i] = i;
+    }
+    uint64_t self = matrix_key(s, m, ident);
+    unsigned rep = p;
+    for (unsigned k = 0; k < fact(s); k++) {
+        arr_perm(s, k, perm);
+        if (matrix_key(s, m, perm) == self) {
+            rep = perm[p] < rep ? perm[p] : rep;
+        }
+    }
+    return rep;
+}
+
+static void catalogue_check(bool directed, unsigned n_orbits) {
+    glet_tables_init();
+    unsigned n_graphlets = 0;
+    uint64_t seen_keys[64];
+    for (unsigned o = 0; o < n_orbits; o++) {
+        glet_orbit_info in;
+        uint8_t m[MAXK][MAXK];
+        TEST_ASSERT_TRUE(glet_orbit_describe(directed, o, &in));
+        mat_from_code(directed, in.nodes, in.code, m);
+        unsigned cls = aut_class(in.nodes, m, in.pos);
+        unsigned mult = 0;
+        for (unsigned p = 0; p < in.nodes; p++) {
+            mult += aut_class(in.nodes, m, p) == cls ? 1U : 0U;
+        }
+        TEST_ASSERT_EQUAL_UINT(mult, in.mult); /* orbit size equals the hand-recomputed class */
+        unsigned ident[MAXK];
+        for (unsigned i = 0; i < in.nodes; i++) {
+            ident[i] = i;
+        }
+        uint64_t key = (matrix_key(in.nodes, m, ident) << 3) | in.nodes;
+        bool known = false;
+        for (unsigned g = 0; g < n_graphlets; g++) {
+            known = known || seen_keys[g] == key;
+        }
+        if (!known) {
+            seen_keys[n_graphlets++] = key;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT(directed ? 40 : 30, n_graphlets);
+}
+
+/* Every connected oriented graph of 2..4 nodes is isomorphic to exactly one catalogue graphlet. */
+static void test_catalogue_complete(void) {
+    glet_tables_init();
+    uint64_t cat[64];
+    unsigned n_cat = 0;
+    for (unsigned o = 0; o < 129; o++) {
+        glet_orbit_info in;
+        uint8_t m[MAXK][MAXK];
+        (void)glet_orbit_describe(true, o, &in);
+        mat_from_code(true, in.nodes, in.code, m);
+        unsigned perm[MAXK];
+        uint64_t best = ~0ULL;
+        for (unsigned k = 0; k < fact(in.nodes); k++) {
+            arr_perm(in.nodes, k, perm);
+            uint64_t key = matrix_key(in.nodes, m, perm);
+            best = key < best ? key : best;
+        }
+        uint64_t tagged = (best << 3) | in.nodes;
+        bool known = false;
+        for (unsigned i = 0; i < n_cat; i++) {
+            known = known || cat[i] == tagged;
+        }
+        if (!known) {
+            cat[n_cat++] = tagged;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT(40, n_cat);
+    unsigned found = 0;
+    for (unsigned s = 2; s <= 4; s++) {
+        unsigned pairs = s * (s - 1) / 2;
+        for (unsigned code = 0; code < (1U << (2 * pairs)); code++) {
+            uint8_t m[MAXK][MAXK];
+            mat_from_code(true, s, code, m);
+            bool oriented = true;
+            for (unsigned p = 0; p < pairs; p++) {
+                oriented = oriented && ((code >> (2 * p)) & 3U) != 3U;
+            }
+            bool conn = true;
+            unsigned set[MAXK];
+            bf probe;
+            memset(&probe, 0, sizeof probe);
+            for (unsigned i = 0; i < s; i++) {
+                set[i] = i;
+                for (unsigned j = 0; j < s; j++) {
+                    probe.a[i][j] = m[i][j];
+                }
+            }
+            conn = bf_conn(&probe, set, s);
+            if (!oriented || !conn) {
+                continue;
+            }
+            unsigned perm[MAXK];
+            uint64_t best = ~0ULL;
+            for (unsigned k = 0; k < fact(s); k++) {
+                arr_perm(s, k, perm);
+                uint64_t key = matrix_key(s, m, perm);
+                best = key < best ? key : best;
+            }
+            uint64_t tagged = (best << 3) | s;
+            unsigned hits = 0;
+            for (unsigned i = 0; i < n_cat; i++) {
+                hits += cat[i] == tagged ? 1U : 0U;
+            }
+            TEST_ASSERT_EQUAL_UINT(1, hits);
+            found++;
+        }
+    }
+    TEST_ASSERT_TRUE(found > 40);
+}
+
+static void test_catalogue_orbits_directed(void) {
+    catalogue_check(true, 129);
+}
+static void test_catalogue_orbits_undirected(void) {
+    catalogue_check(false, 73);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_table_sizes);
@@ -442,5 +585,8 @@ int main(void) {
     RUN_TEST(test_directed_families);
     RUN_TEST(test_antiparallel_pair);
     RUN_TEST(test_work_bound);
+    RUN_TEST(test_catalogue_orbits_directed);
+    RUN_TEST(test_catalogue_orbits_undirected);
+    RUN_TEST(test_catalogue_complete);
     return UNITY_END();
 }

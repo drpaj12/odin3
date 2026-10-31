@@ -213,6 +213,15 @@ static unsigned rename_orbit(bool directed, unsigned orbit) {
     return directed ? orbit : k_przulj[orbit];
 }
 
+static unsigned first_pos(const canon_entry *ce, unsigned local, unsigned size) {
+    for (unsigned p = 0; p < size; p++) {
+        if (ce->local[p] == local) {
+            return p;
+        }
+    }
+    return 0;
+}
+
 static void fill_size(tab_ctx *tc, size_build *sb, unsigned *graphlet, unsigned *orbit) {
     unsigned n_g = *graphlet;
     for (unsigned g = 0; g < sb->n_ents; g++) {
@@ -227,6 +236,8 @@ static void fill_size(tab_ctx *tc, size_build *sb, unsigned *graphlet, unsigned 
             info->nodes = tc->size;
             info->edges = sb->ents[g].edges;
             info->mult = sb->ents[g].mult[l];
+            info->code = sb->ents[g].code;
+            info->pos = first_pos(&sb->ents[g], l, tc->size);
         }
         *orbit += sb->ents[g].n_local;
     }
