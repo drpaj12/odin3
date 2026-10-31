@@ -334,4 +334,11 @@ Each check reports a pass count in the PR.
   construction. `tools/graphlets/construction_gate.py` (CTest `graphlets_construction`) compares
   the counted graph (nodes, simple edges, self-loops, directed edges, degree sequence) with an
   independent E-4 build from `write_json` through `plugins/python/odin3_graph.py`, on LUT form
-  (BLIF as read) and gate form (`abc --gates cmos6`). Results: GATE_RESULTS
+  (BLIF as read) and gate form (`abc --gates cmos6`). Results (main 0a44260b plus the fix, EArch
+  parmys goldens): 68 micros and the 14 small VTR
+  designs, LUT and gate form, 164 of 164 identical. Negative control: the unfixed binary fails the
+  gate on 3 of the 4 smallest LUT-form micros with logic (for example `bm_DL_2_1_mux`: 4 nodes and
+  0 edges against 5 nodes and 4 edges in the E-4 build). ORCA gate on the pass's graphs: 904 of 904
+  identical over 452 designs (LU32PEEng, LU64PEEng and mcml are above `--max-nodes` 200000, as
+  designed); directed checks all pass (Python reference 701/701, relabelling 752/752, reversal 752/752,
+  projection to the undirected counter 556/556 and to ORCA 556/556).
