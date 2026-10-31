@@ -13,7 +13,12 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { FILE_MAX = 512 * 1024 * 1024, PERMILLE = 1000 };
+enum {
+    FILE_MAX = 512 * 1024 * 1024,
+    PERMILLE = 1000,
+    CAL_MAX_BINS = 4096, /* bins of one calibrated metric */
+    SIG_MAX_ORBITS = GLET_MAX_ORBITS
+};
 static const double k_ppm = 1e6;
 static const double k_half = 0.5;
 
@@ -38,6 +43,93 @@ static odin3_status parse_file(const char *path, odin3_json_doc *doc) {
     return st;
 }
 
+/* A non-negative INT node. */
+static bool is_count(const odin3_json_node *node) {
+    return node != NULL && odin3_json_kind_of(node) == ODIN3_JSON_INT && odin3_json_int(node) >= 0;
+}
+
+/* The array of non-negative counts, `want` long (0: any length from 1 to CAL_MAX_BINS). */
+static bool counts_ok(const odin3_json_node *arr, size_t want) {
+    if (arr == NULL || odin3_json_kind_of(arr) != ODIN3_JSON_ARRAY) {
+        return false;
+    }
+    size_t cnt = odin3_json_count(arr);
+    if (want != 0 ? cnt != want : (cnt == 0 || cnt > CAL_MAX_BINS)) {
+        return false;
+    }
+    for (const odin3_json_node *it = odin3_json_first(arr); it != NULL; it = odin3_json_next(it)) {
+        if (!is_count(it)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* The bin edges: 2 .. CAL_MAX_BINS + 1 integers, never decreasing. */
+static bool edges_ok(const odin3_json_node *edges) {
+    if (edges == NULL || odin3_json_kind_of(edges) != ODIN3_JSON_ARRAY ||
+        odin3_json_count(edges) < 2 || odin3_json_count(edges) > CAL_MAX_BINS + 1) {
+        return false;
+    }
+    int64_t prev = INT64_MIN;
+    for (const odin3_json_node *it = odin3_json_first(edges); it != NULL;
+         it = odin3_json_next(it)) {
+        if (odin3_json_kind_of(it) != ODIN3_JSON_INT || odin3_json_int(it) < prev) {
+            return false;
+        }
+        prev = odin3_json_int(it);
+    }
+    return true;
+}
+
+static bool metric_ok(const odin3_json_node *met) {
+    const odin3_json_node *edges = odin3_json_member(met, "edges");
+    if (!edges_ok(edges)) {
+        return false;
+    }
+    size_t bins = odin3_json_count(edges) - 1;
+    return counts_ok(odin3_json_member(met, "same"), bins) &&
+           counts_ok(odin3_json_member(met, "different"), bins);
+}
+
+static bool mode_ok(const odin3_json_node *mode) {
+    const odin3_json_node *prior = odin3_json_member(mode, "prior");
+    if (prior != NULL) {
+        const odin3_json_node *same = odin3_json_member(prior, "same");
+        const odin3_json_node *diff = odin3_json_member(prior, "different");
+        if ((same != NULL && !is_count(same)) || (diff != NULL && !is_count(diff))) {
+            return false;
+        }
+    }
+    const odin3_json_node *metrics = odin3_json_member(mode, "metrics");
+    if (metrics == NULL) {
+        return true;
+    }
+    for (const odin3_json_node *met = odin3_json_first(metrics); met != NULL;
+         met = odin3_json_next(met)) {
+        if (!metric_ok(met)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* Counts non-negative, bin edges sorted, bin counts equal to the edges less one and at most
+ * CAL_MAX_BINS, so the prior (same / (same + different)) is in [0, 1]. */
+static bool cal_valid(const odin3_json_doc *doc) {
+    const odin3_json_node *modes = odin3_json_member(doc->root, "modes");
+    if (modes == NULL) {
+        return true;
+    }
+    for (const odin3_json_node *md = odin3_json_first(modes); md != NULL;
+         md = odin3_json_next(md)) {
+        if (!mode_ok(md)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 gl_cal *gl_cal_load(const char *path) {
     gl_cal *cal = odin3_util_calloc(sizeof *cal);
     if (cal == NULL) {
@@ -54,6 +146,14 @@ gl_cal *gl_cal_load(const char *path) {
         gl_cal_free(cal);
         return NULL;
     }
+    if (!cal_valid(&cal->doc)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "graphlets: '%s': invalid calibration (negative or non-integer counts, unsorted "
+                  "bin edges, bin counts not equal to the edges less one, or more than %d bins)",
+                  path, CAL_MAX_BINS);
+        gl_cal_free(cal);
+        return NULL;
+    }
     return cal;
 }
 
@@ -64,26 +164,34 @@ void gl_cal_free(gl_cal *cal) {
     }
 }
 
-static int64_t nth_int(const odin3_json_node *arr, size_t index) {
-    const odin3_json_node *item = odin3_json_first(arr);
-    for (size_t i = 0; item != NULL && i < index; i++) {
-        item = odin3_json_next(item);
-    }
-    return item != NULL ? odin3_json_int(item) : 0;
-}
-
 static const odin3_json_node *path2(const odin3_json_node *obj, const char *xa, const char *xb) {
     const odin3_json_node *first = odin3_json_member(obj, xa);
     return first != NULL ? odin3_json_member(first, xb) : NULL;
 }
 
-/* Likelihood of the bin among counts (Laplace smoothing). */
+/* Likelihood of the bin among counts (Laplace smoothing): one pass over the array. */
 static double likelihood(const odin3_json_node *counts, size_t bin, size_t bins) {
     double total = 0;
-    for (size_t i = 0; i < bins; i++) {
-        total += (double)nth_int(counts, i);
+    double hit = 0;
+    size_t idx = 0;
+    for (const odin3_json_node *it = odin3_json_first(counts); it != NULL;
+         it = odin3_json_next(it), idx++) {
+        total += (double)odin3_json_int(it);
+        hit = idx == bin ? (double)odin3_json_int(it) : hit;
     }
-    return ((double)nth_int(counts, bin) + 1.0) / (total + (double)bins);
+    return (hit + 1.0) / (total + (double)bins);
+}
+
+/* The last bin whose lower edge is at or below vn (bin 0 when below all of them). */
+static size_t bin_of(const odin3_json_node *edges, int64_t vn) {
+    size_t bins = odin3_json_count(edges) - 1;
+    size_t bin = 0;
+    size_t idx = 0;
+    for (const odin3_json_node *it = odin3_json_first(edges); it != NULL && idx < bins;
+         it = odin3_json_next(it), idx++) {
+        bin = vn >= odin3_json_int(it) ? idx : bin;
+    }
+    return bin;
 }
 
 typedef struct cal_view {
@@ -101,7 +209,7 @@ static bool cal_mode(const gl_cal *cal, const char *mode, cal_view *view) {
     }
     const odin3_json_node *same = odin3_json_member(prior, "same");
     const odin3_json_node *diff = odin3_json_member(prior, "different");
-    double ps = same != NULL ? (double)odin3_json_int(same) : 0;
+    double ps = same != NULL ? (double)odin3_json_int(same) : 0; /* counts, validated >= 0 */
     double pd = diff != NULL ? (double)odin3_json_int(diff) : 0;
     view->prior_same = ps + pd > 0 ? ps / (ps + pd) : k_half;
     view->prior_diff = 1.0 - view->prior_same;
@@ -122,11 +230,10 @@ static bool metric_likelihoods(const cal_view *view, const char *metric, double 
     if (odin3_json_count(same) != bins || odin3_json_count(diff) != bins) {
         return false;
     }
-    int64_t vn = (int64_t)lround(value * PERMILLE);
-    size_t bin = 0;
-    for (size_t i = 0; i < bins; i++) {
-        bin = vn >= nth_int(edges, i) ? i : bin;
+    if (!isfinite(value)) {
+        return false;
     }
+    size_t bin = bin_of(edges, (int64_t)lround(value * PERMILLE));
     *ls = likelihood(same, bin, bins);
     *ld = likelihood(diff, bin, bins);
     return true;
@@ -180,8 +287,10 @@ odin3_status gl_compare_json(odin3_strbuf *out, const gl_cmp_in *in, bool ints) 
     const double vals[2] = {glet_gdd_agreement(in->sig_a, in->sig_b, NULL),
                             glet_cosine_log(in->sig_a, in->sig_b)};
     double post = 0;
-    odin3_status st =
-        odin3_strbuf_appendf(out, "{\"a\": \"%s\", \"b\": \"%s\"", in->name_a, in->name_b);
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr("{\"a\": "));
+    st = st == ODIN3_OK ? gl_put_escaped(out, in->name_a) : st;
+    st = st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr(", \"b\": ")) : st;
+    st = st == ODIN3_OK ? gl_put_escaped(out, in->name_b) : st;
     st = st == ODIN3_OK ? put_value(out, "gdd_agreement", vals[0], ints) : st;
     st = st == ODIN3_OK ? put_value(out, "cosine_log", vals[1], ints) : st;
     bool have = gl_cal_posterior(in->cal, in->mode, "gdd_agreement", vals[0], &post);
@@ -209,17 +318,52 @@ static const odin3_json_node *find_group(const odin3_json_node *groups, const ch
     return NULL;
 }
 
-static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, glet_sig *sig) {
-    const odin3_json_node *totals = odin3_json_member(grp, "orbit_totals");
-    const odin3_json_node *gdd = odin3_json_member(grp, "gdd");
-    const odin3_json_node *rep = odin3_json_member(grp, "reported");
-    if (totals == NULL || gdd == NULL || odin3_json_count(totals) != norb ||
-        odin3_json_count(gdd) != norb) {
-        return ODIN3_ERR_INVALID_ARG;
+static int64_t nth_int(const odin3_json_node *arr, size_t index) {
+    const odin3_json_node *item = odin3_json_first(arr);
+    for (size_t i = 0; item != NULL && i < index; i++) {
+        item = odin3_json_next(item);
     }
-    memset(sig, 0, sizeof *sig);
-    sig->norb = norb;
-    sig->nodes = rep != NULL ? (uint64_t)odin3_json_int(rep) : 0;
+    return item != NULL ? odin3_json_int(item) : 0;
+}
+
+/* One GDD pair [degree, number]: both INT, degree > prev (so >= 1 and sorted), number >= 1. */
+static bool pair_ok(const odin3_json_node *ps, int64_t prev) {
+    if (odin3_json_kind_of(ps) != ODIN3_JSON_ARRAY || odin3_json_count(ps) != 2) {
+        return false;
+    }
+    const odin3_json_node *deg = odin3_json_first(ps);
+    const odin3_json_node *num = odin3_json_next(deg);
+    return odin3_json_kind_of(deg) == ODIN3_JSON_INT && odin3_json_kind_of(num) == ODIN3_JSON_INT &&
+           odin3_json_int(deg) > prev && odin3_json_int(deg) >= 1 && odin3_json_int(num) >= 1;
+}
+
+/* The gdd and totals arrays are well formed for norb orbits (see pair_ok); totals never negative.
+ */
+static bool sig_shape_ok(const odin3_json_node *totals, const odin3_json_node *gdd) {
+    for (const odin3_json_node *tt = odin3_json_first(totals); tt != NULL;
+         tt = odin3_json_next(tt)) {
+        if (!is_count(tt)) {
+            return false;
+        }
+    }
+    for (const odin3_json_node *ob = odin3_json_first(gdd); ob != NULL; ob = odin3_json_next(ob)) {
+        if (odin3_json_kind_of(ob) != ODIN3_JSON_ARRAY) {
+            return false;
+        }
+        int64_t prev = 0;
+        for (const odin3_json_node *ps = odin3_json_first(ob); ps != NULL;
+             ps = odin3_json_next(ps)) {
+            if (!pair_ok(ps, prev)) {
+                return false;
+            }
+            prev = nth_int(ps, 0);
+        }
+    }
+    return true;
+}
+
+static odin3_status sig_alloc(glet_sig *sig, const odin3_json_node *gdd) {
+    uint32_t norb = sig->norb;
     size_t pairs = 0;
     for (const odin3_json_node *ob = odin3_json_first(gdd); ob != NULL; ob = odin3_json_next(ob)) {
         pairs += odin3_json_count(ob);
@@ -231,6 +375,26 @@ static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, gl
     if (sig->totals == NULL || sig->off == NULL || sig->deg == NULL || sig->num == NULL) {
         glet_sig_free(sig);
         return ODIN3_ERR_NO_MEMORY;
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, glet_sig *sig) {
+    const odin3_json_node *totals = odin3_json_member(grp, "orbit_totals");
+    const odin3_json_node *gdd = odin3_json_member(grp, "gdd");
+    const odin3_json_node *rep = odin3_json_member(grp, "reported");
+    if (totals == NULL || gdd == NULL || odin3_json_kind_of(totals) != ODIN3_JSON_ARRAY ||
+        odin3_json_kind_of(gdd) != ODIN3_JSON_ARRAY || odin3_json_count(totals) != norb ||
+        odin3_json_count(gdd) != norb || (rep != NULL && !is_count(rep)) ||
+        !sig_shape_ok(totals, gdd)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    memset(sig, 0, sizeof *sig);
+    sig->norb = norb;
+    sig->nodes = rep != NULL ? (uint64_t)odin3_json_int(rep) : 0;
+    odin3_status st = sig_alloc(sig, gdd);
+    if (st != ODIN3_OK) {
+        return st;
     }
     uint32_t j = 0;
     uint32_t used = 0;
@@ -250,30 +414,47 @@ static odin3_status sig_from_group(const odin3_json_node *grp, uint32_t norb, gl
     return ODIN3_OK;
 }
 
-static odin3_status take_names(const odin3_json_doc *doc, const odin3_json_node *grp,
-                               odin3_strbuf *mode, odin3_strbuf *group) {
-    odin3_strbuf_clear(mode);
-    odin3_strbuf_clear(group);
-    const odin3_json_node *md = odin3_json_member(doc->root, "mode");
-    odin3_status st = odin3_strbuf_append(mode, odin3_bytes_cstr(odin3_json_string(md, NULL)));
-    const odin3_json_node *gname = odin3_json_member(grp, "name");
-    return gname != NULL && st == ODIN3_OK
-               ? odin3_strbuf_append(group, odin3_bytes_cstr(odin3_json_string(gname, NULL)))
-               : st;
+/* The text of a non-empty STRING node, else NULL. */
+static const char *req_string(const odin3_json_node *node) {
+    const char *text = node != NULL ? odin3_json_string(node, NULL) : NULL;
+    return text != NULL && text[0] != '\0' ? text : NULL;
 }
 
-/* The group `name` (NULL: the first) of a parsed graphlets file as a signature. */
+static odin3_status take_names(const odin3_json_doc *doc, const odin3_json_node *grp,
+                               odin3_strbuf *mode, odin3_strbuf *group) {
+    const char *md = req_string(odin3_json_member(doc->root, "mode"));
+    const char *gname = req_string(odin3_json_member(grp, "name"));
+    if (md == NULL || gname == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_strbuf_clear(mode);
+    odin3_strbuf_clear(group);
+    odin3_status st = odin3_strbuf_append(mode, odin3_bytes_cstr(md));
+    return st == ODIN3_OK ? odin3_strbuf_append(group, odin3_bytes_cstr(gname)) : st;
+}
+
+/* The group `name` (NULL: the first) of a parsed graphlets file as a signature. The mode and the
+ * group name must be non-empty strings (checked before the signature is built). */
 static odin3_status sig_from_doc(const odin3_json_doc *doc, const char *name, glet_sig *sig,
                                  odin3_strbuf *mode, odin3_strbuf *group) {
     const odin3_json_node *groups = odin3_json_member(doc->root, "groups");
     const odin3_json_node *grp = groups != NULL ? find_group(groups, name) : NULL;
-    const odin3_json_node *md = odin3_json_member(doc->root, "mode");
     const odin3_json_node *nm = odin3_json_member(doc->root, "n_orbits");
-    if (grp == NULL || md == NULL || nm == NULL) {
+    if (grp == NULL || nm == NULL || odin3_json_kind_of(nm) != ODIN3_JSON_INT ||
+        odin3_json_int(nm) < 1 || odin3_json_int(nm) > SIG_MAX_ORBITS ||
+        req_string(odin3_json_member(doc->root, "mode")) == NULL ||
+        req_string(odin3_json_member(grp, "name")) == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_status st = sig_from_group(grp, (uint32_t)odin3_json_int(nm), sig);
-    return st == ODIN3_OK ? take_names(doc, grp, mode, group) : st;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = take_names(doc, grp, mode, group);
+    if (st != ODIN3_OK) {
+        glet_sig_free(sig);
+    }
+    return st;
 }
 
 odin3_status gl_sig_load(const char *path_hash_name, glet_sig *sig, odin3_strbuf *mode,

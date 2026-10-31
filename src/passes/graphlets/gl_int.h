@@ -124,4 +124,7 @@ odin3_status gl_sig_load(const char *path_hash_name, glet_sig *sig, odin3_strbuf
 
 odin3_status gl_run_compare(const gl_opts *opts);
 
+/* Appends text as a quoted JSON string (quote and backslash escaped, control bytes become '?'). */
+odin3_status gl_put_escaped(odin3_strbuf *out, const char *text);
+
 #endif

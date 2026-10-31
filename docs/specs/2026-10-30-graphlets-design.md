@@ -310,3 +310,14 @@ Each check reports a pass count in the PR.
   code pos`; `docs/user/graphlets.md` lists the 40 directed graphlets.
 - Directed graphlet and orbit ids are our own numbering (section 4), not Sarajlic's labels.
 - Sarajlic et al. publish no per-orbit counts for a public network in the text read (check 17.6).
+- PR #304 review fixes (2026-10-31): the orbit tables are built once under a mutex and a release
+  flag, set only after a complete build (a failed build returns ODIN3_ERR_NO_MEMORY and is retried),
+  so `odin3_graphlets_count` is thread-safe. `--compare` inputs and the calibration file are
+  validated on load (non-empty string mode and group name; GDD pairs with degree and count at least 1
+  and strictly increasing degrees; non-negative totals and counts; sorted bin edges; at most 4096
+  bins; invalid files are ODIN3_ERR_INVALID_ARG); `--partition` stops at 4096 groups. The ABI number
+  stays 7 (v1.2.0 is tagged at ABI 7 without `odin3_graphlets_count`; repo precedent, docs/IR.md:
+  an additive export needs no bump), so a libodin3 built from v1.2.0 lacks the symbol: the Python
+  wrapper raises "libodin3 too old: needs odin3_graphlets_count, Odin III > v1.2.0". The Python
+  `max_work` default is the CLI bound, 2e10. No post-1.2.0 patch notes file exists yet; this entry
+  is the record.

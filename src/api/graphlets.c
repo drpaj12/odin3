@@ -8,6 +8,7 @@
 #include "util/alloc.h"
 #include "util/log.h"
 
+#include <stdint.h>
 #include <string.h>
 
 ODIN3_EXPORT odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
@@ -16,6 +17,11 @@ ODIN3_EXPORT odin3_status odin3_graphlets_count(const odin3_graphlet_graph *grap
     if (graph == NULL || opts == NULL || out == NULL ||
         (graph->n_edges > 0 && (graph->from == NULL || graph->to == NULL))) {
         odin3_log(ODIN3_LOG_ERROR, "graphlets: graph, opts and out are required");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (graph->n_edges > SIZE_MAX / sizeof(glet_edge) - 1) {
+        odin3_log(ODIN3_LOG_ERROR, "graphlets: too many edges (%llu)",
+                  (unsigned long long)graph->n_edges);
         return ODIN3_ERR_INVALID_ARG;
     }
     bool dir = opts->directed != 0;

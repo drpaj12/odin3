@@ -66,6 +66,10 @@ static void emit_entries(entry *ents, size_t total, glet_graph *gr) {
 odin3_status glet_graph_build(glet_graph *gr, uint32_t n, const glet_edge *edges, size_t count) {
     memset(gr, 0, sizeof *gr);
     gr->n = n;
+    if (count > UINT32_MAX / 2) { /* off[] holds 2 * count entries in uint32 */
+        odin3_log(ODIN3_LOG_ERROR, "graphlets: too many edges (%llu)", (unsigned long long)count);
+        return ODIN3_ERR_INVALID_ARG;
+    }
     entry *ents = odin3_util_calloc((count * 2 + 1) * sizeof *ents);
     gr->off = odin3_util_calloc(((size_t)n + 1) * sizeof *gr->off);
     if (ents == NULL || gr->off == NULL) {
@@ -306,10 +310,13 @@ odin3_status glet_count(const glet_graph *gr, const glet_spec *spec, int64_t *co
         odin3_log(ODIN3_LOG_ERROR, "graphlets: unsupported size %u", size);
         return ODIN3_ERR_INVALID_ARG;
     }
-    glet_tables_init();
+    odin3_status st = glet_tables_init();
+    if (st != ODIN3_OK) {
+        return st;
+    }
     unsigned top = directed ? GLET_MAX_DIR_SIZE : size;
     esu es;
-    odin3_status st = esu_open(&es, gr, directed, top);
+    st = esu_open(&es, gr, directed, top);
     if (st != ODIN3_OK) {
         return st;
     }

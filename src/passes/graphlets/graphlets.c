@@ -217,7 +217,7 @@ static odin3_status parse_args(odin3_bytes args, gl_opts *ob) {
 
 /* --- JSON output ------------------------------------------------------------------------------ */
 
-static odin3_status put_escaped(odin3_strbuf *out, const char *text) {
+odin3_status gl_put_escaped(odin3_strbuf *out, const char *text) {
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr("\""));
     for (const char *ps = text; st == ODIN3_OK && *ps != '\0'; ps++) {
         unsigned char cd = (unsigned char)*ps;
@@ -277,12 +277,12 @@ static odin3_status put_node(odin3_strbuf *out, const odin3_module *mod, uint32_
     uint32_t name = odin3_node_name(mod, (odin3_node_id){id});
     const char *kind = def != NULL && def->gran == ODIN3_GRAN_PORT ? "port" : "cell";
     odin3_status st = odin3_strbuf_appendf(out, "{\"id\": %u, \"name\": ", (unsigned)id);
-    st =
-        st == ODIN3_OK
-            ? put_escaped(out, name != 0 ? odin3_strtab_get(odin3_design_strtab(design), name) : "")
-            : st;
+    st = st == ODIN3_OK
+             ? gl_put_escaped(out,
+                              name != 0 ? odin3_strtab_get(odin3_design_strtab(design), name) : "")
+             : st;
     st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"kind\": \"%s\", \"type\": ", kind) : st;
-    st = st == ODIN3_OK ? put_escaped(out, def != NULL ? def->name : "") : st;
+    st = st == ODIN3_OK ? gl_put_escaped(out, def != NULL ? def->name : "") : st;
     return st == ODIN3_OK ? put_row(out, row, norb) : st;
 }
 
@@ -433,10 +433,11 @@ static odin3_status put_vectors(const gl_job *job, const gl_counted *cc, odin3_s
 static odin3_status put_group_head(const gl_job *job, const gl_result *res, odin3_strbuf *body) {
     const odin3_strtab *tab = odin3_design_strtab(job->design);
     odin3_status st = odin3_strbuf_append(body, odin3_bytes_cstr("    {\"name\": "));
-    st = st == ODIN3_OK ? put_escaped(body, job->grp->name.data) : st;
+    st = st == ODIN3_OK ? gl_put_escaped(body, job->grp->name.data) : st;
     st = st == ODIN3_OK ? odin3_strbuf_append(body, odin3_bytes_cstr(", \"module\": ")) : st;
-    st = st == ODIN3_OK ? put_escaped(body, odin3_strtab_get(tab, odin3_module_name(job->gm->mod)))
-                        : st;
+    st = st == ODIN3_OK
+             ? gl_put_escaped(body, odin3_strtab_get(tab, odin3_module_name(job->gm->mod)))
+             : st;
     return st == ODIN3_OK
                ? odin3_strbuf_appendf(
                      body,

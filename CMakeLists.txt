@@ -1988,6 +1988,8 @@ if(BUILD_TESTING)
     # graphlets: the counters.
     odin3_add_unit_test(test_graphlets_count)
     odin3_add_unit_test(test_graphlets_sig)
+    odin3_add_unit_test(test_graphlets_threads)
+    target_link_libraries(test_graphlets_threads PRIVATE pthread)
     target_compile_definitions(test_graphlets_sig PRIVATE ODIN3_GL_ROOT="${PROJECT_SOURCE_DIR}")
     foreach(_m IN ITEMS ff.parmys adder_hard_block.parmys ansiportlist_2.parmys)
         add_test(NAME graphlets_cli_${_m}

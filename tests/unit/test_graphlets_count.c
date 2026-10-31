@@ -7,7 +7,9 @@
  */
 #include "graph/glet.h"
 #include "graph/glet_int.h"
+#include "odin3/odin3.h"
 #include "unity.h"
+#include "util/alloc.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -400,6 +402,40 @@ static unsigned graphlets_in(bool directed, unsigned n_orbits) {
     return top;
 }
 
+/* Must run first: the tables are not built yet. A failed build reports NO_MEMORY, leaves nothing
+ * marked built, and the next call builds them. */
+static void test_tables_build_failure_then_retry(void) {
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY, glet_tables_init());
+    glet_edge arcs[1] = {{0, 1}};
+    glet_graph graph;
+    int64_t got[2 * ORBITS_U];
+    memset(got, 0, sizeof got);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, 2, arcs, 1));
+    odin3_util_set_alloc_fail_after(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY,
+                          glet_count(&graph, &(glet_spec){false, 5, 0}, got, NULL));
+    odin3_util_set_alloc_fail_after(-1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){false, 5, 0}, got, NULL));
+    TEST_ASSERT_EQUAL_INT64(1, got[0]); /* orbit 0: the degree */
+    glet_graph_free(&graph);
+}
+
+static void test_edge_count_limits(void) {
+    glet_graph graph;
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          glet_graph_build(&graph, 2, NULL, (size_t)UINT32_MAX));
+    uint32_t from[1] = {0};
+    uint32_t dest[1] = {1};
+    odin3_graphlet_graph api = {2, UINT64_MAX, from, dest};
+    odin3_graphlet_opts opts = {0, 5, 0};
+    const uint64_t out_len = 2U * (uint64_t)ORBITS_U;
+    int64_t out[2 * ORBITS_U];
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_graphlets_count(&api, &opts, out, out_len));
+    api.n_edges = UINT64_MAX / sizeof(glet_edge);
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_graphlets_count(&api, &opts, out, out_len));
+}
+
 static void test_table_sizes(void) {
     glet_tables_init();
     TEST_ASSERT_EQUAL_UINT(15, glet_orbit_count(false, 4));
@@ -618,6 +654,8 @@ static void test_work_bound(void) {
 
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_tables_build_failure_then_retry);
+    RUN_TEST(test_edge_count_limits);
     RUN_TEST(test_table_sizes);
     RUN_TEST(test_orbits_per_size);
     RUN_TEST(test_undirected4_vs_bruteforce);

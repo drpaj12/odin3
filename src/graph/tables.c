@@ -11,6 +11,10 @@
 #include "graph/glet.h"
 #include "graph/glet_int.h"
 
+#include "util/alloc.h"
+
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -37,7 +41,9 @@ typedef struct tab_ctx {
 } tab_ctx;
 
 glet_tables g_glet_tab;
-static bool g_built;
+/* Set (release) only after a complete successful build; the mutex serialises the builders. */
+static atomic_bool g_built;
+static pthread_mutex_t g_build_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned pair_index(unsigned ii, unsigned jj) {
     return jj * (jj - 1) / 2 + ii;
@@ -282,7 +288,7 @@ static void fill_codes(const tab_ctx *tc, const size_build *sb, uint8_t *table) 
     }
 }
 
-static void build_mode(bool directed, unsigned max_size, uint8_t *tables[]) {
+static odin3_status build_mode(bool directed, unsigned max_size, uint8_t *tables[]) {
     next_ids next = {0, 0};
     for (unsigned sz = 2; sz <= max_size; sz++) {
         tab_ctx tc;
@@ -292,21 +298,19 @@ static void build_mode(bool directed, unsigned max_size, uint8_t *tables[]) {
         tc.size = sz;
         tc.pairs = sz * (sz - 1) / 2;
         perms_gen(&tc.perms, sz);
-        size_build *sb = calloc(1, sizeof *sb);
+        size_build *sb = odin3_util_calloc(sizeof *sb);
         if (sb == NULL) {
-            return;
+            return ODIN3_ERR_NO_MEMORY;
         }
         collect_canon(&tc, sb);
         fill_size(&tc, sb, &next);
         fill_codes(&tc, sb, tables[sz]);
-        free(sb);
+        odin3_util_free(sb);
     }
+    return ODIN3_OK;
 }
 
-void glet_tables_init(void) {
-    if (g_built) {
-        return;
-    }
+static odin3_status tables_build(void) {
     uint8_t *ut[GLET_MAX_SIZE + 1];
     uint8_t *dt[GLET_MAX_DIR_SIZE + 1];
     for (unsigned sz = 2; sz <= GLET_MAX_SIZE; sz++) {
@@ -315,9 +319,26 @@ void glet_tables_init(void) {
     for (unsigned sz = 2; sz <= GLET_MAX_DIR_SIZE; sz++) {
         dt[sz] = g_glet_tab.d_orb[sz];
     }
-    build_mode(false, GLET_MAX_SIZE, ut);
-    build_mode(true, GLET_MAX_DIR_SIZE, dt);
-    g_built = true;
+    odin3_status st = build_mode(false, GLET_MAX_SIZE, ut);
+    return st == ODIN3_OK ? build_mode(true, GLET_MAX_DIR_SIZE, dt) : st;
+}
+
+odin3_status glet_tables_init(void) {
+    if (atomic_load_explicit(&g_built, memory_order_acquire)) {
+        return ODIN3_OK;
+    }
+    (void)pthread_mutex_lock(&g_build_lock);
+    odin3_status st = ODIN3_OK;
+    if (!atomic_load_explicit(&g_built, memory_order_relaxed)) {
+        st = tables_build();
+        if (st == ODIN3_OK) {
+            atomic_store_explicit(&g_built, true, memory_order_release);
+        } else {
+            memset(&g_glet_tab, 0, sizeof g_glet_tab); /* a later call retries from scratch */
+        }
+    }
+    (void)pthread_mutex_unlock(&g_build_lock);
+    return st;
 }
 
 uint32_t glet_orbit_count(bool directed, unsigned size) {
@@ -341,7 +362,9 @@ uint32_t glet_graphlet_count(bool directed, unsigned size) {
 }
 
 bool glet_orbit_describe(bool directed, uint32_t orbit, glet_orbit_info *out) {
-    glet_tables_init();
+    if (glet_tables_init() != ODIN3_OK) {
+        return false;
+    }
     if (orbit >= (directed ? (uint32_t)GLET_ORBITS_D4 : (uint32_t)GLET_ORBITS_U5)) {
         return false;
     }

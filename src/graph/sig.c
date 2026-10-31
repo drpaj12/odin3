@@ -31,6 +31,15 @@ void glet_sig_free(glet_sig *sig) {
     memset(sig, 0, sizeof *sig);
 }
 
+/* Grows deg and num to cap entries; a failed realloc leaves the old block valid. */
+static odin3_status runs_grow(glet_sig *sig, size_t cap) {
+    int64_t *deg = odin3_util_realloc(sig->deg, cap * sizeof *sig->deg);
+    sig->deg = deg != NULL ? deg : sig->deg;
+    uint64_t *num = deg != NULL ? odin3_util_realloc(sig->num, cap * sizeof *sig->num) : NULL;
+    sig->num = num != NULL ? num : sig->num;
+    return deg != NULL && num != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+}
+
 /* Appends the run-length pairs of the sorted values (all >= 1) of orbit j. */
 static odin3_status add_runs(glet_sig *sig, const int64_t *vals, uint32_t count, size_t *used,
                              size_t *cap) {
@@ -41,10 +50,9 @@ static odin3_status add_runs(glet_sig *sig, const int64_t *vals, uint32_t count,
         }
         if (*used == *cap) {
             *cap = *cap * 2 + SIG_GROW;
-            sig->deg = odin3_util_realloc(sig->deg, *cap * sizeof *sig->deg);
-            sig->num = odin3_util_realloc(sig->num, *cap * sizeof *sig->num);
-            if (sig->deg == NULL || sig->num == NULL) {
-                return ODIN3_ERR_NO_MEMORY;
+            odin3_status st = runs_grow(sig, *cap);
+            if (st != ODIN3_OK) {
+                return st;
             }
         }
         sig->deg[*used] = vals[i];

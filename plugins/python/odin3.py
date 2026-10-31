@@ -58,6 +58,7 @@ _BUNDLED_HEADER = PACKAGE_DIR / "odin3.h"
 HEADER = (_BUNDLED_HEADER if _BUNDLED_HEADER.is_file()
           else REPO_ROOT / "include" / "odin3" / "odin3.h")
 LOG = logging.getLogger("odin3")
+GRAPHLET_MAX_WORK = 20_000_000_000  # the CLI default bound of the graphlets pass (--max-work)
 
 
 def cdef_from_header(header: Path = HEADER) -> str:
@@ -160,14 +161,19 @@ class Odin3:
         edges: Sequence[tuple[int, int]],
         directed: bool = False,
         size: int = 5,
-        max_work: int = 0,
+        max_work: int = GRAPHLET_MAX_WORK,
     ) -> list[list[int]]:
         """Graphlet orbit counts of any graph, no design needed (odin3_graphlets_count).
 
         The graph has nodes 0..n-1 and the directed edges (u, v). Undirected (default): the simple
         undirected graph, size 4 (15 orbits) or 5 (73 orbits, Przulj numbering). Directed: 2 to 4
         node directed graphlets, 129 orbits (size is ignored). Returns n rows of orbit counts.
+        max_work bounds the connected node sets visited (default: the CLI bound, 2e10; 0: none).
         """
+        if not hasattr(self.lib, "odin3_graphlets_count"):
+            raise Odin3Error(
+                "odin3_graphlets_count", -1,
+                "libodin3 too old: needs odin3_graphlets_count, Odin III > v1.2.0")
         n_orbits = 129 if directed else {4: 15, 5: 73}.get(size, 0)
         if n_orbits == 0:
             raise ValueError("size must be 4 or 5")
@@ -1692,7 +1698,7 @@ def graphlet_counts(
     edges: Sequence[tuple[int, int]],
     directed: bool = False,
     size: int = 5,
-    max_work: int = 0,
+    max_work: int = GRAPHLET_MAX_WORK,
 ) -> list[list[int]]:
     """Graphlet orbit counts of a plain edge list (see Odin3.graphlet_counts)."""
     return default().graphlet_counts(n, edges, directed, size, max_work)

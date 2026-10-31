@@ -13,7 +13,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { FILE_MAX = 64 * 1024 * 1024, LINE_MAX_LEN = 4096, DECIMAL = 10, GROW = 8 };
+enum {
+    FILE_MAX = 64 * 1024 * 1024,
+    LINE_MAX_LEN = 4096,
+    DECIMAL = 10,
+    GROW = 8,
+    MAX_PARTITION_GROUPS = 4096 /* --partition groups of one run */
+};
 
 static void group_free(gl_group *grp) {
     odin3_strbuf_free(&grp->name);
@@ -137,7 +143,7 @@ static odin3_status cell_mark(const odin3_design *design, const odin3_module *mo
     odin3_node_id node = {0};
     uint32_t str = 0;
     if (*tok != '\0' && *end == '\0') {
-        node.v = (uint32_t)id;
+        node.v = id <= UINT32_MAX ? (uint32_t)id : 0; /* 0: no such cell, reported below */
     } else if (odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(tok), &str)) {
         node = odin3_module_find_node(mod, str);
     }
@@ -257,6 +263,22 @@ typedef struct part_state {
     size_t cap;
 } part_state;
 
+static odin3_status part_grow(part_state *ps) {
+    size_t cap = ps->cap * 2 + GROW;
+    odin3_strbuf *names = odin3_util_realloc(ps->names, cap * sizeof *names);
+    if (names == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    ps->names = names; /* kept before the masks grow: a failure below must not lose them */
+    uint8_t **masks = (uint8_t **)odin3_util_realloc((void *)ps->masks, cap * sizeof *masks);
+    if (masks == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    ps->masks = masks;
+    ps->cap = cap;
+    return ODIN3_OK;
+}
+
 static odin3_status part_slot(part_state *ps, const char *text, const odin3_module *mod,
                               size_t *slot) {
     for (size_t i = 0; i < ps->count; i++) {
@@ -265,27 +287,33 @@ static odin3_status part_slot(part_state *ps, const char *text, const odin3_modu
             return ODIN3_OK;
         }
     }
-    if (ps->count == ps->cap) {
-        size_t cap = ps->cap * 2 + GROW;
-        odin3_strbuf *names = odin3_util_realloc(ps->names, cap * sizeof *names);
-        uint8_t **masks =
-            names != NULL ? (uint8_t **)odin3_util_realloc((void *)ps->masks, cap * sizeof *masks)
-                          : NULL;
-        if (masks == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        ps->names = names;
-        ps->masks = masks;
-        ps->cap = cap;
+    if (ps->count >= MAX_PARTITION_GROUPS) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "graphlets: --partition: more than %d groups in module '%s'; choose a coarser "
+                  "attribute",
+                  MAX_PARTITION_GROUPS, module_text(mod));
+        return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_strbuf_init(&ps->names[ps->count]);
-    ps->masks[ps->count] = mask_new(mod);
-    odin3_status st = odin3_strbuf_append(&ps->names[ps->count], odin3_bytes_cstr(text));
-    if (ps->masks[ps->count] == NULL) {
+    if (ps->count == ps->cap) {
+        odin3_status gst = part_grow(ps);
+        if (gst != ODIN3_OK) {
+            return gst;
+        }
+    }
+    uint8_t *mask = mask_new(mod);
+    if (mask == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    odin3_strbuf_init(&ps->names[ps->count]);
+    odin3_status st = odin3_strbuf_append(&ps->names[ps->count], odin3_bytes_cstr(text));
+    if (st != ODIN3_OK) {
+        odin3_strbuf_free(&ps->names[ps->count]);
+        odin3_util_free(mask);
+        return st;
+    }
+    ps->masks[ps->count] = mask;
     *slot = ps->count++;
-    return st;
+    return ODIN3_OK;
 }
 
 static odin3_status partition_assign(const odin3_design *design, const odin3_module *mod,
@@ -312,6 +340,13 @@ static odin3_status partition_module(const odin3_design *design, const odin3_mod
                                      uint32_t key, gl_groups *gs) {
     part_state ps = {NULL, NULL, 0, 0};
     odin3_status st = partition_assign(design, mod, key, &ps);
+    if (st == ODIN3_OK && gs->count + ps.count > MAX_PARTITION_GROUPS) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "graphlets: --partition: more than %d groups; choose a coarser "
+                  "attribute",
+                  MAX_PARTITION_GROUPS);
+        st = ODIN3_ERR_INVALID_ARG;
+    }
     for (size_t i = 0; i < ps.count; i++) {
         if (st == ODIN3_OK) {
             st = groups_add(gs, ps.names[i].data, odin3_module_id_of(mod).v, "partition",

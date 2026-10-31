@@ -51,6 +51,25 @@ class PythonGraphletsTest(unittest.TestCase):
         rows = odin3.graphlet_counts(4, [(0, 1), (1, 2), (2, 3)], size=4)
         self.assertEqual([row[0] for row in rows], [1, 2, 2, 1])  # orbit 0 is the degree
 
+    def test_default_max_work_is_bounded(self) -> None:
+        import inspect
+
+        default = inspect.signature(odin3.graphlet_counts).parameters["max_work"].default
+        self.assertEqual(default, 20_000_000_000)
+        method = inspect.signature(odin3.Odin3.graphlet_counts).parameters["max_work"].default
+        self.assertEqual(method, 20_000_000_000)
+
+    def test_missing_symbol_is_a_clear_error(self) -> None:
+        class OldLib:
+            pass
+
+        old = odin3.Odin3.__new__(odin3.Odin3)
+        old.lib = OldLib()
+        with self.assertRaises(odin3.Odin3Error) as ctx:
+            old.graphlet_counts(2, [(0, 1)])
+        self.assertIn("libodin3 too old", str(ctx.exception))
+        self.assertIn("odin3_graphlets_count", str(ctx.exception))
+
     def test_bad_size(self) -> None:
         with self.assertRaises(ValueError):
             odin3.graphlet_counts(2, [(0, 1)], size=3)

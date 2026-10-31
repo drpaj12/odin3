@@ -18,6 +18,8 @@ typedef struct glet_tables {
 extern glet_tables g_glet_tab;
 extern const uint8_t k_przulj[GLET_ORBITS_U5];
 
-void glet_tables_init(void);
+/* Builds the tables once, thread-safely (a mutex and a release flag, set only after a complete
+ * build). ODIN3_ERR_NO_MEMORY when the build cannot allocate; a later call retries. */
+odin3_status glet_tables_init(void);
 
 #endif

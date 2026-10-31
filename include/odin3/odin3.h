@@ -2285,8 +2285,11 @@ typedef struct odin3_graphlet_opts {
  * 2 to 4 node directed graphlets, 129 orbits (size is ignored); an anti-parallel pair counts once
  * per direction (Sarajlic 2016). out receives n * n_orbits int64 values, row-major (node, orbit),
  * and out_len is its capacity in values (less than needed is ODIN3_ERR_INVALID_ARG). Exceeding
- * max_work is ODIN3_ERR_INVALID_ARG (logged). The caller owns all memory. ODIN3_ERR_NO_MEMORY when
- * the counter cannot allocate.
+ * max_work is ODIN3_ERR_INVALID_ARG (logged), and out then holds partial counts. More than
+ * UINT32_MAX / 2 edges is ODIN3_ERR_INVALID_ARG. The caller owns all memory. ODIN3_ERR_NO_MEMORY
+ * when the counter cannot allocate. Thread-safe: the shared orbit tables are built once under a
+ * lock on first use (a failed build, ODIN3_ERR_NO_MEMORY, is retried by the next call), and
+ * concurrent calls on different graphs and buffers are independent.
  */
 odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
                                    const odin3_graphlet_opts *opts, int64_t *out, uint64_t out_len);
