@@ -555,7 +555,7 @@ set_target_properties(libodin3 PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR})
 target_include_directories(libodin3 PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS})
+target_link_libraries(libodin3 PRIVATE odin3_flags ${CMAKE_DL_LIBS} m)
 
 # --- odin3: the CLI -------------------------------------------------------------
 # Linked against libodin3 and using only odin3.h, so plugins it loads and the CLI share one pass
