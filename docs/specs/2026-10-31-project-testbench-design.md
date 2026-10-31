@@ -157,7 +157,8 @@ reported), `both` (`on both`: the scratch RTL against the design in hand, which 
 with `read_verilog; proc; opt; lower; abc`), `err` (an unsupported construct: error).
 `tests/tb/run_project.sh` (ctest `tb_project`) checks the exit status, the report lines and the
 JSON, and compares the `good` and `both` outputs with `iverilog -g2005 && vvp` (the oracle).
-(c) python `tests/tools/test_project_testbench.py`: the JSON schema.
+(c) the JSON schema is checked inside `run_project.sh` (python3 json), not by a separate
+unittest file (see section 7).
 
 ## 7. Agent defaults and deviations
 
@@ -166,4 +167,20 @@ only when non-empty. PT-5 qsf names as in section 2, unverified against a real q
 a scratch design built through the pass manager. PT-7 no output parsing for failures. PT-8
 `field` index instead of `signal`. PT-9 `max-time` is a 64-bit count (not a `count` word).
 
-Deviations as built: (filled in at the end).
+Deviations as built (2026-10-31):
+1. No `tests/tools/test_project_testbench.py`: the JSON fields are asserted in `run_project.sh`.
+2. An `error` record holds `<step>: <status>` only (`run (rtl): ODIN3_ERR_INVALID_ARG`); the reason
+   (for example `tb_err.v:2: unsupported: function`) is in the log lines before the report.
+3. In a mismatch `want` is the left text: the `expect` file, or the rtl run for `rtl vs netlist`;
+   `got` is the run text. A text that ends first shows `<end of output>`.
+4. `both` with `expect`: the rtl text is compared with the netlist text; if equal, the rtl text
+   is compared with `expect` (so a side is not named in `compared`).
+5. `--seed N` is the one `$random` seed for every testbench of the run.
+6. The golden `both` test builds its netlist side with `abc --lut 6` after `lower`.
+7. The error `dut` check runs after parsing the testbench; a `dut` that is neither an instance
+   nor a module name of the testbench is `error` with the log line naming it.
+8. Files: `src/passes/run_testbenches.c`, `run_testbenches_report.c` (comparison and reports),
+   `src/frontends/project/qsf_tb.c`; tests `tests/unit/test_project_testbench.c`,
+   `tests/tb/run_project.sh` with `tests/tb/project/`.
+
+Gate results: see the PR description.

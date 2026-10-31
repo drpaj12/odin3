@@ -759,8 +759,13 @@ odin3_status odin3_project_add_testbench(odin3_project *proj, const odin3_proj_t
     for (size_t i = 0; i < proj->testbenches.len; i++) {
         if (known[i].name == tb->name) {
             odin3_bytes name = odin3_proj_str_bytes(proj, tb->name);
-            odin3_proj_err err = {ODIN3_PROJ_ERR_SYNTAX, ODIN3_PROJ_LOCATED, tb->at, NULL,
-                                  "testbench given twice", &name, 1};
+            odin3_proj_err err = {ODIN3_PROJ_ERR_SYNTAX,
+                                  ODIN3_PROJ_LOCATED,
+                                  tb->at,
+                                  NULL,
+                                  "testbench given twice",
+                                  &name,
+                                  1};
             return odin3_project_fail(proj, &err);
         }
     }

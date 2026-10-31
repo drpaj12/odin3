@@ -585,9 +585,11 @@ static odin3_status key_import(o3_reader *rd, const o3_stmt *st) {
 
 /* --- testbench ----------------------------------------------------------------------------- */
 
+enum { TB_RADIX = 10, TB_ON_COUNT = 3 };
 enum { TB_KW_FILE, TB_KW_TOP, TB_KW_DUT, TB_KW_MAX_TIME, TB_KW_EXPECT, TB_KW_ON, TB_KW_COUNT };
 
-static const char *const k_tb_keywords[TB_KW_COUNT] = {"file", "top", "dut", "max-time", "expect", "on"};
+static const char *const k_tb_keywords[TB_KW_COUNT] = {"file",     "top",    "dut",
+                                                       "max-time", "expect", "on"};
 
 /* Whether word is wholly an IDENT. */
 static bool is_ident(odin3_bytes word) {
@@ -601,8 +603,8 @@ static odin3_status tb_max_time(o3_reader *rd, const o3_stmt *st, odin3_bytes wo
     bool ok = is_digits(word);
     for (size_t i = 0; ok && i < word.len; i++) {
         uint64_t digit = (uint64_t)(bytes[i] - '0');
-        ok = value <= (UINT64_MAX - digit) / 10U;
-        value = ok ? value * 10U + digit : value;
+        ok = value <= (UINT64_MAX - digit) / TB_RADIX;
+        value = ok ? value * TB_RADIX + digit : value;
     }
     if (!ok || value == 0) {
         return syntax(rd, st, "max-time expects a count above 0", &word);
@@ -621,7 +623,7 @@ static odin3_status tb_ident(o3_reader *rd, const o3_stmt *st, const odin3_word 
 
 static odin3_status tb_on(o3_reader *rd, const o3_stmt *st, odin3_bytes word, uint8_t *out) {
     static const char *const names[] = {"rtl", "netlist", "both"};
-    for (uint8_t i = 0; i < 3; i++) {
+    for (int i = 0; i < TB_ON_COUNT; i++) {
         if (odin3_proj_bytes_is(word, names[i])) {
             *out = (uint8_t)(ODIN3_PROJ_TB_RTL + i);
             return ODIN3_OK;

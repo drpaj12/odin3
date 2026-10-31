@@ -47,10 +47,10 @@ typedef struct tb_unit {
 static const tb_unit k_units[UNIT_COUNT] = {
     {"fs", 1},
     {"ps", FS_PER_PS},
-    {"ns", (uint64_t)FS_PER_PS * PS_PER_NS},
-    {"us", (uint64_t)FS_PER_PS * PS_PER_NS * NS_PER_US},
-    {"ms", (uint64_t)FS_PER_PS * PS_PER_NS * NS_PER_US * US_PER_MS},
-    {"s", (uint64_t)FS_PER_PS * PS_PER_NS * NS_PER_US * US_PER_MS * MS_PER_S},
+    {"ns", (uint64_t)FS_PER_PS *PS_PER_NS},
+    {"us", (uint64_t)FS_PER_PS *PS_PER_NS *NS_PER_US},
+    {"ms", (uint64_t)FS_PER_PS *PS_PER_NS *NS_PER_US *US_PER_MS},
+    {"s", (uint64_t)FS_PER_PS *PS_PER_NS *NS_PER_US *US_PER_MS *MS_PER_S},
 };
 
 /* What the (upper-cased) assignment name is, one of the TB_*_KIND values. */
@@ -295,8 +295,8 @@ odin3_status odin3_qsf_tb_finish(odin3_project *proj, const odin3_vec *items,
         if (kind == TB_OTHER_KIND) {
             warn(proj, list[i].at, "test bench assignment not mapped", list[i].name);
         } else if (tb == NULL) {
-            warn(proj, list[i].at, "test bench assignment in a section that is no declared test bench",
-                 list[i].name);
+            warn(proj, list[i].at,
+                 "test bench assignment in a section that is no declared test bench", list[i].name);
         } else {
             apply(proj, tb, kind, &list[i]);
         }

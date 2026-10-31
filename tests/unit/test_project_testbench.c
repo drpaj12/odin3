@@ -53,9 +53,14 @@ static void fresh_design(void) {
     captured[0] = '\0';
 }
 
-static void write_file(const char *name, const char *text) {
+typedef struct file_spec {
+    const char *name, *text;
+} file_spec;
+
+static void write_file(file_spec spec) {
+    const char *text = spec.text;
     char path[PATH_BUF];
-    (void)snprintf(path, sizeof path, "%s/%s", tmp, name);
+    (void)snprintf(path, sizeof path, "%s/%s", tmp, spec.name);
     FILE *fp = fopen(path, "wb");
     TEST_ASSERT_NOT_NULL(fp);
     TEST_ASSERT_EQUAL_size_t(strlen(text), fwrite(text, 1, strlen(text), fp));
@@ -72,10 +77,10 @@ void setUp(void) {
     (void)snprintf(tmp, sizeof tmp, "%s/odin3_tbproj_XXXXXX",
                    base != NULL && base[0] != '\0' ? base : "/tmp");
     TEST_ASSERT_NOT_NULL(mkdtemp(tmp));
-    write_file("tb.v", "`timescale 1ns/1ps\nmodule tb; endmodule\n");
-    write_file("tb2.v", "`timescale 10 ps / 1 ps\nmodule tb2; endmodule\n");
-    write_file("tb3.v", "module tb3; endmodule\n");
-    write_file("exp.txt", "0 1\n");
+    write_file((file_spec){"tb.v", "`timescale 1ns/1ps\nmodule tb; endmodule\n"});
+    write_file((file_spec){"tb2.v", "`timescale 10 ps / 1 ps\nmodule tb2; endmodule\n"});
+    write_file((file_spec){"tb3.v", "module tb3; endmodule\n"});
+    write_file((file_spec){"exp.txt", "0 1\n"});
 }
 
 void tearDown(void) {
@@ -96,7 +101,7 @@ static uint32_t id(const char *str) {
 }
 
 static odin3_status read_proj(const char *text, const char *name, bool qsf) {
-    write_file(name, text);
+    write_file((file_spec){name, text});
     char path[PATH_BUF];
     (void)snprintf(path, sizeof path, "%s/%s", tmp, name);
     odin3_proj_path file = {id(name), id(path), {0}};
@@ -164,9 +169,10 @@ static void expect_o3_error(const char *text, const char *expected) {
 
 static void test_minimal_and_defaults(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_o3("testbench t1 file tb.v\n"));
-    TEST_ASSERT_EQUAL_STRING("[{\"name\": \"t1\", \"file\": \"tb.v\", \"top\": null, \"dut\": null, "
-                             "\"max_time\": null, \"expect\": null, \"on\": \"rtl\"}]",
-                             tbs());
+    TEST_ASSERT_EQUAL_STRING(
+        "[{\"name\": \"t1\", \"file\": \"tb.v\", \"top\": null, \"dut\": null, "
+        "\"max_time\": null, \"expect\": null, \"on\": \"rtl\"}]",
+        tbs());
 }
 
 static void test_all_keywords_any_order(void) {
@@ -192,7 +198,8 @@ static void test_o3proj_errors(void) {
                     "p.o3proj:1:1: error: syntax: usage: testbench <name> file <path> [top "
                     "<module>] [dut <inst-or-module>] [max-time <T>] [expect <path>] [on "
                     "rtl|netlist|both]");
-    expect_o3_error("testbench t1 top tb\n", "p.o3proj:1:1: error: syntax: usage: testbench "
+    expect_o3_error("testbench t1 top tb\n",
+                    "p.o3proj:1:1: error: syntax: usage: testbench "
                     "<name> file <path> [top <module>] [dut <inst-or-module>] [max-time <T>] "
                     "[expect <path>] [on rtl|netlist|both]: 't1'");
     expect_o3_error("testbench t1 file tb.v bogus x\n",
@@ -260,66 +267,79 @@ static void test_qsf_order_free_and_two_benches(void) {
 static void test_qsf_nativelink_declares(void) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
-        read_qsf("set_global_assignment -name EDA_NATIVELINK_SIMULATION_TEST_BENCH only -section_id "
-                 "eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id only\n"));
+        read_qsf(
+            "set_global_assignment -name EDA_NATIVELINK_SIMULATION_TEST_BENCH only -section_id "
+            "eda_simulation\n"
+            "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id only\n"));
     TEST_ASSERT_EQUAL_STRING("[{\"name\": \"only\", \"file\": \"tb.v\", \"top\": null, \"dut\": "
                              "null, \"max_time\": null, \"expect\": null, \"on\": \"rtl\"}]",
                              tbs());
 }
 
+static void expect_warning(int idx, const char *text) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(warnings[idx], text), text);
+}
+
 static void test_qsf_warnings(void) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK,
-        read_qsf("set_global_assignment -name EDA_TEST_BENCH_NAME nofile -section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_NAME two -section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id two\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb2.v -section_id two\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_ENABLE_STATUS TEST_BENCH_MODE "
-                 "-section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id ghost\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"soon\" -section_id "
-                 "two\n"));
+        read_qsf(
+            "set_global_assignment -name EDA_TEST_BENCH_NAME nofile -section_id eda_simulation\n"
+            "set_global_assignment -name EDA_TEST_BENCH_NAME two -section_id eda_simulation\n"
+            "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id two\n"
+            "set_global_assignment -name EDA_TEST_BENCH_FILE tb2.v -section_id two\n"
+            "set_global_assignment -name EDA_TEST_BENCH_ENABLE_STATUS TEST_BENCH_MODE "
+            "-section_id eda_simulation\n"
+            "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id ghost\n"
+            "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"soon\" -section_id "
+            "two\n"));
     TEST_ASSERT_EQUAL_STRING("[{\"name\": \"two\", \"file\": \"tb.v\", \"top\": null, \"dut\": "
                              "null, \"max_time\": null, \"expect\": null, \"on\": \"rtl\"}]",
                              tbs());
     TEST_ASSERT_EQUAL_INT(5, nwarn);
-    TEST_ASSERT_NOT_NULL(strstr(warnings[0], "extra EDA_TEST_BENCH_FILE not run"));
-    TEST_ASSERT_NOT_NULL(strstr(warnings[1], "test bench assignment not mapped"));
-    TEST_ASSERT_NOT_NULL(strstr(warnings[1], "EDA_TEST_BENCH_ENABLE_STATUS"));
-    TEST_ASSERT_NOT_NULL(strstr(warnings[2], "no declared test bench"));
-    TEST_ASSERT_NOT_NULL(strstr(warnings[3], "has no EDA_TEST_BENCH_FILE, dropped"));
-    TEST_ASSERT_NOT_NULL(strstr(warnings[4], "is not '<n> <unit>'"));
+    expect_warning(0, "extra EDA_TEST_BENCH_FILE not run");
+    expect_warning(1, "test bench assignment not mapped");
+    expect_warning(1, "EDA_TEST_BENCH_ENABLE_STATUS");
+    expect_warning(2, "no declared test bench");
+    expect_warning(3, "has no EDA_TEST_BENCH_FILE, dropped");
+    expect_warning(4, "is not '<n> <unit>'");
+}
+
+static const char k_head[] =
+    "set_global_assignment -name EDA_TEST_BENCH_NAME x -section_id eda_simulation\n";
+
+/* A test bench x on file with the RUN_SIM_FOR value; the dump holds max_time text. */
+typedef struct time_case {
+    const char *file, *run_for, *max_time;
+    int warns;
+} time_case;
+
+static void expect_max_time(time_case tc) {
+    char text[TEXT_MAX];
+    (void)snprintf(text, sizeof text,
+                   "%sset_global_assignment -name EDA_TEST_BENCH_FILE %s -section_id x\n"
+                   "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"%s\" -section_id x\n",
+                   k_head, tc.file, tc.run_for);
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_qsf(text));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(tbs(), tc.max_time), tc.max_time);
+    TEST_ASSERT_EQUAL_INT(tc.warns, nwarn);
 }
 
 static void test_qsf_time_conversion(void) {
-    /* tb3.v has no `timescale: 1 ns assumed, WARNING; 2 us = 2000 units */
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        read_qsf("set_global_assignment -name EDA_TEST_BENCH_NAME x -section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb3.v -section_id x\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"2 us\" -section_id x\n"));
-    TEST_ASSERT_NOT_NULL(strstr(tbs(), "\"max_time\": 2000"));
-    TEST_ASSERT_EQUAL_INT(1, nwarn);
+    expect_max_time((time_case){"tb.v", "7 ns", "\"max_time\": 7,", 0});
+    expect_max_time((time_case){"tb.v", "2 us", "\"max_time\": 2000,", 0});
+    expect_max_time((time_case){"tb2.v", "3 ns", "\"max_time\": 300,", 0});
+    expect_max_time((time_case){"tb.v", "0 ns", "\"max_time\": null", 0});
+}
+
+static void test_qsf_time_warnings(void) {
+    /* tb3.v has no `timescale: 1 ns assumed */
+    expect_max_time((time_case){"tb3.v", "2 us", "\"max_time\": 2000,", 1});
     TEST_ASSERT_NOT_NULL(strstr(warnings[0], "no `timescale"));
-    /* not a whole number of units: 1500 ps in 1 ns units rounds down with a WARNING; 0 ns = none */
-    fresh_design();
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        read_qsf("set_global_assignment -name EDA_TEST_BENCH_NAME x -section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id x\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"1500 ps\" -section_id "
-                 "x\n"));
-    TEST_ASSERT_NOT_NULL(strstr(tbs(), "\"max_time\": 1,"));
-    TEST_ASSERT_EQUAL_INT(1, nwarn);
-    fresh_design();
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK,
-        read_qsf("set_global_assignment -name EDA_TEST_BENCH_NAME x -section_id eda_simulation\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_FILE tb.v -section_id x\n"
-                 "set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR \"0 ns\" -section_id x\n"));
-    TEST_ASSERT_NOT_NULL(strstr(tbs(), "\"max_time\": null"));
-    TEST_ASSERT_EQUAL_INT(0, nwarn);
+    /* 1500 ps in 1 ns units rounds down, with a WARNING */
+    expect_max_time((time_case){"tb.v", "1500 ps", "\"max_time\": 1,", 1});
+    TEST_ASSERT_NOT_NULL(strstr(warnings[0], "not a whole number"));
 }
 
 static void test_qsf_missing_file_is_error(void) {
@@ -348,6 +368,7 @@ int main(void) {
     RUN_TEST(test_qsf_nativelink_declares);
     RUN_TEST(test_qsf_warnings);
     RUN_TEST(test_qsf_time_conversion);
+    RUN_TEST(test_qsf_time_warnings);
     RUN_TEST(test_qsf_missing_file_is_error);
     RUN_TEST(test_qsf_other_assignments_still_ignored);
     return UNITY_END();

@@ -188,7 +188,7 @@ typedef struct odin3_project {
     odin3_vec libext;           /* uint32_t; empty = ".v" at lookup */
     odin3_vec defines, params, arch, rules, rule_cells, inventory, overrides, override_params;
     odin3_vec testbenches; /* odin3_proj_testbench, in listing order */
-    uint32_t top; /* "mod" or "lib.mod" as given; 0 = auto */
+    uint32_t top;          /* "mod" or "lib.mod" as given; 0 = auto */
     odin3_loc top_at;
     odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
     odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */

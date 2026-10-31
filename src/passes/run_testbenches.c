@@ -1,12 +1,12 @@
 /* run_testbenches.c — the `run_testbenches` pass: runs the project's testbenches (the `testbench`
  * key, spec docs/specs/2026-10-31-project-testbench-design.md) through the sim_tb interpreter. */
+#include "passes/run_testbenches.h"
 #include "frontends/project/project.h"
 #include "ir/design.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
-#include "passes/run_testbenches.h"
 #include "sim/tb.h"
 #include "util/clock.h"
 #include "util/log.h"
@@ -175,14 +175,16 @@ static odin3_design *build_rtl(const odin3_project *proj) {
     odin3_strbuf script;
     odin3_strbuf_init(&script);
     const char *entry = text_of(proj->design, proj->entry.resolved);
-    odin3_status st = odin3_strbuf_appendf(&script, "read_project --format %s \"%s\"",
-                                           k_format_names[proj->format - ODIN3_PROJ_FORMAT_O3PROJ],
-                                           entry);
+    odin3_status st =
+        odin3_strbuf_appendf(&script, "read_project --format %s \"%s\"",
+                             k_format_names[proj->format - ODIN3_PROJ_FORMAT_O3PROJ], entry);
     if (st == ODIN3_OK && proj->has_revision) {
-        st = odin3_strbuf_appendf(&script, " --revision \"%s\"", text_of(proj->design, proj->revision));
+        st = odin3_strbuf_appendf(&script, " --revision \"%s\"",
+                                  text_of(proj->design, proj->revision));
     }
-    st = st != ODIN3_OK ? st
-                        : odin3_strbuf_append(&script, odin3_bytes_cstr("\nread_verilog\nproc\nopt\nlower\n"));
+    st = st != ODIN3_OK
+             ? st
+             : odin3_strbuf_append(&script, odin3_bytes_cstr("\nread_verilog\nproc\nopt\nlower\n"));
     odin3_design *scratch = st == ODIN3_OK ? odin3_design_create() : NULL;
     if (scratch != NULL) {
         odin3_script_src src = {"run_testbenches", ODIN3_SCRIPT_BY_LINE};
@@ -250,6 +252,11 @@ static bool run_netlist(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_si
     return st == ODIN3_OK;
 }
 
+/* A text as a view ("" when empty). */
+static rt_text view(const rt_side *side) {
+    return (rt_text){side->data != NULL ? side->data : "", side->len};
+}
+
 /* The expect file against the text; a fail is recorded in res. */
 static void check_expect(const rt_ctx *ctx, const odin3_proj_testbench *tb, const rt_side *side,
                          rt_result *res) {
@@ -261,37 +268,37 @@ static void check_expect(const rt_ctx *ctx, const odin3_proj_testbench *tb, cons
         return;
     }
     rt_text left = {want, strlen(want)};
-    rt_text right = {side->data != NULL ? side->data : "", side->len};
-    if (rt_compare(left, right, &res->mm)) {
+    if (rt_compare(left, view(side), &res->mm)) {
         res->state = RT_FAIL;
         res->mm.compared = "expect";
     }
     free(want);
 }
 
+/* Both sides ran: compares them, then the first against expect; a fail is recorded in res. */
+static void compare_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, const rt_side *rtl,
+                          const rt_side *net, rt_result *res) {
+    bool both = tb->on == ODIN3_PROJ_TB_BOTH;
+    const rt_side *first = tb->on == ODIN3_PROJ_TB_NETLIST ? net : rtl;
+    res->end_time = first->end_time;
+    res->lines = count_lines(first);
+    if (both && rt_compare(view(rtl), view(net), &res->mm)) {
+        res->state = RT_FAIL;
+        res->mm.compared = "rtl vs netlist";
+    }
+    if (res->state == RT_PASS && tb->expect.given != 0) {
+        check_expect(ctx, tb, first, res);
+    }
+}
+
 /* Runs the sides `on` asks for, then the comparisons. */
 static void run_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_result *res) {
     rt_side rtl = {0};
     rt_side net = {0};
-    bool want_rtl = tb->on != ODIN3_PROJ_TB_NETLIST;
-    bool want_net = tb->on != ODIN3_PROJ_TB_RTL;
-    bool ok = !want_rtl || run_rtl(ctx, tb, &rtl, res);
-    ok = ok && (!want_net || run_netlist(ctx, tb, &net, res));
+    bool ok = tb->on == ODIN3_PROJ_TB_NETLIST || run_rtl(ctx, tb, &rtl, res);
+    ok = ok && (tb->on == ODIN3_PROJ_TB_RTL || run_netlist(ctx, tb, &net, res));
     if (ok) {
-        const rt_side *first = want_rtl ? &rtl : &net;
-        res->end_time = first->end_time;
-        res->lines = count_lines(first);
-        if (want_rtl && want_net) {
-            rt_text left = {rtl.data != NULL ? rtl.data : "", rtl.len};
-            rt_text right = {net.data != NULL ? net.data : "", net.len};
-            if (rt_compare(left, right, &res->mm)) {
-                res->state = RT_FAIL;
-                res->mm.compared = "rtl vs netlist";
-            }
-        }
-        if (res->state == RT_PASS && tb->expect.given != 0) {
-            check_expect(ctx, tb, first, res);
-        }
+        compare_sides(ctx, tb, &rtl, &net, res);
     }
     side_free(&rtl);
     side_free(&net);
@@ -307,7 +314,7 @@ static void run_testbench(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_
 
 /* --- the pass ------------------------------------------------------------------------------ */
 
-static const odin3_project *finished_project(odin3_design *design) {
+static const odin3_project *finished_project(const odin3_design *design) {
     const odin3_project *proj = odin3_design_project(design);
     if (proj == NULL || !proj->finished) {
         odin3_log(ODIN3_LOG_ERROR, "run_testbenches: no project was read (run read_project first)");
@@ -317,7 +324,8 @@ static const odin3_project *finished_project(odin3_design *design) {
 }
 
 /* Whether tb is selected by --only (all when none given). */
-static bool selected(const odin3_project *proj, const odin3_proj_testbench *tb, const rt_args *args) {
+static bool selected(const odin3_project *proj, const odin3_proj_testbench *tb,
+                     const rt_args *args) {
     return args->only[0] == '\0' || strcmp(args->only, text_of(proj->design, tb->name)) == 0;
 }
 
@@ -381,7 +389,10 @@ static odin3_status run_testbenches_run(odin3_pass_ctx *pctx, odin3_design *desi
         rt_result_free(&results[i]);
     }
     free(results);
-    return st != ODIN3_OK ? st : (bad ? ODIN3_ERR_INVALID_ARG : ODIN3_OK);
+    if (st == ODIN3_OK && bad) {
+        st = ODIN3_ERR_INVALID_ARG;
+    }
+    return st;
 }
 
 const odin3_pass_def odin3_pass_run_testbenches = {
