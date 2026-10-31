@@ -440,11 +440,18 @@ static odin3_status vectors_apply(odin3_simulation *sim, const odin3_simulation_
     return ODIN3_OK;
 }
 
+/* True when run is a usable odin3_simulation_run: size and reserved, and non-NULL arrays. */
+static bool vectors_valid(const odin3_simulation_run *run) {
+    if (run->size < sizeof(odin3_simulation_run) || run->reserved != 0) {
+        return false;
+    }
+    return (run->n_in == 0 || (run->in_signals != NULL && run->in_values != NULL)) &&
+           (run->n_out == 0 || (run->out_signals != NULL && run->out_values != NULL));
+}
+
 ODIN3_EXPORT odin3_status odin3_simulation_run_vectors(odin3_simulation *sim,
                                                        const odin3_simulation_run *run) {
-    if (sim == NULL || run == NULL ||
-        (run->n_in > 0 && (run->in_signals == NULL || run->in_values == NULL)) ||
-        (run->n_out > 0 && (run->out_signals == NULL || run->out_values == NULL))) {
+    if (sim == NULL || run == NULL || !vectors_valid(run)) {
         return odin3_api_invalid(__func__);
     }
     for (uint32_t row = 0; row < run->n_vectors; row++) {

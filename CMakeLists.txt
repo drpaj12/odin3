@@ -3386,8 +3386,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_edit PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
-    # Gate: every simulated net equals the independent evaluator (Leman Russ blif_sim.py, an
-    # external oracle named by the ODIN3_LEMANRUSS environment variable; the test skips, code 77, without it).
+    # run_vectors outputs and toggle counts against hand-worked values; needs no oracle.
+    add_test(NAME netlist_edit_sim_vectors
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} tools/netlist-edit-sim/check_vs_oracle.py --selftest
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(netlist_edit_sim_vectors PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Gate: every simulated net, before and after edits, equals the independent evaluator (Leman
+    # Russ blif_sim.py, an external oracle named by $ODIN3_LEMANRUSS). Leman Russ III is private, so
+    # CI cannot fetch it: the test then skips (code 77) and prints a SKIP line (see the script).
     add_test(NAME netlist_edit_sim_oracle
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
                 ${ODIN3_PLUGIN_PYTHON} tools/netlist-edit-sim/check_vs_oracle.py
@@ -3396,7 +3404,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 tests/micro/verilog/full/binops.v
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(netlist_edit_sim_oracle PROPERTIES
-        LABELS tools SKIP_RETURN_CODE 77 SKIP_REGULAR_EXPRESSION "skipped '")
+        LABELS tools SKIP_RETURN_CODE 77 SKIP_REGULAR_EXPRESSION "SKIP: netlist-edit-sim")
     # scoap: Design.scoap through the Python binding.
     add_test(NAME python_scoap
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}

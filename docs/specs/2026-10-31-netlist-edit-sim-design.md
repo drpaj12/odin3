@@ -29,18 +29,20 @@ All take the design and a module ID; objects are `odin3_ref` (module, id) as in 
 `tag` is the caller's edit tag (non-NULL, non-empty; e.g. "trojan:t1").
 
 ```
-typedef struct odin3_edit_new { const char *name, *tag, *cell_type, *cover;
-                                uint32_t n_inputs, reserved; } odin3_edit_new;
+typedef struct odin3_edit_new { uint32_t size, reserved; const char *name, *tag, *cell_type,
+                                *cover; int64_t value; uint32_t n_inputs, index; } odin3_edit_new;
+/* size = sizeof the struct the caller compiled against; reserved must be 0 (review fix round) */
 odin3_status odin3_edit_add_net(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
 odin3_status odin3_edit_add_node(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
 odin3_status odin3_edit_add_sop(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
-odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const odin3_edit_new*);
-odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, uint32_t index, int64_t v,
-                                      const char *tag);
+odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const odin3_edit_new*,
+                                  odin3_ref *twin);
+odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, const odin3_edit_new*,
+                                      odin3_ref *twin);   /* what->index, what->value, what->tag */
 odin3_status odin3_edit_connect(odin3_design*, odin3_ref pin, odin3_ref net);
 odin3_status odin3_edit_disconnect(odin3_design*, odin3_ref pin);
 odin3_status odin3_edit_rewire(odin3_design*, odin3_ref pin, odin3_ref net);   /* move a sink */
-odin3_status odin3_edit_remove_node(odin3_design*, odin3_ref node);
+odin3_status odin3_edit_remove_node(odin3_design*, odin3_ref node, int allow_undriven);
 odin3_status odin3_edit_remove_net(odin3_design*, odin3_ref net);
 ```
 
@@ -51,7 +53,7 @@ odin3_status odin3_edit_remove_net(odin3_design*, odin3_ref net);
 - `rewire` = disconnect then connect in one call, atomic (nothing changes on failure).
 - Every call: refuses with `ODIN3_ERR_INVALID_ARG` (logged) while the design has an open
   simulation; checks arguments before changing anything; runs `odin3_check_module` (FAST) in Debug
-  builds on success (and aborts the edit with `ODIN3_ERR_INTERNAL`, logged, if it fails); names are
+  builds after the edit (a failure is `ODIN3_ERR_CHECK`, logged, with the edit left applied; Release never checks); names are
   unique per module (a duplicate name is `ODIN3_ERR_INVALID_ARG`); IDs follow IR.md (new IDs at
   the end of the store, dead IDs not reused until `compact`). Undo: none.
 - Driver rule: `connect` of an output pin to a net that already has a driver is refused (the
@@ -143,5 +145,4 @@ tests against hand-computed values. `LU8PEEng`, `ch_intrinsics`, `memory_control
 oracle cannot resolve it.
 
 Next step: PR; the controller merges after the critique review. Open follow-ups: a sequential
-oracle (extend `blif_sim.py` with latches) to gate the VTR BLIFs; a DERIVED edit record that keeps
-the HDL ancestry of a node changed by `set_cover`.
+oracle (extend `blif_sim.py` with latches) to gate the VTR BLIFs; a sequential oracle.

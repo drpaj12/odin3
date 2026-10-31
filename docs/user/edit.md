@@ -20,15 +20,24 @@ pins[1].connect(top.net("b"))
 pins[2].connect(net)
 victim_pin.rewire(net)       # move a sink onto the new net
 gate = gate.set_cover("10 1\n", tag="trojan:t1")                # returns the twin node
-gate.remove()
+gate.remove()                # refused if it drives a net with other pins; remove(allow_undriven=True)
 ```
 
 - Every call checks its arguments first and changes nothing on failure (`Odin3Error`). Names are
   unique per module. An output pin may not join a net that already has a driver. Edits are refused
   while the design has an open simulation.
-- Debug builds run the fast IR check after every edit.
-- `set_cover` and `set_param_int` replace the node by a twin that takes its pins and name; the ID
-  changes and attributes are not carried over.
+- Debug builds run the fast IR check after every edit. The check runs after the edit, so a
+  failure (`ODIN3_ERR_CHECK`) leaves the edit applied; release builds never check.
+- `set_cover` and `set_param_int` replace the node by a twin that takes its pins, name and
+  attributes; the ID changes. The call returns the twin (C: the `twin` out parameter, set as soon
+  as the old node is replaced, so it is valid even if a later step fails; Python: the exception's
+  `.twin`).
+- `remove_node` of a node that drives a net with other pins is refused, unless `allow_undriven`
+  is set; the net is then left undriven and the Debug check may report it.
+- `rewire` is a disconnect then a connect. If the connect fails the pin returns to its old net, at
+  the end of that net's pin array.
+- C structs `odin3_edit_new` and `odin3_simulation_run` start with `size` (set it to `sizeof` of
+  the struct) and carry a `reserved` word that must be zero.
 - There is no undo, and module ports are not edited.
 - The result goes through `write_blif`, `write_json` and every pass like any other design.
 
@@ -38,6 +47,11 @@ Every object an edit creates carries a provenance leaf that is distinguishable f
 origins: an IMPORTED record in a pass run named `edit` whose arguments are your tag. Read it with
 `obj.edit_tag` (Python) or `odin3_edit_get_tag` (C). `None` means the object was not made by an
 edit. Objects made under one tag share one record.
+
+A twin made by `set_cover` or `set_param_int` keeps the old node's ancestry: its record is a
+DERIVED record (class rewrite, in a new run `edit` with your tag) whose parents are the old node's
+record, first, and the edit's IMPORTED record. Source locations and the construct chain of the
+old node are still reached through it, and `edit_tag` still reads your tag.
 
 ## Simulating every net
 
@@ -59,5 +73,9 @@ sim.toggles("d")                          # bit changes of d between cycle ends
   cost nothing when off. They are the energy proxy for tools such as Leman Russ III.
 - The gate `tools/netlist-edit-sim/check_vs_oracle.py` compares every simulated net with an
   independent evaluator (Leman Russ III `blif_sim.py`, named by `$ODIN3_LEMANRUSS`) on random
-  vectors. That evaluator is combinational only, so sequential designs are covered by the unit
-  tests instead.
+  vectors, once on the design as read and once after a `set_cover` and a `rewire`, comparing against
+  the written edited BLIF. That evaluator is combinational only, so sequential designs are covered
+  by `check_vs_oracle.py --selftest` and the unit tests, which check `run_vectors` and toggle counts
+  against hand-worked values. Leman Russ III is a private repository, so CI cannot run the oracle
+  gate: it skips and prints a `SKIP: netlist-edit-sim oracle gate NOT RUN` line and a GitHub
+  warning annotation. Run it locally with `ODIN3_LEMANRUSS` set before merging changes here.

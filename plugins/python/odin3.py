@@ -99,6 +99,9 @@ class Odin3Error(RuntimeError):
         super().__init__(f"{function}: {name}")
         self.function = function
         self.status = status
+        # set by Node.set_cover / set_param_int when the old node was replaced and a later step
+        # failed: the twin node (otherwise None)
+        self.twin: Any = None
 
 
 class LogRecord(NamedTuple):
@@ -939,7 +942,15 @@ class Simulation:
         """Bit changes of a signal, summed over its bits, since counting was turned on or reset."""
         _edit_probe_sim(self, "odin3_simulation_get_toggles")
         info = self._resolve(sig)
-        self._call("odin3_simulation_get_toggles", info.id, self._u64)
+        try:
+            self._call("odin3_simulation_get_toggles", info.id, self._u64)
+        except Odin3Error as exc:
+            raise Odin3Error(
+                "odin3_simulation_get_toggles",
+                exc.status,
+                f"no toggle count for {info.name!r}: counting is off, or the signal was looked up "
+                "after set_toggle_counting() (look up every signal you want first)",
+            ) from exc
         return int(self._u64[0])
 
     def run_vectors(
@@ -960,6 +971,7 @@ class Simulation:
         in_vals = ffi.new("uint64_t[]", flat or [0])
         out_vals = ffi.new("uint64_t[]", max(len(rows) * len(outs), 1))
         run = ffi.new("odin3_simulation_run *")
+        run.size = ffi.sizeof("odin3_simulation_run")
         run.in_signals, run.n_in, run.in_values = in_ids, len(ins), in_vals
         run.n_vectors = len(rows)
         run.out_signals, run.n_out, run.out_values = out_ids, len(outs), out_vals
@@ -1117,7 +1129,7 @@ class Module(_Named):
         ffi = self.design.odin3.ffi
         fields["tag"] = tag
         keep = {k: ffi.new("char[]", v.encode()) for k, v in fields.items() if isinstance(v, str)}
-        what = ffi.new("odin3_edit_new *")
+        what = _edit_new(ffi)
         for key, value in fields.items():
             if isinstance(value, str):
                 setattr(what, key, keep[key])
@@ -1198,6 +1210,13 @@ def _cstr(text: str | None) -> bytes | Any:
 def _edit_probe_sim(sim: Simulation, function: str) -> None:
     if not hasattr(sim.odin3.lib, function):
         raise Odin3Error(function, -1, f"libodin3 too old: needs {function} (after v1.2.0)")
+
+
+def _edit_new(ffi: Any) -> Any:
+    """A zeroed odin3_edit_new with size set (the ABI's leading size field)."""
+    what = ffi.new("odin3_edit_new *")
+    what.size = ffi.sizeof("odin3_edit_new")
+    return what
 
 
 def _edit_probe(design: Design, function: str) -> None:
@@ -1281,32 +1300,40 @@ class Node(_Local):
                 out[name] = self._text("odin3_node_get_param_text", i)
         return out
 
+    def _twin(self, function: str, what: Any) -> Node:
+        """Run a twin-making edit; the twin's ref comes back through an out parameter."""
+        _edit_probe(self.design, function)
+        out = self.design.odin3.ffi.new("odin3_ref *")
+        try:
+            self.design.call(function, self.ref(), what, out)
+        except Odin3Error as exc:
+            if out.id:  # replaced, then a later step failed: the error carries the twin
+                exc.twin = Node(self.design, int(out.module), int(out.id))
+            raise
+        return Node(self.design, int(out.module), int(out.id))
+
     def set_cover(self, cover: str, tag: str) -> Node:
         """Replace a $sop's cover (same width). Returns the twin node that takes over this
-        node's pins and name; this node is then dead (odin3_edit_set_cover)."""
-        _edit_probe(self.design, "odin3_edit_set_cover")
+        node's pins, name and attributes; this node is then dead. The twin's provenance is
+        derived from this node's and the edit's (odin3_edit_set_cover)."""
         ffi = self.design.odin3.ffi
         keep = (ffi.new("char[]", cover.encode()), ffi.new("char[]", tag.encode()))
-        what = ffi.new("odin3_edit_new *")
+        what = _edit_new(ffi)
         what.cover, what.tag = keep
-        _edit_call(self.design, "odin3_edit_set_cover", self.ref(), what)
-        twin = self.module.node(self.name) if self.name else None
-        if twin is None:
-            raise Odin3Error("odin3_edit_set_cover", -1, "the twin is unnamed; look it up by pins")
-        return twin
+        return self._twin("odin3_edit_set_cover", what)
 
     def set_param_int(self, index: int, value: int, tag: str) -> Node:
         """Change an integer parameter; returns the twin node (as set_cover)."""
-        ref = (self.module_id, self.id)
-        _edit_call(self.design, "odin3_edit_set_param_int", ref, index, value, tag.encode())
-        twin = self.module.node(self.name) if self.name else None
-        if twin is None:
-            raise Odin3Error("odin3_edit_set_param_int", -1, "the twin is unnamed")
-        return twin
+        ffi = self.design.odin3.ffi
+        keep = ffi.new("char[]", tag.encode())
+        what = _edit_new(ffi)
+        what.tag, what.index, what.value = keep, index, value
+        return self._twin("odin3_edit_set_param_int", what)
 
-    def remove(self) -> None:
-        """Remove this node (odin3_edit_remove_node)."""
-        _edit_call(self.design, "odin3_edit_remove_node", self.ref())
+    def remove(self, allow_undriven: bool = False) -> None:
+        """Remove this node (odin3_edit_remove_node). Refused (Odin3Error) when it drives a net
+        that has other pins, unless allow_undriven: the net is then left undriven."""
+        _edit_call(self.design, "odin3_edit_remove_node", self.ref(), int(allow_undriven))
 
     def pins(self) -> list[Pin]:
         """All pins: port order, then bit order (LSB first)."""

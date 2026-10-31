@@ -74,6 +74,31 @@ class PythonEditTest(unittest.TestCase):
         assert pin_net is not None
         self.assertEqual(pin_net.name, "a")
 
+    def test_twin_keeps_source_location_attrs_and_param_twin(self) -> None:
+        y = self.top.net("y")
+        assert y is not None
+        driver = y.pins()[0].node()
+        before = [(src.file, src.line) for src in driver.sources()]
+        self.assertTrue(before)
+        driver.set_attr("note", "kept")
+        twin = driver.set_cover("00 1\n", "trojan:t9")
+        self.assertEqual([(src.file, src.line) for src in twin.sources()], before)
+        self.assertEqual(twin.attr("note"), "kept")
+        self.assertEqual(twin.edit_tag, "trojan:t9")
+        self.assertGreaterEqual(len(twin.provenance()), 2)
+        gate = self.top.add_sop(2, "11 1\n", "pg", "t")
+        again = gate.set_param_int(0, 2, "t5")
+        self.assertFalse(gate.is_live)
+        self.assertTrue(again.is_live)
+
+    def test_remove_driver_needs_the_flag(self) -> None:
+        y = self.top.net("y")
+        assert y is not None
+        driver = y.pins()[0].node()
+        with self.assertRaises(odin3.Odin3Error):
+            driver.remove()
+        self.assertTrue(driver.is_live)
+
     def test_refusals_raise(self) -> None:
         self.top.add_net("n1", "t")
         with self.assertRaises(odin3.Odin3Error):
@@ -116,6 +141,16 @@ class PythonEditTest(unittest.TestCase):
         sim.reset()
         self.assertEqual(sim.toggles("q"), 0)
         sim.close()
+
+    def test_toggles_of_an_untracked_signal_explains_itself(self) -> None:
+        sim = self.design.simulate()
+        self.addCleanup(sim.close)
+        sim.set_toggle_counting()
+        late = sim.signal("y")
+        assert late is not None
+        with self.assertRaises(odin3.Odin3Error) as ctx:
+            sim.toggles(late._replace(id=10**6))
+        self.assertIn("set_toggle_counting", str(ctx.exception))
 
     def test_missing_symbol_is_a_clear_error(self) -> None:
         class OldLib:

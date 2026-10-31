@@ -2277,10 +2277,14 @@ odin3_status odin3_simulation_set_toggle_counting(odin3_simulation *sim, int ena
 odin3_status odin3_simulation_get_toggles(const odin3_simulation *sim, uint32_t signal,
                                           uint64_t *count);
 
-/* A multi-cycle input sequence (odin3_simulation_run_vectors). in_values has n_vectors rows of
- * n_in values (LSB first, width <= 64), row-major; out_values gets n_vectors rows of n_out values.
+/* A multi-cycle input sequence (odin3_simulation_run_vectors). size and reserved: as for
+ * odin3_edit_new (a smaller size or a non-zero reserved is ODIN3_ERR_INVALID_ARG). in_values has
+ * n_vectors rows of n_in values (LSB first, width <= 64), row-major; out_values gets n_vectors rows
+ * of n_out values.
  */
 typedef struct odin3_simulation_run {
+    uint32_t size;              /* sizeof(odin3_simulation_run) the caller compiled against */
+    uint32_t reserved;          /* zero */
     const uint32_t *in_signals; /* n_in INPUT signal IDs */
     uint32_t n_in;
     const uint64_t *in_values; /* n_vectors * n_in */
@@ -2338,26 +2342,33 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
  * Additive, ABI stays 7. Every call takes the design and refuses (ODIN3_ERR_INVALID_ARG, logged,
  * nothing changed) while the design has an open simulation, for an unknown module, object or
  * cell type, a dead object, or a name already used in the module. Debug builds run the fast IR
- * check after every successful edit (ODIN3_ERR_CHECK, logged, if it fails). IDs: new objects take
- * fresh IDs at the end of their store; dead IDs are not reused before compact. `tag` is the
+ * check after every successful edit and return ODIN3_ERR_CHECK (logged) if it fails: the check
+ * runs after the edit, so the edit stays applied then. Release builds never check. IDs: new objects
+ * take fresh IDs at the end of their store; dead IDs are not reused before compact. `tag` is the
  * caller's non-empty edit tag: every object an edit creates carries an IMPORTED provenance leaf
  * in a pass run named "edit" whose arguments are the tag (odin3_edit_get_tag reads it back), so
  * inserted logic is traceable and distinguishable in the provenance DAG. No undo. Pins are named
  * by odin3_ref from odin3_node_get_pins; nets and nodes by the refs these calls return.
  */
 
-/* What a new object is called and made of (odin3_edit_add_net, _add_node, _add_sop). name: NULL or
- * "" for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover:
- * add_sop only; cover is the BLIF cover text, rows "01- 1" separated by newlines (input chars 0,
- * 1 or -, blanks ignored, then the output char); "" is the constant 0, and a zero-input cover is
- * one output char per row. */
+/* What an edit creates or changes (odin3_edit_add_net, _add_node, _add_sop, _set_cover,
+ * _set_param_int). size: sizeof(odin3_edit_new) of the header the caller compiled against, set
+ * first; a later library may append fields and reads only what size covers (a smaller size is
+ * ODIN3_ERR_INVALID_ARG). reserved: must be zero, else ODIN3_ERR_INVALID_ARG. name: NULL or ""
+ * for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover: add_sop
+ * only (cover also set_cover); cover is the BLIF cover text, rows "01- 1" separated by newlines
+ * (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0, and a
+ * zero-input cover is one output char per row. index and value: set_param_int only. */
 typedef struct odin3_edit_new {
+    uint32_t size;
+    uint32_t reserved;
     const char *name;
     const char *tag;
     const char *cell_type;
     const char *cover;
+    int64_t value;
     uint32_t n_inputs;
-    uint32_t reserved; /* zero */
+    uint32_t index;
 } odin3_edit_new;
 
 /* New net in `module`. *net gets its ref. */
@@ -2373,13 +2384,19 @@ odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const od
 odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
                                 odin3_ref *node);
 
-/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag. The node is replaced
- * by a twin that takes over its pins and name; its ID changes (the old one is dead) and attributes
- * are not carried over. The twin's provenance is the edit record. Use odin3_edit_set_param_int the
- * same way. */
-odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what);
-odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node, uint32_t index,
-                                      int64_t value, const char *tag);
+/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag;
+ * odin3_edit_set_param_int sets integer parameter what->index to what->value the same way. The node
+ * is replaced by a twin that takes over its pins, name and attributes; its ID changes (the old one
+ * is dead). *twin gets the twin's ref as soon as the old node has been replaced, even when a later
+ * step (the rename, the attribute copy, the debug check) fails and the call returns an error, so
+ * the caller keeps a handle; it is {0, 0} when nothing was replaced. The twin's provenance is a
+ * DERIVED record in a new run "edit" (arguments: the tag) of class REWRITE whose parents are the
+ * old node's record (first) and the edit's IMPORTED record, so the backward walk still reaches the
+ * HDL source and the construct chain; odin3_edit_get_tag reads the tag. */
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what,
+                                  odin3_ref *twin);
+odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node,
+                                      const odin3_edit_new *what, odin3_ref *twin);
 
 /* Connects an unconnected pin to a net of the same module. An output pin may not join a net that
  * already has a driver. */
@@ -2388,11 +2405,16 @@ odin3_status odin3_edit_connect(odin3_design *design, odin3_ref pin, odin3_ref n
 /* Disconnects a pin (a no-op when unconnected). */
 odin3_status odin3_edit_disconnect(odin3_design *design, odin3_ref pin);
 
-/* Moves a pin to another net in one step (nothing changes on failure). */
+/* Moves a pin to another net: a disconnect then a connect. Arguments are checked first and a
+ * refusal changes nothing; if the connect still fails the pin is reconnected to its old net (at
+ * the end of that net's pin array, so the pin order of the old net may change). */
 odin3_status odin3_edit_rewire(odin3_design *design, odin3_ref pin, odin3_ref net);
 
-/* Removes a node (not a port node) or a net with no pins, wire membership or aliases. */
-odin3_status odin3_edit_remove_node(odin3_design *design, odin3_ref node);
+/* Removes a node (not a port node) or a net with no pins, wire membership or aliases. A node
+ * whose output pin sits on a net with other pins would leave that net undriven: that is refused
+ * (ODIN3_ERR_INVALID_ARG, logged) unless allow_undriven is non-zero, which removes it and leaves
+ * the net undriven (the Debug check may then fail, ODIN3_ERR_CHECK, with the removal applied). */
+odin3_status odin3_edit_remove_node(odin3_design *design, odin3_ref node, int allow_undriven);
 odin3_status odin3_edit_remove_net(odin3_design *design, odin3_ref net);
 
 /* *tag gets the edit tag of the node, net or wire `obj` (string owned by the design), or NULL
