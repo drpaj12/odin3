@@ -29,6 +29,8 @@
  *   (odin3_design_construct_count, odin3_design_get_construct), odin3_obj_get_prov,
  *   odin3_prov_get_info, odin3_prov_visit_parents, _joined and _chain. Plugins built for ABI 6
  *   must be rebuilt: odin3_plugin_init refuses a host of another ABI number.
+ * After v1.2.0, additive, ABI stays 7: odin3_edit_* (netlist editing), odin3_simulation_
+ *   set_toggle_counting, _get_toggles and _run_vectors (spec 2026-10-31-netlist-edit-sim-design).
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
@@ -2259,6 +2261,43 @@ odin3_status odin3_simulation_get_cycle(const odin3_simulation *sim, uint64_t *c
 odin3_status odin3_simulation_reset(odin3_simulation *sim);
 
 /*
+ * Toggle counts (spec docs/specs/2026-10-31-netlist-edit-sim-design.md 4.3), the energy proxy.
+ * set_toggle_counting(sim, 1) tracks every signal known at that moment (the listed ones and any
+ * find_signal appended: look up the unlisted nets you want first), takes the current values as
+ * the baseline and zeroes the counts; 0 turns counting off and frees it. While on, every cycle
+ * of odin3_simulation_step compares each tracked signal with its value at the end of the previous
+ * cycle; get_toggles gives, for one signal, the number of bit changes summed over its bits since
+ * counting was turned on or the last reset (odin3_simulation_reset zeroes the counts and takes the
+ * new baseline). A clock input toggles twice per cycle inside a cycle but is sampled once per
+ * cycle, so it reads 0. Settles outside a step are not sampled. Off by default; costs nothing
+ * when off. ODIN3_ERR_INVALID_ARG (logged) for NULL arguments, counting off, or a signal not
+ * tracked; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_simulation_set_toggle_counting(odin3_simulation *sim, int enable);
+odin3_status odin3_simulation_get_toggles(const odin3_simulation *sim, uint32_t signal,
+                                          uint64_t *count);
+
+/* A multi-cycle input sequence (odin3_simulation_run_vectors). in_values has n_vectors rows of
+ * n_in values (LSB first, width <= 64), row-major; out_values gets n_vectors rows of n_out values.
+ */
+typedef struct odin3_simulation_run {
+    const uint32_t *in_signals; /* n_in INPUT signal IDs */
+    uint32_t n_in;
+    const uint64_t *in_values; /* n_vectors * n_in */
+    uint32_t n_vectors;
+    const uint32_t *out_signals; /* n_out signal IDs of any kind */
+    uint32_t n_out;
+    uint64_t *out_values; /* n_vectors * n_out, written */
+} odin3_simulation_run;
+
+/*
+ * For each vector in order: set the inputs (as odin3_simulation_set), step one cycle, read the
+ * outputs into out_values. Stops at the first failure with the rows before it written
+ * (ODIN3_ERR_INVALID_ARG, logged, as for set and get). Several calls continue the same run.
+ */
+odin3_status odin3_simulation_run_vectors(odin3_simulation *sim, const odin3_simulation_run *run);
+
+/*
  * A plain graph for odin3_graphlets_count: n nodes (0 .. n-1) and n_edges directed edges
  * from[i] -> to[i].
  */
@@ -2293,6 +2332,72 @@ typedef struct odin3_graphlet_opts {
  */
 odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
                                    const odin3_graphlet_opts *opts, int64_t *out, uint64_t out_len);
+
+/* --- netlist editing (spec docs/specs/2026-10-31-netlist-edit-sim-design.md) --------------------
+ *
+ * Additive, ABI stays 7. Every call takes the design and refuses (ODIN3_ERR_INVALID_ARG, logged,
+ * nothing changed) while the design has an open simulation, for an unknown module, object or
+ * cell type, a dead object, or a name already used in the module. Debug builds run the fast IR
+ * check after every successful edit (ODIN3_ERR_CHECK, logged, if it fails). IDs: new objects take
+ * fresh IDs at the end of their store; dead IDs are not reused before compact. `tag` is the
+ * caller's non-empty edit tag: every object an edit creates carries an IMPORTED provenance leaf
+ * in a pass run named "edit" whose arguments are the tag (odin3_edit_get_tag reads it back), so
+ * inserted logic is traceable and distinguishable in the provenance DAG. No undo. Pins are named
+ * by odin3_ref from odin3_node_get_pins; nets and nodes by the refs these calls return.
+ */
+
+/* What a new object is called and made of (odin3_edit_add_net, _add_node, _add_sop). name: NULL or
+ * "" for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover:
+ * add_sop only; cover is the BLIF cover text, rows "01- 1" separated by newlines (input chars 0,
+ * 1 or -, blanks ignored, then the output char); "" is the constant 0, and a zero-input cover is
+ * one output char per row. */
+typedef struct odin3_edit_new {
+    const char *name;
+    const char *tag;
+    const char *cell_type;
+    const char *cover;
+    uint32_t n_inputs;
+    uint32_t reserved; /* zero */
+} odin3_edit_new;
+
+/* New net in `module`. *net gets its ref. */
+odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+                                odin3_ref *net);
+
+/* New node of the registered or built-in cell type what->cell_type (default parameters), all pins
+ * unconnected. Parameterised types: use odin3_edit_add_sop or odin3_edit_set_param_int. */
+odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+                                 odin3_ref *node);
+
+/* New $sop (BLIF .names) of what->n_inputs inputs and what->cover. */
+odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+                                odin3_ref *node);
+
+/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag. The node is replaced
+ * by a twin that takes over its pins and name; its ID changes (the old one is dead) and attributes
+ * are not carried over. The twin's provenance is the edit record. Use odin3_edit_set_param_int the
+ * same way. */
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what);
+odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node, uint32_t index,
+                                      int64_t value, const char *tag);
+
+/* Connects an unconnected pin to a net of the same module. An output pin may not join a net that
+ * already has a driver. */
+odin3_status odin3_edit_connect(odin3_design *design, odin3_ref pin, odin3_ref net);
+
+/* Disconnects a pin (a no-op when unconnected). */
+odin3_status odin3_edit_disconnect(odin3_design *design, odin3_ref pin);
+
+/* Moves a pin to another net in one step (nothing changes on failure). */
+odin3_status odin3_edit_rewire(odin3_design *design, odin3_ref pin, odin3_ref net);
+
+/* Removes a node (not a port node) or a net with no pins, wire membership or aliases. */
+odin3_status odin3_edit_remove_node(odin3_design *design, odin3_ref node);
+odin3_status odin3_edit_remove_net(odin3_design *design, odin3_ref net);
+
+/* *tag gets the edit tag of the node, net or wire `obj` (string owned by the design), or NULL
+ * when the object was not made by an edit call. */
+odin3_status odin3_edit_get_tag(const odin3_design *design, odin3_obj obj, const char **tag);
 
 /* ODIN3_CDEF_END */
 
