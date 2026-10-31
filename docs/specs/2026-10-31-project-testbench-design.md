@@ -151,13 +151,12 @@ the cffi binding needs no new function); it raises on a nonzero status.
 ## 6. Tests and gates
 
 (a) Unit tests `test_project_testbench`: o3proj parse (all keywords, defaults, errors, dump
-text), qsf mapping (every assignment of section 2, time conversion, each WARNING). (b)
-`tests/tb/project` golden project `tbproj` with a counter DUT and 4 testbenches: `pass` (self-
-contained, `expect` file made by iverilog), `bad` (deliberately wrong expect file: fail with the
-mismatch line), `both` (`on both`: rtl vs netlist by `abc`-free `lower` plus a `read_blif`-
-free route, see test script), `err` (a testbench that uses an unsupported construct: error).
+text), qsf mapping (every assignment of section 2, time conversion, each WARNING). (b) `tests/tb/project` golden project `tbproj` with a counter DUT and testbenches: `good` (an
+`expect` file made by iverilog), `bad` (a deliberately wrong `expect` file: fail, mismatch line
+reported), `both` (`on both`: the scratch RTL against the design in hand, which the script builds
+with `read_verilog; proc; opt; lower; abc`), `err` (an unsupported construct: error).
 `tests/tb/run_project.sh` (ctest `tb_project`) checks the exit status, the report lines and the
-JSON, and compares the `pass`/`both` outputs with `iverilog -g2005 && vvp` (the oracle).
+JSON, and compares the `good` and `both` outputs with `iverilog -g2005 && vvp` (the oracle).
 (c) python `tests/tools/test_project_testbench.py`: the JSON schema.
 
 ## 7. Agent defaults and deviations

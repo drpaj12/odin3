@@ -44,6 +44,7 @@ static const vec_slot k_vecs[] = {
     {offsetof(odin3_project, inventory), sizeof(odin3_proj_inventory)},
     {offsetof(odin3_project, overrides), sizeof(odin3_proj_override)},
     {offsetof(odin3_project, override_params), sizeof(odin3_proj_kv)},
+    {offsetof(odin3_project, testbenches), sizeof(odin3_proj_testbench)},
     {offsetof(odin3_project, ignored), sizeof(uint32_t)},
     {offsetof(odin3_project, duplicates), sizeof(uint32_t)},
 };
@@ -751,6 +752,19 @@ odin3_status odin3_project_add_override(odin3_project *proj, const odin3_proj_ov
         (void)push_copy(&proj->override_params, &params.kvs[i]);
     }
     return push_copy(&proj->overrides, &copy);
+}
+
+odin3_status odin3_project_add_testbench(odin3_project *proj, const odin3_proj_testbench *tb) {
+    const odin3_proj_testbench *known = proj->testbenches.data;
+    for (size_t i = 0; i < proj->testbenches.len; i++) {
+        if (known[i].name == tb->name) {
+            odin3_bytes name = odin3_proj_str_bytes(proj, tb->name);
+            odin3_proj_err err = {ODIN3_PROJ_ERR_SYNTAX, ODIN3_PROJ_LOCATED, tb->at, NULL,
+                                  "testbench given twice", &name, 1};
+            return odin3_project_fail(proj, &err);
+        }
+    }
+    return push_copy(&proj->testbenches, tb);
 }
 
 odin3_status odin3_project_add_ignored(odin3_project *proj, odin3_bytes name) {
