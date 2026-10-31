@@ -97,6 +97,26 @@ class PythonEditTest(unittest.TestCase):
         assert top is not None
         self.assertEqual(top.node_count(), self.top.node_count())
 
+    def test_sequences_and_toggles(self) -> None:
+        seq = Path(self.tmp.name) / "seq.blif"
+        seq.write_text(
+            ".model s\n.inputs clk en\n.outputs q\n.names en q d\n10 1\n01 1\n"
+            ".latch d q re clk 0\n.end\n"
+        )
+        design = Design()
+        self.addCleanup(design.close)
+        design.run_pass("read_blif", str(seq))
+        sim = design.simulate()
+        self.assertIsNotNone(sim.signal("d"))  # an internal net, no (* keep *)
+        sim.set_toggle_counting()
+        rows = sim.run_vectors(["en"], [[1], [1], [0], [1]], ["q", "d"])
+        self.assertEqual(rows, [[1, 0], [0, 1], [0, 0], [1, 0]])
+        self.assertEqual(sim.toggles("q"), 3)
+        self.assertEqual(sim.toggles("d"), 2)
+        sim.reset()
+        self.assertEqual(sim.toggles("q"), 0)
+        sim.close()
+
     def test_missing_symbol_is_a_clear_error(self) -> None:
         class OldLib:
             pass

@@ -41,6 +41,23 @@ edit. Objects made under one tag share one record.
 
 ## Simulating every net
 
-See the simulation chapter of the API reference. `Simulation.find_signal` resolves any live net of
-the simulated module by name, with no `(* keep *)`, for a design read from BLIF or edited here.
-`toggle counting` and `run_vectors` are described in the spec, section 4.
+`Simulation.signal(name)` resolves any live named net of the simulated module, with no
+`(* keep *)`, for a design read from BLIF or edited here (`$`-prefixed names resolve by name too,
+but are not listed). A pass such as `opt` or `abc` that removed a net still removes it.
+
+```python
+sim = design.simulate()
+sim.set_toggle_counting()                 # track every signal known now
+rows = sim.run_vectors(["en"], [[1], [1], [0], [1]], ["q", "d"])   # set, step 1 cycle, read
+sim.toggles("d")                          # bit changes of d between cycle ends
+```
+
+- `run_vectors(inputs, rows, outputs)`: for each row set the inputs (each at most 64 bits), step one
+  cycle, read the outputs; returns one list per row.
+- Toggle counts compare each signal with its value at the end of the previous cycle (a clock input
+  reads 0 because it is sampled once per cycle). `reset()` zeroes them. They are off by default and
+  cost nothing when off. They are the energy proxy for tools such as Leman Russ III.
+- The gate `tools/netlist-edit-sim/check_vs_oracle.py` compares every simulated net with an
+  independent evaluator (Leman Russ III `blif_sim.py`, named by `$ODIN3_LEMANRUSS`) on random
+  vectors. That evaluator is combinational only, so sequential designs are covered by the unit
+  tests instead.

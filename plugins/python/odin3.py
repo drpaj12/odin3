@@ -55,8 +55,9 @@ import cffi
 PACKAGE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = PACKAGE_DIR.parents[1]
 _BUNDLED_HEADER = PACKAGE_DIR / "odin3.h"
-HEADER = (_BUNDLED_HEADER if _BUNDLED_HEADER.is_file()
-          else REPO_ROOT / "include" / "odin3" / "odin3.h")
+HEADER = (
+    _BUNDLED_HEADER if _BUNDLED_HEADER.is_file() else REPO_ROOT / "include" / "odin3" / "odin3.h"
+)
 LOG = logging.getLogger("odin3")
 GRAPHLET_MAX_WORK = 20_000_000_000  # the CLI default bound of the graphlets pass (--max-work)
 
@@ -78,8 +79,9 @@ def find_library() -> Path:
     candidates = [("bundled", PACKAGE_DIR / "libodin3.so")]
     if env:
         candidates.append(("$ODIN3_LIB", Path(env)))
-    candidates += [(f"build/{p}", REPO_ROOT / "build" / p / "libodin3.so")
-                   for p in ("debug", "release")]
+    candidates += [
+        (f"build/{p}", REPO_ROOT / "build" / p / "libodin3.so") for p in ("debug", "release")
+    ]
     for origin, path in candidates:
         if path.is_file():
             LOG.info("libodin3: using the %s library %s", origin, path)
@@ -172,21 +174,25 @@ class Odin3:
         """
         if not hasattr(self.lib, "odin3_graphlets_count"):
             raise Odin3Error(
-                "odin3_graphlets_count", -1,
-                "libodin3 too old: needs odin3_graphlets_count, Odin III > v1.2.0")
+                "odin3_graphlets_count",
+                -1,
+                "libodin3 too old: needs odin3_graphlets_count, Odin III > v1.2.0",
+            )
         n_orbits = 129 if directed else {4: 15, 5: 73}.get(size, 0)
         if n_orbits == 0:
             raise ValueError("size must be 4 or 5")
         src = self.ffi.new("uint32_t[]", [u for u, _ in edges] or [0])
         dst = self.ffi.new("uint32_t[]", [v for _, v in edges] or [0])
         out = self.ffi.new("int64_t[]", max(n * n_orbits, 1))
-        graph = self.ffi.new("odin3_graphlet_graph *", {
-            "n": n, "n_edges": len(edges), "from": src, "to": dst})
-        opts = self.ffi.new("odin3_graphlet_opts *", {
-            "directed": int(directed), "size": size, "max_work": max_work})
+        graph = self.ffi.new(
+            "odin3_graphlet_graph *", {"n": n, "n_edges": len(edges), "from": src, "to": dst}
+        )
+        opts = self.ffi.new(
+            "odin3_graphlet_opts *", {"directed": int(directed), "size": size, "max_work": max_work}
+        )
         status = self.lib.odin3_graphlets_count(graph, opts, out, n * n_orbits)
         self.check("odin3_graphlets_count", status)
-        return [list(out[row * n_orbits:(row + 1) * n_orbits]) for row in range(n)]
+        return [list(out[row * n_orbits : (row + 1) * n_orbits]) for row in range(n)]
 
     def check(self, function: str, status: int) -> None:
         """Raise Odin3Error unless status is ODIN3_OK."""
@@ -753,9 +759,7 @@ class Simulation:
         raw = design.get("odin3_simulation_open", "odin3_simulation *", module)
         addr = int(self.odin3.ffi.cast("uintptr_t", raw))
         design._open[addr] = raw
-        self.ptr: Any = self.odin3.ffi.gc(
-            raw, _sim_destructor(self.odin3.lib, design._open, addr)
-        )
+        self.ptr: Any = self.odin3.ffi.gc(raw, _sim_destructor(self.odin3.lib, design._open, addr))
         self._cache: dict[str, SignalInfo] = {}
         self._u64 = self.odin3.ffi.new("uint64_t *")
         design._sims.add(self)
@@ -791,10 +795,16 @@ class Simulation:
         self._call("odin3_simulation_get_signal", ident, raw)
         text = self.odin3.text
         return SignalInfo(
-            ident, text(raw.name), text(raw.leaf), int(raw.width),
+            ident,
+            text(raw.name),
+            text(raw.leaf),
+            int(raw.width),
             self.odin3.enum_name("odin3_simulation_kind", raw.kind),
-            int(raw.msb), int(raw.lsb), int(raw.scope),
-            (int(raw.obj.module), int(raw.obj.kind), int(raw.obj.id)), int(raw.first_bit),
+            int(raw.msb),
+            int(raw.lsb),
+            int(raw.scope),
+            (int(raw.obj.module), int(raw.obj.kind), int(raw.obj.id)),
+            int(raw.first_bit),
         )
 
     def signals(self) -> list[SignalInfo]:
@@ -809,18 +819,27 @@ class Simulation:
         out = []
         for i in range(self._count("odin3_simulation_get_scope_count")):
             self._call("odin3_simulation_get_scope", i, raw)
-            out.append(ScopeInfo(
-                i, self.odin3.text(raw.name), self.odin3.text(raw.leaf), int(raw.parent),
-                int(raw.module), (int(raw.inst.module), int(raw.inst.id)),
-            ))
+            out.append(
+                ScopeInfo(
+                    i,
+                    self.odin3.text(raw.name),
+                    self.odin3.text(raw.leaf),
+                    int(raw.parent),
+                    int(raw.module),
+                    (int(raw.inst.module), int(raw.inst.id)),
+                )
+            )
         return out
 
     def signal(self, name: str) -> SignalInfo | None:
         """The signal named `name` (cached), or None when the simulated netlist has no such name."""
         found = self._cache.get(name)
         if found is None:
-            ident = int(self.odin3.get("odin3_simulation_find_signal", "uint32_t",
-                                       self._live(), name.encode()))
+            ident = int(
+                self.odin3.get(
+                    "odin3_simulation_find_signal", "uint32_t", self._live(), name.encode()
+                )
+            )
             if ident == 0:
                 return None
             found = self._cache[name] = self._info(ident)
@@ -876,6 +895,44 @@ class Simulation:
     def reset(self) -> None:
         """Power-on reset: every value and state bit 0 (INIT applied), cycle counter 0."""
         self._call("odin3_simulation_reset")
+
+    def set_toggle_counting(self, enable: bool = True) -> None:
+        """Count per-signal bit toggles between cycle ends (the energy proxy). Tracks the signals
+        known now: look up unlisted nets with signal() first. Needs the editing-era libodin3."""
+        _edit_probe_sim(self, "odin3_simulation_set_toggle_counting")
+        self._call("odin3_simulation_set_toggle_counting", int(enable))
+
+    def toggles(self, sig: str | SignalInfo) -> int:
+        """Bit changes of a signal, summed over its bits, since counting was turned on or reset."""
+        _edit_probe_sim(self, "odin3_simulation_get_toggles")
+        info = self._resolve(sig)
+        self._call("odin3_simulation_get_toggles", info.id, self._u64)
+        return int(self._u64[0])
+
+    def run_vectors(
+        self,
+        inputs: Sequence[str | SignalInfo],
+        rows: Sequence[Sequence[int]],
+        outputs: Sequence[str | SignalInfo],
+    ) -> list[list[int]]:
+        """For each row of input values (<= 64 bits each): set the inputs, step one cycle, read
+        the outputs. Returns one list of output values per row."""
+        _edit_probe_sim(self, "odin3_simulation_run_vectors")
+        ffi = self.odin3.ffi
+        ins = [self._resolve(sig).id for sig in inputs]
+        outs = [self._resolve(sig).id for sig in outputs]
+        flat = [value for row in rows for value in row]
+        in_ids = ffi.new("uint32_t[]", ins or [0])
+        out_ids = ffi.new("uint32_t[]", outs or [0])
+        in_vals = ffi.new("uint64_t[]", flat or [0])
+        out_vals = ffi.new("uint64_t[]", max(len(rows) * len(outs), 1))
+        run = ffi.new("odin3_simulation_run *")
+        run.in_signals, run.n_in, run.in_values = in_ids, len(ins), in_vals
+        run.n_vectors = len(rows)
+        run.out_signals, run.n_out, run.out_values = out_ids, len(outs), out_vals
+        self._call("odin3_simulation_run_vectors", run)
+        width = len(outs)
+        return [[int(out_vals[r * width + c]) for c in range(width)] for r in range(len(rows))]
 
     @property
     def cycle(self) -> int:
@@ -1105,11 +1162,17 @@ def _cstr(text: str | None) -> bytes | Any:
     return None if text is None else text.encode()
 
 
+def _edit_probe_sim(sim: Simulation, function: str) -> None:
+    if not hasattr(sim.odin3.lib, function):
+        raise Odin3Error(function, -1, f"libodin3 too old: needs {function} (after v1.2.0)")
+
+
 def _edit_probe(design: Design, function: str) -> None:
     """Raise a clear error when libodin3 predates the netlist-editing ABI."""
     if not hasattr(design.odin3.lib, function):
         raise Odin3Error(
-            function, -1, f"libodin3 too old: needs {function} (netlist editing, after v1.2.0)")
+            function, -1, f"libodin3 too old: needs {function} (netlist editing, after v1.2.0)"
+        )
 
 
 def _edit_ref(design: Design, function: str, *args: Any) -> tuple[int, int]:
@@ -1346,7 +1409,7 @@ class Ast:
 
     @property
     def form(self) -> str:
-        """"parsed" or "elaborated"."""
+        """ "parsed" or "elaborated"."""
         parsed = self._get("odin3_ast_get_form") == self.design.odin3.lib.ODIN3_AST_FORM_PARSED
         return "parsed" if parsed else "elaborated"
 
@@ -1421,7 +1484,8 @@ _MAP_DECIMAL = re.compile(r"[0-9]{1,10}")  # as the C parse_decimal: ASCII digit
 _MAP_UINT32_MAX = 0xFFFFFFFF
 _MAP_HEADER = re.compile(
     r"# odin3-names (?P<version>[12]) hash=sha256 width=(?P<width>\d{1,2})"
-    r"(?: prov=1 ast=(?P<ast>refs|constructs|full|none))?")
+    r"(?: prov=1 ast=(?P<ast>refs|constructs|full|none))?"
+)
 
 
 def _map_unescape(text: str, v2: bool = True) -> str:
@@ -1590,8 +1654,9 @@ class NameMap:
     whys: list[MapWhy] = field(default_factory=list)
     members: list[MapMember] = field(default_factory=list)
     ignored: int = 0
-    _index: dict[str, list[MapObject]] = field(default_factory=dict, init=False, repr=False,
-                                               compare=False)
+    _index: dict[str, list[MapObject]] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
     _indexed: int = field(default=-1, init=False, repr=False, compare=False)
 
     def find(self, name: str) -> list[MapObject]:
@@ -1649,8 +1714,11 @@ class NameMap:
 
 def _map_header(line: str, path: str) -> NameMap:
     match = _MAP_HEADER.fullmatch(line)
-    if match is None or not 1 <= int(match["width"]) <= 52 or (
-            (match["version"] == "2") != (match["ast"] is not None)):
+    if (
+        match is None
+        or not 1 <= int(match["width"]) <= 52
+        or ((match["version"] == "2") != (match["ast"] is not None))
+    ):
         raise ValueError(f"{path}:1: not a name map header: '{line}'")
     return NameMap(int(match["version"]), int(match["width"]), match["ast"] or "")
 
@@ -1664,8 +1732,19 @@ def _map_object_o(fields: list[str], text: str, v2: bool) -> MapObject:
     line = _map_decimal(fields[6])
     if not v2:
         return MapObject("O", esc[0], fields[1], esc[2], esc[3], esc[4], esc[5], line, (), "", text)
-    return MapObject("O", esc[0], fields[1], esc[2], esc[3], esc[4], esc[5], line,
-                     _map_refs(fields[7], "r"), _map_unescape(fields[8]), text)
+    return MapObject(
+        "O",
+        esc[0],
+        fields[1],
+        esc[2],
+        esc[3],
+        esc[4],
+        esc[5],
+        line,
+        _map_refs(fields[7], "r"),
+        _map_unescape(fields[8]),
+        text,
+    )
 
 
 def _map_line_v1(nm: NameMap, text: str) -> None:
@@ -1688,32 +1767,74 @@ def _map_line(nm: NameMap, text: str) -> None:
         return
     raw = [_map_unescape(item) for item in fields]
     if kind == "N":
-        nm.objects.append(MapObject("N", raw[0], raw[1], raw[2], "", "", "", 0,
-                                    _map_refs(fields[3], "r"), raw[4], text))
+        nm.objects.append(
+            MapObject(
+                "N", raw[0], raw[1], raw[2], "", "", "", 0, _map_refs(fields[3], "r"), raw[4], text
+            )
+        )
     elif kind == "R":
-        nm.records.append(MapRecord(
-            _map_ref(fields[0], "r"), raw[1], raw[2], raw[3], raw[4], _map_refs(fields[5], "r"),
-            tuple(_map_unescape(item) for item in fields[6].split("|")) if fields[6] else (),
-            _map_refs(fields[7], "c"),
-            tuple(_map_unescape(item) for item in fields[8].split(",")) if fields[8] else (),
-            text))
+        nm.records.append(
+            MapRecord(
+                _map_ref(fields[0], "r"),
+                raw[1],
+                raw[2],
+                raw[3],
+                raw[4],
+                _map_refs(fields[5], "r"),
+                tuple(_map_unescape(item) for item in fields[6].split("|")) if fields[6] else (),
+                _map_refs(fields[7], "c"),
+                tuple(_map_unescape(item) for item in fields[8].split(",")) if fields[8] else (),
+                text,
+            )
+        )
     elif kind == "C":
-        nm.constructs.append(MapConstruct(_map_ref(fields[0], "c"), raw[1], raw[2],
-                                          _map_ref(fields[3], "c"), _map_ref(fields[4], "f"),
-                                          raw[5], raw[6], text))
+        nm.constructs.append(
+            MapConstruct(
+                _map_ref(fields[0], "c"),
+                raw[1],
+                raw[2],
+                _map_ref(fields[3], "c"),
+                _map_ref(fields[4], "f"),
+                raw[5],
+                raw[6],
+                text,
+            )
+        )
     elif kind == "F":
         nm.files.append(raw[1])
     elif kind == "T":
         nm.runs.append((raw[1], raw[2], raw[3]))
     elif kind == "Q":
-        nm.whys.append(MapWhy(
-            _map_ref_lenient(fields[0], "r"), _map_list(fields[1]), raw[2], _map_list(fields[3]),
-            raw[4], raw[5], raw[6], _map_list(fields[7]), _map_list(fields[8]), raw[9],
-            _map_list(fields[10]), raw[11], text))
+        nm.whys.append(
+            MapWhy(
+                _map_ref_lenient(fields[0], "r"),
+                _map_list(fields[1]),
+                raw[2],
+                _map_list(fields[3]),
+                raw[4],
+                raw[5],
+                raw[6],
+                _map_list(fields[7]),
+                _map_list(fields[8]),
+                raw[9],
+                _map_list(fields[10]),
+                raw[11],
+                text,
+            )
+        )
     elif kind == "K":
-        nm.members.append(MapMember(
-            _map_ref_lenient(fields[0], "r"), raw[1], raw[2], raw[3], raw[4],
-            _map_list(fields[5]), raw[6], text))
+        nm.members.append(
+            MapMember(
+                _map_ref_lenient(fields[0], "r"),
+                raw[1],
+                raw[2],
+                raw[3],
+                raw[4],
+                _map_list(fields[5]),
+                raw[6],
+                text,
+            )
+        )
     else:
         nm.atoms.append(tuple(raw))
 
@@ -1736,8 +1857,9 @@ def _map_add(nm: NameMap, raw: bytes, path: str, number: int, warned: set[str]) 
         else:
             if line[0] not in warned:
                 warned.add(line[0])
-                LOG.warning("%s:%d: name map line type '%s' is unknown and ignored", path, number,
-                            line[0])
+                LOG.warning(
+                    "%s:%d: name map line type '%s' is unknown and ignored", path, number, line[0]
+                )
             nm.ignored += 1
     except ValueError as err:  # includes UnicodeDecodeError
         LOG.warning("%s:%d: name map entry ignored: %s", path, number, err)
@@ -1784,7 +1906,8 @@ def timing_attribution(flow_dir: str | Path, paths: int | None = None) -> dict[s
             if str(flow) not in sys.path:
                 sys.path.insert(0, str(flow))
             report: dict[str, Any] = importlib.import_module("timing_attr").attribute_flow_dir(
-                Path(flow_dir), paths)
+                Path(flow_dir), paths
+            )
             return report
     raise RuntimeError("timing_attr.py not found: the install has no tools/flow data")
 

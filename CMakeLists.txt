@@ -3359,6 +3359,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_edit PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # Gate: every simulated net equals the independent evaluator (Leman Russ blif_sim.py, an
+    # external oracle named by the ODIN3_LEMANRUSS environment variable; the test skips, code 77, without it).
+    add_test(NAME netlist_edit_sim_oracle
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} tools/netlist-edit-sim/check_vs_oracle.py
+                --odin3 $<TARGET_FILE:odin3>
+                tests/golden/blif/hand_wide.blif tests/micro/verilog/full/ansiportlist.v
+                tests/micro/verilog/full/binops.v
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(netlist_edit_sim_oracle PROPERTIES
+        LABELS tools SKIP_RETURN_CODE 77 SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
     add_test(NAME python_copy
         COMMAND ${CMAKE_COMMAND} -E env ${_python_env}

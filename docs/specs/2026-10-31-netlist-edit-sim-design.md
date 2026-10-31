@@ -126,10 +126,22 @@ symbol and raises a clear "built against an older libodin3" error.
 4. Oracle (blif_sim.py) is an external tools-script dependency, never vendored.
 
 ## 9. Progress and next step
-Done: `src/api/edit.c` (section 2 complete, tag provenance), `odin3.h`, `tests/unit/test_edit.c`,
-the Python wrapper and `tests/tools/test_python_edit.py` (both green in debug), `docs/user/edit.md`.
-Agent default 5: the creation calls take an `odin3_edit_new` struct (lint caps parameters at 5).
-Agent default 6: the edit leaf record is made without an operation (op 0); IMPORTED needs none.
-Next step: section 4 (toggle counts, `run_vectors`, net visibility check on BLIF/edited designs)
-in `src/api/sim_abi.c` with its unit test; then the oracle gate script (sec. 5); then full
-debug ctest, PR.
+Done: edit API (C + Python + tests), toggle counts and `run_vectors` (C + Python + tests), the
+oracle gate script `tools/netlist-edit-sim/check_vs_oracle.py` and CTest `netlist_edit_sim_oracle`,
+`docs/user/edit.md`. Agent defaults 5 to 8: creation calls take an `odin3_edit_new` struct (the
+lint caps parameters at 5); the edit leaf record has no operation (op 0); toggle counts sample
+once per cycle end (a clock reads 0); net visibility needed no core change (a BLIF-read or edited
+design already lists and resolves every named net; the unit test proves it on an internal net).
+
+Gate result: the oracle is combinational and `.names` only, so the gate covers combinational
+designs: `hand_wide.blif`, and the micros `ansiportlist.v` and `binops.v` after
+`read_verilog; proc; opt; lower; write_blif --gates-as-names`: 16 and 322 nets, 64 random
+vectors, every net equal. Sequential micros and the VTR benchmarks are skipped by the script
+(`.latch`) and reported as skipped; their toggle and sequence behaviour is covered by the unit
+tests against hand-computed values. `LU8PEEng`, `ch_intrinsics`, `memory_controller`,
+`mkPktMerge`, `stereovision0` fail to lower (not caused by this work); `CRC33_D264` lowers but the
+oracle cannot resolve it.
+
+Next step: PR; the controller merges after the critique review. Open follow-ups: a sequential
+oracle (extend `blif_sim.py` with latches) to gate the VTR BLIFs; a DERIVED edit record that keeps
+the HDL ancestry of a node changed by `set_cover`.

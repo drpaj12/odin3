@@ -29,6 +29,8 @@
  *   (odin3_design_construct_count, odin3_design_get_construct), odin3_obj_get_prov,
  *   odin3_prov_get_info, odin3_prov_visit_parents, _joined and _chain. Plugins built for ABI 6
  *   must be rebuilt: odin3_plugin_init refuses a host of another ABI number.
+ * After v1.2.0, additive, ABI stays 7: odin3_edit_* (netlist editing), odin3_simulation_
+ *   set_toggle_counting, _get_toggles and _run_vectors (spec 2026-10-31-netlist-edit-sim-design).
  *
  * The block between ODIN3_CDEF_BEGIN and ODIN3_CDEF_END is read verbatim by the
  * Python binding as a cffi cdef: keep it free of preprocessor directives and
