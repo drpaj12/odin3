@@ -464,4 +464,4 @@ const odin3_pass_def odin3_pass_scoap = {
     scoap_run,
     NULL,
     false,
-    ODIN3_PASS_PROCESSES_OK};
+    ODIN3_PASS_PROCESSES_REFUSE};

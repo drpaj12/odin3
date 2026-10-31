@@ -147,6 +147,53 @@ class ScoapTest(unittest.TestCase):
         )
         self.assertEqual(len(top["hardest_to_observe"]), 2)
 
+    def test_gate_cells_equal_names_form(self) -> None:
+        text = (
+            ".model t\n.inputs a b s\n.outputs y z m\n.subckt $_AND_ A=a B=b Y=y\n"
+            ".subckt $_XOR_ A=a B=b Y=z\n.subckt $_MUX_ A=a B=b S=s Y=m\n.end\n"
+        )
+        src = self.dir / "g.blif"
+        src.write_text(text)
+        out = self.dir / "g.json"
+        done = subprocess.run(
+            [str(ODIN3), "-p", f"read_blif {src}; scoap --out {out}"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        nets = {n["name"]: n for n in json.loads(out.read_text())["modules"][0]["nets"]}
+        self.check(
+            nets,
+            {
+                "y": {"cc0": 2, "cc1": 3},
+                "z": {"cc0": 3, "cc1": 3},
+                "m": {"cc0": 3, "cc1": 3, "co": 0},
+                "s": {"co": 3},
+                "a": {"co": 2},
+            },
+        )
+        self.assertEqual(len(nets), 6)
+
+    def test_lut_mapped_equals_names_form(self) -> None:
+        text = blif(".names a b y\n11 1\n", "a b", "y")
+        src = self.dir / "l.blif"
+        src.write_text(text)
+        out = self.dir / "l.json"
+        script = f"read_techlib {LIB}; read_blif {src}; abc --lut 4; scoap --out {out}"
+        done = subprocess.run([str(ODIN3), "-p", script], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        nets = {n["name"]: n for n in json.loads(out.read_text())["modules"][0]["nets"]}
+        self.check(nets, {"y": {"cc0": 2, "cc1": 3}, "a": {"co": 2}})
+
+    def test_black_box_is_opaque_and_named(self) -> None:
+        text = (
+            ".model t\n.inputs a\n.outputs y\n.subckt box i=a o=y\n.end\n"
+            ".model box\n.inputs i\n.outputs o\n.blackbox\n.end\n"
+        )
+        got = self.run_pass(text)
+        self.check(got, {"y": {"cc0": 1, "cc1": 1, "co": 0}, "a": {"co": 0}})
+        self.assertIn("opaque cell type box", self.log)
+
     def test_reference_equals_pass_on_small_circuits(self) -> None:
         gate = load("gate")
         text = blif(

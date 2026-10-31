@@ -141,6 +141,23 @@ as a dict. `docs/user/scoap.md`, PASSES.md row. No IR change, no ADR (attributes
 3. Construction check: every live net of every module has a value; opaque cell types listed.
 4. Signal probability against exact enumeration on small circuits.
 
-## 8. Next step (resume note)
+## 8. As built (2026-10-31)
 
-Written when the lane stopped or finished; see the PR description for the state.
+- Files: `src/passes/scoap/{scoap.c,sc_model.c,sc_fn.c,sc_solve.c,sc_sigprob.c}`. Registry flag
+  `processes` = REFUSE (as `levelize`): the netlist view without `$proc` cells.
+- Deviation: the unit tests are Python `unittest` through the CLI (`tests/tools/test_scoap.py`, CTest
+  `scoap_unit`), not Unity; the circuits are hand-computed in the test comments.
+- Deviation: the reference reads BLIF (not the golden JSON), so a design with a `.subckt` of a model
+  that the file does not define is skipped by the gate (10 of 474 designs).
+- Storage cells in `--sequential` mode: only types whose ports include `D` and one output are
+  handled by the sequential rules; others stay scan cells.
+- Undriven input pins read constant 0 (as the simulator does); a flip-flop without a clock pin has
+  no clock term.
+- Gate evidence: see the PR description.
+
+## 9. Next step (resume note)
+
+Done: spec, pass, Python API, docs, tests, reference gate. Open: Mimir `scoap` measurer (next to
+`struct`, `rent`, `graphlet`) and Leman Russ III rare-net selection consume `Design.scoap(sigprob=...)`;
+per-branch (fanout branch) observability is not stored (stem minimum only); `--sigprob` covers the top
+module only.
