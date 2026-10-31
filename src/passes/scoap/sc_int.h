@@ -15,8 +15,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* SCOAP_INF: unreachable. SC_MAX_EXACT: widest function treated exactly (spec section 3). */
-enum { SCOAP_INF = 1000000000, SC_MAX_EXACT = 8, SC_MAX_TABLE = 1 << SC_MAX_EXACT };
+/* SCOAP_INF: unreachable, only ever the value of something with no assignment or path. SCOAP_SAT:
+ * finite values saturate here and stay finite (SCOAP_SAT < SCOAP_INF). Both exact in a double.
+ * SC_MAX_EXACT: widest function treated exactly (spec section 3). */
+#define SCOAP_INF INT64_C(1000000000000000000)
+#define SCOAP_SAT INT64_C(1000000000000000)
+enum { SC_MAX_EXACT = 8, SC_MAX_TABLE = 1 << SC_MAX_EXACT };
 
 /* A cube over at most SC_MAX_EXACT inputs: bit j of care set = input j specified, val = its value.
  */
@@ -52,16 +56,18 @@ typedef struct sc_cell {
 
 typedef struct sc_stats {
     uint64_t cells[SC_NKINDS];
-    uint32_t sweeps;
+    uint32_t sweeps; /* rounds of the worklist, all phases */
     bool converged;
     uint64_t unreachable;
+    uint64_t saturated; /* nets with a value at SCOAP_SAT */
+    uint64_t evals;     /* cell evaluations */
 } sc_stats;
 
 typedef struct sc_model {
     odin3_module *mod;
     bool seq;
     uint32_t n_nets; /* net IDs are 1 .. n_nets - 1 */
-    int32_t *cc[2], *sc[2], *co, *so;
+    int64_t *cc[2], *sc[2], *co, *so;
     uint8_t *live;
     uint8_t *fixed; /* constant nets: values never change */
     sc_cell *cells;
@@ -69,10 +75,11 @@ typedef struct sc_model {
     odin3_vec in_pool;    /* uint32_t */
     odin3_vec prime_pool; /* sc_cube */
     odin3_vec sens_ref;   /* uint32_t pairs: offset, count */
-    odin3_vec sens_pool;  /* uint8_t minterms */
+    odin3_vec sens_pool;  /* sc_cube: sensitising cubes of the other inputs, per input */
     odin3_vec cover_pool; /* uint8_t */
     sc_stats stats;
     odin3_vec opaque_types; /* uint32_t celltype IDs, first seen */
+    uint64_t hash;          /* fingerprint of everything the values are computed from */
 } sc_model;
 
 /* --- sc_fn.c: function tables ----------------------------------------------------------------- */
@@ -83,7 +90,8 @@ typedef struct sc_table {
     uint8_t f[SC_MAX_TABLE];
 } sc_table;
 
-/* Appends the prime implicants of {f = v} and the sensitising minterms of every input to cell. */
+/* Appends the prime implicants of {f = v} and, per input, the cheapest-cube candidates that make
+ * the output follow that input with a known polarity (spec section 3, observability) to cell. */
 odin3_status sc_fn_compile(sc_model *md, sc_cell *cell, const sc_table *tab);
 
 /* --- sc_model.c: building ----------------------------------------------------------------------
@@ -93,6 +101,6 @@ void sc_model_free(sc_model *md);
 
 /* --- sc_solve.c: the fixed point ---------------------------------------------------------------
  */
-void sc_solve(sc_model *md);
+odin3_status sc_solve(sc_model *md);
 
 #endif

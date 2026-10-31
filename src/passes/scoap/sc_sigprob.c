@@ -51,7 +51,7 @@ static void map_signal(sp_ctx *ctx, uint32_t id) {
     ctx->total_bits += sg->width;
 }
 
-static void count_cycle(sp_ctx *ctx, uint32_t n_sig, uint8_t *bits, uint32_t *ones) {
+static void count_cycle(sp_ctx *ctx, uint32_t n_sig, uint8_t *bits, uint64_t *ones) {
     for (uint32_t id = 1; id <= n_sig; id++) {
         const odin3_sim_signal *sg = odin3_sim_signals_at(ctx->sig, id);
         if (sg != NULL && sg->scope == 0) {
@@ -70,7 +70,7 @@ static odin3_status run_vectors(odin3_sim *sim, sp_ctx *ctx, const sc_opts *opts
     uint32_t nets = odin3_module_net_end(ctx->mod);
     uint32_t n_sig = odin3_sim_signals_total(ctx->sig);
     uint8_t *bits = odin3_util_calloc((size_t)ctx->total_bits + 1);
-    uint32_t *ones = odin3_util_calloc(((size_t)nets + 1) * sizeof *ones);
+    uint64_t *ones = odin3_util_calloc(((size_t)nets + 1) * sizeof *ones);
     odin3_prng prng;
     odin3_prng_seed(&prng, opts->seed);
     if (bits == NULL || ones == NULL) {
@@ -85,7 +85,7 @@ static odin3_status run_vectors(odin3_sim *sim, sp_ctx *ctx, const sc_opts *opts
     }
     for (uint32_t net = 1; net < nets; net++) {
         if (ctx->refs[net].sig != 0) {
-            ppm[net] = (int32_t)(((uint64_t)ones[net] * PPM + opts->vectors / 2) / opts->vectors);
+            ppm[net] = (int32_t)((ones[net] * PPM + opts->vectors / 2) / opts->vectors);
         }
     }
     odin3_util_free(bits);

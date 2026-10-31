@@ -1,8 +1,9 @@
 /*
  * sc_fn.c — the function tables of the scoap pass (spec section 3): from a truth table the prime
- * implicants of {f = 0} and {f = 1} (controllability) and, per input, the assignments of the
- * other inputs that make the output depend on it (observability). No recursion: cubes are
- * enumerated as base-3 numbers, a don't-care digit is derived from smaller numbers.
+ * implicants of {f = 0} and {f = 1} (controllability) and, per input, the prime implicants of
+ * "the output follows this input with a known polarity" over the other inputs (observability). No
+ * recursion: cubes are enumerated as base-3 numbers, a don't-care digit is derived from smaller
+ * numbers.
  */
 #include "passes/scoap/sc_int.h"
 
@@ -64,31 +65,70 @@ static sc_cube cube_of(const sc_table *tab, uint32_t idx) {
     return cube;
 }
 
-/* The prime implicants of {f = val}, appended to the model's prime pool. */
-static odin3_status add_primes(sc_model *md, sc_cell *cell, const sc_table *tab, uint8_t val) {
-    sc_scan scan = {tab, val, {0}};
+/* Moves a cube over the inputs without `skip` back to the full input numbering. */
+static sc_cube lift_cube(sc_cube cube, uint32_t skip) {
+    uint32_t low = (1U << skip) - 1U;
+    cube.care = (uint8_t)((cube.care & low) | ((cube.care & ~low) << 1));
+    cube.val = (uint8_t)((cube.val & low) | ((cube.val & ~low) << 1));
+    return cube;
+}
+
+/* What to emit: the prime implicants of {f = val}; skip >= 0: tab leaves input `skip` out and the
+ * cubes are lifted to the numbering with it. */
+typedef struct sc_emit {
+    const sc_table *tab;
+    uint8_t val;
+    int skip;
+} sc_emit;
+
+static odin3_status emit_primes(odin3_vec *pool, const sc_emit *what, uint32_t *count) {
+    const sc_table *tab = what->tab;
+    int skip = what->skip;
+    sc_scan scan = {tab, what->val, {0}};
     uint32_t total = pow3(tab->n);
     for (uint32_t idx = 0; idx < total; idx++) {
         scan.imp[idx] = cube_implicant(&scan, idx) ? 1 : 0;
     }
-    cell->prime_off[val] = (uint32_t)md->prime_pool.len;
-    cell->prime_n[val] = 0;
     for (uint32_t idx = 0; idx < total; idx++) {
         if (scan.imp[idx] == 0 || !cube_prime(&scan, idx)) {
             continue;
         }
-        sc_cube *slot = odin3_vec_push(&md->prime_pool);
+        sc_cube *slot = odin3_vec_push(pool);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
         *slot = cube_of(tab, idx);
-        cell->prime_n[val]++;
+        *slot = skip >= 0 ? lift_cube(*slot, (uint32_t)skip) : *slot;
+        (*count)++;
     }
     return ODIN3_OK;
 }
 
-static bool sens_minterm(const sc_table *tab, uint32_t input, uint32_t mint) {
-    return (mint >> input & 1U) == 0 && tab->f[mint] != tab->f[mint | (1U << input)];
+static odin3_status add_primes(sc_model *md, sc_cell *cell, const sc_table *tab, uint8_t val) {
+    cell->prime_off[val] = (uint32_t)md->prime_pool.len;
+    cell->prime_n[val] = 0;
+    sc_emit what = {tab, val, -1};
+    return emit_primes(&md->prime_pool, &what, &cell->prime_n[val]);
+}
+
+/* h(r) = 1 when, for the other inputs r, f(x=0, r) = pol and f(x=1, r) = 1 - pol: the output
+ * follows input x with polarity pol whatever the don't-care inputs of a cube over r are. */
+typedef struct sc_sel {
+    uint32_t input;
+    uint8_t pol;
+} sc_sel;
+
+static sc_table polarity_table(const sc_table *tab, sc_sel sel) {
+    sc_table sub = {.n = tab->n - 1};
+    uint32_t input = sel.input;
+    uint8_t pol = sel.pol;
+    uint32_t low_mask = (1U << input) - 1U;
+    for (uint32_t row = 0; row < (1U << sub.n); row++) {
+        uint32_t m0 = (row & low_mask) | ((row & ~low_mask) << 1);
+        uint32_t m1 = m0 | (1U << input);
+        sub.f[row] = (tab->f[m0] == pol && tab->f[m1] == 1 - pol) ? 1 : 0;
+    }
+    return sub;
 }
 
 static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
@@ -100,28 +140,18 @@ static odin3_status push_u32(odin3_vec *vec, uint32_t value) {
     return ODIN3_OK;
 }
 
-static odin3_status push_u8(odin3_vec *vec, uint32_t value) {
-    uint8_t *slot = odin3_vec_push(vec);
-    if (slot == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    *slot = (uint8_t)value;
-    return ODIN3_OK;
-}
-
-/* One input's list: its offset and count in sens_ref, the minterms in sens_pool. */
+/* One input's list: its offset and count in sens_ref, the cubes (both polarities) in sens_pool. */
 static odin3_status add_sens_input(sc_model *md, const sc_table *tab, uint32_t input) {
     uint32_t count = 0;
-    uint32_t rows = 1U << tab->n;
-    for (uint32_t mint = 0; mint < rows; mint++) {
-        count += sens_minterm(tab, input, mint) ? 1U : 0U;
+    uint32_t first = (uint32_t)md->sens_pool.len;
+    odin3_status st = ODIN3_OK;
+    for (uint8_t pol = 0; st == ODIN3_OK && pol < 2; pol++) {
+        sc_table sub = polarity_table(tab, (sc_sel){input, pol});
+        sc_emit what = {&sub, 1, (int)input};
+        st = emit_primes(&md->sens_pool, &what, &count);
     }
-    odin3_status st = push_u32(&md->sens_ref, (uint32_t)md->sens_pool.len);
-    st = st == ODIN3_OK ? push_u32(&md->sens_ref, count) : st;
-    for (uint32_t mint = 0; st == ODIN3_OK && mint < rows; mint++) {
-        st = sens_minterm(tab, input, mint) ? push_u8(&md->sens_pool, mint) : ODIN3_OK;
-    }
-    return st;
+    st = st == ODIN3_OK ? push_u32(&md->sens_ref, first) : st;
+    return st == ODIN3_OK ? push_u32(&md->sens_ref, count) : st;
 }
 
 static odin3_status add_sens(sc_model *md, sc_cell *cell, const sc_table *tab) {

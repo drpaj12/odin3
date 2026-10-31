@@ -38,7 +38,7 @@ static bool node_is_constant(const odin3_module *mod, odin3_node_id node) {
     return true;
 }
 
-static void lower(int32_t *slot, int32_t value) {
+static void lower(int64_t *slot, int64_t value) {
     *slot = value < *slot ? value : *slot;
 }
 
@@ -80,9 +80,9 @@ static void boundary_pins(sc_model *md, odin3_node_id node) {
 
 static odin3_status alloc_nets(sc_model *md) {
     size_t cnt = (size_t)md->n_nets + 1;
-    int32_t **arrays[] = {&md->cc[0], &md->cc[1], &md->sc[0], &md->sc[1], &md->co, &md->so};
+    int64_t **arrays[] = {&md->cc[0], &md->cc[1], &md->sc[0], &md->sc[1], &md->co, &md->so};
     for (size_t k = 0; k < sizeof arrays / sizeof arrays[0]; k++) {
-        *arrays[k] = odin3_util_calloc(cnt * sizeof(int32_t));
+        *arrays[k] = odin3_util_calloc(cnt * sizeof(int64_t));
         if (*arrays[k] == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
@@ -285,13 +285,46 @@ static bool is_function_type(const odin3_celltype_def *def) {
             (def->flags & (ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL)) == 0);
 }
 
+/* Pins on the same net are one input: the table is rebuilt over the distinct nets, so a constant
+ * function (XOR(a, a)) shows its constant and a shared net's cost counts once. */
+static void collapse_duplicates(sc_pins *pp, sc_table *tab) {
+    uint32_t map[SC_MAX_EXACT];
+    uint32_t uniq[SC_MAX_EXACT];
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < pp->n_in; i++) {
+        uint32_t j = 0;
+        while (j < count && uniq[j] != pp->in[i]) {
+            j++;
+        }
+        uniq[j] = pp->in[i];
+        map[i] = j;
+        count += j == count ? 1U : 0U;
+    }
+    if (count == pp->n_in) {
+        return;
+    }
+    sc_table out = {.n = count};
+    for (uint32_t row = 0; row < (1U << count); row++) {
+        uint32_t mint = 0;
+        for (uint32_t i = 0; i < pp->n_in; i++) {
+            mint |= ((row >> map[i]) & 1U) << i;
+        }
+        out.f[row] = tab->f[mint];
+    }
+    *tab = out;
+    memcpy(pp->in, uniq, count * sizeof uniq[0]);
+    pp->n_in = count;
+}
+
 static odin3_status add_function(sc_model *md, odin3_node_id node, const sc_pins *pp, bool *done) {
     sc_cell cell = {.node = node.v, .out = pp->out, .kind = SC_FUNC, .cover_val = -2};
     sc_table tab;
     *done = true;
     odin3_status st = ODIN3_OK;
     if (func_table(md, node, pp, &tab)) {
-        st = push_inputs(md, &cell, pp->in, pp->n_in);
+        sc_pins uniq = *pp;
+        collapse_duplicates(&uniq, &tab);
+        st = push_inputs(md, &cell, uniq.in, uniq.n_in);
         st = st == ODIN3_OK ? sc_fn_compile(md, &cell, &tab) : st;
     } else {
         const odin3_celltype_def *def =
@@ -388,6 +421,59 @@ static odin3_status add_node(sc_model *md, odin3_node_id node) {
     return done || st != ODIN3_OK ? st : add_other(md, node, def, type);
 }
 
+enum { BYTE_BITS = 8, BYTE_MASK = 0xFF, OUT_SHIFT = 8, COUNT_SHIFT = 40 };
+
+/* FNV-1a over the bytes of a 64-bit word. */
+static uint64_t mix(uint64_t hash, uint64_t word) {
+    for (int byte = 0; byte < BYTE_BITS; byte++) {
+        hash ^= (word >> (BYTE_BITS * byte)) & BYTE_MASK;
+        hash *= UINT64_C(1099511628211);
+    }
+    return hash;
+}
+
+static uint64_t hash_nets(const sc_model *md, uint64_t hash) {
+    for (uint32_t id = 1; id < md->n_nets; id++) {
+        hash = mix(hash, (uint64_t)md->live[id] | (uint64_t)md->fixed[id] << 1);
+        hash = mix(hash, (uint64_t)md->cc[0][id]);
+        hash = mix(hash, (uint64_t)md->cc[1][id]);
+        hash = mix(hash, (uint64_t)md->co[id]);
+    }
+    return hash;
+}
+
+static uint64_t hash_cells(const sc_model *md, uint64_t hash) {
+    for (size_t k = 0; k < md->n_cells; k++) {
+        const sc_cell *cell = &md->cells[k];
+        uint64_t shape = (uint64_t)cell->kind | (uint64_t)cell->out << OUT_SHIFT |
+                         (uint64_t)cell->n_in << COUNT_SHIFT;
+        hash = mix(mix(hash, shape), (uint64_t)cell->node);
+    }
+    for (size_t k = 0; k < md->in_pool.len; k++) {
+        hash = mix(hash, *(const uint32_t *)odin3_vec_cat(&md->in_pool, k));
+    }
+    return hash;
+}
+
+static uint64_t hash_functions(const sc_model *md, uint64_t hash) {
+    const odin3_vec *cube_pools[] = {&md->prime_pool, &md->sens_pool};
+    for (size_t pool = 0; pool < 2; pool++) {
+        for (size_t k = 0; k < cube_pools[pool]->len; k++) {
+            const sc_cube *cube = odin3_vec_cat(cube_pools[pool], k);
+            hash = mix(hash, (uint64_t)cube->care | (uint64_t)cube->val << BYTE_BITS);
+        }
+    }
+    for (size_t k = 0; k < md->cover_pool.len; k++) {
+        hash = mix(hash, *(const uint8_t *)odin3_vec_cat(&md->cover_pool, k));
+    }
+    return hash;
+}
+
+/* Fingerprint of what the values are computed from: nets, boundary values, cells, functions. */
+static uint64_t model_hash(const sc_model *md) {
+    return hash_functions(md, hash_cells(md, hash_nets(md, UINT64_C(14695981039346656037))));
+}
+
 odin3_status sc_model_build(sc_model *md, odin3_module *mod, bool seq) {
     memset(md, 0, sizeof *md);
     md->mod = mod;
@@ -396,7 +482,7 @@ odin3_status sc_model_build(sc_model *md, odin3_module *mod, bool seq) {
     odin3_vec_init(&md->in_pool, sizeof(uint32_t));
     odin3_vec_init(&md->prime_pool, sizeof(sc_cube));
     odin3_vec_init(&md->sens_ref, sizeof(uint32_t));
-    odin3_vec_init(&md->sens_pool, sizeof(uint8_t));
+    odin3_vec_init(&md->sens_pool, sizeof(sc_cube));
     odin3_vec_init(&md->cover_pool, sizeof(uint8_t));
     odin3_vec_init(&md->opaque_types, sizeof(uint32_t));
     odin3_status st = alloc_nets(md);
@@ -406,11 +492,12 @@ odin3_status sc_model_build(sc_model *md, odin3_module *mod, bool seq) {
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_module_node_end(mod); id++) {
         st = add_node(md, (odin3_node_id){id});
     }
+    md->hash = model_hash(md);
     return st;
 }
 
 void sc_model_free(sc_model *md) {
-    int32_t *arrays[] = {md->cc[0], md->cc[1], md->sc[0], md->sc[1], md->co, md->so};
+    int64_t *arrays[] = {md->cc[0], md->cc[1], md->sc[0], md->sc[1], md->co, md->so};
     for (size_t k = 0; k < sizeof arrays / sizeof arrays[0]; k++) {
         odin3_util_free(arrays[k]);
     }

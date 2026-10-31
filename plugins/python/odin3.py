@@ -602,7 +602,7 @@ class Design:
         seed: int = 1,
         threshold: float = 0.01,
     ) -> dict[str, Any]:
-        """Run the scoap pass and return its JSON (schema odin3-scoap, version 1).
+        """Run the scoap pass and return its JSON (schema odin3-scoap, version 2).
 
         Per module and net: cc0, cc1, co (and sc0, sc1, so with sequential=True; p1_ppm with
         sigprob=<vectors>), keyed by the module-local net id and name; "top" holds the `top`

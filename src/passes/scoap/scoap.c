@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { SCHEMA_VERSION = 1, DECIMAL = 10, PPM = 1000000, NUM_BUF = 48, DEFAULT_SEED = 1 };
+enum { SCHEMA_VERSION = 2, DECIMAL = 10, PPM = 1000000, NUM_BUF = 48, DEFAULT_SEED = 1 };
 static const double k_default_threshold = 0.01;
 static const double k_half = 0.5;
 
@@ -59,18 +59,27 @@ static bool next_decimal(odin3_bytes *rest, double *val) {
     return *end == '\0' && errno == 0 && *val >= 0.0 && *val <= 1.0;
 }
 
+static odin3_status store_number(odin3_bytes word, unsigned long long num, sc_opts *ob) {
+    if (odin3_pass_arg_is(word, "--top")) {
+        if (num > UINT32_MAX) {
+            return bad_option("--top expects at most 4294967295");
+        }
+        ob->top_n = (uint32_t)num;
+    } else if (odin3_pass_arg_is(word, "--sigprob")) {
+        ob->vectors = num;
+    } else {
+        ob->seed = num;
+    }
+    return ODIN3_OK;
+}
+
 static odin3_status number_option(odin3_bytes word, odin3_bytes *rest, sc_opts *ob, bool *used) {
     unsigned long long num = 0;
     *used = true;
     if (odin3_pass_arg_is(word, "--top") || odin3_pass_arg_is(word, "--sigprob") ||
         odin3_pass_arg_is(word, "--seed")) {
-        if (!next_number(rest, &num)) {
-            return bad_option("a numeric option expects a number");
-        }
-        ob->top_n = odin3_pass_arg_is(word, "--top") ? (uint32_t)num : ob->top_n;
-        ob->vectors = odin3_pass_arg_is(word, "--sigprob") ? num : ob->vectors;
-        ob->seed = odin3_pass_arg_is(word, "--seed") ? num : ob->seed;
-        return ODIN3_OK;
+        return next_number(rest, &num) ? store_number(word, num, ob)
+                                       : bad_option("a numeric option expects a number");
     }
     if (odin3_pass_arg_is(word, "--threshold")) {
         return next_decimal(rest, &ob->threshold) ? ODIN3_OK
@@ -131,7 +140,7 @@ static void opts_free(sc_opts *ob) {
 
 typedef struct sc_entry {
     uint32_t id;
-    int32_t key;
+    int64_t key;
 } sc_entry;
 
 static int entry_cmp(const void *pa, const void *pb) {
@@ -161,12 +170,14 @@ static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id,
     char fallback[NUM_BUF];
     odin3_status st = odin3_strbuf_appendf(out, "{\"id\": %u, \"name\": ", (unsigned)id);
     st = st == ODIN3_OK ? gl_put_escaped(out, net_text(md, id, fallback, sizeof fallback)) : st;
-    st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"cc0\": %d, \"cc1\": %d, \"co\": %d",
-                                               md->cc[0][id], md->cc[1][id], md->co[id])
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"cc0\": %lld, \"cc1\": %lld, \"co\": %lld",
+                                               (long long)md->cc[0][id], (long long)md->cc[1][id],
+                                               (long long)md->co[id])
                         : st;
     if (st == ODIN3_OK && md->seq) {
-        st = odin3_strbuf_appendf(out, ", \"sc0\": %d, \"sc1\": %d, \"so\": %d", md->sc[0][id],
-                                  md->sc[1][id], md->so[id]);
+        st = odin3_strbuf_appendf(out, ", \"sc0\": %lld, \"sc1\": %lld, \"so\": %lld",
+                                  (long long)md->sc[0][id], (long long)md->sc[1][id],
+                                  (long long)md->so[id]);
     }
     if (st == ODIN3_OK && ppm != NULL) {
         st = odin3_strbuf_appendf(out, ", \"p1_ppm\": %d", ppm[id]);
@@ -180,8 +191,8 @@ static odin3_status put_top(odin3_strbuf *out, const char *label, sc_entry *list
     qsort(list, cnt, sizeof *list, entry_cmp);
     odin3_status st = odin3_strbuf_appendf(out, "\"%s\": [", label);
     for (size_t k = 0; st == ODIN3_OK && k < cnt && k < top_n; k++) {
-        st = odin3_strbuf_appendf(out, "%s{\"id\": %u, \"value\": %d}", k != 0 ? ", " : "",
-                                  (unsigned)list[k].id, list[k].key);
+        st = odin3_strbuf_appendf(out, "%s{\"id\": %u, \"value\": %lld}", k != 0 ? ", " : "",
+                                  (unsigned)list[k].id, (long long)list[k].key);
     }
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("]")) : st;
 }
@@ -219,7 +230,7 @@ static size_t fill_lists(const sc_view *vw, sc_entry *lists[2]) {
     size_t cnt = 0;
     for (uint32_t id = 1; id < md->n_nets; id++) {
         if (net_reported(vw, id)) {
-            int32_t hard = md->cc[0][id] > md->cc[1][id] ? md->cc[0][id] : md->cc[1][id];
+            int64_t hard = md->cc[0][id] > md->cc[1][id] ? md->cc[0][id] : md->cc[1][id];
             ctl[cnt] = (sc_entry){id, hard};
             obs[cnt++] = (sc_entry){id, md->co[id]};
         }
@@ -248,12 +259,13 @@ static odin3_status put_lists(odin3_strbuf *out, const sc_view *vw) {
 
 static odin3_status put_rare(odin3_strbuf *out, const sc_view *vw) {
     int64_t thr = (int64_t)(vw->opts->threshold * PPM + k_half);
+    /* constant nets are 0 or 1 by construction, not rare in the sense of the option */
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(",\n    \"rare\": ["));
     bool first = true;
     for (uint32_t id = 1; st == ODIN3_OK && id < vw->md->n_nets; id++) {
         int32_t pp = vw->ppm[id];
         int32_t low = pp < PPM - pp ? pp : PPM - pp;
-        if (net_reported(vw, id) && pp >= 0 && low < thr) {
+        if (net_reported(vw, id) && vw->md->fixed[id] == 0 && pp >= 0 && low < thr) {
             st = odin3_strbuf_appendf(out, "%s%u", first ? "" : ", ", (unsigned)id);
             first = false;
         }
@@ -273,8 +285,8 @@ static odin3_status set_int(odin3_module *mod, const char *key, int64_t num) {
                : st;
 }
 
-static int32_t max_finite(const int32_t *arr, uint32_t cnt, const uint8_t *live) {
-    int32_t best = 0;
+static int64_t max_finite(const int64_t *arr, uint32_t cnt, const uint8_t *live) {
+    int64_t best = 0;
     for (uint32_t id = 1; id < cnt; id++) {
         best = live[id] != 0 && arr[id] < SCOAP_INF && arr[id] > best ? arr[id] : best;
     }
@@ -292,14 +304,17 @@ static uint64_t live_nets(const sc_model *md) {
 static odin3_status write_attrs(const sc_model *md) {
     odin3_module *mod = md->mod;
     const sc_stats *sts = &md->stats;
-    int32_t max_cc = max_finite(md->cc[0], md->n_nets, md->live);
-    int32_t max_cc1 = max_finite(md->cc[1], md->n_nets, md->live);
+    int64_t max_cc = max_finite(md->cc[0], md->n_nets, md->live);
+    int64_t max_cc1 = max_finite(md->cc[1], md->n_nets, md->live);
     const struct {
         const char *key;
         int64_t val;
     } table[] = {
         {"odin3:scoap_version", SCHEMA_VERSION},
         {"odin3:scoap_inf", SCOAP_INF},
+        {"odin3:scoap_sat", SCOAP_SAT},
+        {"odin3:scoap_netlist_hash", (int64_t)(md->hash & INT64_MAX)},
+        {"odin3:scoap_saturated", (int64_t)sts->saturated},
         {"odin3:scoap_sequential", md->seq ? 1 : 0},
         {"odin3:scoap_nets", (int64_t)live_nets(md)},
         {"odin3:scoap_cells",
@@ -370,23 +385,49 @@ static uint8_t *focus_nets(const sc_run *run, uint32_t id, const odin3_module *m
     return sel;
 }
 
+/* Builds and solves one module, stores the attributes, warns when the iteration cap was hit. */
+static odin3_status solve_module(sc_model *md, odin3_module *mod, const char *mname, bool seq) {
+    odin3_status st = sc_model_build(md, mod, seq);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = sc_solve(md);
+    log_opaque(md, mname);
+    st = st == ODIN3_OK ? write_attrs(md) : st;
+    if (!md->stats.converged) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "scoap: module %s: iteration cap (2 * nets + 2 = %llu rounds per phase) hit, "
+                  "values not converged",
+                  mname, 2ULL * md->n_nets + 2);
+    }
+    return st;
+}
+
+/* The module's JSON object up to the start of "nets". */
+static odin3_status put_head(odin3_strbuf *body, const sc_model *md, const char *mname,
+                             bool first) {
+    const sc_stats *sts = &md->stats;
+    odin3_status st = odin3_strbuf_appendf(body, "%s    {\"name\": ", first ? "" : ",\n");
+    st = st == ODIN3_OK ? gl_put_escaped(body, mname) : st;
+    return st == ODIN3_OK
+               ? odin3_strbuf_appendf(
+                     body,
+                     ", \"sweeps\": %u, \"evals\": %llu, \"converged\": %d, "
+                     "\"unreachable\": %llu, \"saturated\": %llu, \"netlist_hash\": %llu,\n    ",
+                     sts->sweeps, (unsigned long long)sts->evals, sts->converged ? 1 : 0,
+                     (unsigned long long)sts->unreachable, (unsigned long long)sts->saturated,
+                     (unsigned long long)(md->hash & INT64_MAX))
+               : st;
+}
+
 static odin3_status put_module(odin3_strbuf *body, sc_run *run, uint32_t id, bool first) {
     odin3_module *mod = odin3_module_get(run->design, (odin3_module_id){id});
     const char *mname = odin3_strtab_get(odin3_design_strtab(run->design), odin3_module_name(mod));
     sc_model md;
-    odin3_status st = sc_model_build(&md, mod, run->opts->seq);
-    if (st == ODIN3_OK) {
-        sc_solve(&md);
-        log_opaque(&md, mname);
-        st = write_attrs(&md);
-    }
+    odin3_status st = solve_module(&md, mod, mname, run->opts->seq);
     uint8_t *sel = st == ODIN3_OK ? focus_nets(run, id, mod) : NULL;
     sc_view view = {&md, run->opts, sel, id == run->top.v ? run->ppm : NULL};
-    st = st == ODIN3_OK ? odin3_strbuf_appendf(body, "%s    {\"name\": ", first ? "" : ",\n") : st;
-    st = st == ODIN3_OK ? gl_put_escaped(body, mname) : st;
-    st = st == ODIN3_OK ? odin3_strbuf_appendf(body, ", \"sweeps\": %u, \"converged\": %d,\n    ",
-                                               md.stats.sweeps, md.stats.converged ? 1 : 0)
-                        : st;
+    st = st == ODIN3_OK ? put_head(body, &md, mname, first) : st;
     st = st == ODIN3_OK ? put_nets(body, &view) : st;
     st = st == ODIN3_OK ? put_lists(body, &view) : st;
     st = st == ODIN3_OK && view.ppm != NULL ? put_rare(body, &view) : st;
@@ -447,12 +488,14 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     double start = odin3_now_ms();
     st = st == ODIN3_OK ? prepare(&run, &ob, design) : st;
     st = st == ODIN3_OK
-             ? odin3_strbuf_appendf(&body,
-                                    "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
-                                    "\"inf\": %d,\n  \"mode\": \"%s\",\n  \"sigprob_vectors\": "
-                                    "%llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
-                                    SCHEMA_VERSION, SCOAP_INF, ob.seq ? "seq" : "comb",
-                                    (unsigned long long)ob.vectors, (unsigned long long)ob.seed)
+             ? odin3_strbuf_appendf(
+                   &body,
+                   "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
+                   "\"inf\": %lld,\n  \"sat\": %lld,\n  \"mode\": \"%s\",\n  \"sigprob_vectors\": "
+                   "%llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
+                   SCHEMA_VERSION, (long long)SCOAP_INF, (long long)SCOAP_SAT,
+                   ob.seq ? "seq" : "comb", (unsigned long long)ob.vectors,
+                   (unsigned long long)ob.seed)
              : st;
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_design_module_end(design); id++) {
         st = put_module(&body, &run, id, id == 1);
