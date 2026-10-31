@@ -28,6 +28,7 @@ outputs
 provenance
 analysis
 graphlets
+edit
 timing-attribution
 python-api
 re-workflow

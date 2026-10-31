@@ -29,13 +29,11 @@ All take the design and a module ID; objects are `odin3_ref` (module, id) as in 
 `tag` is the caller's edit tag (non-NULL, non-empty; e.g. "trojan:t1").
 
 ```
-odin3_status odin3_edit_add_net(odin3_design*, uint32_t module, const char *name,
-                                const char *tag, odin3_ref *net);
-odin3_status odin3_edit_add_node(odin3_design*, uint32_t module, const char *cell_type,
-                                 const char *name, const char *tag, odin3_ref *node);
-odin3_status odin3_edit_add_sop(odin3_design*, uint32_t module, uint32_t n_inputs,
-                                const char *cover, const char *name, const char *tag,
-                                odin3_ref *node);
+typedef struct odin3_edit_new { const char *name, *tag, *cell_type, *cover;
+                                uint32_t n_inputs, reserved; } odin3_edit_new;
+odin3_status odin3_edit_add_net(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
+odin3_status odin3_edit_add_node(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
+odin3_status odin3_edit_add_sop(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
 odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const char *cover, const char *tag);
 odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, uint32_t index, int64_t v,
                                       const char *tag);
@@ -128,8 +126,10 @@ symbol and raises a clear "built against an older libodin3" error.
 4. Oracle (blif_sim.py) is an external tools-script dependency, never vendored.
 
 ## 9. Progress and next step
-Done (commit 2): `src/api/edit.c` (section 2 complete incl. tag provenance), `odin3.h`
-declarations, `tests/unit/test_edit.c` (6 tests green in debug).
-Next step: Python wrapper (sec. 7) and its test; then section 4 (net visibility without keep,
-toggle counts, `run_vectors`) in `src/sim/signals.c` / `build_names.c` and `src/api/sim_abi.c`;
-then the oracle gate script (sec. 5); `docs/user/edit.md`; lint; PR.
+Done: `src/api/edit.c` (section 2 complete, tag provenance), `odin3.h`, `tests/unit/test_edit.c`,
+the Python wrapper and `tests/tools/test_python_edit.py` (both green in debug), `docs/user/edit.md`.
+Agent default 5: the creation calls take an `odin3_edit_new` struct (lint caps parameters at 5).
+Agent default 6: the edit leaf record is made without an operation (op 0); IMPORTED needs none.
+Next step: section 4 (toggle counts, `run_vectors`, net visibility check on BLIF/edited designs)
+in `src/api/sim_abi.c` with its unit test; then the oracle gate script (sec. 5); then full
+debug ctest, PR.

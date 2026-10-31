@@ -2307,20 +2307,31 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
  * by odin3_ref from odin3_node_get_pins; nets and nodes by the refs these calls return.
  */
 
-/* New net `name` (NULL or "": unnamed) in `module`. *net gets its ref. */
-odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const char *name,
-                                const char *tag, odin3_ref *net);
+/* What a new object is called and made of (odin3_edit_add_net, _add_node, _add_sop). name: NULL or
+ * "" for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover:
+ * add_sop only; cover is the BLIF cover text, rows "01- 1" separated by newlines (input chars 0,
+ * 1 or -, blanks ignored, then the output char); "" is the constant 0, and a zero-input cover is
+ * one output char per row. */
+typedef struct odin3_edit_new {
+    const char *name;
+    const char *tag;
+    const char *cell_type;
+    const char *cover;
+    uint32_t n_inputs;
+    uint32_t reserved; /* zero */
+} odin3_edit_new;
 
-/* New node of the registered or built-in cell type `cell_type` (default parameters), all pins
+/* New net in `module`. *net gets its ref. */
+odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+                                odin3_ref *net);
+
+/* New node of the registered or built-in cell type what->cell_type (default parameters), all pins
  * unconnected. Parameterised types: use odin3_edit_add_sop or odin3_edit_set_param_int. */
-odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const char *cell_type,
-                                 const char *name, const char *tag, odin3_ref *node);
+odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+                                 odin3_ref *node);
 
-/* New $sop (BLIF .names) of n_inputs inputs. `cover` is the BLIF cover text: rows "01- 1" separated
- * by newlines (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0,
- * and a zero-input cover is one output char per row. */
-odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, uint32_t n_inputs,
-                                const char *cover, const char *name, const char *tag,
+/* New $sop (BLIF .names) of what->n_inputs inputs and what->cover. */
+odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
                                 odin3_ref *node);
 
 /* Replaces the cover of a $sop (same width). The node is replaced by a twin that takes over its

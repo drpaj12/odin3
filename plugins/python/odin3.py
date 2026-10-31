@@ -941,6 +941,13 @@ class _Named:
         chain_with_leaves() for the leaf record of each entry."""
         return [construct for construct, _leaf in self.chain_with_leaves()]
 
+    @property
+    def edit_tag(self) -> str | None:
+        """The tag of the edit that made this node, net or wire (odin3_edit_*), else None."""
+        _edit_probe(self.design, "odin3_edit_get_tag")
+        value = self.design.get("odin3_edit_get_tag", "const char *", self.obj())
+        return None if value == self.design.odin3.ffi.NULL else self.design.odin3.text(value)
+
     def attr(self, key: str) -> str | None:
         """The string attribute key, None when absent."""
         value = self.design.get("odin3_attr_get_string", "const char *", self.obj(), key.encode())
@@ -1016,6 +1023,33 @@ class Module(_Named):
     def _lookup(self, store: str, name: str) -> int:
         return self._get(f"odin3_module_lookup_{store}", name.encode())
 
+    def _add(self, function: str, tag: str, **fields: Any) -> tuple[int, int]:
+        ffi = self.design.odin3.ffi
+        fields["tag"] = tag
+        keep = {k: ffi.new("char[]", v.encode()) for k, v in fields.items() if isinstance(v, str)}
+        what = ffi.new("odin3_edit_new *")
+        for key, value in fields.items():
+            if isinstance(value, str):
+                setattr(what, key, keep[key])
+            elif value is not None:
+                setattr(what, key, value)
+        _edit_probe(self.design, function)
+        return _edit_ref(self.design, function, self.id, what)
+
+    def add_net(self, name: str | None, tag: str) -> Net:
+        """A new net (odin3_edit_add_net). tag marks the edit in the provenance (edit_tag)."""
+        return Net(self.design, *self._add("odin3_edit_add_net", tag, name=name))
+
+    def add_node(self, cell_type: str, name: str | None, tag: str) -> Node:
+        """A new node of a registered or built-in cell type, default parameters, pins open."""
+        ref = self._add("odin3_edit_add_node", tag, name=name, cell_type=cell_type)
+        return Node(self.design, *ref)
+
+    def add_sop(self, n_inputs: int, cover: str, name: str | None, tag: str) -> Node:
+        """A new $sop (BLIF .names) of n_inputs inputs; cover is the BLIF rows, e.g. "11 1\\n"."""
+        ref = self._add("odin3_edit_add_sop", tag, name=name, cover=cover, n_inputs=n_inputs)
+        return Node(self.design, *ref)
+
     def node(self, name: str) -> Node | None:
         ident = self._lookup("node", name)
         return Node(self.design, self.id, ident) if ident else None
@@ -1064,6 +1098,30 @@ class _Local(_Named):
 
 
 _L = TypeVar("_L", bound=_Local)
+
+
+def _cstr(text: str | None) -> bytes | Any:
+    """Text as C bytes; None stays None (cffi turns it into NULL)."""
+    return None if text is None else text.encode()
+
+
+def _edit_probe(design: Design, function: str) -> None:
+    """Raise a clear error when libodin3 predates the netlist-editing ABI."""
+    if not hasattr(design.odin3.lib, function):
+        raise Odin3Error(
+            function, -1, f"libodin3 too old: needs {function} (netlist editing, after v1.2.0)")
+
+
+def _edit_ref(design: Design, function: str, *args: Any) -> tuple[int, int]:
+    """Call an odin3_edit_* function whose last argument is an odin3_ref out; return its pair."""
+    _edit_probe(design, function)
+    out = design.get(function, "odin3_ref", *args)
+    return (int(out.module), int(out.id))
+
+
+def _edit_call(design: Design, function: str, *args: Any) -> None:
+    _edit_probe(design, function)
+    design.call(function, *args)
 
 
 def _span(design: Design, module: int, span: Any) -> list[Pin]:
@@ -1127,6 +1185,29 @@ class Node(_Local):
                 out[name] = self._text("odin3_node_get_param_text", i)
         return out
 
+    def set_cover(self, cover: str, tag: str) -> Node:
+        """Replace a $sop's cover (same width). Returns the twin node that takes over this
+        node's pins and name; this node is then dead (odin3_edit_set_cover)."""
+        ref = (self.module_id, self.id)
+        _edit_call(self.design, "odin3_edit_set_cover", ref, cover.encode(), tag.encode())
+        twin = self.module.node(self.name) if self.name else None
+        if twin is None:
+            raise Odin3Error("odin3_edit_set_cover", -1, "the twin is unnamed; look it up by pins")
+        return twin
+
+    def set_param_int(self, index: int, value: int, tag: str) -> Node:
+        """Change an integer parameter; returns the twin node (as set_cover)."""
+        ref = (self.module_id, self.id)
+        _edit_call(self.design, "odin3_edit_set_param_int", ref, index, value, tag.encode())
+        twin = self.module.node(self.name) if self.name else None
+        if twin is None:
+            raise Odin3Error("odin3_edit_set_param_int", -1, "the twin is unnamed")
+        return twin
+
+    def remove(self) -> None:
+        """Remove this node (odin3_edit_remove_node)."""
+        _edit_call(self.design, "odin3_edit_remove_node", self.ref())
+
     def pins(self) -> list[Pin]:
         """All pins: port order, then bit order (LSB first)."""
         return _span(self.design, self.module_id, self._get("odin3_node_get_pins", "odin3_span"))
@@ -1181,6 +1262,17 @@ class Pin(_Local):
         """in, out or inout (its port's direction)."""
         return self.node().port_dir(self.port)
 
+    def connect(self, net: Net) -> None:
+        """Connect this unconnected pin to net (odin3_edit_connect)."""
+        _edit_call(self.design, "odin3_edit_connect", self.ref(), net.ref())
+
+    def disconnect(self) -> None:
+        _edit_call(self.design, "odin3_edit_disconnect", self.ref())
+
+    def rewire(self, net: Net) -> None:
+        """Move this pin to net in one step (odin3_edit_rewire)."""
+        _edit_call(self.design, "odin3_edit_rewire", self.ref(), net.ref())
+
     def net(self) -> Net | None:
         """The net the pin is connected to, None when unconnected."""
         net = int(self._get("odin3_pin_get_net"))
@@ -1197,6 +1289,10 @@ class Net(_Local):
     @property
     def name(self) -> str:
         return self._text("odin3_net_get_name")
+
+    def remove(self) -> None:
+        """Remove this net, which must have no pins (odin3_edit_remove_net)."""
+        _edit_call(self.design, "odin3_edit_remove_net", self.ref())
 
     def pins(self) -> list[Pin]:
         """Every pin on the net, its drivers first."""

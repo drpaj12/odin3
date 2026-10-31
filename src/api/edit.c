@@ -36,8 +36,8 @@ static odin3_module *edit_module(odin3_design *design, uint32_t module, const ch
         return NULL;
     }
     if (odin3_design_sim_holds(design) > 0) {
-        odin3_log(ODIN3_LOG_ERROR, "%s: the design has %u open simulation(s); close them first",
-                  fn, odin3_design_sim_holds(design));
+        odin3_log(ODIN3_LOG_ERROR, "%s: the design has %u open simulation(s); close them first", fn,
+                  odin3_design_sim_holds(design));
         return NULL;
     }
     return odin3_module_get(design, (odin3_module_id){module});
@@ -81,7 +81,6 @@ static odin3_status edit_prov(odin3_design *design, const char *tag, odin3_prov_
             return st;
         }
     }
-    odin3_prov_begin_op(&ctx);
     const odin3_prov_origin origin = {NULL, 0, 0, 0};
     return odin3_prov_imported(&ctx, &origin, out);
 }
@@ -111,17 +110,17 @@ static odin3_status name_str(odin3_design *design, const char *name, uint32_t *s
 }
 
 ODIN3_EXPORT odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module,
-                                             const char *name, const char *tag, odin3_ref *net) {
+                                             const odin3_edit_new *what, odin3_ref *net) {
     odin3_module *mod = edit_module(design, module, "odin3_edit_add_net");
-    if (mod == NULL || net == NULL) {
+    if (mod == NULL || net == NULL || what == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_prov_id prov = {0};
     uint32_t name_id = 0;
     odin3_net_id id = {0};
-    odin3_status st = edit_prov(design, tag, &prov);
+    odin3_status st = edit_prov(design, what->tag, &prov);
     if (st == ODIN3_OK) {
-        st = name_str(design, name, &name_id);
+        st = name_str(design, what->name, &name_id);
     }
     if (st == ODIN3_OK) {
         st = odin3_net_create(mod, name_id, prov, &id);
@@ -146,10 +145,10 @@ static odin3_status find_type(odin3_design *design, const char *type_name, odin3
 }
 
 static odin3_status make_node(odin3_design *design, odin3_module *mod, odin3_node_spec spec,
-                              const char *name, const char *tag, odin3_node_id *out) {
-    odin3_status st = edit_prov(design, tag, &spec.prov);
+                              const odin3_edit_new *what, odin3_node_id *out) {
+    odin3_status st = edit_prov(design, what->tag, &spec.prov);
     if (st == ODIN3_OK) {
-        st = name_str(design, name, &spec.name);
+        st = name_str(design, what->name, &spec.name);
     }
     if (st == ODIN3_OK) {
         st = odin3_node_create(mod, &spec, out);
@@ -158,15 +157,15 @@ static odin3_status make_node(odin3_design *design, odin3_module *mod, odin3_nod
 }
 
 ODIN3_EXPORT odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module,
-                                              const char *cell_type, const char *name,
-                                              const char *tag, odin3_ref *node) {
+                                              const odin3_edit_new *what, odin3_ref *node) {
     odin3_module *mod = edit_module(design, module, "odin3_edit_add_node");
     odin3_node_spec spec = {0};
     odin3_node_id id = {0};
-    if (mod == NULL || node == NULL || find_type(design, cell_type, &spec.type) != ODIN3_OK) {
+    if (mod == NULL || node == NULL || what == NULL ||
+        find_type(design, what->cell_type, &spec.type) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_status st = make_node(design, mod, spec, name, tag, &id);
+    odin3_status st = make_node(design, mod, spec, what, &id);
     if (st == ODIN3_OK) {
         st = after_edit(mod, "odin3_edit_add_node");
     }
@@ -221,14 +220,15 @@ static odin3_status parse_cover(const char *text, uint32_t n_inputs, uint8_t **b
 }
 
 ODIN3_EXPORT odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module,
-                                             uint32_t n_inputs, const char *cover,
-                                             const char *name, const char *tag, odin3_ref *node) {
+                                             const odin3_edit_new *what, odin3_ref *node) {
     odin3_module *mod = edit_module(design, module, "odin3_edit_add_sop");
     uint8_t *bits = NULL;
     uint32_t len = 0;
-    if (mod == NULL || node == NULL || parse_cover(cover, n_inputs, &bits, &len) != ODIN3_OK) {
+    if (mod == NULL || node == NULL || what == NULL ||
+        parse_cover(what->cover, what->n_inputs, &bits, &len) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
+    uint32_t n_inputs = what->n_inputs;
     odin3_node_spec spec = {0};
     odin3_node_id id = {0};
     odin3_value params[SOP_PARAMS] = {odin3_value_int(n_inputs), {.kind = ODIN3_VAL_COVER}};
@@ -239,7 +239,7 @@ ODIN3_EXPORT odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t modu
     spec.n_params = SOP_PARAMS;
     odin3_status st = find_type(design, "$sop", &spec.type);
     if (st == ODIN3_OK) {
-        st = make_node(design, mod, spec, name, tag, &id);
+        st = make_node(design, mod, spec, what, &id);
     }
     odin3_util_free(bits);
     if (st == ODIN3_OK) {
@@ -353,8 +353,9 @@ ODIN3_EXPORT odin3_status odin3_edit_remove_net(odin3_design *design, odin3_ref 
  * Makes a twin of old with params, takes over its pins (odin3_node_replace) and its name. The
  * twin carries the edit record: the old node's original provenance is not kept (spec 3.1).
  */
-static odin3_status replace_node(odin3_design *design, odin3_module *mod, odin3_node_id old,
-                                 const odin3_value *params, uint32_t n_params, const char *tag) {
+static odin3_status replace_node(odin3_module *mod, odin3_node_id old, const odin3_value *params,
+                                 uint32_t n_params, const char *tag) {
+    odin3_design *design = odin3_module_design(mod);
     odin3_node_spec spec = {odin3_node_type(mod, old), 0, {0}, params, n_params};
     odin3_node_id fresh = {0};
     uint32_t old_name = odin3_node_name(mod, old);
@@ -408,14 +409,13 @@ ODIN3_EXPORT odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref n
     }
     params[SOP_COVER].bits = bits;
     params[SOP_COVER].len = len;
-    odin3_status st = replace_node(design, mod, nid, params, n_params, tag);
+    odin3_status st = replace_node(mod, nid, params, n_params, tag);
     odin3_util_free(bits);
     return st == ODIN3_OK ? after_edit(mod, "odin3_edit_set_cover") : st;
 }
 
 ODIN3_EXPORT odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node,
-                                                   uint32_t index, int64_t value,
-                                                   const char *tag) {
+                                                   uint32_t index, int64_t value, const char *tag) {
     odin3_module *mod = edit_module(design, node.module, "odin3_edit_set_param_int");
     odin3_value params[SOP_PARAMS];
     uint32_t n_params = 0;
@@ -426,7 +426,7 @@ ODIN3_EXPORT odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_r
         return odin3_api_invalid_why("odin3_edit_set_param_int", "not an integer parameter");
     }
     params[index] = odin3_value_int(value);
-    odin3_status st = replace_node(design, mod, nid, params, n_params, tag);
+    odin3_status st = replace_node(mod, nid, params, n_params, tag);
     return st == ODIN3_OK ? after_edit(mod, "odin3_edit_set_param_int") : st;
 }
 

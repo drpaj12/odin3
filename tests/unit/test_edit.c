@@ -24,14 +24,30 @@ void setUp(void) {
     TEST_ASSERT_NOT_NULL(file);
     (void)fputs(K_BLIF, file);
     (void)fclose(file);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_blif",
-                                                          ODIN3_TEST_TMP ".in.blif"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_run_pass(design, "read_blif", ODIN3_TEST_TMP ".in.blif"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_top_module(design, &top));
 }
 
 void tearDown(void) {
     odin3_design_destroy(design);
     design = NULL;
+}
+
+static odin3_status add_net(uint32_t module, const char *name, const char *tag, odin3_ref *out) {
+    odin3_edit_new what = {.name = name, .tag = tag};
+    return odin3_edit_add_net(design, module, &what, out);
+}
+
+static odin3_status add_node(const char *type, const char *name, const char *tag, odin3_ref *out) {
+    odin3_edit_new what = {.name = name, .tag = tag, .cell_type = type};
+    return odin3_edit_add_node(design, top, &what, out);
+}
+
+static odin3_status add_sop(uint32_t n_inputs, const char *cover, const char *name, const char *tag,
+                            odin3_ref *out) {
+    odin3_edit_new what = {.name = name, .tag = tag, .cover = cover, .n_inputs = n_inputs};
+    return odin3_edit_add_sop(design, top, &what, out);
 }
 
 static odin3_ref net_named(const char *name) {
@@ -51,9 +67,8 @@ static odin3_ref pin_of(odin3_ref node, uint32_t port, uint32_t bit) {
 static void test_add_net_and_sop_carry_the_tag(void) {
     odin3_ref net;
     odin3_ref sop;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, "t_q", "trojan:t1", &net));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_edit_add_sop(design, top, 2, "11 1\n", "t_and", "trojan:t1", &sop));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "t_q", "trojan:t1", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(2, "11 1\n", "t_and", "trojan:t1", &sop));
     const char *tag = NULL;
     TEST_ASSERT_EQUAL_INT(
         ODIN3_OK, odin3_edit_get_tag(design, (odin3_obj){top, ODIN3_OBJ_NET, net.id}, &tag));
@@ -69,22 +84,20 @@ static void test_add_net_and_sop_carry_the_tag(void) {
 
 static void test_duplicate_name_and_bad_args_are_refused(void) {
     odin3_ref net;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, "n1", "t", &net));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, top, "n1", "t", &net));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, top, "n2", "", &net));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, 999, "n3", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "n1", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_net(top, "n1", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_net(top, "n2", "", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_net(999, "n3", "t", &net));
     odin3_ref node;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_edit_add_node(design, top, "$nosuch", "x", "t", &node));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_edit_add_sop(design, top, 2, "1 1\n", "bad", "t", &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_node("$nosuch", "x", "t", &node));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_sop(2, "1 1\n", "bad", "t", &node));
 }
 
 static void test_connect_rewire_and_driver_rule(void) {
     odin3_ref sop;
     odin3_ref out;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, "t_q", "t", &out));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_sop(design, top, 2, "10 1\n", "g", "t", &sop));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "t_q", "t", &out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(2, "10 1\n", "g", "t", &sop));
     odin3_ref in0 = pin_of(sop, 0, 0);
     odin3_ref in1 = pin_of(sop, 0, 1);
     odin3_ref drv = pin_of(sop, 1, 0);
@@ -103,7 +116,7 @@ static void test_connect_rewire_and_driver_rule(void) {
 
 static void test_set_cover_keeps_pins_and_name(void) {
     odin3_ref sop;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_sop(design, top, 2, "11 1\n", "g", "t", &sop));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(2, "11 1\n", "g", "t", &sop));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(sop, 0, 0), net_named("a")));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_set_cover(design, sop, "00 1\n", "t2"));
     uint32_t node = 0;
@@ -114,8 +127,8 @@ static void test_set_cover_keeps_pins_and_name(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_get_net(design, pin_of(fresh, 0, 0), &net));
     TEST_ASSERT_EQUAL_UINT32(net_named("a").id, net);
     const char *tag = NULL;
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_edit_get_tag(design, (odin3_obj){top, ODIN3_OBJ_NODE, node}, &tag));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_edit_get_tag(design, (odin3_obj){top, ODIN3_OBJ_NODE, node}, &tag));
     TEST_ASSERT_EQUAL_STRING("t2", tag);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_set_cover(design, fresh, "0 1\n", "t"));
 }
@@ -123,8 +136,8 @@ static void test_set_cover_keeps_pins_and_name(void) {
 static void test_remove_and_noop_sequence_round_trips(void) {
     odin3_ref sop;
     odin3_ref net;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, "tmp", "t", &net));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_sop(design, top, 1, "1 1\n", "tmpg", "t", &sop));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "tmp", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(1, "1 1\n", "tmpg", "t", &sop));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_remove_node(design, sop));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_remove_net(design, net));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_remove_net(design, net));
@@ -140,9 +153,9 @@ static void test_edits_are_refused_while_simulating(void) {
     odin3_simulation *sim = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_open(design, 0, &sim));
     odin3_ref net;
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, top, "x", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, add_net(top, "x", "t", &net));
     odin3_simulation_close(sim);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, "x", "t", &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "x", "t", &net));
 }
 
 int main(void) {
