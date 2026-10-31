@@ -1,0 +1,2 @@
+# src/graph
+Generic graph analysis for Odin III: no IR or netlist types. Graphlet orbit counting (spec docs/specs/2026-10-30-graphlets-design.md). The graphlets pass (src/passes/graphlets/) is an adapter from a netlist to this library. Kept apart from src/util (containers only) and src/passes (netlist passes) so Norns, Mimir or any tool can count graphlets on a plain edge list through the C ABI and Python.

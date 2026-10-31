@@ -114,6 +114,9 @@ add_library(odin3_core OBJECT
     src/passes/names.c
     src/passes/names_v2.c
     src/passes/levelize/levelize.c
+    src/graph/tables.c
+    src/graph/przulj.c
+    src/graph/count.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
     src/passes/submod/busattr.c
@@ -1976,6 +1979,11 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tests/golden/blif/pow.parmys.blif
                 ${PROJECT_BINARY_DIR}/levelize_micro refuse)
     set_tests_properties(levelize_micro_word_refused PROPERTIES LABELS unit)
+    # graphlets: the counters.
+    odin3_add_unit_test(test_graphlets_count)
+    add_executable(glet_count tools/graphlets/glet_count.c)
+    target_include_directories(glet_count PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(glet_count PRIVATE odin3_core odin3_flags)
     # Phase 7 (7.4a): the submod pass.
     odin3_add_unit_test(test_submod)
     target_compile_definitions(test_submod PRIVATE ODIN3_SM_ROOT="${PROJECT_BINARY_DIR}")

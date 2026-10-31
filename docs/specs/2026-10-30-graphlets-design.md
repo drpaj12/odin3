@@ -240,3 +240,54 @@ calibration=None)`. Unit tests (section 9) gain: identical subgraphs give GDD ag
 1; the posterior rises with similarity under the test calibration; a focus equals brute force on the
 induced subgraph; a halo-1 run equals brute force on the group-plus-neighbours subgraph reported for
 the group.
+
+## 16. Graph-generic core and build order (Peter 2026-10-30)
+
+Peter, verbatim: "Go with your plan trying to build it graph generically as this might be useful in
+other instances ... test it out against the oracle and then build the directed graph one (which has
+no oracle) think how you will verify it works."
+
+- The counters live in `src/graph/` (new directory), not in `src/util/` (containers only, CLAUDE.md)
+  and not in `src/passes/` (netlist passes). `src/graph/` includes no IR or netlist header: input is
+  a node count and a directed edge list (`glet_edge`), converted to a CSR simple graph
+  (`glet_graph_build`); undirected use is the union of the two directions; optional node colours are
+  a later addition (spec only, section 4 "typed"). The pass `src/passes/graphlets/` is a thin
+  adapter: netlist -> graph (section 2 rules, global-signal exclusion, focus / partitions / halo) ->
+  core -> attributes + JSON.
+- Public C ABI: `odin3_graphlets_count(n, from[], to[], n_edges, directed, size, max_work, out,
+  out_len)` in include/odin3/odin3.h, int64 `n x n_orbits` row-major into the caller's buffer, so the
+  Python package exposes `odin3.graphlet_counts(n, edges, directed=False, size=5)` for any edge list
+  (Norns, Mimir, anything non-netlist). Unit tests of the core run without any netlist.
+- Build order: (1) undirected core, gated against ORCA (identical counts) and brute force, committed
+  and pushed as a gate before (2) the directed counter is started.
+
+## 17. Verification plan for the directed counter (no oracle), written before the code
+
+Each check reports a pass count in the PR.
+
+1. Independent brute-force reference in C (tests/unit/test_graphlets_count.c): separate code, the
+   simplest possible: enumerate every connected 2-4 node subset of a small digraph, resolve
+   anti-parallel pairs, classify the induced oriented graph by exhaustive-permutation canonical form,
+   and assign orbits by automorphisms found by exhaustive permutation. The fast counter must equal it
+   on thousands of random small digraphs (varied density, with and without anti-parallel pairs) and
+   on the directed graph of every micro netlist.
+2. A second independent implementation in Python (plain itertools, tests/tools/): the same
+   brute-force by a different author path, run on a few hundred random digraphs through the Python
+   binding: three-way agreement (C fast, C brute force, Python).
+3. Catalogue checks: exactly 40 graphlets and 129 orbits for 2-4 nodes; per graphlet the orbit
+   partition (automorphism classes) is listed (`docs/user/graphlets.md` table) and the orbit
+   multiplicities are checked against a hand count of the automorphism group of each of the 40
+   graphs (checked by a test that recomputes |Aut| by permutation and compares).
+4. Projection to the oracle: drop directions (anti-parallel pair -> one undirected edge) and map each
+   directed orbit to the undirected orbit of the same position of the underlying undirected graphlet
+   (a many-to-one map built from the catalogue); the sum of directed counts mapped must equal the
+   gated undirected counts (themselves equal to ORCA) for 2-4 nodes on every test graph, once the
+   multiplicity of resolutions is divided out (an anti-parallel pair contributes 2^p occurrences; the
+   projection check is therefore run on graphs without anti-parallel pairs, and on graphs with them
+   the identity total_directed(per undirected set) = 2^p is checked).
+5. Invariances: relabelling the nodes (random permutation) leaves the multiset of orbit vectors
+   unchanged; reversing every edge maps each orbit o to its reverse orbit rev(o) (defined from the
+   catalogue by reversing the canonical graph) with equal counts.
+6. Public data: Sarajlic et al. 2016 publish no per-orbit counts for a public network in the text
+   read; if the supplementary data gives one it is reproduced, otherwise this check is reported as
+   not available.
