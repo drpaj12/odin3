@@ -150,8 +150,9 @@ static void do_readmem(run *r, const tb_stmt *s, bool hex) {
         rfail(r, s, "$readmem start/end must be constants");
         return;
     }
-    if (!tb_readmem(&r->ev, call->list[0]->str, &r->tb->vars[call->list[1]->var], hex, from, to,
-                    err, sizeof err)) {
+    tb_readmem_req req = {call->list[0]->str, &r->tb->vars[call->list[1]->var], hex, from, to, err,
+                          sizeof err};
+    if (!tb_readmem(&req)) {
         rfail(r, s, err);
     }
 }
@@ -178,26 +179,35 @@ static void do_close(run *r, const tb_expr *call) {
     }
 }
 
+static void do_monitor(run *r, const tb_stmt *s) {
+    const char *name = s->sys->str;
+    if (strcmp(name, "$monitor") == 0) {
+        r->monitor = s;
+        r->mon_pending = true;
+    } else {
+        r->mon_on = name[8] == 'o' && name[9] == 'n';
+    }
+}
+
 static void do_systask(run *r, const tb_stmt *s) {
     const tb_expr *call = s->sys;
     const char *name = call->str;
-    if (strcmp(name, "$display") == 0 || strcmp(name, "$write") == 0) {
-        print_to(r, r->tb->out, call, 0, strstr(name, "display") != NULL);
-    } else if (strcmp(name, "$fdisplay") == 0 || strcmp(name, "$fwrite") == 0) {
-        uint64_t fd = call->n > 0 ? tb_eval(&r->ev, call->list[0], 32, false) : 0;
-        print_to(r, fd_stream(r, fd), call, 1, strstr(name, "display") != NULL);
+    if (strstr(name, "display") != NULL || strstr(name, "write") != NULL) {
+        uint64_t fd = 1;
+        if (name[1] == 'f') {
+            fd = call->n > 0 ? tb_eval(&r->ev, call->list[0], 32, false) : 0;
+        }
+        print_to(r, fd_stream(r, fd), call, name[1] == 'f' ? 1U : 0U,
+                 strstr(name, "display") != NULL);
     } else if (strcmp(name, "$strobe") == 0) {
         push_strobe(r, s);
-    } else if (strcmp(name, "$monitor") == 0) {
-        r->monitor = s;
-        r->mon_pending = true;
-    } else if (strcmp(name, "$monitoroff") == 0 || strcmp(name, "$monitoron") == 0) {
-        r->mon_on = name[8] == 'o' && name[9] == 'n';
+    } else if (strncmp(name, "$monitor", 8) == 0) {
+        do_monitor(r, s);
     } else if (strcmp(name, "$finish") == 0 || strcmp(name, "$stop") == 0) {
         r->finished = true;
     } else if (strcmp(name, "$fclose") == 0) {
         do_close(r, call);
-    } else if (strcmp(name, "$readmemh") == 0 || strcmp(name, "$readmemb") == 0) {
+    } else if (strncmp(name, "$readmem", 8) == 0) {
         do_readmem(r, s, name[8] == 'h');
     }
 }
@@ -261,73 +271,78 @@ static const tb_stmt *case_pick(run *r, const tb_stmt *s) {
     return dflt;
 }
 
-/* One step of the top frame; returns false when the process blocked or finished. */
-static bool step_loop(run *r, proc *p, frame *f) {
+static bool step_block(run *r, proc *p, frame *f) {
     const tb_stmt *s = f->s;
-    switch (s->kind) {
-    case S_BLOCK:
-        if (f->pc < s->n) {
-            return push(r, p, s->list[f->pc++]);
-        }
+    if (f->pc < s->n) {
+        return push(r, p, s->list[f->pc++]);
+    }
+    p->sp--;
+    return true;
+}
+
+/* DELAY, EVENT and WAIT: the first visit blocks (or passes when a wait is already true), the
+ * second runs the body. */
+static bool step_wait(run *r, proc *p, frame *f) {
+    const tb_stmt *s = f->s;
+    if (f->pc != 0) {
+        p->sp--;
+        return push(r, p, s->a);
+    }
+    f->pc = 1;
+    if (s->kind == S_DELAY) {
+        p->wake = r->ev.time + tb_eval(&r->ev, s->rhs, s->rhs->width, false);
+        p->state = P_TIME;
+    } else if (s->kind == S_EVENT) {
+        arm(r, p, s);
+        p->state = P_EVENT;
+    } else if (tb_eval(&r->ev, s->rhs, s->rhs->width, false) == 0) {
+        p->waiting = s;
+        p->state = P_COND;
+    }
+    return p->state == P_RUN;
+}
+
+static bool step_branch(run *r, proc *p, const tb_stmt *s) {
+    const tb_stmt *next = NULL;
+    if (s->kind == S_IF) {
+        next = tb_eval(&r->ev, s->rhs, s->rhs->width, false) != 0 ? s->a : s->b;
+    } else {
+        next = case_pick(r, s);
+    }
+    p->sp--;
+    return next == NULL || push(r, p, next);
+}
+
+static bool step_for(run *r, proc *p, frame *f) {
+    const tb_stmt *s = f->s;
+    if (f->pc == 0) {
+        f->pc = 1;
+        exec_leaf(r, s->init);
+        return true;
+    }
+    if (f->pc == 2) {
+        f->pc = 1;
+        exec_leaf(r, s->step);
+        return true;
+    }
+    if (tb_eval(&r->ev, s->rhs, s->rhs->width, false) == 0) {
         p->sp--;
         return true;
-    case S_DELAY:
-    case S_EVENT:
-    case S_WAIT:
-        if (f->pc == 0) {
-            f->pc = 1;
-            if (s->kind == S_DELAY) {
-                p->wake = r->ev.time + tb_eval(&r->ev, s->rhs, s->rhs->width, false);
-                p->state = P_TIME;
-            } else if (s->kind == S_EVENT) {
-                arm(r, p, s);
-                p->state = P_EVENT;
-            } else if (tb_eval(&r->ev, s->rhs, s->rhs->width, false) == 0) {
-                p->waiting = s;
-                p->state = P_COND;
-            } else {
-                f->pc = 0;
-                f->pc = 1;
-                return true;
-            }
-            return p->state == P_RUN;
-        }
-        p->sp--;
-        return push(r, p, s->a);
-    case S_IF: {
-        const tb_stmt *next = tb_eval(&r->ev, s->rhs, s->rhs->width, false) != 0 ? s->a : s->b;
-        p->sp--;
-        return next == NULL || push(r, p, next);
     }
-    case S_CASE: {
-        const tb_stmt *next = case_pick(r, s);
-        p->sp--;
-        return next == NULL || push(r, p, next);
-    }
-    case S_FOR:
-        if (f->pc == 0) {
-            f->pc = 1;
-            exec_leaf(r, s->init);
-            return true;
-        }
-        if (f->pc == 2) {
-            f->pc = 1;
-            exec_leaf(r, s->step);
-            return true;
-        }
-        if (tb_eval(&r->ev, s->rhs, s->rhs->width, false) == 0) {
-            p->sp--;
-            return true;
-        }
-        f->pc = 2;
-        return push(r, p, s->a);
-    case S_WHILE:
+    f->pc = 2;
+    return push(r, p, s->a);
+}
+
+static bool step_loop_kind(run *r, proc *p, frame *f) {
+    const tb_stmt *s = f->s;
+    if (s->kind == S_WHILE) {
         if (tb_eval(&r->ev, s->rhs, s->rhs->width, false) == 0) {
             p->sp--;
             return true;
         }
         return push(r, p, s->a);
-    case S_REPEAT:
+    }
+    if (s->kind == S_REPEAT) {
         if (f->pc == 0) {
             f->pc = 1;
             f->cnt = tb_eval(&r->ev, s->rhs, s->rhs->width, false);
@@ -337,9 +352,29 @@ static bool step_loop(run *r, proc *p, frame *f) {
             return true;
         }
         f->cnt--;
-        return push(r, p, s->a);
+    }
+    return push(r, p, s->a);
+}
+
+/* One step of the top frame; returns false when the process blocked or finished. */
+static bool step_loop(run *r, proc *p, frame *f) {
+    const tb_stmt *s = f->s;
+    switch (s->kind) {
+    case S_BLOCK:
+        return step_block(r, p, f);
+    case S_DELAY:
+    case S_EVENT:
+    case S_WAIT:
+        return step_wait(r, p, f);
+    case S_IF:
+    case S_CASE:
+        return step_branch(r, p, s);
+    case S_FOR:
+        return step_for(r, p, f);
+    case S_WHILE:
+    case S_REPEAT:
     case S_FOREVER:
-        return push(r, p, s->a);
+        return step_loop_kind(r, p, f);
     default:
         exec_leaf(r, s);
         p->sp--;
@@ -393,7 +428,8 @@ static void active_region(run *r) {
         }
     }
     if (!r->finished) {
-        rfail(r, NULL, "time step does not converge (combinational feedback through the testbench)");
+        rfail(r, NULL,
+              "time step does not converge (combinational feedback through the testbench)");
     }
 }
 

@@ -129,15 +129,61 @@ the generated `tb.v` run by `vvp` against the DUT RTL equals `sim_tb` on the low
 reference testbench runs unchanged in the subset, and the number whose output equals iverilog's.
 Results are in the PR description and `docs/user/testbench.md`.
 
-## 8. Agent defaults, deviations, next step
+## 8. Agent defaults, deviations from sections 1 to 7 as built, next step
 
-D-1 `--dut-netlist` is sugar for `read_blif`. D-2 divide by zero is 0. D-3 detection heuristics as
-in section 5. D-4 64-bit value limit. D-5 pass named `sim_tb`; generator `testbench_gen`; compare
-is a Python tool, not a pass. D-6 VCD in `sim_tb` writes the DUT inputs/outputs and the
-testbench regs (the DUT internals are in the `sim` pass's VCD, not here).
+Agent defaults: D-1 pass named `sim_tb`, generator `testbench_gen`, compare is a Python tool (not a
+pass). D-2 divide by zero is 0. D-3 detection heuristics as in section 5. D-4 64-bit value limit
+(testbench values, DUT ports, generator ports). D-5 the testbench file holds exactly one module.
 
-Next step (updated at each stop): implement section 2 in `src/sim/tb_*.c`, then the pass,
-generator, tool, micros, docs.
+Deviations from the text above, as built (2026-10-31):
+1. `--dut-netlist` is not a flag: read the netlist first (`read_blif f.blif; sim_tb tb.v`).
+2. `--vcd` is refused ("not implemented yet"): the `sim` pass keeps its own `--vcd`.
+3. Ranges must be `[h:0]` (and arrays `[0:N]`); ordered port connections are rejected (named only).
+4. `testbench_gen` writes one stimulus file per data input, `<out>.<input>.hex`, not one file with
+   a word per input per line.
+5. `$random` is a Park-Miller generator; its stream does NOT equal iverilog's (iverilog updates
+   the seed as `seed*69069+1` but derives the value differently; not matched). Testbenches whose
+   output depends on `$random` values are not an oracle gate; `$random(seed)` is deterministic.
+6. `$display` details matched to iverilog 12 (checked): no separator between arguments, extra
+   arguments after a format string are appended in default decimal, a missing argument prints
+   `<%d>`, `%0Nd` zero pads, `$finish` runs the postponed region (`$monitor`, `$strobe`) of its
+   time step. `$finish` itself prints nothing here (vvp's "$finish called" line is not compared).
+7. A DUT with more than one clock input, a DUT port wider than 64 bits and any hierarchical name
+   are rejected, as listed in section 2.
+
+Gate results (2026-10-31, debug build, iverilog 12.0; tests in `tests/tb/`):
+(a) micros: comb, counter, fsm, mem (with `$readmemh`), misc (format, `$monitor`, `$strobe`,
+signed shifts, concat): 5/5 identical to iverilog (`tests/tb/run_micros.sh`, ctest `tb_micros`).
+(b) generated testbenches (`tests/tb/gen_gate.sh`, same `tb.v` on RTL under iverilog and on the
+lowered netlist under `sim_tb`): PASS (exact): counter, fsm, comb, single_wire, single_ff,
+and_latch, diffeq2. PASS-X (equal except hex digits that are x in iverilog because state is
+uninitialised before the first write; the 2-state side prints 0): mem, ch_intrinsics,
+ch_intrinsics_nolatches, sha, diffeq1. Not run, with reason: multiclock_output_and_latch (iverilog
+rejects the design), multiclock_separate_and_latch, multiclock_reader_writer and stereovision3
+(more than one clock input: unsupported), mkPktMerge and blob_merge (ports wider than 64 bits).
+That is 12 of the 14 designs of the PHASE3 #16 set run (5 exact, 5 x-masked) with no mismatch;
+the other 2 are limits of the subset, listed above. ch_intrinsics, mkPktMerge need the
+`single_port_ram`/`dual_port_ram` models (`tests/tb/vtr_rams.v`, read by both tools).
+(c) VerilogEval (`dataset_spec-to-rtl`, 156 `*_test.sv`): 0 of 156 run unchanged. Every file uses
+`` `define `` and SystemVerilog (`logic`, `int`, `typedef struct`, tasks, several modules per
+file, `$urandom` streams, `wavedrom_*` tasks), all outside the subset. A SystemVerilog testbench
+interpreter would need the slang front end (`adapters/slang`) to parse them; not started.
+
+Next step (for the resuming agent), FIRST: `tools/lint.sh` (clang-tidy) fails on the new files
+(370 findings, 2026-10-31: 257 readability-identifier-length (names under 2 characters: `e`, `w`,
+`c`, `b`, `g`, `o`, `n`, `r`, `t`), 52 readability-magic-numbers, 30 misc-no-recursion (the
+recursive-descent parser in `tb_parse.c` and the recursive evaluator in `tb_expr.c`, `tb_eval` and
+callees), 20 bugprone-multi-level-implicit-pointer-conversion and 11 bugprone-sizeof-expression
+(the `tb_alloc` / array-of-pointer idiom), 10 easily-swappable-parameters, 7 cognitive-complexity,
+4 nested conditional operators, and a few singles). All other gates pass (clang-format, cppcheck,
+lizard, ruff, mypy, `--no-tidy`). Fix at the source, never NOLINT: rename short identifiers,
+name the constants, and replace the recursion by explicit stacks (an operand stack with a
+post-order node list built at parse time for `tb_eval`; an operator-precedence parser with
+explicit stacks for expressions and a statement stack for the parser). Then CI. After that: (1) read DUT signals by hierarchical name in testbench
+expressions through `odin3_sim_find_signal`; (2) values wider than 64 bits (arrays of words) so
+mkPktMerge/blob_merge generate; (3) `` `define `` object macros and `` `include `` in the testbench
+lexer; (4) multi-clock DUTs by per-clock edge calls in the simulator; (5) `$random` matching
+iverilog; (6) `--vcd`; (7) the section 9 processor target.
 
 ## 9. Stretch target: BRISC-V timer core (Arduino-on-RISC-V, `quartus_project_revert_timer`)
 

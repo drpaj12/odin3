@@ -31,7 +31,18 @@ typedef struct tb_tok {
 
 /* --- expressions --- */
 typedef enum {
-    E_NUM, E_STR, E_VAR, E_BITSEL, E_PART, E_MEM, E_CONCAT, E_REPL, E_UN, E_BIN, E_COND, E_SYS
+    E_NUM,
+    E_STR,
+    E_VAR,
+    E_BITSEL,
+    E_PART,
+    E_MEM,
+    E_CONCAT,
+    E_REPL,
+    E_UN,
+    E_BIN,
+    E_COND,
+    E_SYS
 } tb_ekind;
 
 typedef struct tb_expr {
@@ -51,8 +62,20 @@ typedef struct tb_expr {
 
 /* --- statements --- */
 typedef enum {
-    S_NOP, S_BLOCK, S_ASSIGN, S_NBA, S_DELAY, S_EVENT, S_WAIT, S_IF, S_CASE, S_FOR, S_WHILE,
-    S_REPEAT, S_FOREVER, S_SYS
+    S_NOP,
+    S_BLOCK,
+    S_ASSIGN,
+    S_NBA,
+    S_DELAY,
+    S_EVENT,
+    S_WAIT,
+    S_IF,
+    S_CASE,
+    S_FOR,
+    S_WHILE,
+    S_REPEAT,
+    S_FOREVER,
+    S_SYS
 } tb_skind;
 
 typedef struct tb_event_term {
@@ -125,8 +148,8 @@ typedef struct tb_module {
     uint32_t nprocs;
     void **allocs; /* every parse allocation, freed with the module */
     uint32_t nallocs, cap_allocs;
-    FILE *out;                    /* $display output (fd 1) */
-    FILE *files[TB_MAX_FILES];    /* $fopen descriptors 3.. */
+    FILE *out;                 /* $display output (fd 1) */
+    FILE *files[TB_MAX_FILES]; /* $fopen descriptors 3.. */
 } tb_module;
 
 /* Parses text (file name for messages) and picks the top: name, or the first module when NULL.

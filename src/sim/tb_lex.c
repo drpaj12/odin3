@@ -175,8 +175,23 @@ static void lex_op(const char **p, tb_tok *tok) {
     (*p)++;
 }
 
-/* Skips blanks and comments; counts lines; handles `timescale. */
-static bool skip_trivia(const char **p, uint32_t *line, const char *file, tb_module *tb) {
+static void skip_block_comment(const char **p, uint32_t *line) {
+    *p += 2;
+    while (**p != '\0' && !(p[0][0] == '*' && p[0][1] == '/')) {
+        *line += **p == '\n' ? 1U : 0U;
+        (*p)++;
+    }
+    *p += **p == '\0' ? 0 : 2;
+}
+
+static void skip_to_eol(const char **p) {
+    while (**p != '\n' && **p != '\0') {
+        (*p)++;
+    }
+}
+
+/* Skips blanks and comments; counts lines; accepts `timescale lines (ignored). */
+static bool skip_trivia(const char **p, uint32_t *line, const char *file) {
     for (;;) {
         const char *q = *p;
         if (*q == '\n') {
@@ -185,25 +200,14 @@ static bool skip_trivia(const char **p, uint32_t *line, const char *file, tb_mod
         } else if (isspace((unsigned char)*q)) {
             (*p)++;
         } else if (q[0] == '/' && q[1] == '/') {
-            while (**p != '\n' && **p != '\0') {
-                (*p)++;
-            }
+            skip_to_eol(p);
         } else if (q[0] == '/' && q[1] == '*') {
-            *p += 2;
-            while (**p != '\0' && !(p[0][0] == '*' && p[0][1] == '/')) {
-                *line += **p == '\n' ? 1U : 0U;
-                (*p)++;
-            }
-            *p += **p == '\0' ? 0 : 2;
+            skip_block_comment(p, line);
+        } else if (*q == '`' && strncmp(q, "`timescale", 10) == 0) {
+            skip_to_eol(p);
         } else if (*q == '`') {
-            if (strncmp(q, "`timescale", 10) != 0) {
-                tb_error(file, *line, "compiler directive");
-                return false;
-            }
-            while (**p != '\n' && **p != '\0') {
-                (*p)++;
-            }
-            (void)tb;
+            tb_error(file, *line, "compiler directive");
+            return false;
         } else {
             return true;
         }
@@ -217,7 +221,7 @@ bool tb_lex(const char *file, const char *text, tb_module *tb, tb_lexed *out) {
     out->toks = tb_alloc(tb, cap * sizeof *out->toks);
     out->n = 0;
     while (out->toks != NULL) {
-        if (!skip_trivia(&p, &line, file, tb)) {
+        if (!skip_trivia(&p, &line, file)) {
             return false;
         }
         if (out->n + 1 >= cap) {

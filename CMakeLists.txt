@@ -111,6 +111,7 @@ add_library(odin3_core OBJECT
     src/passes/read_json_pass.c
     src/passes/sim_pass.c
     src/passes/sim_tb_pass.c
+    src/passes/testbench_gen.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
@@ -2762,6 +2763,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(sim_check_fixtures PROPERTIES LABELS tools)
     else()
         message(STATUS "sim_check_fixtures not registered: needs ABC, yosys, iverilog and vvp")
+    endif()
+    find_program(IVERILOG_BIN iverilog)
+    find_program(VVP_BIN vvp)
+    if(IVERILOG_BIN AND VVP_BIN)
+        add_test(NAME tb_micros
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     endif()
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .

@@ -16,64 +16,40 @@ static unsigned digits_of(uint64_t val, unsigned base) {
     return n;
 }
 
-static void put(char *out, size_t cap, size_t *len, const char *text, size_t n) {
-    for (size_t i = 0; i < n && *len + 1 < cap; i++) {
-        out[(*len)++] = text[i];
+typedef struct sbuf {
+    char *buf;
+    size_t cap, len;
+} sbuf;
+
+static void put(sbuf *out, const char *text, size_t n) {
+    for (size_t i = 0; i < n && out->len + 1 < out->cap; i++) {
+        out->buf[out->len++] = text[i];
     }
-    out[*len < cap ? *len : cap - 1U] = '\0';
+    out->buf[out->len < out->cap ? out->len : out->cap - 1U] = '\0';
 }
 
 /* val printed in base (2, 8, 16) with at least `digits` digits, zero padded. */
-static void put_radix(char *out, size_t cap, size_t *len, uint64_t val, unsigned base,
-                      unsigned digits, bool pad) {
+static void put_radix(sbuf *out, uint64_t val, unsigned base, unsigned digits) {
     char buf[TB_MAX_WIDTH + 1];
     unsigned n = 0;
     do {
         buf[n++] = "0123456789abcdef"[val % base];
         val /= base;
     } while (val != 0);
-    while (pad && n < digits) {
+    while (n < digits) {
         buf[n++] = '0';
     }
     while (n > 0) {
-        put(out, cap, len, &buf[--n], 1);
+        put(out, &buf[--n], 1);
     }
 }
 
-static void pad_to(char *out, size_t cap, size_t *len, const char *text, size_t width, char fill) {
+static void pad_to(sbuf *out, const char *text, size_t width, char fill) {
     size_t tl = strlen(text);
     for (size_t i = tl; i < width; i++) {
-        put(out, cap, len, &fill, 1);
+        put(out, &fill, 1);
     }
-    put(out, cap, len, text, tl);
-}
-
-static void put_dec(char *out, size_t cap, size_t *len, const tb_expr *arg, uint64_t val,
-                    int width, bool zero) {
-    char text[DEC_BUF];
-    unsigned digits = 0;
-    if (arg->sgn) {
-        int64_t sv = (int64_t)(arg->width >= TB_MAX_WIDTH ? val
-                                                          : (val ^ ((uint64_t)1 << (arg->width - 1U))) -
-                                                                ((uint64_t)1 << (arg->width - 1U)));
-        (void)snprintf(text, sizeof text, "%lld", (long long)sv);
-        digits = digits_of((uint64_t)1 << (arg->width - 1U), 10) + 1U;
-    } else {
-        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)val);
-        digits = digits_of(tb_mask(arg->width), 10);
-    }
-    pad_to(out, cap, len, text, width < 0 ? digits : (size_t)width, zero ? '0' : ' ');
-}
-
-static void put_string_value(char *out, size_t cap, size_t *len, uint64_t val, uint32_t width) {
-    bool started = false;
-    for (uint32_t shift = (width + 7U) / 8U; shift > 0; shift--) {
-        char ch = (char)((val >> ((shift - 1U) * 8U)) & 0xFFU);
-        started = started || ch != '\0';
-        if (started) {
-            put(out, cap, len, &ch, 1);
-        }
-    }
+    put(out, text, tl);
 }
 
 typedef struct spec {
@@ -82,34 +58,66 @@ typedef struct spec {
     bool zero; /* leading 0 flag with a width */
 } spec;
 
-static void put_arg(tb_ev *ev, char *out, size_t cap, size_t *len, const tb_expr *arg, spec sp) {
+static int64_t signed_value(const tb_expr *arg, uint64_t val) {
+    if (arg->width >= TB_MAX_WIDTH) {
+        return (int64_t)val;
+    }
+    uint64_t sign = (uint64_t)1 << (arg->width - 1U);
+    return (int64_t)((val ^ sign) - sign);
+}
+
+static void put_dec(sbuf *out, const tb_expr *arg, uint64_t val, spec sp) {
+    char text[DEC_BUF];
+    unsigned digits = 0;
+    if (arg->sgn) {
+        (void)snprintf(text, sizeof text, "%lld", (long long)signed_value(arg, val));
+        digits = digits_of((uint64_t)1 << (arg->width - 1U), 10) + 1U;
+    } else {
+        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)val);
+        digits = digits_of(tb_mask(arg->width), 10);
+    }
+    pad_to(out, text, sp.width < 0 ? digits : (size_t)sp.width, sp.zero ? '0' : ' ');
+}
+
+static void put_string_value(sbuf *out, uint64_t val, uint32_t width) {
+    bool started = false;
+    for (uint32_t shift = (width + 7U) / 8U; shift > 0; shift--) {
+        char ch = (char)((val >> ((shift - 1U) * 8U)) & 0xFFU);
+        started = started || ch != '\0';
+        if (started) {
+            put(out, &ch, 1);
+        }
+    }
+}
+
+static void put_arg(tb_ev *ev, sbuf *out, const tb_expr *arg, spec sp) {
     if (arg->kind == E_STR) {
-        put(out, cap, len, arg->str, strlen(arg->str));
+        put(out, arg->str, strlen(arg->str));
         return;
     }
     uint64_t val = tb_eval(ev, arg, arg->width, arg->sgn) & tb_mask(arg->width);
     unsigned bits = arg->width;
+    bool pad = sp.width != 0;
+    char ch = (char)val;
     switch (sp.conv) {
     case 'b':
-        put_radix(out, cap, len, val, 2, bits, sp.width != 0);
+        put_radix(out, val, 2, pad ? bits : 0);
         break;
     case 'h':
     case 'x':
-        put_radix(out, cap, len, val, 16, (bits + 3U) / 4U, sp.width != 0);
+        put_radix(out, val, 16, pad ? (bits + 3U) / 4U : 0);
         break;
     case 'o':
-        put_radix(out, cap, len, val, 8, (bits + 2U) / 3U, sp.width != 0);
+        put_radix(out, val, 8, pad ? (bits + 2U) / 3U : 0);
         break;
-    case 'c': {
-        char ch = (char)val;
-        put(out, cap, len, &ch, 1);
+    case 'c':
+        put(out, &ch, 1);
         break;
-    }
     case 's':
-        put_string_value(out, cap, len, val, arg->width);
+        put_string_value(out, val, arg->width);
         break;
     default:
-        put_dec(out, cap, len, arg, val, sp.width, sp.zero);
+        put_dec(out, arg, val, sp);
         break;
     }
 }
@@ -146,42 +154,48 @@ static spec read_spec(const char **c) {
     return sp;
 }
 
-static uint32_t format_string(tb_ev *ev, const char *fmt, tb_expr *const *args, uint32_t nargs,
-                              char *out, size_t cap, size_t *outlen) {
-    size_t len = 0;
-    uint32_t next = 0;
+typedef struct fargs {
+    tb_expr *const *args;
+    uint32_t nargs, next;
+} fargs;
+
+static void put_one(tb_ev *ev, sbuf *out, spec sp, fargs *fa) {
+    if (sp.conv == '%') {
+        put(out, "%", 1);
+    } else if (sp.conv == 'm') {
+        put(out, ev->tb->name, strlen(ev->tb->name));
+    } else if (fa->next < fa->nargs) {
+        put_arg(ev, out, fa->args[fa->next++], sp);
+    } else {
+        const char miss[4] = {'<', '%', sp.conv, '>'};
+        put(out, miss, sizeof miss);
+    }
+}
+
+static uint32_t format_string(tb_ev *ev, sbuf *out, const char *fmt, tb_expr *const *args,
+                              uint32_t nargs) {
+    fargs fa = {args, nargs, 0};
     for (const char *c = fmt; *c != '\0'; c++) {
         if (*c != '%') {
-            put(out, cap, &len, c, 1);
+            put(out, c, 1);
             continue;
         }
         c++;
-        spec sp = read_spec(&c);
-        if (sp.conv == '%') {
-            put(out, cap, &len, "%", 1);
-        } else if (sp.conv == 'm') {
-            put(out, cap, &len, ev->tb->name, strlen(ev->tb->name));
-        } else if (next < nargs) {
-            put_arg(ev, out, cap, &len, args[next++], sp);
-        } else {
-            char miss[8] = {'<', '%', sp.conv, '>', 0};
-            put(out, cap, &len, miss, 4);
-        }
+        put_one(ev, out, read_spec(&c), &fa);
     }
-    *outlen = len;
-    return next;
+    return fa.next;
 }
 
-void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *out, size_t cap) {
-    out[0] = '\0';
-    size_t len = 0;
+void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *buf, size_t cap) {
+    sbuf out = {buf, cap, 0};
+    buf[0] = '\0';
     uint32_t first = 0;
     if (nargs > 0 && args[0]->kind == E_STR) {
-        first = 1U + format_string(ev, args[0]->str, args + 1, nargs - 1U, out, cap, &len);
+        first = 1U + format_string(ev, &out, args[0]->str, args + 1, nargs - 1U);
     }
     for (uint32_t i = first; i < nargs; i++) {
         spec sp = {'d', -1, false};
-        put_arg(ev, out, cap, &len, args[i], sp);
+        put_arg(ev, &out, args[i], sp);
     }
 }
 
@@ -223,12 +237,16 @@ static void strip_comments(char *text) {
     }
 }
 
-bool tb_readmem(tb_ev *ev, const char *file, tb_var *mem, bool hex, int64_t from, int64_t to,
-                char *err, size_t errcap) {
-    (void)ev;
-    char *text = slurp(file);
+bool tb_readmem(const tb_readmem_req *req) {
+    tb_var *mem = req->mem;
+    char *err = req->err;
+    size_t errcap = req->errcap;
+    bool hex = req->hex;
+    int64_t from = req->from;
+    int64_t to = req->to;
+    char *text = slurp(req->file);
     if (text == NULL) {
-        (void)snprintf(err, errcap, "$readmem: cannot read `%s`", file);
+        (void)snprintf(err, errcap, "$readmem: cannot read `%s`", req->file);
         return false;
     }
     strip_comments(text);

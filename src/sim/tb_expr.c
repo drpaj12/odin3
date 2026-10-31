@@ -32,7 +32,8 @@ static uint32_t max_u32(uint32_t a, uint32_t b) {
 }
 
 int32_t tb_random(int32_t *seed) {
-    /* Park-Miller minimal standard generator (see the spec: matched against iverilog in the gate). */
+    /* Park-Miller minimal standard generator (see the spec: matched against iverilog in the gate).
+     */
     int64_t s = *seed;
     s = s <= 0 ? 1 : s;
     s = (s * 16807) % 2147483647;
@@ -44,6 +45,44 @@ static uint64_t eval_index(tb_ev *ev, const tb_expr *idx) {
     return tb_eval(ev, idx, idx->width, false);
 }
 
+static uint64_t eval_random(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg) {
+    int32_t seed = ev->seed;
+    if (e->n > 0) {
+        seed = (int32_t)tb_eval(ev, e->list[0], 32, false);
+    }
+    int32_t val = tb_random(&seed);
+    if (e->n > 0) {
+        tb_write(ev, e->list[0], (uint64_t)(uint32_t)seed);
+    } else {
+        ev->seed = seed;
+    }
+    return ext((uint64_t)(uint32_t)val, 32, sg, w);
+}
+
+static uint64_t eval_fopen(tb_ev *ev, const tb_expr *e) {
+    ev->failed = ev->failed || ev->const_only || e->n < 1 || e->list[0]->kind != E_STR;
+    if (ev->failed) {
+        return 0;
+    }
+    const char *mode = e->n > 1 && e->list[1]->kind == E_STR ? e->list[1]->str : "w";
+    for (uint32_t i = 0; i < TB_MAX_FILES; i++) {
+        if (ev->tb->files[i] == NULL) {
+            ev->tb->files[i] = fopen(e->list[0]->str, mode);
+            return ev->tb->files[i] != NULL ? i + 3U : 0U;
+        }
+    }
+    return 0;
+}
+
+static uint64_t eval_clog2(tb_ev *ev, const tb_expr *e, uint32_t w) {
+    uint64_t val = tb_eval(ev, e->list[0], e->list[0]->width, false);
+    uint64_t res = 0;
+    while (res < TB_MAX_WIDTH && ((uint64_t)1 << res) < val) {
+        res++;
+    }
+    return res & tb_mask(w);
+}
+
 static uint64_t eval_sys(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg) {
     const char *name = e->str;
     if (strcmp(name, "$time") == 0) {
@@ -51,39 +90,13 @@ static uint64_t eval_sys(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg) {
         return ev->time & tb_mask(w);
     }
     if (strcmp(name, "$random") == 0 || strcmp(name, "$urandom") == 0) {
-        int32_t seed = ev->seed;
-        if (e->n > 0) {
-            seed = (int32_t)tb_eval(ev, e->list[0], 32, false);
-        }
-        int32_t val = tb_random(&seed);
-        if (e->n > 0) {
-            tb_write(ev, e->list[0], (uint64_t)(uint32_t)seed);
-        } else {
-            ev->seed = seed;
-        }
-        return ext((uint64_t)(uint32_t)val, 32, sg, w);
+        return eval_random(ev, e, w, sg);
     }
     if (strcmp(name, "$fopen") == 0) {
-        ev->failed = ev->failed || ev->const_only || e->n < 1 || e->list[0]->kind != E_STR;
-        if (ev->failed) {
-            return 0;
-        }
-        const char *mode = e->n > 1 && e->list[1]->kind == E_STR ? e->list[1]->str : "w";
-        for (uint32_t i = 0; i < TB_MAX_FILES; i++) {
-            if (ev->tb->files[i] == NULL) {
-                ev->tb->files[i] = fopen(e->list[0]->str, mode);
-                return ev->tb->files[i] != NULL ? i + 3U : 0U;
-            }
-        }
-        return 0;
+        return eval_fopen(ev, e);
     }
     if (strcmp(name, "$clog2") == 0) {
-        uint64_t val = tb_eval(ev, e->list[0], e->list[0]->width, false);
-        uint64_t res = 0;
-        while (res < TB_MAX_WIDTH && ((uint64_t)1 << res) < val) {
-            res++;
-        }
-        return res & tb_mask(w);
+        return eval_clog2(ev, e, w);
     }
     /* $signed / $unsigned */
     uint64_t val = tb_eval(ev, e->list[0], e->list[0]->width, false);
@@ -122,7 +135,10 @@ static uint64_t eval_shift(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg) {
     }
     if (op_is(e, ">>>") && sg) {
         int64_t sv = sx(av, w);
-        return (uint64_t)(amt >= TB_MAX_WIDTH ? (sv < 0 ? -1 : 0) : sv >> amt) & tb_mask(w);
+        if (amt >= TB_MAX_WIDTH - 1U) {
+            return sv < 0 ? tb_mask(w) : 0;
+        }
+        return (uint64_t)(sv >> amt) & tb_mask(w);
     }
     return amt >= TB_MAX_WIDTH ? 0 : av >> amt;
 }
@@ -264,7 +280,7 @@ uint64_t tb_eval(tb_ev *ev, const tb_expr *e, uint32_t w, bool sg) {
         return eval_bin(ev, e, w, sg);
     case E_COND:
         return tb_eval(ev, e->a, e->a->width, false) != 0 ? tb_eval(ev, e->b, w, sg)
-                                                           : tb_eval(ev, e->c, w, sg);
+                                                          : tb_eval(ev, e->c, w, sg);
     case E_SYS:
         return eval_sys(ev, e, w, sg);
     default:

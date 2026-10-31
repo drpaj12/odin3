@@ -116,7 +116,7 @@ static int add_var(ps *p, const char *name, uint32_t width, bool sgn, bool is_wi
 static tb_expr *parse_expr(ps *p);
 
 static bool const_int(ps *p, int64_t *out) {
-    tb_expr *e = parse_expr(p);
+    const tb_expr *e = parse_expr(p);
     if (e == NULL) {
         return false;
     }
@@ -170,8 +170,8 @@ static bool parse_args(ps *p, tb_expr *e) {
     return true;
 }
 
-static const char *const SYS_EXPR[] = {"$time",   "$random", "$urandom", "$signed",
-                                       "$unsigned", "$clog2", "$fopen", NULL};
+static const char *const SYS_EXPR[] = {"$time",     "$random", "$urandom", "$signed",
+                                       "$unsigned", "$clog2",  "$fopen",   NULL};
 
 static tb_expr *parse_sys_expr(ps *p) {
     tb_expr *e = new_expr(p, E_SYS);
@@ -227,6 +227,39 @@ static tb_expr *parse_number(ps *p) {
     return e;
 }
 
+/* After the first item: `{n{...}}` makes it a replication. */
+static bool concat_replication(ps *p, tb_expr *e, const tb_expr *first, uint64_t *reps) {
+    int64_t count = 0;
+    if (!tb_const(p->tb, first, &count) || count <= 0) {
+        return fail(p, "replication count");
+    }
+    *reps = (uint64_t)count;
+    e->kind = E_REPL;
+    p->pos++;
+    return true;
+}
+
+static bool concat_items(ps *p, tb_expr *e, tb_expr **list, uint32_t *count, uint64_t *reps) {
+    uint32_t n = 0;
+    do {
+        if (n + 1U >= TB_MAX_ARGS) {
+            return fail(p, "concatenation too long");
+        }
+        list[n] = parse_expr(p);
+        if (list[n++] == NULL) {
+            return false;
+        }
+        if (n == 1 && is_op(p, "{")) {
+            if (!concat_replication(p, e, list[0], reps)) {
+                return false;
+            }
+            n = 0;
+        }
+    } while (accept_op(p, ","));
+    *count = n;
+    return true;
+}
+
 static tb_expr *parse_concat(ps *p) {
     tb_expr *e = new_expr(p, E_CONCAT);
     tb_expr *list[TB_MAX_ARGS];
@@ -236,29 +269,8 @@ static tb_expr *parse_concat(ps *p) {
         return NULL;
     }
     p->pos++;
-    for (;;) {
-        list[n] = parse_expr(p);
-        if (list[n] == NULL || n + 1U >= TB_MAX_ARGS) {
-            return fail(p, "concatenation too long"), NULL;
-        }
-        n++;
-        if (n == 1 && is_op(p, "{")) {
-            int64_t count = 0;
-            tb_expr *first = list[0];
-            if (!tb_const(p->tb, first, &count) || count <= 0) {
-                return fail(p, "replication count"), NULL;
-            }
-            reps = (uint64_t)count;
-            e->kind = E_REPL;
-            p->pos++;
-            n = 0;
-            continue;
-        }
-        if (!accept_op(p, ",")) {
-            break;
-        }
-    }
-    if (!expect_op(p, "}") || (e->kind == E_REPL && !expect_op(p, "}"))) {
+    if (!concat_items(p, e, list, &n, &reps) || !expect_op(p, "}") ||
+        (e->kind == E_REPL && !expect_op(p, "}"))) {
         return NULL;
     }
     e->list = pnew(p, n * sizeof *list);
@@ -280,16 +292,26 @@ static tb_expr *parse_concat(ps *p) {
     return e;
 }
 
+static tb_expr *parse_part_select(ps *p, tb_expr *sel, const tb_expr *idx, const tb_var *v) {
+    int64_t high = 0;
+    int64_t low = 0;
+    if (!tb_const(p->tb, idx, &high) || !const_int(p, &low) || high < low || low < 0 ||
+        high >= (int64_t)v->width) {
+        return fail(p, "part select (constants within the declared width)"), NULL;
+    }
+    sel->kind = E_PART;
+    sel->aux = (uint32_t)low;
+    sel->width = (uint32_t)(high - low) + 1U;
+    return sel;
+}
+
 static tb_expr *parse_select(ps *p, tb_expr *base, int var) {
     tb_var *v = &p->tb->vars[var];
     if (!accept_op(p, "[")) {
         return base;
     }
     tb_expr *idx = parse_expr(p);
-    if (idx == NULL) {
-        return NULL;
-    }
-    tb_expr *sel = new_expr(p, v->depth > 0 ? E_MEM : E_BITSEL);
+    tb_expr *sel = idx != NULL ? new_expr(p, v->depth > 0 ? E_MEM : E_BITSEL) : NULL;
     if (sel == NULL) {
         return NULL;
     }
@@ -299,19 +321,11 @@ static tb_expr *parse_select(ps *p, tb_expr *base, int var) {
     sel->width = v->depth > 0 ? v->width : 1U;
     sel->sgn = v->depth > 0 && v->sgn;
     if (v->depth == 0 && accept_op(p, ":")) {
-        int64_t high = 0;
-        int64_t low = 0;
-        if (!tb_const(p->tb, idx, &high) || !const_int(p, &low) || high < low || low < 0 ||
-            high >= (int64_t)v->width) {
-            return fail(p, "part select (constants within the declared width)"), NULL;
-        }
-        sel->kind = E_PART;
-        sel->aux = (uint32_t)low;
-        sel->width = (uint32_t)(high - low) + 1U;
+        sel = parse_part_select(p, sel, idx, v);
     } else if (v->depth == 0 && (is_op(p, "+") || is_op(p, "-"))) {
         return fail(p, "indexed part select"), NULL;
     }
-    return expect_op(p, "]") ? sel : NULL;
+    return sel != NULL && expect_op(p, "]") ? sel : NULL;
 }
 
 static tb_expr *parse_ident(ps *p) {
@@ -370,8 +384,8 @@ static void copy_op(char *dst, const char *op) {
 }
 
 static tb_expr *parse_unary(ps *p) {
-    static const char *const UNOPS[] = {"+", "-", "~", "!", "&", "|", "^", "~&", "~|", "~^", "^~",
-                                        NULL};
+    static const char *const UNOPS[] = {"+", "-",  "~",  "!",  "&",  "|",
+                                        "^", "~&", "~|", "~^", "^~", NULL};
     for (size_t i = 0; UNOPS[i] != NULL; i++) {
         if (is_op(p, UNOPS[i])) {
             tb_expr *e = new_expr(p, E_UN);
@@ -395,10 +409,10 @@ static int bin_prec(const char *op) {
     static const struct {
         const char *op;
         int prec;
-    } TABLE[] = {{"||", 1}, {"&&", 2}, {"|", 3},  {"^", 4},  {"~^", 4}, {"^~", 4}, {"&", 5},
-                 {"==", 6}, {"!=", 6}, {"===", 6}, {"!==", 6}, {"<", 7},  {"<=", 7},  {">", 7},
-                 {">=", 7}, {"<<", 8}, {">>", 8}, {"<<<", 8}, {">>>", 8}, {"+", 9},  {"-", 9},
-                 {"*", 10}, {"/", 10}, {"%", 10}, {NULL, 0}};
+    } TABLE[] = {{"||", 1}, {"&&", 2}, {"|", 3},   {"^", 4},   {"~^", 4},  {"^~", 4}, {"&", 5},
+                 {"==", 6}, {"!=", 6}, {"===", 6}, {"!==", 6}, {"<", 7},   {"<=", 7}, {">", 7},
+                 {">=", 7}, {"<<", 8}, {">>", 8},  {"<<<", 8}, {">>>", 8}, {"+", 9},  {"-", 9},
+                 {"*", 10}, {"/", 10}, {"%", 10},  {NULL, 0}};
     for (size_t i = 0; TABLE[i].op != NULL; i++) {
         if (strcmp(TABLE[i].op, op) == 0) {
             return TABLE[i].prec;
@@ -523,10 +537,10 @@ static tb_stmt *parse_assign(ps *p, bool semi) {
     return s->rhs != NULL && (!semi || expect_op(p, ";")) ? s : NULL;
 }
 
-static const char *const SYS_TASKS[] = {"$display", "$write", "$strobe", "$monitor", "$monitoroff",
-                                        "$monitoron", "$fdisplay", "$fwrite", "$fclose", "$finish",
-                                        "$stop", "$readmemh", "$readmemb", "$dumpfile", "$dumpvars",
-                                        "$fopen", NULL};
+static const char *const SYS_TASKS[] = {
+    "$display",  "$write",    "$strobe",   "$monitor", "$monitoroff", "$monitoron",
+    "$fdisplay", "$fwrite",   "$fclose",   "$finish",  "$stop",       "$readmemh",
+    "$readmemb", "$dumpfile", "$dumpvars", "$fopen",   NULL};
 
 static tb_expr *parse_sys_task_expr(ps *p) {
     tb_expr *e = new_expr(p, E_SYS);
@@ -542,6 +556,23 @@ static tb_expr *parse_sys_task_expr(ps *p) {
     return parse_args(p, e) ? e : NULL;
 }
 
+/* Rejects a format string with a specifier outside the subset (the format is the first argument,
+ * or the second for the $f* tasks). */
+static bool check_format(ps *p, const tb_expr *call) {
+    bool file_task = strncmp(call->str, "$f", 2) == 0 && strcmp(call->str, "$finish") != 0;
+    uint32_t at = file_task ? 1U : 0U;
+    bool no_fmt = strncmp(call->str, "$read", 5) == 0 || strcmp(call->str, "$dumpfile") == 0 ||
+                  strcmp(call->str, "$fopen") == 0;
+    char bad = 0;
+    if (no_fmt || call->n <= at || call->list[at]->kind != E_STR ||
+        tb_fmt_valid(call->list[at]->str, &bad)) {
+        return true;
+    }
+    char msg[64];
+    (void)snprintf(msg, sizeof msg, "format specifier %%%c", bad);
+    return fail(p, msg);
+}
+
 static tb_stmt *parse_systask(ps *p) {
     tb_stmt *s = new_stmt(p, S_SYS);
     bool known = false;
@@ -552,17 +583,8 @@ static tb_stmt *parse_systask(ps *p) {
         return fail(p, "system task"), NULL;
     }
     s->sys = parse_sys_task_expr(p);
-    if (s->sys == NULL || !expect_op(p, ";")) {
+    if (s->sys == NULL || !expect_op(p, ";") || !check_format(p, s->sys)) {
         return NULL;
-    }
-    uint32_t fmt_at = strncmp(s->sys->str, "$f", 2) == 0 && strcmp(s->sys->str, "$finish") != 0 ? 1U : 0U;
-    char bad = 0;
-    if (s->sys->n > fmt_at && s->sys->list[fmt_at]->kind == E_STR && fmt_at + 1U <= s->sys->n &&
-        strncmp(s->sys->str, "$read", 5) != 0 && strcmp(s->sys->str, "$dumpfile") != 0 &&
-        strcmp(s->sys->str, "$fopen") != 0 && !tb_fmt_valid(s->sys->list[fmt_at]->str, &bad)) {
-        char msg[64];
-        (void)snprintf(msg, sizeof msg, "format specifier %%%c", bad);
-        return fail(p, msg), NULL;
     }
     return s;
 }
@@ -577,7 +599,10 @@ static tb_stmt *parse_block(ps *p) {
     if (accept_op(p, ":") && cur(p)->kind == TK_ID) {
         p->pos++;
     }
-    while (s->list != NULL && !accept_kw(p, "end")) {
+    if (s->list == NULL) {
+        return NULL;
+    }
+    while (!accept_kw(p, "end")) {
         if (cur(p)->kind == TK_EOF) {
             return fail(p, "missing `end`"), NULL;
         }
@@ -596,7 +621,7 @@ static tb_stmt *parse_block(ps *p) {
         }
         s->list[s->n++] = child;
     }
-    return s->list != NULL ? s : NULL;
+    return s;
 }
 
 static tb_stmt *parse_paren_stmt(ps *p, tb_skind kind) {
@@ -751,63 +776,117 @@ static tb_stmt *parse_case(ps *p) {
 
 static bool parse_decl(ps *p);
 
+static tb_stmt *parse_begin(ps *p) {
+    p->pos++;
+    return parse_block(p);
+}
+
+static tb_stmt *parse_while(ps *p) {
+    return parse_paren_stmt(p, S_WHILE);
+}
+
+static tb_stmt *parse_repeat(ps *p) {
+    return parse_paren_stmt(p, S_REPEAT);
+}
+
+static tb_stmt *parse_wait(ps *p) {
+    return parse_paren_stmt(p, S_WAIT);
+}
+
+static tb_stmt *parse_forever(ps *p) {
+    tb_stmt *s = new_stmt(p, S_FOREVER);
+    p->pos++;
+    s->a = parse_stmt(p);
+    return s->a != NULL ? s : NULL;
+}
+
+static tb_stmt *parse_local_decl(ps *p) {
+    return parse_decl(p) ? new_stmt(p, S_NOP) : NULL;
+}
+
+static tb_stmt *parse_rejected(ps *p) {
+    return fail(p, cur(p)->text), NULL;
+}
+
+static tb_stmt *parse_kw_stmt(ps *p) {
+    static const struct {
+        const char *kw;
+        tb_stmt *(*fn)(ps *);
+    } TABLE[] = {{"begin", parse_begin},
+                 {"if", parse_if},
+                 {"case", parse_case},
+                 {"casez", parse_case},
+                 {"casex", parse_case},
+                 {"for", parse_for},
+                 {"while", parse_while},
+                 {"repeat", parse_repeat},
+                 {"wait", parse_wait},
+                 {"forever", parse_forever},
+                 {"reg", parse_local_decl},
+                 {"integer", parse_local_decl},
+                 {"disable", parse_rejected},
+                 {"fork", parse_rejected},
+                 {"task", parse_rejected},
+                 {"deassign", parse_rejected},
+                 {"force", parse_rejected},
+                 {"release", parse_rejected},
+                 {NULL, NULL}};
+    for (size_t i = 0; TABLE[i].kw != NULL; i++) {
+        if (is_kw(p, TABLE[i].kw)) {
+            return TABLE[i].fn(p);
+        }
+    }
+    return parse_assign(p, true);
+}
+
 static tb_stmt *parse_stmt(ps *p) {
     const tb_tok *t = cur(p);
-    if (t->kind == TK_OP && strcmp(t->text, ";") == 0) {
+    if (is_op(p, ";")) {
         tb_stmt *s = new_stmt(p, S_NOP);
         p->pos++;
         return s;
     }
-    if (t->kind == TK_OP && strcmp(t->text, "#") == 0) {
+    if (is_op(p, "#")) {
         return parse_delay(p);
     }
-    if (t->kind == TK_OP && strcmp(t->text, "@") == 0) {
+    if (is_op(p, "@")) {
         return parse_event(p);
     }
     if (t->kind == TK_SYS) {
         return parse_systask(p);
     }
-    if (t->kind != TK_ID) {
-        return parse_assign(p, true);
-    }
-    if (accept_kw(p, "begin")) {
-        return parse_block(p);
-    }
-    if (is_kw(p, "if")) {
-        return parse_if(p);
-    }
-    if (is_kw(p, "case") || is_kw(p, "casez") || is_kw(p, "casex")) {
-        return parse_case(p);
-    }
-    if (is_kw(p, "for")) {
-        return parse_for(p);
-    }
-    if (is_kw(p, "while")) {
-        return parse_paren_stmt(p, S_WHILE);
-    }
-    if (is_kw(p, "repeat")) {
-        return parse_paren_stmt(p, S_REPEAT);
-    }
-    if (is_kw(p, "wait")) {
-        return parse_paren_stmt(p, S_WAIT);
-    }
-    if (is_kw(p, "forever")) {
-        tb_stmt *s = new_stmt(p, S_FOREVER);
-        p->pos++;
-        s->a = parse_stmt(p);
-        return s->a != NULL ? s : NULL;
-    }
-    if (is_kw(p, "reg") || is_kw(p, "integer")) {
-        return parse_decl(p) ? new_stmt(p, S_NOP) : NULL;
-    }
-    if (is_kw(p, "disable") || is_kw(p, "fork") || is_kw(p, "task") || is_kw(p, "deassign") ||
-        is_kw(p, "force") || is_kw(p, "release")) {
-        return fail(p, t->text), NULL;
-    }
-    return parse_assign(p, true);
+    return t->kind == TK_ID ? parse_kw_stmt(p) : parse_assign(p, true);
 }
 
 /* --- module items --- */
+static bool parse_array_range(ps *p, int var) {
+    int64_t high = 0;
+    int64_t low = 0;
+    p->pos++;
+    if (!const_int(p, &low) || !expect_op(p, ":") || !const_int(p, &high) || !expect_op(p, "]") ||
+        low != 0 || high < 0 || high > (1 << 20)) {
+        return fail(p, "array range (use [0:N])");
+    }
+    tb_var *v = &p->tb->vars[var];
+    v->depth = (uint32_t)high + 1U;
+    v->mem = pnew(p, v->depth * sizeof *v->mem);
+    return v->mem != NULL;
+}
+
+static bool add_assign(ps *p, int var, tb_expr *rhs) {
+    tb_assign *grown = pnew(p, (p->tb->nassigns + 1U) * sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    if (p->tb->nassigns > 0) {
+        memcpy(grown, p->tb->assigns, p->tb->nassigns * sizeof *grown);
+    }
+    grown[p->tb->nassigns] = (tb_assign){var, rhs};
+    p->tb->assigns = grown;
+    p->tb->nassigns++;
+    return true;
+}
+
 static bool parse_decl_item(ps *p, const char *kw, uint32_t width, bool sgn) {
     bool is_wire = strcmp(kw, "wire") == 0;
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
@@ -823,17 +902,7 @@ static bool parse_decl_item(ps *p, const char *kw, uint32_t width, bool sgn) {
     }
     p->tb->vars[var].is_param = is_param;
     if (is_op(p, "[")) {
-        int64_t high = 0;
-        int64_t low = 0;
-        p->pos++;
-        if (!const_int(p, &low) || !expect_op(p, ":") || !const_int(p, &high) || !expect_op(p, "]") ||
-            low != 0 || high < 0 || high > (1 << 20)) {
-            return fail(p, "array range (use [0:N])");
-        }
-        tb_var *v = &p->tb->vars[var];
-        v->depth = (uint32_t)high + 1U;
-        v->mem = pnew(p, v->depth * sizeof *v->mem);
-        return v->mem != NULL;
+        return parse_array_range(p, var);
     }
     if (!accept_op(p, "=")) {
         return !is_param || fail(p, "parameter without a value");
@@ -844,18 +913,7 @@ static bool parse_decl_item(ps *p, const char *kw, uint32_t width, bool sgn) {
         return false;
     }
     if (is_wire) {
-        tb_assign *as = pnew(p, sizeof *as);
-        tb_assign *grown = pnew(p, (p->tb->nassigns + 1U) * sizeof *grown);
-        if (as == NULL || grown == NULL) {
-            return false;
-        }
-        if (p->tb->nassigns > 0) {
-            memcpy(grown, p->tb->assigns, p->tb->nassigns * sizeof *grown);
-        }
-        grown[p->tb->nassigns] = (tb_assign){var, init};
-        p->tb->assigns = grown;
-        p->tb->nassigns++;
-        return true;
+        return add_assign(p, var, init);
     }
     if (!tb_const(p->tb, init, &val)) {
         return fail(p, "non-constant initialiser");
@@ -916,24 +974,15 @@ static bool parse_always(ps *p) {
 
 static bool parse_assign_item(ps *p) {
     p->pos++;
-    tb_expr *lhs = parse_primary(p);
+    const tb_expr *lhs = parse_primary(p);
     if (lhs == NULL || lhs->kind != E_VAR || !p->tb->vars[lhs->var].is_wire) {
         return fail(p, "assign to anything but a whole wire");
     }
-    tb_assign *grown = pnew(p, (p->tb->nassigns + 1U) * sizeof *grown);
-    if (!expect_op(p, "=") || grown == NULL) {
+    if (!expect_op(p, "=")) {
         return false;
     }
     tb_expr *rhs = parse_expr(p);
-    if (rhs == NULL || !expect_op(p, ";")) {
-        return false;
-    }
-    if (p->tb->nassigns > 0) {
-        memcpy(grown, p->tb->assigns, p->tb->nassigns * sizeof *grown);
-    }
-    grown[p->tb->nassigns++] = (tb_assign){lhs->var, rhs};
-    p->tb->assigns = grown;
-    return true;
+    return rhs != NULL && expect_op(p, ";") && add_assign(p, lhs->var, rhs);
 }
 
 static bool parse_inst_conns(ps *p, tb_inst *inst) {
@@ -1011,16 +1060,32 @@ static bool parse_item(ps *p) {
     if (is_kw(p, "assign")) {
         return parse_assign_item(p);
     }
-    static const char *const REJECT[] = {"genvar", "generate", "task", "function", "real", "time",
-                                         "string", "event", "defparam", "specify", "input",
-                                         "output", "inout", "and", "or", "nand", "nor", "xor",
-                                         "not", "buf", NULL};
+    static const char *const REJECT[] = {
+        "genvar", "generate", "task",    "function", "real",   "time",  "string",
+        "event",  "defparam", "specify", "input",    "output", "inout", "and",
+        "or",     "nand",     "nor",     "xor",      "not",    "buf",   NULL};
     for (size_t i = 0; REJECT[i] != NULL; i++) {
         if (is_kw(p, REJECT[i])) {
             return fail(p, t->text);
         }
     }
     return parse_instance(p);
+}
+
+static bool parse_header(ps *p, const char *top) {
+    if (!accept_kw(p, "module") || cur(p)->kind != TK_ID) {
+        return fail(p, "file does not start with a module");
+    }
+    (void)snprintf(p->tb->name, sizeof p->tb->name, "%s", cur(p)->text);
+    p->pos++;
+    if (top != NULL && strcmp(top, p->tb->name) != 0) {
+        return fail(p,
+                    "--top names a module that is not the first (one testbench module per file)");
+    }
+    if (accept_op(p, "(") && !expect_op(p, ")")) {
+        return false;
+    }
+    return expect_op(p, ";");
 }
 
 odin3_status tb_parse(const char *file, const char *text, const char *top, tb_module **out) {
@@ -1036,25 +1101,16 @@ odin3_status tb_parse(const char *file, const char *text, const char *top, tb_mo
         return ODIN3_ERR_INVALID_ARG;
     }
     p.t = lexed.toks;
-    if (!accept_kw(&p, "module") || cur(&p)->kind != TK_ID) {
-        fail(&p, "file does not start with a module");
-    } else {
-        (void)snprintf(tb->name, sizeof tb->name, "%s", cur(&p)->text);
-        p.pos++;
-        if (top != NULL && strcmp(top, tb->name) != 0) {
-            fail(&p, "--top names a module that is not the first (one testbench module per file)");
+    if (parse_header(&p, top)) {
+        while (!p.failed && !accept_kw(&p, "endmodule")) {
+            bool bad = cur(&p)->kind == TK_EOF || is_kw(&p, "module");
+            if (bad) {
+                fail(&p, cur(&p)->kind == TK_EOF ? "missing endmodule"
+                                                 : "more than one module in the file");
+            } else {
+                (void)parse_item(&p);
+            }
         }
-        if (accept_op(&p, "(") && !expect_op(&p, ")")) {
-            p.failed = true;
-        }
-        (void)expect_op(&p, ";");
-    }
-    while (!p.failed && !accept_kw(&p, "endmodule")) {
-        if (cur(&p)->kind == TK_EOF || is_kw(&p, "module")) {
-            fail(&p, cur(&p)->kind == TK_EOF ? "missing endmodule" : "more than one module in the file");
-            break;
-        }
-        (void)parse_item(&p);
     }
     if (!p.failed && cur(&p)->kind != TK_EOF) {
         fail(&p, "more than one module in the file");

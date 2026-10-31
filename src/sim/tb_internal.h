@@ -36,8 +36,15 @@ int32_t tb_random(int32_t *seed);
 /* Display formatting (tb_fmt.c): formats args (first may be a format string) into out. */
 void tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs, char *out, size_t cap);
 bool tb_fmt_valid(const char *fmt, char *bad);
-bool tb_readmem(tb_ev *ev, const char *file, tb_var *mem, bool hex, int64_t from, int64_t to,
-                char *err, size_t errcap);
+typedef struct tb_readmem_req {
+    const char *file;
+    tb_var *mem;
+    bool hex;
+    int64_t from, to; /* addresses; to < 0: the last word */
+    char *err;
+    size_t errcap;
+} tb_readmem_req;
+bool tb_readmem(const tb_readmem_req *req);
 
 /* DUT binding (tb_dut.c): one simulated module instance of the testbench. */
 typedef struct tb_dut tb_dut;

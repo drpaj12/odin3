@@ -1,8 +1,8 @@
 /* tb_dut.c — binds a testbench instance to a module of the design simulated by odin3_sim (spec
  * sections 1 and 4). */
+#include "ir/module.h"
 #include "sim/sim.h"
 #include "sim/tb_internal.h"
-#include "ir/module.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -18,9 +18,10 @@ struct tb_dut {
 static bool find_module(odin3_design *design, const char *name, odin3_module_id *out) {
     for (uint32_t id = 1; id < odin3_design_module_end(design); id++) {
         odin3_module_id mid = {id};
-        odin3_module *mod = odin3_module_get(design, mid);
+        const odin3_module *mod = odin3_module_get(design, mid);
         if (mod != NULL &&
-            strcmp(odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(mod)), name) == 0) {
+            strcmp(odin3_strtab_get(odin3_design_strtab(design), odin3_module_name(mod)), name) ==
+                0) {
             *out = mid;
             return true;
         }
@@ -83,8 +84,9 @@ odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_
     *out = NULL;
     odin3_module_id id = {0};
     if (!find_module(design, inst->module, &id)) {
-        odin3_log(ODIN3_LOG_ERROR, "testbench:%u: no module `%s` in the design (read the DUT first)",
-                  inst->line, inst->module);
+        odin3_log(ODIN3_LOG_ERROR,
+                  "testbench:%u: no module `%s` in the design (read the DUT first)", inst->line,
+                  inst->module);
         return ODIN3_ERR_INVALID_ARG;
     }
     tb_dut *dut = calloc(1, sizeof *dut);
