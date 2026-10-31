@@ -2256,7 +2256,8 @@ if(BUILD_TESTING)
     add_executable(test_edit_gaps tests/unit/test_edit_gaps.c)
     target_link_libraries(test_edit_gaps PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_edit_gaps PRIVATE
-                               ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit_gaps")
+                               ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit_gaps"
+                               ODIN3_EDIT_GOLDEN="${PROJECT_SOURCE_DIR}/tests/golden/edit_tags")
     add_test(NAME test_edit_gaps COMMAND test_edit_gaps)
     set_tests_properties(test_edit_gaps PROPERTIES LABELS unit)
     add_executable(test_sim_abi tests/unit/test_sim_abi.c)

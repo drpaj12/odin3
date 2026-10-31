@@ -231,6 +231,50 @@ static void test_json_odin3_round_trip_restores_cell_and_net_events(void) {
     odin3_design_destroy(again);
 }
 
+/*
+ * The exports of a fixed edit sequence against the committed files in tests/golden/edit_tags
+ * (ODIN3_EDIT_GOLDEN). ODIN3_UPDATE_GOLDEN=1 rewrites them.
+ */
+static void check_golden(const char *produced, const char *name) {
+    char golden[512];
+    (void)snprintf(golden, sizeof golden, "%s/%s", ODIN3_EDIT_GOLDEN, name);
+    char *got = slurp(produced);
+    if (getenv("ODIN3_UPDATE_GOLDEN") != NULL) {
+        FILE *file = fopen(golden, "wb");
+        TEST_ASSERT_NOT_NULL(file);
+        (void)fputs(got, file);
+        (void)fclose(file);
+    }
+    char *want = slurp(golden);
+    TEST_ASSERT_EQUAL_STRING(want, got);
+    free(want);
+    free(got);
+}
+
+static void test_golden_exports_of_a_fixed_edit_sequence(void) {
+    odin3_ref gate = add_sop("trojan_and", "trojan:t1");
+    odin3_edit_new net_what = {sizeof net_what, 0, .name = "trojan_q", .tag = "trojan:t1"};
+    odin3_ref net;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_add_net(design, top, &net_what, &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(gate, 0), net_named("a")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(gate, 1), net_named("b")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(gate, 2), net));
+    uint32_t drv_pin = 0;
+    uint32_t drv_node = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_get_driver(design, net_named("y"), &drv_pin));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_pin_get_node(design, (odin3_ref){top, drv_pin}, &drv_node));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_edit_rewire_tagged(design, pin_of((odin3_ref){top, drv_node}, 1), net, "trojan:t1"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "write_blif",
+                                                          "--edit-tags " ODIN3_TEST_TMP ".g.blif"));
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_design_run_pass(design, "write_json", "--odin3 " ODIN3_TEST_TMP ".g.json"));
+    check_golden(ODIN3_TEST_TMP ".g.blif", "edit_tags.blif");
+    check_golden(ODIN3_TEST_TMP ".g.json", "edit_tags_odin3.json");
+}
+
 static void test_edit_tags_is_refused_for_the_vtr_dialect(void) {
     TEST_ASSERT_EQUAL_INT(
         ODIN3_ERR_INVALID_ARG,
@@ -334,6 +378,7 @@ int main(void) {
     RUN_TEST(test_get_tag_after_a_round_trip_falls_back_to_the_events);
     RUN_TEST(test_default_blif_and_json_do_not_change_with_events);
     RUN_TEST(test_json_odin3_round_trip_restores_cell_and_net_events);
+    RUN_TEST(test_golden_exports_of_a_fixed_edit_sequence);
     RUN_TEST(test_edit_tags_is_refused_for_the_vtr_dialect);
     RUN_TEST(test_add_node_takes_initial_params_without_a_twin);
     RUN_TEST(test_add_node_bad_params_change_nothing);
