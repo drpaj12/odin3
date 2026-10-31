@@ -13,8 +13,8 @@ enum { PPM = 1000000 };
 
 /* Where a net is read from: a signal of the table and a bit of it. */
 typedef struct sp_ref {
-    uint32_t sig;  /* signal ID, 0 none */
-    uint32_t off;  /* offset of the signal's bits in the read buffer */
+    uint32_t sig; /* signal ID, 0 none */
+    uint32_t off; /* offset of the signal's bits in the read buffer */
     uint32_t bit;
 } sp_ref;
 

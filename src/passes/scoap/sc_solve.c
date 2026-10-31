@@ -13,6 +13,10 @@ typedef struct sc_dom {
     int frame;           /* 0 for CC/CO, 1 for SC/SO: a flip-flop adds this */
 } sc_dom;
 
+static int bit_of(unsigned word, uint32_t pos) {
+    return (int)((word >> pos) & 1U);
+}
+
 static int32_t clamp(int64_t x) {
     return x >= SCOAP_INF ? SCOAP_INF : (int32_t)x;
 }
@@ -41,15 +45,15 @@ static const uint32_t *cell_inputs(const sc_model *md, const sc_cell *cell) {
 static int64_t cube_cost(const sc_dom *dom, const uint32_t *in, sc_cube cube) {
     int64_t sum = 0;
     for (uint32_t j = 0; j < SC_MAX_EXACT; j++) {
-        if ((cube.care >> j & 1U) != 0) {
-            sum += net_cost(dom, in[j], (cube.val >> j) & 1U);
+        if (bit_of(cube.care, j) != 0) {
+            sum += net_cost(dom, in[j], bit_of(cube.val, j));
         }
     }
     return sum;
 }
 
 /* CCv(y) = bonus + min over the prime implicants of {f = v} of the cube cost. */
-static bool fwd_func(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool fwd_func(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     const uint32_t *in = cell_inputs(md, cell);
     bool changed = false;
     for (int val = 0; val < 2; val++) {
@@ -66,7 +70,7 @@ static bool fwd_func(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
 }
 
 /* CO(x_i) = CO(y) + bonus + min over the sensitising assignments of the other inputs' costs. */
-static bool bwd_func(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool bwd_func(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     const uint32_t *in = cell_inputs(md, cell);
     int64_t base = dom->obs[cell->out];
     bool changed = false;
@@ -80,7 +84,7 @@ static bool bwd_func(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
         for (uint32_t k = 0; k < ref[1]; k++) {
             int64_t cost = 0;
             for (uint32_t j = 0; j < cell->n_in; j++) {
-                cost += j == i ? 0 : net_cost(dom, in[j], (mints[k] >> j) & 1U);
+                cost += j == i ? 0 : net_cost(dom, in[j], bit_of(mints[k], j));
             }
             best = cost < best ? cost : best;
         }
@@ -118,7 +122,7 @@ static int64_t row_min(const sc_model *md, const sc_dom *dom, const sc_cell *cel
     return best;
 }
 
-static bool fwd_wide(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool fwd_wide(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     bool changed = false;
     for (int val = 0; val < 2; val++) {
         int64_t best = cheap_sum(dom, cell_inputs(md, cell), cell->n_in, UINT32_MAX);
@@ -133,7 +137,7 @@ static bool fwd_wide(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     return changed;
 }
 
-static bool bwd_wide(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool bwd_wide(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     const uint32_t *in = cell_inputs(md, cell);
     int64_t base = dom->obs[cell->out];
     bool changed = false;
@@ -154,7 +158,7 @@ static int64_t clock_cost(const sc_dom *dom, uint32_t clk) {
     return clk == 0 ? 0 : (int64_t)dom->val[0][clk] + dom->val[1][clk];
 }
 
-static bool fwd_ff(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool fwd_ff(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     const uint32_t *in = cell_inputs(md, cell);
     int64_t clk = clock_cost(dom, in[1]);
     bool changed = false;
@@ -167,7 +171,7 @@ static bool fwd_ff(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     return changed;
 }
 
-static bool bwd_ff(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
+static bool bwd_ff(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     const uint32_t *in = cell_inputs(md, cell);
     int64_t base = dom->obs[cell->out];
     int64_t clk = clock_cost(dom, in[1]);
@@ -192,7 +196,7 @@ static bool bwd_ff(sc_model *md, const sc_dom *dom, const sc_cell *cell) {
 
 /* --- sweeps ---------------------------------------------------------------------------------- */
 
-static bool cell_step(sc_model *md, const sc_dom *dom, const sc_cell *cell, bool forward) {
+static bool cell_step(const sc_model *md, const sc_dom *dom, const sc_cell *cell, bool forward) {
     if (cell->out == 0) {
         return false;
     }
@@ -208,7 +212,7 @@ static bool cell_step(sc_model *md, const sc_dom *dom, const sc_cell *cell, bool
     }
 }
 
-static bool sweep(sc_model *md, const sc_dom *dom, bool forward) {
+static bool sweep(const sc_model *md, const sc_dom *dom, bool forward) {
     bool changed = false;
     for (size_t k = 0; k < md->n_cells; k++) {
         const sc_cell *cell = &md->cells[forward ? k : md->n_cells - 1 - k];
@@ -232,8 +236,8 @@ static void run_phase(sc_model *md, const sc_dom *dom, bool forward) {
 static uint64_t count_unreachable(const sc_model *md) {
     uint64_t count = 0;
     for (uint32_t id = 1; id < md->n_nets; id++) {
-        bool bad = md->cc[0][id] >= SCOAP_INF || md->cc[1][id] >= SCOAP_INF ||
-                   md->co[id] >= SCOAP_INF;
+        bool bad =
+            md->cc[0][id] >= SCOAP_INF || md->cc[1][id] >= SCOAP_INF || md->co[id] >= SCOAP_INF;
         bad = bad || (md->seq && (md->sc[0][id] >= SCOAP_INF || md->sc[1][id] >= SCOAP_INF ||
                                   md->so[id] >= SCOAP_INF));
         count += md->live[id] != 0 && bad ? 1U : 0U;

@@ -18,7 +18,8 @@
 /* SCOAP_INF: unreachable. SC_MAX_EXACT: widest function treated exactly (spec section 3). */
 enum { SCOAP_INF = 1000000000, SC_MAX_EXACT = 8, SC_MAX_TABLE = 1 << SC_MAX_EXACT };
 
-/* A cube over at most SC_MAX_EXACT inputs: bit j of care set = input j specified, val = its value. */
+/* A cube over at most SC_MAX_EXACT inputs: bit j of care set = input j specified, val = its value.
+ */
 typedef struct sc_cube {
     uint8_t care;
     uint8_t val;
@@ -33,7 +34,8 @@ typedef enum sc_kind {
     SC_NKINDS
 } sc_kind;
 
-/* One cell of the model. Input nets live in the model's pool at in_off (n_in of them, 0 = no net). */
+/* One cell of the model. Input nets live in the model's pool at in_off (n_in of them, 0 = no net).
+ */
 typedef struct sc_cell {
     uint32_t node;
     uint32_t out; /* output net, 0 none */
@@ -41,9 +43,9 @@ typedef struct sc_cell {
     uint32_t n_in;
     uint32_t prime_off[2]; /* into the prime pool, per value */
     uint32_t prime_n[2];
-    uint32_t sens_off; /* into the sens table: n_in {offset, count} pairs */
-    uint8_t kind;      /* sc_kind */
-    int8_t cover_val;  /* SC_WIDE $sop: the value its rows give (0, 1), -1 none */
+    uint32_t sens_off;  /* into the sens table: n_in {offset, count} pairs */
+    uint8_t kind;       /* sc_kind */
+    int8_t cover_val;   /* SC_WIDE $sop: the value its rows give (0, 1), -1 none */
     uint32_t cover_off; /* SC_WIDE $sop: byte offset into the cover pool of its rows */
     uint32_t cover_len;
 } sc_cell;
@@ -84,11 +86,13 @@ typedef struct sc_table {
 /* Appends the prime implicants of {f = v} and the sensitising minterms of every input to cell. */
 odin3_status sc_fn_compile(sc_model *md, sc_cell *cell, const sc_table *tab);
 
-/* --- sc_model.c: building ---------------------------------------------------------------------- */
+/* --- sc_model.c: building ----------------------------------------------------------------------
+ */
 odin3_status sc_model_build(sc_model *md, odin3_module *mod, bool seq);
 void sc_model_free(sc_model *md);
 
-/* --- sc_solve.c: the fixed point --------------------------------------------------------------- */
+/* --- sc_solve.c: the fixed point ---------------------------------------------------------------
+ */
 void sc_solve(sc_model *md);
 
 #endif

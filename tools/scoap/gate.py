@@ -70,7 +70,11 @@ def check_one(odin3: str, lib: str, blif: Path, seq: bool, tmp: Path) -> tuple[b
         got = run_pass(odin3, lib, blif, seq, tmp / f"{blif.stem}.{'seq' if seq else 'comb'}.json")
     except RuntimeError as err:
         return False, f"pass failed: {err}"
-    problems = compare(ref_mod.reference(blif, seq), got)
+    try:
+        expect = ref_mod.reference(blif, seq)
+    except ref_mod.Unsupported as err:
+        return True, f"skipped: {err}"
+    problems = compare(expect, got)
     return not problems, "; ".join(problems[:3])
 
 

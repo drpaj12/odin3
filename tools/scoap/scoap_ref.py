@@ -15,7 +15,7 @@ import argparse
 import itertools
 import json
 import sys
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,10 @@ MAX_EXACT = 8
 
 Net = str
 Values = dict[Net, list[int]]
+
+
+class Unsupported(Exception):
+    """A .subckt of a model the BLIF does not define: directions unknown, design skipped."""
 
 
 class Model:
@@ -94,7 +98,7 @@ def sop_value(rows: list[tuple[str, str]], bits: tuple[int, ...]) -> int:
     has_on = False
     off_hit = False
     for pattern, out in rows:
-        hit = all(c == "-" or int(c) == b for c, b in zip(pattern, bits))
+        hit = all(c == "-" or int(c) == b for c, b in zip(pattern, bits, strict=True))
         if out == "1":
             if hit:
                 return 1
@@ -107,31 +111,33 @@ def sop_value(rows: list[tuple[str, str]], bits: tuple[int, ...]) -> int:
 Cube = tuple[int | None, ...]
 
 
-@lru_cache(maxsize=None)
+@cache
 def primes(table: tuple[int, ...], n: int, val: int) -> tuple[Cube, ...]:
     """Prime implicants of {f = val}; table[m] = f(m), bit j of m = input j."""
 
-    @lru_cache(maxsize=None)
+    @cache
     def implicant(cube: Cube) -> bool:
         for j, lit in enumerate(cube):
             if lit is None:
                 return implicant(cube[:j] + (0,) + cube[j + 1 :]) and implicant(
                     cube[:j] + (1,) + cube[j + 1 :]
                 )
-        minterm = sum(int(lit) << j for j, lit in enumerate(cube))
+        minterm = sum((lit or 0) << j for j, lit in enumerate(cube))
         return table[minterm] == val
 
     out = []
     for cube in itertools.product((0, 1, None), repeat=n):
         if not implicant(cube):
             continue
-        widened = (cube[:j] + (None,) + cube[j + 1 :] for j, lit in enumerate(cube) if lit is not None)
+        widened = (
+            cube[:j] + (None,) + cube[j + 1 :] for j, lit in enumerate(cube) if lit is not None
+        )
         if not any(implicant(w) for w in widened):
             out.append(cube)
     return tuple(out)
 
 
-@lru_cache(maxsize=None)
+@cache
 def sensitising(table: tuple[int, ...], n: int, i: int) -> tuple[tuple[int, ...], ...]:
     """Assignments (full minterms with bit i = 0) of the other inputs on which f depends on i."""
     return tuple(
@@ -202,6 +208,8 @@ class Solver:
         for din, qout, ctrl in model.latches:
             self.add_latch(din, qout, ctrl)
         for mname, pins in model.subckts:
+            if mname not in models:
+                raise Unsupported(f"model {mname} not defined in the file")
             self.add_subckt(models[mname], pins)
 
     def add_names(self, ins: list[Net], out: Net, rows: list[tuple[str, str]]) -> None:
@@ -263,7 +271,11 @@ class Solver:
         for cell in self.cells:
             for v in (0, 1):
                 best = self.fwd_cost(cell, dom, v)
-                val = INF if best >= INF else best + (bonus if cell.kind != "ff" else (0 if dom == "c" else 1))
+                val = (
+                    INF
+                    if best >= INF
+                    else best + (bonus if cell.kind != "ff" else (0 if dom == "c" else 1))
+                )
                 if cell.kind == "ff":
                     val = INF if best >= INF else val
                 changed |= self.lower(tab[cell.out], v, val, cell.out)
@@ -276,7 +288,11 @@ class Solver:
         if cell.kind == "func":
             best = INF
             for cube in primes(cell.table, n, v):
-                total = sum(self.cost(dom, cell.ins[j], lit) for j, lit in enumerate(cube) if lit is not None)
+                total = sum(
+                    self.cost(dom, cell.ins[j], lit)
+                    for j, lit in enumerate(cube)
+                    if lit is not None
+                )
                 best = min(best, total)
             return best
         if cell.cover_val == v:
@@ -284,7 +300,9 @@ class Solver:
             for pattern, out in cell.rows:
                 if out == str(v):
                     total = sum(
-                        self.cost(dom, cell.ins[j], int(c)) for j, c in enumerate(pattern) if c != "-"
+                        self.cost(dom, cell.ins[j], int(c))
+                        for j, c in enumerate(pattern)
+                        if c != "-"
                     )
                     best = min(best, total)
             return best
@@ -318,7 +336,9 @@ class Solver:
                     via1 = self.cost(dom, cell.ins[0], 1) + tab[cell.out][0]
                     flip = min(via0, via1)
                     if flip < INF:
-                        changed |= self.lower(obs, cell.ins[1], base + clk + frame + flip, cell.ins[1])
+                        changed |= self.lower(
+                            obs, cell.ins[1], base + clk + frame + flip, cell.ins[1]
+                        )
                 continue
             for i, net in enumerate(cell.ins):
                 best = self.bwd_cost(cell, dom, i)
@@ -337,7 +357,9 @@ class Solver:
         if cell.cover_val == -1:
             return INF
         return sum(
-            min(self.cost(dom, x, 0), self.cost(dom, x, 1)) for j, x in enumerate(cell.ins) if j != i
+            min(self.cost(dom, x, 0), self.cost(dom, x, 1))
+            for j, x in enumerate(cell.ins)
+            if j != i
         )
 
     def run_phase(self, dom: str, fwd: bool) -> None:

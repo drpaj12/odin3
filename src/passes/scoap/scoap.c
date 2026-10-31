@@ -148,7 +148,8 @@ static const char *net_text(const sc_model *md, uint32_t id, char *fallback, siz
     return fallback;
 }
 
-static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id, int32_t ppm) {
+static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id,
+                            const int32_t *ppm) {
     char fallback[NUM_BUF];
     odin3_status st = odin3_strbuf_appendf(out, "{\"id\": %u, \"name\": ", (unsigned)id);
     st = st == ODIN3_OK ? gl_put_escaped(out, net_text(md, id, fallback, sizeof fallback)) : st;
@@ -283,9 +284,9 @@ static odin3_status write_attrs(const sc_model *md) {
         {"odin3:scoap_inf", SCOAP_INF},
         {"odin3:scoap_sequential", md->seq ? 1 : 0},
         {"odin3:scoap_nets", (int64_t)live_nets(md)},
-        {"odin3:scoap_cells", (int64_t)(sts->cells[SC_FUNC] + sts->cells[SC_WIDE] +
-                                        sts->cells[SC_FF] + sts->cells[SC_SCAN] +
-                                        sts->cells[SC_OPAQUE])},
+        {"odin3:scoap_cells",
+         (int64_t)(sts->cells[SC_FUNC] + sts->cells[SC_WIDE] + sts->cells[SC_FF] +
+                   sts->cells[SC_SCAN] + sts->cells[SC_OPAQUE])},
         {"odin3:scoap_scan_cells", (int64_t)sts->cells[SC_SCAN]},
         {"odin3:scoap_opaque_cells", (int64_t)sts->cells[SC_OPAQUE]},
         {"odin3:scoap_wide_cells", (int64_t)sts->cells[SC_WIDE]},

@@ -282,8 +282,7 @@ static bool is_function_type(const odin3_celltype_def *def) {
             (def->flags & (ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL)) == 0);
 }
 
-static odin3_status add_function(sc_model *md, odin3_node_id node, const sc_pins *pp,
-                                 bool *done) {
+static odin3_status add_function(sc_model *md, odin3_node_id node, const sc_pins *pp, bool *done) {
     sc_cell cell = {.node = node.v, .out = pp->out, .kind = SC_FUNC, .cover_val = -2};
     sc_table tab;
     *done = true;
@@ -292,8 +291,8 @@ static odin3_status add_function(sc_model *md, odin3_node_id node, const sc_pins
         st = push_inputs(md, &cell, pp->in, pp->n_in);
         st = st == ODIN3_OK ? sc_fn_compile(md, &cell, &tab) : st;
     } else {
-        const odin3_celltype_def *def = odin3_celltype_get(
-            odin3_module_design(md->mod), odin3_node_type(md->mod, node));
+        const odin3_celltype_def *def =
+            odin3_celltype_get(odin3_module_design(md->mod), odin3_node_type(md->mod, node));
         bool wide = pp->n_in > SC_MAX_EXACT && pp->n_in <= SC_MAX_TABLE &&
                     (type_is(def, "$sop") || type_is(def, "$lut"));
         *done = wide;

@@ -62,21 +62,32 @@ class ScoapTest(unittest.TestCase):
     def test_and_chain(self) -> None:
         text = blif(".names a b y\n11 1\n.names y c z\n11 1\n", "a b c", "z")
         got = self.run_pass(text)
-        self.check(got, {
-            "a": {"cc0": 1, "cc1": 1, "co": 4}, "c": {"co": 4},
-            "y": {"cc0": 2, "cc1": 3, "co": 2}, "z": {"cc0": 2, "cc1": 5, "co": 0},
-        })
+        self.check(
+            got,
+            {
+                "a": {"cc0": 1, "cc1": 1, "co": 4},
+                "c": {"co": 4},
+                "y": {"cc0": 2, "cc1": 3, "co": 2},
+                "z": {"cc0": 2, "cc1": 5, "co": 0},
+            },
+        )
 
     def test_or_not_xor(self) -> None:
         text = blif(
             ".names a b o\n1- 1\n-1 1\n.names a n\n0 1\n.names a b x\n10 1\n01 1\n",
-            "a b", "o n x",
+            "a b",
+            "o n x",
         )
         got = self.run_pass(text)
-        self.check(got, {
-            "o": {"cc0": 3, "cc1": 2}, "n": {"cc0": 2, "cc1": 2},
-            "x": {"cc0": 3, "cc1": 3}, "a": {"co": 1},  # the NOT is cheapest
-        })
+        self.check(
+            got,
+            {
+                "o": {"cc0": 3, "cc1": 2},
+                "n": {"cc0": 2, "cc1": 2},
+                "x": {"cc0": 3, "cc1": 3},
+                "a": {"co": 1},  # the NOT is cheapest
+            },
+        )
 
     def test_observability_values(self) -> None:
         # co(a) through OR (b to 0: 1, +1) = 2; through XOR (min(cc0 b, cc1 b) = 1, +1) = 2
@@ -96,25 +107,28 @@ class ScoapTest(unittest.TestCase):
         self.check(got, {"y": {"cc0": 3, "cc1": 2}})
 
     def test_constants_and_unreachable(self) -> None:
-        text = blif(".names one\n1\n.names a one y\n11 1\n.names zero\n.names zero a q\n11 1\n",
-                    "a", "y q")
+        text = blif(
+            ".names one\n1\n.names a one y\n11 1\n.names zero\n.names zero a q\n11 1\n", "a", "y q"
+        )
         got = self.run_pass(text)
-        self.check(got, {"one": {"cc0": INF, "cc1": 1}, "y": {"cc0": 2, "cc1": 3},
-                         "q": {"cc1": INF}})
+        self.check(
+            got, {"one": {"cc0": INF, "cc1": 1}, "y": {"cc0": 2, "cc1": 3}, "q": {"cc1": INF}}
+        )
         self.assertGreaterEqual(self.log.count("unreachable"), 1)
 
     def test_one_flip_flop_sequential(self) -> None:
         text = blif(".latch d q re clk 0\n", "d clk", "q")
         got = self.run_pass(text, "--sequential")
-        self.check(got, {"q": {"cc0": 3, "cc1": 3, "sc0": 1, "sc1": 1},
-                         "d": {"co": 2, "so": 1}})
+        self.check(got, {"q": {"cc0": 3, "cc1": 3, "sc0": 1, "sc1": 1}, "d": {"co": 2, "so": 1}})
         comb = self.run_pass(text)  # scan view: q is a pseudo input, d a pseudo output
         self.check(comb, {"q": {"cc0": 1, "cc1": 1}, "d": {"co": 0}})
         self.assertNotIn("sc0", comb["q"])
 
     def test_two_bit_counter(self) -> None:
-        body = (".names q0 r d0\n00 1\n.names q1 q0 r d1\n100 1\n010 1\n"
-                ".latch d0 q0 re clk 0\n.latch d1 q1 re clk 0\n")
+        body = (
+            ".names q0 r d0\n00 1\n.names q1 q0 r d1\n100 1\n010 1\n"
+            ".latch d0 q0 re clk 0\n.latch d1 q1 re clk 0\n"
+        )
         got = self.run_pass(blif(body, "r clk", "q0 q1"), "--sequential")
         self.check(got, {"q0": {"cc0": 4, "cc1": 8, "sc0": 1, "sc1": 2}})
         self.assertEqual(self.raw["modules"][0]["converged"], 1)
@@ -128,8 +142,9 @@ class ScoapTest(unittest.TestCase):
         text = blif(".names a b y\n11 1\n.names y c z\n11 1\n", "a b c", "z")
         self.run_pass(text, "--top 2")
         top = self.raw["modules"][0]["top"]
-        self.assertEqual(top["hardest_to_control"][0], {"id": top["hardest_to_control"][0]["id"],
-                                                          "value": 5})
+        self.assertEqual(
+            top["hardest_to_control"][0], {"id": top["hardest_to_control"][0]["id"], "value": 5}
+        )
         self.assertEqual(len(top["hardest_to_observe"]), 2)
 
     def test_reference_equals_pass_on_small_circuits(self) -> None:
@@ -137,7 +152,8 @@ class ScoapTest(unittest.TestCase):
         text = blif(
             ".names a b c y\n11- 1\n--1 1\n.names y a w\n10 1\n01 1\n.names w b q\n00 1\n"
             ".latch q r re clk 0\n.names r a z\n1- 1\n-0 1\n",
-            "a b c clk", "z w",
+            "a b c clk",
+            "z w",
         )
         src = self.dir / "r.blif"
         src.write_text(text)
@@ -146,14 +162,15 @@ class ScoapTest(unittest.TestCase):
             self.assertTrue(ok, note)
 
     def test_signal_probability_against_exact_enumeration(self) -> None:
-        text = blif(".names a b y\n11 1\n.names y c z\n1- 1\n-1 1\n.names a z w\n10 1\n01 1\n",
-                    "a b c", "w")
+        text = blif(
+            ".names a b y\n11 1\n.names y c z\n1- 1\n-1 1\n.names a z w\n10 1\n01 1\n", "a b c", "w"
+        )
         got = self.run_pass(text, "--sigprob 20000 --seed 7 --threshold 0.3")
         ref = load("scoap_ref")
         model = ref.parse_blif(self.dir / "t.blif")["t"]
         exact: dict[str, int] = {}
         for bits in itertools.product((0, 1), repeat=3):
-            env = dict(zip(model.inputs, bits))
+            env = dict(zip(model.inputs, bits, strict=True))
             for ins, out, rows in model.names:
                 env[out] = ref.sop_value(rows, tuple(env[x] for x in ins))
             for net, val in env.items():
