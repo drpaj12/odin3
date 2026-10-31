@@ -934,6 +934,69 @@ static odin3_status dot_build(dot_ctx *dc, const odin3_dot_opts *opts, odin3_str
     return st == ODIN3_OK ? dot_emit(dc, buf) : st;
 }
 
+odin3_status odin3_dot_focus_parse(odin3_bytes value, odin3_strbuf *text,
+                                   odin3_dot_focus_kind *kind) {
+    const char *src = (const char *)value.ptr;
+    size_t len = value.len;
+    bool cone = len > strlen("cone()") && strncmp(src, "cone(", strlen("cone(")) == 0 &&
+                src[len - 1] == ')';
+    if (cone) {
+        src += strlen("cone(");
+        len -= strlen("cone()");
+    }
+    odin3_status st = odin3_strbuf_append(text, (odin3_bytes){src, len});
+    const char *colon = st == ODIN3_OK ? strrchr(text->data, ':') : NULL;
+    bool line = !cone && colon != NULL && colon[1] != '\0' &&
+                strspn(colon + 1, "0123456789") == strlen(colon + 1);
+    *kind = ODIN3_DOT_FOCUS_PATH;
+    if (cone) {
+        *kind = ODIN3_DOT_FOCUS_CONE;
+    } else if (line) {
+        *kind = ODIN3_DOT_FOCUS_LOC;
+    }
+    return st;
+}
+
+void odin3_dot_selection_free(odin3_dot_selection *sel) {
+    for (uint32_t i = 0; sel->mask != NULL && i < sel->mod_end; i++) {
+        odin3_util_free(sel->mask[i]);
+    }
+    odin3_util_free((void *)sel->mask);
+    sel->mask = NULL;
+    sel->mod_end = 0;
+}
+
+odin3_status odin3_dot_select(const odin3_design *design, odin3_dot_focus_kind kind,
+                              const char *focus, odin3_dot_selection *out) {
+    out->mask = NULL;
+    out->mod_end = 0;
+    odin3_dot_opts opts = {kind, focus, 0, NULL, false};
+    dot_ctx dc = {
+        .design = (odin3_design *)design, .tab = odin3_design_strtab(design), .opts = &opts};
+    odin3_status st = dot_masks_alloc(&dc);
+    st = st == ODIN3_OK && (focus == NULL || kind == ODIN3_DOT_FOCUS_NONE) ? ODIN3_ERR_INVALID_ARG
+                                                                           : st;
+    if (st == ODIN3_OK) {
+        st = dot_apply_focus(&dc, &opts);
+    }
+    if (st != ODIN3_OK) {
+        dot_masks_free(&dc);
+        return st;
+    }
+    out->mod_end = dc.mod_end;
+    out->mask = (uint8_t **)odin3_util_calloc(sizeof(uint8_t *) * dc.mod_end);
+    if (out->mask == NULL) {
+        dot_masks_free(&dc);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 1; i < dc.mod_end; i++) {
+        out->mask[i] = dc.mask[i].bytes;
+        dc.mask[i].bytes = NULL;
+    }
+    dot_masks_free(&dc);
+    return ODIN3_OK;
+}
+
 odin3_status odin3_dot_write(const odin3_design *design, const char *path,
                              const odin3_dot_opts *opts) {
     static const odin3_dot_opts k_defaults = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false};

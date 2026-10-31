@@ -7,9 +7,11 @@
 
 #include "ir/design.h"
 #include "odin3/odin3.h"
+#include "util/str.h"
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* The node budget used when odin3_dot_opts.max_nodes is 0. */
 enum { ODIN3_DOT_DEFAULT_MAX_NODES = 2000 };
@@ -47,5 +49,30 @@ typedef struct odin3_dot_opts {
  */
 odin3_status odin3_dot_write(const odin3_design *design, const char *path,
                              const odin3_dot_opts *opts);
+
+/*
+ * Splits a focus word the way write_dot --focus reads it: "cone(<net>)" (the text inside the
+ * parentheses, kind CONE), "<file>:<digits>" (kind LOC) or else a hierarchical path (kind PATH).
+ * The focus text (without cone( )) is appended to text. ODIN3_ERR_NO_MEMORY on failure.
+ */
+odin3_status odin3_dot_focus_parse(odin3_bytes value, odin3_strbuf *text,
+                                   odin3_dot_focus_kind *kind);
+
+/* The nodes a focus selects: mask[module ID] is NULL for module ID 0 and otherwise one byte per
+ * node ID up to odin3_module_node_end of that module (1 = selected, live nodes only). */
+typedef struct odin3_dot_selection {
+    uint8_t **mask;
+    uint32_t mod_end;
+} odin3_dot_selection;
+
+/*
+ * Resolves a focus (kind from odin3_dot_focus_parse, never NONE) with the code write_dot uses and
+ * returns the per-module node masks in out (free with odin3_dot_selection_free). Errors as
+ * odin3_dot_write: ODIN3_ERR_INVALID_ARG (logged) for an unresolvable focus. A focus that selects
+ * nothing returns empty masks. The design is not changed.
+ */
+odin3_status odin3_dot_select(const odin3_design *design, odin3_dot_focus_kind kind,
+                              const char *focus, odin3_dot_selection *out);
+void odin3_dot_selection_free(odin3_dot_selection *sel);
 
 #endif

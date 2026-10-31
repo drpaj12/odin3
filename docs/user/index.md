@@ -27,6 +27,7 @@ inputs
 outputs
 provenance
 analysis
+graphlets
 timing-attribution
 python-api
 re-workflow

@@ -1,0 +1,14 @@
+{
+  "schema": "odin3-graphlet-calibration",
+  "version": 1,
+  "source": "synthetic counts for unit tests only; not a calibration of any real data",
+  "modes": {
+    "undirected-5": {
+      "prior": {"same": 30, "different": 70},
+      "metrics": {
+        "gdd_agreement": {"edges": [0, 500, 800, 900, 1000], "same": [1, 4, 10, 50], "different": [60, 30, 8, 2]},
+        "cosine_log": {"edges": [0, 500, 800, 900, 1000], "same": [1, 5, 12, 40], "different": [50, 30, 12, 6]}
+      }
+    }
+  }
+}

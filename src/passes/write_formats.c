@@ -89,24 +89,7 @@ static odin3_status parse_max_nodes(odin3_bytes value, write_args *out) {
  * "file:line" (digits after the last ':'), or else a hierarchical path ("module/inst/...").
  */
 static odin3_status parse_focus(odin3_bytes value, write_args *out) {
-    const char *text = (const char *)value.ptr;
-    size_t len = value.len;
-    bool cone = len > strlen("cone()") && strncmp(text, "cone(", strlen("cone(")) == 0 &&
-                text[len - 1] == ')';
-    if (cone) {
-        text += strlen("cone(");
-        len -= strlen("cone()");
-    }
-    odin3_status st = odin3_strbuf_append(&out->focus, (odin3_bytes){text, len});
-    const char *colon = strrchr(out->focus.data, ':');
-    bool line = !cone && colon != NULL && colon[1] != '\0' &&
-                strspn(colon + 1, "0123456789") == strlen(colon + 1);
-    out->dot.focus_kind = ODIN3_DOT_FOCUS_PATH;
-    if (cone) {
-        out->dot.focus_kind = ODIN3_DOT_FOCUS_CONE;
-    } else if (line) {
-        out->dot.focus_kind = ODIN3_DOT_FOCUS_LOC;
-    }
+    odin3_status st = odin3_dot_focus_parse(value, &out->focus, &out->dot.focus_kind);
     out->dot.focus = out->focus.data;
     return st;
 }
