@@ -34,7 +34,7 @@ typedef struct odin3_edit_new { const char *name, *tag, *cell_type, *cover;
 odin3_status odin3_edit_add_net(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
 odin3_status odin3_edit_add_node(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
 odin3_status odin3_edit_add_sop(odin3_design*, uint32_t module, const odin3_edit_new*, odin3_ref*);
-odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const char *cover, const char *tag);
+odin3_status odin3_edit_set_cover(odin3_design*, odin3_ref node, const odin3_edit_new*);
 odin3_status odin3_edit_set_param_int(odin3_design*, odin3_ref node, uint32_t index, int64_t v,
                                       const char *tag);
 odin3_status odin3_edit_connect(odin3_design*, odin3_ref pin, odin3_ref net);

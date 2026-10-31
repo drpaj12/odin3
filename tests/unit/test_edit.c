@@ -50,6 +50,11 @@ static odin3_status add_sop(uint32_t n_inputs, const char *cover, const char *na
     return odin3_edit_add_sop(design, top, &what, out);
 }
 
+static odin3_status set_cover(odin3_ref node, const char *cover, const char *tag) {
+    odin3_edit_new what = {.tag = tag, .cover = cover};
+    return odin3_edit_set_cover(design, node, &what);
+}
+
 static odin3_ref net_named(const char *name) {
     uint32_t id = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_lookup_net(design, top, name, &id));
@@ -57,11 +62,12 @@ static odin3_ref net_named(const char *name) {
     return (odin3_ref){top, id};
 }
 
-static odin3_ref pin_of(odin3_ref node, uint32_t port, uint32_t bit) {
+/* Pin `index` of the node, in port order then bit order. */
+static odin3_ref pin_of(odin3_ref node, uint32_t index) {
     odin3_span pins;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_port_pins(design, node, port, &pins));
-    TEST_ASSERT_TRUE(bit < pins.count);
-    return (odin3_ref){top, pins.first + bit};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_node_get_pins(design, node, &pins));
+    TEST_ASSERT_TRUE(index < pins.count);
+    return (odin3_ref){top, pins.first + index};
 }
 
 static void test_add_net_and_sop_carry_the_tag(void) {
@@ -98,9 +104,9 @@ static void test_connect_rewire_and_driver_rule(void) {
     odin3_ref out;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_net(top, "t_q", "t", &out));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(2, "10 1\n", "g", "t", &sop));
-    odin3_ref in0 = pin_of(sop, 0, 0);
-    odin3_ref in1 = pin_of(sop, 0, 1);
-    odin3_ref drv = pin_of(sop, 1, 0);
+    odin3_ref in0 = pin_of(sop, 0);
+    odin3_ref in1 = pin_of(sop, 1);
+    odin3_ref drv = pin_of(sop, 2);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, in0, net_named("a")));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, in1, net_named("b")));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, drv, out));
@@ -117,20 +123,20 @@ static void test_connect_rewire_and_driver_rule(void) {
 static void test_set_cover_keeps_pins_and_name(void) {
     odin3_ref sop;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, add_sop(2, "11 1\n", "g", "t", &sop));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(sop, 0, 0), net_named("a")));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_set_cover(design, sop, "00 1\n", "t2"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_edit_connect(design, pin_of(sop, 0), net_named("a")));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_cover(sop, "00 1\n", "t2"));
     uint32_t node = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_lookup_node(design, top, "g", &node));
     TEST_ASSERT_NOT_EQUAL_UINT32(0, node);
     odin3_ref fresh = {top, node};
     uint32_t net = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_get_net(design, pin_of(fresh, 0, 0), &net));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pin_get_net(design, pin_of(fresh, 0), &net));
     TEST_ASSERT_EQUAL_UINT32(net_named("a").id, net);
     const char *tag = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
                           odin3_edit_get_tag(design, (odin3_obj){top, ODIN3_OBJ_NODE, node}, &tag));
     TEST_ASSERT_EQUAL_STRING("t2", tag);
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_set_cover(design, fresh, "0 1\n", "t"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, set_cover(fresh, "0 1\n", "t"));
 }
 
 static void test_remove_and_noop_sequence_round_trips(void) {
@@ -173,15 +179,15 @@ static void test_sequences_net_visibility_and_toggles(void) {
     odin3_simulation *sim = NULL;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_open(seq, 0, &sim));
     uint32_t en = 0;
-    uint32_t q = 0;
-    uint32_t d = 0;
+    uint32_t sig_q = 0;
+    uint32_t sig_d = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "en", &en));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "q", &q));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "d", &d));
-    TEST_ASSERT_NOT_EQUAL_UINT32(0, d);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "q", &sig_q));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_find_signal(sim, "d", &sig_d));
+    TEST_ASSERT_NOT_EQUAL_UINT32(0, sig_d);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_set_toggle_counting(sim, 1));
     const uint64_t in_values[] = {1, 1, 0, 1};
-    const uint32_t outs[] = {q, d};
+    const uint32_t outs[] = {sig_q, sig_d};
     uint64_t out_values[8] = {0};
     odin3_simulation_run run = {.in_signals = &en,
                                 .n_in = 1,
@@ -194,12 +200,12 @@ static void test_sequences_net_visibility_and_toggles(void) {
     const uint64_t want[] = {1, 0, 0, 1, 0, 0, 1, 0};
     TEST_ASSERT_EQUAL_UINT64_ARRAY(want, out_values, 8);
     uint64_t toggles = 0;
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, q, &toggles));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, sig_q, &toggles));
     TEST_ASSERT_EQUAL_UINT64(3, toggles);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, d, &toggles));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, sig_d, &toggles));
     TEST_ASSERT_EQUAL_UINT64(2, toggles);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_reset(sim));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, q, &toggles));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_get_toggles(sim, sig_q, &toggles));
     TEST_ASSERT_EQUAL_UINT64(0, toggles);
     odin3_simulation_close(sim);
     odin3_design_destroy(seq);

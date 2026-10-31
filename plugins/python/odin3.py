@@ -1251,8 +1251,12 @@ class Node(_Local):
     def set_cover(self, cover: str, tag: str) -> Node:
         """Replace a $sop's cover (same width). Returns the twin node that takes over this
         node's pins and name; this node is then dead (odin3_edit_set_cover)."""
-        ref = (self.module_id, self.id)
-        _edit_call(self.design, "odin3_edit_set_cover", ref, cover.encode(), tag.encode())
+        _edit_probe(self.design, "odin3_edit_set_cover")
+        ffi = self.design.odin3.ffi
+        keep = (ffi.new("char[]", cover.encode()), ffi.new("char[]", tag.encode()))
+        what = ffi.new("odin3_edit_new *")
+        what.cover, what.tag = keep
+        _edit_call(self.design, "odin3_edit_set_cover", self.ref(), what)
         twin = self.module.node(self.name) if self.name else None
         if twin is None:
             raise Odin3Error("odin3_edit_set_cover", -1, "the twin is unnamed; look it up by pins")

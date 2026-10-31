@@ -180,6 +180,33 @@ ODIN3_EXPORT odin3_status odin3_edit_add_node(odin3_design *design, uint32_t mod
  * blanks, the output char 0/1. Rows end at a newline; blank lines are skipped. *bits is
  * odin3_util_malloc'd (the caller frees), *len its size.
  */
+static bool cover_blank(char chr) {
+    return chr == ' ' || chr == '\t' || chr == '\r';
+}
+
+/* Copies the cover chars of text into out; false when a row is not row_len chars wide. */
+static bool cover_rows(const char *text, size_t row_len, uint8_t *out, size_t *used) {
+    size_t row_pos = 0;
+    *used = 0;
+    for (const char *chr = text;; chr++) {
+        if (*chr == '\n' || *chr == '\0') {
+            if (row_pos != 0 && row_pos != row_len) {
+                return false;
+            }
+            row_pos = 0;
+            if (*chr == '\0') {
+                return true;
+            }
+        } else if (!cover_blank(*chr)) {
+            if (row_pos == row_len) {
+                return false;
+            }
+            out[(*used)++] = (uint8_t)*chr;
+            row_pos++;
+        }
+    }
+}
+
 static odin3_status parse_cover(const char *text, uint32_t n_inputs, uint8_t **bits,
                                 uint32_t *len) {
     *bits = NULL;
@@ -187,32 +214,14 @@ static odin3_status parse_cover(const char *text, uint32_t n_inputs, uint8_t **b
     if (text == NULL) {
         return odin3_api_invalid_why("odin3_edit_cover", "the cover text is NULL");
     }
-    size_t cap = strlen(text) + 1;
-    uint8_t *out = odin3_util_malloc(cap);
+    uint8_t *out = odin3_util_malloc(strlen(text) + 1);
     if (out == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     size_t used = 0;
-    size_t row_pos = 0;
-    size_t row_len = (size_t)n_inputs + 1;
-    for (const char *chr = text;; chr++) {
-        if (*chr == '\n' || *chr == '\0') {
-            if (row_pos != 0 && row_pos != row_len) {
-                odin3_util_free(out);
-                return odin3_api_invalid_why("odin3_edit_cover", "a cover row has the wrong width");
-            }
-            row_pos = 0;
-            if (*chr == '\0') {
-                break;
-            }
-        } else if (*chr != ' ' && *chr != '\t' && *chr != '\r') {
-            if (row_pos == row_len) {
-                odin3_util_free(out);
-                return odin3_api_invalid_why("odin3_edit_cover", "a cover row has the wrong width");
-            }
-            out[used++] = (uint8_t)*chr;
-            row_pos++;
-        }
+    if (!cover_rows(text, (size_t)n_inputs + 1, out, &used)) {
+        odin3_util_free(out);
+        return odin3_api_invalid_why("odin3_edit_cover", "a cover row has the wrong width");
     }
     *bits = out;
     *len = (uint32_t)used;
@@ -391,7 +400,7 @@ static bool copy_node_params(const odin3_module *mod, odin3_node_id node, uint32
 }
 
 ODIN3_EXPORT odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node,
-                                               const char *cover, const char *tag) {
+                                               const odin3_edit_new *what) {
     odin3_module *mod = edit_module(design, node.module, "odin3_edit_set_cover");
     odin3_value params[SOP_PARAMS];
     uint32_t n_params = 0;
@@ -404,12 +413,12 @@ ODIN3_EXPORT odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref n
         return odin3_api_invalid_why("odin3_edit_set_cover", "not a live node with a COVER");
     }
     uint32_t width = (uint32_t)params[SOP_WIDTH].i;
-    if (parse_cover(cover, width, &bits, &len) != ODIN3_OK) {
+    if (what == NULL || parse_cover(what->cover, width, &bits, &len) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
     params[SOP_COVER].bits = bits;
     params[SOP_COVER].len = len;
-    odin3_status st = replace_node(mod, nid, params, n_params, tag);
+    odin3_status st = replace_node(mod, nid, params, n_params, what->tag);
     odin3_util_free(bits);
     return st == ODIN3_OK ? after_edit(mod, "odin3_edit_set_cover") : st;
 }

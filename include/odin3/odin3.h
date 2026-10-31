@@ -2373,11 +2373,11 @@ odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const od
 odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
                                 odin3_ref *node);
 
-/* Replaces the cover of a $sop (same width). The node is replaced by a twin that takes over its
- * pins and name; its ID changes (the old one is dead) and attributes are not carried over. The
- * twin's provenance is the edit record. Use odin3_edit_set_param_int the same way. */
-odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const char *cover,
-                                  const char *tag);
+/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag. The node is replaced
+ * by a twin that takes over its pins and name; its ID changes (the old one is dead) and attributes
+ * are not carried over. The twin's provenance is the edit record. Use odin3_edit_set_param_int the
+ * same way. */
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what);
 odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node, uint32_t index,
                                       int64_t value, const char *tag);
 

@@ -83,18 +83,18 @@ static void toggles_sample(odin3_simulation *sim, bool count_it) {
 
 /* Allocates the toggle state for the signals known now and takes the first sample. */
 static odin3_status toggles_start(odin3_simulation *sim) {
-    uint32_t n = odin3_sim_signals_total(sim->signals);
+    uint32_t known = odin3_sim_signals_total(sim->signals);
     toggle_state *tog = odin3_util_calloc(sizeof *tog);
     if (tog == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     sim->toggles = tog;
-    tog->n = n;
-    tog->count = odin3_util_calloc(((size_t)n + 1) * sizeof *tog->count);
-    tog->first = odin3_util_calloc(((size_t)n + 2) * sizeof *tog->first);
+    tog->n = known;
+    tog->count = odin3_util_calloc(((size_t)known + 1) * sizeof *tog->count);
+    tog->first = odin3_util_calloc(((size_t)known + 2) * sizeof *tog->first);
     uint64_t bits = 0;
     uint32_t widest = 1;
-    for (uint32_t id = 1; tog->first != NULL && id <= n; id++) {
+    for (uint32_t id = 1; tog->first != NULL && id <= known; id++) {
         uint32_t width = odin3_sim_signals_at(sim->signals, id)->width;
         tog->first[id] = (uint32_t)bits;
         bits += width;
