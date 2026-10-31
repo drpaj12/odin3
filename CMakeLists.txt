@@ -123,6 +123,11 @@ add_library(odin3_core OBJECT
     src/passes/graphlets/gl_net.c
     src/passes/graphlets/gl_group.c
     src/passes/graphlets/gl_cal.c
+    src/passes/scoap/scoap.c
+    src/passes/scoap/sc_fn.c
+    src/passes/scoap/sc_model.c
+    src/passes/scoap/sc_solve.c
+    src/passes/scoap/sc_sigprob.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
     src/passes/submod/busattr.c
@@ -2900,6 +2905,28 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(graphlets_construction PROPERTIES LABELS tools TIMEOUT 600)
 
+    # scoap: hand-computed circuits, the signal probability, and the pass equal to the independent
+    # reference (tools/scoap) on small designs in both modes.
+    add_test(NAME scoap_unit
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_scoap
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(scoap_unit PROPERTIES LABELS tools TIMEOUT 600)
+    if(EXISTS "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
+        set(_scoap_golden "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
+        add_test(NAME scoap_gate_small_vtr
+            COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/scoap/gate.py
+                    --odin3 $<TARGET_FILE:odin3> --lib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+                    --out ${PROJECT_BINARY_DIR}/scoap_gate
+                    ${_scoap_golden}/single_wire/single_wire.parmys.blif
+                    ${_scoap_golden}/single_ff/single_ff.parmys.blif
+                    ${_scoap_golden}/and_latch/and_latch.parmys.blif
+                    ${_scoap_golden}/multiclock_separate_and_latch/multiclock_separate_and_latch.parmys.blif
+                    ${_scoap_golden}/multiclock_output_and_latch/multiclock_output_and_latch.parmys.blif
+                    ${_scoap_golden}/multiclock_reader_writer/multiclock_reader_writer.parmys.blif)
+        set_tests_properties(scoap_gate_small_vtr PROPERTIES LABELS tools TIMEOUT 600)
+    endif()
+
     if(ODIN3_FUZZ)
         # The seeds (`pp-fuzz seeds`): the preprocessor micros, every micro holding a backtick
         # and the reviewer's probes, smallest first, each after options byte 0x00 (tight caps)
@@ -3345,6 +3372,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_graphlets
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(python_graphlets PROPERTIES
+        LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # scoap: Design.scoap through the Python binding.
+    add_test(NAME python_scoap
+        COMMAND ${CMAKE_COMMAND} -E env ${_python_env}
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_python_scoap
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(python_scoap PROPERTIES
         LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 6 (spec 3.2): Design.copy() over odin3_design_copy.
     add_test(NAME python_copy
