@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import itertools
+import os
 import random
 import subprocess
 import sys
@@ -18,10 +19,14 @@ from pathlib import Path
 
 Matrix = tuple[tuple[int, ...], ...]
 
+# The counting tool may itself be built with a sanitizer; a sanitizer runtime preloaded for the
+# Python process (the CTest run of the Python binding) must not be inherited by it.
+TOOL_ENV = {k: v for k, v in os.environ.items() if k != "LD_PRELOAD"}
+
 
 def run_catalogue(tool: str, directed: bool) -> list[tuple[int, int, int, int, int, int, int]]:
     args = [tool] + (["--directed"] if directed else []) + ["--catalogue"]
-    out = subprocess.run(args, check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(args, check=True, capture_output=True, text=True, env=TOOL_ENV).stdout
     return [tuple(int(x) for x in line.split()) for line in out.splitlines() if line.strip()]  # type: ignore[misc]
 
 
@@ -173,6 +178,7 @@ def fast(
         subprocess.run(
             [tool] + (["--directed"] if directed else []) + [str(size), str(src), str(dst)],
             check=True,
+            env=TOOL_ENV,
         )
         return [[int(x) for x in ln.split()] for ln in dst.read_text().splitlines()]
 
