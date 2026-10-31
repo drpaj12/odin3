@@ -12,7 +12,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   exported on request: `write_json --odin3` member `odin3_edit`, `write_blif --edit-tags` line
   `.attr odin3_edit KIND:TAG,...` (plain dialect); `read_json` and `read_blif` restore them. `odin3_edit_rewire` and
   `_disconnect` now mark the node whose pin moved (`_tagged` forms take a tag); `odin3_edit_get_events`.
-  `odin3_edit_add_node` takes initial integer parameters (`odin3_edit_new` grew: size 64 to 88, old callers
+  `odin3_edit_add_node` takes initial integer parameters (`odin3_edit_new` grew: size 56 to 80, old callers
   unaffected), so a flip-flop starts at INIT 0 without a twin. Python: `Design(top=...)`, `run_script(top=...)`,
   `run_pass(top=...)` set the requested top before `read_verilog`; `Module.add_node(params=)`,
   `Pin.rewire(tag=)`, `Pin.disconnect(tag=)`, `obj.edit_events`. Default BLIF, JSON, Verilog and RTLIL output is

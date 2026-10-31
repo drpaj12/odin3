@@ -2360,7 +2360,7 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
  * (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0, and a
  * zero-input cover is one output char per row. index and value: set_param_int only.
  * param_names, param_values, n_params (add_node only; appended after v1.2.0, so a caller compiled
- * against the 64-byte struct passes size 64 and these read as zero): n_params integer parameters of
+ * against the 56-byte struct passes size 56 and these read as zero): n_params integer parameters of
  * the cell type, by name (e.g. "INIT"), set over their defaults in the new node, so a flip-flop
  * can start at 0 without a twin. An unknown or non-integer parameter, a repeated name, or more
  * than 8, is ODIN3_ERR_INVALID_ARG with nothing changed. reserved2: must be zero. */

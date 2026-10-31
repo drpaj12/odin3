@@ -31,7 +31,7 @@ enum { SOP_WIDTH = 0, SOP_COVER = 1, SOP_PARAMS = 2 };
 static const char K_EDIT_RUN[] = "edit";
 
 /* sizeof(odin3_edit_new) of the first release of the struct (up to and including index). */
-enum { EDIT_NEW_V1_SIZE = 64, MAX_INIT_PARAMS = 8 };
+enum { EDIT_NEW_V1_SIZE = 56, MAX_INIT_PARAMS = 8 };
 
 static const char K_DEFAULT_TAG[] = "edit";
 

@@ -84,9 +84,9 @@ Both formats use the same event text, one token without blanks: events joined by
 
 ## 3. Initial parameters on add_node (gap 3)
 `odin3_edit_new` gets appended fields `const char *const *param_names; const int64_t *param_values;
-uint32_t n_params; uint32_t reserved2;` (sizeof 64 -> 88). The library reads only what `size`
-covers and treats the rest as zero, so a caller compiled against the 64-byte struct still works
-(`size` must still be at least 64). `add_node` applies each (name, value) to the cell type's INT
+uint32_t n_params; uint32_t reserved2;` (sizeof 56 -> 80). The library reads only what `size`
+covers and treats the rest as zero, so a caller compiled against the 56-byte struct still works
+(`size` must still be at least 56). `add_node` applies each (name, value) to the cell type's INT
 parameter of that name over the default; an unknown name, a non-INT parameter, a duplicate name or
 more than 8 parameters is `ODIN3_ERR_INVALID_ARG`, nothing changed. `set_param_int` keeps its twin
 semantics. Python: `Module.add_node(cell_type, name, tag, params={"INIT": 0})`.

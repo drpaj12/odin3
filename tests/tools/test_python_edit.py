@@ -225,15 +225,11 @@ class PythonEditTest(unittest.TestCase):
         top = other.top()
         assert top is not None
         self.assertEqual(top.name, "two")
-        # not left set for the next, top-less design
+        # the name is not left set for the next, top-less design: two roots are ambiguous again
         third = Design()
         self.addCleanup(third.close)
-        try:
+        with self.assertRaises(odin3.Odin3Error):
             third.run_script(f"read_verilog {src}")
-        except odin3.Odin3Error:
-            return
-        top = third.top()
-        self.assertTrue(top is None or top.name != "two" or True)
 
     def test_missing_symbol_is_a_clear_error(self) -> None:
         class OldLib:

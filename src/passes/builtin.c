@@ -447,7 +447,7 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
     (void)user;
     (void)ctx;
     write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false,
-                                       NULL, false, ODIN3_PROV_MAP_NONE},
+                                       NULL, false, ODIN3_PROV_MAP_NONE, false},
                               .seen = 0};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.name_map);

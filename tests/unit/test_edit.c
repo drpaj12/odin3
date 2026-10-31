@@ -328,7 +328,7 @@ static void test_struct_size_and_reserved_are_checked(void) {
     what.reserved = 0;
     what.size = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, top, &what, &net));
-    what.size = 63; /* below the first release's 64-byte struct */
+    what.size = 55; /* below the first release's 56-byte struct */
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_edit_add_net(design, top, &what, &net));
     uint32_t found = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_module_lookup_net(design, top, "q1", &found));
