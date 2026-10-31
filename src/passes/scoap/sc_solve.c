@@ -17,8 +17,8 @@ static int bit_of(unsigned word, uint32_t pos) {
     return (int)((word >> pos) & 1U);
 }
 
-static int32_t clamp(int64_t x) {
-    return x >= SCOAP_INF ? SCOAP_INF : (int32_t)x;
+static int32_t clamp(int64_t value) {
+    return value >= SCOAP_INF ? SCOAP_INF : (int32_t)value;
 }
 
 /* Cost of value v on a net; a pin without a net reads constant 0 (as the simulator does). */
@@ -29,12 +29,19 @@ static int32_t net_cost(const sc_dom *dom, uint32_t net, int val) {
     return dom->val[val][net];
 }
 
-static bool relax(const sc_model *md, int32_t *slot, uint32_t net, int64_t value) {
-    int32_t val = clamp(value);
-    if (net == 0 || md->fixed[net] != 0 || val >= *slot) {
+/* A candidate value for a net. */
+typedef struct sc_cand {
+    uint32_t net;
+    int64_t value;
+} sc_cand;
+
+/* Lowers arr[net] to the candidate; true when it changed. Fixed (constant) nets never change. */
+static bool relax(const sc_model *md, int32_t *arr, sc_cand cand) {
+    int32_t val = clamp(cand.value);
+    if (cand.net == 0 || md->fixed[cand.net] != 0 || val >= arr[cand.net]) {
         return false;
     }
-    *slot = val;
+    arr[cand.net] = val;
     return true;
 }
 
@@ -64,9 +71,26 @@ static bool fwd_func(const sc_model *md, const sc_dom *dom, const sc_cell *cell)
             best = cost < best ? cost : best;
         }
         int64_t res = best >= SCOAP_INF ? SCOAP_INF : best + dom->bonus;
-        changed = relax(md, &dom->val[val][cell->out], cell->out, res) || changed;
+        changed = relax(md, dom->val[val], (sc_cand){cell->out, res}) || changed;
     }
     return changed;
+}
+
+/* The cheapest sensitising assignment of the other inputs for input number `input`. */
+static int64_t sens_best(const sc_model *md, const sc_dom *dom, const sc_cell *cell,
+                         uint32_t input) {
+    const uint32_t *in = cell_inputs(md, cell);
+    const uint32_t *ref = odin3_vec_cat(&md->sens_ref, 2 * (size_t)(cell->sens_off + input));
+    const uint8_t *mints = ref[1] == 0 ? NULL : odin3_vec_cat(&md->sens_pool, ref[0]);
+    int64_t best = SCOAP_INF;
+    for (uint32_t k = 0; k < ref[1]; k++) {
+        int64_t cost = 0;
+        for (uint32_t j = 0; j < cell->n_in; j++) {
+            cost += j == input ? 0 : net_cost(dom, in[j], bit_of(mints[k], j));
+        }
+        best = cost < best ? cost : best;
+    }
+    return best;
 }
 
 /* CO(x_i) = CO(y) + bonus + min over the sensitising assignments of the other inputs' costs. */
@@ -78,30 +102,26 @@ static bool bwd_func(const sc_model *md, const sc_dom *dom, const sc_cell *cell)
         return false;
     }
     for (uint32_t i = 0; i < cell->n_in; i++) {
-        const uint32_t *ref = odin3_vec_cat(&md->sens_ref, 2 * (size_t)(cell->sens_off + i));
-        const uint8_t *mints = ref[1] == 0 ? NULL : odin3_vec_cat(&md->sens_pool, ref[0]);
-        int64_t best = SCOAP_INF;
-        for (uint32_t k = 0; k < ref[1]; k++) {
-            int64_t cost = 0;
-            for (uint32_t j = 0; j < cell->n_in; j++) {
-                cost += j == i ? 0 : net_cost(dom, in[j], bit_of(mints[k], j));
-            }
-            best = cost < best ? cost : best;
-        }
+        int64_t best = sens_best(md, dom, cell, i);
         int64_t res = best >= SCOAP_INF ? SCOAP_INF : base + dom->bonus + best;
-        changed = relax(md, &dom->obs[in[i]], in[i], res) || changed;
+        changed = relax(md, dom->obs, (sc_cand){in[i], res}) || changed;
     }
     return changed;
 }
 
 /* --- wide $sop and $lut: bounds -------------------------------------------------------------- */
 
-static int64_t cheap_sum(const sc_dom *dom, const uint32_t *in, uint32_t n_in, uint32_t skip) {
+/* Sum over the inputs except `skip` of the cheaper value (the bound of a wide function). */
+static int64_t cheap_sum(const sc_model *md, const sc_dom *dom, const sc_cell *cell,
+                         uint32_t skip) {
+    const uint32_t *in = cell_inputs(md, cell);
     int64_t sum = 0;
-    for (uint32_t j = 0; j < n_in; j++) {
+    for (uint32_t j = 0; j < cell->n_in; j++) {
         int32_t c0 = net_cost(dom, in[j], 0);
         int32_t c1 = net_cost(dom, in[j], 1);
-        sum += j == skip ? 0 : (c0 < c1 ? c0 : c1);
+        if (j != skip) {
+            sum += c0 < c1 ? c0 : c1;
+        }
     }
     return sum;
 }
@@ -125,14 +145,14 @@ static int64_t row_min(const sc_model *md, const sc_dom *dom, const sc_cell *cel
 static bool fwd_wide(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     bool changed = false;
     for (int val = 0; val < 2; val++) {
-        int64_t best = cheap_sum(dom, cell_inputs(md, cell), cell->n_in, UINT32_MAX);
+        int64_t best = cheap_sum(md, dom, cell, UINT32_MAX);
         if (cell->cover_val == val) {
             best = row_min(md, dom, cell, (char)('0' + val));
         } else if (cell->cover_val == -1) {
             best = val == 0 ? 0 : SCOAP_INF;
         }
         int64_t res = best >= SCOAP_INF ? SCOAP_INF : best + dom->bonus;
-        changed = relax(md, &dom->val[val][cell->out], cell->out, res) || changed;
+        changed = relax(md, dom->val[val], (sc_cand){cell->out, res}) || changed;
     }
     return changed;
 }
@@ -145,8 +165,8 @@ static bool bwd_wide(const sc_model *md, const sc_dom *dom, const sc_cell *cell)
         return false;
     }
     for (uint32_t i = 0; i < cell->n_in; i++) {
-        int64_t res = base + dom->bonus + cheap_sum(dom, in, cell->n_in, i);
-        changed = relax(md, &dom->obs[in[i]], in[i], res) || changed;
+        int64_t res = base + dom->bonus + cheap_sum(md, dom, cell, i);
+        changed = relax(md, dom->obs, (sc_cand){in[i], res}) || changed;
     }
     return changed;
 }
@@ -163,10 +183,9 @@ static bool fwd_ff(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
     int64_t clk = clock_cost(dom, in[1]);
     bool changed = false;
     for (int val = 0; val < 2; val++) {
-        int64_t res = (int64_t)net_cost(dom, in[0], val) + clk + dom->frame;
-        changed = relax(md, &dom->val[val][cell->out], cell->out,
-                        net_cost(dom, in[0], val) >= SCOAP_INF ? SCOAP_INF : res) ||
-                  changed;
+        int64_t data = net_cost(dom, in[0], val);
+        int64_t res = data >= SCOAP_INF ? SCOAP_INF : data + clk + dom->frame;
+        changed = relax(md, dom->val[val], (sc_cand){cell->out, res}) || changed;
     }
     return changed;
 }
@@ -183,13 +202,13 @@ static bool bwd_ff(const sc_model *md, const sc_dom *dom, const sc_cell *cell) {
         if (i == 1) {
             continue;
         }
-        changed = relax(md, &dom->obs[in[i]], in[i], base + clk + dom->frame) || changed;
+        changed = relax(md, dom->obs, (sc_cand){in[i], base + clk + dom->frame}) || changed;
     }
     int64_t via0 = (int64_t)net_cost(dom, in[0], 0) + dom->val[1][cell->out];
     int64_t via1 = (int64_t)net_cost(dom, in[0], 1) + dom->val[0][cell->out];
     int64_t flip = via0 < via1 ? via0 : via1;
     if (in[1] != 0 && flip < SCOAP_INF) {
-        changed = relax(md, &dom->obs[in[1]], in[1], base + clk + dom->frame + flip) || changed;
+        changed = relax(md, dom->obs, (sc_cand){in[1], base + clk + dom->frame + flip}) || changed;
     }
     return changed;
 }

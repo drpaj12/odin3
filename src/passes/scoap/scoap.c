@@ -19,6 +19,7 @@
 
 enum { SCHEMA_VERSION = 1, DECIMAL = 10, PPM = 1000000, NUM_BUF = 48, DEFAULT_SEED = 1 };
 static const double k_default_threshold = 0.01;
+static const double k_half = 0.5;
 
 static const char k_usage[] =
     "scoap: usage: scoap [--sequential] [--out FILE] [--top N] [--focus F] [--sigprob V] "
@@ -89,25 +90,29 @@ static odin3_status focus_option(odin3_bytes *rest, sc_opts *ob) {
     return odin3_dot_focus_parse(value, &ob->gl.focus[ii], &ob->gl.focus_kind[ii]);
 }
 
+/* One word of the arguments; *used is false for a word that is not an option of this pass. */
+static odin3_status parse_word(odin3_bytes word, odin3_bytes *rest, sc_opts *ob, bool *used) {
+    *used = true;
+    if (odin3_pass_arg_is(word, "--sequential")) {
+        ob->seq = true;
+        return ODIN3_OK;
+    }
+    if (odin3_pass_arg_is(word, "--out")) {
+        odin3_bytes file = odin3_pass_arg_next(rest);
+        return file.ptr != NULL && file.len > 0 ? odin3_strbuf_append(&ob->out, file)
+                                                : bad_option("--out needs a file");
+    }
+    if (odin3_pass_arg_is(word, "--focus")) {
+        return focus_option(rest, ob);
+    }
+    return number_option(word, rest, ob, used);
+}
+
 static odin3_status parse_args(odin3_bytes args, sc_opts *ob) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         bool used = false;
-        odin3_status st = ODIN3_OK;
-        if (odin3_pass_arg_is(word, "--sequential")) {
-            ob->seq = true;
-            used = true;
-        } else if (odin3_pass_arg_is(word, "--out")) {
-            odin3_bytes file = odin3_pass_arg_next(&args);
-            st = file.ptr != NULL && file.len > 0 ? odin3_strbuf_append(&ob->out, file)
-                                                  : bad_option("--out needs a file");
-            used = true;
-        } else if (odin3_pass_arg_is(word, "--focus")) {
-            st = focus_option(&args, ob);
-            used = true;
-        } else {
-            st = number_option(word, &args, ob, &used);
-        }
+        odin3_status st = parse_word(word, &args, ob, &used);
         if (st != ODIN3_OK || !used) {
             return st != ODIN3_OK ? st : bad_option("unknown option");
         }
@@ -135,7 +140,10 @@ static int entry_cmp(const void *pa, const void *pb) {
     if (ea->key != eb->key) {
         return ea->key < eb->key ? 1 : -1;
     }
-    return ea->id < eb->id ? -1 : (ea->id > eb->id ? 1 : 0);
+    if (ea->id == eb->id) {
+        return 0;
+    }
+    return ea->id < eb->id ? -1 : 1;
 }
 
 static const char *net_text(const sc_model *md, uint32_t id, char *fallback, size_t size) {
@@ -203,20 +211,30 @@ static odin3_status put_nets(odin3_strbuf *out, const sc_view *vw) {
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n    ]")) : st;
 }
 
-static odin3_status put_lists(odin3_strbuf *out, const sc_view *vw) {
+/* The reported nets as (id, key) pairs for the two lists; returns how many. */
+static size_t fill_lists(const sc_view *vw, sc_entry *lists[2]) {
+    sc_entry *ctl = lists[0];
+    sc_entry *obs = lists[1];
     const sc_model *md = vw->md;
     size_t cnt = 0;
-    sc_entry *ctl = odin3_util_calloc(((size_t)md->n_nets + 1) * sizeof *ctl);
-    sc_entry *obs = odin3_util_calloc(((size_t)md->n_nets + 1) * sizeof *obs);
-    odin3_status st = ctl != NULL && obs != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-    for (uint32_t id = 1; st == ODIN3_OK && id < md->n_nets; id++) {
+    for (uint32_t id = 1; id < md->n_nets; id++) {
         if (net_reported(vw, id)) {
             int32_t hard = md->cc[0][id] > md->cc[1][id] ? md->cc[0][id] : md->cc[1][id];
             ctl[cnt] = (sc_entry){id, hard};
             obs[cnt++] = (sc_entry){id, md->co[id]};
         }
     }
+    return cnt;
+}
+
+static odin3_status put_lists(odin3_strbuf *out, const sc_view *vw) {
+    size_t cap = (size_t)vw->md->n_nets + 1;
+    sc_entry *ctl = odin3_util_calloc(cap * sizeof *ctl);
+    sc_entry *obs = odin3_util_calloc(cap * sizeof *obs);
+    odin3_status st = ctl != NULL && obs != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     if (st == ODIN3_OK) {
+        sc_entry *lists[2] = {ctl, obs};
+        size_t cnt = fill_lists(vw, lists);
         st = odin3_strbuf_append(out, odin3_bytes_cstr(",\n    \"top\": {"));
         st = st == ODIN3_OK ? put_top(out, "hardest_to_control", ctl, cnt, vw->opts->top_n) : st;
         st = st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr(", ")) : st;
@@ -229,7 +247,7 @@ static odin3_status put_lists(odin3_strbuf *out, const sc_view *vw) {
 }
 
 static odin3_status put_rare(odin3_strbuf *out, const sc_view *vw) {
-    int64_t thr = (int64_t)(vw->opts->threshold * PPM + 0.5);
+    int64_t thr = (int64_t)(vw->opts->threshold * PPM + k_half);
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(",\n    \"rare\": ["));
     bool first = true;
     for (uint32_t id = 1; st == ODIN3_OK && id < vw->md->n_nets; id++) {
@@ -339,8 +357,8 @@ static uint8_t *focus_nets(const sc_run *run, uint32_t id, const odin3_module *m
         return NULL;
     }
     uint8_t *sel = odin3_util_calloc((size_t)odin3_module_net_end(mod) + 1);
-    for (size_t g = 0; sel != NULL && g < run->groups.count; g++) {
-        const gl_group *grp = &run->groups.items[g];
+    for (size_t gi = 0; sel != NULL && gi < run->groups.count; gi++) {
+        const gl_group *grp = &run->groups.items[gi];
         for (uint32_t node = 1; grp->module == id && node < odin3_module_node_end(mod); node++) {
             odin3_pinslice pins = odin3_node_pins(mod, (odin3_node_id){node});
             for (uint32_t k = 0; grp->mask[node] != 0 && k < pins.count; k++) {

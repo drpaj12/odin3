@@ -39,14 +39,14 @@ static void map_signal(sp_ctx *ctx, uint32_t id) {
         return;
     }
     ctx->sig_off[id] = ctx->total_bits;
-    for (uint32_t b = 0; b < sg->width; b++) {
+    for (uint32_t bit = 0; bit < sg->width; bit++) {
         odin3_net_id net = {0};
         if (sg->obj_kind == ODIN3_OBJ_NET) {
             net.v = sg->obj_id;
         } else if (sg->obj_kind == ODIN3_OBJ_WIRE) {
-            net = odin3_wire_net(ctx->mod, (odin3_wire_id){sg->obj_id}, sg->first_bit + b);
+            net = odin3_wire_net(ctx->mod, (odin3_wire_id){sg->obj_id}, sg->first_bit + bit);
         }
-        ref_net(ctx, net, id, ctx->total_bits, b);
+        ref_net(ctx, net, id, ctx->total_bits, bit);
     }
     ctx->total_bits += sg->width;
 }
@@ -78,7 +78,7 @@ static odin3_status run_vectors(odin3_sim *sim, sp_ctx *ctx, const sc_opts *opts
         odin3_util_free(ones);
         return ODIN3_ERR_NO_MEMORY;
     }
-    for (uint64_t v = 0; v < opts->vectors; v++) {
+    for (uint64_t vec = 0; vec < opts->vectors; vec++) {
         odin3_sim_drive_random(sim, &prng);
         odin3_sim_cycle(sim);
         count_cycle(ctx, n_sig, bits, ones);

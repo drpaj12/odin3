@@ -12,7 +12,7 @@
 
 #include <string.h>
 
-enum { SOP_PARAM_COVER = 1, MAX_FUNC_WORDS = 4, BIT_WORD = 64, LUT_PARAMS = 2 };
+enum { SOP_PARAM_COVER = 1, MAX_FUNC_WORDS = 4, BIT_WORD = 64, LUT_PARAMS = 2, FIRST_CELLS = 64 };
 
 typedef struct sc_pins {
     uint32_t in[SC_MAX_TABLE]; /* input nets in pin order */
@@ -47,9 +47,9 @@ static void make_source(sc_model *md, uint32_t net) {
     if (net == 0 || md->fixed[net] != 0) {
         return;
     }
-    for (int v = 0; v < 2; v++) {
-        lower(&md->cc[v][net], 1);
-        lower(&md->sc[v][net], 0);
+    for (int val = 0; val < 2; val++) {
+        lower(&md->cc[val][net], 1);
+        lower(&md->sc[val][net], 0);
     }
 }
 
@@ -107,10 +107,10 @@ static void init_net(sc_model *md, uint32_t id) {
         return;
     }
     md->fixed[id] = 1;
-    for (int v = 0; v < 2; v++) {
-        bool held = cv == ODIN3_CONST_X || cv == ODIN3_CONST_Z || (int)(cv == ODIN3_CONST_1) == v;
-        md->cc[v][id] = held ? 1 : SCOAP_INF;
-        md->sc[v][id] = held ? 0 : SCOAP_INF;
+    for (int val = 0; val < 2; val++) {
+        bool held = cv == ODIN3_CONST_X || cv == ODIN3_CONST_Z || (int)(cv == ODIN3_CONST_1) == val;
+        md->cc[val][id] = held ? 1 : SCOAP_INF;
+        md->sc[val][id] = held ? 0 : SCOAP_INF;
     }
 }
 
@@ -139,7 +139,8 @@ static void gather_pins(const sc_model *md, odin3_node_id node, sc_pins *pp) {
 }
 
 /* $sop semantics of src/ir/cells/sop.c: ON rows give 1, OFF rows give 0 on a hit, none: 0. */
-static uint8_t sop_eval(const odin3_value *cover, uint32_t width, uint32_t mint) {
+static uint8_t sop_eval(const odin3_value *cover, uint64_t mint) {
+    uint32_t width = cover->cover_inputs;
     uint64_t row_len = (uint64_t)width + 1;
     bool has_on = false;
     bool off_hit = false;
@@ -167,8 +168,8 @@ static bool table_sop(const sc_model *md, odin3_node_id node, uint32_t width, sc
         return false;
     }
     tab->n = width;
-    for (uint32_t m = 0; m < (1U << width); m++) {
-        tab->f[m] = sop_eval(cover, width, m);
+    for (uint32_t mint = 0; mint < (1U << width); mint++) {
+        tab->f[mint] = sop_eval(cover, mint);
     }
     return true;
 }
@@ -187,8 +188,8 @@ static bool table_lut(const sc_model *md, odin3_node_id node, uint32_t width, sc
         return false;
     }
     tab->n = width;
-    for (uint32_t m = 0; m < (1U << width); m++) {
-        tab->f[m] = (uint8_t)(words[m / BIT_WORD] >> (m % BIT_WORD) & 1U);
+    for (uint32_t mint = 0; mint < (1U << width); mint++) {
+        tab->f[mint] = (uint8_t)(words[mint / BIT_WORD] >> (mint % BIT_WORD) & 1U);
     }
     return true;
 }
@@ -202,15 +203,15 @@ static bool table_gate(const sc_model *md, odin3_celltype_id type, const odin3_c
         return false;
     }
     tab->n = odin3_gate_truth_inputs(def);
-    for (uint32_t m = 0; m < (1U << tab->n); m++) {
-        tab->f[m] = (uint8_t)(bits >> m & 1U);
+    for (uint32_t mint = 0; mint < (1U << tab->n); mint++) {
+        tab->f[mint] = (uint8_t)(bits >> mint & 1U);
     }
     return true;
 }
 
 static odin3_status push_cell(sc_model *md, const sc_cell *cell) {
     if (md->n_cells == md->cap_cells) {
-        size_t cap = md->cap_cells == 0 ? 64 : md->cap_cells * 2;
+        size_t cap = md->cap_cells == 0 ? FIRST_CELLS : md->cap_cells * 2;
         sc_cell *grown = odin3_util_realloc(md->cells, cap * sizeof *grown);
         if (grown == NULL) {
             return ODIN3_ERR_NO_MEMORY;
@@ -246,7 +247,9 @@ static odin3_status keep_cover(sc_model *md, sc_cell *cell, odin3_node_id node) 
     cell->cover_val = cover->len == 0 ? -1 : 0;
     uint32_t row_len = cell->n_in + 1;
     for (uint32_t off = 0; off + row_len <= cover->len; off += row_len) {
-        cell->cover_val = cover->bits[off + cell->n_in] == '1' ? 1 : cell->cover_val;
+        if (cover->bits[off + cell->n_in] == '1') {
+            cell->cover_val = 1;
+        }
     }
     cell->cover_off = (uint32_t)md->cover_pool.len;
     cell->cover_len = cover->len;
