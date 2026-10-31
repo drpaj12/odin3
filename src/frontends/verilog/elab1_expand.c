@@ -18,6 +18,7 @@
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab.h"
 #include "frontends/project/project.h"
+#include "frontends/verilog/soft_blocks.h"
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
@@ -1471,6 +1472,18 @@ static odin3_status given_instances(e1_pass *ps, odin3_ast_id item, const odin3_
     return st;
 }
 
+/* The advice for a name of a VTR primitive (soft_blocks.h): they are supplied only by --vtr-compat
+ * with an architecture loaded. */
+static const char *soft_hint(const char *name) {
+    for (uint32_t i = 0; i < SOFT_BLOCK_COUNT; i++) {
+        if (strcmp(name, odin3_soft_block_name(i)) == 0) {
+            return "; it is a VTR primitive: load an architecture (read_arch) and read the design "
+                   "with read_verilog --vtr-compat";
+        }
+    }
+    return "";
+}
+
 /* One INSTANTIATION of the module scope, resolved (EL-6) and specialized. */
 static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
     odin3_elab1 *e1 = ps->e1;
@@ -1496,8 +1509,8 @@ static odin3_status instantiation(e1_pass *ps, odin3_ast_id item) {
         return log_all(ps, item, ODIN3_DECISION_SKIPPED);
     default:
         odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, item),
-                          "unresolved_module: module '%s' is not defined",
-                          odin3_elab1_str(e1, name));
+                          "unresolved_module: module '%s' is not defined%s",
+                          odin3_elab1_str(e1, name), soft_hint(odin3_elab1_str(e1, name)));
         return log_all(ps, item, ODIN3_DECISION_SKIPPED);
     }
 }
