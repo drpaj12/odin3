@@ -111,6 +111,8 @@ add_library(odin3_core OBJECT
     src/passes/write_formats.c
     src/passes/read_json_pass.c
     src/passes/sim_pass.c
+    src/passes/sim_tb_pass.c
+    src/passes/testbench_gen.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
     src/passes/names.c
@@ -460,6 +462,12 @@ add_library(odin3_core OBJECT
     src/sim/vectors.c
     src/sim/vectors_in.c
     src/sim/word.c
+    src/sim/tb_lex.c
+    src/sim/tb_parse.c
+    src/sim/tb_expr.c
+    src/sim/tb_fmt.c
+    src/sim/tb_dut.c
+    src/sim/tb_run.c
     src/sim/signals.c
     src/sim/vcd.c
     src/sim/gate_truth.c
@@ -2767,6 +2775,16 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     else()
         message(STATUS "sim_check_fixtures not registered: needs ABC, yosys, iverilog and vvp")
     endif()
+    find_program(IVERILOG_BIN iverilog)
+    find_program(VVP_BIN vvp)
+    if(IVERILOG_BIN AND VVP_BIN)
+        add_test(NAME tb_micros
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+    endif()
+    add_test(NAME tb_errors
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_errors.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(tb_errors PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

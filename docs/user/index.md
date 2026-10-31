@@ -31,6 +31,7 @@ graphlets
 edit
 scoap
 timing-attribution
+testbench
 python-api
 re-workflow
 ```
