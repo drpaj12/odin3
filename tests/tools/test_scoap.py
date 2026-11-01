@@ -367,6 +367,20 @@ class ScoapTest(unittest.TestCase):
         rare = {n["name"] for n in got.values() if n["id"] in self.raw["modules"][0]["rare"]}
         self.assertNotIn("one", rare)
 
+    def test_sigprob_skipped_when_simulator_refuses_a_latch_hold_loop(self) -> None:
+        # d = latch(D = mux(en2 ? x : q)): D reads the latch's own Q (an inferred hold path), a
+        # structural loop through a transparent latch that the simulator refuses. SCOAP still
+        # runs; p1_ppm is -1 on every net and the log says why.
+        rows = (
+            ".subckt $_MUX_ A=q B=x S=sel Y=dd\n"
+            ".latch dd q al en 3\n"
+            ".names q y\n1 1\n"
+        )
+        got = self.run_pass(blif(rows, "x sel en", "y"), "--sigprob 100")
+        self.assertIn("--sigprob skipped", self.log)
+        self.assertEqual({n["p1_ppm"] for n in got.values()}, {-1})
+        self.assertIn("cc0", got["q"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -483,20 +483,23 @@ static void test_api_plain_rejects_vtr_options(void) {
         "odin3_blif_write_with: lut_k and name_style apply to the VTR dialect only";
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN,
                                                 ODIN3_BLIF_NAMES_PROVENANCE, 0, false, NULL, false,
-                                                ODIN3_PROV_MAP_NONE, false},
+                                                ODIN3_PROV_MAP_NONE, false, false},
                        want);
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 6,
-                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        want);
 }
 
 static void test_api_lut_k_range(void) {
     read_ok(TWO_MODELS, false);
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1,
-                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        "odin3_blif_write_with: lut_k 1 is outside 2..16");
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 17,
-                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        "odin3_blif_write_with: lut_k 17 is outside 2..16");
 }
 
@@ -533,6 +536,7 @@ static void test_api_vtr_matches_pass(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_write_with(tc.design, path, &opts));
     slurp_into(path, &api);
@@ -561,6 +565,7 @@ static void test_e13_no_top(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {.errors = 7};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -599,6 +604,7 @@ static void test_preflight_report_and_k(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     TEST_ASSERT_EQUAL_UINT32(ODIN3_BLIF_VTR_DEFAULT_K, odin3_blif_vtr_k(&opts));
     odin3_blif_vtr_report report = {.errors = 7, .renamed = 3};
@@ -1281,6 +1287,7 @@ static void test_port_collision_refused(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
@@ -1410,6 +1417,7 @@ static void test_info_line(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -1459,6 +1467,7 @@ static void expect_preflight_refused(const char *want) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     char line[LINE_BUF * 2];
@@ -1561,6 +1570,7 @@ static void test_e1b_names(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
@@ -1849,7 +1859,8 @@ static void test_e12_one_cell_twice(void) {
         line_of("write_blif: --vtr: top: net 'n' has 2 drivers ('$c%u', '$c%u')", adder, adder);
     expect_preflight_refused(want);
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0,
-                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        want);
 }
 
@@ -1877,6 +1888,7 @@ static void test_error_cap(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
@@ -1928,6 +1940,7 @@ static void test_naming_refusal_past_cap(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     odin3_strbuf_clear(&tc.log);
@@ -2016,6 +2029,7 @@ static void test_classes_by_pin_kind(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     odin3_blif_vtr_plan plan = {0};
@@ -2079,6 +2093,7 @@ static void test_clean_report(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {.errors = 9};
     odin3_strbuf_clear(&tc.log);
@@ -2105,6 +2120,7 @@ static void preflight_oom_sweep(odin3_status want) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report clean = {0};
     odin3_strbuf clean_log;
@@ -2156,14 +2172,18 @@ static void test_help_string(void) {
     TEST_ASSERT_NOT_NULL(def);
     TEST_ASSERT_EQUAL_STRING(
         "write_blif [--vtr] [--lut-k K] [--name-style short|provenance|hash [--name-map <file>]] "
-        "[--prov-map [refs|constructs|full]] [--src-attr] [--edit-tags] [--gates-as-names] <file>: "
+        "[--prov-map [refs|constructs|full]] [--src-attr] [--edit-tags] [--reachable] "
+        "[--gates-as-names] <file>: "
         "write the design as BLIF (the top first); --prov-map (hash names only) writes the version "
         "2 name "
         "map; --vtr writes the top alone "
         "in the dialect VPR reads; hash names write the name map to <file>.names or --name-map; "
         "--src-attr (plain dialect only) writes each cell's HDL locations as `.attr src \"SRC\"`; "
         "--edit-tags (plain dialect only) writes the edit events of each cell as `.attr odin3_edit "
-        "KIND:TAG,...`; --gates-as-names (plain dialect only) writes gate cells as `.names` and "
+        "KIND:TAG,...`; --reachable (plain dialect only) writes only the top and the modules "
+        "reachable from it, with a WARNING per module skipped; --gates-as-names (plain dialect "
+        "only) "
+        "writes gate cells as `.names` and "
         "library state "
         "cells as `.latch`",
         def->help);
@@ -2177,7 +2197,8 @@ static void test_processes_refused_first(void) {
     expect_refused(
         (refusal){"--vtr out.blif", "pass 'write_blif': module 'm' has processes; run proc first"});
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 1,
-                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                false, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        "module 'm' has processes; run proc first");
 }
 
@@ -2207,6 +2228,7 @@ static void test_out_of_memory_sweep(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
@@ -2288,6 +2310,7 @@ static void test_out_of_memory_sweep_renames(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
@@ -2365,6 +2388,7 @@ static odin3_blif_vtr_report vtr_report(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     odin3_blif_vtr_report report = {0};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_blif_vtr_preflight(tc.design, &opts, &report));
@@ -2763,6 +2787,7 @@ static void test_out_of_memory_sweep_gates(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
@@ -3160,6 +3185,7 @@ static void test_out_of_memory_sweep_stubs(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
@@ -3380,6 +3406,7 @@ static void test_out_of_memory_sweep_lut(void) {
                                   NULL,
                                   false,
                                   ODIN3_PROV_MAP_NONE,
+                                  false,
                                   false};
     bool done = false;
     for (long fail_at = 0; fail_at < OOM_SWEEP && !done; fail_at++) {
@@ -3734,7 +3761,8 @@ static void test_src_attr_refused_with_vtr(void) {
                              "write_blif: --src-attr is for the plain dialect; the VTR dialect has "
                              "no .attr lines"});
     expect_api_refused(&(odin3_blif_write_opts){ODIN3_BLIF_DIALECT_VTR, ODIN3_BLIF_NAMES_SHORT, 0,
-                                                true, NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                                true, NULL, false, ODIN3_PROV_MAP_NONE, false,
+                                                false},
                        "odin3_blif_write_with: src_attr applies to the PLAIN dialect only");
 }
 

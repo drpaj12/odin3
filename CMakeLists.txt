@@ -3014,6 +3014,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_scoap
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(scoap_unit PROPERTIES LABELS tools TIMEOUT 600)
+    # write_blif writes the top and what it reaches, not modules nothing instantiates.
+    add_test(NAME write_blif_reach
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_write_blif_reach
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(write_blif_reach PROPERTIES LABELS tools)
     if(EXISTS "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
         set(_scoap_golden "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
         add_test(NAME scoap_gate_small_vtr

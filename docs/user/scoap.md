@@ -24,6 +24,13 @@ odin3: info: scoap: 1 modules, 4 nets, 3 cells, mode comb, 4 sweeps, 0 unreachab
 | `--sigprob V`, `--seed S` | Simulate V random vectors (default seed 1) on the top module and add `p1_ppm`, P(net = 1) in parts per million (-1: the simulator does not list the net). |
 | `--threshold P` | With `--sigprob`: nets with `min(P1, 1-P1)` below P (default 0.01) are listed in `rare`. |
 
+If the simulator refuses the netlist (a loop through a transparent latch, a net with two drivers), `--sigprob`
+is skipped with a WARNING and `p1_ppm` is -1 on every net; the SCOAP values do not need the simulator. A latch
+loop is common: Verilog `always @*` with an incomplete assignment infers a latch whose data input reads its own
+output on the hold path (Yosys builds the same loop). SCOAP takes loops through gates and storage cells as a
+least fixed point; with `--sequential` a latch is a storage cell (Q from D, enable observed like D), and without
+it the latch is cut: Q is an input and D an output.
+
 `INF` is 10^18 (`odin3:scoap_inf`) and means only "unreachable": the net cannot be set to that value,
 or cannot be observed. Finite values saturate at `SAT` = 10^15 (`odin3:scoap_sat`) and stay finite;
 a deep reconvergent circuit gives a saturated value, never `INF`. `odin3:scoap_saturated` and the

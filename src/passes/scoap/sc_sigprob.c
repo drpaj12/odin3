@@ -93,18 +93,11 @@ static odin3_status run_vectors(odin3_sim *sim, sp_ctx *ctx, const sc_opts *opts
     return ODIN3_OK;
 }
 
-odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts *opts,
-                        int32_t **ppm) {
-    odin3_module *mod = odin3_module_get(design, top);
-    uint32_t nets = odin3_module_net_end(mod);
-    odin3_sim *sim = NULL;
+/* Runs the vectors on a built simulator, filling ppm (all -1 on entry). */
+static odin3_status measure(odin3_module *mod, odin3_sim *sim, const sc_opts *opts, int32_t *ppm) {
     odin3_sim_signals *sig = NULL;
-    *ppm = odin3_util_calloc(((size_t)nets + 1) * sizeof(int32_t));
-    odin3_status st = *ppm != NULL ? odin3_sim_build(design, top, &sim) : ODIN3_ERR_NO_MEMORY;
-    st = st == ODIN3_OK ? odin3_sim_signals_create(sim, &sig) : st;
-    for (uint32_t net = 0; *ppm != NULL && net <= nets; net++) {
-        (*ppm)[net] = -1;
-    }
+    uint32_t nets = odin3_module_net_end(mod);
+    odin3_status st = odin3_sim_signals_create(sim, &sig);
     if (st == ODIN3_OK) {
         uint32_t n_sig = odin3_sim_signals_total(sig);
         sp_ctx ctx = {mod, sig, NULL, NULL, 0};
@@ -114,11 +107,41 @@ odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts
         for (uint32_t id = 1; st == ODIN3_OK && id <= n_sig; id++) {
             map_signal(&ctx, id);
         }
-        st = st == ODIN3_OK ? run_vectors(sim, &ctx, opts, *ppm) : st;
+        st = st == ODIN3_OK ? run_vectors(sim, &ctx, opts, ppm) : st;
         odin3_util_free(ctx.refs);
         odin3_util_free(ctx.sig_off);
     }
     odin3_sim_signals_destroy(sig);
+    return st;
+}
+
+odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts *opts,
+                        int32_t **ppm) {
+    odin3_module *mod = odin3_module_get(design, top);
+    uint32_t nets = odin3_module_net_end(mod);
+    odin3_sim *sim = NULL;
+    *ppm = odin3_util_calloc(((size_t)nets + 1) * sizeof(int32_t));
+    if (*ppm == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t net = 0; net <= nets; net++) {
+        (*ppm)[net] = -1;
+    }
+    odin3_status st = odin3_sim_build(design, top, &sim);
+    if (st == ODIN3_ERR_NO_MEMORY) {
+        odin3_util_free(*ppm);
+        *ppm = NULL;
+        return st;
+    }
+    if (st != ODIN3_OK) {
+        /* The simulator refuses the netlist (a loop through a transparent latch, a multiply
+         * driven net, ...): SCOAP itself does not need it, so every net keeps -1 ("not listed"). */
+        odin3_log(ODIN3_LOG_WARN,
+                  "scoap: --sigprob skipped: the simulator cannot run this netlist (see above); "
+                  "p1_ppm is -1 for every net");
+        return ODIN3_OK;
+    }
+    st = measure(mod, sim, opts, *ppm);
     odin3_sim_destroy(sim);
     if (st != ODIN3_OK) {
         odin3_util_free(*ppm);
