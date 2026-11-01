@@ -47,7 +47,9 @@ other than `` `timescale ``.
 
 The simulator is 2-state and cycle-based. The DUT powers on with all state 0 (iverilog starts at
 x), so reset the DUT before printing its outputs. Gate or `#` delays in the DUT are not seen. The
-DUT must have at most one clock input, a primary input of the DUT. Divide by zero gives 0.
+DUT must have at most one clock input, a primary input of the DUT; its registers may be clocked by
+nets derived from it (divided, gated or muxed clocks: `tests/tb/micro/dclk.v`, equal to iverilog), which
+the simulator evaluates after each input change and each edge. Divide by zero gives 0.
 
 Asynchronous resets: `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
 VTR architecture's flip-flop (`.latch`) has no set or reset pin. `sim_tb` runs the lowered netlist, so

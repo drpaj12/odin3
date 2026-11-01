@@ -122,6 +122,15 @@ void odin3_sim_cycle(odin3_sim *sim);
 void odin3_sim_settle(odin3_sim *sim);
 
 /*
+ * A settle that also takes the edges of derived clocks (a net driven by logic or a register that
+ * clocks an edge-triggered cell) that the inputs just set cause, as a gated clock whose enable
+ * changed or a clock mux whose select changed does in a simulator of events: those cells copy
+ * their inputs and the outputs settle again, until no derived clock changes. Without derived
+ * clocks it is odin3_sim_settle. ODIN3_ERR_CHECK, logged, when the derived clocks never settle.
+ */
+odin3_status odin3_sim_settle_events(odin3_sim *sim);
+
+/*
  * One clock edge: event is ODIN3_SIM_POSEDGE or ODIN3_SIM_NEGEDGE. Sets every clock input bit to
  * 1 (POSEDGE) or 0 (NEGEDGE) and leaves the other input bits as they are, sends the event to every
  * edge-triggered cell, then settles. A design with no clock input is not an error: no input

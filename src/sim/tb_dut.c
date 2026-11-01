@@ -185,7 +185,7 @@ static bool publish(tb_ev *ev, tb_dut *dut) {
 
 bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
     if (apply_inputs(ev, dut)) {
-        odin3_sim_settle(dut->sim);
+        (void)odin3_sim_settle_events(dut->sim);
     }
     return publish(ev, dut);
 }

@@ -61,7 +61,7 @@ therefore the same 132,446 flip-flops.
    "not a primary input". The clock check now follows identity cells (`$_BUF_`, one-input identity `$lut`, `$sop` row `1 1`)
    back to the input (the cells stay in the simulation).
 
-## Found, not fixed
+## Found, not fixed (both taken up in 2026-11-01-initloop-derived-clocks.md)
 
 - `proc` and `opt` are quadratic in the length of an `initial` loop that writes a memory held as
   registers (Yosys mem2reg on blocking writes): a 128-word-per-lane RAM took 11.6 s in `proc` and

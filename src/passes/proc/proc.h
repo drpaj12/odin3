@@ -46,6 +46,7 @@ typedef enum odin3_proc_warning {
 typedef struct odin3_proc_opts {
     bool noopt;                 /* --noopt: skip step F */
     odin3_proc_stop stop_after; /* --stop-after; implies noopt */
+    bool share_selects;         /* --share-selects: one select cell per case, not per signal */
 } odin3_proc_opts;
 
 /* Cells counted in odin3_proc_stats.cells. */

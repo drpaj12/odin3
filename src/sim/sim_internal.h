@@ -70,10 +70,12 @@ typedef struct odin3_sim_port {
  * order; in_clock[k] is 1 when input bit k drives the clock pin of an edge-triggered cell (the
  * engine toggles it instead of driving it at random). n_edge: the number of edge-triggered cells,
  * which are order[0 .. n_edge). n_hook_calls counts every simulate hook call (a deterministic
- * work measure for tests). frames / n_frames: one frame per expanded instance, in expansion order
- * (frame 0 is the top); netmap[frames[f].map + net] is the final slot of net `net` of frame f, or
- * ODIN3_SIM_UNSET for a net with none (n_netmap entries in all). They give the signal table
- * (signals.c) its names.
+ * work measure for tests). Derived clocks: n_dclk edge-triggered cells have a clock pin on a net
+ * that is not an input; dclk_cell[k] is the cell, dclk_slot[k] its clock slot, dclk_last[k] the
+ * value of the slot at the last edge evaluation; dclk_mark[cell] is 1 for those cells. frames /
+ * n_frames: one frame per expanded instance, in expansion order (frame 0 is the top);
+ * netmap[frames[f].map + net] is the final slot of net `net` of frame f, or ODIN3_SIM_UNSET for a
+ * net with none (n_netmap entries in all). They give the signal table (signals.c) its names.
  */
 struct odin3_sim {
     odin3_design *design;
@@ -98,6 +100,11 @@ struct odin3_sim {
     uint32_t *out_bits;
     uint32_t n_out_bits;
     uint32_t n_edge;
+    uint32_t n_dclk;
+    uint32_t *dclk_cell;
+    uint32_t *dclk_slot;
+    uint8_t *dclk_last;
+    uint8_t *dclk_mark;
     uint64_t n_hook_calls;
     odin3_sim_frame *frames;
     uint32_t n_frames;

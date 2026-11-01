@@ -534,6 +534,8 @@ static odin3_status parse_opts(odin3_bytes args, odin3_proc_opts *opts) {
          word = odin3_pass_arg_next(&rest)) {
         if (odin3_pass_arg_is(word, "--noopt")) {
             opts->noopt = true;
+        } else if (odin3_pass_arg_is(word, "--share-selects")) {
+            opts->share_selects = true;
         } else if (odin3_pass_arg_is(word, "--stop-after")) {
             opts->stop_after = stop_named(odin3_pass_arg_next(&rest));
             if (opts->stop_after == ODIN3_PROC_STOP_NONE) {
@@ -543,7 +545,8 @@ static odin3_status parse_opts(odin3_bytes args, odin3_proc_opts *opts) {
             }
         } else {
             odin3_log(ODIN3_LOG_ERROR,
-                      "proc: unknown option '%.*s' (options: --noopt, --stop-after <phase>)",
+                      "proc: unknown option '%.*s' (options: --noopt, --share-selects, "
+                      "--stop-after <phase>)",
                       (int)word.len, (const char *)word.ptr);
             return ODIN3_ERR_INVALID_ARG;
         }
@@ -554,12 +557,12 @@ static odin3_status parse_opts(odin3_bytes args, odin3_proc_opts *opts) {
 static odin3_status proc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                   void *user) {
     (void)user;
-    odin3_proc_opts opts = {false, ODIN3_PROC_STOP_NONE};
+    odin3_proc_opts opts = {false, ODIN3_PROC_STOP_NONE, false};
     odin3_status st = parse_opts(args, &opts);
     return st == ODIN3_OK ? odin3_proc_run(ctx, design, &opts, NULL) : st;
 }
 
 const odin3_pass_def odin3_pass_proc = {
-    "proc",        "proc [--noopt] [--stop-after clean|rmdead|prune|arst]",
+    "proc",        "proc [--noopt] [--share-selects] [--stop-after clean|rmdead|prune|arst]",
     proc_pass_run, NULL,
     false,         ODIN3_PASS_PROCESSES_OK};

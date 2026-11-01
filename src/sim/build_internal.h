@@ -76,6 +76,36 @@ void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3
  */
 void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cell, uint32_t slot);
 
+/* A final slot and a count (a number of primary inputs). */
+typedef struct odin3_sim_net_count {
+    uint32_t slot;
+    uint32_t n;
+} odin3_sim_net_count;
+
+/* An edge-triggered cell (index) whose clock pin is on `slot`, which is not a primary input. */
+typedef struct odin3_sim_derived {
+    uint32_t cell;
+    uint32_t slot;
+} odin3_sim_derived;
+
+/*
+ * The clock of flat cell, on net.slot, is derived from net.n primary inputs, none of which
+ * clocks another cell: which of them is the clock is not known.
+ */
+void odin3_sim_err_clock_inputs(const odin3_sim_builder *bld, const odin3_sim_flat *cell,
+                                odin3_sim_net_count net);
+
+/*
+ * build_clock.c: the edge-triggered cells list[0..count) have their clock pins on slots that are
+ * not primary inputs (input_of: per slot, the first input bit on it). Each must be
+ * driven by cells; records them in sim (n_dclk, dclk_*) and flags the one primary input the
+ * clock hangs on when it is not clear from the cells that clock directly. An undriven clock net,
+ * or one that hangs on several unflagged inputs, is an error naming the net.
+ */
+odin3_status odin3_sim_derived_clocks(const odin3_sim_builder *bld, odin3_sim *sim,
+                                      const uint32_t *input_of, const odin3_sim_derived *list,
+                                      uint32_t count);
+
 /* A combinational loop through final slot `slot` (slots renumbered). */
 void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot);
 
