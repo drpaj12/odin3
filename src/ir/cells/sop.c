@@ -118,8 +118,13 @@ enum {
 };
 
 uint32_t odin3_cell_sop_sim_state_bytes(const odin3_celltype_def *def, const odin3_value *params) {
-    bool cached = def->simulate == sop_sim && params[SOP_WIDTH].i >= 1 &&
-                  params[SOP_WIDTH].i <= SOP_TABLE_MAX_WIDTH;
+    if (def->simulate != sop_sim) {
+        return 0;
+    }
+    /* the table is indexed by the cover's inputs: the width parameter must be the same count */
+    assert(params[SOP_COVER].kind == ODIN3_VAL_COVER &&
+           params[SOP_WIDTH].i == (int64_t)params[SOP_COVER].cover_inputs);
+    bool cached = params[SOP_WIDTH].i >= 1 && params[SOP_WIDTH].i <= SOP_TABLE_MAX_WIDTH;
     return cached ? 1U + (uint32_t)SOP_TABLE_BYTES : 0U;
 }
 

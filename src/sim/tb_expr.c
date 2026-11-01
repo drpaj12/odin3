@@ -7,6 +7,8 @@
 #include "sim/tb_internal.h"
 #include "util/alloc.h"
 
+#include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -358,35 +360,63 @@ static const char *plusarg_find(const tb_ev *ev, const char *name, size_t len) {
 
 enum { BASE_BIN = 2, BASE_OCT = 8, BASE_DEC = 10, BASE_HEX = 16, BYTE_BITS = 8 };
 
+/* The numeric base of conversion conv (case-insensitive), or 0 for one that is not numeric. */
 static int plusarg_base(char conv) {
     switch (conv) {
     case 'h':
+    case 'H':
     case 'x':
+    case 'X':
         return BASE_HEX;
     case 'b':
+    case 'B':
         return BASE_BIN;
     case 'o':
+    case 'O':
         return BASE_OCT;
-    default:
+    case 'd':
+    case 'D':
         return BASE_DEC;
+    default:
+        return 0;
     }
 }
 
-/* Parses text as a value in format conversion conv (d, h or x, b, o, s); false when it is not
- * one. A string keeps its first 8 bytes, the first in the most significant byte used. */
+/* True when text is an optional '-' then digits only in base (no space, '+' or 0x/0b prefix). */
+static bool plusarg_digits_ok(const char *text, int base) {
+    const char *digits = text[0] == '-' ? text + 1 : text;
+    if (!isxdigit((unsigned char)digits[0])) {
+        return false;
+    }
+    bool prefixed =
+        digits[0] == '0' && ((base == BASE_HEX && (digits[1] == 'x' || digits[1] == 'X')) ||
+                             (base == BASE_BIN && (digits[1] == 'b' || digits[1] == 'B')));
+    return !prefixed;
+}
+
+/* Parses text as a value in format conversion conv (d, h or x, b, o, s, any case); false when it
+ * is not one. A string keeps its first 8 bytes, the first in the most significant byte used. */
 static bool plusarg_parse(char conv, const char *text, uint64_t *val) {
-    if (conv == 's') {
+    if (conv == 's' || conv == 'S') {
         *val = 0;
         for (size_t i = 0; i < strlen(text) && i < sizeof(uint64_t); i++) {
             *val = (*val << BYTE_BITS) | (uint8_t)text[i];
         }
         return true;
     }
+    int base = plusarg_base(conv);
+    if (base == 0 || !plusarg_digits_ok(text, base)) {
+        return false;
+    }
     char *end = NULL;
     bool neg = text[0] == '-';
-    *val = strtoull(neg ? text + 1 : text, &end, plusarg_base(conv));
-    *val = neg ? (uint64_t)0 - *val : *val;
-    return text[0] != '\0' && *end == '\0';
+    errno = 0;
+    uint64_t mag = strtoull(neg ? text + 1 : text, &end, base);
+    if (errno == ERANGE || *end != '\0') {
+        return false;
+    }
+    *val = neg ? (uint64_t)0 - mag : mag;
+    return true;
 }
 
 /* $value$plusargs("name=%d", var): 1 and var set when a plusarg starts with the text before the

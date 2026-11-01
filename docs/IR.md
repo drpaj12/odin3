@@ -357,6 +357,12 @@ The other attributes keep their order; removing a key and setting it again moves
 the first-set order. The record stays in the table until compact drops it. *(2E Task 3, plan point
 (e): `ffinit` removes an `init` left all x, 2E §10, 2F §9.4; for Peter's review with IR change D.)*
 
+Reserved module attribute: `odin3 flattened away` (`ODIN3_ATTR_FLATTENED_AWAY`, an INT 1 on a module object).
+`flatten` sets it on every module the run leaves uninstantiated (the IR cannot delete modules) and removes it
+from every root of a later run; plain `write_blif` reads it and skips those modules. The RTLIL, JSON and Verilog
+writers never print it (`src/backends/common/attrs.c`, `src/backends/rtlil/writer.c`). Not a user attribute: do
+not set it by hand.
+
 **BLIF cells (used by 1C).** `.names` → `$sop` (bit granularity; *N* inputs, 1 output;
 parameter `COVER`; zero inputs allowed). `.latch` → `$_DFF_P_` (`re`) / `$_DFF_N_` (`fe`) with
 clock, or `$_DLATCH_P_` (`ah`) / `$_DLATCH_N_` (`al`), each with an `INIT` int parameter 0–3

@@ -51,6 +51,30 @@ class WriteBlifReachTest(unittest.TestCase):
         self.assertEqual(models, ["top"])
         self.assertNotIn("not reachable", log)
         self.assertIn("2 modules that flatten left unused not written", log)
+        self.assertIn("deletes them): mid, leaf", log)  # the names, not only the count
+
+    def test_flattened_away_mark_is_internal(self) -> None:
+        # the mark is read by write_blif only; no other writer shows it
+        writers = (("write_rtlil", "il"), ("write_json", "json"), ("write_verilog", "v"))
+        for writer, suffix in writers:
+            with tempfile.TemporaryDirectory() as tmp:
+                src, out = Path(tmp) / "d.v", Path(tmp) / f"o.{suffix}"
+                src.write_text(VERILOG)
+                script = f'read_verilog "{src}"; proc; opt; lower; flatten; {writer} "{out}"'
+                done = subprocess.run(
+                    [str(ODIN3), "--top", "top", "-p", script], capture_output=True, text=True
+                )
+                self.assertEqual(done.returncode, 0, done.stderr)
+                text = out.read_text()
+            self.assertNotIn("flattened away", text, writer)
+            self.assertNotIn("flattened_away", text, writer)
+
+    def test_second_flatten_with_another_top_keeps_the_new_root(self) -> None:
+        # flatten with top `top` marks mid and leaf; after `hierarchy --top mid` a second flatten
+        # keeps mid as a root, so the stale mark must go and mid is written.
+        models, log = run("flatten; hierarchy --top mid; flatten")
+        self.assertEqual(models, ["mid"])
+        self.assertIn("deletes them): top, leaf", log)
 
     def test_default_writes_unreachable_modules_with_one_warning(self) -> None:
         models, log = run("opt")
@@ -125,4 +149,19 @@ class SpecialisedModuleTest(unittest.TestCase):
         self.assertTrue(all("=" not in name for name in models), models)
         subckts = {t for t in re.findall(r"^\.subckt (\S+)", text, re.M) if not t.startswith("$")}
         self.assertEqual(subckts, {m for m in models if m != "top"})
-        self.assertIn("had '=' written as '?'", log)
+        self.assertIn("written as '?'", log)
+        self.assertIn("2 distinct model and .subckt names", log)  # 2 modules, not 4 uses
+
+    def test_black_box_model_and_subckt_names_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "b.v", Path(tmp) / "o.blif"
+            src.write_text("module top(input a, output y); \\bb=x#<> u(.i(a), .o(y)); endmodule\n")
+            script = f'read_verilog --auto-blackbox "{src}"; proc; opt; lower; write_blif "{out}"'
+            done = subprocess.run(
+                [str(ODIN3), "--top", "top", "-p", script], capture_output=True, text=True
+            )
+            self.assertEqual(done.returncode, 0, done.stderr)
+            text = out.read_text()
+        self.assertIn(".subckt bb?x??? i=a o=y", text)
+        self.assertIn(".model bb?x???", text)
+        self.assertNotIn("=x", text.replace("=a", ""))

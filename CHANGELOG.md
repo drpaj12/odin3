@@ -12,14 +12,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   (module attribute `odin3 flattened away`, not printed by the other writers) and plain `write_blif` no longer writes them (Yosys deletes them): the 28
   `.model` blocks after `proc; opt; flatten; opt; lower` were these 27 leftovers, and ABC cannot resolve their
   `.subckt` boxes. Plain `write_blif` writes `?` for `=` in model and `.subckt` type names, as Yosys does, so a
-  hierarchical netlist with specialised modules (`m$P=V`) is readable by ABC. A system function or hierarchical
+  hierarchical netlist with specialised modules (`m$P=V`) is readable by ABC (`#`, `<` and `>` too; the model and
+  the `.subckt` of a black box get the same name). The INFO line names the modules not written. A system function or hierarchical
   reference in a dead generate branch is no longer an error at the module scan (Yosys reads only the branches
-  the parameters select; a live branch still errors), which lets `servile_mux.v` read. 2026-11-01.
-
-### Added
-
-- `sim_tb` and `run_testbenches` take `--plusarg name=value` (repeatable); the testbench subset gains
-  `$test$plusargs` and `$value$plusargs`.
+  the parameters select; a live branch still errors), which lets `servile_mux.v` read. A module that is never
+  elaborated (no instance reaches it) therefore no longer errors on such calls in its generate bodies, as in Yosys.
+  A second `flatten` with another top removes the mark from the modules that are roots then. 2026-11-01.
 
 - Leman Russ III round 6 gaps. `write_blif --reachable` (plain dialect) writes the top and the modules reachable from
   it and skips the rest with a WARNING, as Parmys writes only the top's netlist; without it every module is
@@ -32,6 +30,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   fails the pass), `p1_ppm` is -1 on every net, and the JSON (schema version 3) says `"sigprob_ran": false`,
   `"sigprob_vectors": 0` and `"rare": null`.
   Python `Odin3Error` can be pickled, so a `multiprocessing` pool no longer hangs on one. 2026-11-01.
+
+### Added
+
+- `sim_tb` and `run_testbenches` take `--plusarg name=value` (repeatable); the testbench subset gains
+  `$test$plusargs` and `$value$plusargs` (a value is decimal, hex, binary or octal digits with an optional `-`; no
+  whitespace, `+` or `0x` prefix; a value that overflows 64 bits or an unknown conversion such as `%c` is not found;
+  at most 16 plusargs of 255 bytes). 2026-11-01.
 
 ### Documented
 

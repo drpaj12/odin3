@@ -54,10 +54,15 @@ static bool take_number(odin3_bytes *args, uint64_t *out) {
     return errno == 0 && *end == '\0';
 }
 
-/* Takes the text of a --plusarg; false when it is missing, too long or the 16th has passed. */
+/* Takes the text of a --plusarg; false (after saying why) when it is missing, too long or the
+ * 17th has come. */
 static bool take_plusarg(odin3_bytes *args, tb_args *out) {
-    if (out->n_plusarg >= TB_MAX_PLUSARGS ||
-        !take(args, out->plusarg[out->n_plusarg], TB_PLUSARG_LEN)) {
+    if (out->n_plusarg >= TB_MAX_PLUSARGS) {
+        odin3_log(ODIN3_LOG_ERROR, "at most %d --plusarg options are allowed", TB_MAX_PLUSARGS);
+        return false;
+    }
+    if (!take(args, out->plusarg[out->n_plusarg], TB_PLUSARG_LEN)) {
+        odin3_log(ODIN3_LOG_ERROR, "--plusarg needs a text of 1 to %d bytes", TB_PLUSARG_LEN - 1);
         return false;
     }
     out->plusarg_ptr[out->n_plusarg] = out->plusarg[out->n_plusarg];

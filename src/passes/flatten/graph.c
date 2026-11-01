@@ -599,17 +599,19 @@ odin3_flatten_size odin3_flatten_graph_size(const odin3_flatten_graph *graph, ui
 
 void odin3_flatten_graph_mark_unused(const odin3_flatten_graph *graph) {
     uint32_t key = 0;
-    if (graph->totals.unused == 0 ||
-        odin3_design_intern(graph->design, odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key) !=
-            ODIN3_OK) {
+    if (odin3_design_intern(graph->design, odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key) !=
+        ODIN3_OK) {
         return;
     }
     odin3_value one = odin3_value_int(1);
     for (uint32_t mod = 1; mod < graph->n_mod; mod++) {
+        odin3_module *module = odin3_module_get(graph->design, (odin3_module_id){mod});
+        odin3_objref obj = {ODIN3_OBJ_MODULE, mod};
         if (graph->is_root[mod] == 0) {
-            odin3_module *module = odin3_module_get(graph->design, (odin3_module_id){mod});
-            odin3_objref obj = {ODIN3_OBJ_MODULE, mod};
             (void)odin3_attr_set(module, obj, key, &one);
+        } else if (odin3_attr_get(module, obj, key) != NULL) {
+            /* a mark from an earlier flatten with another top: this run keeps the module */
+            (void)odin3_attr_remove(module, obj, key);
         }
     }
 }

@@ -1,6 +1,7 @@
 /*
  * test_sim_cells.c — simulate hooks of the bit-level cell types, driven through hand-built views.
  */
+#include "ir/cells/cells.h"
 #include "ir/celltype.h"
 #include "ir/ir_internal.h"
 #include "ir/value.h"
@@ -230,6 +231,98 @@ static const seq_case k_seq[] = {
 
 enum { SIM_FLAGS = ODIN3_CT_SEQ_EDGE | ODIN3_CT_SEQ_LEVEL | ODIN3_CT_CLOCK_PIN0 };
 
+/* --- $sop truth-table cache against the row walk ---------------------------------------------- */
+
+enum {
+    COVER_MAX_ROWS = 12,
+    COVER_ROW_MAX = 8,
+    LCG_MUL = 1103515245,
+    LCG_ADD = 12345,
+    LCG_SHIFT = 16
+};
+
+typedef enum cover_kind { COVER_ON, COVER_OFF, COVER_MIXED } cover_kind;
+
+typedef struct cover_shape {
+    uint32_t width, n_rows;
+    cover_kind kind;
+} cover_shape;
+
+static uint32_t lcg_next(uint32_t *seed) {
+    *seed = *seed * (uint32_t)LCG_MUL + (uint32_t)LCG_ADD;
+    return *seed >> LCG_SHIFT;
+}
+
+/* Fills rows with n_rows random rows of width inputs ('0', '1', '-') and an output char of kind. */
+static uint32_t random_cover(char *rows, cover_shape shape, uint32_t *seed) {
+    uint32_t width = shape.width;
+    uint32_t n_rows = shape.n_rows;
+    cover_kind kind = shape.kind;
+    static const char k_lit[] = "01-";
+    uint32_t len = 0;
+    for (uint32_t row = 0; row < n_rows; row++) {
+        for (uint32_t i = 0; i < width; i++) {
+            rows[len++] = k_lit[lcg_next(seed) % 3U];
+        }
+        bool one = kind == COVER_ON || (kind == COVER_MIXED && (lcg_next(seed) & 1U) != 0);
+        rows[len++] = one ? '1' : '0';
+    }
+    return len;
+}
+
+/* Evaluates the $sop on every input combo with the cache (the state the simulator sizes) and with
+ * the row walk (no state): the two must agree bit for bit. */
+static void compare_cache_to_walk(const char *rows, uint32_t len, uint32_t width) {
+    const odin3_value params[2] = {
+        odin3_value_int(width),
+        {ODIN3_VAL_COVER, 0, (const uint8_t *)rows, len, 0, width},
+    };
+    TEST_ASSERT_EQUAL(ODIN3_OK, def_named("$sop")->verify(params));
+    uint32_t bytes = odin3_cell_sop_sim_state_bytes(def_named("$sop"), params);
+    TEST_ASSERT_EQUAL_UINT32(width >= 1 && width <= 6 ? 9U : 0U, bytes);
+    uint8_t state[9] = {0};
+    harness walk;
+    harness cached;
+    setup(&walk, "$sop", params, width);
+    setup(&cached, "$sop", params, width);
+    cached.cell.state = state;
+    cached.cell.n_state = bytes;
+    for (uint32_t combo = 0; combo < (1U << width); combo++) {
+        drive(&walk, combo);
+        drive(&cached, combo);
+        preset_output(&walk, 0);
+        preset_output(&cached, 1);
+        fire(&walk, ODIN3_SIM_COMB);
+        fire(&cached, ODIN3_SIM_COMB);
+        TEST_ASSERT_EQUAL_UINT8(output(&walk), output(&cached));
+    }
+}
+
+static void test_sop_cache_matches_walk(void) {
+    uint32_t seed = 12345;
+    char rows[COVER_MAX_ROWS * COVER_ROW_MAX];
+    for (uint32_t width = 0; width <= 7; width++) {
+        for (uint32_t kind = COVER_ON; kind <= COVER_MIXED; kind++) {
+            for (uint32_t n_rows = 0; n_rows <= COVER_MAX_ROWS; n_rows += 3) {
+                for (uint32_t rep = 0; rep < 8; rep++) {
+                    uint32_t len =
+                        random_cover(rows, (cover_shape){width, n_rows, (cover_kind)kind}, &seed);
+                    compare_cache_to_walk(rows, len, width);
+                }
+            }
+        }
+    }
+}
+
+static void test_sop_cache_zero_inputs_and_constant_rows(void) {
+    compare_cache_to_walk("1", 1, 0);
+    compare_cache_to_walk("0", 1, 0);
+    compare_cache_to_walk("", 0, 0);
+    compare_cache_to_walk("-1", 2, 1);      /* 1 input, always on */
+    compare_cache_to_walk("-0", 2, 1);      /* off-set of everything: constant 0 */
+    compare_cache_to_walk("------1", 7, 6); /* 6 inputs, tautology */
+}
+
 static void test_sequential_flags(void) {
     for (uint32_t i = 0; i < sizeof k_seq / sizeof k_seq[0]; i++) {
         TEST_ASSERT_EQUAL_HEX32_MESSAGE(k_seq[i].flags, def_named(k_seq[i].name)->flags & SIM_FLAGS,
@@ -347,6 +440,8 @@ int main(void) {
     RUN_TEST(test_sop_dont_care);
     RUN_TEST(test_sop_empty_and_zero_input);
     RUN_TEST(test_sop_mixed_rows);
+    RUN_TEST(test_sop_cache_matches_walk);
+    RUN_TEST(test_sop_cache_zero_inputs_and_constant_rows);
     RUN_TEST(test_sequential_flags);
     RUN_TEST(test_init_mapping);
     RUN_TEST(test_flip_flop_edges);
