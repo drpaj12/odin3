@@ -13,8 +13,10 @@
  *   - every mention of it is inside an `always`, and a read follows, in an enclosing begin/end of
  *     the same block, a whole-variable blocking assignment of it (so no value reaches a read from
  *     outside the block, another block or an earlier cycle).
- * Each block that writes one then gets a private IR wire for it, swapped in for the symbol's
- * ir_wire while the block is built, so the blocks drive different nets and there is no conflict.
+ * Each block that writes one (the first included) then gets a private IR wire for it, swapped in
+ * for the symbol's ir_wire while the block is built, so the blocks drive different nets and there
+ * is no conflict. The module-level wire of the symbol stays undriven and unread (it is kept, not
+ * removed; `opt` drops it as dead).
  * The private flip-flops have no reader and `opt` removes them, as in Yosys. Every other case keeps
  * the T10 error. The module walk runs once, and only when the module has a process.
  */
@@ -92,11 +94,13 @@ static odin3_status sc_write(sc_walk *walk, uint32_t sym) {
     uint64_t was = 0;
     (void)odin3_u64map_get(walk->state, sym, &was);
     uint64_t first = was >> SC_SHIFT;
-    if (first == 0) {
+    odin3_status st = ODIN3_OK;
+    if (first == 0) { /* the first writer is listed too: every block gets a private wire */
         was |= (uint64_t)walk->always << SC_SHIFT;
-        return odin3_u64map_put(walk->state, (odin3_kv){sym, was});
+        st = odin3_u64map_put(walk->state, (odin3_kv){sym, was});
+    } else if (first != walk->always) {
+        st = sc_flag(walk, sym, SC_MULTI);
     }
-    odin3_status st = first != walk->always ? sc_flag(walk, sym, SC_MULTI) : ODIN3_OK;
     if (st != ODIN3_OK || sc_listed(walk, sym)) {
         return st;
     }
