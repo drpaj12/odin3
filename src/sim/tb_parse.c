@@ -1352,11 +1352,13 @@ static bool parse_decl(parser *pr) {
     (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
     pr->pos++;
     bool is_int = strcmp(kw, "integer") == 0;
-    var_shape shape = {is_int ? (uint32_t)TB_INT_BITS : 1U, is_int, false};
-    if (accept_kw(pr, "signed")) {
-        shape.sgn = true;
-    }
-    if (is_op(pr, "[") && !parse_range(pr, &shape.width)) {
+    /* A parameter without a range has the type of its value: an unsized one is a 32-bit integer. */
+    bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
+    bool is_signed = accept_kw(pr, "signed");
+    bool is_ranged = is_op(pr, "[");
+    bool wide = is_int || (is_param && !is_ranged);
+    var_shape shape = {wide ? (uint32_t)TB_INT_BITS : 1U, wide || is_signed, false};
+    if (is_ranged && !parse_range(pr, &shape.width)) {
         return false;
     }
     do {

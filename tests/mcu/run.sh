@@ -12,12 +12,13 @@ command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "SKIP: no 
 d=$work/${prog%.vmh}${bits:+_m$bits}
 files=$("$here/prepare.sh" "$up" "$d" "$prog" $bits | tail -1) || exit 2
 cd "$d" || exit 2
-iverilog -g2005 -P mcu_tb.CYCLES="$cycles" -o ref.vvp mcu_tb.v $files || exit 2
+sed -i "s/parameter CYCLES = [0-9]*/parameter CYCLES = $cycles/" mcu_tb.v iv/mcu_tb.v
+(cd iv && iverilog -g2005 -o ../ref.vvp mcu_tb.v $files) || exit 2
 timed() { # label, outfile, command...
     label=$1; out=$2; shift 2
     /usr/bin/time -f "%e s %M KB" -o "$out.time" "$@" >"$out.log" 2>&1 || { echo "$label: ERROR"; tail -3 "$out.log"; return 2; }
 }
-timed iverilog ref vvp ref.vvp && grep '^[0-9]' ref.log >ref.txt
+timed iverilog ref sh -c "cd iv && vvp ../ref.vvp" && grep '^[0-9]' ref.log >ref.txt
 echo "iverilog: $(cat ref.time)"
 status=0
 run_odin() { # label, script, optional second script (a fresh run reading what the first wrote)

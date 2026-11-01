@@ -566,7 +566,7 @@ static void test_readmemh(void) {
 }
 
 /* The file name is any constant string: a string parameter, a localparam, a concatenation of
- * string constants (Yosys simplifies the argument to a constant; NULs from a wider operand drop). */
+ * string constants (Yosys simplifies the argument to a constant; NULs of a wider operand drop). */
 static void test_readmemh_string_parameter(void) {
     read_with_file("sub/init.hex", "module t #(parameter FILE = \"init.hex\") (input [1:0] ra,\n"
                                    "  output [7:0] q);\n"
