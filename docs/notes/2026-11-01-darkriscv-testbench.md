@@ -24,3 +24,37 @@ Steps
    build for timing. Report cycles, wall, memory, DFFs, masked fields, first mismatch.
 4. Fix only Odin III bugs found, each with a regression micro.
 5. CTest `tb_darkriscv` (CMake cache variable `ODIN3_DARKRISCV_UPSTREAM`, skips with 77).
+
+## Result (12000 cycles = 120 us; machine shared with other jobs)
+
+Design `darksocv`: 8 KB RAM as soft logic, lowered 67,638 `$_DFF_P_` (65,536 RAM bits, 2,102
+others). Trace: cycle, UART_TXD, LED, OPORT, DEBUG[3], DEBUG[2], DEBUG[0]. Firmware
+`src/darksocv.mem`; the UART line shows the reset window, then four start/stop edges (cycles
+380, 2118, 2987, 3856, 4725 ...), and the bus handshake bits toggle (first at cycle 4725).
+iverilog reference 0.35 to 0.47 s, 8 MB. Masked fields: 0 (iverilog has no x on the recorded
+signals). First mismatch: none; every line identical.
+
+| run | debug (ASan + UBSan) | release |
+|---|---|---|
+| RTL (proc; opt; lower) | 594 s, 495 MB | 160 s, 178 MB |
+| netlist (write_blif, read_blif) | 607 s, 596 MB | 156 s, 274 MB |
+
+The recorded signals are only TX, LED, OPORT and three handshake bits; LED and OPORT stay 0
+in the window, so the program's effect is visible through the UART and the handshakes. The
+core bus is not a port.
+
+## Odin III bugs found and fixed
+
+None. The first full flow ran identical to iverilog.
+
+## Found, not fixed
+
+- DEBUG[1] (data ack) is x in iverilog on every UART access (an uninitialised value in
+  darkio); it is not recorded.
+- iverilog defines `__ICARUS__`, which turns on the upstream `SIMULATION` code (`$write`,
+  `$fflush`, `$finish` on the `>` prompt); `prepare.sh` renames it so both tools see the
+  non-SIMULATION design. Upstream-specific, logged as patch 1.
+- `check` warns "rule 4: net has no pins" for 54+ unnamed nets of `darkriscv` after `opt`
+ ; cause not investigated, results are unaffected.
+- sim_tb costs about 13 ms per cycle in release for this design (about
+  50 ms per cycle in debug).

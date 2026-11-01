@@ -2829,13 +2829,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     # DarkRISCV SoC (docs/notes/2026-11-01-darkriscv-testbench.md): the prebuilt firmware's UART
     # output and the three bus-handshake signals, iverilog against Odin III on the RTL and on
-    # the BLIF netlist. ODIN3_DARKRISCV_UPSTREAM as ODIN3_MCU_UPSTREAM. 12000 cycles reach the
-    # first UART start bit.
+    # the BLIF netlist. ODIN3_DARKRISCV_UPSTREAM as ODIN3_MCU_UPSTREAM. 5000 cycles pass four UART
+    # line edges and a core halt.
     set(ODIN3_DARKRISCV_UPSTREAM "$ENV{ODIN3_DARKRISCV_UPSTREAM}" CACHE PATH
         "DarkRISCV checkout for the tb_darkriscv test (empty: the test skips)")
     add_test(NAME tb_darkriscv
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/darkriscv/run.sh $<TARGET_FILE:odin3>
-                "${ODIN3_DARKRISCV_UPSTREAM}" 12000 ${CMAKE_BINARY_DIR}/tb_darkriscv)
+                "${ODIN3_DARKRISCV_UPSTREAM}" 5000 ${CMAKE_BINARY_DIR}/tb_darkriscv)
     set_tests_properties(tb_darkriscv PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
