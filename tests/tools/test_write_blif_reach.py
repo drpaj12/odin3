@@ -1,7 +1,7 @@
 """write_blif --reachable writes the top and the modules reachable from it, not modules nothing
 instantiates (Parmys writes only the top's netlist; Yosys's write_blif and the default here write
-every module). The skipped module stays in the design and a WARNING names it. Run through CTest `write_blif_reach`
-(ODIN3_BIN set); skipped without it.
+every module). The skipped module stays in the design and a WARNING names it. Run through CTest
+`write_blif_reach` (ODIN3_BIN set); skipped without it.
 """
 
 from __future__ import annotations
@@ -27,7 +27,9 @@ def run(script_body: str, flags: str = "") -> tuple[list[str], str]:
     with tempfile.TemporaryDirectory() as tmp:
         src, out = Path(tmp) / "d.v", Path(tmp) / "o.blif"
         src.write_text(VERILOG)
-        script = f'read_verilog "{src}"; proc; opt; lower; {script_body}; write_blif {flags} "{out}"'
+        script = (
+            f'read_verilog "{src}"; proc; opt; lower; {script_body}; write_blif {flags} "{out}"'
+        )
         done = subprocess.run(
             [str(ODIN3), "--top", "top", "-p", script], capture_output=True, text=True
         )

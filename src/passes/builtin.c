@@ -390,6 +390,30 @@ static bool wb_is_option(odin3_bytes word) {
     return word.len > 2 && memcmp(word.ptr, "--", 2) == 0;
 }
 
+/* The refusal for a plain-dialect-only option given with --vtr, NULL when there is none. */
+static const char *wb_plain_only_refusal(uint16_t seen) {
+    static const struct {
+        uint16_t bit;
+        const char *why;
+    } PLAIN_ONLY[] = {
+        {WB_SRC_ATTR,
+         "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines"},
+        {WB_EDIT_TAGS,
+         "write_blif: --edit-tags is for the plain dialect; the VTR dialect has no .attr lines"},
+        {WB_REACHABLE,
+         "write_blif: --reachable is for the plain dialect; --vtr writes the top alone"},
+        {WB_GATES_AS_NAMES, "write_blif: --gates-as-names is for the plain dialect"}};
+    if ((seen & WB_VTR) == 0) {
+        return NULL;
+    }
+    for (size_t k = 0; k < sizeof PLAIN_ONLY / sizeof PLAIN_ONLY[0]; k++) {
+        if ((seen & PLAIN_ONLY[k].bit) != 0) {
+            return PLAIN_ONLY[k].why;
+        }
+    }
+    return NULL;
+}
+
 /* The options that go together: --lut-k and --name-style need --vtr, --name-map needs hash names,
  * --src-attr is for the plain dialect. Logged, ODIN3_ERR_INVALID_ARG. */
 static odin3_status wb_check_options(const write_blif_args *out) {
@@ -400,15 +424,8 @@ static odin3_status wb_check_options(const write_blif_args *out) {
         why = "write_blif: --name-map needs --name-style hash";
     } else if ((out->seen & WB_PROV_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
         why = "write_blif: --prov-map needs --name-style hash";
-    } else if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
-        why = "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines";
-    } else if ((out->seen & WB_EDIT_TAGS) != 0 && (out->seen & WB_VTR) != 0) {
-        why =
-            "write_blif: --edit-tags is for the plain dialect; the VTR dialect has no .attr lines";
-    } else if ((out->seen & WB_REACHABLE) != 0 && (out->seen & WB_VTR) != 0) {
-        why = "write_blif: --reachable is for the plain dialect; --vtr writes the top alone";
-    } else if ((out->seen & WB_GATES_AS_NAMES) != 0 && (out->seen & WB_VTR) != 0) {
-        why = "write_blif: --gates-as-names is for the plain dialect";
+    } else {
+        why = wb_plain_only_refusal(out->seen);
     }
     if (why != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s", why);
