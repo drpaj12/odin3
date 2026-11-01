@@ -100,9 +100,15 @@ class Odin3Error(RuntimeError):
         super().__init__(f"{function}: {name}")
         self.function = function
         self.status = status
+        self.status_name = name
         # set by Node.set_cover / set_param_int when the old node was replaced and a later step
         # failed: the twin node (otherwise None)
         self.twin: Any = None
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        """Pickle by the constructor arguments (the base class would replay args=(message,),
+        which this three-argument constructor rejects); the twin node is not carried across."""
+        return (type(self), (self.function, self.status, self.status_name))
 
 
 class LogRecord(NamedTuple):
