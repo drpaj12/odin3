@@ -20,6 +20,10 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `"sigprob_vectors": 0` and `"rare": null`.
   Python `Odin3Error` can be pickled, so a `multiprocessing` pool no longer hangs on one. 2026-11-01.
 
+### Documented
+
+- `opt` latch fold. A latch whose D is constant (read in as `.latch` with a constant data net) is treated as an asynchronous load of that constant (Yosys `opt_dff`): with INIT unknown (2 or 3, the default) `opt` folds it to the constant (D = 1, INIT 3 gives constant 1), with INIT 0 or 1 it stays a latch. `-keepdc` keeps the latch when INIT is unknown (verified: `opt -keepdc` leaves `.latch one q al en 3`); it does not matter for a defined INIT. 2026-11-01.
+
 ### Added
 
 - `$readmemh`/`$readmemb` take any constant string expression as the file name (a string parameter, a

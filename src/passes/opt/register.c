@@ -530,7 +530,8 @@ OPT_DEF(odin3_pass_opt_share, P_SHARE,
 OPT_DEF(odin3_pass_opt_dff, P_DFF,
         "opt_dff [-nodffe] [-nosdff] [-keepdc] [--opt-stats]: simplify flip-flops (constant "
         "controls, enables, "
-        "synchronous resets)");
+        "synchronous resets); a latch with constant D and unknown INIT folds to the constant "
+        "unless -keepdc");
 OPT_DEF(odin3_pass_opt_clean, P_CLEAN,
         "opt_clean [-purge] [--opt-stats]: remove unused cells and wires");
 OPT_DEF(odin3_pass_wreduce, P_WREDUCE,
