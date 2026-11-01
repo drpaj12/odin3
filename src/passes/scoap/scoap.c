@@ -17,7 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { SCHEMA_VERSION = 2, DECIMAL = 10, PPM = 1000000, NUM_BUF = 48, DEFAULT_SEED = 1 };
+enum { SCHEMA_VERSION = 3, DECIMAL = 10, PPM = 1000000, NUM_BUF = 48, DEFAULT_SEED = 1 };
 static const double k_default_threshold = 0.01;
 static const double k_half = 0.5;
 
@@ -362,6 +362,7 @@ typedef struct sc_run {
     bool use_groups;
     odin3_module_id top;
     int32_t *ppm;
+    bool sigprob_ran; /* --sigprob simulated (false: not asked, or skipped) */
     uint64_t nets, cells, unreachable;
     uint32_t sweeps, modules;
 } sc_run;
@@ -430,7 +431,12 @@ static odin3_status put_module(odin3_strbuf *body, sc_run *run, uint32_t id, boo
     st = st == ODIN3_OK ? put_head(body, &md, mname, first) : st;
     st = st == ODIN3_OK ? put_nets(body, &view) : st;
     st = st == ODIN3_OK ? put_lists(body, &view) : st;
-    st = st == ODIN3_OK && view.ppm != NULL ? put_rare(body, &view) : st;
+    if (st == ODIN3_OK && view.ppm != NULL) {
+        /* a skipped --sigprob has no rare list: null, not an empty list */
+        st = run->sigprob_ran
+                 ? put_rare(body, &view)
+                 : odin3_strbuf_append(body, odin3_bytes_cstr(",\n    \"rare\": null"));
+    }
     st = st == ODIN3_OK ? odin3_strbuf_append(body, odin3_bytes_cstr("}")) : st;
     run->nets += live_nets(&md);
     run->unreachable += md.stats.unreachable;
@@ -466,7 +472,7 @@ static odin3_status prepare(sc_run *run, const sc_opts *ob, odin3_design *design
             odin3_log(ODIN3_LOG_ERROR, "scoap: --sigprob needs a top module");
             return ODIN3_ERR_INVALID_ARG;
         }
-        st = sc_sigprob(design, run->top, ob, &run->ppm);
+        st = sc_sigprob(design, run->top, ob, &run->ppm, &run->sigprob_ran);
     }
     return st;
 }
@@ -487,16 +493,17 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     odin3_strbuf_init(&body);
     double start = odin3_now_ms();
     st = st == ODIN3_OK ? prepare(&run, &ob, design) : st;
-    st = st == ODIN3_OK
-             ? odin3_strbuf_appendf(
-                   &body,
-                   "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
-                   "\"inf\": %lld,\n  \"sat\": %lld,\n  \"mode\": \"%s\",\n  \"sigprob_vectors\": "
-                   "%llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
-                   SCHEMA_VERSION, (long long)SCOAP_INF, (long long)SCOAP_SAT,
-                   ob.seq ? "seq" : "comb", (unsigned long long)ob.vectors,
-                   (unsigned long long)ob.seed)
-             : st;
+    st = st == ODIN3_OK ? odin3_strbuf_appendf(
+                              &body,
+                              "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
+                              "\"inf\": %lld,\n  \"sat\": %lld,\n  \"mode\": \"%s\",\n  "
+                              "\"sigprob_ran\": %s,\n  "
+                              "\"sigprob_vectors\": %llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
+                              SCHEMA_VERSION, (long long)SCOAP_INF, (long long)SCOAP_SAT,
+                              ob.seq ? "seq" : "comb", run.sigprob_ran ? "true" : "false",
+                              (unsigned long long)(run.sigprob_ran ? ob.vectors : 0),
+                              (unsigned long long)ob.seed)
+                        : st;
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_design_module_end(design); id++) {
         st = put_module(&body, &run, id, id == 1);
     }

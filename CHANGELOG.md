@@ -10,10 +10,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 - Leman Russ III round 6 gaps. `write_blif --reachable` (plain dialect) writes the top and the modules reachable from
   it and skips the rest with a WARNING, as Parmys writes only the top's netlist; without it every module is
-  written, as before, so multi-model BLIF still round-trips (`flatten` leaves the flattened modules in the
+  written, as before, so multi-model BLIF still round-trips (one WARNING counts the unreachable modules written;
+  `--reachable` with no top is ignored, with a WARNING) (`flatten` leaves the flattened modules in the
   design; `--vtr` already writes the top alone). `scoap --sigprob` no longer fails when
   the simulator refuses the netlist (for example a loop through a transparent latch, as boundtop's inferred
-  latches give): the scoap values are still computed, a WARNING is logged and `p1_ppm` is -1 on every net.
+  latches give) or a net with two drivers: the scoap values are still computed, a WARNING names the refusal
+  (the simulator's own line is downgraded to a WARNING for these two refusals; any other simulator failure still
+  fails the pass), `p1_ppm` is -1 on every net, and the JSON (schema version 3) says `"sigprob_ran": false`,
+  `"sigprob_vectors": 0` and `"rare": null`.
   Python `Odin3Error` can be pickled, so a `multiprocessing` pool no longer hangs on one. 2026-11-01.
 
 ### Added

@@ -157,7 +157,8 @@ static int simulate(const sv_args *args) {
     int rc = SV_FAIL;
     odin3_sim *sim = NULL;
     if (read_design(design, args) == ODIN3_OK &&
-        odin3_sim_build_opts(design, (odin3_module_id){1}, &(odin3_sim_options){args->max_cells},
+        odin3_sim_build_opts(design, (odin3_module_id){1},
+                             &(odin3_sim_options){.max_cells = args->max_cells},
                              &sim) == ODIN3_OK) {
         bool ran = run_cycles(sim, args);
         rc = fflush(stdout) == 0 && ran ? SV_OK : SV_FAIL;

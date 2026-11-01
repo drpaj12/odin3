@@ -658,13 +658,16 @@ class Design:
         seed: int = 1,
         threshold: float = 0.01,
     ) -> dict[str, Any]:
-        """Run the scoap pass and return its JSON (schema odin3-scoap, version 2).
+        """Run the scoap pass and return its JSON (schema odin3-scoap, version 3).
 
         Per module and net: cc0, cc1, co (and sc0, sc1, so with sequential=True; p1_ppm with
         sigprob=<vectors>), keyed by the module-local net id and name; "top" holds the `top`
         hardest-to-control and hardest-to-observe nets, "rare" (with sigprob) the nets whose
-        probability of 1 or 0 is below `threshold`. INF (1000000000) means unreachable. Module
-        summaries are also stored as module attributes odin3:scoap_*. See docs/user/scoap.md.
+        probability of 1 or 0 is below `threshold`. INF (1000000000) means unreachable. With
+        sigprob the top-level "sigprob_ran" says whether the simulation happened: when the
+        simulator refuses the netlist (combinational loop, multiple drivers) the run is skipped
+        with a WARNING, "sigprob_ran" is False, "sigprob_vectors" is 0, p1_ppm is -1 on every net
+        and the top module's "rare" is None. Module summaries are also stored as module attributes odin3:scoap_*. See docs/user/scoap.md.
         """
         import json
         import tempfile

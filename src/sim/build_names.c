@@ -235,7 +235,7 @@ void odin3_sim_err_drivers(const odin3_sim_builder *bld, uint32_t slot) {
     char loc[LOC_MAX];
     name_buf net;
     slot_name(bld, slot, &net, (loc_buf){loc, sizeof loc});
-    odin3_log(ODIN3_LOG_ERROR,
+    odin3_log(bld->soft_refusals ? ODIN3_LOG_WARN : ODIN3_LOG_ERROR,
               "%scannot simulate: net `%s` has more than one driver that is neither an inout pin "
               "nor a tristate output (primary inputs count as drivers)",
               loc, name_str(&net));
@@ -245,8 +245,8 @@ void odin3_sim_err_loop(const odin3_sim_builder *bld, uint32_t slot) {
     char loc[LOC_MAX];
     name_buf net;
     slot_name(bld, slot, &net, (loc_buf){loc, sizeof loc});
-    odin3_log(ODIN3_LOG_ERROR, "%scannot simulate: combinational loop through net `%s`", loc,
-              name_str(&net));
+    odin3_log(bld->soft_refusals ? ODIN3_LOG_WARN : ODIN3_LOG_ERROR,
+              "%scannot simulate: combinational loop through net `%s`", loc, name_str(&net));
 }
 
 void odin3_sim_err_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,

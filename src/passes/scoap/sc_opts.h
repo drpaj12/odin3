@@ -18,8 +18,11 @@ typedef struct sc_opts {
 } sc_opts;
 
 /* P(net = 1) in parts per million per net of module top (-1: not simulated), from opts->vectors
- * random vectors of the simulator. *ppm gets net_end entries, caller frees (odin3_util_free). */
+ * random vectors of the simulator. *ppm gets net_end entries, caller frees (odin3_util_free).
+ * The simulator's refusals of a combinational loop or a multiply driven net are not fatal: the run
+ * is skipped with a WARNING, every ppm stays -1 and *ran is false. Any other failure (budget,
+ * unsupported cell, clock, invalid argument, memory) is returned as the status. */
 odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts *opts,
-                        int32_t **ppm);
+                        int32_t **ppm, bool *ran);
 
 #endif

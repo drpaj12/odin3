@@ -576,7 +576,7 @@ static uint32_t cell_drivers(const odin3_sim_flat *flat, uint8_t *count) {
  * Rejects a slot with two ordinary drivers: outputs of non-tristate cells and primary inputs
  * (inout pins and tristate outputs form buses, which the IR allows to share a net).
  */
-static odin3_status check_drivers(const odin3_sim_builder *bld, const odin3_sim *sim) {
+static odin3_status check_drivers(odin3_sim_builder *bld, const odin3_sim *sim) {
     uint8_t *count = odin3_util_calloc(sim->n_values);
     if (count == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -590,6 +590,7 @@ static odin3_status check_drivers(const odin3_sim_builder *bld, const odin3_sim 
     }
     odin3_util_free(count);
     if (clash != ODIN3_SIM_UNSET) {
+        bld->refusal = ODIN3_SIM_REFUSAL_DRIVERS;
         odin3_sim_err_drivers(bld, clash);
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -620,6 +621,7 @@ static odin3_status run(odin3_sim_builder *bld, odin3_module_id top, odin3_sim *
     uint32_t loop_slot = 0;
     st = odin3_sim_levelize(sim, &loop_slot);
     if (st == ODIN3_ERR_INVALID_ARG) {
+        bld->refusal = ODIN3_SIM_REFUSAL_LOOP;
         odin3_sim_err_loop(bld, loop_slot);
     }
     if (st == ODIN3_OK) {
@@ -678,8 +680,12 @@ odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
         opts != NULL && opts->max_cells != 0 ? opts->max_cells : ODIN3_SIM_DEFAULT_MAX_CELLS;
     bld.max_units = max_cells;
     bld.max_bits = (uint64_t)max_cells * ODIN3_SIM_BITS_PER_CELL;
+    bld.soft_refusals = opts != NULL && opts->soft_refusals;
     odin3_sim *sim = odin3_util_calloc(sizeof *sim);
     odin3_status st = sim == NULL ? ODIN3_ERR_NO_MEMORY : run(&bld, top, sim);
+    if (opts != NULL && opts->refusal != NULL) {
+        *opts->refusal = bld.refusal;
+    }
     builder_free(&bld);
     if (st != ODIN3_OK) {
         odin3_sim_destroy(sim);

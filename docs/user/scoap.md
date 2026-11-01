@@ -18,14 +18,18 @@ odin3: info: scoap: 1 modules, 4 nets, 3 cells, mode comb, 4 sweeps, 0 unreachab
 | Option | Meaning |
 | --- | --- |
 | `--sequential` | Also SC0, SC1, SO, and flip-flops by the sequential rules (default: scan view, a flip-flop output is an input and its data pin an output). |
-| `--out FILE` | The JSON (schema `odin3-scoap`, version 2): per module `nets` (`id`, `name`, `cc0`, `cc1`, `co`, ...), `top`, `rare`. |
+| `--out FILE` | The JSON (schema `odin3-scoap`, version 3): per module `nets` (`id`, `name`, `cc0`, `cc1`, `co`, ...), `top`, `rare`. |
 | `--top N` | The N hardest-to-control (largest `max(CC0,CC1)`) and hardest-to-observe (largest `CO`) nets per module. |
 | `--focus F` | Report only the nets of a write_dot focus (`cone(NET)`, instance path); values are still computed on the whole module. |
 | `--sigprob V`, `--seed S` | Simulate V random vectors (default seed 1) on the top module and add `p1_ppm`, P(net = 1) in parts per million (-1: the simulator does not list the net). |
 | `--threshold P` | With `--sigprob`: nets with `min(P1, 1-P1)` below P (default 0.01) are listed in `rare`. |
 
-If the simulator refuses the netlist (a loop through a transparent latch, a net with two drivers), `--sigprob`
-is skipped with a WARNING and `p1_ppm` is -1 on every net; the SCOAP values do not need the simulator. A latch
+If the simulator refuses the netlist because of a combinational loop (for example through a transparent latch)
+or a net with two drivers, `--sigprob` is skipped with a WARNING that names the refusal; the SCOAP values do
+not need the simulator. The JSON says so: top level `"sigprob_ran": false`, `"sigprob_vectors": 0`, `p1_ppm`
+is -1 on every net and the top module's `"rare"` is `null`. Test `sigprob_ran` before reading `p1_ppm` or
+`rare`. Any other simulator failure (`max_cells` budget, an unsupported cell, a clock that is not a primary
+input) fails the pass. A latch
 loop is common: Verilog `always @*` with an incomplete assignment infers a latch whose data input reads its own
 output on the hold path (Yosys builds the same loop). SCOAP takes loops through gates and storage cells as a
 least fixed point; with `--sequential` a latch is a storage cell (Q from D, enable observed like D), and without

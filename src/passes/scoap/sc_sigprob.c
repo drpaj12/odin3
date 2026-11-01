@@ -120,10 +120,13 @@ static odin3_status measure(odin3_module *mod, odin3_sim *sim, const sc_opts *op
 }
 
 odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts *opts,
-                        int32_t **ppm) {
+                        int32_t **ppm, bool *ran) {
     odin3_module *mod = odin3_module_get(design, top);
     uint32_t nets = odin3_module_net_end(mod);
     odin3_sim *sim = NULL;
+    odin3_sim_refusal why = ODIN3_SIM_REFUSAL_OTHER;
+    odin3_sim_options sim_opts = {.soft_refusals = true, .refusal = &why};
+    *ran = false;
     *ppm = odin3_util_calloc(((size_t)nets + 1) * sizeof(int32_t));
     if (*ppm == NULL) {
         return ODIN3_ERR_NO_MEMORY;
@@ -131,22 +134,20 @@ odin3_status sc_sigprob(odin3_design *design, odin3_module_id top, const sc_opts
     for (uint32_t net = 0; net <= nets; net++) {
         (*ppm)[net] = -1;
     }
-    odin3_status st = odin3_sim_build(design, top, &sim);
-    if (st == ODIN3_ERR_NO_MEMORY) {
-        odin3_util_free(*ppm);
-        *ppm = NULL;
-        return st;
-    }
-    if (st != ODIN3_OK) {
-        /* The simulator refuses the netlist (a loop through a transparent latch, a multiply
-         * driven net, ...): SCOAP itself does not need it, so every net keeps -1 ("not listed"). */
+    odin3_status st = odin3_sim_build_opts(design, top, &sim_opts, &sim);
+    if (st == ODIN3_ERR_INVALID_ARG && why != ODIN3_SIM_REFUSAL_OTHER) {
+        /* SCOAP itself does not need the simulator: every net keeps -1 ("not listed"). */
         odin3_log(ODIN3_LOG_WARN,
-                  "scoap: --sigprob skipped: the simulator cannot run this netlist (see above); "
-                  "p1_ppm is -1 for every net");
+                  "scoap: --sigprob skipped: the simulator refused the netlist (%s; the warning "
+                  "above is not fatal); sigprob_ran is false and p1_ppm is -1 for every net",
+                  why == ODIN3_SIM_REFUSAL_LOOP ? "combinational loop" : "multiple drivers");
         return ODIN3_OK;
     }
-    st = measure(mod, sim, opts, *ppm);
-    odin3_sim_destroy(sim);
+    if (st == ODIN3_OK) {
+        st = measure(mod, sim, opts, *ppm);
+        odin3_sim_destroy(sim);
+        *ran = st == ODIN3_OK;
+    }
     if (st != ODIN3_OK) {
         odin3_util_free(*ppm);
         *ppm = NULL;
