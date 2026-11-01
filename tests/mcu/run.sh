@@ -28,8 +28,8 @@ run_odin() { # label, script, optional second script (a fresh run reading what t
     fi
     timed "$1" "$1.txt" "$odin3" --top single_cycle_BRAM_top -p "$2; sim_tb --out $1.txt mcu_tb.v" || { status=1; return; }
     printf '%s: %s; ' "$1" "$(cat "$1.txt.time")"
-    python3 "$here/compare.py" ref.txt "$1.txt" | tr '\n' ' '; echo
-    python3 "$here/compare.py" ref.txt "$1.txt" >/dev/null || status=1
+    python3 "$here/compare.py" ref.txt "$1.txt" "$cycles" | tr '\n' ' '; echo
+    python3 "$here/compare.py" ref.txt "$1.txt" "$cycles" >/dev/null || status=1
 }
 run_odin rtl "read_verilog $files; proc; opt; lower"
 run_odin netlist "read_verilog $files; proc; opt; lower; write_blif nl.blif" "read_blif nl.blif"

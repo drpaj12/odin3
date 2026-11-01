@@ -1,20 +1,24 @@
-"""compare.py REF OUT: line-by-line compare of two port traces (iverilog reference, Odin III).
+"""compare.py REF OUT [CYCLES]: line-by-line compare of two port traces (iverilog reference, Odin III).
 
 A reference field with an x or z digit (iverilog starts at x, Odin III at 0) matches any value of
-the other side. Prints the number of lines, the number of masked fields and the first mismatch.
-Exit status: 0 identical, 1 mismatch, 2 usage or read error.
+the other side, but only on lines of cycle < MASK_CYCLES (the reset window of mcu_tb.v: reset is
+released at 52 ns, the fifth falling clock edge). A masked field on a later line is a mismatch.
+Prints the number of lines, the number of masked fields and the first mismatch.
+CYCLES, when given, is the number of lines expected; fewer compared lines is an error.
+Exit status: 0 identical, 1 mismatch, 2 usage or read error, no line compared or too few.
 """
 import sys
 from pathlib import Path
 
-USAGE_ARGS = 3
+USAGE_ARGS = (3, 4)
+MASK_CYCLES = 8
 
 
-def field_matches(ref: str, out: str) -> bool:
-    """True when out equals ref, a digit of ref that is x or z matching any digit of out."""
+def field_matches(ref: str, out: str, allow_x: bool = True) -> bool:
+    """True when out equals ref; with allow_x a digit of ref that is x or z matches any digit of out."""
     if len(ref) != len(out):
         return False
-    return all(r == o or r in "xXzZ" for r, o in zip(ref, out, strict=True))
+    return all(r == o or (allow_x and r in "xXzZ") for r, o in zip(ref, out, strict=True))
 
 
 def compare(ref_lines: list[str], out_lines: list[str]) -> tuple[int, int, str | None]:
@@ -24,8 +28,9 @@ def compare(ref_lines: list[str], out_lines: list[str]) -> tuple[int, int, str |
         ref_fields, out_fields = ref.split(), out.split()
         if len(ref_fields) != len(out_fields):
             return n, masked, f"line {n}: field counts differ\n  ref: {ref}\n  out: {out}"
+        in_reset = ref_fields[0].isdigit() and int(ref_fields[0]) < MASK_CYCLES
         for i, (r, o) in enumerate(zip(ref_fields, out_fields, strict=True)):
-            if r != o and not field_matches(r, o):
+            if r != o and not field_matches(r, o, in_reset):
                 return n, masked, f"line {n} field {i}: ref {r} vs out {o}\n  ref: {ref}\n  out: {out}"
             masked += 1 if r != o else 0
     if len(ref_lines) != len(out_lines):
@@ -39,15 +44,19 @@ def trace(path: str) -> list[str]:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != USAGE_ARGS:
+    if len(argv) not in USAGE_ARGS:
         print(__doc__, file=sys.stderr)
         return 2
     try:
         lines, masked, report = compare(trace(argv[1]), trace(argv[2]))
-    except OSError as err:
+        expected = int(argv[3]) if len(argv) == USAGE_ARGS[1] else 1
+    except (OSError, ValueError) as err:
         print(f"compare.py: {err}", file=sys.stderr)
         return 2
     print(f"{lines} lines compared, {masked} x-masked fields")
+    if lines < max(expected, 1):
+        print(f"compare.py: {lines} lines compared, {expected} expected", file=sys.stderr)
+        return 2
     if report is not None:
         print(f"first mismatch: {report}")
         return 1
