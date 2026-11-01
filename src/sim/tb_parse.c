@@ -1312,6 +1312,22 @@ static bool add_assign(parser *pr, int var, tb_expr *rhs) {
     return true;
 }
 
+/* A string-valued parameter is 8 bits per character, first character in the high byte. */
+static bool string_param(parser *pr, tb_var *dst, const tb_expr *init) {
+    size_t len = strlen(init->str);
+    if (len > TB_MAX_WIDTH / CHAR_BITS) {
+        return fail(pr, "string parameter longer than 8 characters");
+    }
+    dst->width = len == 0 ? (uint32_t)CHAR_BITS : (uint32_t)(len * CHAR_BITS);
+    dst->sgn = false;
+    uint64_t val = 0;
+    for (size_t i = 0; i < len; i++) {
+        val = (val << CHAR_BITS) | (uint8_t)init->str[i];
+    }
+    dst->val = val;
+    return true;
+}
+
 static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
     if (cur(pr)->kind != TK_ID) {
@@ -1340,10 +1356,19 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     if (shape.is_wire) {
         return add_assign(pr, var, init);
     }
+    tb_var *dst = &pr->tb->vars[var];
+    if (is_param && shape.width == 0U) {
+        /* No range: the parameter takes the width and signedness of its value (Verilog-2005 4.10.1). */
+        if (init->kind == E_STR) {
+            return string_param(pr, dst, init);
+        }
+        dst->width = init->width;
+        dst->sgn = shape.sgn ? true : init->sgn;
+    }
     if (!tb_const(pr->tb, init, &val)) {
         return fail(pr, "non-constant initialiser");
     }
-    pr->tb->vars[var].val = (uint64_t)val & tb_mask(shape.width);
+    dst->val = (uint64_t)val & tb_mask(dst->width);
     return true;
 }
 
@@ -1352,12 +1377,13 @@ static bool parse_decl(parser *pr) {
     (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
     pr->pos++;
     bool is_int = strcmp(kw, "integer") == 0;
-    /* A parameter without a range has the type of its value: an unsized one is a 32-bit integer. */
+    /* A parameter without a range has the type of its value (width 0 here, set from the initialiser). */
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
     bool is_signed = accept_kw(pr, "signed");
     bool is_ranged = is_op(pr, "[");
     bool wide = is_int || (is_param && !is_ranged);
-    var_shape shape = {wide ? (uint32_t)TB_INT_BITS : 1U, wide || is_signed, false};
+    uint32_t base = is_param && !is_ranged ? 0U : (wide ? (uint32_t)TB_INT_BITS : 1U);
+    var_shape shape = {base, (wide && !is_param) || is_signed, false};
     if (is_ranged && !parse_range(pr, &shape.width)) {
         return false;
     }
