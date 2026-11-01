@@ -674,7 +674,8 @@ class Design:
         sigprob the top-level "sigprob_ran" says whether the simulation happened: when the
         simulator refuses the netlist (combinational loop, multiple drivers) the run is skipped
         with a WARNING, "sigprob_ran" is False, "sigprob_vectors" is 0, p1_ppm is -1 on every net
-        and the top module's "rare" is None. Module summaries are also stored as module attributes odin3:scoap_*. See docs/user/scoap.md.
+        and the top module's "rare" is None. Module summaries are also stored as module
+        attributes odin3:scoap_*. See docs/user/scoap.md.
         """
         import json
         import tempfile

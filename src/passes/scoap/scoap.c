@@ -477,6 +477,17 @@ static odin3_status prepare(sc_run *run, const sc_opts *ob, odin3_design *design
     return st;
 }
 
+static odin3_status put_header(odin3_strbuf *body, const sc_run *run, const sc_opts *ob) {
+    return odin3_strbuf_appendf(
+        body,
+        "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
+        "\"inf\": %lld,\n  \"sat\": %lld,\n  \"mode\": \"%s\",\n  \"sigprob_ran\": %s,\n  "
+        "\"sigprob_vectors\": %llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
+        SCHEMA_VERSION, (long long)SCOAP_INF, (long long)SCOAP_SAT, ob->seq ? "seq" : "comb",
+        run->sigprob_ran ? "true" : "false",
+        (unsigned long long)(run->sigprob_ran ? ob->vectors : 0), (unsigned long long)ob->seed);
+}
+
 static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                               void *user) {
     (void)ctx;
@@ -493,17 +504,7 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     odin3_strbuf_init(&body);
     double start = odin3_now_ms();
     st = st == ODIN3_OK ? prepare(&run, &ob, design) : st;
-    st = st == ODIN3_OK ? odin3_strbuf_appendf(
-                              &body,
-                              "{\n  \"schema\": \"odin3-scoap\",\n  \"version\": %d,\n  "
-                              "\"inf\": %lld,\n  \"sat\": %lld,\n  \"mode\": \"%s\",\n  "
-                              "\"sigprob_ran\": %s,\n  "
-                              "\"sigprob_vectors\": %llu,\n  \"seed\": %llu,\n  \"modules\": [\n",
-                              SCHEMA_VERSION, (long long)SCOAP_INF, (long long)SCOAP_SAT,
-                              ob.seq ? "seq" : "comb", run.sigprob_ran ? "true" : "false",
-                              (unsigned long long)(run.sigprob_ran ? ob.vectors : 0),
-                              (unsigned long long)ob.seed)
-                        : st;
+    st = st == ODIN3_OK ? put_header(&body, &run, &ob) : st;
     for (uint32_t id = 1; st == ODIN3_OK && id < odin3_design_module_end(design); id++) {
         st = put_module(&body, &run, id, id == 1);
     }
