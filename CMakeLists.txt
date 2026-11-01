@@ -459,6 +459,7 @@ add_library(odin3_core OBJECT
     src/techlib/fnsim_eval.c
     src/techlib/libcells.c
     src/sim/build.c
+    src/sim/build_clock.c
     src/sim/build_hier.c
     src/sim/build_names.c
     src/sim/eval.c
@@ -2831,6 +2832,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
                 "${_mcu_upstream}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu)
     set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
+    # The same with the RAM zero-filled by an `initial` loop (128 words per lane: registers) and
+    # `proc --share-selects`; the timer's derived clock is the unpatched one in both.
+    add_test(NAME tb_mcu_zero_fill
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
+                "${_mcu_upstream}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu_zero_fill 9)
+    set_tests_properties(tb_mcu_zero_fill PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     # blink_interrupt reaches 138 distinct PC values after reset by cycle 500 and no more up to 6000
     # (a delay loop), PORTB stays 0 and PORTD changes once. blink (393 PCs, PORTB and PORTD change)
     # and interrupt (163 PCs, PORTB changes) are added at 2000 cycles for the rest of the program.

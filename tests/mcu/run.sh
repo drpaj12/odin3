@@ -34,6 +34,7 @@ run_odin() { # label, script, optional second script (a fresh run reading what t
     python3 "$here/compare.py" ref.txt "$1.txt" "$cycles" | tr '\n' ' '; echo
     python3 "$here/compare.py" ref.txt "$1.txt" "$cycles" >/dev/null || status=1
 }
-run_odin rtl "read_verilog $files; proc; opt; lower"
-run_odin netlist "read_verilog $files; proc; opt; lower; write_blif nl.blif" "read_blif nl.blif"
+share=${bits:+ --share-selects}
+run_odin rtl "read_verilog $files; proc$share; opt; lower"
+run_odin netlist "read_verilog $files; proc$share; opt; lower; write_blif nl.blif" "read_blif nl.blif"
 exit $status

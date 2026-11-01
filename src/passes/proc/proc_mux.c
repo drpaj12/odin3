@@ -84,6 +84,9 @@ typedef struct mx_walk {
     odin3_vec parents;  /* odin3_prov_id: a switch's record's parents */
     odin3_vec fstack;   /* uint32_t triples: the full_case walk */
     odin3_u64map *full; /* switch << 32 | snippet -> MX_FULL_NO / MX_FULL_YES */
+    odin3_u64map *sels; /* case index + 1 -> the select bit its first snippet made
+                           (--share-selects), else how many snippets made the select again */
+    bool hinted;        /* the --share-selects hint was logged */
 } mx_walk;
 
 static uint64_t pair_key(uint32_t hi, uint32_t lo) {
@@ -477,8 +480,8 @@ static odin3_status mx_any(mx_walk *walk, uint32_t sw, odin3_pw_bit *sel) {
  * compare at all (a default appended to an open mux) gives 0, where Yosys builds a $reduce_or of
  * zero bits, which the IR does not have.
  */
-static odin3_status mx_select(mx_walk *walk, const mx_frame *frame, uint32_t case_index,
-                              odin3_pw_bit *sel, bool *empty) {
+static odin3_status mx_select_make(mx_walk *walk, const mx_frame *frame, uint32_t case_index,
+                                   odin3_pw_bit *sel, bool *empty) {
     uint32_t sw = frame->index;
     const odin3_pw_case *cs = case_cat(walk->pw, case_index);
     *empty = false;
@@ -509,6 +512,54 @@ static odin3_status mx_select(mx_walk *walk, const mx_frame *frame, uint32_t cas
         return ODIN3_OK;
     }
     return mx_any(walk, sw, sel);
+}
+
+/* Snippets that make the same case's select again before proc suggests --share-selects. */
+enum { MX_SHARE_HINT = 64 };
+
+/* Counts one more snippet making the select of case_index again; logs the hint (once per run)
+ * when a case has MX_SHARE_HINT of them. */
+static odin3_status mx_count_unshared(mx_walk *walk, uint32_t case_index) {
+    uint64_t seen = 0;
+    const uint64_t key = (uint64_t)case_index + 1U;
+    (void)odin3_u64map_get(walk->sels, key, &seen);
+    seen++;
+    if (seen == MX_SHARE_HINT && !walk->hinted) {
+        walk->hinted = true;
+        odin3_log(ODIN3_LOG_INFO,
+                  "proc: %d snippets of one switch case make the same select cells; pass "
+                  "--share-selects to share them (the cells then differ from Yosys's before opt)",
+                  MX_SHARE_HINT);
+    }
+    return odin3_u64map_put(walk->sels, (odin3_kv){key, seen});
+}
+
+/*
+ * mx_select_make, once per case under --share-selects: a case's select depends on its switch's
+ * signal and its compares only, so the snippets of one process can share it. Yosys makes the
+ * select again for every signal and opt_merge joins the copies; with the option the first copy is
+ * the one that stays, so a switch of C cases over S signals makes C selects, not C * S (a memory
+ * held as registers: 128 words, 4096 snippets, 82,000 $eq cells against 640). Without the option
+ * proc's cells are Yosys's one for one (the proc_rows goldens, proc-diff). A case with an empty
+ * select is not kept (its cells are dead anyway).
+ */
+static odin3_status mx_select(mx_walk *walk, const mx_frame *frame, uint32_t case_index,
+                              odin3_pw_bit *sel, bool *empty) {
+    uint64_t known = 0;
+    if (walk->mctx->opts == NULL || !walk->mctx->opts->share_selects) {
+        odin3_status made = mx_select_make(walk, frame, case_index, sel, empty);
+        return made == ODIN3_OK && !*empty ? mx_count_unshared(walk, case_index) : made;
+    }
+    if (odin3_u64map_get(walk->sels, (uint64_t)case_index + 1U, &known)) {
+        *sel = (odin3_pw_bit)known;
+        *empty = false;
+        return ODIN3_OK;
+    }
+    odin3_status st = mx_select_make(walk, frame, case_index, sel, empty);
+    if (st == ODIN3_OK && !*empty) {
+        st = odin3_u64map_put(walk->sels, (odin3_kv){(uint64_t)case_index + 1U, *sel});
+    }
+    return st;
 }
 
 /* --- muxes (gen_mux, append_pmux) ------------------------------------------------------------ */
@@ -820,6 +871,7 @@ static odin3_status mx_snippet(mx_walk *walk, uint32_t index) {
 static void mx_free(mx_walk *walk) {
     odin3_proc_snips_free(walk->snips);
     odin3_u64map_destroy(walk->full);
+    odin3_u64map_destroy(walk->sels);
     odin3_vec_free(&walk->stack);
     odin3_vec_free(&walk->entries);
     odin3_vec_free(&walk->switches);
@@ -854,7 +906,8 @@ static odin3_status mx_init(mx_walk *walk, odin3_proc_mctx *mctx, odin3_pw *pw) 
     odin3_vec_init(&walk->parents, sizeof(odin3_prov_id));
     odin3_vec_init(&walk->fstack, sizeof(fm_frame));
     walk->full = odin3_u64map_create(0);
-    odin3_status st = walk->full != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    walk->sels = odin3_u64map_create(0);
+    odin3_status st = walk->full != NULL && walk->sels != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     st = st == ODIN3_OK ? mx_zeroed(&walk->switches, pw->switches.len) : st;
     st = st == ODIN3_OK ? mx_zeroed(&walk->groups, pw->cases.len) : st;
     return st == ODIN3_OK ? odin3_proc_snips_build(mctx, pw, &walk->snips) : st;

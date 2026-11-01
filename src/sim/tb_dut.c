@@ -183,9 +183,17 @@ static bool publish(tb_ev *ev, tb_dut *dut) {
     return changed;
 }
 
+/* Fails the run when the DUT's simulator reported an error (a derived clock that never settles). */
+static void dut_status(tb_ev *ev, odin3_status st) {
+    if (st != ODIN3_OK) {
+        ev->failed = true;
+        ev->why = "a derived clock of the DUT does not settle (a register clocks itself)";
+    }
+}
+
 bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
     if (apply_inputs(ev, dut)) {
-        odin3_sim_settle(dut->sim);
+        dut_status(ev, odin3_sim_settle_events(dut->sim));
     }
     return publish(ev, dut);
 }
@@ -195,7 +203,8 @@ bool tb_dut_edges(tb_ev *ev, tb_dut *dut) {
         return false;
     }
     for (uint32_t i = 0; i < dut->nedges; i++) {
-        (void)odin3_sim_clock_edge(dut->sim, dut->edges[i] ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE);
+        dut_status(ev, odin3_sim_clock_edge(dut->sim,
+                                            dut->edges[i] ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE));
     }
     dut->nedges = 0;
     (void)publish(ev, dut);

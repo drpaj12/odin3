@@ -52,7 +52,7 @@ odin3_status odin3_sim_vcd_sample(odin3_sim_vcd *vcd, uint64_t time);
  * Runs cycle `cycle` of sim (whose signal table is vcd->sig) with the inputs as set: settle, sample
  * at 10c+2, rising edge, sample at 10c+5, falling edge, sample at 10c+10. It computes exactly what
  * odin3_sim_cycle does. ODIN3_ERR_IO (stops at the first failed write; the cycle may be
- * incomplete).
+ * incomplete), ODIN3_ERR_CHECK when a derived clock never settles.
  */
 odin3_status odin3_sim_vcd_cycle(odin3_sim_vcd *vcd, odin3_sim *sim, uint64_t cycle);
 

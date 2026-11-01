@@ -355,8 +355,7 @@ ODIN3_EXPORT odin3_status odin3_simulation_settle(odin3_simulation *sim) {
     if (sim == NULL) {
         return odin3_api_invalid(__func__);
     }
-    odin3_sim_settle(sim->sim);
-    return ODIN3_OK;
+    return odin3_sim_settle_events(sim->sim);
 }
 
 ODIN3_EXPORT odin3_status odin3_simulation_step(odin3_simulation *sim, uint32_t cycles) {
@@ -364,7 +363,10 @@ ODIN3_EXPORT odin3_status odin3_simulation_step(odin3_simulation *sim, uint32_t 
         return odin3_api_invalid(__func__);
     }
     for (uint32_t k = 0; k < cycles; k++) {
-        odin3_sim_cycle(sim->sim);
+        if (odin3_sim_cycle(sim->sim) != ODIN3_OK) {
+            sim->cycle += k;
+            return ODIN3_ERR_CHECK;
+        }
         if (sim->toggles != NULL) {
             toggles_sample(sim, true);
         }

@@ -1309,11 +1309,12 @@ static void test_simcheck_unsimulable_after_is_an_error(void) {
 #ifdef NDEBUG
     TEST_IGNORE_MESSAGE("--opt-simcheck is a Debug option");
 #endif
-    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n"
-          "  wire output 4 \\q\n  wire output 5 \\t\n"
-          "  cell $_NOT_ \\n\n    connect \\A \\b\n    connect \\Y \\t\n  end\n"
-          "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\a\n    connect \\Q \\q\n"
-          "  end\nend\n");
+    build(
+        "module \\m\n  wire input 1 \\a\n  wire input 2 \\b\n  wire input 3 \\clk\n"
+        "  wire output 4 \\q\n  wire output 5 \\t\n"
+        "  cell $_AND_ \\n\n    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\t\n  end\n"
+        "  cell $_DFF_P_ \\f\n    connect \\C \\clk\n    connect \\D \\a\n    connect \\Q \\q\n"
+        "  end\nend\n");
     odin3_opt_test_hooks hooks = {NULL, NULL, NULL, clock_from_a_gate};
     odin3_opt_test_set_hooks(&hooks);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, run_pass("opt_clean", "--opt-simcheck"));
@@ -1321,13 +1322,15 @@ static void test_simcheck_unsimulable_after_is_an_error(void) {
         1, count_lines(ODIN3_LOG_ERROR, "opt: opt_clean: module 'm' can no longer be simulated"));
 }
 
-/* A module the simulator cannot build (a clock that is no primary input) is skipped, quietly. */
+/* A module the simulator cannot build (a clock derived from two inputs, none of which clocks
+ * another register) is skipped, quietly. */
 static void test_simcheck_build_failure_is_quiet(void) {
-    build("module \\m\n  wire input 1 \\a\n  wire input 2 \\d\n  wire output 3 \\q\n"
-          "  wire \\ck\n"
-          "  cell $_NOT_ \\c\n    connect \\A \\a\n    connect \\Y \\ck\n  end\n"
-          "  cell $_DFF_P_ \\f\n    connect \\C \\ck\n    connect \\D \\d\n    connect \\Q \\q\n"
-          "  end\nend\n");
+    build(
+        "module \\m\n  wire input 1 \\a\n  wire input 2 \\d\n  wire output 3 \\q\n"
+        "  wire \\ck\n"
+        "  cell $_AND_ \\c\n    connect \\A \\a\n    connect \\B \\d\n    connect \\Y \\ck\n  end\n"
+        "  cell $_DFF_P_ \\f\n    connect \\C \\ck\n    connect \\D \\d\n    connect \\Q \\q\n"
+        "  end\nend\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass("opt_clean", "--opt-simcheck"));
     TEST_ASSERT_EQUAL_UINT32(0, count_errors());
     TEST_ASSERT_EQUAL_UINT32(0, count_prefix("sim"));

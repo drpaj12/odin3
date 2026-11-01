@@ -2231,7 +2231,9 @@ odin3_status odin3_simulation_get_bits(const odin3_simulation *sim, uint32_t sig
 /*
  * SA-9, SC-3. One settle: the combinational effect of inputs just set shows in the values, no
  * state advances and the cycle counter is unchanged. Allocates nothing; ODIN3_ERR_INVALID_ARG
- * (logged) for a NULL sim.
+ * (logged) for a NULL sim. A design with derived clocks (a clock mux or gate) also takes the
+ * clock edges that the new input values cause, as odin3_sim_settle_events: ODIN3_ERR_CHECK
+ * (logged) when a derived clock never settles.
  */
 odin3_status odin3_simulation_settle(odin3_simulation *sim);
 
@@ -2242,7 +2244,9 @@ odin3_status odin3_simulation_settle(odin3_simulation *sim);
  * falling edge; settle. Values read afterwards are those after the last settle; the values match
  * the `sim` pass's vector file for the same inputs. A design with no clock steps too. Allocates
  * nothing; time per cycle is linear in the flattened design. ODIN3_ERR_INVALID_ARG (logged) for a
- * NULL sim.
+ * NULL sim. ODIN3_ERR_CHECK (logged) when a derived clock never settles (a register that clocks
+ * itself); the cycle counter then counts the cycles that finished, and the simulation must be
+ * reset before further use.
  */
 odin3_status odin3_simulation_step(odin3_simulation *sim, uint32_t cycles);
 
