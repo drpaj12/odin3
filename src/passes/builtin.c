@@ -252,7 +252,7 @@ typedef struct write_blif_args {
     odin3_strbuf path;
     odin3_strbuf name_map; /* --name-map's value (5.4f), empty when not given */
     odin3_blif_write_opts opts;
-    uint8_t seen; /* the WB_* bits of the options given so far */
+    uint16_t seen; /* the WB_* bits of the options given so far */
 } write_blif_args;
 
 enum {
@@ -264,6 +264,7 @@ enum {
     WB_GATES_AS_NAMES = 1U << 5,
     WB_PROV_MAP = 1U << 6,
     WB_EDIT_TAGS = 1U << 7,
+    WB_REACHABLE = 1U << 8,
     WB_DECIMAL = 10,
     WB_MAX_DIGITS = 9, /* more digits than this are out of range anyway (no overflow) */
 };
@@ -316,10 +317,10 @@ static odin3_status wb_name_map(odin3_bytes value, write_blif_args *out) {
 }
 
 /* The WB_* bit of an option word, 0 for an unknown one. */
-static uint8_t wb_bit_of(odin3_bytes word) {
+static uint16_t wb_bit_of(odin3_bytes word) {
     static const struct {
         const char *name;
-        uint8_t bit;
+        uint16_t bit;
     } OPTIONS[] = {{"--vtr", WB_VTR},
                    {"--lut-k", WB_LUT_K},
                    {"--name-style", WB_NAME_STYLE},
@@ -327,7 +328,8 @@ static uint8_t wb_bit_of(odin3_bytes word) {
                    {"--name-map", WB_NAME_MAP},
                    {"--gates-as-names", WB_GATES_AS_NAMES},
                    {"--prov-map", WB_PROV_MAP},
-                   {"--edit-tags", WB_EDIT_TAGS}};
+                   {"--edit-tags", WB_EDIT_TAGS},
+                   {"--reachable", WB_REACHABLE}};
     for (size_t k = 0; k < sizeof OPTIONS / sizeof OPTIONS[0]; k++) {
         if (odin3_pass_arg_is(word, OPTIONS[k].name)) {
             return OPTIONS[k].bit;
@@ -348,7 +350,7 @@ static void wb_prov_map(odin3_bytes *rest, write_blif_args *out) {
 
 /* Option word (its value read from rest): unknown, given twice, or parsed into out. */
 static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_args *out) {
-    uint8_t bit = wb_bit_of(word);
+    uint16_t bit = wb_bit_of(word);
     if (bit == 0) {
         return unknown_arg("write_blif", word);
     }
@@ -366,8 +368,9 @@ static odin3_status wb_option(odin3_bytes word, odin3_bytes *rest, write_blif_ar
         wb_prov_map(rest, out);
         return ODIN3_OK;
     }
-    if (bit == WB_EDIT_TAGS) {
-        out->opts.edit_tags = true;
+    if (bit == WB_EDIT_TAGS || bit == WB_REACHABLE) {
+        out->opts.edit_tags = out->opts.edit_tags || bit == WB_EDIT_TAGS;
+        out->opts.reachable_only = out->opts.reachable_only || bit == WB_REACHABLE;
         return ODIN3_OK;
     }
     if (bit == WB_SRC_ATTR || bit == WB_GATES_AS_NAMES) {
@@ -387,6 +390,30 @@ static bool wb_is_option(odin3_bytes word) {
     return word.len > 2 && memcmp(word.ptr, "--", 2) == 0;
 }
 
+/* The refusal for a plain-dialect-only option given with --vtr, NULL when there is none. */
+static const char *wb_plain_only_refusal(uint16_t seen) {
+    static const struct {
+        uint16_t bit;
+        const char *why;
+    } PLAIN_ONLY[] = {
+        {WB_SRC_ATTR,
+         "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines"},
+        {WB_EDIT_TAGS,
+         "write_blif: --edit-tags is for the plain dialect; the VTR dialect has no .attr lines"},
+        {WB_REACHABLE,
+         "write_blif: --reachable is for the plain dialect; --vtr writes the top alone"},
+        {WB_GATES_AS_NAMES, "write_blif: --gates-as-names is for the plain dialect"}};
+    if ((seen & WB_VTR) == 0) {
+        return NULL;
+    }
+    for (size_t k = 0; k < sizeof PLAIN_ONLY / sizeof PLAIN_ONLY[0]; k++) {
+        if ((seen & PLAIN_ONLY[k].bit) != 0) {
+            return PLAIN_ONLY[k].why;
+        }
+    }
+    return NULL;
+}
+
 /* The options that go together: --lut-k and --name-style need --vtr, --name-map needs hash names,
  * --src-attr is for the plain dialect. Logged, ODIN3_ERR_INVALID_ARG. */
 static odin3_status wb_check_options(const write_blif_args *out) {
@@ -397,13 +424,8 @@ static odin3_status wb_check_options(const write_blif_args *out) {
         why = "write_blif: --name-map needs --name-style hash";
     } else if ((out->seen & WB_PROV_MAP) != 0 && out->opts.name_style != ODIN3_BLIF_NAMES_HASH) {
         why = "write_blif: --prov-map needs --name-style hash";
-    } else if ((out->seen & WB_SRC_ATTR) != 0 && (out->seen & WB_VTR) != 0) {
-        why = "write_blif: --src-attr is for the plain dialect; the VTR dialect has no .attr lines";
-    } else if ((out->seen & WB_EDIT_TAGS) != 0 && (out->seen & WB_VTR) != 0) {
-        why =
-            "write_blif: --edit-tags is for the plain dialect; the VTR dialect has no .attr lines";
-    } else if ((out->seen & WB_GATES_AS_NAMES) != 0 && (out->seen & WB_VTR) != 0) {
-        why = "write_blif: --gates-as-names is for the plain dialect";
+    } else {
+        why = wb_plain_only_refusal(out->seen);
     }
     if (why != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "%s", why);
@@ -447,7 +469,7 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
     (void)user;
     (void)ctx;
     write_blif_args parsed = {.opts = {ODIN3_BLIF_DIALECT_PLAIN, ODIN3_BLIF_NAMES_SHORT, 0, false,
-                                       NULL, false, ODIN3_PROV_MAP_NONE, false},
+                                       NULL, false, ODIN3_PROV_MAP_NONE, false, false},
                               .seen = 0};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.name_map);
@@ -809,13 +831,16 @@ static const odin3_pass_def READ_TECHLIB = {
 static const odin3_pass_def WRITE_BLIF = {
     "write_blif",
     "write_blif [--vtr] [--lut-k K] [--name-style short|provenance|hash [--name-map <file>]] "
-    "[--prov-map [refs|constructs|full]] [--src-attr] [--edit-tags] [--gates-as-names] <file>: "
+    "[--prov-map [refs|constructs|full]] [--src-attr] [--edit-tags] [--reachable] "
+    "[--gates-as-names] <file>: "
     "write the design "
     "as BLIF (the top first); --prov-map (hash names only) writes the version 2 name map; --vtr "
     "writes the top alone in the dialect VPR reads; hash names write the name map to "
     "<file>.names or --name-map; --src-attr (plain dialect only) writes each cell's HDL "
     "locations as `.attr src \"SRC\"`; --edit-tags (plain dialect only) writes the edit events of "
-    "each cell as `.attr odin3_edit KIND:TAG,...`; --gates-as-names (plain dialect only) writes "
+    "each cell as `.attr odin3_edit KIND:TAG,...`; --reachable (plain dialect only) writes only "
+    "the top and the modules reachable from it, with a WARNING per module skipped; "
+    "--gates-as-names (plain dialect only) writes "
     "gate cells "
     "as `.names` and library state cells as `.latch`",
     write_blif_run,

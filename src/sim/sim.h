@@ -55,8 +55,20 @@ odin3_status odin3_sim_build(odin3_design *design, odin3_module_id top, odin3_si
 #define ODIN3_SIM_DEFAULT_MAX_CELLS (1U << 24)
 #define ODIN3_SIM_BITS_PER_CELL 8U
 
+/* Why a build was refused, for callers that tolerate some refusals (scoap --sigprob). */
+typedef enum odin3_sim_refusal {
+    ODIN3_SIM_REFUSAL_OTHER = 0, /* anything else: budget, unsupported cell, clock, ... */
+    ODIN3_SIM_REFUSAL_LOOP,      /* a combinational loop */
+    ODIN3_SIM_REFUSAL_DRIVERS    /* a net with more than one driver */
+} odin3_sim_refusal;
+
+/* max_cells: 0 means ODIN3_SIM_DEFAULT_MAX_CELLS. refusal (may be NULL) receives the reason of a
+ * refused build. With soft_refusals the loop and multiple-driver refusals are logged at WARNING,
+ * not ERROR (the caller goes on without a simulator); every other refusal stays an error. */
 typedef struct odin3_sim_options {
-    uint32_t max_cells; /* 0: ODIN3_SIM_DEFAULT_MAX_CELLS */
+    uint32_t max_cells;
+    bool soft_refusals;
+    odin3_sim_refusal *refusal;
 } odin3_sim_options;
 
 /* odin3_sim_build with options (NULL: the defaults); the budget errors are described above. */

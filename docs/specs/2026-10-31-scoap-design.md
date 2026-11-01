@@ -111,12 +111,12 @@ same iteration.
 [--threshold P]`. Runs on every module with a netlist view (instances are opaque cells, so
 `flatten` first for a whole-design value).
 
-- Per-net values: JSON `odin3-scoap` version 2 (top level `inf`, `sat`; per module `sweeps`, `evals`, `converged`,
+- Per-net values: JSON `odin3-scoap` version 3 (top level `inf`, `sat`, `sigprob_ran`, `sigprob_vectors`; per module `sweeps`, `evals`, `converged`,
   `unreachable`, `saturated`, `netlist_hash`): per module an array of nets
   `{"id","name","cc0","cc1","co"}` plus `"sc0","sc1","so"` with `--sequential` and
   `"p1_ppm"` with `--sigprob`. `id` is the module-local net ID and `name` its printed name
   (`$n<ID>` for an unnamed net): the key to provenance (`odin3_net_prov`).
-- Design summary as module attributes (INT unless noted): `odin3:scoap_version` (2), `scoap_inf`, `scoap_sat`, `scoap_saturated`,
+- Design summary as module attributes (INT unless noted): `odin3:scoap_version` (3), `scoap_inf`, `scoap_sat`, `scoap_saturated`,
   `scoap_netlist_hash` (fingerprint of the nets, boundary values, cells and functions the values were
   computed from: the attributes are a snapshot and go stale when a later pass edits the netlist, rerun
   `scoap` and compare),
@@ -141,6 +141,16 @@ min(P, 1-P) < P (JSON `"rare"`); constant nets (P = 0 or 1 by construction) are 
 logged and stored in the JSON. Checked against exact enumeration over all 2^k input vectors on small
 combinational circuits (statistical tolerance 5 sigma). A sequential design gives the
 cycle-average, not a steady-state value.
+
+Skip (schema version 3). The simulator refuses two netlists that SCOAP itself handles: a
+combinational loop (for example through a transparent latch) and a net with more than one driver. Only
+those two refusals skip the run; any other failure (`max_cells`, an unsupported cell, a clock that is
+not a primary input, an invalid argument, memory) fails the pass as before. A skipped run logs one
+WARNING naming the refusal and says the simulator's line above it (logged at WARNING, not ERROR, for
+these two refusals) is not fatal. The JSON then says so: top level `"sigprob_ran": false` and
+`"sigprob_vectors": 0` (a run that happened has `true` and V; without `--sigprob` it is `false` and 0),
+`p1_ppm` is `-1` on every top-module net, and the top module's `"rare"` is `null` (not an empty list:
+"nothing is rare" and "not measured" differ). A reader tests `sigprob_ran` first.
 
 ## 6. Python API and docs
 
@@ -170,6 +180,10 @@ as a dict. `docs/user/scoap.md`, PASSES.md row. No IR change, no ADR (attributes
 - Undriven input pins read constant 0 (as the simulator does); a flip-flop without a clock pin has
   no clock term.
 - Gate evidence: see the PR description.
+- Fix round 6 gaps: `--sigprob` skip is machine-visible (section 5): schema 2 to 3, `sigprob_ran`,
+  `sigprob_vectors` 0 and `rare` null when skipped; skip only for the loop and multiple-driver
+  refusals. Test `test_sigprob_skipped_*`, `test_sigprob_other_refusal_fails` in
+  `tests/tools/test_scoap.py` and the boundtop-style latch loop `tests/tools/data/latch_loop.v`.
 - Fix round 1 (review of head e2874254): empty cover, worklist, INF/SAT split, duplicate pins,
   cube observability, loop cap 2 x nets + 2, 64-bit counts; the reference and the pass were changed
   together and are checked against hand-derived numbers in `tests/tools/test_scoap.py`.

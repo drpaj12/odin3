@@ -4,6 +4,8 @@
 #ifndef ODIN3_SIM_BUILD_INTERNAL_H
 #define ODIN3_SIM_BUILD_INTERNAL_H
 
+#include <stdbool.h>
+
 #include "ir/celltype.h"
 #include "ir/design.h"
 #include "ir/ids.h"
@@ -49,6 +51,8 @@ typedef struct odin3_sim_builder {
     uint32_t n_scratch;
     uint64_t max_units; /* cells + frames (odin3_sim_options.max_cells) */
     uint64_t max_bits;  /* net-map entries + slots + pin bits (8 x max_cells) */
+    bool soft_refusals; /* odin3_sim_options.soft_refusals */
+    odin3_sim_refusal refusal;
 } odin3_sim_builder;
 
 /*

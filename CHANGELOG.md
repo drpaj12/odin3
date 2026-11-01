@@ -6,6 +6,24 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Fixed
+
+- Leman Russ III round 6 gaps. `write_blif --reachable` (plain dialect) writes the top and the modules reachable from
+  it and skips the rest with a WARNING, as Parmys writes only the top's netlist; without it every module is
+  written, as before, so multi-model BLIF still round-trips (one WARNING counts the unreachable modules written;
+  `--reachable` with no top is ignored, with a WARNING) (`flatten` leaves the flattened modules in the
+  design; `--vtr` already writes the top alone). `scoap --sigprob` no longer fails when
+  the simulator refuses the netlist (for example a loop through a transparent latch, as boundtop's inferred
+  latches give) or a net with two drivers: the scoap values are still computed, a WARNING names the refusal
+  (the simulator's own line is downgraded to a WARNING for these two refusals; any other simulator failure still
+  fails the pass), `p1_ppm` is -1 on every net, and the JSON (schema version 3) says `"sigprob_ran": false`,
+  `"sigprob_vectors": 0` and `"rare": null`.
+  Python `Odin3Error` can be pickled, so a `multiprocessing` pool no longer hangs on one. 2026-11-01.
+
+### Documented
+
+- `opt` latch fold. A latch whose D is constant (read in as `.latch` with a constant data net) is treated as an asynchronous load of that constant (Yosys `opt_dff`): with INIT unknown (2 or 3, the default) `opt` folds it to the constant (D = 1, INIT 3 gives constant 1), with INIT 0 or 1 it stays a latch. `-keepdc` keeps the latch when INIT is unknown (verified: `opt -keepdc` leaves `.latch one q al en 3`); it does not matter for a defined INIT. 2026-11-01.
+
 ### Added
 
 - `$readmemh`/`$readmemb` take any constant string expression as the file name (a string parameter, a

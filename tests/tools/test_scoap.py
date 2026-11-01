@@ -346,7 +346,7 @@ class ScoapTest(unittest.TestCase):
         text = blif(".names a b y\n11 1\n", "a b", "y")
         self.run_pass(text)
         first = self.raw["modules"][0]["netlist_hash"]
-        self.assertEqual(self.raw["version"], 2)
+        self.assertEqual(self.raw["version"], 3)
         self.run_pass(text)
         self.assertEqual(self.raw["modules"][0]["netlist_hash"], first)
         self.run_pass(blif(".names a b y\n1- 1\n-1 1\n", "a b", "y"))
@@ -366,6 +366,63 @@ class ScoapTest(unittest.TestCase):
         self.assertEqual(got["one"]["p1_ppm"], 1000000)
         rare = {n["name"] for n in got.values() if n["id"] in self.raw["modules"][0]["rare"]}
         self.assertNotIn("one", rare)
+
+    def test_sigprob_skipped_when_simulator_refuses_a_latch_hold_loop(self) -> None:
+        # d = latch(D = mux(en2 ? x : q)): D reads the latch's own Q (an inferred hold path), a
+        # structural loop through a transparent latch that the simulator refuses. SCOAP still
+        # runs; p1_ppm is -1 on every net and the log says why.
+        rows = (
+            ".subckt $_MUX_ A=q B=x S=sel Y=dd\n"
+            ".latch dd q al en 3\n"
+            ".names q y\n1 1\n"
+        )
+        got = self.run_pass(blif(rows, "x sel en", "y"), "--sigprob 100")
+        self.assertIn("--sigprob skipped", self.log)
+        self.assertIn("combinational loop", self.log)
+        self.assertEqual({n["p1_ppm"] for n in got.values()}, {-1})
+        self.assertIn("cc0", got["q"])
+        self.assertIs(self.raw["sigprob_ran"], False)
+        self.assertEqual(self.raw["sigprob_vectors"], 0)
+        self.assertIsNone(self.raw["modules"][0]["rare"])
+        self.assertNotIn("error:", self.log)  # the refusal line is downgraded to a warning
+
+    def test_sigprob_skipped_for_a_boundtop_style_latch_loop_in_rtl(self) -> None:
+        # the RTL form of the case above: tests/tools/data/latch_loop.v (an incomplete always @*)
+        out = self.dir / "s.json"
+        src = REPO_ROOT / "tests" / "tools" / "data" / "latch_loop.v"
+        script = (
+            f"read_verilog {src}; proc; opt; lower; opt; scoap --sigprob 100 --out {out}"
+        )
+        done = subprocess.run(
+            [str(ODIN3), "--top", "latch_loop", "-p", script], capture_output=True, text=True
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("--sigprob skipped", done.stderr)
+        self.assertNotIn("error:", done.stderr)
+        raw = json.loads(out.read_text())
+        self.assertIs(raw["sigprob_ran"], False)
+        self.assertEqual(raw["sigprob_vectors"], 0)
+        self.assertIsNone(raw["modules"][0]["rare"])
+        self.assertEqual({n["p1_ppm"] for n in raw["modules"][0]["nets"]}, {-1})
+
+    def test_sigprob_ran_true_and_false_without_option(self) -> None:
+        text = blif(".names a b y\n11 1\n", "a b", "y")
+        self.run_pass(text, "--sigprob 50")
+        self.assertIs(self.raw["sigprob_ran"], True)
+        self.assertEqual(self.raw["sigprob_vectors"], 50)
+        self.assertIsInstance(self.raw["modules"][0]["rare"], list)
+        self.run_pass(text)
+        self.assertIs(self.raw["sigprob_ran"], False)
+        self.assertEqual(self.raw["sigprob_vectors"], 0)
+
+    def test_sigprob_other_refusal_fails(self) -> None:
+        # a black box has no semantics: not a skippable refusal, the pass fails as before
+        src = self.dir / "t.blif"
+        src.write_text(blif(".subckt mystery a=a y=y\n", "a", "y"))
+        script = f"read_techlib {LIB}; read_blif {src}; scoap --sigprob 10"
+        done = subprocess.run([str(ODIN3), "-p", script], capture_output=True, text=True)
+        self.assertNotEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("--sigprob skipped", done.stderr)
 
 
 if __name__ == "__main__":

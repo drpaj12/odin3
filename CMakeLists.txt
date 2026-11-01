@@ -1549,10 +1549,14 @@ if(BUILD_TESTING)
     endif()
     odin3_add_unit_test(test_lower_corpus)
     target_sources(test_lower_corpus PRIVATE tests/unit/lower_fixture.c)
+    # the reverse test writes its two BLIFs to the build directory, not the source tree
+    set_tests_properties(test_lower_corpus PROPERTIES
+        ENVIRONMENT "ODIN3_TEST_OUT_DIR=${CMAKE_CURRENT_BINARY_DIR}")
     # 3B Task 9 (spec 12.1): the module built in reverse order compares identical (netlist-compare).
     add_test(NAME lower_reverse_netlist_compare
         COMMAND ${PROJECT_SOURCE_DIR}/tools/netlist-compare/netlist-compare
-                --implicit-models lower_reverse_a.blif lower_reverse_b.blif)
+                --implicit-models ${CMAKE_CURRENT_BINARY_DIR}/lower_reverse_a.blif
+                ${CMAKE_CURRENT_BINARY_DIR}/lower_reverse_b.blif)
     set_tests_properties(test_lower_corpus PROPERTIES FIXTURES_SETUP lower_reverse)
     set_tests_properties(lower_reverse_netlist_compare PROPERTIES FIXTURES_REQUIRED lower_reverse
         LABELS lower)
@@ -3021,6 +3025,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_scoap
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(scoap_unit PROPERTIES LABELS tools TIMEOUT 600)
+    # write_blif writes the top and what it reaches, not modules nothing instantiates.
+    add_test(NAME write_blif_reach
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_write_blif_reach
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(write_blif_reach PROPERTIES LABELS tools)
     if(EXISTS "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
         set(_scoap_golden "$ENV{HOME}/odin3-ws/golden/EArch/vtr")
         add_test(NAME scoap_gate_small_vtr

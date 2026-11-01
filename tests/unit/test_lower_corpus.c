@@ -3,7 +3,9 @@
  * rule family (the shifts, $pmux, the arithmetic and comparisons, $mul, $div and $mod, the bitwise
  * cells: the Task 4 and 5 builders that the Task 1 kit sweep does not run), and a module built in
  * reverse creation order. The reverse test writes lower_reverse_a.blif and lower_reverse_b.blif to
- * the working directory; CTest lower_reverse_netlist_compare compares them.
+ * $ODIN3_TEST_OUT_DIR (CTest sets it to its build directory), else to $TMPDIR or /tmp, never to
+ * the working directory (running the binary by hand once left them in the source tree); CTest
+ * lower_reverse_netlist_compare compares them.
  */
 #include "backends/blif/writer.h"
 #include "ir/check.h"
@@ -20,6 +22,8 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { MAX_STEPS = 40000, SMALL = 3, WIDE = 4 };
@@ -147,7 +151,7 @@ static void test_oom_at_every_allocation_bitwise(void) {
 /* --- reverse creation order ----------------------------------------------------------------- */
 
 static const char *const k_rev_types[] = {"$add", "$and", "$lt", "$shl"};
-enum { REV_CELLS = 4 };
+enum { REV_CELLS = 4, PATH_MAX_BUF = 4096 };
 
 /* A module holding the four cells, created in forward or reverse order; each cell's ports are
  * prefixed by its type so the two orders name the same wires. */
@@ -167,7 +171,11 @@ static void build_four(lf *fix, bool reverse) {
     }
 }
 
-static void lower_and_write(bool reverse, const char *path) {
+static const char *g_out_dir = NULL; /* where the reverse test writes (set by main) */
+
+static void lower_and_write(bool reverse, const char *name) {
+    char path[PATH_MAX_BUF];
+    TEST_ASSERT_TRUE(snprintf(path, sizeof path, "%s/%s", g_out_dir, name) < (int)sizeof path);
     lf fix;
     lf_begin(&fix);
     build_four(&fix, reverse);
@@ -181,7 +189,15 @@ static void test_a_module_built_in_reverse_order_lowers_to_the_same_netlist(void
     lower_and_write(true, "lower_reverse_b.blif");
 }
 
+static const char *env_or_null(const char *name) {
+    const char *val = getenv(name);
+    return val != NULL && val[0] != '\0' ? val : NULL;
+}
+
 int main(void) {
+    g_out_dir = env_or_null("ODIN3_TEST_OUT_DIR");
+    g_out_dir = g_out_dir != NULL ? g_out_dir : env_or_null("TMPDIR");
+    g_out_dir = g_out_dir != NULL ? g_out_dir : "/tmp";
     UNITY_BEGIN();
     RUN_TEST(test_oom_at_every_allocation_shifts_and_pmux);
     RUN_TEST(test_oom_at_every_allocation_arithmetic_and_comparisons);

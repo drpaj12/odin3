@@ -150,7 +150,7 @@ checked. The decisions are in `docs/V1.0.2.md`.
 
 ## 10. write
 
-`write_blif --vtr` writes the top module in the dialect VPR reads. `write_verilog` writes
+`write_blif --vtr` writes the top module in the dialect VPR reads. Plain `write_blif` writes every module (one WARNING counts the modules the top does not reach; use `--reachable`); `write_blif --reachable` writes only the top and the modules reachable from it (a WARNING names each module it skips, e.g. after `flatten`, and says the module stays in the design; with no top the option is ignored, with a WARNING; Parmys writes only the top). `write_verilog` writes
 structural Verilog (with LPM cells for the LPM target), `write_json` the Yosys JSON schema,
 `write_dot` a Graphviz graph. See {doc}`outputs`.
 

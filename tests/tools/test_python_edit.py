@@ -8,7 +8,9 @@ ODIN3_REQUIRE_CFFI=1.
 
 from __future__ import annotations
 
+import multiprocessing
 import os
+import pickle
 import tempfile
 import threading
 import unittest
@@ -26,6 +28,10 @@ REQUIRE_CFFI = os.environ.get("ODIN3_REQUIRE_CFFI") == "1"
 if TYPE_CHECKING or HAVE_CFFI:
     import odin3
     from odin3 import Design
+
+def _raise_odin3_error(_: int) -> None:
+    raise odin3.Odin3Error("odin3_probe", 3, "ODIN3_ERR_INVALID_ARG")
+
 
 BLIF_TEXT = ".model m\n.inputs a b\n.outputs y\n.names a b y\n11 1\n.end\n"
 
@@ -297,6 +303,37 @@ class PythonEditTest(unittest.TestCase):
         with self.assertRaises(odin3.Odin3Error) as ctx:
             odin3._edit_probe(OldDesign(), "odin3_edit_add_net")  # type: ignore[arg-type]
         self.assertIn("libodin3 too old", str(ctx.exception))
+
+
+@unittest.skipUnless(HAVE_CFFI or REQUIRE_CFFI, "cffi not installed")
+class Odin3ErrorPickleTest(unittest.TestCase):
+    def test_pickle_round_trip(self) -> None:
+        err = odin3.Odin3Error("odin3_probe", 3, "ODIN3_ERR_INVALID_ARG")
+        back = pickle.loads(pickle.dumps(err))
+        self.assertIsInstance(back, odin3.Odin3Error)
+        self.assertEqual(str(back), str(err))
+        self.assertEqual((back.function, back.status), ("odin3_probe", 3))
+        self.assertIsNone(back.twin)
+
+    def test_multiprocessing_pool_returns_the_error(self) -> None:
+        ctx = multiprocessing.get_context("fork")
+        with ctx.Pool(1) as pool:
+            res = pool.apply_async(_raise_odin3_error, (0,))
+            with self.assertRaises(odin3.Odin3Error) as caught:
+                res.get(timeout=30)
+        self.assertEqual(caught.exception.function, "odin3_probe")
+
+    def test_spawn_pool_returns_the_error(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(1) as pool:
+            res = pool.apply_async(_raise_odin3_error, (0,))
+            with self.assertRaises(odin3.Odin3Error) as caught:
+                res.get(timeout=60)
+        self.assertEqual(
+            (caught.exception.function, caught.exception.status_name),
+            ("odin3_probe", "ODIN3_ERR_INVALID_ARG"),
+        )
+        self.assertIsNone(caught.exception.twin)
 
 
 if __name__ == "__main__":

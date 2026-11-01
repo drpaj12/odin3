@@ -94,15 +94,28 @@ _ABC_TRIED = False  # the abc adapter load was attempted in this process
 
 
 class Odin3Error(RuntimeError):
-    """An ABI call returned a failure status (status: the odin3_status value)."""
+    """An ABI call returned a failure status.
+
+    function: the ABI function; status: the odin3_status value; status_name: its name (for
+    example "ODIN3_ERR_INVALID_ARG"). twin: the replacement node of Node.set_cover /
+    Node.set_param_int when a later step failed, else None. Pickling (a multiprocessing pool
+    returns the error to the parent) keeps function, status and status_name but drops twin: it
+    belongs to a design in the worker process, so after a round trip twin is None.
+    """
 
     def __init__(self, function: str, status: int, name: str) -> None:
         super().__init__(f"{function}: {name}")
         self.function = function
         self.status = status
+        self.status_name = name
         # set by Node.set_cover / set_param_int when the old node was replaced and a later step
         # failed: the twin node (otherwise None)
         self.twin: Any = None
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        """Pickle by the constructor arguments (the base class would replay args=(message,),
+        which this three-argument constructor rejects); the twin node is not carried across."""
+        return (type(self), (self.function, self.status, self.status_name))
 
 
 class LogRecord(NamedTuple):
@@ -652,13 +665,17 @@ class Design:
         seed: int = 1,
         threshold: float = 0.01,
     ) -> dict[str, Any]:
-        """Run the scoap pass and return its JSON (schema odin3-scoap, version 2).
+        """Run the scoap pass and return its JSON (schema odin3-scoap, version 3).
 
         Per module and net: cc0, cc1, co (and sc0, sc1, so with sequential=True; p1_ppm with
         sigprob=<vectors>), keyed by the module-local net id and name; "top" holds the `top`
         hardest-to-control and hardest-to-observe nets, "rare" (with sigprob) the nets whose
-        probability of 1 or 0 is below `threshold`. INF (1000000000) means unreachable. Module
-        summaries are also stored as module attributes odin3:scoap_*. See docs/user/scoap.md.
+        probability of 1 or 0 is below `threshold`. INF (1000000000) means unreachable. With
+        sigprob the top-level "sigprob_ran" says whether the simulation happened: when the
+        simulator refuses the netlist (combinational loop, multiple drivers) the run is skipped
+        with a WARNING, "sigprob_ran" is False, "sigprob_vectors" is 0, p1_ppm is -1 on every net
+        and the top module's "rare" is None. Module summaries are also stored as module
+        attributes odin3:scoap_*. See docs/user/scoap.md.
         """
         import json
         import tempfile
