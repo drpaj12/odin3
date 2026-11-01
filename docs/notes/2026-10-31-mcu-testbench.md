@@ -15,8 +15,9 @@ Steps
    (string parameter, localparam, concatenation of string constants). Resolved at
    elaboration with the constant evaluator. As Yosys (`AstNode::readmem`, simplify.cc): the
    string is the constant's bytes with NULs dropped (so `{"0"+i, BASE}` works). Relative
-   paths: Yosys tries the working directory, then the source file's directory; Odin III
-   keeps its documented rule (source file's directory only, spec 17).
+   paths: Yosys tries the working directory, then the source file's directory. Odin III
+   does the same under `--vtr-compat`; otherwise it reads the source file's directory (spec
+   17 #6) and warns once per call when the working directory holds a file of that name too.
 2. Regression micro + golden for the string parameter case.
 3. Patch set for the design (PLL stub, `byte` identifier, `$time()`), port-only testbench,
    iverilog reference for 2-3 programs.
@@ -24,6 +25,10 @@ Steps
    and unmap if the RAM maps hard). Report cycles, wall time, memory, DFF count, first mismatch.
 5. Fix only Odin III bugs found on the way; log Quartus-specific items as patches.
 6. Lint, full debug ctest, CI, PR.
+
+CTest `tb_mcu` (blink_interrupt, 500 cycles: both interrupt pulses) runs when the CMake cache
+variable `ODIN3_MCU_UPSTREAM` (default: the environment variable of that name) names an
+Arduino-on-RISC-V checkout; otherwise it skips (exit 77).
 
 ## Result (debug build, ASan + UBSan, one core, no other load)
 

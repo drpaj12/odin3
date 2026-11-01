@@ -35,6 +35,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 #include <string.h>
 
 enum { RM_MIN_ARGS = 2, RM_MAX_ARGS = 4, RM_HEX_BITS = 4, RM_RADIX_HEX = 16, RM_PATH = 4096 };
@@ -192,13 +193,15 @@ static odin3_status rm_args(rm_run *rm) {
 /* --- the file -----------------------------------------------------------------------------------
  */
 
-/* The path of the file: absolute as given, else beside the source file holding the call. */
-static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
+/* True when path names a regular file the process can see. */
+static bool rm_is_file(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISREG(info.st_mode);
+}
+
+/* The directory part (with the slash) of the source file holding the call, into path. */
+static odin3_status rm_source_dir(const rm_run *rm, odin3_strbuf *path) {
     const odin3_elab2 *e2 = rm->init->e2;
-    odin3_strbuf_clear(path);
-    if (rm->file[0] == '/') {
-        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
-    }
     odin3_srcman *sm = NULL;
     odin3_srcpos pos;
     odin3_srcbuf_info info;
@@ -211,6 +214,29 @@ static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
         st = slash == NULL
                  ? ODIN3_OK
                  : odin3_strbuf_append(path, (odin3_bytes){source, (size_t)(slash - source) + 1U});
+    }
+    return st;
+}
+
+/* The path of the file: absolute as given. A relative one is beside the source file holding the
+ * call; under --vtr-compat the working directory is tried first, as Yosys (and so Parmys) does.
+ * Without it a file of that name in the working directory is not read: one WARNING says so. */
+static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
+    odin3_elab2 *e2 = rm->init->e2;
+    odin3_strbuf_clear(path);
+    if (rm->file[0] == '/') {
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    bool in_cwd = rm->file[0] != '\0' && rm_is_file(rm->file);
+    if (in_cwd && e2->mod_vtr_compat) {
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    odin3_status st = rm_source_dir(rm, path);
+    if (st == ODIN3_OK && in_cwd && path->len > 0) {
+        odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, rm->call),
+                         "%s reads '%s' beside the source file, not the one in the working "
+                         "directory (Yosys and --vtr-compat read the working directory first)",
+                         rm->task, rm->file);
     }
     return st != ODIN3_OK ? st : odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
 }
