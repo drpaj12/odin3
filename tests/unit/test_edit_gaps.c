@@ -42,7 +42,9 @@ static char *slurp(const char *path) {
     TEST_ASSERT_NOT_NULL(file);
     char *text = calloc(1, 1U << 16);
     TEST_ASSERT_NOT_NULL(text);
-    (void)fread(text, 1, (1U << 16) - 1U, file);
+    size_t got = fread(text, 1, (1U << 16) - 1U, file);
+    TEST_ASSERT_FALSE(ferror(file));
+    TEST_ASSERT_LESS_THAN_size_t((1U << 16) - 1U, got);
     (void)fclose(file);
     return text;
 }
