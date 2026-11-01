@@ -15,7 +15,7 @@ blocks (b15.v lines 125, 296, 724). In every use the block assigns TEMPORARY in 
 reads it in a later statement of the same sequence (`TEMPORARY = rEIP / 4; Address = TEMPORARY [29:0];`).
 No block reads a value another block wrote, and nothing outside the blocks reads it.
 
-Minimal reproducer: `tests/verilog/elab/scratch_two_blocks.v` (two clocked blocks, one scratch `T`).
+Minimal reproducer: `tests/verilog/proc-bridge/scratch.v` (two clocked blocks, one scratch `T`).
 
 What the oracles do with the same input:
 - Yosys 0.55 (Parmys front end): `read_verilog -nolatches; proc; opt; check` exits 0 on b15, b17, b18, b19
@@ -92,3 +92,11 @@ target cannot hold.
 
 1. Issue 1 fix is limited to the strict dominated-scratch pattern; wider cases keep T10.
 2. Issue 3 stays a documented divergence (no `--async` default change).
+
+## Known, not fixed (critique round, LOW)
+
+- The scratch rule is narrow by design: only the strict dominated pattern is accepted; wider cases keep the
+  T10 error (safe refusals).
+- Scratch flip-flops that nothing reads are removed by `opt`; without `opt` they remain as dead cells.
+- The scratch walk and the writer-list scans are O(n^2) in the worst case (many scratch variables or
+  blocks per module); not a problem at the sizes seen (ITC-99 b15 to b19).

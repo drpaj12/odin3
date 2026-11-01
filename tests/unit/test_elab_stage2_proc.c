@@ -445,6 +445,60 @@ static void test_scratch_read_outside_is_t10(void) {
     pt_expect_error((at_loc){5, 29}, "'s' is assigned in two always blocks (also at t.v:4:29)");
 }
 
+/* A define under an `if` without `else` does not dominate the read: T10 stays. */
+static void test_scratch_conditional_define_is_t10(void) {
+    pt_read_failing("module t(input c, input [3:0] a, output reg [3:0] x, y);\n"
+                    "  reg [3:0] s;\n"
+                    "  always @(posedge c) begin if (a[0]) s = a; x <= s; end\n"
+                    "  always @(posedge c) begin if (a[1]) s = a; y <= s; end\n"
+                    "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+}
+
+/* A partial write is not a whole-variable define: T10 stays. */
+static void test_scratch_partial_write_is_t10(void) {
+    pt_read_failing("module t(input c, input [3:0] a, output reg [3:0] x, y);\n"
+                    "  reg [3:0] s;\n"
+                    "  always @(posedge c) begin s[0] = a[0]; x <= s; end\n"
+                    "  always @(posedge c) begin s[0] = a[1]; y <= s; end\n"
+                    "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+}
+
+/* A write from a task is outside every always block's own text: T10 stays. */
+static void test_scratch_task_write_is_t10(void) {
+    pt_read_failing("module t(input c, input [3:0] a, output reg [3:0] x, y);\n"
+                    "  reg [3:0] s;\n"
+                    "  task set; begin s = a; end endtask\n"
+                    "  always @(posedge c) begin set; x <= s; end\n"
+                    "  always @(posedge c) begin set; y <= s; end\n"
+                    "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+}
+
+/* A loop variable shared by two blocks is no scratch variable (the for header is not a dominating
+ * define) and stays what it was before the rule: unrolled, no driver, no T10 (spec divergence 5).
+ */
+static void test_scratch_loop_variable_unchanged(void) {
+    pt_read_clean("module t(input c, input [3:0] a, output reg [3:0] x, y);\n"
+                  "  integer i;\n"
+                  "  always @(posedge c) for (i = 0; i < 4; i = i + 1) x[i] <= a[i];\n"
+                  "  always @(posedge c) for (i = 0; i < 4; i = i + 1) y[i] <= a[3 - i];\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(2, pt_count_of("$proc"));
+}
+
+/* Three blocks write the scratch variable: accepted, three processes. */
+static void test_scratch_variable_three_blocks(void) {
+    pt_read_clean("module t(input c, input [3:0] a, b, d, output reg [3:0] x, y, z);\n"
+                  "  reg [3:0] s;\n"
+                  "  always @(posedge c) begin s = a; x <= s; end\n"
+                  "  always @(posedge c) begin s = b; y <= s; end\n"
+                  "  always @(posedge c) begin s = d; z <= s; end\n"
+                  "endmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(3, pt_count_of("$proc"));
+}
+
 /* T10 per bit: the bit named in the message, the other bits of the variable are no conflict. */
 static void test_two_processes_one_bit_of_a_vector(void) {
     pt_read_failing("module t(input c, a, b, output reg [3:0] r);\n"
@@ -1171,6 +1225,11 @@ static void test_oom_sweep(void) {
     X(test_scratch_variable_two_blocks)                                                            \
     X(test_scratch_read_before_write_is_t10)                                                       \
     X(test_scratch_read_outside_is_t10)                                                            \
+    X(test_scratch_conditional_define_is_t10)                                                      \
+    X(test_scratch_partial_write_is_t10)                                                           \
+    X(test_scratch_task_write_is_t10)                                                              \
+    X(test_scratch_loop_variable_unchanged)                                                        \
+    X(test_scratch_variable_three_blocks)                                                          \
     X(test_blocking_and_nonblocking_same_path)                                                     \
     X(test_blocking_and_nonblocking_exclusive_arms)                                                \
     X(test_blocking_and_nonblocking_other_shapes)                                                  \
