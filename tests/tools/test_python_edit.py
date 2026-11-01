@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -230,6 +231,58 @@ class PythonEditTest(unittest.TestCase):
         self.addCleanup(third.close)
         with self.assertRaises(odin3.Odin3Error):
             third.run_script(f"read_verilog {src}")
+
+    def test_tops_of_concurrent_threads_do_not_mix(self) -> None:
+        src = Path(self.tmp.name) / "two.v"
+        src.write_text(
+            "module one(input a, output y); assign y = a; endmodule\n"
+            "module two(input a, output y); assign y = ~a; endmodule\n"
+        )
+        errors: list[str] = []
+
+        def work(want: str) -> None:
+            for _ in range(15):
+                design = Design(top=want)
+                try:
+                    design.run_script(f"read_verilog {src}")
+                    top = design.top()
+                    if top is None or top.name != want:
+                        errors.append(f"{want}: got {None if top is None else top.name}")
+                except odin3.Odin3Error as err:
+                    errors.append(f"{want}: {err}")
+                finally:
+                    design.close()
+
+        threads = [threading.Thread(target=work, args=(name,)) for name in ("one", "two")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        # and nothing is left set afterwards
+        third = Design()
+        self.addCleanup(third.close)
+        with self.assertRaises(odin3.Odin3Error):
+            third.run_script(f"read_verilog {src}")
+
+    def test_params_need_a_library_that_has_them(self) -> None:
+        # a library without odin3_edit_get_events predates the parameter fields: refuse, as it
+        # would otherwise ignore them
+        real = self.design.odin3.lib
+
+        class NoEvents:
+            def __getattr__(self, name: str) -> object:
+                if name == "odin3_edit_get_events":
+                    raise AttributeError(name)
+                return getattr(real, name)
+
+        self.design.odin3.lib = NoEvents()
+        try:
+            with self.assertRaises(odin3.Odin3Error) as ctx:
+                self.top.add_node("$_DFF_P_", "ff_old", "t", params={"INIT": 0})
+            self.assertIn("libodin3 too old", str(ctx.exception))
+        finally:
+            self.design.odin3.lib = real
 
     def test_missing_symbol_is_a_clear_error(self) -> None:
         class OldLib:

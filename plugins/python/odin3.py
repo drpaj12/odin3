@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import sys
+import threading
 import weakref
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -547,17 +548,29 @@ class Design:
 
     @contextmanager
     def _top_scope(self, top: str | None) -> Iterator[None]:
-        """Set the requested top name (odin3_pass_set_top_name, process-wide) for one run and clear
-        it afterwards, so it never leaks into another design."""
+        """Set the requested top name (odin3_pass_set_top_name) for one run, then put back the
+        top that was set before it.
+
+        The C top name is process-wide, so the whole run holds a module-level lock: runs of this
+        binding are serialised across threads (cffi releases the GIL during a pass) and never see
+        each other's top. The previous value is the one this binding last set (the C API has no
+        getter); a host that calls odin3_pass_set_top_name directly is not seen. A failure while
+        restoring never hides the exception of the run."""
         name = top if top is not None else self.top_name
-        if name is None:
-            yield
-            return
-        self.odin3.call("odin3_pass_set_top_name", name.encode())
-        try:
-            yield
-        finally:
-            self.odin3.call("odin3_pass_set_top_name", self.odin3.ffi.NULL)
+        with _TOP_LOCK:
+            if name is None and _current_top is None:
+                yield
+                return
+            previous = _current_top
+            _set_top(self.odin3, name)
+            try:
+                yield
+            finally:
+                try:
+                    _set_top(self.odin3, previous)
+                except Odin3Error:
+                    if sys.exc_info()[0] is None:
+                        raise
 
     def run_pass(self, name: str, args: str = "", *, top: str | None = None) -> None:
         """Run one pass (odin3_design_run_pass); raises Odin3Error with its status.
@@ -1180,6 +1193,9 @@ class Module(_Named):
         pnames = ffi.new("const char *[]", names or 1)
         pvalues = ffi.new("int64_t[]", list((params or {}).values()) or 1)
         if names:
+            # a library from before the parameter fields ignores them (and accepts the larger
+            # struct): odin3_edit_get_events arrived with them, so its absence means too old
+            _edit_probe(self.design, "odin3_edit_get_events")
             what.param_names, what.param_values, what.n_params = pnames, pvalues, len(names)
         _edit_probe(self.design, function)
         return _edit_ref(self.design, function, self.id, what)
@@ -1251,6 +1267,17 @@ class _Local(_Named):
 
 
 _L = TypeVar("_L", bound=_Local)
+
+
+_TOP_LOCK = threading.RLock()
+_current_top: str | None = None  # the top name this binding last set (guarded by _TOP_LOCK)
+
+
+def _set_top(odin3: Odin3, name: str | None) -> None:
+    """odin3_pass_set_top_name(name), NULL for None; remembers the value. Hold _TOP_LOCK."""
+    global _current_top
+    odin3.call("odin3_pass_set_top_name", odin3.ffi.NULL if name is None else name.encode())
+    _current_top = name
 
 
 def _cstr(text: str | None) -> bytes | Any:
