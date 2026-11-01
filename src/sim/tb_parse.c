@@ -1358,7 +1358,8 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     }
     tb_var *dst = &pr->tb->vars[var];
     if (is_param && shape.width == 0U) {
-        /* No range: the parameter takes the width and signedness of its value (Verilog-2005 4.10.1). */
+        /* No range: the parameter takes the width and signedness of its value
+         * (Verilog-2005 4.10.1). */
         if (init->kind == E_STR) {
             return string_param(pr, dst, init);
         }
@@ -1377,12 +1378,16 @@ static bool parse_decl(parser *pr) {
     (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
     pr->pos++;
     bool is_int = strcmp(kw, "integer") == 0;
-    /* A parameter without a range has the type of its value (width 0 here, set from the initialiser). */
+    /* A parameter without a range has the type of its value (width 0 here, set from the
+     * initialiser). */
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
     bool is_signed = accept_kw(pr, "signed");
     bool is_ranged = is_op(pr, "[");
     bool wide = is_int || (is_param && !is_ranged);
-    uint32_t base = is_param && !is_ranged ? 0U : (wide ? (uint32_t)TB_INT_BITS : 1U);
+    uint32_t base = wide ? (uint32_t)TB_INT_BITS : 1U;
+    if (is_param && !is_ranged) {
+        base = 0U;
+    }
     var_shape shape = {base, (wide && !is_param) || is_signed, false};
     if (is_ranged && !parse_range(pr, &shape.width)) {
         return false;

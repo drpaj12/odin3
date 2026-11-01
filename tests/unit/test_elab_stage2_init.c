@@ -572,9 +572,9 @@ static void test_readmemh(void) {
  * (Yosys and Parmys try it first). Without the working directory's file, both read the source's. */
 static void read_cwd_and_source(const char *args, bool with_cwd_file) {
     const et_src both[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
-                                        "  reg [7:0] m [0:3];\n"
-                                        "  initial $readmemh(\"init.hex\", m);\n"
-                                        "  assign q = m[ra];\nendmodule\n"},
+                                       "  reg [7:0] m [0:3];\n"
+                                       "  initial $readmemh(\"init.hex\", m);\n"
+                                       "  assign q = m[ra];\nendmodule\n"},
                            {"sub/init.hex", "@2\n12 34\n"},
                            {"init.hex", "@2\n56 78\n"}};
     pt_read_files(both, with_cwd_file ? 3U : 2U, args);
@@ -584,7 +584,8 @@ static void read_cwd_and_source(const char *args, bool with_cwd_file) {
 static void test_readmem_default_reads_the_source_directory_and_warns(void) {
     read_cwd_and_source("sub/t.v", true);
     TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
-    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "reads 'init.hex' beside the source"));
+    TEST_ASSERT_EQUAL_UINT32(
+        1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "reads 'init.hex' beside the source"));
 }
 
 static void test_readmem_vtr_compat_reads_the_working_directory_first(void) {
@@ -1109,6 +1110,12 @@ static void test_oom_sweep_write_primitive(void) {
     pt_expect_ir_ok();
 }
 
+static void run_readmem_dir_tests(void) {
+    RUN_TEST(test_readmem_default_reads_the_source_directory_and_warns);
+    RUN_TEST(test_readmem_vtr_compat_reads_the_working_directory_first);
+    RUN_TEST(test_readmem_vtr_compat_falls_back_to_the_source_directory);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_conditional_write_port);
@@ -1136,9 +1143,7 @@ int main(void) {
     RUN_TEST(test_initial_value_of_a_driven_net);
     RUN_TEST(test_init_bits_cap);
     RUN_TEST(test_readmemh);
-    RUN_TEST(test_readmem_default_reads_the_source_directory_and_warns);
-    RUN_TEST(test_readmem_vtr_compat_reads_the_working_directory_first);
-    RUN_TEST(test_readmem_vtr_compat_falls_back_to_the_source_directory);
+    run_readmem_dir_tests();
     RUN_TEST(test_readmemh_string_parameter);
     RUN_TEST(test_readmemh_string_concat_of_parameters);
     RUN_TEST(test_readmemh_nonconstant_file_name_is_an_error);
