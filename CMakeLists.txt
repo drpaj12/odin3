@@ -2792,6 +2792,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME tb_errors
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_errors.sh $<TARGET_FILE:odin3>)
     set_tests_properties(tb_errors PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+    add_test(NAME tb_blif
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_blif.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(tb_blif PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+    # The Arduino-on-RISC-V microcontroller (docs/notes/2026-10-31-mcu-testbench.md): a small
+    # program, iverilog against Odin III on the RTL and on the BLIF netlist. Exit 77 (skipped)
+    # without external/Arduino-on-RISC-V, iverilog or vvp.
+    set(_mcu_up $ENV{HOME}/odin3-ws/external/Arduino-on-RISC-V)
+    add_test(NAME tb_mcu
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3> ${_mcu_up}
+                blink_interrupt.vmh 100 ${CMAKE_BINARY_DIR}/tb_mcu)
+    set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

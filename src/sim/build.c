@@ -1,6 +1,7 @@
 /* build.c — odin3_sim_build: expands module instances into flat cells over shared value slots. */
 #include "build_internal.h"
 #include "ir/celltype.h"
+#include "ir/lut.h"
 #include "ir/module.h"
 #include "sim/sim.h"
 #include "sim/sim_internal.h"
@@ -10,6 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* --- value slots: a union-find while instances are expanded ----------------------------------- */
 
@@ -272,6 +274,57 @@ static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_
     return size_scratch(bld, flat);
 }
 
+/* True for a cell whose output is its input: a `$_BUF_`, or a one-input `$lut` with table 0, 1,
+ * or a `$sop` with the one row `1 1` (what `.names a y / 1 1` of a BLIF file reads as). */
+static bool is_identity(const odin3_celltype_def *def, const odin3_value *params) {
+    if (strcmp(def->name, "$_BUF_") == 0) {
+        return true;
+    }
+    if (strcmp(def->name, "$sop") == 0) {
+        const odin3_value *cover = &params[1];
+        return params[0].kind == ODIN3_VAL_INT && params[0].i == 1 &&
+               cover->kind == ODIN3_VAL_COVER && cover->len == 2 && cover->bits[0] == '1' &&
+               cover->bits[1] == '1';
+    }
+    if (strcmp(def->name, "$lut") != 0) {
+        return false;
+    }
+    const odin3_value *lut = &params[ODIN3_LUT_P_LUT];
+    return params[ODIN3_LUT_P_WIDTH].kind == ODIN3_VAL_INT && params[ODIN3_LUT_P_WIDTH].i == 1 &&
+           lut->kind == ODIN3_VAL_BITS && lut->len == 2 && lut->bits[0] == ODIN3_BIT_0 &&
+           lut->bits[1] == ODIN3_BIT_1;
+}
+
+/*
+ * An identity cell is not a cell of the flat design: its input and output nets share one slot, so a
+ * clock that passes through one (a BLIF model `.names clk c`) is still the primary input. True when
+ * node was joined; false leaves it to be a flat cell (open pin, or a wider cell).
+ */
+static bool join_identity(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                          const odin3_celltype_def *def) {
+    const odin3_module *mod = frame_module(bld, frame);
+    if (!is_identity(def, odin3_node_param(mod, node, 0))) {
+        return false;
+    }
+    odin3_pinslice in = odin3_node_port(mod, node, 0);
+    odin3_pinslice out = odin3_node_port(mod, node, 1);
+    if (in.count != 1 || out.count != 1) {
+        return false;
+    }
+    odin3_net_id in_net = odin3_pin_net(mod, in.first);
+    odin3_net_id out_net = odin3_pin_net(mod, out.first);
+    if (!odin3_net_valid(in_net) || !odin3_net_valid(out_net)) {
+        return false;
+    }
+    uint32_t one = *map_at(bld, frame, in_net);
+    uint32_t two = *map_at(bld, frame, out_net);
+    if (one == ODIN3_SIM_UNSET || two == ODIN3_SIM_UNSET) {
+        return false;
+    }
+    uf_union(bld, one, two);
+    return true;
+}
+
 /* A node of frame: port nodes are the frame's boundary; an instance opens a frame. */
 static odin3_status expand_node(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
     const odin3_module *mod = frame_module(bld, frame);
@@ -284,7 +337,7 @@ static odin3_status expand_node(odin3_sim_builder *bld, uint32_t frame, odin3_no
     }
     uint32_t child = odin3_sim_child_module(bld, mod, node);
     if (child == 0) {
-        return add_flat(bld, frame, node, def);
+        return join_identity(bld, frame, node, def) ? ODIN3_OK : add_flat(bld, frame, node, def);
     }
     odin3_status st = add_frame(bld, (odin3_module_id){child}, frame, node);
     return st != ODIN3_OK ? st : bind_ports(bld, (uint32_t)bld->frames.len - 1);
