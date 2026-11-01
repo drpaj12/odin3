@@ -18,7 +18,7 @@
 
 /* Where an attribute goes. */
 typedef enum odin3_wattr_role {
-    ODIN3_WATTR_SKIP,      /* bookkeeping (the BLIF reader's blif_extras list): not written */
+    ODIN3_WATTR_SKIP,      /* bookkeeping (blif_extras, the edit events odin3_edit): not written */
     ODIN3_WATTR_ATTRIBUTE, /* an attribute */
     ODIN3_WATTR_PARAMETER, /* a cell parameter (a BLIF `.param` line) */
 } odin3_wattr_role;

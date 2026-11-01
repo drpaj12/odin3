@@ -1,0 +1,127 @@
+{
+  "creator": "Odin III",
+  "odin3_version": 1,
+  "modules": {
+    "m": {
+      "attributes": {
+        "top": "00000000000000000000000000000001"
+      },
+      "ports": {
+        "a": {
+          "direction": "input",
+          "bits": [ 2 ]
+        },
+        "b": {
+          "direction": "input",
+          "bits": [ 3 ]
+        },
+        "y": {
+          "direction": "output",
+          "bits": [ 4 ]
+        }
+      },
+      "cells": {
+        "$c4": {
+          "hide_name": 1,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 5 ],
+            "Y": [ 4 ]
+          },
+          "odin3_edit": "rewired:trojan:t1",
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        },
+        "trojan_and": {
+          "hide_name": 0,
+          "type": "$lut",
+          "parameters": {
+            "LUT": "1000",
+            "WIDTH": "00000000000000000000000000000010"
+          },
+          "attributes": {
+          },
+          "port_directions": {
+            "A": "input",
+            "Y": "output"
+          },
+          "connections": {
+            "A": [ 2, 3 ],
+            "Y": [ 5 ]
+          },
+          "odin3_edit": "added:trojan:t1",
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        }
+      },
+      "netnames": {
+        "a": {
+          "hide_name": 0,
+          "bits": [ 2 ],
+          "attributes": {
+          },
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        },
+        "b": {
+          "hide_name": 0,
+          "bits": [ 3 ],
+          "attributes": {
+          },
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        },
+        "y": {
+          "hide_name": 0,
+          "bits": [ 4 ],
+          "attributes": {
+          },
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        },
+        "trojan_q": {
+          "hide_name": 0,
+          "bits": [ 5 ],
+          "attributes": {
+          },
+          "odin3_edit": "added:trojan:t1",
+          "odin3_prov": {
+            "kind": "IMPORTED",
+            "hier": "",
+            "hdl": [  ]
+          }
+        }
+      },
+      "odin3_prov": {
+        "kind": "IMPORTED",
+        "hier": "",
+        "hdl": [  ]
+      }
+    }
+  }
+}

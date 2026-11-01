@@ -1,0 +1,11 @@
+.model m
+.inputs a b
+.outputs y
+.names a trojan_q y
+11 1
+.attr odin3_edit rewired:trojan:t1
+.names a b trojan_q
+11 1
+.cname trojan_and
+.attr odin3_edit added:trojan:t1
+.end

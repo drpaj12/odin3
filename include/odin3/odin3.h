@@ -2353,12 +2353,23 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
 
 /* What an edit creates or changes (odin3_edit_add_net, _add_node, _add_sop, _set_cover,
  * _set_param_int). size: sizeof(odin3_edit_new) of the header the caller compiled against, set
- * first; a later library may append fields and reads only what size covers (a smaller size is
- * ODIN3_ERR_INVALID_ARG). reserved: must be zero, else ODIN3_ERR_INVALID_ARG. name: NULL or ""
+ * first; a later library may append fields and reads only what size covers. Accepted sizes: exactly
+ * 56 (the first release, up to and including index) or at least sizeof(odin3_edit_new) of this
+ * library; any other size is ODIN3_ERR_INVALID_ARG. A library built before the parameter fields
+ * ignores them, so a caller that passes n_params checks for odin3_edit_get_events first (the ABI
+ * version stays 7). reserved: must be zero, else ODIN3_ERR_INVALID_ARG. name: NULL or ""
  * for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover: add_sop
  * only (cover also set_cover); cover is the BLIF cover text, rows "01- 1" separated by newlines
  * (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0, and a
- * zero-input cover is one output char per row. index and value: set_param_int only. */
+ * zero-input cover is one output char per row. index and value: set_param_int only.
+ * param_names, param_values, n_params (add_node only; appended after v1.2.0, so a caller compiled
+ * against the 56-byte struct passes size 56 and these read as zero): n_params integer parameters of
+ * the cell type, by name (e.g. "INIT"), set over their defaults in the new node, so a flip-flop
+ * can start at 0 without a twin. An unknown or non-integer parameter, a repeated name, or more
+ * than 8, is ODIN3_ERR_INVALID_ARG with nothing changed; so is a non-zero n_params in any call
+ * but add_node. reserved2: must be zero. tag: non-empty and without a newline (a tag with a
+ * newline is ODIN3_ERR_INVALID_ARG in add_net, add_node, add_sop, set_cover and
+ * set_param_int, as in the tagged connection calls; it was accepted before the edit events). */
 typedef struct odin3_edit_new {
     uint32_t size;
     uint32_t reserved;
@@ -2369,23 +2380,28 @@ typedef struct odin3_edit_new {
     int64_t value;
     uint32_t n_inputs;
     uint32_t index;
+    const char *const *param_names;
+    const int64_t *param_values;
+    uint32_t n_params;
+    uint32_t reserved2;
 } odin3_edit_new;
 
 /* New net in `module`. *net gets its ref. */
-odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                 odin3_ref *net);
 
-/* New node of the registered or built-in cell type what->cell_type (default parameters), all pins
- * unconnected. Parameterised types: use odin3_edit_add_sop or odin3_edit_set_param_int. */
-odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+/* New node of the registered or built-in cell type in->cell_type, all pins unconnected. Its
+ * parameters are the type's defaults except the integer ones named by in->param_names. A $sop:
+ * use odin3_edit_add_sop. */
+odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                  odin3_ref *node);
 
-/* New $sop (BLIF .names) of what->n_inputs inputs and what->cover. */
-odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+/* New $sop (BLIF .names) of in->n_inputs inputs and in->cover. */
+odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                 odin3_ref *node);
 
-/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag;
- * odin3_edit_set_param_int sets integer parameter what->index to what->value the same way. The node
+/* Replaces the cover of a $sop (same width) by in->cover, tagged in->tag;
+ * odin3_edit_set_param_int sets integer parameter in->index to in->value the same way. The node
  * is replaced by a twin that takes over its pins, name and attributes; its ID changes (the old one
  * is dead). *twin gets the twin's ref as soon as the old node has been replaced, even when a later
  * step (the rename, the attribute copy, the debug check) fails and the call returns an error, so
@@ -2393,22 +2409,33 @@ odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odi
  * DERIVED record in a new run "edit" (arguments: the tag) of class REWRITE whose parents are the
  * old node's record (first) and the edit's IMPORTED record, so the backward walk still reaches the
  * HDL source and the construct chain; odin3_edit_get_tag reads the tag. */
-odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what,
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *in,
                                   odin3_ref *twin);
 odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node,
-                                      const odin3_edit_new *what, odin3_ref *twin);
+                                      const odin3_edit_new *in, odin3_ref *twin);
 
 /* Connects an unconnected pin to a net of the same module. An output pin may not join a net that
  * already has a driver. */
 odin3_status odin3_edit_connect(odin3_design *design, odin3_ref pin, odin3_ref net);
 
-/* Disconnects a pin (a no-op when unconnected). */
+/* Disconnects a pin (a no-op when unconnected). The pin's node gets the edit event "removed" with
+ * the tag "edit" (see odin3_edit_get_events). */
 odin3_status odin3_edit_disconnect(odin3_design *design, odin3_ref pin);
+
+/* As odin3_edit_disconnect, with the caller's non-empty tag in the event (no newline). */
+odin3_status odin3_edit_disconnect_tagged(odin3_design *design, odin3_ref pin, const char *tag);
 
 /* Moves a pin to another net: a disconnect then a connect. Arguments are checked first and a
  * refusal changes nothing; if the connect still fails the pin is reconnected to its old net (at
- * the end of that net's pin array, so the pin order of the old net may change). */
+ * the end of that net's pin array, so the pin order of the old net may change). The pin's node
+ * gets the edit event "rewired" with the tag "edit" (a pin already on net changes nothing and
+ * records nothing). */
 odin3_status odin3_edit_rewire(odin3_design *design, odin3_ref pin, odin3_ref net);
+
+/* As odin3_edit_rewire, with the caller's non-empty tag in the event (no newline). Also works on an
+ * unconnected pin (then it is a connect that leaves a mark). */
+odin3_status odin3_edit_rewire_tagged(odin3_design *design, odin3_ref pin, odin3_ref net,
+                                      const char *tag);
 
 /* Removes a node (not a port node) or a net with no pins, wire membership or aliases. A node
  * whose output pin sits on a net with other pins would leave that net undriven: that is refused
@@ -2420,6 +2447,18 @@ odin3_status odin3_edit_remove_net(odin3_design *design, odin3_ref net);
 /* *tag gets the edit tag of the node, net or wire `obj` (string owned by the design), or NULL
  * when the object was not made by an edit call. */
 odin3_status odin3_edit_get_tag(const odin3_design *design, odin3_obj obj, const char **tag);
+
+/*
+ * *text gets the edit events of the node or net `obj` (string owned by the design): lines
+ * "<kind> <tag>\n", oldest first, NULL when there are none. Kinds: "added" (made by an add call),
+ * "param" (a twin made by set_cover or set_param_int), "rewired" and "removed" (a pin of the node
+ * moved or was disconnected). An identical line is recorded once. The events are kept by flatten
+ * and by the twin, and are exported only on request: write_json --odin3 (member "odin3_edit") and
+ * write_blif --edit-tags (".attr odin3_edit"); read_json and read_blif restore them. When the
+ * object has no provenance record from an edit (for example after a BLIF round trip),
+ * odin3_edit_get_tag returns the tag of the first "added" event, else of the first event.
+ */
+odin3_status odin3_edit_get_events(const odin3_design *design, odin3_obj obj, const char **text);
 
 /* ODIN3_CDEF_END */
 

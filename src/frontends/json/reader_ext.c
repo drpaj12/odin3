@@ -3,6 +3,8 @@
  * graph export (J-9).
  */
 #include "frontends/json/reader_internal.h"
+#include "ir/edit_events.h"
+#include "util/str.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -29,6 +31,15 @@ static odin3_status ext_level(jr *rd, const odin3_json_node *value) {
 
 static bool is_text(const odin3_json_node *node) {
     return jr_kind(node) == ODIN3_JSON_STRING;
+}
+
+/* odin3_edit: the edit events of a cell or net, as write_json --odin3 writes them (a text). */
+static odin3_status ext_edit(jr *rd, const odin3_json_node *value) {
+    if (!is_text(value)) {
+        return jr_error(rd, value, NULL, "odin3_edit is not a text");
+    }
+    rd->ext_edit = value;
+    return ODIN3_OK;
 }
 
 static bool prov_kind_ok(const odin3_json_node *kind) {
@@ -69,7 +80,7 @@ static odin3_status ext_prov(jr *rd, const odin3_json_node *value) {
 
 /* odin3_version is read by jr_check_version and, as before, counted with the skipped members. */
 static const odin3_json_ext_key odin3_json_ext_keys[] = {
-    {"odin3_level", ext_level}, {"odin3_prov", ext_prov}, {NULL, NULL}};
+    {"odin3_level", ext_level}, {"odin3_prov", ext_prov}, {"odin3_edit", ext_edit}, {NULL, NULL}};
 
 static const char EXT_PREFIX[] = "odin3_";
 
@@ -95,8 +106,35 @@ static odin3_status ext_handle(jr *rd, const odin3_json_node *member, bool *hand
     return ODIN3_OK;
 }
 
+/* Sets the events of obj (a one-bit wire: of its net) from the odin3_edit member; a text that is
+ * not an event list is skipped with a warning, as an unknown member is. */
+static odin3_status apply_edit(jr *rd, odin3_module *module, odin3_objref obj) {
+    size_t len = 0;
+    const char *text = jr_text(rd->ext_edit, &len);
+    odin3_strbuf raw;
+    odin3_strbuf_init(&raw);
+    if (obj.kind == ODIN3_OBJ_WIRE && odin3_wire_width(module, (odin3_wire_id){obj.id}) == 1) {
+        obj = (odin3_objref){ODIN3_OBJ_NET, odin3_wire_net(module, (odin3_wire_id){obj.id}, 0).v};
+    }
+    odin3_status st = odin3_edit_events_decode((odin3_bytes){text, len}, &raw);
+    if (st == ODIN3_OK) {
+        st = odin3_edit_events_set_raw(module, obj, (odin3_bytes){raw.data, raw.len});
+    }
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_log(ODIN3_LOG_WARN, "%s: odin3_edit '%s' is not an edit event list; skipped",
+                  rd->path, text);
+        st = ODIN3_OK;
+    }
+    odin3_strbuf_free(&raw);
+    rd->ext_edit = NULL;
+    return st;
+}
+
 odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj) {
     odin3_status st = ODIN3_OK;
+    if (rd->ext_edit != NULL) {
+        st = apply_edit(rd, module, obj);
+    }
     if (rd->ext_level != NULL) {
         odin3_value val = odin3_value_int(jr_int(rd->ext_level));
         st = jr_set_attr_named(rd, module, obj, "odin3_level", &val);
@@ -108,6 +146,7 @@ odin3_status jr_apply_ext(jr *rd, odin3_module *module, odin3_objref obj) {
 odin3_status jr_audit(jr *rd, const odin3_json_node *obj, const char *const *known, size_t count) {
     odin3_status st = ODIN3_OK;
     rd->ext_level = NULL;
+    rd->ext_edit = NULL;
     for (const odin3_json_node *member = jr_first(obj); st == ODIN3_OK && member != NULL;
          member = odin3_json_next(member)) {
         const char *key = odin3_json_key(member);
