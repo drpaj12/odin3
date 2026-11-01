@@ -8,6 +8,18 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `$readmemh`/`$readmemb` take any constant string expression as the file name (a string parameter, a
+  localparam, a concatenation), as Yosys does. `tests/mcu/` runs the Arduino-on-RISC-V microcontroller
+  (`docs/notes/2026-10-31-mcu-testbench.md`): iverilog and `sim_tb` agree cycle for cycle on the ports, RTL and
+  BLIF netlist. 2026-10-31.
+
+### Fixed
+
+- `sim_tb`: an unsized testbench `parameter N = 3` was one bit wide. The simulator accepts a clock that passes
+  through an identity buffer (a BLIF `.names i o / 1 1`). 2026-10-31.
+
+### Added (continued)
+
 - `scoap` pass: SCOAP testability measures (CC0, CC1, CO; with `--sequential` SC0, SC1, SO) of every net, signal
   probability from random simulation (`--sigprob`), module attributes `odin3:scoap_*`, versioned JSON, Python
   `Design.scoap()`. Spec `docs/specs/2026-10-31-scoap-design.md`, manual `docs/user/scoap.md`. 2026-10-31.
