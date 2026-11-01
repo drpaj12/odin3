@@ -210,18 +210,27 @@ static void skip_to_eol(const char **cursor) {
     }
 }
 
-/* Keeps the time unit of `timescale <unit>/<precision> (digits and letters, e.g. 10ns). */
+/* Keeps the time unit of `timescale <n> <unit> / <precision>: digits, optional blanks, letters
+ * (1ns, 1 ns, 100 ps / 10 ps all work); stored as "<n> <unit>". The precision is ignored. */
 static void take_timescale(const char *text, tb_module *tb) {
     while (*text == ' ' || *text == '\t') {
         text++;
     }
-    size_t len = 0;
-    while (isalnum((unsigned char)text[len]) && len + 1 < sizeof tb->timescale) {
-        len++;
+    size_t ndig = 0;
+    while (isdigit((unsigned char)text[ndig])) {
+        ndig++;
     }
-    if (len > 0) {
-        memcpy(tb->timescale, text, len);
-        tb->timescale[len] = '\0';
+    const char *unit = text + ndig;
+    while (*unit == ' ' || *unit == '\t') {
+        unit++;
+    }
+    size_t nlet = 0;
+    while (isalpha((unsigned char)unit[nlet])) {
+        nlet++;
+    }
+    if (ndig > 0 && nlet > 0 && ndig + nlet + 2 <= sizeof tb->timescale) {
+        (void)snprintf(tb->timescale, sizeof tb->timescale, "%.*s %.*s", (int)ndig, text, (int)nlet,
+                       unit);
     }
 }
 
@@ -277,7 +286,7 @@ static bool lex_token(const char **cursor, tb_tok *tok, const tb_source *src, tb
 bool tb_lex(const tb_source *src, tb_module *tb, tb_lexed *out) {
     uint32_t line = 1;
     const char *cursor = src->text;
-    (void)strcpy(tb->timescale, "1ns");
+    (void)strcpy(tb->timescale, "1 ns");
     uint32_t cap = LEX_TOKS0;
     out->toks = tb_alloc(tb, (size_t)cap * sizeof *out->toks);
     out->n = 0;

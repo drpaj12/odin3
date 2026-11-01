@@ -60,6 +60,12 @@ class VcdCompareTest(unittest.TestCase):
         proc = run_tool(BASE, BASE.replace("#5", "#6"))
         self.assertEqual(proc.returncode, 1, proc.stdout)
 
+    def test_mismatch_time_in_the_reference_unit(self) -> None:
+        ref = BASE.replace("1ns", "100 ps").replace("#5", "#6")
+        proc = run_tool(BASE, ref)
+        self.assertEqual(proc.returncode, 1, proc.stdout)
+        self.assertIn("t=6 x 100 ps (=600000 fs)", proc.stdout)
+
     def test_missing_signal(self) -> None:
         proc = run_tool(BASE, BASE.replace('$var reg 4 " q $end\n', ""))
         self.assertEqual(proc.returncode, 1)
@@ -79,7 +85,7 @@ class SimTbVcdTest(unittest.TestCase):
             proc = subprocess.run([CLI, "-p", script], capture_output=True, text=True, check=False)
             self.assertEqual(proc.returncode, 0, proc.stderr)
             text = vcd.read_text()
-        self.assertIn("$timescale 1ns $end", text)
+        self.assertIn("$timescale 1 ns $end", text)
         self.assertIn("$scope module counter_tb $end", text)
         self.assertIn("$scope module dut $end", text)
         self.assertIn("$enddefinitions $end", text)
@@ -100,3 +106,48 @@ class SimTbVcdTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def run_tb(tmp: str, body: str, vcd: bool) -> tuple[str, str]:
+    """(stdout file text, vcd text) of `sim_tb` on a one-DUT testbench."""
+    d, tb = Path(tmp) / "d.v", Path(tmp) / "t.v"
+    d.write_text("module d(input [31:0] a, output y);\n  assign y = 1;\nendmodule\n")
+    tb.write_text(body)
+    out, wave = Path(tmp) / ("v.out" if vcd else "p.out"), Path(tmp) / "w.vcd"
+    extra = f" --vcd {wave}" if vcd else ""
+    script = f"read_verilog {d}; proc; opt; lower; sim_tb --out {out}{extra} {tb}"
+    proc = subprocess.run([CLI, "-p", script], capture_output=True, text=True, check=False)
+    assert proc.returncode == 0, proc.stderr
+    return out.read_text(), wave.read_text() if vcd else ""
+
+
+RANDOM_TB = """module t;
+  reg [31:0] x; wire y;
+  d u(.a($random), .y(y));
+  initial begin x = $random; #1 $display("%d", x); #1 $display("%d", $random); end
+endmodule
+"""
+
+
+@unittest.skipUnless(CLI, "ODIN3_CLI not set")
+class SimTbVcdFixesTest(unittest.TestCase):
+    def test_timescale_forms(self) -> None:
+        want = {"1ns/1ps": "1 ns", "1 ns / 1 ps": "1 ns", "100 ps/10 ps": "100 ps",
+                "10us / 1ns": "10 us"}
+        with tempfile.TemporaryDirectory() as tmp:
+            for form, unit in want.items():
+                _, text = run_tb(tmp, f"`timescale {form}\n" + RANDOM_TB, True)
+                self.assertIn(f"$timescale {unit} $end", text, form)
+
+    def test_random_in_a_connection_is_not_sampled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            plain, _ = run_tb(tmp, RANDOM_TB, False)
+            waved, _ = run_tb(tmp, RANDOM_TB, True)
+        self.assertEqual(plain, waved)
+
+    def test_final_timestamp(self) -> None:
+        body = ("module t; reg [31:0] x; wire y; d u(.a(x), .y(y));\n"
+                "  initial begin x = 0; #1 x = 1; #3 $display(\"e\"); end\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            _, text = run_tb(tmp, body, True)
+        self.assertEqual(text.splitlines()[-1], "#4")

@@ -22,6 +22,7 @@ struct tb_vcd {
     vcd_sig *sigs;
     uint32_t nsigs;
     bool first;
+    uint64_t last_time; /* the last #<time> written */
 };
 
 static bool dumpable(const tb_var *var) {
@@ -112,7 +113,11 @@ static uint64_t current(tb_ev *ev, const vcd_sig *sig) {
     if (sig->var != NULL) {
         return sig->var->val & tb_mask(sig->width);
     }
-    return tb_eval(ev, sig->conn->expr, sig->width, false) & tb_mask(sig->width);
+    /* Sampling must not change the run: a `$random` in the connection would advance the seed. */
+    int32_t seed = ev->seed;
+    uint64_t val = tb_eval(ev, sig->conn->expr, sig->width, false) & tb_mask(sig->width);
+    ev->seed = seed;
+    return val;
 }
 
 void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time) {
@@ -126,6 +131,7 @@ void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time) {
         if (!header) {
             (void)fprintf(vcd->fp, "#%llu\n%s", (unsigned long long)time,
                           vcd->first ? "$dumpvars\n" : "");
+            vcd->last_time = time;
             header = true;
         }
         write_value(vcd, sig, val);
@@ -137,9 +143,12 @@ void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time) {
     vcd->first = false;
 }
 
-bool tb_vcd_close(tb_vcd *vcd) {
+bool tb_vcd_close(tb_vcd *vcd, uint64_t end_time) {
     if (vcd == NULL) {
         return true;
+    }
+    if (end_time != vcd->last_time) {
+        (void)fprintf(vcd->fp, "#%llu\n", (unsigned long long)end_time); /* the run's end */
     }
     bool ok = ferror(vcd->fp) == 0;
     ok = fclose(vcd->fp) == 0 && ok;

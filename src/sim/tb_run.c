@@ -621,7 +621,7 @@ odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *o
         event_loop(&rt);
         st = rt.failed ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
     }
-    if (!tb_vcd_close(rt.vcd) && st == ODIN3_OK) {
+    if (!tb_vcd_close(rt.vcd, rt.ev.time) && st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_ERROR, "sim_tb: write error on the --vcd file");
         st = ODIN3_ERR_IO;
     }

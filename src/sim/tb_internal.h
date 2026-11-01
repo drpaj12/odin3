@@ -85,7 +85,8 @@ typedef struct tb_vcd tb_vcd;
 tb_vcd *tb_vcd_open(const char *path, const tb_module *tb);
 /* Writes the values that changed at time (the first call writes them all, as $dumpvars). */
 void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time);
-/* Closes the file; false when a write failed. NULL is a no-op returning true. */
-bool tb_vcd_close(tb_vcd *vcd);
+/* Writes the end time when later than the last sample, closes the file; false when a write
+ * failed. NULL is a no-op returning true. */
+bool tb_vcd_close(tb_vcd *vcd, uint64_t end_time);
 
 #endif

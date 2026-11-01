@@ -2804,7 +2804,8 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME tb_vcd
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
                     ${Python3_EXECUTABLE})
-        set_tests_properties(tb_vcd PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+        set_tests_properties(tb_vcd PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " SKIP_RETURN_CODE 77
+                                               LABELS tools)
     endif()
     add_test(NAME tb_project
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_project.sh $<TARGET_FILE:odin3>)

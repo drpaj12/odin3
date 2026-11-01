@@ -87,24 +87,43 @@ def value_at(line: Timeline, times: list[int], when: int) -> int | None:
     return best
 
 
-def compare_signal(name: str, a: Timeline, b: Timeline) -> str | None:
-    """A report for the first differing time of one signal, or None."""
+def read_timescale(path: Path) -> tuple[int, str]:
+    """(femtoseconds per unit, the `$timescale` text such as `1 ns`) of a VCD file."""
+    tokens = path.read_text().split()
+    if "$timescale" not in tokens:
+        raise VcdError(f"{path}: no $timescale")
+    start = tokens.index("$timescale") + 1
+    body = " ".join(tokens[start : tokens.index("$end", start)])
+    return parse_timescale(body), body
+
+
+FS_UNIT = (1, "fs")
+
+
+def compare_signal(
+    name: str, a: Timeline, b: Timeline, unit: tuple[int, str] = FS_UNIT
+) -> str | None:
+    """A report for the first differing time of one signal, or None. The time is printed in
+    `unit` (femtoseconds per tick, label): the reference file's own timescale."""
     ta, tb = sorted(a), sorted(b)
     for when in sorted(set(ta) | set(tb)):
         va, vb = value_at(a, ta, when), value_at(b, tb, when)
         if va is not None and vb is not None and va != vb:
-            return f"{name} at {when // 10**6} ns-equivalent (t={when} fs): {va} vs {vb}"
+            ticks = when / unit[0]
+            return f"{name} at t={ticks:g} x {unit[1]} (={when} fs): {va} vs {vb}"
     return None
 
 
-def compare(a: dict[str, Timeline], b: dict[str, Timeline]) -> list[str]:
+def compare(
+    a: dict[str, Timeline], b: dict[str, Timeline], unit: tuple[int, str] = FS_UNIT
+) -> list[str]:
     """All reports (missing signals, then one per differing signal)."""
     reports = []
     for name in sorted(a):
         if name not in b:
             reports.append(f"{name}: missing from the second file")
             continue
-        report = compare_signal(name, a[name], b[name])
+        report = compare_signal(name, a[name], b[name], unit)
         if report is not None:
             reports.append(report)
     return reports
@@ -117,13 +136,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = ap.parse_args(argv)
     try:
         a, b = read_vcd(args.a), read_vcd(args.b)
+        unit = read_timescale(args.b)
     except (VcdError, OSError, ValueError, IndexError) as err:
         print(f"vcd-compare: {err}", file=sys.stderr)
         return 2
     if not a:
         print("vcd-compare: the first file has no signals", file=sys.stderr)
         return 2
-    reports = compare(a, b)
+    reports = compare(a, b, unit)
     if reports:
         print(f"vcd-compare: MISMATCH ({len(reports)} signals)")
         for report in reports[:10]:
