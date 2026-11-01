@@ -8,6 +8,10 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `$readmemh`/`$readmemb` take any constant string expression as the file name (a string parameter, a
+  localparam, a concatenation), as Yosys does. `tests/mcu/` runs the Arduino-on-RISC-V microcontroller
+  (`docs/notes/2026-10-31-mcu-testbench.md`): iverilog and `sim_tb` agree cycle for cycle on the ports, RTL and
+  BLIF netlist. 2026-10-31.
 - Netlist-edit gaps (Leman Russ III round 5). Edit events (added, param, rewired, removed) per node and net,
   exported on request: `write_json --odin3` member `odin3_edit`, `write_blif --edit-tags` line
   `.attr odin3_edit KIND:TAG,...` (plain dialect); `read_json` and `read_blif` restore them. `odin3_edit_rewire` and
@@ -34,6 +38,8 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- `sim_tb`: an unsized testbench `parameter N = 3` was one bit wide. The simulator accepts a clock that passes
+  through an identity buffer (a BLIF `.names i o / 1 1`). 2026-10-31.
 - `odin3-flow` runs `odin3` with the working directory set to the common parent directory of the design
   files and passes each design relative to it, so hash names, the version 2 name map and the BLIF are
   identical for one design in any directory (the known gap of `docs/V1.2.0.md`). The run log (`odin3/odin3.log`)

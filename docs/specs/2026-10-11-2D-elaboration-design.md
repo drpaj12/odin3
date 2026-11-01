@@ -369,7 +369,7 @@ a word past the array (an `@` address or a count) is not stored and the call war
 SIZE x WIDTH bits (word `k` at bit `k x WIDTH`), x where nothing was written. Messages added to §9.1: the
 D2 warnings are as §8.8 says; the shape errors of `$readmem`'s arguments (`the second argument of $readmemh
 must be a memory`, `$readmemh needs a one-dimensional array; 'm' has N dimensions`, `$readmemh takes 2 to 4
-arguments; N given`, `the first argument of $readmemh must be a string`, `an address argument of $readmemh is
+arguments; N given`, `the first argument of $readmemh must be a constant string`, `an address argument of $readmemh is
 not constant`) and `assignment to a word outside array 'm' is ignored` (an `initial` write past the array).
 (4) The pending feature `memory write` and the kind `INITIAL` are gone from the point (l) tables, which are
 empty; `elab-equiv` gains `--unmap-enables` (`dffunmap` and `opt -nodffe -nosdff`: `memory_map` makes enabled
@@ -2188,8 +2188,10 @@ order:
   Loops, `if`, `case` and constant function calls work as in EL-17; memory words take constant
   indices (a non-constant index makes the statement non-constant).
 - `$readmemh("file", m [, start [, finish]])` / `$readmemb` (S4): the file is resolved against the
-  directory of the source file that contains the call (DESIGN §4.0: never the working directory;
-  Yosys tries the working directory first — divergence §17 #6); its words are parsed as Yosys's
+  directory of the source file that contains the call (DESIGN §4.0). Yosys tries the working
+  directory first (divergence §17 #6); under `--vtr-compat` Odin III does too (Parmys rule), and
+  otherwise it keeps the source directory and prints one WARNING per call when the working
+  directory also holds a file of that name; its words are parsed as Yosys's
   `readmem` does (blank-separated tokens, `//` and `/* */` comments, `@hex` addresses, each word
   a sized literal of the memory's width in base 16 or 2), filling from `start` (default: the
   lowest index) toward `finish` (default: the highest). Errors: "cannot open 'f' for $readmemh",
@@ -2953,7 +2955,7 @@ and reported, never relaxed (2A's rule).
 | 3 | `if (A) … else if (B) …` generate: the else branch is a scope, named like the then-branch; names nest as `genblk1.genblk1.x` for a first construct | same (verified on 0.55) | a directly nested conditional is not a separate scope (`genblk1.x`) | names match Yosys's |
 | 4 | non-constant lvalue selects use the case method | mask-and-shift (`$shift`) unless `nowrshmsk` | — | no `$shift` cell needed; equivalent |
 | 5 | loop variables are process-local unless read elsewhere | outputs (dead registers) | — | avoids a false T10 on a shared `integer i`; equivalent |
-| 6 | `$readmem` files relative to the source file only | working directory first | tool-defined | DESIGN §4.0: never the working directory |
+| 6 | `$readmem` files relative to the source file; under `--vtr-compat` the working directory first, then the source file (Parmys rule); without it a WARNING when the working directory holds a file of that name | working directory first | tool-defined | DESIGN §4.0: names resolve against the source; the Parmys-match rule for `--vtr-compat` |
 | 7 | project > named `#()` > first `defparam` > ordered `#()`; ordered `#()` with `defparam` accepted | same order; ordered + defparam is an error | `defparam` wins; last `defparam` wins | the exit bar is Parmys; the ordered case is undefined in Yosys |
 | 8 | a specialization is keyed by resolved values; overrides equal to defaults share the base module; names `base$P=v` | `$paramod\base\P=…` whenever any override is given | — | fewer modules, IR-7 naming |
 | 9 | automatic top = the single uninstantiated module, else an error | deepest hierarchy, ties to the last defined | — | DESIGN §4.0 and the project corpus; the micro harness passes `--top` |

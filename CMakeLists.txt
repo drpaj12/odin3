@@ -2813,6 +2813,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     add_test(NAME tb_errors
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_errors.sh $<TARGET_FILE:odin3>)
     set_tests_properties(tb_errors PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+    add_test(NAME tb_blif
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_blif.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(tb_blif PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+    # The Arduino-on-RISC-V microcontroller (docs/notes/2026-10-31-mcu-testbench.md): a small
+    # program, iverilog against Odin III on the RTL and on the BLIF netlist. ODIN3_MCU_UPSTREAM
+    # (cache variable, else the environment variable of that name) is the upstream checkout; exit
+    # 77 (skipped) when it is unset or absent, or without iverilog or vvp. 500 cycles cover both
+    # interrupt pulses (cycles 200 and 400 of tests/mcu/mcu_tb.v).
+    set(ODIN3_MCU_UPSTREAM "$ENV{ODIN3_MCU_UPSTREAM}" CACHE PATH
+        "Arduino-on-RISC-V checkout for the tb_mcu test (empty: the test skips)")
+    add_test(NAME tb_mcu
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
+                "${ODIN3_MCU_UPSTREAM}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu)
+    set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})

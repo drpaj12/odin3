@@ -1,6 +1,7 @@
 /* build.c — odin3_sim_build: expands module instances into flat cells over shared value slots. */
 #include "build_internal.h"
 #include "ir/celltype.h"
+#include "ir/lut.h"
 #include "ir/module.h"
 #include "sim/sim.h"
 #include "sim/sim_internal.h"
@@ -10,6 +11,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 /* --- value slots: a union-find while instances are expanded ----------------------------------- */
 
@@ -429,10 +431,80 @@ static void point_views(odin3_sim *sim) {
 
 /* --- clocks ----------------------------------------------------------------------------------- */
 
+/* True for a cell whose output is its input: a `$_BUF_`, a one-input `$lut` with table 0, 1, or a
+ * `$sop` with the one row `1 1` (what `.names a y / 1 1` of a BLIF file reads as). */
+static bool sop_is_identity(const odin3_value *params) {
+    const odin3_value *cover = &params[1];
+    return params[0].kind == ODIN3_VAL_INT && params[0].i == 1 && cover->kind == ODIN3_VAL_COVER &&
+           cover->len == 2 && cover->bits[0] == '1' && cover->bits[1] == '1';
+}
+
+static bool lut_is_identity(const odin3_value *params) {
+    const odin3_value *lut = &params[ODIN3_LUT_P_LUT];
+    return params[ODIN3_LUT_P_WIDTH].kind == ODIN3_VAL_INT && params[ODIN3_LUT_P_WIDTH].i == 1 &&
+           lut->kind == ODIN3_VAL_BITS && lut->len == 2 && lut->bits[0] == ODIN3_BIT_0 &&
+           lut->bits[1] == ODIN3_BIT_1;
+}
+
+static bool is_identity(const odin3_sim_flat *flat) {
+    if (flat->view.n_ports != 2 || flat->view.ports[0].width != 1 ||
+        flat->view.ports[1].width != 1) {
+        return false;
+    }
+    const char *name = flat->def->name;
+    return strcmp(name, "$_BUF_") == 0 ||
+           (strcmp(name, "$sop") == 0 && sop_is_identity(flat->view.params)) ||
+           (strcmp(name, "$lut") == 0 && lut_is_identity(flat->view.params));
+}
+
+/*
+ * For every slot driven by an identity cell, the slot that cell reads; ODIN3_SIM_UNSET for the
+ * others. A clock may pass through such cells (a BLIF model `.names clk c`) and still be the input.
+ */
+static uint32_t *identity_sources(const odin3_sim *sim) {
+    uint32_t *via = odin3_util_malloc((size_t)sim->n_values * sizeof *via);
+    if (via == NULL) {
+        return NULL;
+    }
+    for (uint32_t slot_ix = 0; slot_ix < sim->n_values; slot_ix++) {
+        via[slot_ix] = ODIN3_SIM_UNSET;
+    }
+    for (uint32_t i = 0; i < sim->n_cells; i++) {
+        const odin3_sim_flat *flat = &sim->cells[i];
+        if (is_identity(flat)) {
+            via[flat->view.ports[1].idx[0]] = flat->view.ports[0].idx[0];
+        }
+    }
+    return via;
+}
+
+/* Per slot: the first input bit on it, and the slot an identity cell driving it reads. */
+typedef struct clock_maps {
+    const uint32_t *input_of;
+    const uint32_t *via;
+} clock_maps;
+
+/* The input bit that drives clock slot, through identity cells; ODIN3_SIM_UNSET for none. */
+static uint32_t clock_input(const odin3_sim *sim, const clock_maps *maps, uint32_t slot) {
+    for (uint32_t hops = 0; hops <= sim->n_values; hops++) {
+        if (maps->input_of[slot] != ODIN3_SIM_UNSET) {
+            return maps->input_of[slot];
+        }
+        if (maps->via[slot] == ODIN3_SIM_UNSET) {
+            break;
+        }
+        slot = maps->via[slot];
+    }
+    return ODIN3_SIM_UNSET;
+}
+
 /* Flags the inputs that clock edge-triggered cells; a clock that is not an input is an error. */
 static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
     uint32_t *input_of = odin3_util_malloc((size_t)sim->n_values * sizeof *input_of);
-    if (input_of == NULL) {
+    uint32_t *via = identity_sources(sim);
+    if (input_of == NULL || via == NULL) {
+        odin3_util_free(input_of);
+        odin3_util_free(via);
         return ODIN3_ERR_NO_MEMORY;
     }
     for (uint32_t slot_ix = 0; slot_ix < sim->n_values; slot_ix++) {
@@ -449,14 +521,16 @@ static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
             continue;
         }
         uint32_t slot = flat->view.ports[0].idx[0];
-        if (input_of[slot] == ODIN3_SIM_UNSET) {
+        uint32_t input = clock_input(sim, &(clock_maps){input_of, via}, slot);
+        if (input == ODIN3_SIM_UNSET) {
             odin3_sim_err_clock(bld, flat, slot);
             st = ODIN3_ERR_INVALID_ARG;
         } else {
-            sim->in_clock[input_of[slot]] = 1;
+            sim->in_clock[input] = 1;
         }
     }
     odin3_util_free(input_of);
+    odin3_util_free(via);
     return st;
 }
 

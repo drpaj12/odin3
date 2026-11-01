@@ -526,7 +526,7 @@ static const char *data_text(unsigned slot, const char *name) {
     return g_files[slot];
 }
 
-/* "sub/t.v" and "sub/<name>": the file is beside the source, never in the working directory. */
+/* "sub/t.v" and "sub/<name>": the file is beside the source (the working directory holds none). */
 static void read_with_file(const char *name, const char *source) {
     const et_src srcs[] = {{"sub/t.v", source}, {name, data_text(0, strrchr(name, '/') + 1)}};
     pt_read_files(srcs, 2, "sub/t.v");
@@ -563,6 +563,72 @@ static void test_readmemh(void) {
                                    "  assign q = m[ra];\nendmodule\n");
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
     TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+/* The file name is any constant string: a string parameter, a localparam, a concatenation of
+ * string constants (Yosys simplifies the argument to a constant; NULs of a wider operand drop). */
+/* A relative file name found in the working directory and beside the source: by default the source
+ * directory's file is read, with one WARNING; under --vtr-compat the working directory's is read
+ * (Yosys and Parmys try it first). Without the working directory's file, both read the source's. */
+static void read_cwd_and_source(const char *args, bool with_cwd_file) {
+    const et_src both[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                       "  reg [7:0] m [0:3];\n"
+                                       "  initial $readmemh(\"init.hex\", m);\n"
+                                       "  assign q = m[ra];\nendmodule\n"},
+                           {"sub/init.hex", "@2\n12 34\n"},
+                           {"init.hex", "@2\n56 78\n"}};
+    pt_read_files(both, with_cwd_file ? 3U : 2U, args);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+}
+
+static void test_readmem_default_reads_the_source_directory_and_warns(void) {
+    read_cwd_and_source("sub/t.v", true);
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(
+        1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "reads 'init.hex' beside the source"));
+}
+
+static void test_readmem_vtr_compat_reads_the_working_directory_first(void) {
+    read_cwd_and_source("--vtr-compat sub/t.v", true);
+    TEST_ASSERT_EQUAL_STRING("xx xx 56 78", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "beside the source"));
+}
+
+static void test_readmem_vtr_compat_falls_back_to_the_source_directory(void) {
+    read_cwd_and_source("--vtr-compat sub/t.v", false);
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "beside the source"));
+}
+
+static void test_readmemh_string_parameter(void) {
+    read_with_file("sub/init.hex", "module t #(parameter FILE = \"init.hex\") (input [1:0] ra,\n"
+                                   "  output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(FILE, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmemh_string_concat_of_parameters(void) {
+    read_with_file("sub/init.hex", "module t #(parameter BASE = \"hex\") (input [1:0] ra,\n"
+                                   "  output [7:0] q);\n"
+                                   "  localparam NAME = {\"init.\", BASE};\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(NAME, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmemh_nonconstant_file_name_is_an_error(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, input [7:0] f, output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(f, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pt_rs.status);
+    et_expect(&pt_rs, ODIN3_LOG_ERROR,
+              "sub/t.v:3:11: error: the first argument of $readmemh must be a constant string");
 }
 
 static void test_readmemb_with_start_and_finish(void) {
@@ -1044,6 +1110,12 @@ static void test_oom_sweep_write_primitive(void) {
     pt_expect_ir_ok();
 }
 
+static void run_readmem_dir_tests(void) {
+    RUN_TEST(test_readmem_default_reads_the_source_directory_and_warns);
+    RUN_TEST(test_readmem_vtr_compat_reads_the_working_directory_first);
+    RUN_TEST(test_readmem_vtr_compat_falls_back_to_the_source_directory);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_conditional_write_port);
@@ -1071,6 +1143,10 @@ int main(void) {
     RUN_TEST(test_initial_value_of_a_driven_net);
     RUN_TEST(test_init_bits_cap);
     RUN_TEST(test_readmemh);
+    run_readmem_dir_tests();
+    RUN_TEST(test_readmemh_string_parameter);
+    RUN_TEST(test_readmemh_string_concat_of_parameters);
+    RUN_TEST(test_readmemh_nonconstant_file_name_is_an_error);
     RUN_TEST(test_readmemb_with_start_and_finish);
     RUN_TEST(test_readmem_errors);
     RUN_TEST(test_readmem_dropped_words_warn);

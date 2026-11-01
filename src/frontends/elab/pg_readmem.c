@@ -29,12 +29,14 @@
 #include "util/vec.h"
 
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 enum { RM_MIN_ARGS = 2, RM_MAX_ARGS = 4, RM_HEX_BITS = 4, RM_RADIX_HEX = 16, RM_PATH = 4096 };
 
@@ -121,6 +123,46 @@ static odin3_status rm_address(rm_run *rm, odin3_ast_id arg, int64_t *out) {
     return st;
 }
 
+/* The file name: a string literal, else a constant string expression (a string parameter, a
+ * concatenation of string constants), evaluated as Yosys does by simplifying the argument to a
+ * constant; its bytes are the name with the NULs dropped (decode_string), so a concatenation
+ * wider than its text, as {"0"+i, BASE}, gives the text alone. */
+static odin3_status rm_file_name(rm_run *rm, odin3_ast_id arg) {
+    odin3_elab2 *e2 = rm->init->e2;
+    if (odin3_ast_kind_of(e2->elab, arg) == ODIN3_AST_STRING) {
+        rm->file = odin3_ast_name_str(e2->elab, arg);
+        return ODIN3_OK;
+    }
+    const odin3_ceval_req req = {arg, {0, false, false}, "file name"};
+    odin3_cval value;
+    odin3_bytes bytes = {NULL, 0};
+    bool is_const = false;
+    odin3_status st = odin3_ceval_try(rm->init->ev, &req, e2->scratch, &value, &is_const);
+    if (st == ODIN3_OK) {
+        bool whole = is_const && value.width % CHAR_BIT == 0 && odin3_cval_is_known(&value);
+        st = whole ? odin3_cval_string_bytes(e2->scratch, &value, &bytes) : ODIN3_ERR_PARSE;
+    }
+    if (st != ODIN3_OK) {
+        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, rm->call),
+                          "the first argument of %s must be a constant string", rm->task);
+        return ODIN3_ERR_PARSE;
+    }
+    char *name = odin3_arena_alloc(e2->scratch, bytes.len + 1U);
+    if (name == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    size_t used = 0;
+    const char *text = bytes.ptr;
+    for (size_t i = 0; i < bytes.len; i++) {
+        if (text[i] != '\0') {
+            name[used++] = text[i];
+        }
+    }
+    name[used] = '\0';
+    rm->file = name;
+    return ODIN3_OK;
+}
+
 /* The arguments: file name, memory, the optional addresses. */
 static odin3_status rm_args(rm_run *rm) {
     const odin3_ast *ast = rm->init->e2->elab;
@@ -131,12 +173,11 @@ static odin3_status rm_args(rm_run *rm) {
                           args.n);
         return ODIN3_ERR_PARSE;
     }
-    if (odin3_ast_kind_of(ast, args.ids[0]) != ODIN3_AST_STRING) {
-        odin3_elab2_error(rm->init->e2, loc, "the first argument of %s must be a string", rm->task);
-        return ODIN3_ERR_PARSE;
+    odin3_status st = rm_file_name(rm, args.ids[0]);
+    if (st != ODIN3_OK) {
+        return st;
     }
-    rm->file = odin3_ast_name_str(ast, args.ids[0]);
-    odin3_status st = rm_memory(rm, args.ids[1]);
+    st = rm_memory(rm, args.ids[1]);
     rm->cursor = rm->low;
     rm->finish = rm->high + 1;
     if (st == ODIN3_OK && args.n > 2) {
@@ -152,13 +193,15 @@ static odin3_status rm_args(rm_run *rm) {
 /* --- the file -----------------------------------------------------------------------------------
  */
 
-/* The path of the file: absolute as given, else beside the source file holding the call. */
-static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
+/* True when path names a regular file the process can see. */
+static bool rm_is_file(const char *path) {
+    struct stat info;
+    return stat(path, &info) == 0 && S_ISREG(info.st_mode);
+}
+
+/* The directory part (with the slash) of the source file holding the call, into path. */
+static odin3_status rm_source_dir(const rm_run *rm, odin3_strbuf *path) {
     const odin3_elab2 *e2 = rm->init->e2;
-    odin3_strbuf_clear(path);
-    if (rm->file[0] == '/') {
-        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
-    }
     odin3_srcman *sm = NULL;
     odin3_srcpos pos;
     odin3_srcbuf_info info;
@@ -171,6 +214,29 @@ static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
         st = slash == NULL
                  ? ODIN3_OK
                  : odin3_strbuf_append(path, (odin3_bytes){source, (size_t)(slash - source) + 1U});
+    }
+    return st;
+}
+
+/* The path of the file: absolute as given. A relative one is beside the source file holding the
+ * call; under --vtr-compat the working directory is tried first, as Yosys (and so Parmys) does.
+ * Without it a file of that name in the working directory is not read: one WARNING says so. */
+static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
+    odin3_elab2 *e2 = rm->init->e2;
+    odin3_strbuf_clear(path);
+    if (rm->file[0] == '/') {
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    bool in_cwd = rm->file[0] != '\0' && rm_is_file(rm->file);
+    if (in_cwd && e2->mod_vtr_compat) {
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    odin3_status st = rm_source_dir(rm, path);
+    if (st == ODIN3_OK && in_cwd && path->len > 0) {
+        odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, rm->call),
+                         "%s reads '%s' beside the source file, not the one in the working "
+                         "directory (Yosys and --vtr-compat read the working directory first)",
+                         rm->task, rm->file);
     }
     return st != ODIN3_OK ? st : odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
 }
