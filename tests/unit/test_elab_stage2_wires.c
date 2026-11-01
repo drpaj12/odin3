@@ -262,7 +262,7 @@ static void test_scoped_names(void) {
 
 /* Named and unnamed blocks of a process: their locals are module wires named by the block. */
 static void test_block_names(void) {
-    read_text("module top;\n  reg x;\n  always @(*) begin : blk\n    reg [3:0] count;\n"
+    read_text("module top(output reg x);\n  always @(*) begin : blk\n    reg [3:0] count;\n"
               "    x = count[0];\n  end\n  always @(*) begin\n    reg tmp;\n    x = tmp;\n  end\n"
               "endmodule\n",
               ODIN3_KEEP_AST_NONE);

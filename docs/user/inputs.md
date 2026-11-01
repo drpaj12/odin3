@@ -10,6 +10,15 @@
 | VPR architecture | `read_arch <file.xml>` | Imports the `<model>` and `pb_type` entries; the models become hard cell types. `read_arch` also takes a `.o3lib` |
 | Project | `--project FILE`, `-f LIST`, `read_project` | A project record read from `o3proj`, `f` (file list), `qsf` or `odin2` input (`read_project --format`) |
 
+`--vtr-compat` supplies the VTR primitives `single_port_ram`, `dual_port_ram`, `multiply` and `adder`
+only when an architecture is loaded (`read_arch` first): a primitive the architecture has no model of
+is built as soft logic, one it has stays a hard cell. Without `read_arch` an instance of one is the
+error `module 'single_port_ram' is not defined`. To read a VTR benchmark such as `ch_intrinsics.v` or
+`boundtop.v` into gates, use
+`read_arch k6_frac_N10_frac_chain_mem32K_40nm.xml; read_verilog --vtr-compat X.v; proc; opt; unmap; lower`:
+`unmap` turns the hard RAM, multiplier and adder cells back to `$mem`, `$mul` and `$add`, and `lower`
+makes those gates and flip-flops.
+
 Verilog files and a top: `odin3 --top NAME -p "read_verilog a.v b.v"`. Without `--top` the top is
 the one module no other module instantiates; the log says which one was chosen.
 

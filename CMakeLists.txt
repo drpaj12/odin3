@@ -422,6 +422,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/pg_case.c
     src/frontends/elab/pg_emit.c
     src/frontends/elab/pg_loop.c
+    src/frontends/elab/pg_scratch.c
     src/frontends/elab/pg_scan.c
     src/frontends/elab/pg_memw.c
     src/frontends/elab/pg_init.c
@@ -3767,7 +3768,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # processes and Yosys's own, through one Yosys back end, are equivalent. Exit 77 (skip)
         # when an ASan child cannot be capped (no systemd-run).
         add_test(NAME elab_proc_bridge_smoke
-            COMMAND sh -c "for f in t7 t8 qplus1; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
+            COMMAND sh -c "for f in t7 t8 qplus1 scratch; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
                     ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
                     $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check

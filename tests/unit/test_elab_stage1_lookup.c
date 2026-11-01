@@ -187,6 +187,16 @@ static void test_lookup_single_other_library(void) {
     TEST_ASSERT_EQUAL_STRING("lib2", str(def.library));
 }
 
+/* A VTR primitive name gets the advice to load an architecture and use --vtr-compat. */
+static void check_vtr_primitive_hint(void) {
+    run_one("t.v", "module t;\n  single_port_ram u1 ();\nendmodule\n");
+    et_expect(&rs, ODIN3_LOG_ERROR,
+              "t.v:2:3: error: unresolved_module: module 'single_port_ram' is not defined; "
+              "if you meant the VTR primitive, load an architecture (read_arch) and read the "
+              "design with read_verilog --vtr-compat");
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_real_errors(&rs), et_log(&rs));
+}
+
 /* Every instantiation of a body is resolved, each unresolved one reported at itself. */
 static void test_lookup_every_instance(void) {
     run_one("t.v", "module t;\n  foo u1 ();\n  bar u2 ();\nendmodule\n");
@@ -195,6 +205,8 @@ static void test_lookup_every_instance(void) {
     et_expect(&rs, ODIN3_LOG_ERROR,
               "t.v:3:3: error: unresolved_module: module 'bar' is not defined");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, et_real_errors(&rs), et_log(&rs));
+    et_free(&rs);
+    check_vtr_primitive_hint();
 }
 
 /* `(* blackbox *)` is true as Yosys reads it: no value or a 1 bit; `= 0` is an ordinary module. */
