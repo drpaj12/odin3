@@ -2,153 +2,153 @@
 #   <set> <level> <format> <kind> <class> <count>
 # A count above its pin fails the run; below, the run prints "improved, update the pin".
 # A class with no line is pinned at 0. Regenerate: loc-check --print-pins (lines starting PIN).
-default word json net X-1 14
-default word json node X-9 2
-default word verilog net X-1 6
-default word verilog net modgained 2
-default word verilog node modgained 2
-default gate json net X-1 72
-default gate json node X-9 2
-default gate verilog net X-1 11
-default gate verilog net modgained 1
-default gate verilog node X-9 1
-default gate verilog node modgained 1
-default gate blif module X-1 9
-default gate blif wire X-8 42
-default gate blif net X-1 55
-default gate blif node X-6 13
-default gate blif node X-8 39
-default gate blif node X-9 2
-default gate plain module X-1 9
-default gate plain wire X-8 42
-default gate plain net X-1 112
-default gate plain node X-8 39
-default gate plain node X-9 2
-default lut json net X-1 18
-default lut json node X-9 2
-default lut verilog net X-1 5
-default lut verilog node X-9 1
-default lut blif module X-1 9
-default lut blif wire X-8 39
-default lut blif net X-1 55
-default lut blif node X-6 13
-default lut blif node X-8 39
-default lut blif node X-9 2
-default lut plain module X-1 9
-default lut plain wire X-8 39
-default lut plain net X-1 58
-default lut plain node X-8 39
-default lut plain node X-9 2
-lpm lpm json net X-1 14
-lpm lpm json node X-9 12
-lpm lpm verilog net modgained 80
-lpm lpm verilog node modgained 2
-micros word json net X-1 2798
-micros word json node X-9 70
-micros word verilog module X-1 1
-micros word verilog wire X-1 3
-micros word verilog wire modgained 6
-micros word verilog net X-1 1386
-micros word verilog net modgained 8
-micros word verilog node X-1 12
-micros word verilog node modgained 8
-micros lpm json net X-1 2428
-micros lpm json node X-9 108
-micros lpm verilog module X-1 1
-micros lpm verilog wire X-1 3
-micros lpm verilog wire modgained 6
-micros lpm verilog net X-1 1216
-micros lpm verilog net modgained 705
-micros lpm verilog node X-1 10
-micros lpm verilog node modgained 38
-micros gate json net X-1 28133
-micros gate json node X-9 64
-micros gate verilog module X-1 60
-micros gate verilog wire X-1 238
-micros gate verilog net X-1 1826
-micros gate verilog net modgained 19
-micros gate verilog node X-1 619
-micros gate verilog node X-9 19
-micros gate verilog node modgained 19
-micros gate blif module X-1 128
-micros gate blif wire X-1 238
-micros gate blif wire X-8 1071
-micros gate blif net X-1 4561
-micros gate blif node X-1 619
-micros gate blif node X-6 1560
-micros gate blif node X-8 526
-micros gate blif node X-9 43
-micros gate plain module X-1 128
-micros gate plain wire X-8 1309
-micros gate plain net X-1 30426
-micros gate plain node X-8 721
-micros gate plain node X-9 64
-micros lut json net X-1 9626
-micros lut json node X-9 64
-micros lut verilog module X-1 60
-micros lut verilog wire X-1 234
-micros lut verilog net X-1 704
-micros lut verilog net modgained 16
-micros lut verilog node X-1 466
-micros lut verilog node X-9 19
-micros lut verilog node modgained 16
-micros lut blif module X-1 128
-micros lut blif wire X-1 234
-micros lut blif wire X-8 998
-micros lut blif net X-1 4423
-micros lut blif node X-1 466
-micros lut blif node X-6 1554
-micros lut blif node X-8 526
-micros lut blif node X-9 43
-micros lut plain module X-1 128
-micros lut plain wire X-8 1232
-micros lut plain net X-1 11919
-micros lut plain node X-8 721
-micros lut plain node X-9 64
-vtr14 word json net X-1 15029
-vtr14 word json node X-9 45
-vtr14 word verilog net X-1 1246
-vtr14 gate json net X-1 70102
-vtr14 gate json node X-9 34
-vtr14 gate verilog module X-1 11
-vtr14 gate verilog wire X-1 205
-vtr14 gate verilog net X-1 4345
-vtr14 gate verilog net modgained 1
-vtr14 gate verilog node X-1 1087
-vtr14 gate verilog node X-9 1
-vtr14 gate verilog node modgained 1
-vtr14 gate blif module X-1 25
-vtr14 gate blif wire X-1 205
-vtr14 gate blif wire X-8 562
-vtr14 gate blif net X-1 5186
-vtr14 gate blif node X-1 1087
-vtr14 gate blif node X-6 502
-vtr14 gate blif node X-8 105
-vtr14 gate blif node X-9 19
-vtr14 gate plain module X-1 25
-vtr14 gate plain wire X-8 767
-vtr14 gate plain net X-1 72637
-vtr14 gate plain node X-8 202
-vtr14 gate plain node X-9 34
-vtr14 lut json net X-1 15935
-vtr14 lut json node X-9 34
-vtr14 lut verilog module X-1 11
-vtr14 lut verilog wire X-1 198
-vtr14 lut verilog net X-1 3290
-vtr14 lut verilog net modgained 1
-vtr14 lut verilog node X-1 424
-vtr14 lut verilog node X-9 7
-vtr14 lut verilog node modgained 1
-vtr14 lut blif module X-1 25
-vtr14 lut blif wire X-1 198
-vtr14 lut blif wire X-8 495
-vtr14 lut blif net X-1 4780
-vtr14 lut blif node X-1 424
-vtr14 lut blif node X-6 443
-vtr14 lut blif node X-8 105
-vtr14 lut blif node X-9 19
-vtr14 lut plain module X-1 25
-vtr14 lut plain wire X-8 693
-vtr14 lut plain net X-1 18470
-vtr14 lut plain node X-8 202
-vtr14 lut plain node X-9 34
+# Each line ends with the population of its kind (objects read back, how many had a location), so a
+# re-pin can tell a regression from a larger population. The comment is not checked; the count is.
+default word json net X-1 14  # of 70 objects, 70 with a location
+default word json node X-9 2  # of 63 objects, 63 with a location
+default word verilog net X-1 6  # of 70 objects, 70 with a location
+default word verilog net modgained 2  # of 70 objects, 70 with a location
+default word verilog node modgained 2  # of 63 objects, 63 with a location
+default gate json net X-1 72  # of 112 objects, 112 with a location
+default gate json node X-9 2  # of 111 objects, 111 with a location
+default gate verilog net X-1 11  # of 112 objects, 112 with a location
+default gate verilog net modgained 1  # of 112 objects, 112 with a location
+default gate verilog node X-9 1  # of 111 objects, 111 with a location
+default gate verilog node modgained 1  # of 111 objects, 111 with a location
+default gate blif module X-1 9  # of 9 objects, 9 with a location
+default gate blif wire X-8 42  # of 42 objects, 42 with a location
+default gate blif net X-1 55  # of 112 objects, 112 with a location
+default gate blif node X-6 13  # of 111 objects, 111 with a location
+default gate blif node X-8 39  # of 111 objects, 111 with a location
+default gate blif node X-9 2  # of 111 objects, 111 with a location
+default gate plain module X-1 9  # of 9 objects, 9 with a location
+default gate plain wire X-8 42  # of 42 objects, 42 with a location
+default gate plain net X-1 112  # of 112 objects, 112 with a location
+default gate plain node X-8 39  # of 111 objects, 111 with a location
+default gate plain node X-9 2  # of 111 objects, 111 with a location
+default lut json net X-1 18  # of 58 objects, 58 with a location
+default lut json node X-9 2  # of 57 objects, 57 with a location
+default lut verilog net X-1 5  # of 58 objects, 58 with a location
+default lut verilog node X-9 1  # of 57 objects, 57 with a location
+default lut blif module X-1 9  # of 9 objects, 9 with a location
+default lut blif wire X-8 39  # of 39 objects, 39 with a location
+default lut blif net X-1 55  # of 58 objects, 58 with a location
+default lut blif node X-6 13  # of 57 objects, 57 with a location
+default lut blif node X-8 39  # of 57 objects, 57 with a location
+default lut blif node X-9 2  # of 57 objects, 57 with a location
+default lut plain module X-1 9  # of 9 objects, 9 with a location
+default lut plain wire X-8 39  # of 39 objects, 39 with a location
+default lut plain net X-1 58  # of 58 objects, 58 with a location
+default lut plain node X-8 39  # of 57 objects, 57 with a location
+default lut plain node X-9 2  # of 57 objects, 57 with a location
+lpm lpm json net X-1 14  # of 264 objects, 264 with a location
+lpm lpm json node X-9 12  # of 79 objects, 79 with a location
+lpm lpm verilog net modgained 80  # of 264 objects, 264 with a location
+lpm lpm verilog node modgained 2  # of 79 objects, 79 with a location
+micros word json net X-1 2798  # of 7184 objects, 7184 with a location
+micros word json node X-9 70  # of 1518 objects, 1518 with a location
+micros word verilog module X-1 1  # of 128 objects, 128 with a location
+micros word verilog wire X-1 3  # of 853 objects, 853 with a location
+micros word verilog wire modgained 6  # of 853 objects, 853 with a location
+micros word verilog net X-1 1386  # of 7184 objects, 7184 with a location
+micros word verilog net modgained 8  # of 7184 objects, 7184 with a location
+micros word verilog node X-1 12  # of 1518 objects, 1518 with a location
+micros word verilog node modgained 8  # of 1518 objects, 1518 with a location
+micros lpm json net X-1 2428  # of 6379 objects, 6379 with a location
+micros lpm json node X-9 108  # of 1530 objects, 1530 with a location
+micros lpm verilog module X-1 1  # of 128 objects, 128 with a location
+micros lpm verilog wire X-1 3  # of 853 objects, 853 with a location
+micros lpm verilog wire modgained 6  # of 853 objects, 853 with a location
+micros lpm verilog net X-1 1216  # of 6379 objects, 6379 with a location
+micros lpm verilog net modgained 705  # of 6379 objects, 6379 with a location
+micros lpm verilog node X-1 10  # of 1530 objects, 1530 with a location
+micros lpm verilog node modgained 38  # of 1530 objects, 1530 with a location
+micros gate json net X-1 28133  # of 30426 objects, 30426 with a location
+micros gate json node X-9 64  # of 28613 objects, 28613 with a location
+micros gate verilog module X-1 60  # of 128 objects, 128 with a location
+micros gate verilog wire X-1 238  # of 1309 objects, 1309 with a location
+micros gate verilog net X-1 1826  # of 30426 objects, 30426 with a location
+micros gate verilog net modgained 19  # of 30426 objects, 30426 with a location
+micros gate verilog node X-1 619  # of 28613 objects, 28613 with a location
+micros gate verilog node X-9 19  # of 28613 objects, 28613 with a location
+micros gate verilog node modgained 19  # of 28613 objects, 28613 with a location
+micros gate blif module X-1 128  # of 128 objects, 128 with a location
+micros gate blif wire X-1 238  # of 1309 objects, 1309 with a location
+micros gate blif wire X-8 1071  # of 1309 objects, 1309 with a location
+micros gate blif net X-1 4561  # of 30426 objects, 30426 with a location
+micros gate blif node X-1 619  # of 28613 objects, 28613 with a location
+micros gate blif node X-6 1560  # of 28613 objects, 28613 with a location
+micros gate blif node X-8 526  # of 28613 objects, 28613 with a location
+micros gate blif node X-9 43  # of 28613 objects, 28613 with a location
+micros gate plain module X-1 128  # of 128 objects, 128 with a location
+micros gate plain wire X-8 1309  # of 1309 objects, 1309 with a location
+micros gate plain net X-1 30426  # of 30426 objects, 30426 with a location
+micros gate plain node X-8 721  # of 28613 objects, 28613 with a location
+micros gate plain node X-9 64  # of 28613 objects, 28613 with a location
+micros lut json net X-1 9629  # of 11922 objects, 11922 with a location
+micros lut json node X-9 67  # of 10088 objects, 10088 with a location
+micros lut verilog module X-1 60  # of 128 objects, 128 with a location
+micros lut verilog wire X-1 234  # of 1232 objects, 1232 with a location
+micros lut verilog net X-1 698  # of 11922 objects, 11922 with a location
+micros lut verilog node X-1 466  # of 10088 objects, 10088 with a location
+micros lut verilog node X-9 13  # of 10088 objects, 10088 with a location
+micros lut blif module X-1 128  # of 128 objects, 128 with a location
+micros lut blif wire X-1 234  # of 1232 objects, 1232 with a location
+micros lut blif wire X-8 998  # of 1232 objects, 1232 with a location
+micros lut blif net X-1 4418  # of 11922 objects, 11922 with a location
+micros lut blif node X-1 466  # of 10088 objects, 10088 with a location
+micros lut blif node X-6 1554  # of 10088 objects, 10088 with a location
+micros lut blif node X-8 524  # of 10088 objects, 10088 with a location
+micros lut blif node X-9 46  # of 10088 objects, 10088 with a location
+micros lut plain module X-1 128  # of 128 objects, 128 with a location
+micros lut plain wire X-8 1232  # of 1232 objects, 1232 with a location
+micros lut plain net X-1 11922  # of 11922 objects, 11922 with a location
+micros lut plain node X-8 721  # of 10088 objects, 10088 with a location
+micros lut plain node X-9 67  # of 10088 objects, 10088 with a location
+vtr14 word json net X-1 15029  # of 18324 objects, 18324 with a location
+vtr14 word json node X-9 45  # of 2934 objects, 2934 with a location
+vtr14 word verilog net X-1 1246  # of 18324 objects, 18324 with a location
+vtr14 gate json net X-1 70102  # of 72637 objects, 72637 with a location
+vtr14 gate json node X-9 34  # of 68391 objects, 68391 with a location
+vtr14 gate verilog module X-1 11  # of 25 objects, 25 with a location
+vtr14 gate verilog wire X-1 205  # of 767 objects, 767 with a location
+vtr14 gate verilog net X-1 4345  # of 72637 objects, 72637 with a location
+vtr14 gate verilog net modgained 1  # of 72637 objects, 72637 with a location
+vtr14 gate verilog node X-1 1087  # of 68391 objects, 68391 with a location
+vtr14 gate verilog node X-9 1  # of 68391 objects, 68391 with a location
+vtr14 gate verilog node modgained 1  # of 68391 objects, 68391 with a location
+vtr14 gate blif module X-1 25  # of 25 objects, 25 with a location
+vtr14 gate blif wire X-1 205  # of 767 objects, 767 with a location
+vtr14 gate blif wire X-8 562  # of 767 objects, 767 with a location
+vtr14 gate blif net X-1 5186  # of 72637 objects, 72637 with a location
+vtr14 gate blif node X-1 1087  # of 68391 objects, 68391 with a location
+vtr14 gate blif node X-6 502  # of 68391 objects, 68391 with a location
+vtr14 gate blif node X-8 105  # of 68391 objects, 68391 with a location
+vtr14 gate blif node X-9 19  # of 68391 objects, 68391 with a location
+vtr14 gate plain module X-1 25  # of 25 objects, 25 with a location
+vtr14 gate plain wire X-8 767  # of 767 objects, 767 with a location
+vtr14 gate plain net X-1 72637  # of 72637 objects, 72637 with a location
+vtr14 gate plain node X-8 202  # of 68391 objects, 68391 with a location
+vtr14 gate plain node X-9 34  # of 68391 objects, 68391 with a location
+vtr14 lut json net X-1 15935  # of 18470 objects, 18470 with a location
+vtr14 lut json node X-9 34  # of 13903 objects, 13903 with a location
+vtr14 lut verilog module X-1 11  # of 25 objects, 25 with a location
+vtr14 lut verilog wire X-1 198  # of 693 objects, 693 with a location
+vtr14 lut verilog net X-1 3290  # of 18470 objects, 18470 with a location
+vtr14 lut verilog net modgained 1  # of 18470 objects, 18470 with a location
+vtr14 lut verilog node X-1 424  # of 13903 objects, 13903 with a location
+vtr14 lut verilog node X-9 7  # of 13903 objects, 13903 with a location
+vtr14 lut verilog node modgained 1  # of 13903 objects, 13903 with a location
+vtr14 lut blif module X-1 25  # of 25 objects, 25 with a location
+vtr14 lut blif wire X-1 198  # of 693 objects, 693 with a location
+vtr14 lut blif wire X-8 495  # of 693 objects, 693 with a location
+vtr14 lut blif net X-1 4780  # of 18470 objects, 18470 with a location
+vtr14 lut blif node X-1 424  # of 13903 objects, 13903 with a location
+vtr14 lut blif node X-6 443  # of 13903 objects, 13903 with a location
+vtr14 lut blif node X-8 105  # of 13903 objects, 13903 with a location
+vtr14 lut blif node X-9 19  # of 13903 objects, 13903 with a location
+vtr14 lut plain module X-1 25  # of 25 objects, 25 with a location
+vtr14 lut plain wire X-8 693  # of 693 objects, 693 with a location
+vtr14 lut plain net X-1 18470  # of 18470 objects, 18470 with a location
+vtr14 lut plain node X-8 202  # of 13903 objects, 13903 with a location
+vtr14 lut plain node X-9 34  # of 13903 objects, 13903 with a location

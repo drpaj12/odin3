@@ -15,7 +15,20 @@ odin3 -p "read_verilog dut.v; proc; opt; lower; sim_tb --out run.txt tb.v"
 For a netlist DUT use `read_blif dut.blif` (or `read_json`) instead of the first four commands.
 Options: `--top <module>` (the testbench module, default the first), `--max-time N` (default
 10,000,000 time units), `--seed N` (the seed of `$random`), `--out <file>` (the `$display` text;
-default stdout). Python: `design.run("sim_tb --out run.txt tb.v")` after the design is built.
+default stdout), `--vcd <file>` (a waveform, below). Python: `design.run("sim_tb --out run.txt tb.v")`
+after the design is built.
+
+## Waveform (`--vcd`)
+
+`sim_tb --vcd wave.vcd tb.v` writes an IEEE 1364 VCD of the run. It holds every scalar `reg`,
+`wire` and `integer` of the testbench (arrays and parameters are left out) under `$scope module
+<testbench>`, and the ports of each DUT instance that the testbench connects, under a nested
+`$scope module <instance>`. Values are 2-state (0 and 1). The `$timescale` is the testbench's
+`` `timescale `` unit (`1ns` when it has none), and the time stamps are the testbench time units.
+The file starts with a `#0` `$dumpvars` block, then one `#<time>` block for each time step in
+which a dumped signal changed; a signal is written with the value it has when the step ends, so a
+glitch inside one time step does not show. Open it with GTKWave. Odin III checks it against
+iverilog (`$dumpvars(0, tb)` on the same testbench) with `tools/vcd-compare/vcd-compare`.
 
 ## What is supported
 

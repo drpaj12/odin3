@@ -439,11 +439,12 @@ class PinTests(unittest.TestCase):
         self.assertEqual(lc.pin_problems(self.PINS, "vtr14", self.sums(0, 0)), ([], []))
 
     def test_pin_lines_round_trip(self) -> None:
-        run = {"node": lc.Tally(lost={"X-9": 5})}
+        run = {"node": lc.Tally(objects=40, had=30, lost={"X-9": 5})}
         lines = lc.pin_lines("micros", "lut", "json", run)
         self.assertEqual(
             lc.parse_pins("\n".join(lines)), {("micros", "lut", "json", "node", "X-9"): 5}
         )
+        self.assertIn("# of 40 objects, 30 with a location", lines[0])
 
     def test_modgained_is_pinned(self) -> None:
         pins = lc.parse_pins("micros lut verilog node modgained 3\n")
@@ -452,7 +453,8 @@ class PinTests(unittest.TestCase):
         self.assertEqual(len(fails), 1)
         self.assertIn("modgained", fails[0])
         lines = lc.pin_lines("micros", "lut", "verilog", run)
-        self.assertEqual(lines, ["micros lut verilog node modgained 4"])
+        self.assertEqual(len(lines), 1)
+        self.assertTrue(lines[0].startswith("micros lut verilog node modgained 4  # of "))
 
     def test_bad_pins(self) -> None:
         for bad in ("micros lut json node X-9\n", "micros lut json node lost 5\n"):

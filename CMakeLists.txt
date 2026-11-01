@@ -473,6 +473,7 @@ add_library(odin3_core OBJECT
     src/sim/tb_fmt.c
     src/sim/tb_dut.c
     src/sim/tb_run.c
+    src/sim/tb_vcd.c
     src/sim/signals.c
     src/sim/vcd.c
     src/sim/gate_truth.c
@@ -2800,6 +2801,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME tb_micros
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+        add_test(NAME tb_vcd
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
+                    ${Python3_EXECUTABLE})
+        set_tests_properties(tb_vcd PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " SKIP_RETURN_CODE 77
+                                               LABELS tools)
     endif()
     add_test(NAME tb_project
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_project.sh $<TARGET_FILE:odin3>)
