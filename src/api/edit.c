@@ -30,21 +30,25 @@ enum { SOP_WIDTH = 0, SOP_COVER = 1, SOP_PARAMS = 2 };
 
 static const char K_EDIT_RUN[] = "edit";
 
-/* sizeof(odin3_edit_new) of the first release of the struct (up to and including index). */
-enum { EDIT_NEW_V1_SIZE = 56, MAX_INIT_PARAMS = 8 };
+/* sizeof(odin3_edit_new) of the first release: the fields before param_names. */
+enum { EDIT_NEW_V1_SIZE = offsetof(odin3_edit_new, param_names), MAX_INIT_PARAMS = 8 };
 
 static const char K_DEFAULT_TAG[] = "edit";
 
 /*
- * The edit struct as the caller compiled it, widened to this library's: its size covers at least
- * the first release, fields past its size read as zero, reserved words are zero.
+ * The edit struct as the caller compiled it, widened to this library's. Its size is exactly the
+ * first release's or at least this library's (a size between them cuts a field in two and is
+ * refused); fields past an older size read as zero, reserved words are zero. Only add_node reads
+ * the parameter list: n_params must be zero when uses_params is false.
  */
-static odin3_status check_what(const odin3_edit_new *in, odin3_edit_new *norm, const char *fn) {
+static odin3_status check_what(const odin3_edit_new *in, odin3_edit_new *norm, const char *fn,
+                               bool uses_params) {
     if (in == NULL) {
         return odin3_api_invalid(fn);
     }
-    if (in->size < EDIT_NEW_V1_SIZE) {
-        return odin3_api_invalid_why(fn, "odin3_edit_new.size is smaller than the struct");
+    if (in->size != EDIT_NEW_V1_SIZE && in->size < sizeof *norm) {
+        return odin3_api_invalid_why(
+            fn, "odin3_edit_new.size is neither the first release's nor the current struct's");
     }
     memset(norm, 0, sizeof *norm);
     memcpy(norm, in, in->size < sizeof *norm ? in->size : sizeof *norm);
@@ -52,18 +56,18 @@ static odin3_status check_what(const odin3_edit_new *in, odin3_edit_new *norm, c
     if (norm->reserved != 0 || norm->reserved2 != 0) {
         return odin3_api_invalid_why(fn, "odin3_edit_new.reserved must be zero");
     }
+    if (!uses_params && norm->n_params != 0) {
+        return odin3_api_invalid_why(fn, "odin3_edit_new.n_params is used by add_node only");
+    }
     return ODIN3_OK;
 }
 
-/* A usable tag: non-empty, no newline (events are line based). */
-static odin3_status check_tag(const char *tag, const char *fn) {
+/* Why tag is not usable (non-empty, no newline: events are line based); NULL when it is. */
+static const char *tag_problem(const char *tag) {
     if (tag == NULL || tag[0] == '\0') {
-        return odin3_api_invalid_why(fn, "the edit tag must be a non-empty string");
+        return "the edit tag must be a non-empty string";
     }
-    if (strchr(tag, '\n') != NULL) {
-        return odin3_api_invalid_why(fn, "the edit tag must not contain a newline");
-    }
-    return ODIN3_OK;
+    return strchr(tag, '\n') != NULL ? "the edit tag must not contain a newline" : NULL;
 }
 
 /* A mutable module of the design for an edit call; NULL (logged) when the edit is refused. */
@@ -101,8 +105,9 @@ static odin3_passrun_id find_edit_run(const odin3_design *design, uint32_t run_s
 static odin3_status edit_prov(odin3_design *design, const char *tag, odin3_prov_id *out) {
     uint32_t run_str = 0;
     uint32_t tag_str = 0;
-    odin3_status st = check_tag(tag, "edit");
-    st = st == ODIN3_OK ? intern_text(design, K_EDIT_RUN, &run_str) : st;
+    const char *why = tag_problem(tag);
+    odin3_status st = why == NULL ? intern_text(design, K_EDIT_RUN, &run_str)
+                                  : odin3_api_invalid_why("edit", why);
     if (st == ODIN3_OK) {
         st = intern_text(design, tag, &tag_str);
     }
@@ -153,7 +158,8 @@ ODIN3_EXPORT odin3_status odin3_edit_add_net(odin3_design *design, uint32_t modu
     odin3_edit_new norm;
     const odin3_edit_new *what = &norm;
     odin3_module *mod = edit_module(design, module, "odin3_edit_add_net");
-    if (mod == NULL || net == NULL || check_what(in, &norm, "odin3_edit_add_net") != ODIN3_OK) {
+    if (mod == NULL || net == NULL ||
+        check_what(in, &norm, "odin3_edit_add_net", false) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_prov_id prov = {0};
@@ -169,6 +175,9 @@ ODIN3_EXPORT odin3_status odin3_edit_add_net(odin3_design *design, uint32_t modu
     if (st == ODIN3_OK) {
         st = odin3_edit_event_add(mod, (odin3_objref){ODIN3_OBJ_NET, id.v}, ODIN3_EDIT_ADDED,
                                   what->tag);
+        if (st != ODIN3_OK) {
+            (void)odin3_net_delete(mod, id); /* no event, no net: nothing half made */
+        }
     }
     if (st == ODIN3_OK) {
         st = after_edit(mod, "odin3_edit_add_net");
@@ -201,6 +210,9 @@ static odin3_status make_node(odin3_design *design, odin3_module *mod, odin3_nod
     if (st == ODIN3_OK) {
         st = odin3_edit_event_add(mod, (odin3_objref){ODIN3_OBJ_NODE, out->v}, ODIN3_EDIT_ADDED,
                                   what->tag);
+        if (st != ODIN3_OK) {
+            (void)odin3_node_delete(mod, *out); /* no event, no node: nothing half made */
+        }
     }
     return st;
 }
@@ -252,7 +264,8 @@ ODIN3_EXPORT odin3_status odin3_edit_add_node(odin3_design *design, uint32_t mod
     odin3_node_spec spec = {0};
     odin3_value params[MAX_INIT_PARAMS];
     odin3_node_id id = {0};
-    if (mod == NULL || node == NULL || check_what(in, &norm, "odin3_edit_add_node") != ODIN3_OK ||
+    if (mod == NULL || node == NULL ||
+        check_what(in, &norm, "odin3_edit_add_node", true) != ODIN3_OK ||
         find_type(design, what->cell_type, &spec.type) != ODIN3_OK ||
         initial_params(odin3_celltype_get(design, spec.type), what, params, &spec.n_params) !=
             ODIN3_OK) {
@@ -329,7 +342,8 @@ ODIN3_EXPORT odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t modu
     odin3_module *mod = edit_module(design, module, "odin3_edit_add_sop");
     uint8_t *bits = NULL;
     uint32_t len = 0;
-    if (mod == NULL || node == NULL || check_what(in, &norm, "odin3_edit_add_sop") != ODIN3_OK ||
+    if (mod == NULL || node == NULL ||
+        check_what(in, &norm, "odin3_edit_add_sop", false) != ODIN3_OK ||
         parse_cover(what->cover, what->n_inputs, &bits, &len) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -404,16 +418,32 @@ static odin3_status mark_pin_node(odin3_module *mod, odin3_pin_id pin, const cha
     return odin3_edit_event_add(mod, (odin3_objref){ODIN3_OBJ_NODE, node.v}, kind, tag);
 }
 
+/* Puts pin back on old (0: unconnected) after a failed edit step. */
+static void restore_pin(odin3_module *mod, odin3_pin_id pin, odin3_net_id old) {
+    (void)odin3_pin_disconnect(mod, pin);
+    if (old.v != 0) {
+        (void)odin3_pin_connect(mod, pin, old);
+    }
+}
+
 static odin3_status disconnect_pin(odin3_design *design, odin3_ref pin, const char *tag) {
     odin3_module *mod = edit_pin_net(design, pin, NULL, "odin3_edit_disconnect");
-    if (mod == NULL || check_tag(tag, "odin3_edit_disconnect") != ODIN3_OK) {
+    if (mod == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
+    const char *why = tag_problem(tag);
+    if (why != NULL) {
+        return odin3_api_invalid_why("odin3_edit_disconnect", why);
+    }
     odin3_pin_id pid = {pin.id};
-    bool connected = odin3_net_valid(odin3_pin_net(mod, pid));
+    odin3_net_id old = odin3_pin_net(mod, pid);
+    bool connected = odin3_net_valid(old);
     odin3_status st = odin3_pin_disconnect(mod, pid);
     if (st == ODIN3_OK && connected) {
         st = mark_pin_node(mod, pid, ODIN3_EDIT_REMOVED, tag);
+        if (st != ODIN3_OK) {
+            restore_pin(mod, pid, old); /* no mark, no change */
+        }
     }
     return st == ODIN3_OK ? after_edit(mod, "odin3_edit_disconnect") : st;
 }
@@ -430,8 +460,12 @@ ODIN3_EXPORT odin3_status odin3_edit_disconnect_tagged(odin3_design *design, odi
 static odin3_status rewire_pin(odin3_design *design, odin3_ref pin, odin3_ref net,
                                const char *tag) {
     odin3_module *mod = edit_pin_net(design, pin, &net, "odin3_edit_rewire");
-    if (mod == NULL || check_tag(tag, "odin3_edit_rewire") != ODIN3_OK) {
+    if (mod == NULL) {
         return ODIN3_ERR_INVALID_ARG;
+    }
+    const char *why = tag_problem(tag);
+    if (why != NULL) {
+        return odin3_api_invalid_why("odin3_edit_rewire", why);
     }
     odin3_pin_id pid = {pin.id};
     odin3_net_id nid = {net.id};
@@ -455,7 +489,12 @@ static odin3_status rewire_pin(odin3_design *design, odin3_ref pin, odin3_ref ne
             (void)odin3_pin_connect(mod, pid, old);
         }
     }
-    st = st == ODIN3_OK ? mark_pin_node(mod, pid, ODIN3_EDIT_REWIRED, tag) : st;
+    if (st == ODIN3_OK) {
+        st = mark_pin_node(mod, pid, ODIN3_EDIT_REWIRED, tag);
+        if (st != ODIN3_OK) {
+            restore_pin(mod, pid, old); /* no mark, no move */
+        }
+    }
     return st == ODIN3_OK ? after_edit(mod, "odin3_edit_rewire") : st;
 }
 
@@ -569,8 +608,9 @@ static odin3_status twin_prov(odin3_design *design, odin3_prov_id old_prov, cons
                               odin3_prov_id *out) {
     uint32_t run_str = 0;
     uint32_t tag_str = 0;
-    odin3_status st = check_tag(tag, "edit");
-    st = st == ODIN3_OK ? intern_text(design, K_EDIT_RUN, &run_str) : st;
+    const char *why = tag_problem(tag);
+    odin3_status st = why == NULL ? intern_text(design, K_EDIT_RUN, &run_str)
+                                  : odin3_api_invalid_why("edit", why);
     if (st == ODIN3_OK) {
         st = intern_text(design, tag, &tag_str);
     }
@@ -656,7 +696,7 @@ ODIN3_EXPORT odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref n
     uint8_t *bits = NULL;
     uint32_t len = 0;
     odin3_node_id nid = {node.id};
-    if (twin == NULL || check_what(in, &norm, "odin3_edit_set_cover") != ODIN3_OK) {
+    if (twin == NULL || check_what(in, &norm, "odin3_edit_set_cover", false) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
     *twin = (odin3_ref){0, 0};
@@ -684,7 +724,7 @@ ODIN3_EXPORT odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_r
     odin3_value params[SOP_PARAMS];
     uint32_t n_params = 0;
     odin3_node_id nid = {node.id};
-    if (twin == NULL || check_what(in, &norm, "odin3_edit_set_param_int") != ODIN3_OK) {
+    if (twin == NULL || check_what(in, &norm, "odin3_edit_set_param_int", false) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG;
     }
     *twin = (odin3_ref){0, 0};

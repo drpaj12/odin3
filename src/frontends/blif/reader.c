@@ -1584,7 +1584,7 @@ static odin3_status try_edit(blif_reader *rd, const odin3_blif_line *ln, const c
                              bool *applied) {
     *applied = false;
     if (strcmp(prefix, ODIN3_BLIF_ATTR_PREFIX) != 0 || ln->count != EXTRA_MIN ||
-        !tok_is(&ln->tokens[1], ODIN3_ATTR_EDIT_EVENTS)) {
+        !tok_is(&ln->tokens[1], ODIN3_EDIT_FILE_KEY)) {
         return ODIN3_OK;
     }
     odin3_strbuf raw;
@@ -1594,7 +1594,10 @@ static odin3_status try_edit(blif_reader *rd, const odin3_blif_line *ln, const c
         st = odin3_edit_events_set_raw(rd->module, (odin3_objref){ODIN3_OBJ_NODE, rd->last.v},
                                        (odin3_bytes){raw.data, raw.len});
         *applied = st == ODIN3_OK;
-    } else if (st == ODIN3_ERR_INVALID_ARG) {
+    }
+    if (st == ODIN3_ERR_INVALID_ARG) { /* not an event list: read as any other .attr */
+        odin3_log(ODIN3_LOG_WARN, "read_blif: odin3_edit is not an edit event list; kept as a "
+                                  "plain attribute");
         st = ODIN3_OK;
     }
     odin3_strbuf_free(&raw);

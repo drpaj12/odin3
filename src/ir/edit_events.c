@@ -127,6 +127,20 @@ odin3_status odin3_edit_event_add(odin3_module *module, odin3_objref obj, const 
     return st;
 }
 
+bool odin3_edit_events_wellformed(const char *raw) {
+    if (raw == NULL || raw[0] == '\0') {
+        return false;
+    }
+    for (const char *at = raw; *at != '\0'; at += strcspn(at, "\n") + 1U) {
+        size_t len = strcspn(at, "\n");
+        const char *space = memchr(at, ' ', len);
+        if (space == NULL || space == at || space + 1 == at + len || at[len] == '\0') {
+            return false; /* a line is `kind tag\n`: both parts, and the newline */
+        }
+    }
+    return true;
+}
+
 /* --- the export token ----------------------------------------------------------------------- */
 
 static bool must_escape(unsigned char chr) {
@@ -151,12 +165,12 @@ static odin3_status put_escaped(odin3_strbuf *out, const char *text, size_t len)
 odin3_status odin3_edit_events_encode(const char *raw, odin3_strbuf *out) {
     odin3_status st = ODIN3_OK;
     bool first = true;
+    if (raw != NULL && !odin3_edit_events_wellformed(raw)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     for (const char *at = raw; st == ODIN3_OK && at != NULL && *at != '\0';) {
         size_t len = strcspn(at, "\n");
         const char *space = memchr(at, ' ', len);
-        if (space == NULL) {
-            return ODIN3_ERR_INVALID_ARG;
-        }
         st = first ? ODIN3_OK : odin3_strbuf_append(out, odin3_bytes_cstr(","));
         st =
             st == ODIN3_OK ? odin3_strbuf_append(out, (odin3_bytes){at, (size_t)(space - at)}) : st;
@@ -178,23 +192,28 @@ static int hex_digit(char chr) {
     return -1;
 }
 
-/* Appends the decoded tag text[0..len) to out; false on a bad escape. */
+/* The character of the escape text[at..at+3) (a '%' and two hex digits); -1 when malformed. */
+static int unescape_at(const char *text, size_t at, size_t len) {
+    if (at + ESC_LEN > len) {
+        return -1;
+    }
+    int high = hex_digit(text[at + 1]);
+    int low = hex_digit(text[at + 2]);
+    return high < 0 || low < 0 ? -1 : (high << NIBBLE_BITS) | low;
+}
+
+/* Appends the decoded tag text[0..len) to out; false on a bad escape, a NUL or a newline. */
 static bool decode_tag(odin3_strbuf *out, const char *text, size_t len, odin3_status *st) {
     for (size_t i = 0; *st == ODIN3_OK && i < len; i++) {
-        char chr = text[i];
-        if (chr == '%') {
-            bool room = i + ESC_LEN <= len;
-            int high = room ? hex_digit(text[i + 1]) : -1;
-            int low = room ? hex_digit(text[i + 2]) : -1;
-            if (high < 0 || low < 0) {
-                return false;
-            }
-            chr = (char)((high << NIBBLE_BITS) | low);
+        int code = (unsigned char)text[i];
+        if (text[i] == '%') {
+            code = unescape_at(text, i, len);
             i += ESC_LEN - 1U;
         }
-        if (chr == '\n') {
-            return false; /* a tag has no newline */
+        if (code <= 0 || code == '\n') {
+            return false; /* a tag has no NUL (a bad escape is -1) and no newline */
         }
+        char chr = (char)code;
         *st = odin3_strbuf_append(out, (odin3_bytes){&chr, 1});
     }
     return true;

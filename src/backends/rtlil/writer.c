@@ -149,7 +149,10 @@ static odin3_status put_attr(void *user, uint32_t key_str, const odin3_value *va
     attr_ctx *ctx = user;
     rtl_writer *rw = ctx->rw;
     if (strcmp(odin3_strtab_get(odin3_design_strtab(rw->design), key_str),
-               ODIN3_ATTR_EDIT_EVENTS) == 0) {
+               ODIN3_ATTR_EDIT_EVENTS) == 0 &&
+        value->kind == ODIN3_VAL_STRING &&
+        odin3_edit_events_wellformed(
+            odin3_strtab_get(odin3_design_strtab(rw->design), value->str))) {
         return rw->st; /* edit events: printed only by the opt-in exports */
     }
     rw_indent(rw, ctx->indent);

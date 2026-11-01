@@ -117,12 +117,13 @@ static odin3_status apply_edit(jr *rd, odin3_module *module, odin3_objref obj) {
         obj = (odin3_objref){ODIN3_OBJ_NET, odin3_wire_net(module, (odin3_wire_id){obj.id}, 0).v};
     }
     odin3_status st = odin3_edit_events_decode((odin3_bytes){text, len}, &raw);
+    if (st == ODIN3_OK) {
+        st = odin3_edit_events_set_raw(module, obj, (odin3_bytes){raw.data, raw.len});
+    }
     if (st == ODIN3_ERR_INVALID_ARG) {
         odin3_log(ODIN3_LOG_WARN, "%s: odin3_edit '%s' is not an edit event list; skipped",
                   rd->path, text);
         st = ODIN3_OK;
-    } else if (st == ODIN3_OK) {
-        st = odin3_edit_events_set_raw(module, obj, (odin3_bytes){raw.data, raw.len});
     }
     odin3_strbuf_free(&raw);
     rd->ext_edit = NULL;

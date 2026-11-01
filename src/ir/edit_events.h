@@ -15,7 +15,15 @@
 
 #include <stdbool.h>
 
-#define ODIN3_ATTR_EDIT_EVENTS "odin3_edit"
+/*
+ * The attribute key of the events. It holds a blank, so no BLIF `.attr`, JSON member or HDL
+ * attribute name can equal it: a user attribute never collides with the events (spec edit-gaps
+ * section 2).
+ */
+#define ODIN3_ATTR_EDIT_EVENTS "odin3 edit"
+
+/* The name of the events in the exports: the BLIF `.attr` name and the JSON member. */
+#define ODIN3_EDIT_FILE_KEY "odin3_edit"
 
 /* Event kinds. */
 #define ODIN3_EDIT_ADDED "added"
@@ -46,12 +54,16 @@ bool odin3_edit_events_first_tag(const odin3_module *module, odin3_objref obj, o
  */
 odin3_status odin3_edit_events_set_raw(odin3_module *module, odin3_objref obj, odin3_bytes raw);
 
+/* True when raw is a well-formed event list: every line is `<kind> <tag>` with both non-empty. */
+bool odin3_edit_events_wellformed(const char *raw);
+
 /* Appends the export token of the raw lines to out. INVALID_ARG for a malformed line. */
 odin3_status odin3_edit_events_encode(const char *raw, odin3_strbuf *out);
 
 /*
  * Appends the raw lines of an export token to out. INVALID_ARG (not logged) when token is not a
- * `,` separated list of `kind:tag` with well-formed percent escapes, so a caller can fall back.
+ * `,` separated list of `kind:tag` with well-formed percent escapes (a decoded NUL or newline is
+ * malformed), so a caller can fall back.
  */
 odin3_status odin3_edit_events_decode(odin3_bytes token, odin3_strbuf *out);
 

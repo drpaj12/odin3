@@ -2093,11 +2093,13 @@ static void write_edit_events(blif_writer *wr, odin3_node_id node) {
     }
     odin3_strbuf_clear(&wr->token);
     odin3_status st = odin3_edit_events_encode(raw, &wr->token);
-    if (st != ODIN3_OK) {
+    if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_log(ODIN3_LOG_WARN, "write_blif: a cell's edit events are malformed; not written");
+    } else if (st != ODIN3_OK) {
         (void)wr_fail(wr, st);
     } else if (wr->token.len > 0) {
         wr_begin(wr, ".attr");
-        wr_token(wr, odin3_bytes_cstr(ODIN3_ATTR_EDIT_EVENTS));
+        wr_token(wr, odin3_bytes_cstr(ODIN3_EDIT_FILE_KEY));
         wr_token_built(wr);
         wr_end(wr);
     }

@@ -22,7 +22,7 @@ default output byte-identical, correctness of each gap against a test.
 An edit event is a pair (kind, tag). Kinds: `added` (the object was created by an edit), `param`
 (set_cover or set_param_int: the node is a twin with a changed parameter), `rewired` (a pin of the
 node moved to another net, or from no net onto one), `removed` (a pin of the node was disconnected
-and left on no net). Events live in one STRING attribute `odin3_edit` on the node or net: lines
+and left on no net). Events live in one STRING attribute `odin3 edit` (with a blank, see agent default 8) on the node or net: lines
 `<kind> <tag>\n`, oldest first. An identical (kind, tag) line is not repeated. Attributes are copied
 to the twin by set_cover/set_param_int (already so) and by flatten, so events survive both.
 Rejected alternative: a new `ODIN3_PROV_*` kind or a mutable provenance record: records are
@@ -96,8 +96,8 @@ The C ABI already has `odin3_pass_set_top_name` (process-wide; the CLI `--top`).
 wrapper never called it. Add `top: str | None = None` to `Design.run_script` and `Design.run_pass`
 and a `Design(top=...)` constructor argument kept on the design and used by every later run
 (same meaning as `--top`: it wins over a file's own top for `read_blif`/`hierarchy`/`read_verilog`
-elaboration). Agent default 5: the name is set around each call and cleared (NULL) afterwards,
-because the C setting is process-wide and must not leak into another Design; the constructor value
+elaboration). Agent default 5: the name is set around each call and the previous value restored afterwards,
+under one module-level lock, because the C setting is process-wide and must not leak into another Design; the constructor value
 is re-applied per call. Agent default 6: no new C symbol is needed.
 
 ## 5. Tests
@@ -113,13 +113,37 @@ is re-applied per call. Agent default 6: no new C symbol is needed.
   `write_json` changes, `include/odin3/odin3.h` paragraphs, `CHANGELOG.md`.
 
 ## 6. Agent defaults log
-1. Events are an attribute (`odin3_edit`), not provenance records; no IR invariant change.
+1. Events are an attribute (`odin3 edit`), not provenance records; no IR invariant change.
 2. Untagged `rewire`/`disconnect` record the tag `edit`.
 3. `connect` records nothing; `rewire_tagged` covers a connect on a clean node.
 4. Node/net removal records nothing.
-5. Python top is set per call and cleared afterwards.
+5. Python top is set per call and the previous value restored; the whole run holds a module-level
+   lock (fix round 1; the C top name is process-wide, cffi releases the GIL, and the C API has no
+   getter, so "previous" is the value the binding last set).
 6. BLIF carries cell events only; nets only in JSON.
-7. Percent encoding for the export token.
+7. Percent encoding for the export token. A decoded NUL or newline is malformed: the reader keeps
+   the text as a plain attribute and warns.
+8. (Fix round 1.) The events attribute key is `odin3 edit` (with a blank), so no BLIF `.attr`, JSON
+   member or HDL attribute can collide with it; the file name of the events stays `odin3_edit`. A
+   writer treats the key as events (SKIP) only when its value is a well-formed event list; a
+   malformed value is an ordinary attribute, and the opt-in exports warn and skip it instead of
+   failing the write.
+9. (Fix round 1.) `odin3_edit_new` sizes: exactly 56 (offsetof param_names) or at least the current
+   size; the sizes between are refused. A non-zero `n_params` is refused outside add_node. ABI
+   version: stays 7. Policy: this repo bumps for incompatible changes and has bumped for additive
+   ones (D13, D14) once per release; ABI 7 is unreleased (v1.2.0 is not tagged) and the change
+   is additive, so a bump would force a plugin rebuild for nothing. A new caller on an old library
+   is caught by the Python probe of `odin3_edit_get_events` when `params` is given; C callers
+   compile against one header.
+10. (Fix round 1.) An edit step that fails after its object exists undoes it: add_net and
+    add_node/add_sop delete the new net or node when the `added` event cannot be recorded, and
+    rewire and disconnect put the pin back when the mark cannot be recorded. The Debug check
+    after an edit is still not a pre-commit gate.
+11. (Fix round 1.) Events copy through opt and lower: each gate that `odin3_kit_copy_attrs` makes
+    from an edited cell carries the `added` event. This is intended: for Trojan provenance the
+    gates of an inserted cell stay marked as inserted.
+12. (Fix round 1.) A creation tag with a newline is refused by add_net, add_node, add_sop,
+    set_cover and set_param_int (behaviour change, in the CHANGELOG and the API doc).
 
 ## 7. Progress and next step
 Spec written. Next: C events module (`src/ir/edit_events.c`), edit.c recording, writers/readers,

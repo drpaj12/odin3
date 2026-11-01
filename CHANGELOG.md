@@ -17,6 +17,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `run_pass(top=...)` set the requested top before `read_verilog`; `Module.add_node(params=)`,
   `Pin.rewire(tag=)`, `Pin.disconnect(tag=)`, `obj.edit_events`. Default BLIF, JSON, Verilog and RTLIL output is
   unchanged. Spec `docs/specs/2026-10-31-edit-gaps-design.md`, manual `docs/user/edit.md`. ABI stays 7. 2026-10-31.
+  Behaviour change: the creation calls (`add_net`, `add_node`, `add_sop`, `set_cover`, `set_param_int`) now refuse
+  a tag with a newline, as the tagged connection calls do. `odin3_edit_new` sizes other than 56 or at least the
+  current size are refused, and a non-zero `n_params` outside `add_node`. The events attribute key is `odin3 edit`
+  (a user attribute named `odin3_edit` no longer collides). Python top: the binding serialises runs with a lock
+  and restores the previous top.
 - `scoap` pass: SCOAP testability measures (CC0, CC1, CO; with `--sequential` SC0, SC1, SO) of every net, signal
   probability from random simulation (`--sigprob`), module attributes `odin3:scoap_*`, versioned JSON, Python
   `Design.scoap()`. Spec `docs/specs/2026-10-31-scoap-design.md`, manual `docs/user/scoap.md`. 2026-10-31.

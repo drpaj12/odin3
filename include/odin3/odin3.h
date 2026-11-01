@@ -2353,8 +2353,11 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
 
 /* What an edit creates or changes (odin3_edit_add_net, _add_node, _add_sop, _set_cover,
  * _set_param_int). size: sizeof(odin3_edit_new) of the header the caller compiled against, set
- * first; a later library may append fields and reads only what size covers (a smaller size is
- * ODIN3_ERR_INVALID_ARG). reserved: must be zero, else ODIN3_ERR_INVALID_ARG. name: NULL or ""
+ * first; a later library may append fields and reads only what size covers. Accepted sizes: exactly
+ * 56 (the first release, up to and including index) or at least sizeof(odin3_edit_new) of this
+ * library; any other size is ODIN3_ERR_INVALID_ARG. A library built before the parameter fields
+ * ignores them, so a caller that passes n_params checks for odin3_edit_get_events first (the ABI
+ * version stays 7). reserved: must be zero, else ODIN3_ERR_INVALID_ARG. name: NULL or ""
  * for unnamed. tag: the edit tag, required. cell_type: add_node only. n_inputs and cover: add_sop
  * only (cover also set_cover); cover is the BLIF cover text, rows "01- 1" separated by newlines
  * (input chars 0, 1 or -, blanks ignored, then the output char); "" is the constant 0, and a
@@ -2363,7 +2366,10 @@ odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
  * against the 56-byte struct passes size 56 and these read as zero): n_params integer parameters of
  * the cell type, by name (e.g. "INIT"), set over their defaults in the new node, so a flip-flop
  * can start at 0 without a twin. An unknown or non-integer parameter, a repeated name, or more
- * than 8, is ODIN3_ERR_INVALID_ARG with nothing changed. reserved2: must be zero. */
+ * than 8, is ODIN3_ERR_INVALID_ARG with nothing changed; so is a non-zero n_params in any call
+ * but add_node. reserved2: must be zero. tag: non-empty and without a newline (a tag with a
+ * newline is ODIN3_ERR_INVALID_ARG in add_net, add_node, add_sop, set_cover and
+ * set_param_int, as in the tagged connection calls; it was accepted before the edit events). */
 typedef struct odin3_edit_new {
     uint32_t size;
     uint32_t reserved;
@@ -2381,21 +2387,21 @@ typedef struct odin3_edit_new {
 } odin3_edit_new;
 
 /* New net in `module`. *net gets its ref. */
-odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+odin3_status odin3_edit_add_net(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                 odin3_ref *net);
 
-/* New node of the registered or built-in cell type what->cell_type, all pins unconnected. Its
- * parameters are the type's defaults except the integer ones named by what->param_names. A $sop:
+/* New node of the registered or built-in cell type in->cell_type, all pins unconnected. Its
+ * parameters are the type's defaults except the integer ones named by in->param_names. A $sop:
  * use odin3_edit_add_sop. */
-odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+odin3_status odin3_edit_add_node(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                  odin3_ref *node);
 
-/* New $sop (BLIF .names) of what->n_inputs inputs and what->cover. */
-odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *what,
+/* New $sop (BLIF .names) of in->n_inputs inputs and in->cover. */
+odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odin3_edit_new *in,
                                 odin3_ref *node);
 
-/* Replaces the cover of a $sop (same width) by what->cover, tagged what->tag;
- * odin3_edit_set_param_int sets integer parameter what->index to what->value the same way. The node
+/* Replaces the cover of a $sop (same width) by in->cover, tagged in->tag;
+ * odin3_edit_set_param_int sets integer parameter in->index to in->value the same way. The node
  * is replaced by a twin that takes over its pins, name and attributes; its ID changes (the old one
  * is dead). *twin gets the twin's ref as soon as the old node has been replaced, even when a later
  * step (the rename, the attribute copy, the debug check) fails and the call returns an error, so
@@ -2403,10 +2409,10 @@ odin3_status odin3_edit_add_sop(odin3_design *design, uint32_t module, const odi
  * DERIVED record in a new run "edit" (arguments: the tag) of class REWRITE whose parents are the
  * old node's record (first) and the edit's IMPORTED record, so the backward walk still reaches the
  * HDL source and the construct chain; odin3_edit_get_tag reads the tag. */
-odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *what,
+odin3_status odin3_edit_set_cover(odin3_design *design, odin3_ref node, const odin3_edit_new *in,
                                   odin3_ref *twin);
 odin3_status odin3_edit_set_param_int(odin3_design *design, odin3_ref node,
-                                      const odin3_edit_new *what, odin3_ref *twin);
+                                      const odin3_edit_new *in, odin3_ref *twin);
 
 /* Connects an unconnected pin to a net of the same module. An output pin may not join a net that
  * already has a driver. */

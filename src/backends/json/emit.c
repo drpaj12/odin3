@@ -472,8 +472,11 @@ static void put_edit_events(jw *out, jw_list *list, odin3_objref obj) {
     odin3_strbuf_init(&token);
     odin3_status st = odin3_edit_events_encode(raw, &token);
     if (st == ODIN3_OK && token.len > 0) {
-        jw_key(out, list, "odin3_edit");
+        jw_key(out, list, ODIN3_EDIT_FILE_KEY);
         jw_string(out, (odin3_bytes){token.data, token.len});
+    } else if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "write_json: edit events of an object are malformed; not written");
     } else if (st != ODIN3_OK) {
         out->status = st;
     }

@@ -38,7 +38,11 @@ gate.remove()                # refused if it drives a net with other pins; remov
 - `rewire` is a disconnect then a connect. If the connect fails the pin returns to its old net, at
   the end of that net's pin array.
 - C structs `odin3_edit_new` and `odin3_simulation_run` start with `size` (set it to `sizeof` of
-  the struct) and carry a `reserved` word that must be zero.
+  the struct) and carry a `reserved` word that must be zero. `odin3_edit_new` accepts exactly the
+  first release's size (56 bytes) or a size of at least the current struct; any size in between is
+  refused. A non-zero `n_params` is refused by every call but `add_node`. A library from before the
+  parameter fields would ignore them, so the Python binding checks for `odin3_edit_get_events` when
+  `params=` is given and raises "libodin3 too old" otherwise. The ABI version stays 7.
 - There is no undo, and module ports are not edited.
 - The result goes through `write_blif`, `write_json` and every pass like any other design.
 
@@ -69,7 +73,10 @@ first, read with `obj.edit_events` (C: `odin3_edit_get_events`):
 `rewire` and `disconnect` take an optional `tag`; without one the event carries the tag `edit`. An
 identical event is recorded once. `connect`, `remove_node` and `remove_net` record nothing (use
 `rewire(net, tag=...)` to mark a connect on a clean node). A twin keeps the events of the node it
-replaced. Tags may not contain a newline.
+replaced. Tags may not contain a newline: `add_net`, `add_node`, `add_sop`, `set_cover` and
+`set_param_int` refuse such a tag (they accepted it before the events existed). The events live in
+an attribute whose name contains a blank (`odin3 edit`), so a user attribute (including one named
+`odin3_edit`) never collides with them.
 
 The events are not printed by default, so every default output is unchanged. To keep them visible
 after export, ask for them:
@@ -94,8 +101,11 @@ design.run_script("write_json --odin3 out.json; write_blif --edit-tags out.blif"
 
 `Design(top="name")`, `design.run_script(text, top="name")` and `design.run_pass(name, args,
 top="name")` set the requested top module name for the run, as the CLI `--top` does, so a script that
-reads Verilog needs no separate step. The name is set around each call and cleared afterwards (the C
-setting is process-wide, so it never leaks into another design).
+reads Verilog needs no separate step. The name is set around each call and the previous value is put
+back afterwards. The C setting is process-wide, so every `run_pass` and `run_script` of the binding
+holds one lock for the whole run: runs from several threads are serialised and never see each
+other's top. The previous value is the one the binding last set; a host that calls
+`odin3_pass_set_top_name` itself is not tracked.
 
 ## Simulating every net
 
