@@ -23,7 +23,7 @@ module top(input a, output y); mid u(.a(a), .y(y)); endmodule
 """
 
 
-def run(script_body: str, flags: str = "") -> tuple[list[str], str]:
+def run(script_body: str, flags: str = "", top: str = "top") -> tuple[list[str], str]:
     with tempfile.TemporaryDirectory() as tmp:
         src, out = Path(tmp) / "d.v", Path(tmp) / "o.blif"
         src.write_text(VERILOG)
@@ -31,7 +31,7 @@ def run(script_body: str, flags: str = "") -> tuple[list[str], str]:
             f'read_verilog "{src}"; proc; opt; lower; {script_body}; write_blif {flags} "{out}"'
         )
         done = subprocess.run(
-            [str(ODIN3), "--top", "top", "-p", script], capture_output=True, text=True
+            [str(ODIN3), "--top", top, "-p", script], capture_output=True, text=True
         )
         assert done.returncode == 0, done.stderr
         return re.findall(r"^\.model (\S+)", out.read_text(), re.M), done.stderr
@@ -44,16 +44,39 @@ class WriteBlifReachTest(unittest.TestCase):
         self.assertEqual(models, ["top", "mid", "leaf"])
         self.assertNotIn("not reachable", log)
 
-    def test_default_writes_every_module(self) -> None:
+    def test_default_writes_every_module_with_one_warning(self) -> None:
         models, log = run("flatten")
         self.assertEqual(models, ["top", "mid", "leaf"])
+        self.assertEqual(log.count("not reachable from the top written"), 1)
+        self.assertIn(
+            "2 modules not reachable from the top written; Parmys writes only the top; "
+            "use --reachable",
+            log,
+        )
+
+    def test_default_without_flatten_does_not_warn(self) -> None:
+        _, log = run("opt")
         self.assertNotIn("not reachable", log)
+
+    def test_top_given_keeps_only_that_module_no_warning(self) -> None:
+        # --top unused: the elaborated design holds only the top, nothing unreachable is kept
+        models, log = run("flatten", "--reachable", top="unused")
+        self.assertEqual(models, ["unused"])
+        self.assertNotIn("not reachable", log)
+
+    def test_no_top_warns_reachable_is_ignored(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            script = f'write_blif --reachable "{Path(tmp) / "o.blif"}"'
+            done = subprocess.run([str(ODIN3), "-p", script], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("--reachable ignored: the design has no top", done.stderr)
 
     def test_flattened_modules_nothing_instantiates_are_not_written(self) -> None:
         models, log = run("flatten", "--reachable")
         self.assertEqual(models, ["top"])
-        self.assertIn("module 'mid' is not reachable from the top", log)
+        self.assertIn("--reachable: module 'mid' is not reachable from the top", log)
         self.assertIn("module 'leaf' is not reachable from the top", log)
+        self.assertIn("the module stays in the design", log)
 
 
 if __name__ == "__main__":

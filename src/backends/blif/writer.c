@@ -2863,13 +2863,45 @@ static void warn_unreachable(const blif_writer *wr, uint32_t id) {
     uint32_t name =
         odin3_module_name(odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id}));
     odin3_log(ODIN3_LOG_WARN,
-              "write_blif: module '%.*s' is not reachable from the top; not written",
+              "write_blif: --reachable: module '%.*s' is not reachable from the top; not written "
+              "(the module stays in the design)",
               (int)odin3_strtab_len(wr->tab, name), odin3_strtab_get(wr->tab, name));
+}
+
+/* The reachability marks of the plain path, or NULL (no top: with --reachable a WARNING says the
+ * option is ignored). A failure to allocate sets the writer's status. */
+static uint8_t *reach_marks(blif_writer *wr, uint32_t n_mod) {
+    if (odin3_design_top(wr->design).v == 0) {
+        if (wr->opts->reachable_only) {
+            odin3_log(ODIN3_LOG_WARN, "write_blif: --reachable ignored: the design has no top");
+        }
+        return NULL;
+    }
+    uint8_t *seen = odin3_util_calloc(n_mod);
+    if (seen == NULL || mark_reachable(wr, seen, n_mod) != ODIN3_OK) {
+        wr->st = wr_fail(wr, ODIN3_ERR_NO_MEMORY);
+    }
+    return seen;
+}
+
+/* Default path: one WARNING when modules the top does not reach are written all the same. */
+static void warn_unreachable_written(const uint8_t *seen, uint32_t n_mod) {
+    uint32_t count = 0;
+    for (uint32_t i = 1; seen != NULL && i < n_mod; i++) {
+        count += seen[i] == 0 ? 1U : 0U;
+    }
+    if (count > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "write_blif: %u modules not reachable from the top written; Parmys writes only "
+                  "the top; use --reachable",
+                  (unsigned)count);
+    }
 }
 
 /* Plain: every module, then the declared black boxes; with reachable_only the top and the modules
  * reachable from it, and a WARNING per module skipped (Parmys writes only the top's netlist; the
- * module stays in the design). VTR: the header, then the top alone. */
+ * module stays in the design). Without it one WARNING counts the unreachable modules written.
+ * VTR: the header, then the top alone. */
 static void write_design(blif_writer *wr) {
     if (wr->vtr) {
         /* written_module: position 1 is the top */
@@ -2880,17 +2912,14 @@ static void write_design(blif_writer *wr) {
         return;
     }
     uint32_t n_mod = odin3_design_module_end(wr->design);
-    uint8_t *seen = NULL;
-    if (wr->opts->reachable_only && odin3_design_top(wr->design).v != 0) {
-        seen = odin3_util_calloc(n_mod);
-        if (seen == NULL || mark_reachable(wr, seen, n_mod) != ODIN3_OK) {
-            wr->st = wr_fail(wr, ODIN3_ERR_NO_MEMORY);
-        }
+    uint8_t *seen = reach_marks(wr, n_mod);
+    if (!wr->opts->reachable_only && wr->st == ODIN3_OK) {
+        warn_unreachable_written(seen, n_mod);
     }
     uint32_t written = 0;
     for (uint32_t i = 1; wr->st == ODIN3_OK && i < n_mod; i++) {
         uint32_t id = written_module(wr->design, i);
-        if (seen != NULL && seen[id] == 0) {
+        if (wr->opts->reachable_only && seen != NULL && seen[id] == 0) {
             warn_unreachable(wr, id);
             continue;
         }
