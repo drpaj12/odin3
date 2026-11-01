@@ -26,3 +26,6 @@ docs/user/_generated/
 
 # Per-user permission overrides (controller keeps machine-specific rules here)
 .claude/settings.local.json
+
+# Scratch BLIFs of test_lower_corpus run by hand
+/lower_reverse_*.blif

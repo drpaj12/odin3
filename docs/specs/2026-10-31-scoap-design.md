@@ -183,7 +183,7 @@ as a dict. `docs/user/scoap.md`, PASSES.md row. No IR change, no ADR (attributes
 - Fix round 6 gaps: `--sigprob` skip is machine-visible (section 5): schema 2 to 3, `sigprob_ran`,
   `sigprob_vectors` 0 and `rare` null when skipped; skip only for the loop and multiple-driver
   refusals. Test `test_sigprob_skipped_*`, `test_sigprob_other_refusal_fails` in
-  `tests/tools/test_scoap.py` and the boundtop-style latch loop `tests/tools/test_scoap_latch_loop.py`.
+  `tests/tools/test_scoap.py` and the boundtop-style latch loop `tests/tools/data/latch_loop.v`.
 - Fix round 1 (review of head e2874254): empty cover, worklist, INF/SAT split, duplicate pins,
   cube observability, loop cap 2 x nets + 2, 64-bit counts; the reference and the pass were changed
   together and are checked against hand-derived numbers in `tests/tools/test_scoap.py`.

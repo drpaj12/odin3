@@ -386,6 +386,25 @@ class ScoapTest(unittest.TestCase):
         self.assertIsNone(self.raw["modules"][0]["rare"])
         self.assertNotIn("error:", self.log)  # the refusal line is downgraded to a warning
 
+    def test_sigprob_skipped_for_a_boundtop_style_latch_loop_in_rtl(self) -> None:
+        # the RTL form of the case above: tests/tools/data/latch_loop.v (an incomplete always @*)
+        out = self.dir / "s.json"
+        src = REPO_ROOT / "tests" / "tools" / "data" / "latch_loop.v"
+        script = (
+            f"read_verilog {src}; proc; opt; lower; opt; scoap --sigprob 100 --out {out}"
+        )
+        done = subprocess.run(
+            [str(ODIN3), "--top", "latch_loop", "-p", script], capture_output=True, text=True
+        )
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("--sigprob skipped", done.stderr)
+        self.assertNotIn("error:", done.stderr)
+        raw = json.loads(out.read_text())
+        self.assertIs(raw["sigprob_ran"], False)
+        self.assertEqual(raw["sigprob_vectors"], 0)
+        self.assertIsNone(raw["modules"][0]["rare"])
+        self.assertEqual({n["p1_ppm"] for n in raw["modules"][0]["nets"]}, {-1})
+
     def test_sigprob_ran_true_and_false_without_option(self) -> None:
         text = blif(".names a b y\n11 1\n", "a b", "y")
         self.run_pass(text, "--sigprob 50")
