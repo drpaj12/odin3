@@ -137,7 +137,10 @@ pass). D-2 divide by zero is 0. D-3 detection heuristics as in section 5. D-4 64
 
 Deviations from the text above, as built (2026-10-31):
 1. `--dut-netlist` is not a flag: read the netlist first (`read_blif f.blif; sim_tb tb.v`).
-2. `--vcd` is refused ("not implemented yet"): the `sim` pass keeps its own `--vcd`.
+2. `--vcd <file>` (added 2026-10-31, `src/sim/tb_vcd.c`): dumps the testbench's scalar regs, wires and
+   integers and the connected ports of each DUT instance (scope per instance), 2-state, with the
+   end-of-time-step value of each change; `$timescale` from the testbench (`1ns` when absent).
+   Gate `tb_vcd` against iverilog's `$dumpvars` VCD (`tools/vcd-compare`).
 3. Ranges must be `[h:0]` (and arrays `[0:N]`); ordered port connections are rejected (named only).
 4. `testbench_gen` writes one stimulus file per data input, `<out>.<input>.hex`, not one file with
    a word per input per line.

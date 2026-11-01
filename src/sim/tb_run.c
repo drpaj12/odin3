@@ -51,6 +51,7 @@ typedef struct run {
     uint32_t nstrobe, cap_strobe;
     bool finished, failed, hit_limit;
     uint64_t max_time;
+    tb_vcd *vcd;
 } run;
 
 static void rfail(run *rt, const tb_stmt *stmt, const char *msg) {
@@ -523,6 +524,9 @@ static void time_step(run *rt) {
         progress = nba_region(rt);
     } while ((any_runnable(rt) || progress) && !rt->finished && run_ok(rt));
     postponed(rt);
+    if (rt->vcd != NULL && !rt->failed) {
+        tb_vcd_sample(rt->vcd, &rt->ev, rt->ev.time);
+    }
     (void)run_ok(rt);
 }
 
@@ -607,11 +611,19 @@ odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *o
     rt.mon_on = true;
     tb->out = opts->out;
     odin3_status st = setup(&rt, design);
+    if (st == ODIN3_OK && opts->vcd != NULL) {
+        rt.vcd = tb_vcd_open(opts->vcd, tb);
+        st = rt.vcd != NULL ? ODIN3_OK : ODIN3_ERR_IO;
+    }
     if (st == ODIN3_OK) {
         settle_assigns(&rt);
         time_step(&rt);
         event_loop(&rt);
         st = rt.failed ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
+    }
+    if (!tb_vcd_close(rt.vcd) && st == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: write error on the --vcd file");
+        st = ODIN3_ERR_IO;
     }
     end->time = rt.ev.time;
     end->hit_limit = rt.hit_limit && !rt.finished;

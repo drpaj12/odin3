@@ -21,6 +21,7 @@ typedef struct tb_args {
     char file[PATH_MAX_LEN];
     char top[TB_NAME];
     char out[PATH_MAX_LEN];
+    char vcd[PATH_MAX_LEN];
     uint64_t max_time;
     uint64_t seed;
 } tb_args;
@@ -52,7 +53,7 @@ static bool take_number(odin3_bytes *args, uint64_t *out) {
 
 static odin3_status usage(void) {
     odin3_log(ODIN3_LOG_ERROR,
-              "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out <file>] <tb.v>");
+              "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -70,8 +71,7 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
         } else if (word_is(word, "--seed")) {
             ok = take_number(&args, &out->seed);
         } else if (word_is(word, "--vcd")) {
-            odin3_log(ODIN3_LOG_ERROR, "sim_tb: --vcd is not implemented yet (spec section 8)");
-            return ODIN3_ERR_INVALID_ARG;
+            ok = take(&args, out->vcd, sizeof out->vcd);
         } else if (out->file[0] == '\0' && word.len < sizeof out->file) {
             memcpy(out->file, word.ptr, word.len);
             out->file[word.len] = '\0';
@@ -106,7 +106,7 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
                                void *user) {
     (void)ctx;
     (void)user;
-    tb_args parsed = {{0}, {0}, {0}, 0, 0};
+    tb_args parsed = {{0}, {0}, {0}, {0}, 0, 0};
     odin3_status st = parse_args(args, &parsed);
     if (st != ODIN3_OK) {
         return st;
@@ -129,7 +129,8 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         tb_module_free(tb);
         return ODIN3_ERR_IO;
     }
-    tb_options opts = {parsed.max_time, parsed.seed, out, NULL};
+    tb_options opts = {parsed.max_time, parsed.seed, out,
+                       parsed.vcd[0] != '\0' ? parsed.vcd : NULL};
     uint64_t end_time = 0;
     st = tb_run(design, tb, &opts, &end_time);
     (void)fflush(out);
@@ -145,9 +146,10 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
-    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] <tb.v>: run a Verilog "
+    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>: run a Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
-    "design's modules; $display text goes to stdout or --out",
+    "design's modules; $display text goes to stdout or --out, "
+    "--vcd writes a waveform of the testbench signals and the DUT ports",
     sim_tb_run,
     NULL,
     false,

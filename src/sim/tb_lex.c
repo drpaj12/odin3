@@ -210,16 +210,33 @@ static void skip_to_eol(const char **cursor) {
     }
 }
 
+/* Keeps the time unit of `timescale <unit>/<precision> (digits and letters, e.g. 10ns). */
+static void take_timescale(const char *text, tb_module *tb) {
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+    size_t len = 0;
+    while (isalnum((unsigned char)text[len]) && len + 1 < sizeof tb->timescale) {
+        len++;
+    }
+    if (len > 0) {
+        memcpy(tb->timescale, text, len);
+        tb->timescale[len] = '\0';
+    }
+}
+
 /* One step over blanks, a comment or a `timescale line: 1 skipped, 0 at a token, -1 error. */
-static int skip_step(const char **cursor, uint32_t *line, const char *file) {
+static int skip_step(const char **cursor, uint32_t *line, const char *file, tb_module *tb) {
     const char *scan = *cursor;
     if (isspace((unsigned char)*scan)) {
         if (*scan == '\n') {
             (*line)++;
         }
         (*cursor)++;
-    } else if ((scan[0] == '/' && scan[1] == '/') ||
-               (*scan == '`' && strncmp(scan, "`timescale", TIMESCALE_LEN) == 0)) {
+    } else if (scan[0] == '/' && scan[1] == '/') {
+        skip_to_eol(cursor);
+    } else if (*scan == '`' && strncmp(scan, "`timescale", TIMESCALE_LEN) == 0) {
+        take_timescale(scan + TIMESCALE_LEN, tb);
         skip_to_eol(cursor);
     } else if (scan[0] == '/' && scan[1] == '*') {
         skip_block_comment(cursor, line);
@@ -232,11 +249,11 @@ static int skip_step(const char **cursor, uint32_t *line, const char *file) {
     return 1;
 }
 
-/* Skips blanks and comments; counts lines; accepts `timescale lines (ignored). */
-static bool skip_trivia(const char **cursor, uint32_t *line, const char *file) {
+/* Skips blanks and comments; counts lines; records `timescale lines. */
+static bool skip_trivia(const char **cursor, uint32_t *line, const char *file, tb_module *tb) {
     int step = 1;
     while (step > 0) {
-        step = skip_step(cursor, line, file);
+        step = skip_step(cursor, line, file, tb);
     }
     return step == 0;
 }
@@ -260,11 +277,12 @@ static bool lex_token(const char **cursor, tb_tok *tok, const tb_source *src, tb
 bool tb_lex(const tb_source *src, tb_module *tb, tb_lexed *out) {
     uint32_t line = 1;
     const char *cursor = src->text;
+    (void)strcpy(tb->timescale, "1ns");
     uint32_t cap = LEX_TOKS0;
     out->toks = tb_alloc(tb, (size_t)cap * sizeof *out->toks);
     out->n = 0;
     while (out->toks != NULL) {
-        if (!skip_trivia(&cursor, &line, src->file)) {
+        if (!skip_trivia(&cursor, &line, src->file, tb)) {
             return false;
         }
         if (out->n + 1 >= cap) {
