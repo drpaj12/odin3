@@ -306,7 +306,7 @@ static void test_options(void) {
     build("module \\m\n  wire \\a\nend\n", &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--bogus"));
     expect_first_error("odin3: error: proc: unknown option '--bogus' (options: --noopt, "
-                       "--stop-after <phase>)");
+                       "--share-selects, --stop-after <phase>)");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--stop-after"));
     expect_first_error("odin3: error: proc: --stop-after needs one of: clean, rmdead, prune, arst");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--stop-after mux"));
