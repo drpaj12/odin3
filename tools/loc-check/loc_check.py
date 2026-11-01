@@ -683,9 +683,12 @@ def pinned_counts(t: Tally) -> dict[str, int]:
 
 def pin_lines(name: str, level: str, fmt: str, tallies: dict[str, Tally]) -> list[str]:
     """The pin lines of one (level, format) total: the lost classes and the objects that took
-    their module's location."""
+    their module's location. A trailing comment holds the population of the kind (objects read
+    back, and how many had a location), so a later re-pin tells a regression from a larger
+    population."""
     return [
-        f"{name} {level} {fmt} {kind} {cls} {n}"
+        f"{name} {level} {fmt} {kind} {cls} {n}  "
+        f"# of {tallies[kind].objects} objects, {tallies[kind].had} with a location"
         for kind in KINDS
         if kind in tallies
         for cls, n in sorted(pinned_counts(tallies[kind]).items())
