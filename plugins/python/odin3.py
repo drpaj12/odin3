@@ -94,7 +94,14 @@ _ABC_TRIED = False  # the abc adapter load was attempted in this process
 
 
 class Odin3Error(RuntimeError):
-    """An ABI call returned a failure status (status: the odin3_status value)."""
+    """An ABI call returned a failure status.
+
+    function: the ABI function; status: the odin3_status value; status_name: its name (for
+    example "ODIN3_ERR_INVALID_ARG"). twin: the replacement node of Node.set_cover /
+    Node.set_param_int when a later step failed, else None. Pickling (a multiprocessing pool
+    returns the error to the parent) keeps function, status and status_name but drops twin: it
+    belongs to a design in the worker process, so after a round trip twin is None.
+    """
 
     def __init__(self, function: str, status: int, name: str) -> None:
         super().__init__(f"{function}: {name}")

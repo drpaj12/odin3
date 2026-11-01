@@ -323,6 +323,18 @@ class Odin3ErrorPickleTest(unittest.TestCase):
                 res.get(timeout=30)
         self.assertEqual(caught.exception.function, "odin3_probe")
 
+    def test_spawn_pool_returns_the_error(self) -> None:
+        ctx = multiprocessing.get_context("spawn")
+        with ctx.Pool(1) as pool:
+            res = pool.apply_async(_raise_odin3_error, (0,))
+            with self.assertRaises(odin3.Odin3Error) as caught:
+                res.get(timeout=60)
+        self.assertEqual(
+            (caught.exception.function, caught.exception.status_name),
+            ("odin3_probe", "ODIN3_ERR_INVALID_ARG"),
+        )
+        self.assertIsNone(caught.exception.twin)
+
 
 if __name__ == "__main__":
     unittest.main()
