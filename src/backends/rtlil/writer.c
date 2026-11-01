@@ -148,9 +148,11 @@ typedef struct attr_ctx {
 static odin3_status put_attr(void *user, uint32_t key_str, const odin3_value *value) {
     attr_ctx *ctx = user;
     rtl_writer *rw = ctx->rw;
-    if (strcmp(odin3_strtab_get(odin3_design_strtab(rw->design), key_str),
-               ODIN3_ATTR_EDIT_EVENTS) == 0 &&
-        value->kind == ODIN3_VAL_STRING &&
+    const char *key = odin3_strtab_get(odin3_design_strtab(rw->design), key_str);
+    if (strcmp(key, ODIN3_ATTR_FLATTENED_AWAY) == 0) {
+        return rw->st; /* flatten's bookkeeping mark: not design content */
+    }
+    if (strcmp(key, ODIN3_ATTR_EDIT_EVENTS) == 0 && value->kind == ODIN3_VAL_STRING &&
         odin3_edit_events_wellformed(
             odin3_strtab_get(odin3_design_strtab(rw->design), value->str))) {
         return rw->st; /* edit events: printed only by the opt-in exports */

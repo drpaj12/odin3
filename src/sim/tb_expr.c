@@ -105,6 +105,8 @@ typedef enum {
     C_RANDOM,
     C_FOPEN,
     C_CLOG2,
+    C_TEST_PLUSARGS,
+    C_VALUE_PLUSARGS,
     C_CAST
 } ev_class;
 
@@ -147,8 +149,14 @@ static ev_class class_of_sys(const tb_expr *expr) {
     static const struct {
         const char *name;
         ev_class cls;
-    } TABLE[] = {{"$time", C_TIME},   {"$random", C_RANDOM}, {"$urandom", C_RANDOM},
-                 {"$fopen", C_FOPEN}, {"$clog2", C_CLOG2},   {NULL, C_CAST}};
+    } TABLE[] = {{"$time", C_TIME},
+                 {"$random", C_RANDOM},
+                 {"$urandom", C_RANDOM},
+                 {"$fopen", C_FOPEN},
+                 {"$clog2", C_CLOG2},
+                 {"$test$plusargs", C_TEST_PLUSARGS},
+                 {"$value$plusargs", C_VALUE_PLUSARGS},
+                 {NULL, C_CAST}};
     size_t i = 0;
     while (TABLE[i].name != NULL && strcmp(expr->str, TABLE[i].name) != 0) {
         i++;
@@ -217,8 +225,13 @@ static bool child_bin(const ev_frame *fr, ev_child *out) {
 
 static bool child_sys(const ev_frame *fr, ev_child *out) {
     const tb_expr *expr = fr->expr;
-    if (fr->cls == C_TIME || fr->cls == C_FOPEN) {
+    if (fr->cls == C_TIME || fr->cls == C_FOPEN || fr->cls == C_TEST_PLUSARGS) {
         return false;
+    }
+    if (fr->cls == C_VALUE_PLUSARGS) { /* only the index of the target, if it has one */
+        const tb_expr *index = lv_index(expr->list[1]);
+        *out = (ev_child){index, index != NULL ? index->width : 0U, false};
+        return fr->stage == 0 && index != NULL;
     }
     if (fr->cls == C_RANDOM) {
         if (expr->n == 0) {
@@ -325,6 +338,90 @@ static uint64_t finish_fopen(tb_ev *ev, const tb_expr *expr) {
     return 0;
 }
 
+/* --- plusargs --- */
+
+/* The plusarg text without its optional leading '+'. */
+static const char *plusarg_text(const char *arg) {
+    return arg[0] == '+' ? arg + 1 : arg;
+}
+
+/* The first plusarg that starts with name (len bytes), or NULL. */
+static const char *plusarg_find(const tb_ev *ev, const char *name, size_t len) {
+    for (uint32_t i = 0; i < ev->tb->n_plusargs; i++) {
+        const char *arg = plusarg_text(ev->tb->plusargs[i]);
+        if (strncmp(arg, name, len) == 0) {
+            return arg;
+        }
+    }
+    return NULL;
+}
+
+enum { BASE_BIN = 2, BASE_OCT = 8, BASE_DEC = 10, BASE_HEX = 16, BYTE_BITS = 8 };
+
+static int plusarg_base(char conv) {
+    switch (conv) {
+    case 'h':
+    case 'x':
+        return BASE_HEX;
+    case 'b':
+        return BASE_BIN;
+    case 'o':
+        return BASE_OCT;
+    default:
+        return BASE_DEC;
+    }
+}
+
+/* Parses text as a value in format conversion conv (d, h or x, b, o, s); false when it is not
+ * one. A string keeps its first 8 bytes, the first in the most significant byte used. */
+static bool plusarg_parse(char conv, const char *text, uint64_t *val) {
+    if (conv == 's') {
+        *val = 0;
+        for (size_t i = 0; i < strlen(text) && i < sizeof(uint64_t); i++) {
+            *val = (*val << BYTE_BITS) | (uint8_t)text[i];
+        }
+        return true;
+    }
+    char *end = NULL;
+    bool neg = text[0] == '-';
+    *val = strtoull(neg ? text + 1 : text, &end, plusarg_base(conv));
+    *val = neg ? (uint64_t)0 - *val : *val;
+    return text[0] != '\0' && *end == '\0';
+}
+
+/* $value$plusargs("name=%d", var): 1 and var set when a plusarg starts with the text before the
+ * '%' and its rest parses in that conversion, else 0 and var unchanged. */
+static uint64_t finish_value_plusargs(tb_ev *ev, const ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    const char *fmt = expr->list[0]->str;
+    const char *pct = strchr(fmt, '%');
+    if (ev->const_only || pct == NULL) {
+        ev->failed = true;
+        ev->why = "$value$plusargs needs a format with a % conversion in a procedural statement";
+        return 0;
+    }
+    const char *conv = pct + 1;
+    while (*conv == '0') {
+        conv++;
+    }
+    const char *arg = plusarg_find(ev, fmt, (size_t)(pct - fmt));
+    uint64_t val = 0;
+    if (arg == NULL || !plusarg_parse(*conv, arg + (pct - fmt), &val)) {
+        return 0;
+    }
+    write_leaf(ev, expr->list[1], val, fr->val[0]);
+    return 1;
+}
+
+static uint64_t finish_test_plusargs(tb_ev *ev, const tb_expr *expr) {
+    if (ev->const_only || expr->list[0]->kind != E_STR) {
+        ev->failed = true;
+        ev->why = "$test$plusargs needs a constant string in a procedural statement";
+        return 0;
+    }
+    return plusarg_find(ev, expr->list[0]->str, strlen(expr->list[0]->str)) != NULL ? 1U : 0U;
+}
+
 static uint64_t finish_sys(tb_ev *ev, const ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     switch (fr->cls) {
@@ -335,6 +432,10 @@ static uint64_t finish_sys(tb_ev *ev, const ev_frame *fr) {
         return finish_random(ev, fr);
     case C_FOPEN:
         return finish_fopen(ev, expr);
+    case C_TEST_PLUSARGS:
+        return finish_test_plusargs(ev, expr);
+    case C_VALUE_PLUSARGS:
+        return finish_value_plusargs(ev, fr);
     case C_CLOG2: {
         uint64_t res = 0;
         while (res < TB_MAX_WIDTH && ((uint64_t)1 << res) < fr->val[0]) {

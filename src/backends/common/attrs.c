@@ -3,6 +3,7 @@
 
 #include "frontends/blif/attrs.h"
 #include "ir/edit_events.h"
+#include "ir/module.h"
 
 #include <string.h>
 
@@ -48,7 +49,9 @@ odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
     odin3_wattr attr = {ODIN3_WATTR_ATTRIBUTE, ODIN3_WATTR_VALUE, key, {NULL, 0}, value, false};
     if ((key.len == strlen(ODIN3_BLIF_ATTR_EXTRAS) &&
          memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) ||
-        is_edit_events(tab, key, value)) {
+        is_edit_events(tab, key, value) ||
+        (key.len == strlen(ODIN3_ATTR_FLATTENED_AWAY) &&
+         memcmp(key.ptr, ODIN3_ATTR_FLATTENED_AWAY, key.len) == 0)) {
         attr.role = ODIN3_WATTR_SKIP;
     } else if (strip_prefix(key, ODIN3_BLIF_ATTR_PREFIX, &attr.key)) {
         blif_value(&attr, tab, value);

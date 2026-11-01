@@ -123,14 +123,15 @@ typedef struct blif_writer {
     odin3_strbuf cover;        /* a $lut's rows (odin3_blif_isop) */
     /* the VTR dialect's names (spec 3E VB-10) */
     odin3_blif_names
-        *names;         /* VTR: the top's names from the preflight's plan, lent to the writer */
-    bool quiet_refusal; /* the preflight's cap is reached: a refusal is counted, not logged */
-    bool log_names;     /* log the port warnings (the preflight's naming run) */
-    odin3_strbuf orig;  /* the last name legalise rewrote, as it was */
-    odin3_strbuf legal; /* scratch for legalise */
-    uint32_t renamed;   /* written names VB-10 changed (note_renamed) */
-    bool have_first;    /* first_key, first_orig, first_legal are set */
-    uint32_t first_key; /* the lowest net ID of such a name */
+        *names;            /* VTR: the top's names from the preflight's plan, lent to the writer */
+    bool quiet_refusal;    /* the preflight's cap is reached: a refusal is counted, not logged */
+    bool log_names;        /* log the port warnings (the preflight's naming run) */
+    odin3_strbuf orig;     /* the last name legalise rewrote, as it was */
+    odin3_strbuf legal;    /* scratch for legalise */
+    uint32_t renamed;      /* written names VB-10 changed (note_renamed) */
+    uint32_t type_renamed; /* plain: model and .subckt type names with '=' written with '?' */
+    bool have_first;       /* first_key, first_orig, first_legal are set */
+    uint32_t first_key;    /* the lowest net ID of such a name */
     odin3_strbuf first_orig, first_legal; /* that name before and after */
     /* the module being written */
     const odin3_module *module;
@@ -341,6 +342,28 @@ static bool same_bytes(odin3_bytes have, odin3_bytes want) {
 
 static odin3_bytes buf_bytes(const odin3_strbuf *buf) {
     return (odin3_bytes){buf->data, buf->len};
+}
+
+/* The plain dialect's token for a model or .subckt type name: '=' becomes '?', as Yosys's
+ * write_blif does for '#', '=', '<' and '>' (ABC's reader cuts a `.subckt` type such as the
+ * specialised module `m$P=V` at the '='). VTR names go through the VB-10 rules instead. The
+ * result lives until the next call. */
+static odin3_bytes plain_type_name(blif_writer *wr, odin3_bytes name) {
+    if (name.len == 0 || memchr(name.ptr, '=', name.len) == NULL) {
+        return name;
+    }
+    odin3_strbuf_clear(&wr->legal);
+    for (size_t i = 0; i < name.len; i++) {
+        char chr = ((const char *)name.ptr)[i];
+        if (chr == '=') {
+            chr = '?';
+        }
+        if (odin3_strbuf_append(&wr->legal, (odin3_bytes){&chr, 1}) != ODIN3_OK) {
+            return name;
+        }
+    }
+    wr->type_renamed++;
+    return buf_bytes(&wr->legal);
 }
 
 /* True when net is used as a .latch control or a hard cell's clock input (VB-10 rule 8). */
@@ -1863,7 +1886,7 @@ static odin3_status write_subckt(blif_writer *wr, odin3_node_id node) {
         return wr->st;
     }
     wr_begin(wr, ".subckt");
-    wr_token(wr, odin3_bytes_cstr(def->name));
+    wr_token(wr, plain_type_name(wr, odin3_bytes_cstr(def->name)));
     uint32_t index = 0;
     const odin3_celltype_def *decl = declared_of(wr, odin3_node_type(wr->module, node), &index);
     odin3_status st = ODIN3_OK;
@@ -2427,6 +2450,8 @@ static odin3_status write_model_line(blif_writer *wr) {
         odin3_strbuf_clear(&wr->legal);
         st = odin3_blif_vtr_legal_bytes(model, &wr->legal);
         model = buf_bytes(&wr->legal);
+    } else {
+        model = plain_type_name(wr, model);
     }
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);
@@ -2884,11 +2909,23 @@ static uint8_t *reach_marks(blif_writer *wr, uint32_t n_mod) {
     return seen;
 }
 
+/* True when flatten marked module id as left unused (ODIN3_FLATTEN_AWAY_ATTR). */
+static bool flattened_away(const blif_writer *wr, uint32_t id) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(wr->tab, odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key)) {
+        return false;
+    }
+    const odin3_module *module =
+        odin3_module_get((odin3_design *)wr->design, (odin3_module_id){id});
+    const odin3_value *val = odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_MODULE, id}, key);
+    return val != NULL && val->kind == ODIN3_VAL_INT && val->i != 0;
+}
+
 /* Default path: one WARNING when modules the top does not reach are written all the same. */
-static void warn_unreachable_written(const uint8_t *seen, uint32_t n_mod) {
+static void warn_unreachable_written(const blif_writer *wr, const uint8_t *seen, uint32_t n_mod) {
     uint32_t count = 0;
     for (uint32_t i = 1; seen != NULL && i < n_mod; i++) {
-        count += seen[i] == 0 ? 1U : 0U;
+        count += seen[i] == 0 && !flattened_away(wr, i) ? 1U : 0U;
     }
     if (count > 0) {
         odin3_log(ODIN3_LOG_WARN,
@@ -2898,36 +2935,76 @@ static void warn_unreachable_written(const uint8_t *seen, uint32_t n_mod) {
     }
 }
 
+/* INFO lines of the plain path: modules flatten left unused and not written; type names with '='
+ * written with '?'. */
+static void log_plain_notes(const blif_writer *wr, uint32_t skipped) {
+    if (skipped > 0) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "write_blif: %u modules that flatten left unused not written (Yosys's flatten "
+                  "deletes them)",
+                  (unsigned)skipped);
+    }
+    if (wr->type_renamed > 0) {
+        odin3_log(ODIN3_LOG_INFO,
+                  "write_blif: %u model and .subckt names had '=' written as '?' (as Yosys "
+                  "write_blif does; ABC's reader cuts a .subckt type at '=')",
+                  (unsigned)wr->type_renamed);
+    }
+}
+
+typedef enum wr_plan { WR_WRITE, WR_SKIP_UNREACHED, WR_SKIP_FLATTENED } wr_plan;
+
+/* What the plain path does with module id; seen is NULL when the design has no top. */
+static wr_plan plan_module(const blif_writer *wr, const uint8_t *seen, uint32_t id) {
+    if (seen == NULL || seen[id] != 0) {
+        return WR_WRITE;
+    }
+    if (wr->opts->reachable_only) {
+        return WR_SKIP_UNREACHED;
+    }
+    return flattened_away(wr, id) ? WR_SKIP_FLATTENED : WR_WRITE;
+}
+
 /* Plain: every module, then the declared black boxes; with reachable_only the top and the modules
  * reachable from it, and a WARNING per module skipped (Parmys writes only the top's netlist; the
- * module stays in the design). Without it one WARNING counts the unreachable modules written.
- * VTR: the header, then the top alone. */
-static void write_design(blif_writer *wr) {
-    if (wr->vtr) {
-        /* written_module: position 1 is the top */
-        if (write_vtr_header(wr) == ODIN3_OK &&
-            write_module(wr, written_module(wr->design, 1), true) == ODIN3_OK) {
-            (void)write_stubs(wr);
-        }
-        return;
-    }
+ * module stays in the design). Without it one WARNING counts the unreachable modules written, and
+ * the modules flatten left unused are skipped (one INFO counts them). */
+static void write_plain(blif_writer *wr) {
     uint32_t n_mod = odin3_design_module_end(wr->design);
     uint8_t *seen = reach_marks(wr, n_mod);
     if (!wr->opts->reachable_only && wr->st == ODIN3_OK) {
-        warn_unreachable_written(seen, n_mod);
+        warn_unreachable_written(wr, seen, n_mod);
     }
     uint32_t written = 0;
+    uint32_t skipped = 0;
     for (uint32_t i = 1; wr->st == ODIN3_OK && i < n_mod; i++) {
         uint32_t id = written_module(wr->design, i);
-        if (wr->opts->reachable_only && seen != NULL && seen[id] == 0) {
+        wr_plan plan = plan_module(wr, seen, id);
+        if (plan == WR_SKIP_UNREACHED) {
             warn_unreachable(wr, id);
-            continue;
+        } else if (plan == WR_SKIP_FLATTENED) {
+            skipped++;
+        } else {
+            (void)write_module(wr, id, written++ == 0);
         }
-        (void)write_module(wr, id, written++ == 0);
     }
     odin3_util_free(seen);
+    log_plain_notes(wr, skipped);
     if (wr->st == ODIN3_OK) {
         (void)write_blackboxes(wr);
+    }
+}
+
+/* Plain: write_plain. VTR: the header, then the top alone. */
+static void write_design(blif_writer *wr) {
+    if (!wr->vtr) {
+        write_plain(wr);
+        return;
+    }
+    /* written_module: position 1 is the top */
+    if (write_vtr_header(wr) == ODIN3_OK &&
+        write_module(wr, written_module(wr->design, 1), true) == ODIN3_OK) {
+        (void)write_stubs(wr);
     }
 }
 

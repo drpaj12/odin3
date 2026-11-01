@@ -30,6 +30,9 @@ typedef struct rt_args {
     char json[PATH_LEN];
     char report[PATH_LEN];
     uint64_t seed;
+    char plusarg[TB_MAX_PLUSARGS][TB_PLUSARG_LEN];
+    const char *plusarg_ptr[TB_MAX_PLUSARGS];
+    uint32_t n_plusarg;
 } rt_args;
 
 /* One side of a run: the output text and the end time. */
@@ -63,6 +66,17 @@ static bool take_number(odin3_bytes *args, uint64_t *out) {
     return errno == 0 && *end == '\0';
 }
 
+/* Takes the text of a --plusarg; false when it is missing, too long or the 16th has passed. */
+static bool take_plusarg(odin3_bytes *args, rt_args *out) {
+    if (out->n_plusarg >= TB_MAX_PLUSARGS ||
+        !take(args, out->plusarg[out->n_plusarg], TB_PLUSARG_LEN)) {
+        return false;
+    }
+    out->plusarg_ptr[out->n_plusarg] = out->plusarg[out->n_plusarg];
+    out->n_plusarg++;
+    return true;
+}
+
 static odin3_status parse_args(odin3_bytes args, rt_args *out) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
@@ -75,10 +89,12 @@ static odin3_status parse_args(odin3_bytes args, rt_args *out) {
             ok = take(&args, out->report, sizeof out->report);
         } else if (odin3_pass_arg_is(word, "--seed")) {
             ok = take_number(&args, &out->seed);
+        } else if (odin3_pass_arg_is(word, "--plusarg")) {
+            ok = take_plusarg(&args, out);
         }
         if (!ok) {
             odin3_log(ODIN3_LOG_ERROR, "run_testbenches: expects [--only <name>] [--json <file>] "
-                                       "[--report <file>] [--seed N]");
+                                       "[--report <file>] [--seed N] [--plusarg <text>]...");
             return ODIN3_ERR_INVALID_ARG;
         }
     }
@@ -162,7 +178,7 @@ static odin3_status parse_tb(const odin3_project *proj, const odin3_proj_testben
 
 /* Runs tb against design; the output text goes to *side (owned by the caller). */
 static odin3_status run_side(odin3_design *design, const odin3_project *proj,
-                             const odin3_proj_testbench *tb, uint64_t seed, rt_side *side) {
+                             const odin3_proj_testbench *tb, const rt_args *args, rt_side *side) {
     tb_module *mod = NULL;
     odin3_status st = parse_tb(proj, tb, &mod);
     if (st != ODIN3_OK) {
@@ -180,7 +196,12 @@ static odin3_status run_side(odin3_design *design, const odin3_project *proj,
         tb_module_free(mod);
         return ODIN3_ERR_NO_MEMORY;
     }
-    tb_options opts = {tb->max_time != 0 ? tb->max_time : DEFAULT_MAX_TIME, seed, out, NULL};
+    tb_options opts = {tb->max_time != 0 ? tb->max_time : DEFAULT_MAX_TIME,
+                       args->seed,
+                       out,
+                       NULL,
+                       args->plusarg_ptr,
+                       args->n_plusarg};
     tb_end end = {0, false};
     st = tb_run_end(design, mod, &opts, &end);
     side->end_time = end.time;
@@ -281,7 +302,7 @@ static bool run_rtl(rt_ctx *ctx, const odin3_proj_testbench *tb, rt_side *side, 
         return false;
     }
     odin3_log_clear_last_error();
-    odin3_status st = run_side(scratch, ctx->proj, tb, ctx->args->seed, side);
+    odin3_status st = run_side(scratch, ctx->proj, tb, ctx->args, side);
     if (st != ODIN3_OK) {
         set_error(res, "run (rtl)", st);
     }
@@ -298,7 +319,7 @@ static bool run_netlist(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_si
         return false;
     }
     odin3_log_clear_last_error();
-    odin3_status st = run_side(ctx->design, ctx->proj, tb, ctx->args->seed, side);
+    odin3_status st = run_side(ctx->design, ctx->proj, tb, ctx->args, side);
     if (st != ODIN3_OK) {
         set_error(res, "run (netlist)", st);
     }
@@ -469,7 +490,7 @@ static odin3_status run_testbenches_run(odin3_pass_ctx *pctx, odin3_design *desi
                                         odin3_bytes args_text, void *user) {
     (void)pctx;
     (void)user;
-    rt_args args = {{0}, {0}, {0}, 0};
+    rt_args args = {{0}, {0}, {0}, 0, {{0}}, {NULL}, 0};
     odin3_status st = parse_args(args_text, &args);
     const odin3_project *proj = st == ODIN3_OK ? finished_project(design) : NULL;
     if (st != ODIN3_OK || proj == NULL) {
@@ -506,7 +527,8 @@ static odin3_status run_testbenches_run(odin3_pass_ctx *pctx, odin3_design *desi
 
 const odin3_pass_def odin3_pass_run_testbenches = {
     "run_testbenches",
-    "run_testbenches [--only <name>] [--json <file>] [--report <file>] [--seed N]: run the "
+    "run_testbenches [--only <name>] [--json <file>] [--report <file>] [--seed N] [--plusarg "
+    "<text>]...: run the "
     "project's testbenches (the testbench key; docs/specs/2026-10-31-project-testbench-design.md);"
     " fails when any testbench fails or errors",
     run_testbenches_run,

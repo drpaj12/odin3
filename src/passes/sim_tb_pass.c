@@ -24,6 +24,9 @@ typedef struct tb_args {
     char vcd[PATH_MAX_LEN];
     uint64_t max_time;
     uint64_t seed;
+    char plusarg[TB_MAX_PLUSARGS][TB_PLUSARG_LEN];
+    const char *plusarg_ptr[TB_MAX_PLUSARGS];
+    uint32_t n_plusarg;
 } tb_args;
 
 static bool word_is(odin3_bytes word, const char *text) {
@@ -51,9 +54,20 @@ static bool take_number(odin3_bytes *args, uint64_t *out) {
     return errno == 0 && *end == '\0';
 }
 
+/* Takes the text of a --plusarg; false when it is missing, too long or the 16th has passed. */
+static bool take_plusarg(odin3_bytes *args, tb_args *out) {
+    if (out->n_plusarg >= TB_MAX_PLUSARGS ||
+        !take(args, out->plusarg[out->n_plusarg], TB_PLUSARG_LEN)) {
+        return false;
+    }
+    out->plusarg_ptr[out->n_plusarg] = out->plusarg[out->n_plusarg];
+    out->n_plusarg++;
+    return true;
+}
+
 static odin3_status usage(void) {
     odin3_log(ODIN3_LOG_ERROR, "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
-                               "<file>] [--vcd <file>] <tb.v>");
+                               "<file>] [--vcd <file>] [--plusarg <text>]... <tb.v>");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -72,6 +86,8 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
             ok = take_number(&args, &out->seed);
         } else if (word_is(word, "--vcd")) {
             ok = take(&args, out->vcd, sizeof out->vcd);
+        } else if (word_is(word, "--plusarg")) {
+            ok = take_plusarg(&args, out);
         } else if (out->file[0] == '\0' && word.len < sizeof out->file) {
             memcpy(out->file, word.ptr, word.len);
             out->file[word.len] = '\0';
@@ -106,7 +122,7 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
                                void *user) {
     (void)ctx;
     (void)user;
-    tb_args parsed = {{0}, {0}, {0}, {0}, 0, 0};
+    tb_args parsed = {{0}, {0}, {0}, {0}, 0, 0, {{0}}, {NULL}, 0};
     odin3_status st = parse_args(args, &parsed);
     if (st != ODIN3_OK) {
         return st;
@@ -129,8 +145,9 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         tb_module_free(tb);
         return ODIN3_ERR_IO;
     }
-    tb_options opts = {parsed.max_time, parsed.seed, out,
-                       parsed.vcd[0] != '\0' ? parsed.vcd : NULL};
+    tb_options opts = {
+        parsed.max_time,    parsed.seed,     out, parsed.vcd[0] != '\0' ? parsed.vcd : NULL,
+        parsed.plusarg_ptr, parsed.n_plusarg};
     uint64_t end_time = 0;
     st = tb_run(design, tb, &opts, &end_time);
     (void)fflush(out);
@@ -146,11 +163,13 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
-    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>: run a "
+    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] [--plusarg "
+    "<text>]... <tb.v>: run a "
     "Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
     "design's modules; $display text goes to stdout or --out, "
-    "--vcd writes a waveform of the testbench signals and the DUT ports",
+    "--vcd writes a waveform of the testbench signals and the DUT ports; --plusarg (up to 16) "
+    "is a run-time argument that $test$plusargs and $value$plusargs read, as name=value",
     sim_tb_run,
     NULL,
     false,

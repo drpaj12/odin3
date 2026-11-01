@@ -19,6 +19,8 @@ enum {
     TB_MAX_STACK = 48,
     TB_MAX_ARGS = 16,
     TB_MAX_FILES = 8,
+    TB_MAX_PLUSARGS = 16,
+    TB_PLUSARG_LEN = 256,
     TB_INT_BITS = 32,         /* integer, $random and $fopen results */
     TB_FD_BASE = 3,           /* first $fopen descriptor (0 to 2 are reserved) */
     TB_RAND_MULT = 16807,     /* Park-Miller minimal standard generator */
@@ -159,9 +161,11 @@ typedef struct tb_module {
     uint32_t nprocs;
     void **allocs; /* every parse allocation, freed with the module */
     uint32_t nallocs, cap_allocs;
-    char timescale[TB_NAME];   /* VCD $timescale, from `timescale ("1 ns" when absent) */
-    FILE *out;                 /* $display output (fd 1) */
-    FILE *files[TB_MAX_FILES]; /* $fopen descriptors 3.. */
+    char timescale[TB_NAME];     /* VCD $timescale, from `timescale ("1 ns" when absent) */
+    FILE *out;                   /* $display output (fd 1) */
+    FILE *files[TB_MAX_FILES];   /* $fopen descriptors 3.. */
+    const char *const *plusargs; /* $test$plusargs and $value$plusargs read these (tb_options) */
+    uint32_t n_plusargs;
 } tb_module;
 
 /* Source text and the file name used in messages. */
@@ -181,6 +185,10 @@ typedef struct tb_options {
     uint64_t seed;
     FILE *out;
     const char *vcd; /* NULL: none */
+    /* The plusargs of the run ("name=value" or "name", a leading '+' is optional); the array
+     * must outlive the run. */
+    const char *const *plusargs;
+    uint32_t n_plusargs;
 } tb_options;
 
 /* How a run ended: the last simulation time, and whether it stopped because the next event lay

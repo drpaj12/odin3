@@ -8,6 +8,19 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- Processor netlists for Seeker-Proc (Leman Russ III round 7). `flatten` marks the modules it leaves unused
+  (module attribute `odin3 flattened away`, not printed by the other writers) and plain `write_blif` no longer writes them (Yosys deletes them): the 28
+  `.model` blocks after `proc; opt; flatten; opt; lower` were these 27 leftovers, and ABC cannot resolve their
+  `.subckt` boxes. Plain `write_blif` writes `?` for `=` in model and `.subckt` type names, as Yosys does, so a
+  hierarchical netlist with specialised modules (`m$P=V`) is readable by ABC. A system function or hierarchical
+  reference in a dead generate branch is no longer an error at the module scan (Yosys reads only the branches
+  the parameters select; a live branch still errors), which lets `servile_mux.v` read. 2026-11-01.
+
+### Added
+
+- `sim_tb` and `run_testbenches` take `--plusarg name=value` (repeatable); the testbench subset gains
+  `$test$plusargs` and `$value$plusargs`.
+
 - Leman Russ III round 6 gaps. `write_blif --reachable` (plain dialect) writes the top and the modules reachable from
   it and skips the rest with a WARNING, as Parmys writes only the top's netlist; without it every module is
   written, as before, so multi-model BLIF still round-trips (one WARNING counts the unreachable modules written;

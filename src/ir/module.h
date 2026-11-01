@@ -368,6 +368,14 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);
 
 /* odin3_objkind is public: see odin3.h. */
 
+/*
+ * Module attribute (integer 1) that flatten sets on each module it leaves unused: Yosys's flatten
+ * deletes such modules, the IR cannot. Bookkeeping, not design content: the RTLIL, JSON and
+ * Verilog writers do not print it, and plain write_blif does not write a marked module that the
+ * top does not reach.
+ */
+#define ODIN3_ATTR_FLATTENED_AWAY "odin3 flattened away"
+
 /* An object of a module: kind and ID (for ODIN3_OBJ_MODULE, the module's own ID). */
 typedef struct odin3_objref {
     odin3_objkind kind;
