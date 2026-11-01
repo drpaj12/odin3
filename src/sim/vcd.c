@@ -248,8 +248,10 @@ odin3_status odin3_sim_vcd_sample(odin3_sim_vcd *vcd, uint64_t time) {
 
 odin3_status odin3_sim_vcd_cycle(odin3_sim_vcd *vcd, odin3_sim *sim, uint64_t cycle) {
     const uint64_t base = cycle * ODIN3_SIM_VCD_PERIOD;
-    odin3_sim_settle(sim);
-    odin3_status st = odin3_sim_vcd_sample(vcd, base + ODIN3_SIM_VCD_INPUT_AT);
+    odin3_status st = odin3_sim_settle_events(sim);
+    if (st == ODIN3_OK) {
+        st = odin3_sim_vcd_sample(vcd, base + ODIN3_SIM_VCD_INPUT_AT);
+    }
     if (st == ODIN3_OK) {
         st = odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
     }

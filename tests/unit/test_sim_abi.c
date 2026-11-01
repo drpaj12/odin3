@@ -268,6 +268,32 @@ static void test_settle_shows_combinational(void) {
     TEST_ASSERT_EQUAL_UINT64(0, cycle_of(g_a));
 }
 
+/* A clock mux whose select an input changes: the derived edge shows at settle, not at the next
+ * clock edge. dclk.v: mclk = sel ? div : clk clocks c <= c + d. */
+static void test_settle_takes_derived_edge(void) {
+    lowered("../tb/micro/dclk.v");
+    g_a = open_top();
+    set(g_a, "d", 3);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_step(g_a, 1));
+    TEST_ASSERT_EQUAL_UINT64(1, get(g_a, "div"));
+    TEST_ASSERT_EQUAL_UINT64(3, get(g_a, "c"));
+    set(g_a, "sel", 1);
+    TEST_ASSERT_EQUAL_UINT64(3, get(g_a, "c"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_simulation_settle(g_a));
+    TEST_ASSERT_EQUAL_UINT64(6, get(g_a, "c"));
+    TEST_ASSERT_EQUAL_UINT64(1, cycle_of(g_a));
+}
+
+/* A derived clock that never settles: step reports ODIN3_ERR_CHECK, the registers toggled. */
+static void test_step_reports_oscillating_clock(void) {
+    lowered("dosc.v");
+    g_a = open_top();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_CHECK, odin3_simulation_step(g_a, 3));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "a derived clock does not settle"));
+    TEST_ASSERT_EQUAL_UINT64(0, cycle_of(g_a));
+    TEST_ASSERT_TRUE(get(g_a, "x") != 0 || get(g_a, "y") != 0);
+}
+
 static void test_reset(void) {
     lowered("traffic.v");
     g_a = open_top();
@@ -470,6 +496,8 @@ int main(void) {
     RUN_TEST(test_traffic_reference_trace);
     RUN_TEST(test_matches_sim_pass_vectors);
     RUN_TEST(test_settle_shows_combinational);
+    RUN_TEST(test_settle_takes_derived_edge);
+    RUN_TEST(test_step_reports_oscillating_clock);
     RUN_TEST(test_reset);
     RUN_TEST(test_set_and_get_rules);
     RUN_TEST(test_mixed_clock_port);

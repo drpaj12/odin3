@@ -65,6 +65,40 @@ class ShareSelectsTest(unittest.TestCase):
             self.assertEqual((Path(tmp) / "a.vec").read_text(), (Path(tmp) / "b.vec").read_text())
 
 
+def wide_case(signals: int) -> str:
+    """One switch whose two cases assign `signals` outputs: `signals` snippets share each select."""
+    outs = ", ".join(f"output reg [3:0] o{i}" for i in range(signals))
+    arms0 = " ".join(f"o{i} = a;" for i in range(signals))
+    arms1 = " ".join(f"o{i} = b;" for i in range(signals))
+    return (f"module m(input s, input [3:0] a, input [3:0] b, {outs});\n"
+            f"  always @* case (s)\n    1'b0: begin {arms0} end\n"
+            f"    default: begin {arms1} end\n  endcase\nendmodule\n")
+
+
+@unittest.skipUnless(CLI, "ODIN3_CLI not set")
+class ShareHintTest(unittest.TestCase):
+    HINT = "pass --share-selects to share them"
+
+    def test_hint_once_for_a_wide_switch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "m.v"
+            src.write_text(wide_case(70))
+            out = run(f"read_verilog {src}; proc --noopt")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertEqual(out.stderr.count(self.HINT), 1, out.stderr)
+            shared = run(f"read_verilog {src}; proc --noopt --share-selects")
+            self.assertEqual(shared.returncode, 0, shared.stderr)
+            self.assertNotIn(self.HINT, shared.stderr)
+
+    def test_no_hint_for_a_small_switch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "m.v"
+            src.write_text(CASE)
+            out = run(f"read_verilog {src}; proc --noopt")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertNotIn(self.HINT, out.stderr)
+
+
 @unittest.skipUnless(CLI, "ODIN3_CLI not set")
 class DerivedClockErrorTest(unittest.TestCase):
     def test_two_candidate_inputs(self) -> None:
@@ -83,6 +117,16 @@ class DerivedClockErrorTest(unittest.TestCase):
             out = run(f"read_verilog {src}; proc; opt; lower; sim 4 1")
             self.assertNotEqual(out.returncode, 0)
             self.assertIn("cannot simulate: the clock of", out.stderr)
+
+
+@unittest.skipUnless(CLI, "ODIN3_CLI not set")
+class OscillatingClockTest(unittest.TestCase):
+    def test_sim_fails_on_a_clock_that_never_settles(self) -> None:
+        src = Path(__file__).resolve().parents[1] / "sim" / "dosc.v"
+        out = run(f"read_verilog {src}; proc; opt; lower; sim 3 1", top="dosc")
+        self.assertNotEqual(out.returncode, 0)
+        self.assertIn("a derived clock does not settle", out.stderr)
+        self.assertIn("ODIN3_ERR_CHECK", out.stderr)
 
 
 if __name__ == "__main__":

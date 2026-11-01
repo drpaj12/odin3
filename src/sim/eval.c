@@ -151,10 +151,12 @@ void odin3_sim_reset(odin3_sim *sim) {
     odin3_sim_start(sim);
 }
 
-void odin3_sim_cycle(odin3_sim *sim) {
-    odin3_sim_settle(sim);
-    (void)odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
-    (void)odin3_sim_clock_edge(sim, ODIN3_SIM_NEGEDGE);
+odin3_status odin3_sim_cycle(odin3_sim *sim) {
+    odin3_status st = odin3_sim_settle_events(sim);
+    if (st == ODIN3_OK) {
+        st = odin3_sim_clock_edge(sim, ODIN3_SIM_POSEDGE);
+    }
+    return st == ODIN3_OK ? odin3_sim_clock_edge(sim, ODIN3_SIM_NEGEDGE) : st;
 }
 
 /* --- ports ------------------------------------------------------------------------------------ */

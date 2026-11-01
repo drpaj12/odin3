@@ -99,6 +99,6 @@ odin3_status odin3_sim_vectors_line(const odin3_sim *sim, uint32_t cycle, odin3_
 odin3_status odin3_sim_vectors_step(odin3_sim *sim, odin3_prng *prng, uint32_t cycle,
                                     odin3_strbuf *buf) {
     odin3_sim_drive_random(sim, prng);
-    odin3_sim_cycle(sim);
-    return odin3_sim_vectors_line(sim, cycle, buf);
+    odin3_status st = odin3_sim_cycle(sim);
+    return st == ODIN3_OK ? odin3_sim_vectors_line(sim, cycle, buf) : st;
 }

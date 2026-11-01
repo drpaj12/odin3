@@ -175,14 +175,17 @@ static void drive_inputs(odin3_sim *sim, odin3_prng *prng) {
     }
 }
 
-/* One seed: CYCLES cycles of random inputs, the outputs after each into row. */
-static void run_seed(odin3_sim *sim, uint32_t seed, uint8_t *row) {
+/* One seed: CYCLES cycles of random inputs, the outputs after each into row. ODIN3_ERR_CHECK when
+ * a derived clock never settles (the module cannot be compared). */
+static odin3_status run_seed(odin3_sim *sim, uint32_t seed, uint8_t *row) {
     odin3_prng prng;
     odin3_prng_seed(&prng, seed);
     uint32_t at = 0;
     for (uint32_t cycle = 0; cycle < SIMCHECK_CYCLES; cycle++) {
         drive_inputs(sim, &prng);
-        odin3_sim_cycle(sim);
+        if (odin3_sim_cycle(sim) != ODIN3_OK) {
+            return ODIN3_ERR_CHECK;
+        }
         for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
             for (uint32_t bit = 0; bit < odin3_sim_output_width(sim, port); bit++) {
                 bool value = false;
@@ -191,6 +194,7 @@ static void run_seed(odin3_sim *sim, uint32_t seed, uint8_t *row) {
             }
         }
     }
+    return ODIN3_OK;
 }
 
 /* Builds the simulator quietly: INVALID_ARG (the build's own error, muted) means "skip". */
@@ -225,7 +229,10 @@ static odin3_status trace_seed(odin3_design *design, odin3_module_id id, uint32_
     }
     if (st == ODIN3_OK && *worth) {
         size_t row = (size_t)out->n_out * SIMCHECK_CYCLES;
-        run_seed(sim, seed, out->bits + (size_t)(seed - 1) * row);
+        if (run_seed(sim, seed, out->bits + (size_t)(seed - 1) * row) != ODIN3_OK) {
+            st = ODIN3_ERR_INVALID_ARG; /* not simulable: the module is skipped, as for a build
+                                           error */
+        }
     }
     odin3_sim_destroy(sim);
     return st;

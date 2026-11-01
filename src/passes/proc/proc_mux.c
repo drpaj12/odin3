@@ -84,7 +84,9 @@ typedef struct mx_walk {
     odin3_vec parents;  /* odin3_prov_id: a switch's record's parents */
     odin3_vec fstack;   /* uint32_t triples: the full_case walk */
     odin3_u64map *full; /* switch << 32 | snippet -> MX_FULL_NO / MX_FULL_YES */
-    odin3_u64map *sels; /* case index + 1 -> the select bit its first snippet made */
+    odin3_u64map *sels; /* case index + 1 -> the select bit its first snippet made
+                           (--share-selects), else how many snippets made the select again */
+    bool hinted;        /* the --share-selects hint was logged */
 } mx_walk;
 
 static uint64_t pair_key(uint32_t hi, uint32_t lo) {
@@ -512,6 +514,26 @@ static odin3_status mx_select_make(mx_walk *walk, const mx_frame *frame, uint32_
     return mx_any(walk, sw, sel);
 }
 
+/* Snippets that make the same case's select again before proc suggests --share-selects. */
+enum { MX_SHARE_HINT = 64 };
+
+/* Counts one more snippet making the select of case_index again; logs the hint (once per run)
+ * when a case has MX_SHARE_HINT of them. */
+static odin3_status mx_count_unshared(mx_walk *walk, uint32_t case_index) {
+    uint64_t seen = 0;
+    const uint64_t key = (uint64_t)case_index + 1U;
+    (void)odin3_u64map_get(walk->sels, key, &seen);
+    seen++;
+    if (seen == MX_SHARE_HINT && !walk->hinted) {
+        walk->hinted = true;
+        odin3_log(ODIN3_LOG_INFO,
+                  "proc: %d snippets of one switch case make the same select cells; pass "
+                  "--share-selects to share them (the cells then differ from Yosys's before opt)",
+                  MX_SHARE_HINT);
+    }
+    return odin3_u64map_put(walk->sels, (odin3_kv){key, seen});
+}
+
 /*
  * mx_select_make, once per case under --share-selects: a case's select depends on its switch's
  * signal and its compares only, so the snippets of one process can share it. Yosys makes the
@@ -525,7 +547,8 @@ static odin3_status mx_select(mx_walk *walk, const mx_frame *frame, uint32_t cas
                               odin3_pw_bit *sel, bool *empty) {
     uint64_t known = 0;
     if (walk->mctx->opts == NULL || !walk->mctx->opts->share_selects) {
-        return mx_select_make(walk, frame, case_index, sel, empty);
+        odin3_status made = mx_select_make(walk, frame, case_index, sel, empty);
+        return made == ODIN3_OK && !*empty ? mx_count_unshared(walk, case_index) : made;
     }
     if (odin3_u64map_get(walk->sels, (uint64_t)case_index + 1U, &known)) {
         *sel = (odin3_pw_bit)known;
