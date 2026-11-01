@@ -125,6 +125,8 @@ odin3_status rt_report_text(const rt_result *res, size_t count, odin3_strbuf *ou
                 or_empty(one->mm.want), or_empty(one->mm.got));
         } else if (st == ODIN3_OK && one->state == RT_ERROR) {
             st = odin3_strbuf_appendf(out, "  error: %s\n", one->error);
+        } else if (st == ODIN3_OK && one->timeout) {
+            st = odin3_strbuf_appendf(out, "  timeout: %s\n", one->error);
         }
     }
     return st != ODIN3_OK
@@ -186,8 +188,11 @@ static odin3_status json_result(odin3_strbuf *out, const rt_result *one) {
     } else if (st == ODIN3_OK) {
         st = odin3_strbuf_append(out, odin3_bytes_cstr("null"));
     }
-    st = st != ODIN3_OK ? st : odin3_strbuf_append(out, odin3_bytes_cstr(", \"error\": "));
-    if (st == ODIN3_OK && one->state == RT_ERROR) {
+    st = st != ODIN3_OK
+             ? st
+             : odin3_strbuf_appendf(
+                   out, ", \"timeout\": %s, \"error\": ", one->timeout ? "true" : "false");
+    if (st == ODIN3_OK && (one->state == RT_ERROR || one->timeout)) {
         st = json_string(out, one->error);
     } else if (st == ODIN3_OK) {
         st = odin3_strbuf_append(out, odin3_bytes_cstr("null"));

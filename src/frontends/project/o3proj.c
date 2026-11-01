@@ -12,6 +12,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -596,6 +597,17 @@ static bool is_ident(odin3_bytes word) {
     return word.len > 0 && odin3_proj_ident_len(word, 0) == word.len;
 }
 
+/* Whether word is a testbench name: an IDENT or a qsf section id (letters, digits, `_$-.`, not
+ * starting with a digit, `-` or `.`), so every imported name round trips. */
+static bool is_tb_name(odin3_bytes word) {
+    const char *chars = word.ptr;
+    bool ok = word.len > 0 && (isalpha((unsigned char)chars[0]) || chars[0] == '_');
+    for (size_t i = 1; ok && i < word.len; i++) {
+        ok = isalnum((unsigned char)chars[i]) || strchr("_$-.", chars[i]) != NULL;
+    }
+    return ok;
+}
+
 /* A decimal count above 0 that fits 64 bits; else `syntax` at the statement, names [word]. */
 static odin3_status tb_max_time(o3_reader *rd, const o3_stmt *st, odin3_bytes word, uint64_t *out) {
     const char *bytes = word.ptr;
@@ -637,7 +649,7 @@ static odin3_status tb_pair(o3_reader *rd, const o3_stmt *st, int kw, odin3_proj
                             const odin3_word *word) {
     switch (kw) {
     case TB_KW_FILE:
-        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE, &tb->file);
+        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE_SOFT, &tb->file);
     case TB_KW_TOP:
         return tb_ident(rd, st, word, &tb->top);
     case TB_KW_DUT:
@@ -645,7 +657,7 @@ static odin3_status tb_pair(o3_reader *rd, const o3_stmt *st, int kw, odin3_proj
     case TB_KW_MAX_TIME:
         return tb_max_time(rd, st, word->text, &tb->max_time);
     case TB_KW_EXPECT:
-        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE, &tb->expect);
+        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE_SOFT, &tb->expect);
     default:
         return tb_on(rd, st, word->text, &tb->on);
     }
@@ -666,7 +678,7 @@ static odin3_status key_testbench(o3_reader *rd, const o3_stmt *st) {
         return usage(rd, st, NULL);
     }
     odin3_proj_testbench tb = {.on = ODIN3_PROJ_TB_RTL, .at = st->at};
-    if (!is_ident(st->args[0].text)) {
+    if (!is_tb_name(st->args[0].text)) {
         return syntax(rd, st, "expected a testbench name", &st->args[0].text);
     }
     odin3_status res = intern(rd, st->args[0].text, &tb.name);

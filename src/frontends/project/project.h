@@ -173,7 +173,9 @@ typedef struct odin3_proj_testbench {
     uint32_t name, top, dut;
     odin3_proj_path file, expect;
     uint64_t max_time;
-    uint8_t on; /* odin3_proj_tb_on */
+    uint8_t on;     /* odin3_proj_tb_on */
+    bool timeboxed; /* a stop at max_time is the intended end (qsf RUN_SIM_FOR), not a hang */
+    bool disabled;  /* not run unless named by --only (qsf: NativeLink picked another bench) */
     odin3_loc at;
 } odin3_proj_testbench;
 
@@ -294,7 +296,8 @@ void odin3_proj_text_free(odin3_proj_text *text);
 typedef enum odin3_proj_want {
     ODIN3_PROJ_WANT_FILE = 1, /* a regular file (a symlink to one counts) */
     ODIN3_PROJ_WANT_DIR,      /* a directory */
-    ODIN3_PROJ_WANT_ANY       /* either */
+    ODIN3_PROJ_WANT_ANY,      /* either */
+    ODIN3_PROJ_WANT_FILE_SOFT /* a regular file; a missing one is a WARNING, not an error */
 } odin3_proj_want;
 
 typedef struct odin3_proj_path_req {

@@ -377,6 +377,12 @@ static void write_testbench(json *jw, const void *elem) {
     string_or_null(jw, tb->expect.given != 0, tb->expect.resolved);
     key(jw, "on", false);
     raw(jw, on_names[tb->on <= ODIN3_PROJ_TB_BOTH ? tb->on : 0]);
+    if (tb->timeboxed) {
+        raw(jw, ", \"timeboxed\": true");
+    }
+    if (tb->disabled) {
+        raw(jw, ", \"disabled\": true");
+    }
     raw(jw, "}");
 }
 

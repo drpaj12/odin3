@@ -49,7 +49,7 @@ typedef struct run {
     bool mon_pending;
     const tb_stmt **strobes;
     uint32_t nstrobe, cap_strobe;
-    bool finished, failed;
+    bool finished, failed, hit_limit;
     uint64_t max_time;
 } run;
 
@@ -534,7 +534,8 @@ static bool next_time(run *rt, uint64_t *next) {
             found = true;
         }
     }
-    return found && *next <= rt->max_time;
+    rt->hit_limit = found && *next > rt->max_time;
+    return found && !rt->hit_limit;
 }
 
 static odin3_status setup(run *rt, odin3_design *design) {
@@ -597,8 +598,7 @@ static void event_loop(run *rt) {
     }
 }
 
-odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
-                    uint64_t *finish_time) {
+odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *opts, tb_end *end) {
     run rt = {0};
     rt.tb = tb;
     rt.ev.tb = tb;
@@ -613,7 +613,16 @@ odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
         event_loop(&rt);
         st = rt.failed ? ODIN3_ERR_INVALID_ARG : ODIN3_OK;
     }
-    *finish_time = rt.ev.time;
+    end->time = rt.ev.time;
+    end->hit_limit = rt.hit_limit && !rt.finished;
     teardown(&rt);
+    return st;
+}
+
+odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
+                    uint64_t *finish_time) {
+    tb_end end = {0, false};
+    odin3_status st = tb_run_end(design, tb, opts, &end);
+    *finish_time = end.time;
     return st;
 }

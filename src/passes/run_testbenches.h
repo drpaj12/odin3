@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum { RT_NAME = 64, RT_STEP = 192 };
+enum { RT_NAME = 256, RT_STEP = 512 };
 
 typedef enum rt_state { RT_PASS, RT_FAIL, RT_ERROR } rt_state;
 
@@ -33,7 +33,8 @@ typedef struct rt_result {
     const char *on; /* "rtl", "netlist" or "both" */
     uint64_t wall_ms, end_time;
     uint32_t lines;
-    char error[RT_STEP]; /* "<step>: <status>" for an error */
+    char error[RT_STEP]; /* "<step>: <status>: <cause>" for an error, the timeout text for a hang */
+    bool timeout;        /* a fail: the run hit its time limit without `$finish` */
     rt_mismatch mm;
 } rt_result;
 

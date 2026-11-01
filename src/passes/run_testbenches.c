@@ -13,6 +13,7 @@
 #include "util/str.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -25,7 +26,7 @@ static const char *const k_format_names[] = {"o3proj", "f", "qsf", "odin2"};
 static const char *const k_on_names[] = {"?", "rtl", "netlist", "both"};
 
 typedef struct rt_args {
-    char only[RT_NAME];
+    char only[PATH_LEN];
     char json[PATH_LEN];
     char report[PATH_LEN];
     uint64_t seed;
@@ -36,6 +37,7 @@ typedef struct rt_side {
     char *data;
     size_t len;
     uint64_t end_time;
+    bool hit_limit; /* the run stopped at its time limit, not at `$finish` */
 } rt_side;
 
 /* --- arguments ----------------------------------------------------------------------------- */
@@ -106,9 +108,27 @@ static const char *text_of(const odin3_design *design, uint32_t str) {
     return odin3_strtab_get(odin3_design_strtab(design), str);
 }
 
-static void set_error(rt_result *res, const char *step, odin3_status st) {
+/* The cause of a failed step: the last ERROR it logged, first line only ("" when none). */
+static void cause_of(char *cause, size_t cap) {
+    (void)snprintf(cause, cap, "%s", odin3_log_last_error());
+    cause[strcspn(cause, "\n")] = '\0';
+}
+
+static void set_error_cause(rt_result *res, const char *step, odin3_status st, const char *cause) {
     res->state = RT_ERROR;
-    (void)snprintf(res->error, sizeof res->error, "%s: %s", step, odin3_status_string(st));
+    if (cause[0] == '\0') {
+        (void)snprintf(res->error, sizeof res->error, "%s: %s", step, odin3_status_string(st));
+    } else {
+        (void)snprintf(res->error, sizeof res->error, "%s: %s: %s", step, odin3_status_string(st),
+                       cause);
+    }
+}
+
+/* Records an error whose cause is the last ERROR logged. */
+static void set_error(rt_result *res, const char *step, odin3_status st) {
+    char cause[RT_STEP];
+    cause_of(cause, sizeof cause);
+    set_error_cause(res, step, st, cause);
 }
 
 /* The testbench must instantiate the named dut (instance or module name); true without a dut. */
@@ -161,7 +181,10 @@ static odin3_status run_side(odin3_design *design, const odin3_project *proj,
         return ODIN3_ERR_NO_MEMORY;
     }
     tb_options opts = {tb->max_time != 0 ? tb->max_time : DEFAULT_MAX_TIME, seed, out, NULL};
-    st = tb_run(design, mod, &opts, &side->end_time);
+    tb_end end = {0, false};
+    st = tb_run_end(design, mod, &opts, &end);
+    side->end_time = end.time;
+    side->hit_limit = end.hit_limit;
     (void)fclose(out); /* flushes and sets data and len */
     tb_module_free(mod);
     return st;
@@ -169,22 +192,36 @@ static odin3_status run_side(odin3_design *design, const odin3_project *proj,
 
 /* --- the RTL scratch design ---------------------------------------------------------------- */
 
+/* The script that builds the project's RTL, or an error (logged, ODIN3_ERR_INVALID_ARG) for an
+ * entry or revision the by-line script cannot quote (a double quote in it). */
+static odin3_status rtl_script(const odin3_project *proj, odin3_strbuf *script) {
+    const char *entry = text_of(proj->design, proj->entry.resolved);
+    const char *rev = proj->has_revision ? text_of(proj->design, proj->revision) : "";
+    if (strchr(entry, '"') != NULL || strchr(rev, '"') != NULL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "run_testbenches: the project path or revision holds a double quote, which a "
+                  "script cannot quote: `%s`",
+                  entry);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_status st =
+        odin3_strbuf_appendf(script, "read_project --format %s \"%s\"",
+                             k_format_names[proj->format - ODIN3_PROJ_FORMAT_O3PROJ], entry);
+    if (st == ODIN3_OK && proj->has_revision) {
+        st = odin3_strbuf_appendf(script, " --revision \"%s\"", rev);
+    }
+    return st != ODIN3_OK ? st
+                          : odin3_strbuf_append(
+                                script, odin3_bytes_cstr("\nread_verilog\nproc\nopt\nlower\n"));
+}
+
 /* A scratch design holding the project's RTL: the project read again from its entry, then
- * read_verilog, proc, opt, lower. NULL (logged) on failure. */
+ * read_verilog, proc, opt, lower (the default flow only: no flatten, parameter override or top
+ * change the script in hand made). NULL (logged) on failure. */
 static odin3_design *build_rtl(const odin3_project *proj) {
     odin3_strbuf script;
     odin3_strbuf_init(&script);
-    const char *entry = text_of(proj->design, proj->entry.resolved);
-    odin3_status st =
-        odin3_strbuf_appendf(&script, "read_project --format %s \"%s\"",
-                             k_format_names[proj->format - ODIN3_PROJ_FORMAT_O3PROJ], entry);
-    if (st == ODIN3_OK && proj->has_revision) {
-        st = odin3_strbuf_appendf(&script, " --revision \"%s\"",
-                                  text_of(proj->design, proj->revision));
-    }
-    st = st != ODIN3_OK
-             ? st
-             : odin3_strbuf_append(&script, odin3_bytes_cstr("\nread_verilog\nproc\nopt\nlower\n"));
+    odin3_status st = rtl_script(proj, &script);
     odin3_design *scratch = st == ODIN3_OK ? odin3_design_create() : NULL;
     if (scratch != NULL) {
         odin3_script_src src = {"run_testbenches", ODIN3_SCRIPT_BY_LINE};
@@ -218,18 +255,33 @@ typedef struct rt_ctx {
     odin3_design *design;
     const odin3_project *proj;
     const rt_args *args;
+    odin3_design *rtl;       /* the scratch RTL design, built by the first rtl run */
+    bool rtl_tried;          /* build_rtl ran (rtl NULL: it failed) */
+    char rtl_cause[RT_STEP]; /* why it failed */
 } rt_ctx;
 
+/* The scratch RTL design, built once per run_testbenches call; NULL when it cannot be built. */
+static odin3_design *rtl_design(rt_ctx *ctx) {
+    if (!ctx->rtl_tried) {
+        ctx->rtl_tried = true;
+        odin3_log_clear_last_error();
+        ctx->rtl = build_rtl(ctx->proj);
+        if (ctx->rtl == NULL) {
+            cause_of(ctx->rtl_cause, sizeof ctx->rtl_cause);
+        }
+    }
+    return ctx->rtl;
+}
+
 /* The rtl side into *side, or the error recorded in res. */
-static bool run_rtl(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_side *side,
-                    rt_result *res) {
-    odin3_design *scratch = build_rtl(ctx->proj);
+static bool run_rtl(rt_ctx *ctx, const odin3_proj_testbench *tb, rt_side *side, rt_result *res) {
+    odin3_design *scratch = rtl_design(ctx);
     if (scratch == NULL) {
-        set_error(res, "elaborate project (rtl)", ODIN3_ERR_PARSE);
+        set_error_cause(res, "elaborate project (rtl)", ODIN3_ERR_PARSE, ctx->rtl_cause);
         return false;
     }
+    odin3_log_clear_last_error();
     odin3_status st = run_side(scratch, ctx->proj, tb, ctx->args->seed, side);
-    odin3_design_destroy(scratch);
     if (st != ODIN3_OK) {
         set_error(res, "run (rtl)", st);
     }
@@ -245,6 +297,7 @@ static bool run_netlist(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_si
         set_error(res, "run (netlist)", ODIN3_ERR_INVALID_ARG);
         return false;
     }
+    odin3_log_clear_last_error();
     odin3_status st = run_side(ctx->design, ctx->proj, tb, ctx->args->seed, side);
     if (st != ODIN3_OK) {
         set_error(res, "run (netlist)", st);
@@ -279,6 +332,15 @@ static void check_expect(const rt_ctx *ctx, const odin3_proj_testbench *tb, cons
 static void compare_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, const rt_side *rtl,
                           const rt_side *net, rt_result *res) {
     bool both = tb->on == ODIN3_PROJ_TB_BOTH;
+    if (!tb->timeboxed && (rtl->hit_limit || net->hit_limit)) {
+        res->state = RT_FAIL;
+        res->timeout = true;
+        (void)snprintf(res->error, sizeof res->error,
+                       "no $finish by time %" PRIu64 " (%s limit; a hung testbench does not pass)",
+                       tb->max_time != 0 ? tb->max_time : (uint64_t)DEFAULT_MAX_TIME,
+                       tb->max_time != 0 ? "max-time" : "default");
+        return;
+    }
     const rt_side *first = tb->on == ODIN3_PROJ_TB_NETLIST ? net : rtl;
     res->end_time = first->end_time;
     res->lines = count_lines(first);
@@ -292,7 +354,7 @@ static void compare_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, con
 }
 
 /* Runs the sides `on` asks for, then the comparisons. */
-static void run_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_result *res) {
+static void run_sides(rt_ctx *ctx, const odin3_proj_testbench *tb, rt_result *res) {
     rt_side rtl = {0};
     rt_side net = {0};
     bool ok = tb->on == ODIN3_PROJ_TB_NETLIST || run_rtl(ctx, tb, &rtl, res);
@@ -304,7 +366,7 @@ static void run_sides(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_resu
     side_free(&net);
 }
 
-static void run_testbench(const rt_ctx *ctx, const odin3_proj_testbench *tb, rt_result *res) {
+static void run_testbench(rt_ctx *ctx, const odin3_proj_testbench *tb, rt_result *res) {
     (void)snprintf(res->name, sizeof res->name, "%s", text_of(ctx->proj->design, tb->name));
     res->on = k_on_names[tb->on <= ODIN3_PROJ_TB_BOTH ? tb->on : 0];
     double start = odin3_now_ms();
@@ -323,10 +385,24 @@ static const odin3_project *finished_project(const odin3_design *design) {
     return proj;
 }
 
-/* Whether tb is selected by --only (all when none given). */
+/* Whether tb runs: --only names it (even a disabled one), or none is given and tb is enabled. */
 static bool selected(const odin3_project *proj, const odin3_proj_testbench *tb,
                      const rt_args *args) {
-    return args->only[0] == '\0' || strcmp(args->only, text_of(proj->design, tb->name)) == 0;
+    if (args->only[0] == '\0') {
+        return !tb->disabled;
+    }
+    return strcmp(args->only, text_of(proj->design, tb->name)) == 0;
+}
+
+/* The count of testbenches the project disables by default. */
+static size_t count_disabled(const odin3_project *proj) {
+    size_t count = 0;
+    for (size_t i = 0; i < proj->testbenches.len; i++) {
+        count += ((const odin3_proj_testbench *)odin3_vec_cat(&proj->testbenches, i))->disabled
+                     ? 1U
+                     : 0U;
+    }
+    return count;
 }
 
 static odin3_status write_file(const char *path, const odin3_strbuf *text) {
@@ -352,6 +428,43 @@ static odin3_status emit(const rt_args *args, const rt_result *res, size_t count
     return st;
 }
 
+/* Runs the selected testbenches into results; returns how many ran. */
+static size_t run_selected(rt_ctx *ctx, rt_result *results) {
+    size_t count = 0;
+    for (size_t i = 0; i < ctx->proj->testbenches.len; i++) {
+        const odin3_proj_testbench *tb = odin3_vec_cat(&ctx->proj->testbenches, i);
+        if (selected(ctx->proj, tb, ctx->args)) {
+            run_testbench(ctx, tb, &results[count++]);
+        }
+    }
+    return count;
+}
+
+/* Whether the run is over without running anything: prints why and sets *st. */
+static bool nothing_to_run(const odin3_project *proj, const rt_args *args, odin3_status *st) {
+    size_t disabled = count_disabled(proj);
+    *st = ODIN3_OK;
+    if (args->only[0] != '\0') {
+        return false; /* an unknown name is an error, found by the run */
+    }
+    if (proj->testbenches.len == 0) {
+        (void)printf("run_testbenches: the project defines no testbenches\n");
+        return true;
+    }
+    if (disabled == proj->testbenches.len) {
+        (void)printf("run_testbenches: all %zu testbenches are disabled by the project (run one "
+                     "with --only <name>)\n",
+                     disabled);
+        return true;
+    }
+    if (disabled > 0) {
+        (void)printf("run_testbenches: %zu testbenches disabled by the project not run (use "
+                     "--only <name>)\n",
+                     disabled);
+    }
+    return false;
+}
+
 static odin3_status run_testbenches_run(odin3_pass_ctx *pctx, odin3_design *design,
                                         odin3_bytes args_text, void *user) {
     (void)pctx;
@@ -362,21 +475,17 @@ static odin3_status run_testbenches_run(odin3_pass_ctx *pctx, odin3_design *desi
     if (st != ODIN3_OK || proj == NULL) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (proj->testbenches.len == 0) {
-        (void)printf("run_testbenches: the project defines no testbenches\n");
-        return ODIN3_OK;
+    if (nothing_to_run(proj, &args, &st)) {
+        return st;
     }
-    rt_result *results = calloc(proj->testbenches.len, sizeof *results);
+    rt_result *results = calloc(proj->testbenches.len + 1U, sizeof *results);
     if (results == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    rt_ctx ctx = {design, proj, &args};
-    size_t count = 0;
-    for (size_t i = 0; i < proj->testbenches.len; i++) {
-        const odin3_proj_testbench *tb = odin3_vec_cat(&proj->testbenches, i);
-        if (selected(proj, tb, &args)) {
-            run_testbench(&ctx, tb, &results[count++]);
-        }
+    rt_ctx ctx = {design, proj, &args, NULL, false, ""};
+    size_t count = run_selected(&ctx, results);
+    if (ctx.rtl != NULL) {
+        odin3_design_destroy(ctx.rtl);
     }
     bool bad = false;
     if (count == 0) {

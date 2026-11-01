@@ -364,6 +364,9 @@ static const char *const k_missing[] = {"not found", "file not found", "director
                                         "not found"};
 
 static bool kind_ok(odin3_path_kind kind, odin3_proj_want want) {
+    if (want == ODIN3_PROJ_WANT_FILE_SOFT) {
+        return true;
+    }
     if (want == ODIN3_PROJ_WANT_FILE) {
         return kind == ODIN3_PATH_FILE;
     }
@@ -384,6 +387,11 @@ odin3_status odin3_project_path(odin3_project *proj, const odin3_proj_path_req *
     odin3_bytes text = {resolved.data, resolved.len};
     if (st == ODIN3_OK) {
         bool nul = memchr(resolved.data, '\0', resolved.len) != NULL;
+        if (!nul && req->want == ODIN3_PROJ_WANT_FILE_SOFT &&
+            odin3_path_stat(resolved.data) != ODIN3_PATH_FILE) {
+            odin3_diag(proj->design, ODIN3_LOG_WARN, req->at, "file not found: '%.*s'",
+                       (int)text.len, (const char *)text.ptr);
+        }
         if (nul || !kind_ok(odin3_path_stat(resolved.data), req->want)) {
             size_t nmissing = sizeof k_missing / sizeof k_missing[0];
             size_t want = (size_t)req->want < nmissing ? (size_t)req->want : 0;

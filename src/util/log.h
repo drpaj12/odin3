@@ -31,6 +31,12 @@ size_t odin3_log_count(odin3_log_level level);
 
 void odin3_log_reset_counts(void);
 
+/* The text of the last ERROR message logged (counted, whether or not the level filter delivered
+ * it) since the last odin3_log_clear_last_error; "" when none. Borrowed, valid until the next
+ * ERROR. For a caller that records why a step failed. */
+const char *odin3_log_last_error(void);
+void odin3_log_clear_last_error(void);
+
 /*
  * Mutes odin3_log: while a mute is on, a message is dropped (not counted, not delivered). Calls
  * nest: odin3_log_mute(true) n times needs n odin3_log_mute(false) calls (an extra false is
