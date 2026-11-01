@@ -191,9 +191,9 @@ static void test_lookup_single_other_library(void) {
 static void check_vtr_primitive_hint(void) {
     run_one("t.v", "module t;\n  single_port_ram u1 ();\nendmodule\n");
     et_expect(&rs, ODIN3_LOG_ERROR,
-              "t.v:2:3: error: unresolved_module: module 'single_port_ram' is not defined; it is "
-              "a VTR primitive: load an architecture (read_arch) and read the design with "
-              "read_verilog --vtr-compat");
+              "t.v:2:3: error: unresolved_module: module 'single_port_ram' is not defined; "
+              "if you meant the VTR primitive, load an architecture (read_arch) and read the "
+              "design with read_verilog --vtr-compat");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_real_errors(&rs), et_log(&rs));
 }
 

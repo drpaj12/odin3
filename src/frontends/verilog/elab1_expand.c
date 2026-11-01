@@ -1477,8 +1477,8 @@ static odin3_status given_instances(e1_pass *ps, odin3_ast_id item, const odin3_
 static const char *soft_hint(const char *name) {
     for (uint32_t i = 0; i < SOFT_BLOCK_COUNT; i++) {
         if (strcmp(name, odin3_soft_block_name(i)) == 0) {
-            return "; it is a VTR primitive: load an architecture (read_arch) and read the design "
-                   "with read_verilog --vtr-compat";
+            return "; if you meant the VTR primitive, load an architecture (read_arch) and read "
+                   "the design with read_verilog --vtr-compat";
         }
     }
     return "";
