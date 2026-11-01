@@ -22,10 +22,14 @@
  */
 #include "ast/ast.h"
 #include "ast/kinds.h"
+#include "ast/srcman.h"
 #include "ast/symtab.h"
 #include "frontends/elab/elab_internal.h"
 #include "frontends/elab/pg_internal.h"
+#include "ir/design.h"
 #include "odin3/odin3.h"
+#include "util/log.h"
+#include "util/str.h"
 #include "util/u64map.h"
 #include "util/vec.h"
 
@@ -216,6 +220,23 @@ static odin3_status sc_leave(sc_walk *walk, odin3_ast_id node) {
     return ODIN3_OK;
 }
 
+/* One INFO line: the variable and the always block (source location) treated as scratch. */
+static void sc_report(const odin3_pg *pg, const pg_scratch_w *rec) {
+    const odin3_elab2 *e2 = pg->e2;
+    odin3_srcman *sm = NULL;
+    odin3_strbuf place;
+    odin3_strbuf_init(&place);
+    const odin3_symbol *sym = odin3_symbol_get(e2->st, (odin3_sym_id){rec->sym});
+    const char *name = odin3_strtab_get(odin3_design_strtab(e2->design), sym->name);
+    if (odin3_design_get_srcman(e2->design, &sm) == ODIN3_OK &&
+        odin3_srcman_format(sm, odin3_ast_loc(e2->elab, (odin3_ast_id){rec->always}), &place,
+                            odin3_design_diag_paths(e2->design)) == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_INFO, "read_verilog: '%s' is block scratch in the always block at %s",
+                  name != NULL ? name : "?", place.data != NULL ? place.data : "?");
+    }
+    odin3_strbuf_free(&place);
+}
+
 /* The writers of variables that stayed good in two or more blocks are the scratch set. */
 static odin3_status sc_finish(sc_walk *walk) {
     odin3_vec *list = &walk->pg->scratch_w;
@@ -228,6 +249,7 @@ static odin3_status sc_finish(sc_walk *walk) {
         if ((flags & SC_BAD) != 0 || (flags & SC_MULTI) == 0) {
             continue;
         }
+        sc_report(walk->pg, &rec);
         *(pg_scratch_w *)odin3_vec_at(list, kept++) = rec;
         st = odin3_u64map_put(walk->pg->scratch, (odin3_kv){rec.sym, 1});
     }
