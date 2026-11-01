@@ -205,6 +205,7 @@ static void test_lookup_every_instance(void) {
     et_expect(&rs, ODIN3_LOG_ERROR,
               "t.v:3:3: error: unresolved_module: module 'bar' is not defined");
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(2, et_real_errors(&rs), et_log(&rs));
+    et_free(&rs);
     check_vtr_primitive_hint();
 }
 
