@@ -2827,16 +2827,38 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
                 "${ODIN3_MCU_UPSTREAM}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu)
     set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
+    # blink_interrupt reaches 138 distinct PC values after reset by cycle 500 and no more up to 6000
+    # (a delay loop), PORTB stays 0 and PORTD changes once. blink (393 PCs, PORTB and PORTD change)
+    # and interrupt (163 PCs, PORTB changes) are added at 2000 cycles for the rest of the program.
+    foreach(_mcu_prog blink interrupt)
+        add_test(NAME tb_mcu_${_mcu_prog}
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
+                    "${ODIN3_MCU_UPSTREAM}" ${_mcu_prog}.vmh 2000
+                    ${CMAKE_BINARY_DIR}/tb_mcu_${_mcu_prog})
+        set_tests_properties(tb_mcu_${_mcu_prog} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800
+                             LABELS tools)
+    endforeach()
     # DarkRISCV SoC (docs/notes/2026-11-01-darkriscv-testbench.md): the prebuilt firmware's UART
-    # output and the three bus-handshake signals, iverilog against Odin III on the RTL and on
-    # the BLIF netlist. ODIN3_DARKRISCV_UPSTREAM as ODIN3_MCU_UPSTREAM. 5000 cycles pass four UART
-    # line edges and a core halt.
+    # text (decoded by a receiver in the testbench, 100 Mbit/s) and two bus-handshake bits, iverilog
+    # against Odin III on the RTL and on the BLIF netlist. ODIN3_DARKRISCV_UPSTREAM as
+    # ODIN3_MCU_UPSTREAM, except that the environment variable, when set, wins over the cached
+    # value on every configure. run.sh skips (77) unless the checkout is at commit 9555119.
+    # tb_darkriscv: 6000 cycles, the first four rows of the logo. tb_darkriscv_full (sweep, about
+    # 20 minutes in Release): 36000 cycles, the whole logo and the line INSTRUCTION SETS WANT TO
+    # BE FREE.
     set(ODIN3_DARKRISCV_UPSTREAM "$ENV{ODIN3_DARKRISCV_UPSTREAM}" CACHE PATH
         "DarkRISCV checkout for the tb_darkriscv test (empty: the test skips)")
+    set(_dark_upstream "${ODIN3_DARKRISCV_UPSTREAM}")
+    if(NOT "$ENV{ODIN3_DARKRISCV_UPSTREAM}" STREQUAL "")
+        set(_dark_upstream "$ENV{ODIN3_DARKRISCV_UPSTREAM}")
+    endif()
     add_test(NAME tb_darkriscv
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/darkriscv/run.sh $<TARGET_FILE:odin3>
-                "${ODIN3_DARKRISCV_UPSTREAM}" 5000 ${CMAKE_BINARY_DIR}/tb_darkriscv)
+                "${_dark_upstream}" 6000 ${CMAKE_BINARY_DIR}/tb_darkriscv)
     set_tests_properties(tb_darkriscv PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
+    odin3_add_sweep_test(tb_darkriscv_full LABEL sweep
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/darkriscv/run.sh $<TARGET_FILE:odin3>
+                "${_dark_upstream}" 36000 ${CMAKE_BINARY_DIR}/tb_darkriscv_full)
     add_test(NAME python_tools
         COMMAND ${Python3_EXECUTABLE} -m unittest discover -s tests/tools -t .
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
