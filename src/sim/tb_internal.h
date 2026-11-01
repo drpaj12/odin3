@@ -80,8 +80,9 @@ void tb_dut_close(tb_dut *dut);
  * the connected ports of every DUT instance (in a $scope per instance), 2-state, as the values at
  * the end of each time step that changed one. */
 typedef struct tb_vcd tb_vcd;
-/* Opens path and writes the header; NULL (logged) when the file cannot be written or on no memory. */
-tb_vcd *tb_vcd_open(const char *path, tb_module *tb);
+/* Opens path and writes the header; NULL (logged) when the file cannot be written or on no memory.
+ */
+tb_vcd *tb_vcd_open(const char *path, const tb_module *tb);
 /* Writes the values that changed at time (the first call writes them all, as $dumpvars). */
 void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time);
 /* Closes the file; false when a write failed. NULL is a no-op returning true. */

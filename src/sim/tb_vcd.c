@@ -58,7 +58,8 @@ static uint32_t count_signals(const tb_module *tb) {
 }
 
 static void write_header(tb_vcd *vcd, const tb_module *tb) {
-    (void)fprintf(vcd->fp, "$version odin3 sim_tb $end\n$timescale %s $end\n$scope module %s $end\n",
+    (void)fprintf(vcd->fp,
+                  "$version odin3 sim_tb $end\n$timescale %s $end\n$scope module %s $end\n",
                   tb->timescale, tb->name);
     for (uint32_t i = 0; i < tb->nvars; i++) {
         const tb_var *var = &tb->vars[i];
@@ -87,7 +88,7 @@ static void write_header(tb_vcd *vcd, const tb_module *tb) {
     (void)fputs("$upscope $end\n$enddefinitions $end\n", vcd->fp);
 }
 
-tb_vcd *tb_vcd_open(const char *path, tb_module *tb) {
+tb_vcd *tb_vcd_open(const char *path, const tb_module *tb) {
     tb_vcd *vcd = calloc(1, sizeof *vcd);
     uint32_t total = count_signals(tb);
     if (vcd != NULL) {

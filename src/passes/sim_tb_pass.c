@@ -52,8 +52,8 @@ static bool take_number(odin3_bytes *args, uint64_t *out) {
 }
 
 static odin3_status usage(void) {
-    odin3_log(ODIN3_LOG_ERROR,
-              "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>");
+    odin3_log(ODIN3_LOG_ERROR, "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
+                               "<file>] [--vcd <file>] <tb.v>");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -146,7 +146,8 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
-    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>: run a Verilog "
+    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] <tb.v>: run a "
+    "Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
     "design's modules; $display text goes to stdout or --out, "
     "--vcd writes a waveform of the testbench signals and the DUT ports",
