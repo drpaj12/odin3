@@ -355,6 +355,37 @@ static void write_override(json *jw, const void *elem) {
     raw(jw, "}}");
 }
 
+static void write_testbench(json *jw, const void *elem) {
+    static const char *const on_names[] = {"\"?\"", "\"rtl\"", "\"netlist\"", "\"both\""};
+    const odin3_proj_testbench *tb = elem;
+    raw(jw, "{");
+    key(jw, "name", true);
+    string_id(jw, tb->name);
+    key(jw, "file", false);
+    string_id(jw, tb->file.resolved);
+    key(jw, "top", false);
+    string_or_null(jw, tb->top != 0, tb->top);
+    key(jw, "dut", false);
+    string_or_null(jw, tb->dut != 0, tb->dut);
+    key(jw, "max_time", false);
+    if (tb->max_time == 0) {
+        raw(jw, "null");
+    } else if (jw->st == ODIN3_OK) {
+        jw->st = odin3_strbuf_appendf(jw->out, "%" PRIu64, tb->max_time);
+    }
+    key(jw, "expect", false);
+    string_or_null(jw, tb->expect.given != 0, tb->expect.resolved);
+    key(jw, "on", false);
+    raw(jw, on_names[tb->on <= ODIN3_PROJ_TB_BOTH ? tb->on : 0]);
+    if (tb->timeboxed) {
+        raw(jw, ", \"timeboxed\": true");
+    }
+    if (tb->disabled) {
+        raw(jw, ", \"disabled\": true");
+    }
+    raw(jw, "}");
+}
+
 static void write_output(json *jw) {
     if (!jw->proj->output.present) {
         raw(jw, "null");
@@ -399,6 +430,9 @@ static void dump_lists(json *jw) {
     field_array(jw, "rules", &proj->rules, write_rule);
     field_array(jw, "inventory", &proj->inventory, write_inventory);
     field_array(jw, "overrides", &proj->overrides, write_override);
+    if (proj->testbenches.len > 0) {
+        field_array(jw, "testbenches", &proj->testbenches, write_testbench);
+    }
 }
 
 odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {

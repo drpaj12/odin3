@@ -13,6 +13,7 @@ static odin3_log_sink g_sink = NULL;
 static void *g_user = NULL;
 static size_t g_counts[ODIN3_LOG_LEVEL_COUNT];
 static bool g_in_sink = false;
+static char g_last_error[ODIN3_LOG_BUF];
 static size_t g_mute = 0;
 
 static const char *const level_names[ODIN3_LOG_LEVEL_COUNT] = {"error", "warning", "info", "debug"};
@@ -78,7 +79,8 @@ void odin3_log(odin3_log_level level, const char *fmt, ...) {
         return;
     }
     g_counts[level]++;
-    if (level > g_max_level || g_in_sink) {
+    bool deliverable = level <= g_max_level && !g_in_sink;
+    if (!deliverable && level != ODIN3_LOG_ERROR) {
         return;
     }
     char buf[ODIN3_LOG_BUF];
@@ -86,5 +88,18 @@ void odin3_log(odin3_log_level level, const char *fmt, ...) {
     va_start(args, fmt);
     format_message(buf, fmt, args);
     va_end(args);
-    deliver(level, buf);
+    if (level == ODIN3_LOG_ERROR) {
+        memcpy(g_last_error, buf, sizeof g_last_error);
+    }
+    if (deliverable) {
+        deliver(level, buf);
+    }
+}
+
+const char *odin3_log_last_error(void) {
+    return g_last_error;
+}
+
+void odin3_log_clear_last_error(void) {
+    g_last_error[0] = '\0';
 }

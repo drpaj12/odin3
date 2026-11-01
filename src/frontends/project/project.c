@@ -44,6 +44,7 @@ static const vec_slot k_vecs[] = {
     {offsetof(odin3_project, inventory), sizeof(odin3_proj_inventory)},
     {offsetof(odin3_project, overrides), sizeof(odin3_proj_override)},
     {offsetof(odin3_project, override_params), sizeof(odin3_proj_kv)},
+    {offsetof(odin3_project, testbenches), sizeof(odin3_proj_testbench)},
     {offsetof(odin3_project, ignored), sizeof(uint32_t)},
     {offsetof(odin3_project, duplicates), sizeof(uint32_t)},
 };
@@ -363,6 +364,9 @@ static const char *const k_missing[] = {"not found", "file not found", "director
                                         "not found"};
 
 static bool kind_ok(odin3_path_kind kind, odin3_proj_want want) {
+    if (want == ODIN3_PROJ_WANT_FILE_SOFT) {
+        return true;
+    }
     if (want == ODIN3_PROJ_WANT_FILE) {
         return kind == ODIN3_PATH_FILE;
     }
@@ -383,6 +387,11 @@ odin3_status odin3_project_path(odin3_project *proj, const odin3_proj_path_req *
     odin3_bytes text = {resolved.data, resolved.len};
     if (st == ODIN3_OK) {
         bool nul = memchr(resolved.data, '\0', resolved.len) != NULL;
+        if (!nul && req->want == ODIN3_PROJ_WANT_FILE_SOFT &&
+            odin3_path_stat(resolved.data) != ODIN3_PATH_FILE) {
+            odin3_diag(proj->design, ODIN3_LOG_WARN, req->at, "file not found: '%.*s'",
+                       (int)text.len, (const char *)text.ptr);
+        }
         if (nul || !kind_ok(odin3_path_stat(resolved.data), req->want)) {
             size_t nmissing = sizeof k_missing / sizeof k_missing[0];
             size_t want = (size_t)req->want < nmissing ? (size_t)req->want : 0;
@@ -751,6 +760,24 @@ odin3_status odin3_project_add_override(odin3_project *proj, const odin3_proj_ov
         (void)push_copy(&proj->override_params, &params.kvs[i]);
     }
     return push_copy(&proj->overrides, &copy);
+}
+
+odin3_status odin3_project_add_testbench(odin3_project *proj, const odin3_proj_testbench *tb) {
+    const odin3_proj_testbench *known = proj->testbenches.data;
+    for (size_t i = 0; i < proj->testbenches.len; i++) {
+        if (known[i].name == tb->name) {
+            odin3_bytes name = odin3_proj_str_bytes(proj, tb->name);
+            odin3_proj_err err = {ODIN3_PROJ_ERR_SYNTAX,
+                                  ODIN3_PROJ_LOCATED,
+                                  tb->at,
+                                  NULL,
+                                  "testbench given twice",
+                                  &name,
+                                  1};
+            return odin3_project_fail(proj, &err);
+        }
+    }
+    return push_copy(&proj->testbenches, tb);
 }
 
 odin3_status odin3_project_add_ignored(odin3_project *proj, odin3_bytes name) {

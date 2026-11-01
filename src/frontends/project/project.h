@@ -68,6 +68,13 @@ typedef enum odin3_proj_override_kind {
     ODIN3_PROJ_OVERRIDE_CELL
 } odin3_proj_override_kind;
 
+/* Which design a project testbench drives (docs/specs/2026-10-31-project-testbench-design.md). */
+typedef enum odin3_proj_tb_on {
+    ODIN3_PROJ_TB_RTL = 1,
+    ODIN3_PROJ_TB_NETLIST,
+    ODIN3_PROJ_TB_BOTH
+} odin3_proj_tb_on;
+
 typedef enum odin3_param_type { ODIN3_PARAM_NUMBER = 1, ODIN3_PARAM_STRING } odin3_param_type;
 
 /* map thresholds given (odin3_proj_rule.u.map.has bits). */
@@ -160,6 +167,18 @@ typedef struct odin3_proj_kv {
     uint32_t key, value;
 } odin3_proj_kv; /* one override parameter */
 
+/* One `testbench` statement (or one Quartus EDA_TEST_BENCH group); name, top, dut: strtab IDs,
+ * top and dut 0 = none; expect.given 0 = none; max_time 0 = the sim_tb default. */
+typedef struct odin3_proj_testbench {
+    uint32_t name, top, dut;
+    odin3_proj_path file, expect;
+    uint64_t max_time;
+    uint8_t on;     /* odin3_proj_tb_on */
+    bool timeboxed; /* a stop at max_time is the intended end (qsf RUN_SIM_FOR), not a hang */
+    bool disabled;  /* not run unless named by --only (qsf: NativeLink picked another bench) */
+    odin3_loc at;
+} odin3_proj_testbench;
+
 typedef struct odin3_project {
     odin3_design *design;
     odin3_proj_path entry;
@@ -170,7 +189,8 @@ typedef struct odin3_project {
     odin3_vec libdirs, incdirs; /* odin3_proj_path */
     odin3_vec libext;           /* uint32_t; empty = ".v" at lookup */
     odin3_vec defines, params, arch, rules, rule_cells, inventory, overrides, override_params;
-    uint32_t top; /* "mod" or "lib.mod" as given; 0 = auto */
+    odin3_vec testbenches; /* odin3_proj_testbench, in listing order */
+    uint32_t top;          /* "mod" or "lib.mod" as given; 0 = auto */
     odin3_loc top_at;
     odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
     odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
@@ -276,7 +296,8 @@ void odin3_proj_text_free(odin3_proj_text *text);
 typedef enum odin3_proj_want {
     ODIN3_PROJ_WANT_FILE = 1, /* a regular file (a symlink to one counts) */
     ODIN3_PROJ_WANT_DIR,      /* a directory */
-    ODIN3_PROJ_WANT_ANY       /* either */
+    ODIN3_PROJ_WANT_ANY,      /* either */
+    ODIN3_PROJ_WANT_FILE_SOFT /* a regular file; a missing one is a WARNING, not an error */
 } odin3_proj_want;
 
 typedef struct odin3_proj_path_req {
@@ -383,6 +404,10 @@ odin3_status odin3_project_add_inventory(odin3_project *proj, const odin3_proj_i
 odin3_status odin3_project_add_override(odin3_project *proj, const odin3_proj_override *ov,
                                         odin3_proj_kvs params);
 
+/* Appends a testbench; a name already used is `syntax` "testbench given twice" at tb->at, names
+ * [the name]. NO_MEMORY. */
+odin3_status odin3_project_add_testbench(odin3_project *proj, const odin3_proj_testbench *tb);
+
 /* Adds name to the ignored set (PRJ-8; sorted and made unique at finish). NO_MEMORY. */
 odin3_status odin3_project_add_ignored(odin3_project *proj, odin3_bytes name);
 
@@ -395,7 +420,8 @@ odin3_status odin3_project_finish(odin3_project *proj);
 /*
  * Appends the record as JSON: "{\n", one `  "key": value` line per README key in README order
  * (files libfiles libdirs libext incdirs defines top params arch rules inventory overrides flow
- * abc_script output ignored duplicates), each array or object on one line with Python's ", " and
+ * abc_script output ignored duplicates; "testbenches" between overrides and flow, only when the
+ * project has one), each array or object on one line with Python's ", " and
  * ": " separators, "}\n". Paths are resolved; top, flow, abc_script, output and a bare define's
  * value are null when absent. Strings are UTF-8 with JSON escapes for '"', '\\' and control bytes;
  * a byte that is not part of valid UTF-8 is written as \u00XX. NO_MEMORY (out unchanged).

@@ -1,0 +1,16 @@
+# Quartus project with simulation test benches (names as in a real IITB-RISC project.qsf)
+set_global_assignment -name TOP_LEVEL_ENTITY counter
+set_global_assignment -name VERILOG_FILE counter.v
+set_global_assignment -name EDA_TEST_BENCH_ENABLE_STATUS TEST_BENCH_MODE -section_id eda_simulation
+set_global_assignment -name EDA_NATIVELINK_SIMULATION_TEST_BENCH qgood -section_id eda_simulation
+set_global_assignment -name EDA_TEST_BENCH_NAME qgood -section_id eda_simulation
+set_global_assignment -name EDA_DESIGN_INSTANCE_NAME NA -section_id qgood
+set_global_assignment -name EDA_TEST_BENCH_MODULE_NAME tb_good -section_id qgood
+set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR "1 us" -section_id qgood
+set_global_assignment -name EDA_TEST_BENCH_FILE TRACEFILE.txt -section_id qgood
+set_global_assignment -name EDA_TEST_BENCH_FILE tb_good.v -section_id qgood
+set_global_assignment -name EDA_TEST_BENCH_NAME Testbench-hang -section_id eda_simulation
+set_global_assignment -name EDA_DESIGN_INSTANCE_NAME NA -section_id Testbench-hang
+set_global_assignment -name EDA_TEST_BENCH_MODULE_NAME tb_hang -section_id Testbench-hang
+set_global_assignment -name EDA_TEST_BENCH_RUN_SIM_FOR "1 us" -section_id Testbench-hang
+set_global_assignment -name EDA_TEST_BENCH_FILE tb_hang.v -section_id Testbench-hang

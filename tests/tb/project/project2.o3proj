@@ -1,0 +1,9 @@
+# Second golden project: netlist-only, dut check, time limits, stale file, long name
+file verilog counter.v
+top counter
+testbench netonly file tb_good.v top tb_good on netlist expect good.expect
+testbench nodut file tb_good.v top tb_good dut nosuch
+testbench hang_default file tb_hang.v
+testbench hang_max file tb_hang.v max-time 1000
+testbench stale file gone.v
+testbench tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_tb_with_a_very_long_name_ file tb_good.v top tb_good

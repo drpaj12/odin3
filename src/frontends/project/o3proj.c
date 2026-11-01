@@ -12,6 +12,7 @@
 #include "util/str.h"
 #include "util/vec.h"
 
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -583,6 +584,123 @@ static odin3_status key_import(o3_reader *rd, const o3_stmt *st) {
     return res != ODIN3_OK ? res : odin3_read_quartus(rd->proj, &file, &req);
 }
 
+/* --- testbench ----------------------------------------------------------------------------- */
+
+enum { TB_RADIX = 10, TB_ON_COUNT = 3 };
+enum { TB_KW_FILE, TB_KW_TOP, TB_KW_DUT, TB_KW_MAX_TIME, TB_KW_EXPECT, TB_KW_ON, TB_KW_COUNT };
+
+static const char *const k_tb_keywords[TB_KW_COUNT] = {"file",     "top",    "dut",
+                                                       "max-time", "expect", "on"};
+
+/* Whether word is wholly an IDENT. */
+static bool is_ident(odin3_bytes word) {
+    return word.len > 0 && odin3_proj_ident_len(word, 0) == word.len;
+}
+
+/* Whether word is a testbench name: an IDENT or a qsf section id (letters, digits, `_$-.`, not
+ * starting with a digit, `-` or `.`), so every imported name round trips. */
+static bool is_tb_name(odin3_bytes word) {
+    const char *chars = word.ptr;
+    bool ok = word.len > 0 && (isalpha((unsigned char)chars[0]) || chars[0] == '_');
+    for (size_t i = 1; ok && i < word.len; i++) {
+        ok = isalnum((unsigned char)chars[i]) || strchr("_$-.", chars[i]) != NULL;
+    }
+    return ok;
+}
+
+/* A decimal count above 0 that fits 64 bits; else `syntax` at the statement, names [word]. */
+static odin3_status tb_max_time(o3_reader *rd, const o3_stmt *st, odin3_bytes word, uint64_t *out) {
+    const char *bytes = word.ptr;
+    uint64_t value = 0;
+    bool ok = is_digits(word);
+    for (size_t i = 0; ok && i < word.len; i++) {
+        uint64_t digit = (uint64_t)(bytes[i] - '0');
+        ok = value <= (UINT64_MAX - digit) / TB_RADIX;
+        value = ok ? value * TB_RADIX + digit : value;
+    }
+    if (!ok || value == 0) {
+        return syntax(rd, st, "max-time expects a count above 0", &word);
+    }
+    *out = value;
+    return ODIN3_OK;
+}
+
+static odin3_status tb_ident(o3_reader *rd, const o3_stmt *st, const odin3_word *word,
+                             uint32_t *out) {
+    if (!is_ident(word->text)) {
+        return syntax(rd, st, "expected a module or instance name", &word->text);
+    }
+    return intern(rd, word->text, out);
+}
+
+static odin3_status tb_on(o3_reader *rd, const o3_stmt *st, odin3_bytes word, uint8_t *out) {
+    static const char *const names[] = {"rtl", "netlist", "both"};
+    for (int i = 0; i < TB_ON_COUNT; i++) {
+        if (odin3_proj_bytes_is(word, names[i])) {
+            *out = (uint8_t)(ODIN3_PROJ_TB_RTL + i);
+            return ODIN3_OK;
+        }
+    }
+    return syntax(rd, st, "on expects rtl, netlist or both", &word);
+}
+
+/* The keyword/value pair (kw, word) into tb. */
+static odin3_status tb_pair(o3_reader *rd, const o3_stmt *st, int kw, odin3_proj_testbench *tb,
+                            const odin3_word *word) {
+    switch (kw) {
+    case TB_KW_FILE:
+        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE_SOFT, &tb->file);
+    case TB_KW_TOP:
+        return tb_ident(rd, st, word, &tb->top);
+    case TB_KW_DUT:
+        return tb_ident(rd, st, word, &tb->dut);
+    case TB_KW_MAX_TIME:
+        return tb_max_time(rd, st, word->text, &tb->max_time);
+    case TB_KW_EXPECT:
+        return arg_path(rd, word, ODIN3_PROJ_WANT_FILE_SOFT, &tb->expect);
+    default:
+        return tb_on(rd, st, word->text, &tb->on);
+    }
+}
+
+static int tb_keyword_of(odin3_bytes word) {
+    for (int k = 0; k < TB_KW_COUNT; k++) {
+        if (odin3_proj_bytes_is(word, k_tb_keywords[k])) {
+            return k;
+        }
+    }
+    return -1;
+}
+
+/* testbench <name> file <path> [top <m>] [dut <d>] [max-time <T>] [expect <path>] [on <where>] */
+static odin3_status key_testbench(o3_reader *rd, const o3_stmt *st) {
+    if ((st->nargs - 1U) % 2U != 0) {
+        return usage(rd, st, NULL);
+    }
+    odin3_proj_testbench tb = {.on = ODIN3_PROJ_TB_RTL, .at = st->at};
+    if (!is_tb_name(st->args[0].text)) {
+        return syntax(rd, st, "expected a testbench name", &st->args[0].text);
+    }
+    odin3_status res = intern(rd, st->args[0].text, &tb.name);
+    unsigned seen = 0;
+    for (uint32_t i = 1; res == ODIN3_OK && i < st->nargs; i += 2) {
+        int kw = tb_keyword_of(st->args[i].text);
+        if (kw < 0) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown testbench keyword",
+                        &st->args[i].text);
+        }
+        if ((seen & (1U << kw)) != 0) {
+            return syntax(rd, st, "repeated testbench keyword", &st->args[i].text);
+        }
+        seen |= 1U << kw;
+        res = tb_pair(rd, st, kw, &tb, &st->args[i + 1]);
+    }
+    if (res == ODIN3_OK && (seen & (1U << TB_KW_FILE)) == 0) {
+        return usage(rd, st, &st->args[0].text);
+    }
+    return res != ODIN3_OK ? res : odin3_project_add_testbench(rd->proj, &tb);
+}
+
 /* --- statements ---------------------------------------------------------------------------- */
 
 static const o3_key k_keys[] = {
@@ -604,6 +722,10 @@ static const o3_key k_keys[] = {
     {"available", 2, 2, "available <libcell> <count>", key_available},
     {"hide", 1, 1, "hide <libcell>", key_hide},
     {"cell", 3, MAX_ARGS, "cell <name> from <libcell> [param <name>=<value>...]", key_cell},
+    {"testbench", 3, MAX_ARGS,
+     "testbench <name> file <path> [top <module>] [dut <inst-or-module>] [max-time <T>] "
+     "[expect <path>] [on rtl|netlist|both]",
+     key_testbench},
     {"flow", 1, 1, "flow <script.o3>", key_flow},
     {"abc_script", 1, 1, "abc_script <file>", key_abc_script},
     {"import", 1, 3, "import <file.qpf|file.qsf> [revision <name>]", key_import},

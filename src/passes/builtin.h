@@ -25,6 +25,7 @@ extern const odin3_pass_def odin3_pass_write_rtlil;
 extern const odin3_pass_def odin3_pass_sim;
 extern const odin3_pass_def odin3_pass_sim_tb;
 extern const odin3_pass_def odin3_pass_testbench_gen;
+extern const odin3_pass_def odin3_pass_run_testbenches;
 /* arch_pass.c (Phase 4.1): read_arch and write_techlib. */
 extern const odin3_pass_def odin3_pass_read_arch;
 extern const odin3_pass_def odin3_pass_write_techlib;

@@ -1,0 +1,7 @@
+# Project testbenches (spec docs/specs/2026-10-31-project-testbench-design.md)
+file verilog counter.v
+top counter
+testbench good file tb_good.v top tb_good dut dut expect good.expect
+testbench bad file tb_good.v top tb_good expect bad.expect
+testbench both file tb_good.v top tb_good on both expect good.expect
+testbench err file tb_err.v

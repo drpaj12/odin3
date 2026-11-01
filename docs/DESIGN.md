@@ -150,6 +150,12 @@ word both are ordinary (`+define+D=#1`). A string macro keeps its quotes in its 
   [min_width|max_width|min_depth <n>]…`; `split <subject> [width] [depth min|max|<n>]`
   (memory splitting, Odin II's `<memory>`); `limit <cell> <n>`; `patterns <file.o3lib>`.
   Scopes are `*`, a module, or an instance path `top.u_a.u_b` (`*` wildcards); `.` separates.
+- `testbench <name> file <path> [top <module>] [dut <inst-or-module>] [max-time <T>]
+  [expect <path>] [on rtl|netlist|both]` (several; keywords in any order, once each): a Verilog
+  testbench for the `sim_tb` simulator, run by `run_testbenches`; a Quartus `.qsf` imports its
+  `EDA_TEST_BENCH_*` groups as the same records (spec
+  `docs/specs/2026-10-31-project-testbench-design.md`; the record dump has a `testbenches` key
+  only when there is one).
 - `flow <script.o3>` (once); `abc_script <file>` (once): the ABC script of the `abc` pass, a
   path (never inline text), any extension; `import <file.qpf|file.qsf> [revision <name>]` reads
   a Quartus project into this one (its top counts as this project's `top`; an imported `.qsf`

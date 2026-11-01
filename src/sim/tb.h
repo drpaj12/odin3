@@ -182,8 +182,18 @@ typedef struct tb_options {
     const char *vcd; /* NULL: none */
 } tb_options;
 
+/* How a run ended: the last simulation time, and whether it stopped because the next event lay
+ * beyond max_time (not `$finish`, not an empty event queue: a clock with no `$finish` ends so). */
+typedef struct tb_end {
+    uint64_t time;
+    bool hit_limit;
+} tb_end;
+
 /* Runs the testbench against the modules of design. *finish_time gets the last time. */
 odin3_status tb_run(odin3_design *design, tb_module *tb, const tb_options *opts,
                     uint64_t *finish_time);
+
+/* As tb_run, with the way the run ended in *end. */
+odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *opts, tb_end *end);
 
 #endif

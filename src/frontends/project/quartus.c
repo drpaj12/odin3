@@ -4,6 +4,7 @@
 #include "ast/srcman.h"
 #include "frontends/project/paths.h"
 #include "frontends/project/project.h"
+#include "frontends/project/qsf_tb.h"
 #include "frontends/project/tcl.h"
 #include "ir/design.h"
 #include "util/arena.h"
@@ -67,6 +68,7 @@ typedef struct qsf_state {
     bool has_device;
     size_t device; /* index of the DEVICE entry in proj->arch */
     odin3_vec params, rules, stack;
+    odin3_vec tbs; /* odin3_qsf_tb_item: EDA_TEST_BENCH_* assignments, mapped after the file */
 } qsf_state;
 
 /* The command being run and its location (its first word's line). */
@@ -472,6 +474,19 @@ static odin3_status assignment_name(qsf_state *st, const cmd_ctx *cc, odin3_byte
     return upper(st, *name, name);
 }
 
+/* An assignment of no known kind: a test bench one is noted (mapped after the file), any other
+ * is ignored and listed under its name. */
+static odin3_status other_assignment(qsf_state *st, const cmd_ctx *cc, odin3_bytes name,
+                                     const qsf_opts *opts) {
+    if (!odin3_qsf_tb_is_name(name)) {
+        return odin3_project_add_ignored(st->proj, name);
+    }
+    const odin3_tcl_word *section = opts->opt[OPT_SECTION_ID];
+    odin3_qsf_tb_item item = {name, section != NULL ? section->text : (odin3_bytes){NULL, 0},
+                              opts->value->text, cc->at};
+    return odin3_qsf_tb_note(&st->tbs, &item);
+}
+
 static odin3_status assignment(qsf_state *st, const cmd_ctx *cc) {
     static const unsigned allowed[] = {FILE_OPTIONS, SINGLE_OPTIONS, RULE_OPTIONS, ALL_OPTIONS};
     odin3_bytes name = {NULL, 0};
@@ -490,7 +505,7 @@ static odin3_status assignment(qsf_state *st, const cmd_ctx *cc) {
     case NAME_RULE:
         return mapping(st, cc, &k_rules[what.idx], &opts);
     default:
-        return odin3_project_add_ignored(st->proj, name);
+        return other_assignment(st, cc, name, &opts);
     }
 }
 
@@ -651,6 +666,7 @@ static odin3_status finish_qsf(qsf_state *st, const odin3_proj_path *qsf) {
     odin3_bytes top = text_or(st->top, st->revision);
     odin3_status res = st->top != NULL ? odin3_project_set_top(st->proj, top, st->top_at)
                                        : odin3_project_set_top_file(st->proj, top, qsf);
+    res = res != ODIN3_OK ? res : odin3_qsf_tb_finish(st->proj, &st->tbs, st->project_dir);
     odin3_bytes top_mod = after_last(top, '.');
     odin3_strbuf scope;
     odin3_strbuf_init(&scope);
@@ -883,6 +899,7 @@ static void free_state(qsf_state *st) {
     odin3_vec_free(&st->stack);
     odin3_vec_free(&st->params);
     odin3_vec_free(&st->rules);
+    odin3_vec_free(&st->tbs);
     odin3_arena_destroy(st->arena);
 }
 
@@ -891,6 +908,7 @@ odin3_status odin3_read_quartus(odin3_project *proj, const odin3_proj_path *file
     qsf_state st = {.proj = proj};
     odin3_vec_init(&st.params, sizeof(queued_param));
     odin3_vec_init(&st.rules, sizeof(queued_rule));
+    odin3_qsf_tb_init(&st.tbs);
     odin3_vec_init(&st.stack, sizeof(qsf_frame));
     st.arena = odin3_arena_create(0);
     odin3_status res =

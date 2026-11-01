@@ -112,6 +112,8 @@ add_library(odin3_core OBJECT
     src/passes/read_json_pass.c
     src/passes/sim_pass.c
     src/passes/sim_tb_pass.c
+    src/passes/run_testbenches.c
+    src/passes/run_testbenches_report.c
     src/passes/testbench_gen.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
@@ -339,6 +341,7 @@ add_library(odin3_core OBJECT
     src/frontends/project/flist.c
     src/frontends/project/tcl.c
     src/frontends/project/quartus.c
+    src/frontends/project/qsf_tb.c
     src/frontends/project/o3proj.c
     src/frontends/project/entry.c
     src/frontends/project/xml.c
@@ -1726,6 +1729,7 @@ if(BUILD_TESTING)
     odin3_add_unit_test(test_project_quartus)
     target_compile_definitions(test_project_quartus PRIVATE
         ODIN3_QUARTUS_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/quartus")
+    odin3_add_unit_test(test_project_testbench)
     odin3_add_unit_test(test_project_o3proj)
     target_compile_definitions(test_project_o3proj PRIVATE
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
@@ -2782,6 +2786,9 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     endif()
+    add_test(NAME tb_project
+        COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_project.sh $<TARGET_FILE:odin3>)
+    set_tests_properties(tb_project PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     add_test(NAME tb_errors
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_errors.sh $<TARGET_FILE:odin3>)
     set_tests_properties(tb_errors PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)

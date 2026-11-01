@@ -57,3 +57,42 @@ tools/tb-compare/tb-compare --tb tb_dut.v --a "read_verilog golden.v; proc; opt;
 ```
 
 Exit 0 identical, 1 mismatch (the first differing line, its cycle and the differing fields), 2 error.
+
+## Testbenches in the project
+
+A project can declare its testbenches and how they run. In an `.o3proj` file:
+
+```
+file verilog counter.v
+top counter
+testbench good file tb_good.v top tb_good dut dut expect good.expect
+testbench both file tb_good.v top tb_good on both expect good.expect
+```
+
+Syntax: `testbench <name> file <path> [top <module>] [dut <inst-or-module>] [max-time <T>]
+[expect <path>] [on rtl|netlist|both]`. Paths are relative to the project file. `top` is the
+testbench module (default the first in the file). `dut` checks that the testbench instantiates
+that instance or module (an error otherwise). `max-time` is a count of testbench time units.
+`expect` is a golden output file: the testbench passes only when its `$display` text equals it
+line by line. `on` (default `rtl`) says which design the testbench drives: `rtl` is built from
+the project itself (`read_project; read_verilog; proc; opt; lower`) and does not need a design in
+hand; `netlist` is the design in hand when `run_testbenches` runs (read a BLIF or run synthesis
+first); `both` runs the two and compares their output line by line.
+
+A Quartus `.qsf` is imported too: `EDA_TEST_BENCH_NAME`, `_FILE`, `_MODULE_NAME`, `_RUN_SIM_FOR`
+(converted to testbench time units with the file's `` `timescale ``), `EDA_DESIGN_INSTANCE_NAME`
+and `EDA_NATIVELINK_SIMULATION_TEST_BENCH` map onto the same records. Anything else of the group
+is a warning, never silently dropped.
+
+```
+odin3 -p "read_project project.o3proj; read_verilog; proc; opt; lower; run_testbenches --json r.json"
+```
+
+`run_testbenches [--only <name>] [--json <file>] [--report <file>] [--seed N]` runs every
+testbench (or the one named) and prints one line each: name, pass, fail or error, `on`, wall time.
+A failed comparison adds the first mismatch (`mismatch: expect line 5 time 4 field 1: want ...
+got ...`: the line, the leading number of the line when it has one, the first differing field);
+an error names the step (`run (rtl)`, `elaborate project (rtl)`, ...). The exit status is nonzero
+when any testbench fails or errors. A project with no testbench prints that and passes. From
+Python: `design.run("run_testbenches --json r.json")`. The specification is
+`docs/specs/2026-10-31-project-testbench-design.md`.
