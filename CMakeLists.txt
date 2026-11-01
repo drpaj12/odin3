@@ -2823,9 +2823,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # interrupt pulses (cycles 200 and 400 of tests/mcu/mcu_tb.v).
     set(ODIN3_MCU_UPSTREAM "$ENV{ODIN3_MCU_UPSTREAM}" CACHE PATH
         "Arduino-on-RISC-V checkout for the tb_mcu test (empty: the test skips)")
+    set(_mcu_upstream "${ODIN3_MCU_UPSTREAM}")
+    if(NOT "$ENV{ODIN3_MCU_UPSTREAM}" STREQUAL "")
+        set(_mcu_upstream "$ENV{ODIN3_MCU_UPSTREAM}")
+    endif()
     add_test(NAME tb_mcu
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
-                "${ODIN3_MCU_UPSTREAM}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu)
+                "${_mcu_upstream}" blink_interrupt.vmh 500 ${CMAKE_BINARY_DIR}/tb_mcu)
     set_tests_properties(tb_mcu PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800 LABELS tools)
     # blink_interrupt reaches 138 distinct PC values after reset by cycle 500 and no more up to 6000
     # (a delay loop), PORTB stays 0 and PORTD changes once. blink (393 PCs, PORTB and PORTD change)
@@ -2833,7 +2837,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     foreach(_mcu_prog blink interrupt)
         add_test(NAME tb_mcu_${_mcu_prog}
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/mcu/run.sh $<TARGET_FILE:odin3>
-                    "${ODIN3_MCU_UPSTREAM}" ${_mcu_prog}.vmh 2000
+                    "${_mcu_upstream}" ${_mcu_prog}.vmh 2000
                     ${CMAKE_BINARY_DIR}/tb_mcu_${_mcu_prog})
         set_tests_properties(tb_mcu_${_mcu_prog} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800
                              LABELS tools)
