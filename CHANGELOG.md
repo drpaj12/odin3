@@ -12,14 +12,6 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   localparam, a concatenation), as Yosys does. `tests/mcu/` runs the Arduino-on-RISC-V microcontroller
   (`docs/notes/2026-10-31-mcu-testbench.md`): iverilog and `sim_tb` agree cycle for cycle on the ports, RTL and
   BLIF netlist. 2026-10-31.
-
-### Fixed
-
-- `sim_tb`: an unsized testbench `parameter N = 3` was one bit wide. The simulator accepts a clock that passes
-  through an identity buffer (a BLIF `.names i o / 1 1`). 2026-10-31.
-
-### Added (continued)
-
 - `scoap` pass: SCOAP testability measures (CC0, CC1, CO; with `--sequential` SC0, SC1, SO) of every net, signal
   probability from random simulation (`--sigprob`), module attributes `odin3:scoap_*`, versioned JSON, Python
   `Design.scoap()`. Spec `docs/specs/2026-10-31-scoap-design.md`, manual `docs/user/scoap.md`. 2026-10-31.
@@ -32,6 +24,8 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- `sim_tb`: an unsized testbench `parameter N = 3` was one bit wide. The simulator accepts a clock that passes
+  through an identity buffer (a BLIF `.names i o / 1 1`). 2026-10-31.
 - `odin3-flow` runs `odin3` with the working directory set to the common parent directory of the design
   files and passes each design relative to it, so hash names, the version 2 name map and the BLIF are
   identical for one design in any directory (the known gap of `docs/V1.2.0.md`). The run log (`odin3/odin3.log`)
