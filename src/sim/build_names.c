@@ -214,6 +214,23 @@ void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cel
               loc, cell->def->name, name_str(&node), name_str(&net));
 }
 
+void odin3_sim_err_clock_inputs(const odin3_sim_builder *bld, const odin3_sim_flat *cell,
+                                odin3_sim_net_count net_count) {
+    char loc[LOC_MAX];
+    char net_loc[LOC_MAX];
+    name_buf node;
+    name_buf net;
+    loc_prefix(bld, odin3_node_prov(frame_module(bld, cell->frame), cell->node),
+               (loc_buf){loc, sizeof loc});
+    node_name(bld, cell->frame, cell->node, &node);
+    slot_name(bld, net_count.slot, &net, (loc_buf){net_loc, sizeof net_loc});
+    odin3_log(ODIN3_LOG_ERROR,
+              "%scannot simulate: the clock of `%s` node `%s` is net `%s`, derived from %u primary "
+              "inputs and none of them clocks another register, so the clock input is not known "
+              "(clock one register on the real clock input, or use a clock enable)",
+              loc, cell->def->name, name_str(&node), name_str(&net), (unsigned)net_count.n);
+}
+
 void odin3_sim_err_drivers(const odin3_sim_builder *bld, uint32_t slot) {
     char loc[LOC_MAX];
     name_buf net;

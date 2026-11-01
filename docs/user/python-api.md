@@ -131,8 +131,14 @@ Rules:
   those after the last settle. `settle()` shows the combinational effect of inputs just set
   without advancing state. `reset()` is a power-on reset (all values 0, register INIT applied,
   `cycle` back to 0); it is not the design's own reset input.
-- **Clocks.** Clocks must be top input ports. A port whose bits are all clocks is kind `"clock"`
-  and the steps drive it; do not set it. For a gated or derived clock use a clock enable instead.
+- **Clocks.** The clock of a register is a top input port, or a net that logic or a register
+  drives (a gated clock, a clock mux, a divided clock: a derived clock). A port whose bits are all
+  clocks is kind `"clock"` and the steps drive it; do not set it. A derived clock is evaluated
+  after every edge and every settle, and its registers copy their inputs when it changes; a clock
+  made by a register triggers its registers one round later, with the values the first round left,
+  as in a Verilog simulator. When the clock net hangs on several top inputs and none of them
+  clocks another register, the build stops with an error naming the net: clock one register on the
+  real clock input, or use a clock enable.
 - **Removed names.** `opt` and `abc` delete logic nothing observes, including an unused register.
   Mark a signal you want to keep with `(* keep *)` in the HDL, or open the simulation before that
   pass.

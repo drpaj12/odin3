@@ -498,13 +498,16 @@ static uint32_t clock_input(const odin3_sim *sim, const clock_maps *maps, uint32
     return ODIN3_SIM_UNSET;
 }
 
-/* Flags the inputs that clock edge-triggered cells; a clock that is not an input is an error. */
+/* Flags the inputs that clock edge-triggered cells. A clock net that is not an input is a derived
+ * clock (build_clock.c): kept for the engine, or an error. */
 static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
     uint32_t *input_of = odin3_util_malloc((size_t)sim->n_values * sizeof *input_of);
     uint32_t *via = identity_sources(sim);
-    if (input_of == NULL || via == NULL) {
+    odin3_sim_derived *derived = odin3_util_malloc(((size_t)sim->n_cells + 1U) * sizeof *derived);
+    if (input_of == NULL || via == NULL || derived == NULL) {
         odin3_util_free(input_of);
         odin3_util_free(via);
+        odin3_util_free(derived);
         return ODIN3_ERR_NO_MEMORY;
     }
     for (uint32_t slot_ix = 0; slot_ix < sim->n_values; slot_ix++) {
@@ -513,6 +516,7 @@ static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
     for (uint32_t k = sim->n_in_bits; k-- > 0;) {
         input_of[sim->in_bits[k]] = k; /* the first input bit on the slot */
     }
+    uint32_t count = 0;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; i < sim->n_cells && st == ODIN3_OK; i++) {
         const odin3_sim_flat *flat = &sim->cells[i];
@@ -522,15 +526,19 @@ static odin3_status find_clocks(const odin3_sim_builder *bld, odin3_sim *sim) {
         }
         uint32_t slot = flat->view.ports[0].idx[0];
         uint32_t input = clock_input(sim, &(clock_maps){input_of, via}, slot);
-        if (input == ODIN3_SIM_UNSET) {
+        if (slot == ODIN3_SIM_SLOT_ZERO) {
             odin3_sim_err_clock(bld, flat, slot);
             st = ODIN3_ERR_INVALID_ARG;
+        } else if (input == ODIN3_SIM_UNSET) {
+            derived[count++] = (odin3_sim_derived){i, slot};
         } else {
             sim->in_clock[input] = 1;
         }
     }
+    st = st == ODIN3_OK ? odin3_sim_derived_clocks(bld, sim, input_of, derived, count) : st;
     odin3_util_free(input_of);
     odin3_util_free(via);
+    odin3_util_free(derived);
     return st;
 }
 
@@ -697,6 +705,10 @@ void odin3_sim_destroy(odin3_sim *sim) {
     odin3_util_free(sim->out_ports);
     odin3_util_free(sim->in_bits);
     odin3_util_free(sim->in_clock);
+    odin3_util_free(sim->dclk_cell);
+    odin3_util_free(sim->dclk_slot);
+    odin3_util_free(sim->dclk_last);
+    odin3_util_free(sim->dclk_mark);
     odin3_util_free(sim->out_bits);
     odin3_util_free(sim->frames);
     odin3_util_free(sim->netmap);

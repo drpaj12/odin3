@@ -149,7 +149,7 @@ static odin3_status source_step(odin3_sim *sim, input_source *src, uint32_t cyc,
     }
     odin3_status st = ODIN3_OK;
     if (src->vcd == NULL) {
-        odin3_sim_cycle(sim);
+        st = odin3_sim_cycle(sim);
     } else {
         st = odin3_sim_vcd_cycle(src->vcd, sim, cyc);
     }

@@ -217,7 +217,7 @@ static int prepare(const bench_args *args, odin3_design **design, bench_result *
 /* proc itself, its steps timed. */
 static int run_proc(const bench_args *args, odin3_design *design, bench_result *res) {
     odin3_proc_test_hooks hooks = {NULL, NULL, NULL, &res->steps, on_step};
-    odin3_proc_opts opts = {args->noopt, ODIN3_PROC_STOP_NONE};
+    odin3_proc_opts opts = {args->noopt, ODIN3_PROC_STOP_NONE, false};
     odin3_pass_ctx ctx = {0};
     uint32_t name = 0;
     if (odin3_design_intern(design, odin3_bytes_cstr("bench_proc"), &name) != ODIN3_OK ||

@@ -110,16 +110,29 @@ void odin3_sim_drive_random(odin3_sim *sim, odin3_prng *prng);
  * Runs one cycle with the inputs as set: settle the combinational logic; raise every clock input
  * and send the rising edge (ODIN3_SIM_POSEDGE) to every edge-triggered cell; settle; lower the
  * clocks and send the falling edge (ODIN3_SIM_NEGEDGE); settle. A settle runs each cell's COMB
- * once, in level order (edge-triggered cells first). Allocates nothing and cannot fail; time is
- * linear in the flattened design (three settles plus two edge events per edge-triggered cell).
+ * once, in level order (edge-triggered cells first); the first settle is odin3_sim_settle_events,
+ * so the edge a changed clock-mux select or gate input causes on a derived clock is taken before
+ * the input clocks rise. Allocates nothing; time is linear in the flattened design (three settles
+ * plus two edge events per edge-triggered cell). ODIN3_ERR_CHECK, logged, when a derived clock
+ * never settles (a register that clocks itself); the state is then half-settled and the caller
+ * must stop using the run.
  */
-void odin3_sim_cycle(odin3_sim *sim);
+odin3_status odin3_sim_cycle(odin3_sim *sim);
 
 /*
  * One settle: every cell's COMB once, in level order. The combinational effect of inputs just set
  * shows in the values, no state advances. Allocates nothing and cannot fail.
  */
 void odin3_sim_settle(odin3_sim *sim);
+
+/*
+ * A settle that also takes the edges of derived clocks (a net driven by logic or a register that
+ * clocks an edge-triggered cell) that the inputs just set cause, as a gated clock whose enable
+ * changed or a clock mux whose select changed does in a simulator of events: those cells copy
+ * their inputs and the outputs settle again, until no derived clock changes. Without derived
+ * clocks it is odin3_sim_settle. ODIN3_ERR_CHECK, logged, when the derived clocks never settle.
+ */
+odin3_status odin3_sim_settle_events(odin3_sim *sim);
 
 /*
  * One clock edge: event is ODIN3_SIM_POSEDGE or ODIN3_SIM_NEGEDGE. Sets every clock input bit to

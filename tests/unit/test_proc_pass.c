@@ -306,7 +306,7 @@ static void test_options(void) {
     build("module \\m\n  wire \\a\nend\n", &res);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--bogus"));
     expect_first_error("odin3: error: proc: unknown option '--bogus' (options: --noopt, "
-                       "--stop-after <phase>)");
+                       "--share-selects, --stop-after <phase>)");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--stop-after"));
     expect_first_error("odin3: error: proc: --stop-after needs one of: clean, rmdead, prune, arst");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, pass_run(&res, "proc", "--stop-after mux"));
@@ -315,7 +315,8 @@ static void test_options(void) {
     TEST_ASSERT_EQUAL_STRING("proc: no processes", proc_info());
     const odin3_pass_def *def = odin3_pass_find(odin3_bytes_cstr("proc"));
     TEST_ASSERT_NOT_NULL(def);
-    TEST_ASSERT_EQUAL_STRING("proc [--noopt] [--stop-after clean|rmdead|prune|arst]", def->help);
+    TEST_ASSERT_EQUAL_STRING(
+        "proc [--noopt] [--share-selects] [--stop-after clean|rmdead|prune|arst]", def->help);
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PASS_PROCESSES_OK, def->processes);
     TEST_ASSERT_FALSE(def->wants_ast);
     pb_free(&res);
@@ -401,8 +402,8 @@ static void test_step_f_schedule(void) {
     TEST_ASSERT_EQUAL_UINT32(0, fakes.step_f[module_id(&res, "m2")]);
     TEST_ASSERT_EQUAL_UINT32(0, fakes.step_f[module_id(&res, "m3")]);
     pb_free(&res);
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
-    const odin3_proc_opts stop = {false, ODIN3_PROC_STOP_RMDEAD};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
+    const odin3_proc_opts stop = {false, ODIN3_PROC_STOP_RMDEAD, false};
     const odin3_proc_opts *cases[] = {&noopt, &stop};
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         install_fakes();
@@ -434,7 +435,7 @@ static void test_on_step(void) {
                              trace_of(ONE_PROC_TEXT("m3", ""), NULL, ODIN3_OK));
     /* --noopt has no step F. */
     install_fakes();
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
     TEST_ASSERT_EQUAL_STRING("A+ b e A- B+ b e B- C+ C- D+ b e D- E+ E- ",
                              trace_of(ONE_PROC_TEXT("m3", ""), &noopt, ODIN3_OK));
     /* An error in step A ends the module's run there (and the open step is closed). */
@@ -443,7 +444,7 @@ static void test_on_step(void) {
                              trace_of(ONE_PROC_TEXT("m2", FAIL_ATTR), NULL, ODIN3_ERR_PARSE));
     /* --stop-after has A only. */
     install_fakes();
-    const odin3_proc_opts stop = {false, ODIN3_PROC_STOP_PRUNE};
+    const odin3_proc_opts stop = {false, ODIN3_PROC_STOP_PRUNE, false};
     TEST_ASSERT_EQUAL_STRING("A+ b e A- ", trace_of(ONE_PROC_TEXT("m3", ""), &stop, ODIN3_OK));
 }
 
@@ -497,7 +498,7 @@ static void test_stop_after_reencodes(void) {
     saved_bodies m3_old = save_bodies(&res, "m3");
     odin3_node_id old_first = pb_proc(&res, "m1", 0);
     fakes.promote = true;
-    const odin3_proc_opts opts = {false, ODIN3_PROC_STOP_PRUNE};
+    const odin3_proc_opts opts = {false, ODIN3_PROC_STOP_PRUNE, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &opts, NULL));
     TEST_ASSERT_TRUE(odin3_design_has_processes(res.design));
     TEST_ASSERT_EQUAL_STRING("proc: stopped after prune; 3 processes kept", proc_info());
@@ -520,7 +521,7 @@ static void test_stop_after_identity(void) {
     pb_result res;
     build(k_ok_text, &res);
     saved_bodies before = save_bodies(&res, "m1");
-    const odin3_proc_opts opts = {true, ODIN3_PROC_STOP_CLEAN};
+    const odin3_proc_opts opts = {true, ODIN3_PROC_STOP_CLEAN, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &opts, NULL));
     TEST_ASSERT_EQUAL_UINT32(0, fakes.calls[module_id(&res, "m1")][ODIN3_PROC_PH_RMDEAD]);
     saved_bodies after = save_bodies(&res, "m1");
@@ -838,7 +839,7 @@ static bool budget_probe(budget_case bc, uint64_t limit, odin3_status *st) {
     limits.budget_pins = bc.pins;
     odin3_proc_test_set_limits(&limits);
     odin3_budget_test_set_limit(limit);
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
     *st = run_proc(&res, &noopt, NULL);
     bool changed = proc_count(&res, "m") == 0;
     pb_free(&res);
@@ -892,7 +893,7 @@ static void budget_stop(budget_case bc, const char *at, pb_result *res) {
     limits.budget_pins = bc.pins;
     odin3_proc_test_set_limits(&limits);
     odin3_budget_test_set_limit(limit);
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run_proc(res, &noopt, NULL));
     char want[LOG_TEXT];
     int len = snprintf(want, sizeof want,
@@ -1012,7 +1013,7 @@ static void test_info_line_success(void) {
     pb_result res;
     build(k_adff_latch_text, &res);
     odin3_proc_stats stats;
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &noopt, &stats));
     const char *info = proc_info();
     const char *want = "proc: 2 processes in 1 modules: 0 $dff, 1 $adff, 0 $aldff, 0 $dffsr, "
@@ -1059,7 +1060,7 @@ static void test_step_f_folds(void) {
     odin3_proc_test_set_hooks(NULL);
     pb_result res;
     build(k_adff_latch_text, &res);
-    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE};
+    const odin3_proc_opts noopt = {true, ODIN3_PROC_STOP_NONE, false};
     odin3_proc_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_proc(&res, &noopt, &stats));
     TEST_ASSERT_EQUAL_UINT32(1, reduce_or_of_one(&res));
@@ -1242,8 +1243,8 @@ static void test_docs(void) {
     TEST_ASSERT_EQUAL_INT(0, fclose(file));
     TEST_ASSERT_TRUE(len < DOC_MAX - 1);
     doc_buf[len] = '\0';
-    TEST_ASSERT_NOT_NULL(strstr(
-        doc_buf, "\n| `proc [--noopt] [--stop-after clean\\|rmdead\\|prune\\|arst]` | 2 (2E) |"));
+    TEST_ASSERT_NOT_NULL(strstr(doc_buf, "\n| `proc [--noopt] [--share-selects] [--stop-after "
+                                         "clean\\|rmdead\\|prune\\|arst]` | 2 (2E) |"));
 }
 
 int main(void) {

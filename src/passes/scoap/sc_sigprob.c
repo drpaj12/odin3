@@ -80,7 +80,11 @@ static odin3_status run_vectors(odin3_sim *sim, sp_ctx *ctx, const sc_opts *opts
     }
     for (uint64_t vec = 0; vec < opts->vectors; vec++) {
         odin3_sim_drive_random(sim, &prng);
-        odin3_sim_cycle(sim);
+        if (odin3_sim_cycle(sim) != ODIN3_OK) {
+            odin3_util_free(bits);
+            odin3_util_free(ones);
+            return ODIN3_ERR_CHECK;
+        }
         count_cycle(ctx, n_sig, bits, ones);
     }
     for (uint32_t net = 1; net < nets; net++) {

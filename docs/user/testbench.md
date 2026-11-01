@@ -47,14 +47,28 @@ other than `` `timescale ``.
 
 The simulator is 2-state and cycle-based. The DUT powers on with all state 0 (iverilog starts at
 x), so reset the DUT before printing its outputs. Gate or `#` delays in the DUT are not seen. The
-DUT must have at most one clock input, a primary input of the DUT. Divide by zero gives 0.
+DUT must have at most one clock input, a primary input of the DUT; its registers may be clocked by
+nets derived from it (divided, gated or muxed clocks: `tests/tb/micro/dclk.v`, equal to iverilog), which
+the simulator evaluates after each input change and each edge. Divide by zero gives 0.
 
 Asynchronous resets: `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
 VTR architecture's flip-flop (`.latch`) has no set or reset pin. `sim_tb` runs the lowered netlist, so
 a reset raised between clock edges takes effect at the next edge; iverilog applies it at once. On the
 IR before `lower`, `sim` and `sim_tb` stop at the `$adff` cell. `testbench_gen` holds reset for four
 clock cycles, so its testbenches agree with iverilog. `lower --async error` refuses an async reset
-instead. A testbench cannot use x or z literals (they are refused with a located error).
+instead. This is a known simulator limit, also for a register on a derived clock with an
+asynchronous reset: the `$adff` form of `tests/tb` is not simulated before `lower`, and after `lower` the
+reset is seen at the next edge, so a design that resets between edges differs from iverilog (a counter
+`always @(posedge clk or posedge rst)` with `rst` raised between edges shows its reset one clock late).
+
+Other known limits of derived clocks. A clock that is constant 1 (`wire k = clk | 1'b1;`) never has an
+edge in a 2-state simulator, while iverilog sees x become 1 at time 0 as a rising edge, so one extra
+clocked update happens there only. A derived clock that never settles (a register that clocks itself,
+for example a clock `clk ^ x` for a register `x` toggled by a rising edge of it) stops the run with the
+error "a derived clock of the DUT does not settle" after 256 rounds; the `sim` and `simcheck` passes and
+the simulation API (`step`, `settle`) report it too (ODIN3_ERR_CHECK). Large `case` statements over
+registers (a memory held as registers) are faster with `proc --share-selects`; `proc` suggests it
+in an info line when one case's select is made 64 times. A testbench cannot use x or z literals (they are refused with a located error).
 
 ## Generating a testbench
 

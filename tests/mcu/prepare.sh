@@ -11,14 +11,13 @@
 #     an 8-bit localparam of the generate block. Odin III and Yosys accept the original; the
 #     patch keeps both tools on one source.
 #  3. pll_clock (Altera altpll, no source) is pll_stub.v.
-#  4. iverilog only (<out-dir>/iv/dual_port_BRAM.v): the RAM starts as zeros before $readmemh
-#     overlays the image (a Quartus M9K is zero; iverilog starts at x, the Odin III simulator at 0).
-#     Odin III gets the unpatched file: the 4096-iteration loop makes proc and opt quadratic
-#     (see docs/notes).
-#  5. 8bit_TC.v: the timer is clocked by clk_T0, a mux of the prescaler outputs (a derived clock);
-#     the Odin III simulator takes clocks from primary inputs only. The block is clocked by
-#     `clock` and runs on the rising edge of clk_T0 (seen as clk_T0 & ~clk_T0_q; every cycle for
-#     the unscaled clock). Same source for both tools.
+#  4. <out-dir>/iv/dual_port_BRAM.v (iverilog): the RAM starts as zeros before $readmemh overlays
+#     the image (a Quartus M9K is zero; iverilog starts at x, the Odin III simulator at 0). Odin III
+#     gets the same loop only with a mem-address-bits argument: the loop turns the RAM into
+#     registers, and proc, opt and the elaboration grow with the square of the words per lane
+#     (run.sh uses `proc --share-selects` then; see docs/notes/2026-11-01-initloop-derived-clocks.md).
+#  5. (removed) 8bit_TC.v is unpatched: its timer clock clk_T0, a mux of the prescaler outputs, is a
+#     derived clock, which the Odin III simulator takes since 2026-11-01.
 #  6. optional: the default MEM_ADDRESS_BITS of single_cycle_BRAM_top (14 = 64 KB of RAM).
 set -eu
 up=$1; out=$2; prog=$3; bits=${4:-}
@@ -37,13 +36,8 @@ applied "$out/dual_port_BRAM_byte_en.v" "parameter INIT_FILE_BASE = \"$prog\""
 sed -i 's/\.INIT_FILE({"0"+i,INIT_FILE_BASE})/.INIT_FILE({PFX,INIT_FILE_BASE})/;
         s/^\( *if(INIT_FILE_BASE != "") begin : IF_INIT\)/\1\n    localparam [7:0] PFX = 8'"'"'d48 + i;/' \
     "$out/dual_port_BRAM_byte_en.v"
-sed -i 's/^always @ (posedge clk_T0 or posedge reset)/reg clk_T0_q;\nalways @(posedge clock) clk_T0_q <= clk_T0;\nwire clk_T0_en = (CS0 == 3'"'"'d1) | (clk_T0 \& ~clk_T0_q);\nalways @ (posedge clock or posedge reset)/;
-        s/^else if (CS0 == 1'"'"'b0)/else if (!clk_T0_en) begin end\nelse if (CS0 == 1'"'"'b0)/' \
-    "$out/8bit_TC.v"
 applied "$out/dual_port_BRAM_byte_en.v" "localparam [7:0] PFX = 8'd48 + i;"
 applied "$out/dual_port_BRAM_byte_en.v" ".INIT_FILE({PFX,INIT_FILE_BASE})"
-applied "$out/8bit_TC.v" "wire clk_T0_en"
-applied "$out/8bit_TC.v" "else if (!clk_T0_en) begin end"
 if [ -n "$bits" ]; then
     sed -i "s/parameter MEM_ADDRESS_BITS = 14/parameter MEM_ADDRESS_BITS = $bits/" \
         "$out/single_cycle_BRAM_top.v"
@@ -57,4 +51,7 @@ sed -i 's/^localparam RAM_DEPTH = 1 << ADDR_WIDTH;/&\ninteger zero_k;/;
     "$out/iv/dual_port_BRAM.v"
 applied "$out/iv/dual_port_BRAM.v" "ram[zero_k] = "
 applied "$out/iv/dual_port_BRAM.v" "integer zero_k;"
+if [ -n "$bits" ]; then
+    cp "$out/iv/dual_port_BRAM.v" "$out/dual_port_BRAM.v"
+fi
 echo $files pll_stub.v
