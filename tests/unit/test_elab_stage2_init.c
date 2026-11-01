@@ -565,6 +565,39 @@ static void test_readmemh(void) {
     TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
 }
 
+/* The file name is any constant string: a string parameter, a localparam, a concatenation of
+ * string constants (Yosys simplifies the argument to a constant; NULs from a wider operand drop). */
+static void test_readmemh_string_parameter(void) {
+    read_with_file("sub/init.hex", "module t #(parameter FILE = \"init.hex\") (input [1:0] ra,\n"
+                                   "  output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(FILE, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmemh_string_concat_of_parameters(void) {
+    read_with_file("sub/init.hex", "module t #(parameter BASE = \"hex\") (input [1:0] ra,\n"
+                                   "  output [7:0] q);\n"
+                                   "  localparam NAME = {\"init.\", BASE};\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(NAME, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
+}
+
+static void test_readmemh_nonconstant_file_name_is_an_error(void) {
+    read_with_file("sub/init.hex", "module t(input [1:0] ra, input [7:0] f, output [7:0] q);\n"
+                                   "  reg [7:0] m [0:3];\n"
+                                   "  initial $readmemh(f, m);\n"
+                                   "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, pt_rs.status);
+    et_expect(&pt_rs, ODIN3_LOG_ERROR,
+              "sub/t.v:3:11: error: the first argument of $readmemh must be a constant string");
+}
+
 static void test_readmemb_with_start_and_finish(void) {
     read_with_file("sub/init.bin", "module t(input [1:0] ra, output [7:0] q);\n"
                                    "  reg [7:0] m [0:3];\n"
@@ -1071,6 +1104,9 @@ int main(void) {
     RUN_TEST(test_initial_value_of_a_driven_net);
     RUN_TEST(test_init_bits_cap);
     RUN_TEST(test_readmemh);
+    RUN_TEST(test_readmemh_string_parameter);
+    RUN_TEST(test_readmemh_string_concat_of_parameters);
+    RUN_TEST(test_readmemh_nonconstant_file_name_is_an_error);
     RUN_TEST(test_readmemb_with_start_and_finish);
     RUN_TEST(test_readmem_errors);
     RUN_TEST(test_readmem_dropped_words_warn);
