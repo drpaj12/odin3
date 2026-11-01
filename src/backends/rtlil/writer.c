@@ -7,6 +7,7 @@
 
 #include "ir/celltype.h"
 #include "ir/design.h"
+#include "ir/edit_events.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/proc.h"
@@ -147,6 +148,13 @@ typedef struct attr_ctx {
 static odin3_status put_attr(void *user, uint32_t key_str, const odin3_value *value) {
     attr_ctx *ctx = user;
     rtl_writer *rw = ctx->rw;
+    if (strcmp(odin3_strtab_get(odin3_design_strtab(rw->design), key_str),
+               ODIN3_ATTR_EDIT_EVENTS) == 0 &&
+        value->kind == ODIN3_VAL_STRING &&
+        odin3_edit_events_wellformed(
+            odin3_strtab_get(odin3_design_strtab(rw->design), value->str))) {
+        return rw->st; /* edit events: printed only by the opt-in exports */
+    }
     rw_indent(rw, ctx->indent);
     rw_put(rw, "attribute ");
     rw_name(rw, "attribute", key_str);

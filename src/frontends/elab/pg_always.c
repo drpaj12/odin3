@@ -654,7 +654,8 @@ odin3_status odin3_pg_open(odin3_pg *pg, odin3_ast_id always_node) {
     return pg_start_block(pg);
 }
 
-odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node) {
+/* The block after its scratch variables have their private wires. */
+static odin3_status always_body(odin3_pg *pg, odin3_ast_id always_node) {
     odin3_status st = odin3_pg_open(pg, always_node);
     if (st != ODIN3_OK || (pg->outs.len == 0 && !pg->has_memw)) {
         return st;
@@ -666,4 +667,11 @@ odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node) {
     pg_incomplete(pg);
     odin3_node_id node = {0};
     return odin3_pg_emit(pg, always_node, &node);
+}
+
+odin3_status odin3_pg_always(odin3_pg *pg, odin3_ast_id always_node) {
+    odin3_status st = pg_scratch_enter(pg, always_node);
+    st = st != ODIN3_OK ? st : always_body(pg, always_node);
+    pg_scratch_leave(pg);
+    return st;
 }

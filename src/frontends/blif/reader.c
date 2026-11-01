@@ -7,6 +7,7 @@
 #include "frontends/blif/reader_names.h"
 #include "frontends/hdl_restore.h"
 #include "ir/celltype.h"
+#include "ir/edit_events.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/prov.h"
@@ -1577,12 +1578,38 @@ static odin3_status apply_lib_param(blif_reader *rd, const odin3_blif_line *ln, 
     return st;
 }
 
+/* `.attr odin3_edit <events>` (write_blif --edit-tags) restores the edit events of the previous
+ * cell and makes no attribute; text that is not an event list is read as any other `.attr`. */
+static odin3_status try_edit(blif_reader *rd, const odin3_blif_line *ln, const char *prefix,
+                             bool *applied) {
+    *applied = false;
+    if (strcmp(prefix, ODIN3_BLIF_ATTR_PREFIX) != 0 || ln->count != EXTRA_MIN ||
+        !tok_is(&ln->tokens[1], ODIN3_EDIT_FILE_KEY)) {
+        return ODIN3_OK;
+    }
+    odin3_strbuf raw;
+    odin3_strbuf_init(&raw);
+    odin3_status st = odin3_edit_events_decode(ln->tokens[2], &raw);
+    if (st == ODIN3_OK) {
+        st = odin3_edit_events_set_raw(rd->module, (odin3_objref){ODIN3_OBJ_NODE, rd->last.v},
+                                       (odin3_bytes){raw.data, raw.len});
+        *applied = st == ODIN3_OK;
+    }
+    if (st == ODIN3_ERR_INVALID_ARG) { /* not an event list: read as any other .attr */
+        odin3_log(ODIN3_LOG_WARN, "read_blif: odin3_edit is not an edit event list; kept as a "
+                                  "plain attribute");
+        st = ODIN3_OK;
+    }
+    odin3_strbuf_free(&raw);
+    return rd_fail(rd, st);
+}
+
 /* `.param` on a library cell is applied; true in *applied then (no attribute). */
 static odin3_status try_param(blif_reader *rd, const odin3_blif_line *ln, const char *prefix,
                               bool *applied) {
     *applied = false;
     return strcmp(prefix, ODIN3_BLIF_PARAM_PREFIX) == 0 ? apply_lib_param(rd, ln, applied)
-                                                        : ODIN3_OK;
+                                                        : try_edit(rd, ln, prefix, applied);
 }
 
 /* With --hdl-locs, `.attr src` (value joined in rd->scratch) is restored on the previous cell

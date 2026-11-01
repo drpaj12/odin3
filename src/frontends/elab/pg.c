@@ -114,6 +114,9 @@ void odin3_pg_destroy(odin3_pg *pg) {
     odin3_u64map_destroy(pg->kind_head);
     odin3_vec_free(&pg->kind_more);
     odin3_vec_free(&pg->fwires);
+    odin3_vec_free(&pg->scratch_w);
+    odin3_vec_free(&pg->scratch_old);
+    odin3_u64map_destroy(pg->scratch);
     odin3_u64map_destroy(pg->loopout);
     odin3_u64map_destroy(pg->tvis);
     vecs_free(pg);
@@ -236,6 +239,8 @@ odin3_status odin3_pg_create(odin3_elab2 *e2, odin3_pg **out) {
     pg->kind_head = odin3_u64map_create(0);
     odin3_vec_init(&pg->kind_more, sizeof(pg_kind_rec));
     odin3_vec_init(&pg->fwires, sizeof(pg_fwire));
+    odin3_vec_init(&pg->scratch_w, sizeof(pg_scratch_w));
+    odin3_vec_init(&pg->scratch_old, sizeof(pg_scratch_old));
     odin3_status st =
         pg->kinds != NULL && pg->kind_at != NULL && pg->mixed_seen != NULL && pg->kind_head != NULL
             ? pg_block_reset(pg)

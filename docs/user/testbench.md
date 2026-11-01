@@ -36,6 +36,13 @@ The simulator is 2-state and cycle-based. The DUT powers on with all state 0 (iv
 x), so reset the DUT before printing its outputs. Gate or `#` delays in the DUT are not seen. The
 DUT must have at most one clock input, a primary input of the DUT. Divide by zero gives 0.
 
+Asynchronous resets: `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
+VTR architecture's flip-flop (`.latch`) has no set or reset pin. `sim_tb` runs the lowered netlist, so
+a reset raised between clock edges takes effect at the next edge; iverilog applies it at once. On the
+IR before `lower`, `sim` and `sim_tb` stop at the `$adff` cell. `testbench_gen` holds reset for four
+clock cycles, so its testbenches agree with iverilog. `lower --async error` refuses an async reset
+instead. A testbench cannot use x or z literals (they are refused with a located error).
+
 ## Generating a testbench
 
 ```

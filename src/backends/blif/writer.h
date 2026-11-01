@@ -36,6 +36,7 @@ typedef struct odin3_blif_write_opts {
     bool gates_as_names;  /* PLAIN only: gate cells as `.names`, library state cells as `.latch`
                              (gatemap spec 7, G-8); see odin3_blif_write_with */
     odin3_prov_map_mode prov_map; /* HASH only: the name map is version 2 (V1.2.0 3.5) */
+    bool edit_tags;               /* PLAIN only: `.attr odin3_edit` per cell (edit-gaps 2.3) */
 } odin3_blif_write_opts;
 
 #define ODIN3_BLIF_VTR_DEFAULT_K 6U /* k6_frac_N10_frac_chain_mem32K_40nm and EArch */

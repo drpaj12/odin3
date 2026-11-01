@@ -1,5 +1,6 @@
 /* emit.c — low-level text, bit, value and provenance output for the Yosys JSON writer. */
 #include "backends/json/jw.h"
+#include "ir/edit_events.h"
 #include "ir/prov.h"
 #include "util/log.h"
 
@@ -459,6 +460,29 @@ static void put_prov(jw *out, jw_list *list, odin3_prov_id prov) {
     jw_close(out, &inner);
 }
 
+/* `"odin3_edit": "added:tag,..."` for a cell or net with edit events (the same text as BLIF). */
+static void put_edit_events(jw *out, jw_list *list, odin3_objref obj) {
+    const char *raw = obj.kind == ODIN3_OBJ_NODE || obj.kind == ODIN3_OBJ_NET
+                          ? odin3_edit_events_raw(out->module, obj)
+                          : NULL;
+    if (raw == NULL) {
+        return;
+    }
+    odin3_strbuf token;
+    odin3_strbuf_init(&token);
+    odin3_status st = odin3_edit_events_encode(raw, &token);
+    if (st == ODIN3_OK && token.len > 0) {
+        jw_key(out, list, ODIN3_EDIT_FILE_KEY);
+        jw_string(out, (odin3_bytes){token.data, token.len});
+    } else if (st == ODIN3_ERR_INVALID_ARG) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "write_json: edit events of an object are malformed; not written");
+    } else if (st != ODIN3_OK) {
+        out->status = st;
+    }
+    odin3_strbuf_free(&token);
+}
+
 void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov) {
     if (!out->odin3_keys || out->status != ODIN3_OK) {
         return;
@@ -471,6 +495,7 @@ void jw_odin3_keys(jw *out, jw_list *list, odin3_objref obj, odin3_prov_id prov)
         jw_key(out, list, "odin3_level");
         jw_fmt(out, "%lld", (long long)level->i);
     }
+    put_edit_events(out, list, obj);
     if (odin3_prov_get(out->design, prov) != NULL) {
         put_prov(out, list, prov);
     }

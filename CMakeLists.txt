@@ -306,6 +306,7 @@ add_library(odin3_core OBJECT
     src/ir/pinpool.c
     src/ir/wire.c
     src/ir/attr.c
+    src/ir/edit_events.c
     src/ir/prov.c
     src/ir/opclass.c
     src/ir/construct.c
@@ -422,6 +423,7 @@ add_library(odin3_core OBJECT
     src/frontends/elab/pg_case.c
     src/frontends/elab/pg_emit.c
     src/frontends/elab/pg_loop.c
+    src/frontends/elab/pg_scratch.c
     src/frontends/elab/pg_scan.c
     src/frontends/elab/pg_memw.c
     src/frontends/elab/pg_init.c
@@ -2256,6 +2258,19 @@ if(BUILD_TESTING)
     target_compile_definitions(test_edit PRIVATE ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit")
     add_test(NAME test_edit COMMAND test_edit)
     set_tests_properties(test_edit PROPERTIES LABELS unit)
+    add_executable(test_edit_gaps tests/unit/test_edit_gaps.c)
+    target_link_libraries(test_edit_gaps PRIVATE libodin3 unity odin3_flags)
+    target_compile_definitions(test_edit_gaps PRIVATE
+                               ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit_gaps"
+                               ODIN3_EDIT_GOLDEN="${PROJECT_SOURCE_DIR}/tests/golden/edit_tags")
+    add_test(NAME test_edit_gaps COMMAND test_edit_gaps)
+    set_tests_properties(test_edit_gaps PROPERTIES LABELS unit)
+    add_executable(test_edit_oom tests/unit/test_edit_oom.c)
+    target_include_directories(test_edit_oom PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(test_edit_oom PRIVATE odin3_core unity odin3_flags)
+    target_compile_definitions(test_edit_oom PRIVATE ODIN3_TEST_TMP="${PROJECT_BINARY_DIR}/test_edit_oom")
+    add_test(NAME test_edit_oom COMMAND test_edit_oom)
+    set_tests_properties(test_edit_oom PROPERTIES LABELS unit)
     add_executable(test_sim_abi tests/unit/test_sim_abi.c)
     target_link_libraries(test_sim_abi PRIVATE libodin3 unity odin3_flags)
     target_compile_definitions(test_sim_abi PRIVATE ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim"
@@ -3778,7 +3793,7 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # processes and Yosys's own, through one Yosys back end, are equivalent. Exit 77 (skip)
         # when an ASan child cannot be capped (no systemd-run).
         add_test(NAME elab_proc_bridge_smoke
-            COMMAND sh -c "for f in t7 t8 qplus1; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
+            COMMAND sh -c "for f in t7 t8 qplus1 scratch; do \"$0\" --odin3 \"$1\" --yosys \"$2\" --equiv-check \"$3\" --top t \"$4/$f.v\" || exit $?; done"
                     ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-equiv
                     $<TARGET_FILE:odin3> ${ODIN3_YOSYS055}
                     ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check

@@ -2,6 +2,7 @@
 #include "backends/common/attrs.h"
 
 #include "frontends/blif/attrs.h"
+#include "ir/edit_events.h"
 
 #include <string.h>
 
@@ -32,13 +33,22 @@ static void blif_value(odin3_wattr *attr, const odin3_strtab *tab, const odin3_v
     }
 }
 
+/* The edit events: their key and a well-formed event list (anything else is a user attribute). */
+static bool is_edit_events(const odin3_strtab *tab, odin3_bytes key, const odin3_value *value) {
+    return key.len == strlen(ODIN3_ATTR_EDIT_EVENTS) &&
+           memcmp(key.ptr, ODIN3_ATTR_EDIT_EVENTS, key.len) == 0 &&
+           value->kind == ODIN3_VAL_STRING &&
+           odin3_edit_events_wellformed(odin3_strtab_get(tab, value->str));
+}
+
 odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
                                  const odin3_value *value) {
     const char *name = odin3_strtab_get(tab, key_str);
     odin3_bytes key = {name != NULL ? name : "", odin3_strtab_len(tab, key_str)};
     odin3_wattr attr = {ODIN3_WATTR_ATTRIBUTE, ODIN3_WATTR_VALUE, key, {NULL, 0}, value, false};
-    if (key.len == strlen(ODIN3_BLIF_ATTR_EXTRAS) &&
-        memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) {
+    if ((key.len == strlen(ODIN3_BLIF_ATTR_EXTRAS) &&
+         memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) ||
+        is_edit_events(tab, key, value)) {
         attr.role = ODIN3_WATTR_SKIP;
     } else if (strip_prefix(key, ODIN3_BLIF_ATTR_PREFIX, &attr.key)) {
         blif_value(&attr, tab, value);

@@ -116,6 +116,10 @@ of the pass as its objective. Writing the map again after an unchanged read-back
 Every IR object carries provenance. Where the writer can express it, so does the file:
 
 - `write_blif --src-attr` writes the HDL locations of a cell as `.attr src "file:line.col-line.col"`.
+- `write_blif --edit-tags` (plain dialect) writes the edit events of a cell, made by the netlist editing API
+  (`docs/user/edit.md`), as `.attr odin3_edit added:trojan:t1,rewired:trojan:t1`; `write_json --odin3` writes
+  the same text as the member `"odin3_edit"` of a cell or net. `read_blif` and `read_json` restore them. Neither
+  is written by default.
 - `write_json` writes a `src` attribute on modules and objects; `read_json` turns it back into
   provenance (`--keep-src-attr` keeps it as a plain attribute too).
 - `write_verilog` writes `(* src = "..." *)` attributes and a trailing `//` comment per line, as the
