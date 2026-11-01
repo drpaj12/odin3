@@ -53,8 +53,8 @@ therefore the same 132,446 flip-flops.
    `if (cycle == N) $finish;` fired on the wrong cycle or never.
 3. Simulator: a clock passing through a BLIF identity buffer (`.names i o / 1 1`, which
    `write_blif` writes for a module whose output is its input, here `pll_clock`) was rejected as
-   "not a primary input". Identity cells (`$_BUF_`, one-input identity `$lut`, `$sop` row `1 1`)
-   now share one slot.
+   "not a primary input". The clock check now follows identity cells (`$_BUF_`, one-input identity `$lut`, `$sop` row `1 1`)
+   back to the input (the cells stay in the simulation).
 
 ## Found, not fixed
 
