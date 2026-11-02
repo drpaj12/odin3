@@ -4,11 +4,13 @@
 `IMAGE/` its figures. Gaps that need measurements or Peter's input are marked `\todo{…}` in the
 text and print as **[TODO: …]**.
 
-The paper has two parts. Part I (Sections I to VI, then the references) is the 8-page FCCM paper:
+The paper has two parts. Part I (Sections I to VIII, then the references) is the 8-page FCCM paper; its body is identical to the double-blind version (`odin3_blind.tex`, made by `make_blind.py`), which only changes names, authors and URLs:
 the "final frontier" story of Odin, Odin II and Odin III, background, architecture, results,
 discussion and conclusion. Part II (Sections VII to XVI, after the references) describes the system
-in detail for its users after v1.0. Appendices A to C (after Part II) are records of the build method, the v1.0 phases and the
-releases after v1.0 (cleanup of 2026-11-02); Appendix D is the research log.
+in detail for its users after v1.0 and carries the Yggdrasil III tree figure (open version only). Appendices A to C (after Part II) are records of the build method, the v1.0 phases and the
+releases after v1.0 (cleanup of 2026-11-02); the next two appendices keep the Part I text that was shortened or moved to fit 8 pages and the history of the Part I experiments; the last is the research log.
+
+The Background defines each term in running prose (no glossary); `terms.json` lists the terms, `make_glossary.py` writes `terms.md` from the `% def:<key>` tags, and `check_terms.py --tex odin3.tex` must report 0 findings. The Experiments are structured arguments (hypothesis, implication, experiment, methodology, measurements, interpretation, conclusion with the verdict).
 
 ## Figures
 

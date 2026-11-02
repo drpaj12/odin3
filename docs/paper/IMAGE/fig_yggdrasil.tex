@@ -36,7 +36,7 @@
       (\tx,0.3) .. controls (\tx,-1.2) and (\gx,-1.0) .. (\gx,-2.45) .. controls (\gx,-3.3) and (\wx,-3.2) .. (\wx,-4.0);
   }
   \foreach \wx/\name/\gloss/\items/\feeds in {
-    -5.9/Mimisbrunnr/{Mimir's well of wisdom: prior work, benchmarks}/{VerilogEval, Gate-Breaker, HAL (DANA),\\CIRCT, TPEKO, LogikBench, fusesoc-cores}/{Loki~III, The Norns~III, Odin~III},
+    -5.9/Mimisbrunnr/{Mimir's well of wisdom: prior work and benchmark sources}/{VerilogEval, Gate-Breaker, HAL (DANA),\\CIRCT, TPEKO, LogikBench, fusesoc-cores\\(the benchmarks themselves live in M\'{\i}mir~III)}/{M\'{\i}mir~III, Loki~III, The Norns~III, Odin~III},
     0.0/Urdarbrunnr/{the Norns' well: FPGA CAD and its views}/{VTR and VPR, nextpnr,\\DREAMPlaceFPGA, OpenPARF, netlistsvg}/{The Norns~III, Wyrd~III},
     5.9/Hvergelmir/{the spring of all rivers: synthesis sources}/{Yosys, ABC, slang, mockturtle,\\Wildebeest scripts, FuseSoC and Edalize}/{Odin~III and the oracle forest}}{
     \node[ellipse, draw=o3wel8, fill=o3wel1, line width=0.8pt, minimum width=56mm, minimum height=30mm,
@@ -84,29 +84,31 @@
     -- (1.7,7.5) .. controls (1.95,6.0) and (1.8,4.5) .. (1.85,2.5)
     .. controls (1.9,1.3) and (1.6,0.7) .. (2.3,0.1) -- cycle;
   \node[font=\small\bfseries, text=white] at (0,6.95) {Odin III};
-  \foreach \y/\t [count=\i] in {6.1/parse, 5.3/elaborate, 4.5/{proc, opt}, 3.7/partial map,
+  \node[font=\tiny, text=white, align=center, text width=33mm, inner sep=0pt] at (0,6.55)
+    {graph features: graphlets, SCOAP\\simulation: \texttt{sim\_tb}, \texttt{testbench\_gen}};
+  \foreach \y/\t [count=\i] in {6.0/parse, 5.25/elaborate, 4.5/{proc, opt}, 3.7/partial map,
                                 2.9/lower, 2.1/ABC, 1.2/{write BLIF, VTR}}{
     \node[stp] (st\i) at (0,\y) {\t};
   }
   \foreach \a/\b in {1/2, 2/3, 3/4, 4/5, 5/6, 6/7}{
     \draw[->, draw=o3brn3, line width=0.5pt] (st\a.south) -- (st\b.north);
   }
-  % ---- the fruit: Mimir III hangs from the canopy ----------------------------------------------------
+  % ---- the fruit: Mimir III hangs from the canopy (it holds the benchmark registry) ----------------------------------------------------
   \foreach \x/\y in {4.9/6.75, 6.0/6.5, 7.1/6.75}{
     \draw[line width=1.6pt, draw=o3brn5, line cap=round] (\x,8.2) -- (\x,\y+0.35);
     \node[fruit] at (\x,\y) {};
     \fill[o3fru1] (\x-0.1,\y+0.1) circle (0.07);
   }
   \node[font=\scriptsize, text width=62mm, align=center, inner sep=1pt, anchor=north] at (6.0,6.05)
-    {\textbf{\small M\'{\i}mir~III}\\\odinsub{the knowledge base: the dataset harvested from every run}};
+    {\textbf{\small M\'{\i}mir~III}\\\odinsub{the knowledge base: the dataset, benchmark registry and blobs, harvested from every run}};
   % ---- canopy pieces ----------------------------------------------------------------------------
   \node[leaf, text width=22mm, minimum height=10mm] (wyrd) at (-4.8,9.4) {\textbf{Wyrd~III}\\\odinsub{experiments, GUI}};
   \node[leaf, text width=30mm, minimum height=10mm] (mid) at (5.6,9.4) {\textbf{Midgard~III}\\\odinsub{(verilogTown)}};
   \draw[->, line width=1.6pt, draw=o3grn8] (wyrd.east) -- (mid.west)
-    node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{Bifrost~III}\\\odinsub{simulation bridge}};
+    node[pos=0.5, box, draw=o3grn8, fill=o3grn1, text width=28mm, minimum height=9mm] {\textbf{Bifrost~III}\\\odinsub{simulation bridge, testbench mode}};
   % ---- tools and experiments on side branches ---------------------------------------------------------
-  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.4) {\textbf{Loki~III}\\\odinsub{Tool \& Experiment: reverse engineering}};
-  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.7) {\textbf{Leman~Russ~III}\\\odinsub{Tool \& Experiment: HT detection tools}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lok) at (-6.3,6.4) {\textbf{Loki~III}\\\odinsub{Tool \& Experiment: reverse engineering (reads graph features)}};
+  \node[leaf, text width=40mm, minimum height=11mm] (lr)  at (-6.3,4.7) {\textbf{Leman~Russ~III}\\\odinsub{Tool \& Experiment: HT benchmarks and detection baselines}};
   \node[leaf, text width=40mm, minimum height=11mm] (nor) at (-6.3,3.0) {\textbf{The Norns~III}\\\odinsub{Tool \& Experiment: Placement with Provenance}};
   \node[leaf, text width=40mm, minimum height=11mm] (ver) at (-6.3,1.3) {\textbf{Verdandi~III}\\\odinsub{Tool \& Experiment: the Micro through the Macro}};
 \end{tikzpicture}
