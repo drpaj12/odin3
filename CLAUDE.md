@@ -112,8 +112,9 @@ ADRs, IR, passes, oracles, phase checklists.
 
 ## Where things are going
 
-Version 1.2.0 is ready to tag, not released (the tag is Peter's; notes `docs/V1.2.0.md`: provenance as a two-way
-granularity DAG, D14, ABI 7). Version 1.1.1 is the latest release (tag `v1.1.1`, 2026-10-25, notes `docs/V1.1.1.md`: critical-path
+Version 1.3.0 is the current version (tag on the merge commit of the release PR; changes in `CHANGELOG.md`; ABI still 7).
+Version 1.2.0 (tag `v1.2.0`, notes `docs/V1.2.0.md`: provenance as a two-way
+granularity DAG, D14, ABI 7). Version 1.1.1 (tag `v1.1.1`, 2026-10-25, notes `docs/V1.1.1.md`: critical-path
 attribution to HDL, `odin3-timing`; ABI still 6). Version 1.1.0 (tag `v1.1.0`, 2026-10-24, notes
 `docs/V1.1.0.md`) rolled up v1.0.1 to v1.0.5 and added SystemVerilog. Version 1.0.0 (tag `v1.0.0`, 2026-10-21) closed Phases 0
 to 7 (`docs/PHASE*.md`, `docs/RELEASE-NOTES-1.0.md`). The manual is published from `docs/user/` to

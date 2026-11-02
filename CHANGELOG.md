@@ -6,6 +6,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+## 1.3.0 (2026-11-02)
+
+**C ABI stays 7**: the public header changed since 1.2.0 only by additive exports (`odin3_edit_*`,
+`odin3_simulation_set_toggle_counting`, `_get_toggles`, `_run_vectors`, `odin3_graphlets_count`), which need no bump
+(repo precedent). Version strings are 1.3.0.
+
 ### Added
 
 - `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its
