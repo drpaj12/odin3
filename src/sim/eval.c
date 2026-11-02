@@ -210,6 +210,73 @@ bool odin3_sim_input_is_clock(const odin3_sim *sim, odin3_sim_bit at) {
     return bit_index(sim->in_ports, sim->n_in_ports, at, &index) && sim->in_clock[index] != 0;
 }
 
+uint32_t odin3_sim_global_clock_cells(const odin3_sim *sim, const char **first) {
+    if (first != NULL) {
+        *first = sim->gclk_label;
+    }
+    return sim->n_gclk;
+}
+
+/* One edge of the input bit `input`. */
+typedef struct input_edge {
+    uint32_t input;
+    odin3_sim_event event;
+} input_edge;
+
+/* Sends the edge to the cells that its input bit clocks directly. */
+static void send_input(odin3_sim *sim, input_edge edge) {
+    for (uint32_t i = 0; i < sim->n_edge; i++) {
+        uint32_t cell = sim->order[i];
+        if (sim->clk_in != NULL && sim->clk_in[cell] == edge.input) {
+            send(sim, &sim->cells[cell], edge.event);
+        }
+    }
+}
+
+/* The input bit numbers of edges[0..count) in index (room for count); false for an event or bit
+ * odin3_sim_clock_edges refuses. */
+static bool edge_inputs(const odin3_sim *sim, const odin3_sim_clock_event *edges, uint32_t count,
+                        uint32_t *index) {
+    for (uint32_t k = 0; k < count; k++) {
+        if ((edges[k].event != ODIN3_SIM_POSEDGE && edges[k].event != ODIN3_SIM_NEGEDGE) ||
+            !bit_index(sim->in_ports, sim->n_in_ports, edges[k].at, &index[k]) ||
+            sim->in_clock[index[k]] == 0) {
+            return false;
+        }
+        for (uint32_t before = 0; before < k; before++) {
+            if (index[before] == index[k]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+odin3_status odin3_sim_clock_edges(odin3_sim *sim, const odin3_sim_clock_event *edges,
+                                   uint32_t count) {
+    enum { MAX_EDGES = 64 };
+    uint32_t index[MAX_EDGES];
+    if (count > MAX_EDGES || !edge_inputs(sim, edges, count, index)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    for (uint32_t k = 0; k < count; k++) {
+        sim->values[sim->in_bits[index[k]]] = edges[k].event == ODIN3_SIM_POSEDGE ? 1 : 0;
+    }
+    if (sim->n_dclk > 0) {
+        odin3_sim_settle(sim);
+    }
+    for (uint32_t k = 0; k < count; k++) {
+        send_input(sim, (input_edge){index[k], edges[k].event});
+    }
+    if (sim->n_dclk > 0) {
+        (void)send_derived(sim);
+        odin3_sim_settle(sim);
+        return derived_rounds(sim);
+    }
+    odin3_sim_settle(sim);
+    return ODIN3_OK;
+}
+
 odin3_status odin3_sim_set_input(odin3_sim *sim, odin3_sim_bit at, bool value) {
     uint32_t index = 0;
     if (!bit_index(sim->in_ports, sim->n_in_ports, at, &index) || sim->in_clock[index] != 0) {

@@ -80,6 +80,10 @@ void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3
  */
 void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cell, uint32_t slot);
 
+/* Writes "`<type>` node `<hierarchical name>`" of flat cell into out (size bytes). */
+void odin3_sim_cell_label(const odin3_sim_builder *bld, const odin3_sim_flat *cell, char *out,
+                          size_t size);
+
 /* A final slot and a count (a number of primary inputs). */
 typedef struct odin3_sim_net_count {
     uint32_t slot;

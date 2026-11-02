@@ -8,6 +8,8 @@
 
 #include "ir/design.h"
 #include "odin3/odin3.h"
+#include "sim/signals.h"
+#include "sim/sim.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -55,7 +57,8 @@ typedef enum {
     E_UN,
     E_BIN,
     E_COND,
-    E_SYS
+    E_SYS,
+    E_HIER /* read of a DUT signal by hierarchical path: var = instance, num = signal ID */
 } tb_ekind;
 
 typedef struct tb_expr {
@@ -137,6 +140,8 @@ typedef struct tb_inst {
     tb_conn *conns;
     uint32_t nconns;
     uint32_t line;
+    odin3_sim *sim; /* the DUT's simulator, built on first use (parse or run), owned here */
+    odin3_sim_signals *sigs; /* its signal table, built with the first hierarchical read */
 } tb_inst;
 
 typedef struct tb_assign {
@@ -163,6 +168,8 @@ typedef struct tb_module {
     uint32_t nallocs, cap_allocs;
     uint64_t time_scale;         /* timescale unit / precision (power of ten), for %t */
     char timescale[TB_NAME];     /* VCD $timescale, from `timescale ("1 ns" when absent) */
+    bool saw_hier;               /* parse: the source has a hierarchical name */
+    odin3_design *design;        /* the design the DUTs come from; NULL: no hierarchical reads */
     FILE *out;                   /* $display output (fd 1) */
     FILE *files[TB_MAX_FILES];   /* $fopen descriptors 3.. */
     const char *const *plusargs; /* $test$plusargs and $value$plusargs read these (tb_options) */
@@ -173,6 +180,7 @@ typedef struct tb_module {
 typedef struct tb_source {
     const char *file;
     const char *text;
+    odin3_design *design; /* the DUTs' design, for hierarchical reads; may be NULL */
 } tb_source;
 
 /* Parses src and picks the top: name, or the first module when NULL.

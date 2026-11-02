@@ -3054,6 +3054,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_sim_tb_conns
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(sim_tb_conns_flow PROPERTIES LABELS tools)
+    # sim_tb: several independent clock inputs on a DUT, and read-only hierarchical references.
+    add_test(NAME sim_tb_hier_flow
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_sim_tb_hier
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_tb_hier_flow PROPERTIES LABELS tools)
     # sim_tb $test$plusargs / $value$plusargs (--plusarg) and the lazy generate-branch check.
     add_test(NAME sim_tb_plusargs
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

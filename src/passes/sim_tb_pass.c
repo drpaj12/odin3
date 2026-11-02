@@ -138,7 +138,7 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         return ODIN3_ERR_IO;
     }
     tb_module *tb = NULL;
-    tb_source src = {parsed.file, text};
+    tb_source src = {parsed.file, text, design};
     st = tb_parse(&src, parsed.top[0] != '\0' ? parsed.top : NULL, &tb);
     free(text);
     if (st != ODIN3_OK) {
