@@ -61,12 +61,17 @@ for pat, rep in [(r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\
                  (r"; Part~II, Sec\.~\\ref\{sec:background-detail\}\)", ")"),
                  (r" Part~II gives the measured table\.", ""),
                  (r"; Part~II explains each method\.", "."),
-                 (r" \(Appendix~A\)", " (the research log)"),
-                 (r"A failed one is a line in the research log \(the research log\) and the Discussion\.",
+                 (r" \(Appendix~\\ref\{sec:(?:register|appmethod|releases|status)\}\)", ""),
+                 (r"; Appendix~\\ref\{sec:[a-z]+\}", ""),
+                 (r" Appendix~\\ref\{sec:releases\} gives the record by release\.", ""),
+                 (r"A failed one is a line in the research log and the Discussion\.",
                   "A failed one is reported in the Discussion."),
                  (r"\(Sec\.~\\ref\{sec:abi\}\)", "")]:
     src, n = re.subn(pat, rep, src)
     print("blind pattern", n, pat[:50])
+cut("Table~\\ref{tab:didnot} lists", "\\emph{What was not measured.}", "")
+cut("\\subsection{The platform features of v1.3.0}", "\\subsection{Odin III against Odin II and Yosys}", "")
+cut("\\item the platform features added since v1.0:", "\\item an account of the build with a Dark Factory", "")
 if "Part~II" in src:
     sys.exit("Part~II left: " + src[src.index("Part~II") - 80:src.index("Part~II") + 60])
 # ---- FCCM page budget: 8 pages plus references. The open version keeps everything. --------------
@@ -136,7 +141,7 @@ cut("The same boundary is how AI tools attach.", "\n\\subsection{Odin III agains
     "No hypothesis tests the ABI itself here; the suite papers use it.\n")
 cut("Its limits are the ones stated in the Introduction.", "\n\\begin{table}[t]\n\\caption{Agent cost of Odin~III v1.0", "")
 sub(" Active time passed 20\\,h on six of the 14 days because agents worked through the night.", "")
-sub(" Hash names still depend on the directory of the design. The ABI keeps attributes as strings, node IDs are module-local, and there are no bulk readers.", "")
+sub(" The ABI keeps attributes as strings, node IDs are module-local, and there are no bulk readers. Hash names no longer depend on the build, and since \\code{odin3-flow} passes design paths relative to their common directory they do not depend on the directory either.", "")
 sub(": Phase~3 closed on the existing M2 and M3 data, because the front end to elaboration is the priority (PHASE3 decision 58).", ".")
 cut("\\emph{What was not measured.}", "What this means for the field", "")
 # authors and URLs
