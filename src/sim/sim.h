@@ -156,6 +156,34 @@ odin3_status odin3_sim_settle_events(odin3_sim *sim);
 odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
 
 /*
+ * The number of edge-triggered cells that have no clock pin (a `$_FF_`, e.g. from a BLIF `.latch`
+ * with no control): the clock they hang on is global, so they follow odin3_sim_clock_edge and
+ * odin3_sim_cycle but no single clock input of odin3_sim_clock_edges. *first, when not NULL, gets
+ * the label of the first one (type and node name), valid as long as sim lives; "" for none.
+ */
+uint32_t odin3_sim_global_clock_cells(const odin3_sim *sim, const char **first);
+
+/* One edge of one clock input bit. */
+typedef struct odin3_sim_clock_event {
+    odin3_sim_bit at;
+    odin3_sim_event event;
+} odin3_sim_clock_event;
+
+/*
+ * Edges of single clock inputs, together: like odin3_sim_clock_edge, but each event sets only its
+ * own input bit (which must be a clock, see odin3_sim_input_is_clock) and reaches only the
+ * edge-triggered cells that bit clocks directly (and the cells on derived clocks that the edges
+ * change). The other clock inputs keep their values, so several clocks of a design run
+ * independently. All events of one call act at the same instant: the cells take their inputs as
+ * settled before the call, whichever clock they hang on, and the design settles once at the end,
+ * as the NBA region of one time step does. Name a clock bit once per call. ODIN3_ERR_INVALID_ARG
+ * (not logged, nothing changed) for an event that is not a POSEDGE or NEGEDGE, a bit that is not a
+ * clock input, or a bit named twice. Allocates nothing.
+ */
+odin3_status odin3_sim_clock_edges(odin3_sim *sim, const odin3_sim_clock_event *edges,
+                                   uint32_t count);
+
+/*
  * Returns the simulator to its state right after the build: every value (inputs included, clocks
  * low) and state bit 0, the INIT event to every sequential cell, one settle. Allocates nothing.
  */

@@ -35,11 +35,14 @@ typedef struct parser {
     uint32_t pos;
     const char *file;
     bool failed;
-    size_t efloor;     /* expression engine: context stack height at entry */
-    bool primary_only; /* expression engine: stop after one primary */
-    odin3_vec ents;    /* xent: open expression contexts */
-    odin3_vec vals;    /* tb_expr *: finished operands */
-    odin3_vec frames;  /* sframe: open compound statements */
+    size_t efloor;      /* expression engine: context stack height at entry */
+    bool primary_only;  /* expression engine: stop after one primary */
+    odin3_vec ents;     /* xent: open expression contexts */
+    odin3_vec vals;     /* tb_expr *: finished operands */
+    odin3_vec frames;   /* sframe: open compound statements */
+    bool lenient;       /* first pass: a hierarchical name is a placeholder, nothing is resolved */
+    bool saw_hier;      /* a hierarchical name was met */
+    uint32_t next_inst; /* the instance slot the next instance item fills (second pass) */
 } parser;
 
 static const tb_tok *cur(const parser *pr) {
@@ -450,7 +453,106 @@ static bool begin_sys(parser *pr, bool *want) {
     return call->list != NULL && sys_finish(pr, call) && push_val(pr, call);
 }
 
+/* --- hierarchical reads of DUT signals: `inst.sub.sig` and `inst.mem[3]` (constant indices) --- */
+
+enum { HIER_PATH = 256 };
+
+static int find_inst(const parser *pr, const char *name) {
+    for (uint32_t i = 0; i < pr->tb->ninsts; i++) {
+        if (strcmp(pr->tb->insts[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* Appends text to path (NUL-terminated, HIER_PATH bytes); false when it does not fit. */
+static bool path_add(char *path, const char *text) {
+    size_t used = strlen(path);
+    size_t add = strlen(text);
+    if (used + add >= HIER_PATH) {
+        return false;
+    }
+    memcpy(path + used, text, add + 1U);
+    return true;
+}
+
+/* `.name` (the "." is read): appends it to path. */
+static bool hier_name(parser *pr, char *path) {
+    char piece[TB_NAME + 2U];
+    if (cur(pr)->kind != TK_ID) {
+        return false;
+    }
+    (void)snprintf(piece, sizeof piece, "%s%s", path[0] != '\0' ? "." : "", cur(pr)->text);
+    pr->pos++;
+    return path_add(path, piece);
+}
+
+/* `[number]` (the "[" is read): appends it to path. */
+static bool hier_index(parser *pr, char *path) {
+    char piece[TB_NAME + 2U];
+    if (cur(pr)->kind != TK_NUM || cur(pr)->sized) {
+        return false;
+    }
+    (void)snprintf(piece, sizeof piece, "[%llu]", (unsigned long long)cur(pr)->num);
+    pr->pos++;
+    if (!is_op(pr, "]")) {
+        return fail(pr, "hierarchical name (name.name[number], constant indices only; "
+                        "part-selects are not supported)");
+    }
+    pr->pos++;
+    return path_add(path, piece);
+}
+
+/* After `inst`: reads `.name` components and `[number]` indices into path (the part after the
+ * instance name, as the DUT's signal table spells it). */
+static bool hier_path(parser *pr, char *path) {
+    bool ok = true;
+    while (ok && (is_op(pr, ".") || is_op(pr, "["))) {
+        bool dot = is_op(pr, ".");
+        pr->pos++;
+        ok = dot ? hier_name(pr, path) : hier_index(pr, path);
+    }
+    return ok || fail(pr, "hierarchical name (name.name[number], constant indices only)");
+}
+
+/* `inst.path`: a read of a signal of the DUT instance, resolved now (the width is needed). */
+static bool begin_hier(parser *pr, bool *want) {
+    int inst = pr->lenient ? 0 : find_inst(pr, cur(pr)->text);
+    uint32_t first = pr->pos; /* the instance name: the line of the read, for its errors */
+    pr->saw_hier = true;
+    if (inst < 0) {
+        return fail(pr, "hierarchical name whose first part is not a DUT instance of this "
+                        "testbench");
+    }
+    char path[HIER_PATH] = "";
+    tb_hier_sig sig = {0,
+                       1}; /* the first pass only finds the instances and the hierarchical names */
+    pr->pos++;
+    if (!hier_path(pr, path)) {
+        return false;
+    }
+    tb_src_loc loc = {pr->file, pr->toks[first].line};
+    if (!pr->lenient &&
+        tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, loc, &sig) != ODIN3_OK) {
+        pr->failed = true;
+        return false;
+    }
+    tb_expr *expr = new_expr(pr, E_HIER);
+    if (expr == NULL) {
+        return false;
+    }
+    expr->var = inst;
+    expr->num = sig.id;
+    expr->width = sig.width;
+    *want = false;
+    return push_val(pr, expr);
+}
+
 static bool begin_ident(parser *pr, bool *want) {
+    if (pr->toks[pr->pos + 1U].kind == TK_OP && strcmp(pr->toks[pr->pos + 1U].text, ".") == 0) {
+        return begin_hier(pr, want);
+    }
     int var = find_var(pr, cur(pr)->text);
     if (var < 0) {
         return fail(pr, "undeclared identifier (declare before use)");
@@ -1523,17 +1625,30 @@ static bool parse_inst_conns(parser *pr, tb_inst *inst) {
     return true;
 }
 
-static bool parse_instance(parser *pr) {
+/* The slot of the next instance item: one the first pass made (the second pass knows every
+ * instance, so a hierarchical name may come before the instance item), else a new one. */
+static tb_inst *next_inst_slot(parser *pr) {
     tb_module *tb = pr->tb;
+    if (pr->next_inst < tb->ninsts) {
+        return &tb->insts[pr->next_inst++];
+    }
     tb_inst *grown = pnew(pr, ((size_t)tb->ninsts + 1U) * sizeof *grown);
     if (grown == NULL) {
-        return false;
+        return NULL;
     }
     if (tb->ninsts > 0) {
         memcpy(grown, tb->insts, (size_t)tb->ninsts * sizeof *grown);
     }
     tb->insts = grown;
-    tb_inst *inst = &grown[tb->ninsts++];
+    pr->next_inst++;
+    return &grown[tb->ninsts++];
+}
+
+static bool parse_instance(parser *pr) {
+    tb_inst *inst = next_inst_slot(pr);
+    if (inst == NULL) {
+        return false;
+    }
     inst->line = cur(pr)->line;
     (void)snprintf(inst->module, sizeof inst->module, "%s", cur(pr)->text);
     pr->pos++;
@@ -1607,7 +1722,10 @@ static void parse_items(parser *pr) {
     }
 }
 
-odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out) {
+/* Parses src once. `pre` (may be NULL) is the module of a first pass: its instances are entered
+ * before the items are read. */
+static odin3_status parse_once(const tb_source *src, const char *top, const tb_module *pre,
+                               bool lenient, tb_module **out) {
     *out = NULL;
     tb_module *tb = calloc(1, sizeof *tb);
     tb_lexed lexed = {0};
@@ -1618,11 +1736,21 @@ odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out) {
         tb_module_free(tb);
         return ODIN3_ERR_INVALID_ARG;
     }
-    parser pr = {.tb = tb, .toks = lexed.toks, .file = src->file};
+    tb->design = src->design;
+    parser pr = {.tb = tb, .toks = lexed.toks, .file = src->file, .lenient = lenient};
     odin3_vec_init(&pr.ents, sizeof(xent));
     odin3_vec_init(&pr.vals, sizeof(tb_expr *));
     odin3_vec_init(&pr.frames, sizeof(sframe));
-    if (parse_header(&pr, top)) {
+    if (pre != NULL && pre->ninsts > 0) {
+        tb->insts = pnew(&pr, (size_t)pre->ninsts * sizeof *tb->insts);
+        for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
+            tb->insts[i] = (tb_inst){.line = pre->insts[i].line};
+            memcpy(tb->insts[i].name, pre->insts[i].name, sizeof tb->insts[i].name);
+            memcpy(tb->insts[i].module, pre->insts[i].module, sizeof tb->insts[i].module);
+        }
+        tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
+    }
+    if (!pr.failed && parse_header(&pr, top)) {
         parse_items(&pr);
     }
     if (!pr.failed && cur(&pr)->kind != TK_EOF) {
@@ -1635,13 +1763,33 @@ odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out) {
         tb_module_free(tb);
         return ODIN3_ERR_INVALID_ARG;
     }
+    tb->saw_hier = pr.saw_hier;
     *out = tb;
     return ODIN3_OK;
+}
+
+odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out) {
+    tb_module *first = NULL;
+    odin3_status st = parse_once(src, top, NULL, true, &first);
+    if (st != ODIN3_OK || !first->saw_hier) {
+        *out = first;
+        return st;
+    }
+    /* A hierarchical name needs the DUT's signals, so the instance items must be known before
+     * the name is read: the first pass found them, the second resolves the names. */
+    tb_module *second = NULL;
+    st = parse_once(src, top, first, false, &second);
+    tb_module_free(first);
+    *out = second;
+    return st;
 }
 
 void tb_module_free(tb_module *tb) {
     if (tb == NULL) {
         return;
+    }
+    for (uint32_t i = 0; i < tb->ninsts; i++) {
+        tb_inst_release(&tb->insts[i]);
     }
     for (uint32_t i = 0; i < tb->nallocs; i++) {
         free(tb->allocs[i]);

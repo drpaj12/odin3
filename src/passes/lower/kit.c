@@ -9,6 +9,7 @@
 #include "passes/budget.h"
 #include "passes/lower/lower_int.h"
 #include "passes/lower/lower_test.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -108,6 +109,12 @@ odin3_status lw_ctx_init(lw_ctx *lw, odin3_pass_ctx *pass, odin3_design *design,
             return ODIN3_ERR_INVALID_ARG;
         }
     }
+    lw->tribuf = type_named(design, "$tribuf");
+    lw->const_z = type_named(design, "$_CONSTZ_");
+    if (!odin3_celltype_valid(lw->const_z)) {
+        odin3_log(ODIN3_LOG_ERROR, "lower: cell type '$_CONSTZ_' is not registered");
+        return ODIN3_ERR_INVALID_ARG;
+    }
     uint32_t key = 0;
     lw->keep_key =
         odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr("keep"), &key) ? key : 0;
@@ -117,6 +124,8 @@ odin3_status lw_ctx_init(lw_ctx *lw, odin3_pass_ctx *pass, odin3_design *design,
 }
 
 void lw_ctx_free(lw_ctx *lw) {
+    odin3_util_free(lw->tri_chain);
+    lw->tri_chain = NULL;
     odin3_vec_free(&lw->created);
     odin3_vec_free(&lw->created_nets);
     odin3_vec_free(&lw->portnets);
@@ -134,11 +143,46 @@ static odin3_net_id const_node_net(const odin3_module *module, odin3_node_id nod
     return pins.count > 0 ? odin3_pin_net(module, pins.first) : (odin3_net_id){0};
 }
 
+/* True when the net on pin is driven by exactly one pin, of a $tribuf. */
+static bool pin_fed_by_tribuf(const lw_ctx *lw, odin3_pin_id pin) {
+    odin3_net_id net = odin3_pin_net(lw->module, pin);
+    if (!odin3_net_valid(net) || odin3_net_driver_count(lw->module, net) != 1U) {
+        return false;
+    }
+    odin3_node_id driver = odin3_pin_node(lw->module, odin3_net_driver(lw->module, net));
+    return odin3_node_type(lw->module, driver).v == lw->tribuf.v;
+}
+
+/* Marks tri_chain for the $tribuf cells whose data input a $tribuf drives, before any cell is
+ * lowered: lowering the first of two chained cells would otherwise hide the chain from the second
+ * (the order of the cells would decide whether the chain is refused). */
+static void mark_tribuf_chains(lw_ctx *lw, uint32_t end) {
+    odin3_util_free(lw->tri_chain);
+    lw->tri_chain = odin3_util_calloc((size_t)end + 1U);
+    if (lw->tri_chain == NULL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "lower: out of memory: cannot build the $tribuf chain table; every $tribuf of "
+                  "this module is refused");
+    }
+    for (uint32_t id = 1; lw->tri_chain != NULL && id < end; id++) {
+        odin3_node_id node = {id};
+        if (!odin3_node_live(lw->module, node) ||
+            odin3_node_type(lw->module, node).v != lw->tribuf.v) {
+            continue;
+        }
+        odin3_pinslice pins = odin3_node_port(lw->module, node, LW_TRI_PORT_A);
+        for (uint32_t i = 0; i < pins.count && lw->tri_chain[id] == 0; i++) {
+            lw->tri_chain[id] = pin_fed_by_tribuf(lw, (odin3_pin_id){pins.first.v + i}) ? 1U : 0U;
+        }
+    }
+}
+
 void lw_ctx_enter(lw_ctx *lw, odin3_module *module) {
     lw->module = module;
     lw->live_nodes = 0;
     memset(lw->const_slot, 0, sizeof lw->const_slot);
     uint32_t end = odin3_module_node_end(module);
+    mark_tribuf_chains(lw, end);
     for (uint32_t id = 1; id < end; id++) {
         odin3_node_id node = {id};
         if (!odin3_node_live(module, node)) {

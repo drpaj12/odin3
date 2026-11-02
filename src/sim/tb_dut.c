@@ -9,14 +9,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { EDGE_CAP = 64 /* clock edges recorded between two NBA regions */ };
+enum {
+    EDGE_CAP = 64,  /* clock edges recorded between two NBA regions */
+    MAX_CLOCKS = 16 /* clock inputs of one DUT instance */
+};
+
+/* One clock input of the DUT: the connection that drives it, and its value at the last
+ * observation (starts at 0). */
+typedef struct dut_clock {
+    int conn; /* index in inst->conns */
+    uint64_t last;
+} dut_clock;
+
+/* One recorded edge: which clock (index in clocks), and whether it rose. */
+typedef struct dut_edge {
+    uint8_t clock;
+    bool rise;
+} dut_edge;
 
 struct tb_dut {
     odin3_sim *sim;
     tb_inst *inst;
-    int clock_conn;       /* index in inst->conns, -1 none */
-    uint64_t clock_last;  /* clock value at the last observation (starts at 0) */
-    bool edges[EDGE_CAP]; /* recorded edges in order: true posedge, false negedge */
+    dut_clock clocks[MAX_CLOCKS];
+    uint32_t nclocks;
+    dut_edge edges[EDGE_CAP]; /* recorded edges in order */
     uint32_t nedges;
 };
 
@@ -54,6 +70,35 @@ static bool port_lookup(const odin3_sim *sim, const char *name, tb_conn *conn) {
     return false;
 }
 
+/* Registers conn as a clock of the DUT when its port is one. False (logged) for a clock bit in a
+ * port wider than one bit (the other bits would never be driven), and for too many clocks. */
+static bool bind_clock(tb_dut *dut, tb_conn *conn, uint32_t line) {
+    const char *mod = dut->inst->module;
+    for (uint32_t bit_no = 0; conn->width > 1 && bit_no < conn->width; bit_no++) {
+        odin3_sim_bit high = {conn->sim_port, bit_no};
+        if (odin3_sim_input_is_clock(dut->sim, high)) {
+            odin3_log(
+                ODIN3_LOG_ERROR,
+                "testbench:%u: module `%s` port `%s` is %u bits wide and bit %u is a clock; a "
+                "clock must be a one-bit port (split the port)",
+                line, mod, conn->port, conn->width, bit_no);
+            return false;
+        }
+    }
+    odin3_sim_bit bit = {conn->sim_port, 0};
+    if (odin3_sim_input_is_clock(dut->sim, bit)) {
+        if (dut->nclocks == MAX_CLOCKS) {
+            odin3_log(
+                ODIN3_LOG_ERROR,
+                "testbench:%u: module `%s` has more than %d clock inputs; `%s` is one too many",
+                line, mod, MAX_CLOCKS, conn->port);
+            return false;
+        }
+        dut->clocks[dut->nclocks++] = (dut_clock){(int)(conn - dut->inst->conns), 0};
+    }
+    return true;
+}
+
 static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
     const char *mod = dut->inst->module;
     if (conn->port[0] == '\0') {
@@ -73,37 +118,46 @@ static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
         tb_error("testbench", line, "output port connected to anything but a whole wire or reg");
         return false;
     }
-    odin3_sim_bit bit = {conn->sim_port, 0};
-    if (!conn->is_out && odin3_sim_input_is_clock(dut->sim, bit)) {
-        if (dut->clock_conn >= 0) {
-            tb_error("testbench", line, "DUT with more than one clock input");
-            return false;
-        }
-        dut->clock_conn = (int)(conn - dut->inst->conns);
+    if (!conn->is_out && !bind_clock(dut, conn, line)) {
+        return false;
     }
     return true;
+}
+
+/* With several clock inputs a cell that has no clock pin (a global-clock `$_FF_`) belongs to none
+ * of them, so no edge would ever reach it: refused, naming the DUT and the cell. */
+static bool check_global_clock(const tb_dut *dut) {
+    const char *first = "";
+    uint32_t count = odin3_sim_global_clock_cells(dut->sim, &first);
+    if (dut->nclocks < 2 || count == 0) {
+        return true;
+    }
+    odin3_log(ODIN3_LOG_ERROR,
+              "testbench:%u: DUT `%s` (module `%s`) has %u clock inputs and %u cell(s) with no "
+              "clock pin (first: %s, a global clock, e.g. a BLIF `.latch` with no control); it "
+              "would never be clocked. Give the latch a control (`.latch in out re clk 0`) or "
+              "use one clock input",
+              dut->inst->line, dut->inst->name, dut->inst->module, dut->nclocks, count, first);
+    return false;
 }
 
 odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_dut **out) {
     (void)tb;
     *out = NULL;
-    odin3_module_id id = {0};
-    if (!find_module(design, inst->module, &id)) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "testbench:%u: no module `%s` in the design (read the DUT first)", inst->line,
-                  inst->module);
-        return ODIN3_ERR_INVALID_ARG;
-    }
     tb_dut *dut = calloc(1, sizeof *dut);
     if (dut == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     dut->inst = inst;
-    dut->clock_conn = -1;
-    odin3_status st = odin3_sim_build(design, id, &dut->sim);
+    odin3_status st = tb_inst_sim(design, inst);
+    dut->sim = inst->sim;
+    if (st == ODIN3_OK) {
+        odin3_sim_reset(dut->sim); /* built at parse time, or kept from an earlier run */
+    }
     for (uint32_t i = 0; st == ODIN3_OK && i < inst->nconns; i++) {
         st = bind_conn(dut, &inst->conns[i], inst->line) ? ODIN3_OK : ODIN3_ERR_INVALID_ARG;
     }
+    st = st != ODIN3_OK || check_global_clock(dut) ? st : ODIN3_ERR_INVALID_ARG;
     if (st != ODIN3_OK) {
         tb_dut_close(dut);
         return st;
@@ -113,17 +167,89 @@ odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_
 }
 
 void tb_dut_close(tb_dut *dut) {
-    if (dut != NULL) {
-        odin3_sim_destroy(dut->sim);
-        free(dut);
+    free(dut);
+}
+
+odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst) {
+    if (inst->sim != NULL) {
+        return ODIN3_OK;
     }
+    odin3_module_id id = {0};
+    if (design == NULL || !find_module(design, inst->module, &id)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "testbench:%u: no module `%s` in the design (read the DUT first)", inst->line,
+                  inst->module);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return odin3_sim_build(design, id, &inst->sim);
+}
+
+odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, tb_src_loc loc,
+                            tb_hier_sig *out) {
+    odin3_status st = tb_inst_sim(design, inst);
+    if (st == ODIN3_OK && inst->sigs == NULL) {
+        st = odin3_sim_signals_create(inst->sim, &inst->sigs);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    uint32_t id = 0;
+    st = odin3_sim_signals_find(inst->sigs, odin3_bytes_cstr(path), &id);
+    const odin3_sim_signal *sig =
+        st == ODIN3_OK && id != 0 ? odin3_sim_signals_at(inst->sigs, id) : NULL;
+    if (sig == NULL) {
+        if (st == ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s:%u: DUT `%s` (module `%s`) has no signal `%s` (a memory word is not "
+                      "readable by hierarchical path after lower; lowering turns it into a "
+                      "register bank)",
+                      loc.file, loc.line, inst->name, inst->module, path);
+        }
+        return st == ODIN3_OK ? ODIN3_ERR_INVALID_ARG : st;
+    }
+    if (sig->width > TB_MAX_WIDTH) {
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: signal `%s` of DUT `%s` is wider than 64 bits", loc.file,
+                  loc.line, path, inst->name);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *out = (tb_hier_sig){id, sig->width};
+    return ODIN3_OK;
+}
+
+uint64_t tb_inst_peek(const tb_inst *inst, uint32_t id) {
+    const odin3_sim_signal *sig = odin3_sim_signals_at(inst->sigs, id);
+    uint8_t bits[TB_MAX_WIDTH] = {0};
+    uint64_t val = 0;
+    if (sig == NULL || odin3_sim_signals_read(inst->sigs, id, bits, sig->width) != ODIN3_OK) {
+        return 0;
+    }
+    for (uint32_t k = 0; k < sig->width; k++) {
+        val |= (uint64_t)(bits[k] & 1U) << k;
+    }
+    return val;
+}
+
+void tb_inst_release(tb_inst *inst) {
+    odin3_sim_signals_destroy(inst->sigs);
+    odin3_sim_destroy(inst->sim);
+    inst->sigs = NULL;
+    inst->sim = NULL;
+}
+
+static bool is_clock_conn(const tb_dut *dut, uint32_t conn) {
+    for (uint32_t k = 0; k < dut->nclocks; k++) {
+        if (dut->clocks[k].conn == (int)conn) {
+            return true;
+        }
+    }
+    return false;
 }
 
 static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     bool changed = false;
     for (uint32_t i = 0; i < dut->inst->nconns; i++) {
         tb_conn *conn = &dut->inst->conns[i];
-        if (conn->is_out || (int)i == dut->clock_conn || conn->expr == NULL) {
+        if (conn->is_out || is_clock_conn(dut, i) || conn->expr == NULL) {
             continue;
         }
         uint64_t val = tb_eval_assign(ev, conn->expr, conn->width);
@@ -141,22 +267,29 @@ static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     return changed;
 }
 
-void tb_dut_observe(tb_ev *ev, tb_dut *dut) {
-    if (dut->clock_conn < 0 || dut->inst->conns[dut->clock_conn].expr == NULL) {
+static void observe_clock(tb_ev *ev, tb_dut *dut, uint32_t which) {
+    dut_clock *clock = &dut->clocks[which];
+    const tb_expr *clk = dut->inst->conns[clock->conn].expr;
+    if (clk == NULL) {
         return;
     }
-    const tb_expr *clk = dut->inst->conns[dut->clock_conn].expr;
     uint64_t val = tb_eval(ev, clk, clk->width, false) & 1U;
-    if (val == dut->clock_last) {
+    if (val == clock->last) {
         return;
     }
-    dut->clock_last = val;
+    clock->last = val;
     if (dut->nedges == EDGE_CAP) {
         ev->failed = true;
         ev->why = "more than 64 clock edges between two NBA regions";
         return;
     }
-    dut->edges[dut->nedges++] = val != 0;
+    dut->edges[dut->nedges++] = (dut_edge){(uint8_t)which, val != 0};
+}
+
+void tb_dut_observe(tb_ev *ev, tb_dut *dut) {
+    for (uint32_t k = 0; k < dut->nclocks; k++) {
+        observe_clock(ev, dut, k);
+    }
 }
 
 static bool publish(tb_ev *ev, tb_dut *dut) {
@@ -198,14 +331,42 @@ bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
     return publish(ev, dut);
 }
 
+/* Replays edges[0..count) of one time step. A DUT with one clock input connected sends each edge
+ * to every clock of the design, as the cycle simulator does. With several, the edges of different
+ * clocks act together (the cells sample the inputs as the active region left them, whichever
+ * clock they hang on); a second edge of the same clock starts a new group. */
+static odin3_status replay_edges(tb_dut *dut) {
+    odin3_sim_clock_event group[MAX_CLOCKS];
+    uint32_t used = 0;
+    uint32_t mask = 0;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dut->nedges; i++) {
+        dut_edge edge = dut->edges[i];
+        odin3_sim_event event = edge.rise ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE;
+        if (dut->nclocks == 1) {
+            st = odin3_sim_clock_edge(dut->sim, event);
+            continue;
+        }
+        if ((mask & (1U << edge.clock)) != 0) {
+            st = odin3_sim_clock_edges(dut->sim, group, used);
+            used = 0;
+            mask = 0;
+        }
+        const tb_conn *conn = &dut->inst->conns[dut->clocks[edge.clock].conn];
+        group[used++] = (odin3_sim_clock_event){{conn->sim_port, 0}, event};
+        mask |= 1U << edge.clock;
+    }
+    if (st == ODIN3_OK && used > 0) {
+        st = odin3_sim_clock_edges(dut->sim, group, used);
+    }
+    return st;
+}
+
 bool tb_dut_edges(tb_ev *ev, tb_dut *dut) {
     if (dut->nedges == 0) {
         return false;
     }
-    for (uint32_t i = 0; i < dut->nedges; i++) {
-        dut_status(ev, odin3_sim_clock_edge(dut->sim,
-                                            dut->edges[i] ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE));
-    }
+    dut_status(ev, replay_edges(dut));
     dut->nedges = 0;
     (void)publish(ev, dut);
     return true;
