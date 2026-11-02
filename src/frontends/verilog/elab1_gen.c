@@ -832,6 +832,32 @@ static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint
     return ODIN3_OK;
 }
 
+odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name,
+                                      uint32_t scope, bool *foreign, odin3_strbuf *text) {
+    *foreign = false;
+    uint32_t saved = env->cur_scope;
+    env->cur_scope = scope;
+    odin3_elab1_comp *comps = NULL;
+    odin3_status st = odin3_elab1_hier_comps(env, hier_name, &comps);
+    env->cur_scope = saved;
+    if (st != ODIN3_OK) {
+        return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+    }
+    uint32_t count = odin3_ast_nchild(env->e1->parsed, hier_name);
+    bool indexed = false;
+    for (uint32_t k = 0; k < count; k++) {
+        indexed = indexed || comps[k].has_index;
+    }
+    odin3_elab1_reach reach = {0, 0};
+    odin3_elab1_path path = {comps, count, scope};
+    if (indexed || count < 2 || odin3_elab1_scope_walk(env, &path, &reach) != ODIN3_WALK_STOP ||
+        reach.used != 0) {
+        return ODIN3_OK;
+    }
+    *foreign = true;
+    return path_text(env->e1, comps, count, text);
+}
+
 odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name,
                                       uint32_t *slot) {
     return target_of(env, hier_name, slot, NULL);

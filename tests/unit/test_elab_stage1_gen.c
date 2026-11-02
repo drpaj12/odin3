@@ -412,9 +412,13 @@ static void test_reference_errors(void) {
                           "t.v:7:14: error: 'g[5].t' does not exist (generate block 'g[5]' was not "
                           "elaborated)"});
     et_free(&rs);
-    run_error(&(gen_case){"module m;\n  wire w;\nendmodule\nmodule t;\n  m u ();\n  wire z;\n"
-                          "  assign z = u.w;\nendmodule\n",
-                          "t.v:7:14: error: hierarchical reference 'u.w' is not supported"});
+    /* a reference into another module is an undriven net of the dotted name, with a warning (Yosys) */
+    run_one("module m;\n  wire w;\nendmodule\nmodule t;\n  m u ();\n  wire z;\n"
+            "  assign z = u.w;\nendmodule\n");
+    expect_clean();
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:7:14: warning: hierarchical reference 'u.w' is not supported; it is read as an "
+              "undriven net of that name (as Yosys does)");
     et_free(&rs);
     run_error(&(gen_case){LOOP_G "  wire z;\n  assign z = g[0].q;\nendmodule\n",
                           "t.v:7:14: error: 'g[0].q' is not declared"});
@@ -450,11 +454,13 @@ static void test_named_block_reference(void) {
 /* A name that is no block of the scope is still E21, and a member the block lacks is the binder's
  * error (Yosys 0.55 declares an implicit wire `blk.nope`, warning only). */
 static void test_named_block_reference_errors(void) {
-    run_error(
-        &(gen_case){"module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
-                    "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = nope.count;\n"
-                    "  assign y = w;\nendmodule\n",
-                    "t.v:6:18: error: hierarchical reference 'nope.count' is not supported"});
+    run_one("module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
+            "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = nope.count;\n"
+            "  assign y = w;\nendmodule\n");
+    expect_clean();
+    et_expect(&rs, ODIN3_LOG_WARN,
+              "t.v:6:18: warning: hierarchical reference 'nope.count' is not supported; it is read "
+              "as an undriven net of that name (as Yosys does)");
     et_free(&rs);
     run_one("module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
             "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = blk.nope;\n"
@@ -464,6 +470,17 @@ static void test_named_block_reference_errors(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_elab_bind(rs.elab, &binding));
     odin3_elab_binding_free(&binding);
     et_expect(&rs, ODIN3_LOG_ERROR, "t.v:6:18: error: 'blk.nope' is not declared");
+}
+
+/* tinyriscv_soc_top.v: a bit of a register file two modules down read in an always block; one
+ * undriven net 'u.r.regs' for both reads, one warning per reference (Yosys: a silent auto-wire). */
+static void test_foreign_reference_in_always(void) {
+    run_one("module t(input clk, output reg a, output reg b);\n  sub u ();\n"
+            "  always @(posedge clk) begin\n    a <= ~u.r.regs[26];\n    b <= ~u.r.regs[27];\n"
+            "  end\nendmodule\nmodule sub;\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(2, et_count_with(&rs, ODIN3_LOG_WARN, "hierarchical reference 'u.r.regs'"));
+    et_free(&rs);
 }
 
 /* --- misplaced and clashing names ---------------------------------------------------------- */
@@ -627,6 +644,7 @@ int main(void) {
     RUN_TEST(test_reference_errors);
     RUN_TEST(test_named_block_reference);
     RUN_TEST(test_named_block_reference_errors);
+    RUN_TEST(test_foreign_reference_in_always);
     RUN_TEST(test_port_in_block);
     RUN_TEST(test_block_clash);
     RUN_TEST(test_scoped_defparam);

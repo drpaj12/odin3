@@ -594,8 +594,33 @@ static odin3_ast_id w_fold(e1w *wr, odin3_ast_id expr, const char *role, bool al
 
 static odin3_ast_id w_copy_node(e1w *wr, odin3_ast_id node, uint32_t mark);
 
+/* The undriven net of a reference into another module (Yosys: an auto-wire named by the dotted
+ * path): its name interned, 0 when the reference is not one or on failure (wr->st set). */
+static uint32_t w_foreign_name(e1w *wr, odin3_ast_id hier, uint32_t scope) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    bool foreign = false;
+    uint32_t name = 0;
+    odin3_status st = odin3_elab1_hier_foreign(wr->env, hier, scope, &foreign, &text);
+    if (st == ODIN3_OK && foreign) {
+        st = odin3_ast_intern(wr->out, odin3_bytes_cstr(text.data), &name);
+    }
+    odin3_strbuf_free(&text);
+    if (st != ODIN3_OK) {
+        fail(wr, st);
+        return 0;
+    }
+    return name;
+}
+
 /* A HIER_NAME into the module's generate blocks (G7), resolved; its indices NUMBERs. */
 static odin3_ast_id w_hier(e1w *wr, odin3_ast_id hier) {
+    uint32_t foreign = w_foreign_name(wr, hier, wr->scope);
+    if (foreign != 0) { /* a reference into another module: the net w_hier_nets declared */
+        odin3_ast_spec ispec = spec_of(wr, ODIN3_AST_IDENT, hier);
+        ispec.name = foreign;
+        return w_make_plain(wr, &ispec, w_mark(wr), hier);
+    }
     odin3_status st = odin3_elab1_scope_ref(wr->e1, hier, wr->scope);
     if (st != ODIN3_OK) {
         stop_on(wr, st);
@@ -2018,9 +2043,38 @@ static void w_implicit_attr(e1w *wr, const w_attrs_of *at) {
     }
 }
 
+/* The foreign hierarchical references of the module as implicit nets, first-use order, each with
+ * its warning (Yosys accepts them silently as undriven wires; Odin III says so). */
+static void w_hier_nets(e1w *wr) {
+    odin3_elab1_env *env = wr->env;
+    for (size_t i = 0; i < env->hier_uses.len && live(wr); i++) {
+        const odin3_elab1_hier_use *use = odin3_vec_cat(&env->hier_uses, i);
+        uint32_t name = w_foreign_name(wr, use->node, use->scope);
+        if (name == 0) {
+            continue;
+        }
+        odin3_elab1_warn_once(wr->e1, use->node,
+                              "hierarchical reference '%s' is not supported; it is read as an "
+                              "undriven net of that name (as Yosys does)",
+                              odin3_elab1_str(wr->e1, name));
+        if (odin3_u64map_get(env->imp_names, name, NULL)) {
+            continue;
+        }
+        odin3_elab1_implicit_net *rec = odin3_vec_push(&env->implicit);
+        odin3_status st = rec == NULL ? ODIN3_ERR_NO_MEMORY
+                                      : odin3_u64map_put(env->imp_names, (odin3_kv){name, 1});
+        if (st != ODIN3_OK) {
+            fail(wr, st);
+            return;
+        }
+        *rec = (odin3_elab1_implicit_net){name, use->node};
+    }
+}
+
 /* EL-4: the implicit nets as one NET_DECL first among the items, in first-use order, of the
  * `default_nettype kind in effect (EL-25). */
 static void w_implicit(e1w *wr) {
+    w_hier_nets(wr);
     const odin3_vec *nets = &wr->env->implicit;
     if (nets->len == 0) {
         return;

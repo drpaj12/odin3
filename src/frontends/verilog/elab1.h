@@ -922,6 +922,12 @@ typedef struct odin3_elab1_implicit_net {
     odin3_ast_id use;
 } odin3_elab1_implicit_net;
 
+/* A HIER_NAME seen by the implicit-net scan and the generate scope it was read in. */
+typedef struct odin3_elab1_hier_use {
+    odin3_ast_id node;
+    uint32_t scope;
+} odin3_elab1_hier_use;
+
 /* A frame of the implicit-net scan: a node, or the end of a scope that node opened. */
 typedef struct odin3_elab1_scan_frame {
     odin3_ast_id node;
@@ -957,6 +963,7 @@ typedef struct odin3_elab1_env {
     odin3_u64map *imp_names; /* implicit (or reported-undeclared) names → 1 */
     odin3_u64map *locals;    /* names of the enclosing blocks and subroutines → depth count */
     odin3_vec scan;          /* odin3_elab1_scan_frame: the implicit-net scan's stack */
+    odin3_vec hier_uses;     /* odin3_elab1_hier_use: the HIER_NAMEs the scan met */
     uint8_t nettype;         /* the module's `default_nettype (odin3_elab1_nettype_at) */
 } odin3_elab1_env;
 
@@ -1092,6 +1099,13 @@ odin3_status odin3_elab1_genblk_name(odin3_elab1 *e1, uint32_t scope, uint32_t c
  * in scope (`blk.count`, I-1) is accepted unchecked: the binder finds its member. ODIN3_ERR_PARSE
  * after the diagnostic; ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope);
+
+/* Whether hier_name, read in scope, is a reference into another module (or any path whose first
+ * component is no generate or named block, and has no index): Yosys makes an undriven net of
+ * the dotted name, and so do we (a warning). *foreign set; when it is, the dotted text is
+ * appended to text. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name,
+                                      uint32_t scope, bool *foreign, odin3_strbuf *text);
 
 /* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
  * dropped while env->quiet). */
