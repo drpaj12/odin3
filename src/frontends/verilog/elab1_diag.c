@@ -38,6 +38,7 @@ typedef struct diag_scan {
     const char *fn_name; /* the FUNCTION_DECL being walked, NULL outside one */
     odin3_ast_id top;    /* the TIMING_STMT the ALWAYS being walked owns */
     bool initial;        /* inside an INITIAL */
+    uint32_t gen_depth;  /* inside this many GEN_IF, GEN_CASE or GEN_FOR bodies */
     odin3_vec frames;    /* diag_frame */
 } diag_scan;
 
@@ -434,6 +435,10 @@ static bool descends(const diag_scan *sc, odin3_ast_id node) {
     }
 }
 
+static bool is_gen_construct(odin3_ast_kind kind) {
+    return kind == ODIN3_AST_GEN_IF || kind == ODIN3_AST_GEN_CASE || kind == ODIN3_AST_GEN_FOR;
+}
+
 /* Enter node: set the context it owns, report its rows. */
 static void enter(diag_scan *sc, odin3_ast_id node) {
     odin3_ast_kind kind = odin3_ast_kind_of(sc->ast, node);
@@ -441,11 +446,19 @@ static void enter(diag_scan *sc, odin3_ast_id node) {
         sc->fn_name = odin3_ast_name_str(sc->ast, node);
     } else if (kind == ODIN3_AST_INITIAL) {
         sc->initial = true;
+    } else if (is_gen_construct(kind)) {
+        sc->gen_depth++;
     } else if (kind == ODIN3_AST_ALWAYS) {
         odin3_ast_id first = kid(sc->ast, node, 0);
         sc->top = is_kind(sc->ast, first, ODIN3_AST_TIMING_STMT) ? first : (odin3_ast_id){0};
     }
-    (void)reject_free(sc->e1, node);
+    /* A call in a generate body is checked when the body is elaborated (E20, E21): Yosys reads
+     * only the branches the parameters select, so an unsupported system function in a dead one
+     * is no error. */
+    bool call = kind == ODIN3_AST_CALL || kind == ODIN3_AST_TASK_CALL;
+    if (!(call && sc->gen_depth > 0)) {
+        (void)reject_free(sc->e1, node);
+    }
     if (!reject_ctx(sc, node)) { /* a control rejected in a function is not also ignored */
         (void)odin3_elab1_ignore(sc->e1, node);
     }
@@ -457,6 +470,8 @@ static void leave(diag_scan *sc, odin3_ast_id node) {
         sc->fn_name = NULL;
     } else if (kind == ODIN3_AST_INITIAL) {
         sc->initial = false;
+    } else if (is_gen_construct(kind)) {
+        sc->gen_depth--;
     } else if (kind == ODIN3_AST_ALWAYS) {
         sc->top = (odin3_ast_id){0};
     }

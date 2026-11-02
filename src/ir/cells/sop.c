@@ -8,6 +8,7 @@
 #include "util/log.h"
 
 #include <assert.h>
+#include <string.h>
 
 enum { SOP_WIDTH, SOP_COVER };
 
@@ -69,44 +70,100 @@ static odin3_const sop_const_value(const odin3_value *params) {
     return ODIN3_CONST_0;
 }
 
-/* True when every literal of row (width input chars) matches the input bits ('-' always does). */
-static bool row_matches(const odin3_sim_cell *cell, const uint8_t *row, uint32_t width) {
-    const odin3_sim_span *inputs = &cell->ports[0];
-    for (uint32_t i = 0; i < width; i++) {
-        if (row[i] != '-' && (row[i] == '1') != (cell->values[inputs->idx[i]] != 0)) {
-            return false;
-        }
-    }
-    return true;
-}
-
 /*
- * Simulate hook (sim/cell.h). Rows ending in 1 form the ON-set, rows ending in 0 the OFF-set; BLIF
- * uses one kind per cover. ON-set: Y = 1 when a row matches. OFF-set: Y = 0 when a row matches.
- * No rows: Y = 0. A cover mixing both (not legal BLIF) follows its ON rows and ignores the OFF
- * rows, which agrees with sop_const_value for zero inputs.
+ * The value of the cover for the input bits in assign (bit i is input i): the semantics of
+ * sop_sim below, which is its only other user. Rows ending in 1 form the ON-set, rows ending in 0
+ * the OFF-set; BLIF uses one kind per cover. ON-set: Y = 1 when a row matches. OFF-set: Y = 0 when
+ * a row matches. No rows: Y = 0. A cover mixing both (not legal BLIF) follows its ON rows and
+ * ignores the OFF rows, which agrees with sop_const_value for zero inputs.
  */
-static void sop_sim(const odin3_sim_cell *cell) {
-    const odin3_value *cover = &cell->params[SOP_COVER];
+static bool cover_value(const odin3_value *cover, bool (*bit_of)(const void *, uint32_t),
+                        const void *src) {
     uint32_t width = cover->cover_inputs;
-    assert(width == cell->ports[0].width);
     uint64_t row_len = (uint64_t)width + 1;
     bool has_on = false;
     bool off_hit = false;
     for (uint64_t off = 0; off + row_len <= cover->len; off += row_len) {
         const uint8_t *row = cover->bits + off;
-        bool hit = row_matches(cell, row, width);
+        bool hit = true;
+        for (uint32_t i = 0; hit && i < width; i++) {
+            hit = row[i] == '-' || (row[i] == '1') == bit_of(src, i);
+        }
         if (row[width] == '1') {
             if (hit) {
-                odin3_cells_sim_out(cell, true);
-                return;
+                return true;
             }
             has_on = true;
         } else {
             off_hit = off_hit || hit;
         }
     }
-    odin3_cells_sim_out(cell, !has_on && cover->len > 0 && !off_hit);
+    return !has_on && cover->len > 0 && !off_hit;
+}
+
+static bool bit_of_cell(const void *src, uint32_t index) {
+    const odin3_sim_cell *cell = src;
+    return cell->values[cell->ports[0].idx[index]] != 0;
+}
+
+static bool bit_of_assign(const void *src, uint32_t index) {
+    return (*(const uint32_t *)src >> index & 1U) != 0;
+}
+
+static void sop_sim(const odin3_sim_cell *cell);
+
+enum {
+    SOP_TABLE_MAX_WIDTH = 6,           /* the widest cover cached as a truth table (64 bits) */
+    SOP_TABLE_BYTES = sizeof(uint64_t) /* the table; state byte 0 says it is built */
+};
+
+uint32_t odin3_cell_sop_sim_state_bytes(const odin3_celltype_def *def, const odin3_value *params) {
+    if (def->simulate != sop_sim) {
+        return 0;
+    }
+    /* the table is indexed by the cover's inputs: the width parameter must be the same count */
+    assert(params[SOP_COVER].kind == ODIN3_VAL_COVER &&
+           params[SOP_WIDTH].i == (int64_t)params[SOP_COVER].cover_inputs);
+    bool cached = params[SOP_WIDTH].i >= 1 && params[SOP_WIDTH].i <= SOP_TABLE_MAX_WIDTH;
+    return cached ? 1U + (uint32_t)SOP_TABLE_BYTES : 0U;
+}
+
+/* Builds the truth table of the cover into state[1..]: bit k is the value for the inputs k. */
+static void build_table(const odin3_sim_cell *cell) {
+    const odin3_value *cover = &cell->params[SOP_COVER];
+    uint64_t table = 0;
+    for (uint32_t assign = 0; assign < (1U << cover->cover_inputs); assign++) {
+        table |= (uint64_t)cover_value(cover, bit_of_assign, &assign) << assign;
+    }
+    memcpy(cell->state + 1, &table, SOP_TABLE_BYTES);
+    cell->state[0] = 1;
+}
+
+/*
+ * Simulate hook (sim/cell.h). A cover of 1 to 6 inputs is cached in the cell's state (the
+ * simulator gives a $sop that: odin3_cell_sop_sim_state_bytes) as a 64-bit truth table, built at
+ * the first evaluation, so an evaluation reads the inputs and one word instead of walking the rows
+ * (the covers of a lowered netlist are small and many: the walk is cache misses on the IR). A
+ * wider cover walks its rows. The result is the same either way (cover_value).
+ */
+static void sop_sim(const odin3_sim_cell *cell) {
+    const odin3_sim_span *in = &cell->ports[0];
+    if (cell->n_state == 0) { /* a wide cover: the rows */
+        const odin3_value *cover = &cell->params[SOP_COVER];
+        assert(cover->cover_inputs == in->width);
+        odin3_cells_sim_out(cell, cover_value(cover, bit_of_cell, cell));
+        return;
+    }
+    if (cell->state[0] == 0) {
+        build_table(cell);
+    }
+    uint32_t index = 0; /* the width is the span's: the IR parameters stay cold */
+    for (uint32_t i = 0; i < in->width; i++) {
+        index |= (uint32_t)(cell->values[in->idx[i]] != 0) << i;
+    }
+    uint64_t table = 0;
+    memcpy(&table, cell->state + 1, SOP_TABLE_BYTES);
+    odin3_cells_sim_out(cell, (table >> index & 1U) != 0);
 }
 
 const odin3_celltype_def odin3_cell_sop = {

@@ -215,14 +215,39 @@ static bool parse_args(parser *pr, tb_expr *call) {
     return call->list != NULL;
 }
 
-static const char *const SYS_EXPR[] = {"$time",     "$random", "$urandom", "$signed",
-                                       "$unsigned", "$clog2",  "$fopen",   NULL};
+static const char *const SYS_EXPR[] = {"$time",           "$random", "$urandom", "$signed",
+                                       "$unsigned",       "$clog2",  "$fopen",   "$test$plusargs",
+                                       "$value$plusargs", NULL};
+
+/* True when e is something a plusarg value can be stored in. */
+static bool plusarg_target(const tb_expr *expr) {
+    return expr->kind == E_VAR || expr->kind == E_BITSEL || expr->kind == E_PART ||
+           expr->kind == E_MEM;
+}
+
+/* The argument check of $test$plusargs ("text") and $value$plusargs ("format", variable). */
+static bool plusargs_ok(parser *pr, const tb_expr *call) {
+    if (strcmp(call->str, "$test$plusargs") == 0 && call->n != 1) {
+        return fail(pr, "wrong argument count");
+    }
+    if (strcmp(call->str, "$value$plusargs") != 0) {
+        return true;
+    }
+    if (call->n != 2) {
+        return fail(pr, "wrong argument count");
+    }
+    return (call->list[0]->kind == E_STR && plusarg_target(call->list[1])) ||
+           fail(pr, "$value$plusargs expects (\"format\", variable)");
+}
 
 /* Width and signedness of a system function call whose arguments are in place. */
 static bool sys_finish(parser *pr, tb_expr *call) {
     bool is_cast = strcmp(call->str, "$signed") == 0 || strcmp(call->str, "$unsigned") == 0;
     if ((is_cast || strcmp(call->str, "$clog2") == 0) && call->n != 1) {
         return fail(pr, "wrong argument count");
+    }
+    if (!plusargs_ok(pr, call)) {
+        return false;
     }
     call->width = strcmp(call->str, "$time") == 0 ? (uint32_t)TB_MAX_WIDTH : (uint32_t)TB_INT_BITS;
     call->sgn = strcmp(call->str, "$random") == 0 || strcmp(call->str, "$signed") == 0 ||

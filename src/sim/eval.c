@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <string.h>
 
+enum { SETTLE_PREFETCH = 8 }; /* cells ahead whose view is prefetched */
+
 /* --- the engine ------------------------------------------------------------------------------- */
 
 static void send(odin3_sim *sim, odin3_sim_flat *flat, odin3_sim_event event) {
@@ -22,6 +24,9 @@ static void send(odin3_sim *sim, odin3_sim_flat *flat, odin3_sim_event event) {
 /* Runs every cell's COMB once in level order (the edge-triggered cells come first). */
 void odin3_sim_settle(odin3_sim *sim) {
     for (uint32_t i = 0; i < sim->n_cells; i++) {
+        if (i + SETTLE_PREFETCH < sim->n_cells) { /* the cell views are scattered: load ahead */
+            __builtin_prefetch(&sim->cells[sim->order[i + SETTLE_PREFETCH]]);
+        }
         send(sim, &sim->cells[sim->order[i]], ODIN3_SIM_COMB);
     }
 }

@@ -191,6 +191,12 @@ extern const odin3_celltype_def odin3_cell_dlatch_p;
 extern const odin3_celltype_def odin3_cell_dlatch_n;
 extern const odin3_celltype_def odin3_cell_ff;
 extern const odin3_celltype_def odin3_cell_sop;
+
+/*
+ * The state bytes the simulator gives a cell of type def with params (a combinational type has
+ * none): for a $sop of 1 to 6 inputs the cache of its truth table (sop.c), else 0.
+ */
+uint32_t odin3_cell_sop_sim_state_bytes(const odin3_celltype_def *def, const odin3_value *params);
 /* 2D IR change A (EL-31, 2D spec §7.2): Yosys word cells, appended after $sop. */
 extern const odin3_celltype_def odin3_cell_neg;
 extern const odin3_celltype_def odin3_cell_xnor;

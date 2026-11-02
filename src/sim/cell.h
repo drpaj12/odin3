@@ -53,7 +53,8 @@ typedef struct odin3_sim_span {
  * One cell as its simulate hook sees it. ports has one span per port definition of the type, in
  * definition order, each as wide as the port's width for these parameters. state is the cell's
  * storage: for a sequential type one byte (0 or 1) per bit of its output ports, in port then bit
- * order (n_state bytes); NULL and 0 for a combinational type.
+ * order (n_state bytes); NULL and 0 for a combinational type, except a $sop of 1 to 6 inputs, whose
+ * state is the cache of its truth table (cells/sop.c).
  *
  * type_data is per-type data the simulator looks up once per cell type at build time (for a
  * tech-library hard cell, its odin3_techlib_cell, whose fn expressions the hook interprets); NULL

@@ -149,6 +149,7 @@ odin3_status odin3_flatten_run(odin3_pass_ctx *ctx, odin3_design *design,
         report(&fc, &tot);
         log_cost(&fc, &added, &before, estimate);
         odin3_flatten_graph_log_unused(graph);
+        odin3_flatten_graph_mark_unused(graph);
     }
     odin3_flatten_ctx_free(&fc);
     odin3_flatten_graph_free(graph);

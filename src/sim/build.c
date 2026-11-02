@@ -1,5 +1,6 @@
 /* build.c — odin3_sim_build: expands module instances into flat cells over shared value slots. */
 #include "build_internal.h"
+#include "ir/cells/cells.h"
 #include "ir/celltype.h"
 #include "ir/lut.h"
 #include "ir/module.h"
@@ -211,7 +212,9 @@ static odin3_status add_pins(odin3_sim_builder *bld, const odin3_sim_flat *flat,
     if (outputs > UINT32_MAX) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *n_state = odin3_sim_is_seq(flat->def) ? (uint32_t)outputs : 0;
+    *n_state = odin3_sim_is_seq(flat->def)
+                   ? (uint32_t)outputs
+                   : odin3_cell_sop_sim_state_bytes(flat->def, flat->view.params);
     return ODIN3_OK;
 }
 

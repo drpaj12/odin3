@@ -95,6 +95,10 @@ bool odin3_flatten_graph_is_const(const odin3_flatten_graph *graph, odin3_cellty
  * modules)`, names capped at 8; nothing when there are none. */
 void odin3_flatten_graph_log_unused(const odin3_flatten_graph *graph);
 
+/* Sets ODIN3_ATTR_FLATTENED_AWAY (ir/module.h) on every module that is not a root and removes a
+ * mark left by an earlier run from every root. Call after the expansion. */
+void odin3_flatten_graph_mark_unused(const odin3_flatten_graph *graph);
+
 /*
  * The pre-flight checks that mutate nothing: the caps (`flatten: the flat design would have N
  * nodes (cap M)`; INVALID_ARG) and the design's budget with the estimate (the budget's message;

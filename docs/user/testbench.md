@@ -18,6 +18,13 @@ Options: `--top <module>` (the testbench module, default the first), `--max-time
 default stdout), `--vcd <file>` (a waveform, below). Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
+Plusargs: `--plusarg name=value` (repeatable, up to 16; a leading `+` is dropped) is read by
+`$test$plusargs("name")` (1 when a plusarg starts with the text) and `$value$plusargs("name=%d", var)`
+(conversions `d`, `h`/`x`, `b`, `o`, `s`; the call is 1 and `var` is set when a plusarg starts with the text
+before the `%` and its rest parses in that conversion, else 0 and `var` is unchanged). A `%s` value keeps its
+first 8 bytes (the testbench subset has no vector wider than 64 bits). `run_testbenches` takes `--plusarg`
+too. A file name from a variable (`$readmemh(firmware_file, ...)`) is not supported.
+
 ## Waveform (`--vcd`)
 
 `sim_tb --vcd wave.vcd tb.v` writes an IEEE 1364 VCD of the run. It holds every scalar `reg`,
