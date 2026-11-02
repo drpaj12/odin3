@@ -7,6 +7,16 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
+**What it is today.** The trunk of Yggdrasil III (hub: <https://github.com/drpaj12/YggdrasilIII>). A C17 framework with
+one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
+Verilog-2005, BLIF, Yosys JSON, structural Verilog) -> two-stage elaboration -> `proc`, `opt`, `fsm`, `wreduce`, `flatten`
+(re-implementing Yosys 0.55 behaviour) -> architecture-driven partial mapping and ABC -> BLIF for VPR or LPM Verilog.
+Since v1.0 it also has graph features (graphlet orbit counts, SCOAP), a netlist editing API, a cycle simulator with testbench
+support, and processor-netlist handling. Headline result (paper, [`docs/paper/`](docs/paper/README.md)): every netlist it
+produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and
+wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
+five lose adders, so the equal-or-explained rule is not met; power is not measured.
+
 **Status: version 1.3.0 (tag on the merge commit; the latest tagged release is 1.2.0).** Version 1.2.0 added provenance at every granularity; 1.3.0 adds netlist editing, simulation toggle counting, graphlets and front-end fixes, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
