@@ -3038,6 +3038,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_hier_ref
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(hier_ref_flow PROPERTIES LABELS tools)
+    # $tribuf lowering (enable dropped, WARNING) and write_blif / sim of an inout driven from inside.
+    add_test(NAME tribuf_lower_flow
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_tribuf_lower
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(tribuf_lower_flow PROPERTIES LABELS tools)
     # sim_tb $test$plusargs / $value$plusargs (--plusarg) and the lazy generate-branch check.
     add_test(NAME sim_tb_plusargs
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

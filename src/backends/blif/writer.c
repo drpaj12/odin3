@@ -1303,21 +1303,43 @@ static void write_generators(blif_writer *wr) {
 
 /* --- ports --------------------------------------------------------------------------------- */
 
+/* The direction BLIF sees for port `at`: an inout port of the module whose every bit has a driver
+ * besides the port's own pin (a lowered tri-state, `lower` drops the enable) is an output; any
+ * other inout stays INOUT, which BLIF cannot write. `of_module`: a port of the module being
+ * written (not of a black-box model). */
+static odin3_dir blif_port_dir(const blif_writer *wr, const odin3_celltype_def *def, uint32_t at,
+                               bool of_module) {
+    if (!of_module || def->ports[at].dir != ODIN3_DIR_INOUT) {
+        return def->ports[at].dir;
+    }
+    odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, at), 0);
+    for (uint32_t k = 0; k < pins.count; k++) {
+        odin3_net_id net = odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k});
+        if (!odin3_net_valid(net) || odin3_net_driver_count(wr->module, net) < 2) {
+            return ODIN3_DIR_INOUT;
+        }
+    }
+    return pins.count > 0 ? ODIN3_DIR_OUT : ODIN3_DIR_INOUT;
+}
+
 /* The directive of a port's direction; INOUT has none in BLIF. */
-static odin3_status port_keyword(blif_writer *wr, const odin3_port_def *port, const char **word) {
-    if (port->dir == ODIN3_DIR_INOUT) {
+static odin3_status port_keyword(blif_writer *wr, const odin3_port_def *port, odin3_dir dir,
+                                 const char **word) {
+    if (dir == ODIN3_DIR_INOUT) {
         return wr_refuse(wr, "BLIF has no inout ports; cannot write port", port->name);
     }
-    *word = port->dir == ODIN3_DIR_IN ? ".inputs" : ".outputs";
+    *word = dir == ODIN3_DIR_IN ? ".inputs" : ".outputs";
     return ODIN3_OK;
 }
 
 /* Starts a new .inputs/.outputs line for port `at` when its direction differs from the previous
  * port's. */
-static odin3_status port_line(blif_writer *wr, const odin3_celltype_def *def, uint32_t at) {
+static odin3_status port_line(blif_writer *wr, const odin3_celltype_def *def, uint32_t at,
+                              bool of_module) {
     const char *word = NULL;
-    odin3_status st = port_keyword(wr, &def->ports[at], &word);
-    if (st == ODIN3_OK && (at == 0 || def->ports[at].dir != def->ports[at - 1].dir)) {
+    odin3_dir dir = blif_port_dir(wr, def, at, of_module);
+    odin3_status st = port_keyword(wr, &def->ports[at], dir, &word);
+    if (st == ODIN3_OK && (at == 0 || dir != blif_port_dir(wr, def, at - 1, of_module))) {
         if (at > 0) {
             wr_end(wr);
         }
@@ -1332,7 +1354,7 @@ static odin3_status write_module_ports(blif_writer *wr) {
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
-        st = port_line(wr, def, i);
+        st = port_line(wr, def, i, true);
         uint32_t width = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0).count;
         for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
             bool changed = false;
@@ -1381,7 +1403,7 @@ static odin3_status port_bit_buffer(blif_writer *wr, uint32_t at, odin3_pin_id p
         (name.len != wr->token.len || memcmp(name.ptr, wr->token.data, name.len) != 0)) {
         const odin3_celltype_def *def =
             odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
-        port_buffer(wr, def->ports[at].dir, name);
+        port_buffer(wr, blif_port_dir(wr, def, at, true), name);
     }
     return st;
 }
@@ -1423,7 +1445,7 @@ static odin3_status write_port_buffers(blif_writer *wr) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < odin3_module_port_count(wr->module); i++) {
         odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
-        bool vtr_out = wr->vtr && def->ports[i].dir == ODIN3_DIR_OUT;
+        bool vtr_out = wr->vtr && blif_port_dir(wr, def, i, true) == ODIN3_DIR_OUT;
         for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {
             odin3_pin_id pin = {pins.first.v + k};
             st = vtr_out ? out_bit_vtr(wr, i, pin) : port_bit_buffer(wr, i, pin);
@@ -1436,7 +1458,7 @@ static odin3_status write_port_buffers(blif_writer *wr) {
 static odin3_status write_model_ports(blif_writer *wr, const odin3_celltype_def *def) {
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
-        st = port_line(wr, def, i);
+        st = port_line(wr, def, i, false);
         const odin3_port_def *port = &def->ports[i];
         for (uint32_t k = 0; st == ODIN3_OK && k < port->width; k++) {
             st = bit_token(wr, port->scalar, odin3_bytes_cstr(port->name), (int64_t)k);

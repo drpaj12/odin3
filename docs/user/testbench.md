@@ -42,7 +42,8 @@ iverilog (`$dumpvars(0, tb)` on the same testbench) with `tools/vcd-compare/vcd-
 One testbench module without ports per file, with `reg`/`wire`/`integer`/array declarations,
 `parameter`, `assign`, `initial`, `always` (starting with `#`, `@` or `wait`), blocking and
 nonblocking assignments, `#N`, `@(posedge|negedge|change ...)`, `wait`, `if`, `case`, `for`,
-`while`, `repeat`, `forever`, DUT instances with named port connections, `$display`, `$write`,
+`while`, `repeat`, `forever`, DUT instances with named port connections (up to 4096), `%t` in `$display`/`$write` (the time in
+the `` `timescale `` precision, 20 columns), `$display`, `$write`,
 `$strobe`, `$monitor`, `$fopen`, `$fdisplay`, `$fwrite`, `$fclose`, `$readmemh`, `$readmemb`,
 `$finish`, `$stop`, `$time`, `$random`, `$signed`, `$unsigned`, `$clog2`. Values are at most 64
 bits wide. Anything else stops the run with `tb.v:LINE: unsupported: <construct>`: x/z literals,

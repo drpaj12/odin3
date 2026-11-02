@@ -133,6 +133,7 @@ typedef struct lw_totals {
     uint64_t mixed_sign;      /* cells warned of for A_SIGNED != B_SIGNED */
     uint64_t async_bits;      /* flip-flop bits whose async control was made synchronous */
     uint64_t async_cells;     /* the cells those bits belong to */
+    uint64_t tribuf_cells;    /* $tribuf cells lowered with the enable dropped */
     uint64_t soft[LW_N_SOFT]; /* cells of $add, $mem, $mul, $sub (the soft-logic INFO line) */
 } lw_totals;
 
@@ -343,6 +344,7 @@ LW_DECLARE_BUILDER(or);
 LW_DECLARE_BUILDER(xor);
 LW_DECLARE_BUILDER(xnor);
 LW_DECLARE_BUILDER(mux);
+LW_DECLARE_BUILDER(tribuf);
 LW_DECLARE_BUILDER(reduce_and);
 LW_DECLARE_BUILDER(reduce_or);
 LW_DECLARE_BUILDER(reduce_xor);

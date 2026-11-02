@@ -7,6 +7,8 @@
  */
 #include "passes/lower/lower_int.h"
 
+#include "util/log.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -107,6 +109,34 @@ odin3_status lw_build_mux(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
         odin3_net_id result = {0};
         st = lw_mux(lw, cell->port[PORT_A].nets[i], cell->port[PORT_B].nets[i], sel, &result);
         st = st == ODIN3_OK ? lw_bits_push(out, result) : st;
+    }
+    return st;
+}
+
+/* --- $tribuf -------------------------------------------------------------------------------- */
+
+/* Port positions of $tribuf: A EN Y. */
+enum { TRI_PORT_A = 0, TRI_PORT_Y = 2 };
+
+/*
+ * $tribuf: the enable is dropped and Y is A, as Parmys does (a lone tri-state driver of a port is
+ * a plain driver there; elab2_trivtr_out.c does the same under --vtr-compat). Yosys keeps a
+ * `$_TBUF_` bit cell through `techmap`; the registry has none (PHASE3 decision 41(3B)(4) made it
+ * an error) and VPR has no tri-state, so the port becomes a plain driver. WARNING per cell.
+ */
+odin3_status lw_build_tribuf(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
+    char label[LW_LABEL_LEN];
+    lw_node_label(lw, cell->node, label, sizeof label);
+    odin3_log(ODIN3_LOG_WARN,
+              "lower: '$tribuf' '%s': the enable is dropped and the output is driven by the data "
+              "input (Parmys default; the registry has no bit-level tri-state cell and VPR has no "
+              "tri-state)",
+              label);
+    lw->totals.tribuf_cells++;
+    lw_bits_clear(out);
+    odin3_status st = odin3_vec_reserve(&out->v, cell->port[TRI_PORT_Y].n);
+    for (uint32_t i = 0; st == ODIN3_OK && i < cell->port[TRI_PORT_Y].n; i++) {
+        st = lw_bits_push(out, cell->port[TRI_PORT_A].nets[i]);
     }
     return st;
 }

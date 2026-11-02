@@ -1,0 +1,69 @@
+"""`$tribuf` lowering (tinyriscv gpio inout). Yosys keeps a `$_TBUF_` bit cell on a port; the
+registry has none, VPR has no tri-state and Parmys drops the enable of a lone port driver, so
+`lower` drives the port from the data input with a WARNING per cell. The micro
+tests/lower/tribuf_inout.v (inout and output tri-states on the top) runs through proc, opt, lower,
+write_blif and sim: write_blif and sim treat an inout port driven from inside as an output. With
+ODIN3_TINYRISCV_TOP set (the unmodified tinyriscv_soc_top.v) it also lowers. Run through CTest
+`tribuf_lower_flow` (ODIN3_BIN set); skipped without it.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import tempfile
+import unittest
+from pathlib import Path
+
+ODIN3 = os.environ.get("ODIN3_BIN")
+ROOT = Path(__file__).resolve().parents[2]
+MICRO = ROOT / "tests" / "lower" / "tribuf_inout.v"
+WARNING = "the enable is dropped and the output is driven by the data input"
+
+
+def run(script: str, top: str) -> subprocess.CompletedProcess[str]:
+    assert ODIN3 is not None
+    return subprocess.run([ODIN3, "--top", top, "-p", script], capture_output=True, text=True)
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest tribuf_lower_flow)")
+class TribufLowerTest(unittest.TestCase):
+    def test_micro_flows_to_blif_and_sim_with_the_enable_dropped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            blif, vec = Path(tmp) / "o.blif", Path(tmp) / "v.txt"
+            done = run(f"read_verilog --nolatches {MICRO}; hierarchy --top tribuf_inout; proc; "
+                       f"opt; lower; write_blif {blif}; sim 32 1 {vec}", "tribuf_inout")
+            self.assertEqual(done.returncode, 0, done.stderr)
+            text = blif.read_text()
+            vectors = vec.read_text()
+        # one warning per tri-state: io (1 bit), bus (2 bits, one cell), o
+        warned = [ln for ln in done.stderr.splitlines() if WARNING in ln]
+        self.assertEqual(len(warned), 3, done.stderr)
+        # the inout ports are written as outputs, each bit driven from its data input
+        self.assertIn(".inputs d en dv[0] dv[1]\n.outputs io bus[0] bus[1] o\n", text)
+        self.assertNotIn(".names en ", text)
+        rows = [ln.split() for ln in vectors.splitlines() if ln and not ln.startswith("#")]
+        self.assertEqual(len(rows), 32)
+        enables = set()
+        for _, ins, outs in rows:  # inputs: d en dv[1:0]; outputs: io bus[1:0] o
+            d, en, dv = ins[0], ins[1], ins[2:4]
+            enables.add(en)
+            self.assertEqual((outs[0], outs[1:3], outs[3]), (d, dv, d), (ins, outs))
+        self.assertEqual(enables, {"0", "1"})  # the outputs follow the data with en low as well
+
+    @unittest.skipUnless(os.environ.get("ODIN3_TINYRISCV_TOP"), "ODIN3_TINYRISCV_TOP not set")
+    def test_unmodified_tinyriscv_soc_lowers(self) -> None:
+        top = Path(os.environ["ODIN3_TINYRISCV_TOP"])
+        rtl = top.parents[1]
+        others = sorted(str(f) for d in ("core", "perips", "debug", "utils")
+                        for f in (rtl / d).glob("*.v") if f.name != "defines.v")
+        files = " ".join(others)
+        done = run(f"read_verilog --nolatches {top} {files}; "
+                   f"hierarchy --top tinyriscv_soc_top; proc; opt; flatten; opt; lower",
+                   "tinyriscv_soc_top")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertGreaterEqual(sum(WARNING in ln for ln in done.stderr.splitlines()), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

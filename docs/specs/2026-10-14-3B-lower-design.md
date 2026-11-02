@@ -393,7 +393,7 @@ refinement against Yosys's own `memory_map` only (§14.4).
 | Cell | Treatment |
 |---|---|
 | `$sop`, `$lut` | `bit`: untouched (§1) |
-| `$tribuf` | located error: `lower: '$tribuf' '<cell>' has no bit-level cell in the registry` (3E also rejects a tri-state; `$_TBUF_` is Phase 6 Altera work). Peter's question 4 |
+| `$tribuf` | lowered since 2026-11-02 (fix/tribuf-simtb): the enable is dropped and Y is A, with `lower: '$tribuf' '<cell>': the enable is dropped ...` (WARNING per cell), as Parmys does; Yosys keeps a `$_TBUF_` bit cell on a port, the registry has none (3E rejects a tri-state). Peter's question 4 was a located error |
 | `$proc` | refused by the manager (O1) |
 | `$_CONST*_`, `$_BUF_`, all bit gates | untouched |
 | An `inout` or a net driven by a tristate type | not examined; `check` rules 4/E stay as they were |

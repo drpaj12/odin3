@@ -81,6 +81,11 @@ uint64_t lw_est_xnor(const lw_cell *cell) {
     return y_width(cell);
 }
 
+uint64_t lw_est_tribuf(const lw_cell *cell) {
+    (void)cell;
+    return 0;
+}
+
 uint64_t lw_est_mux(const lw_cell *cell) {
     return y_width(cell);
 }
