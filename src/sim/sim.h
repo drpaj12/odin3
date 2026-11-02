@@ -156,6 +156,16 @@ odin3_status odin3_sim_settle_events(odin3_sim *sim);
 odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
 
 /*
+ * One edge of one clock input: like odin3_sim_clock_edge, but only input bit `at` (which must be a
+ * clock, see odin3_sim_input_is_clock) is set, and only the edge-triggered cells that bit clocks
+ * directly (and the cells on derived clocks that its edge changes) take the event. The other clock
+ * inputs keep their values, so several clocks of a design can run independently. Same settling as
+ * odin3_sim_clock_edge. ODIN3_ERR_INVALID_ARG (not logged, nothing changed) for another event or
+ * a bit that is not a clock input. Allocates nothing.
+ */
+odin3_status odin3_sim_clock_edge_input(odin3_sim *sim, odin3_sim_bit at, odin3_sim_event event);
+
+/*
  * Returns the simulator to its state right after the build: every value (inputs included, clocks
  * low) and state bit 0, the INIT event to every sequential cell, one settle. Allocates nothing.
  */

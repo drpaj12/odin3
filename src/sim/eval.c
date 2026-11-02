@@ -210,6 +210,35 @@ bool odin3_sim_input_is_clock(const odin3_sim *sim, odin3_sim_bit at) {
     return bit_index(sim->in_ports, sim->n_in_ports, at, &index) && sim->in_clock[index] != 0;
 }
 
+/* Sends event to the cells that the input bit `input` clocks directly. */
+static void send_input(odin3_sim *sim, uint32_t input, odin3_sim_event event) {
+    for (uint32_t i = 0; i < sim->n_edge; i++) {
+        uint32_t cell = sim->order[i];
+        if (sim->clk_in != NULL && sim->clk_in[cell] == input) {
+            send(sim, &sim->cells[cell], event);
+        }
+    }
+}
+
+odin3_status odin3_sim_clock_edge_input(odin3_sim *sim, odin3_sim_bit at, odin3_sim_event event) {
+    uint32_t index = 0;
+    if ((event != ODIN3_SIM_POSEDGE && event != ODIN3_SIM_NEGEDGE) ||
+        !bit_index(sim->in_ports, sim->n_in_ports, at, &index) || sim->in_clock[index] == 0) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    sim->values[sim->in_bits[index]] = event == ODIN3_SIM_POSEDGE ? 1 : 0;
+    if (sim->n_dclk > 0) {
+        odin3_sim_settle(sim);
+        send_input(sim, index, event);
+        (void)send_derived(sim);
+        odin3_sim_settle(sim);
+        return derived_rounds(sim);
+    }
+    send_input(sim, index, event);
+    odin3_sim_settle(sim);
+    return ODIN3_OK;
+}
+
 odin3_status odin3_sim_set_input(odin3_sim *sim, odin3_sim_bit at, bool value) {
     uint32_t index = 0;
     if (!bit_index(sim->in_ports, sim->n_in_ports, at, &index) || sim->in_clock[index] != 0) {

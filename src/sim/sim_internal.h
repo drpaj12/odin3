@@ -68,7 +68,8 @@ typedef struct odin3_sim_port {
  * spans / idx / state: the storage the views point into. Primary inputs (in_ports, n_in_ports)
  * and outputs, in port order; in_bits / out_bits hold the slot of each port bit, in port then bit
  * order; in_clock[k] is 1 when input bit k drives the clock pin of an edge-triggered cell (the
- * engine toggles it instead of driving it at random). n_edge: the number of edge-triggered cells,
+ * engine toggles it instead of driving it at random; clk_in[cell] is the input bit that clocks an
+ * edge-triggered cell directly, for the per-clock edge call). n_edge: the number of edge-triggered cells,
  * which are order[0 .. n_edge). n_hook_calls counts every simulate hook call (a deterministic
  * work measure for tests). Derived clocks: n_dclk edge-triggered cells have a clock pin on a net
  * that is not an input; dclk_cell[k] is the cell, dclk_slot[k] its clock slot, dclk_last[k] the
@@ -96,6 +97,7 @@ struct odin3_sim {
     uint32_t n_out_ports;
     uint32_t *in_bits;
     uint8_t *in_clock;
+    uint32_t *clk_in; /* per cell: the input bit that clocks it directly, ODIN3_SIM_UNSET if none */
     uint32_t n_in_bits;
     uint32_t *out_bits;
     uint32_t n_out_bits;

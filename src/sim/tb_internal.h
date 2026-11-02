@@ -76,6 +76,21 @@ void tb_dut_observe(tb_ev *ev, tb_dut *dut);
 bool tb_dut_edges(tb_ev *ev, tb_dut *dut);
 void tb_dut_close(tb_dut *dut);
 
+/* Hierarchical reads of DUT signals (tb_dut.c). The simulator of an instance is built on the first
+ * use, at parse time for a hierarchical name, and kept in the instance until the module is freed.
+ */
+/* Builds the simulator of instance `inst` of tb->design if it has none. */
+odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst);
+/* Finds the signal `path` (relative to the DUT top, as odin3_sim_signals_find) of inst: its ID in
+ * *id and width in *width. ODIN3_ERR_INVALID_ARG (logged) when the DUT has no such signal or it is
+ * wider than 64 bits. */
+odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, uint32_t *id,
+                            uint32_t *width);
+/* The value of signal `id` as of the last settle of the DUT. */
+uint64_t tb_inst_peek(const tb_inst *inst, uint32_t id);
+/* Frees the simulator and signal table of inst. */
+void tb_inst_release(tb_inst *inst);
+
 /* VCD output of a testbench run (tb_vcd.c): dumps every scalar reg and wire of the testbench and
  * the connected ports of every DUT instance (in a $scope per instance), 2-state, as the values at
  * the end of each time step that changed one. */

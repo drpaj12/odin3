@@ -45,9 +45,11 @@ nonblocking assignments, `#N`, `@(posedge|negedge|change ...)`, `wait`, `if`, `c
 `while`, `repeat`, `forever`, DUT instances with named port connections (up to 4096), `%t` in `$display`/`$write` (the time in
 the `` `timescale `` precision, 20 columns), `$display`, `$write`,
 `$strobe`, `$monitor`, `$fopen`, `$fdisplay`, `$fwrite`, `$fclose`, `$readmemh`, `$readmemb`,
-`$finish`, `$stop`, `$time`, `$random`, `$signed`, `$unsigned`, `$clog2`. Values are at most 64
-bits wide. Anything else stops the run with `tb.v:LINE: unsupported: <construct>`: x/z literals,
-real numbers, tasks and functions, generate, hierarchical names, parameter overrides on the DUT
+`$finish`, `$stop`, `$time`, `$random`, `$signed`, `$unsigned`, `$clog2`. A DUT instance may have up to 16
+independent clock inputs, and an expression may read a DUT signal by hierarchical path (`dut.u_regs.r`,
+`dut.u.v[3]`, literal indices; read only; not a memory word, which has no name after `lower`). Values are at
+most 64 bits wide. Anything else stops the run with `tb.v:LINE: unsupported: <construct>`: x/z literals,
+real numbers, tasks and functions, generate, parameter overrides on the DUT
 instance, ordered port connections, several modules in the testbench file, compiler directives
 other than `` `timescale ``.
 

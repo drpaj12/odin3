@@ -115,13 +115,12 @@ odin3_status lw_build_mux(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
 
 /* --- $tribuf -------------------------------------------------------------------------------- */
 
-/* Port positions of $tribuf: A EN Y. */
-enum { TRI_PORT_A = 0, TRI_PORT_EN = 1, TRI_PORT_Y = 2 };
+enum { TRI_PORT_A = LW_TRI_PORT_A, TRI_PORT_EN = LW_TRI_PORT_EN, TRI_PORT_Y = LW_TRI_PORT_Y };
 
 /* Why a $tribuf is not collapsed to its data input (NULL: it is). */
 static const char *const k_tri_bus = "its output net has another driver (a tri-state bus)";
 static const char *const k_tri_inout = "its output is an inout port of a module below the top";
-static const char *const k_tri_dead = "its enable is the constant 0 or x";
+static const char *const k_tri_dead = "its enable is the constant 0, x or z";
 static const char *const k_tri_chain = "its data input is the output of another $tribuf";
 
 /* True when the driver pin belongs to a port node of this module that is not an output. */
@@ -150,7 +149,7 @@ static const char *y_net_reason(const lw_ctx *lw, odin3_net_id net) {
     return outs > 1U ? k_tri_bus : NULL;
 }
 
-/* True when the net is driven by a node of one of the two dead constant types or by a $tribuf. */
+/* True when the net is driven by a node of one of the listed types (dead constants, a $tribuf). */
 static bool driven_by(const lw_ctx *lw, odin3_net_id net, const odin3_celltype_id *types,
                       size_t n_types) {
     if (!odin3_net_valid(net) || odin3_net_driver_count(lw->module, net) != 1U) {
@@ -166,11 +165,26 @@ static bool driven_by(const lw_ctx *lw, odin3_net_id net, const odin3_celltype_i
     return false;
 }
 
+/* True when a $tribuf drives a data input bit of the cell: as found before any cell was lowered
+ * (tri_chain), so that the order of the cells does not decide; the live net when there is no mark.
+ */
+static bool tribuf_chained(const lw_ctx *lw, const lw_cell *cell) {
+    if (lw->tri_chain != NULL) {
+        return lw->tri_chain[cell->node.v] != 0;
+    }
+    const odin3_celltype_id self[] = {odin3_node_type(lw->module, cell->node)};
+    for (uint32_t i = 0; i < cell->port[TRI_PORT_A].n; i++) {
+        if (driven_by(lw, cell->port[TRI_PORT_A].nets[i], self, 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* The reason this $tribuf is kept as an error, or NULL when it is the sole driver of its Y bits
  * (what Yosys `opt_expr -mux_undef` and so Parmys collapse). */
 static const char *tribuf_reason(const lw_ctx *lw, const lw_cell *cell) {
-    const odin3_celltype_id dead[] = {lw->constant[0], lw->constant[2]};
-    const odin3_celltype_id self[] = {odin3_node_type(lw->module, cell->node)};
+    const odin3_celltype_id dead[] = {lw->constant[0], lw->constant[2], lw->const_z};
     const char *reason = NULL;
     if (cell->port[TRI_PORT_EN].n > 0 &&
         driven_by(lw, cell->port[TRI_PORT_EN].nets[0], dead, sizeof dead / sizeof dead[0])) {
@@ -179,11 +193,8 @@ static const char *tribuf_reason(const lw_ctx *lw, const lw_cell *cell) {
     for (uint32_t i = 0; reason == NULL && i < cell->port[TRI_PORT_Y].n; i++) {
         odin3_net_id ynet = cell->port[TRI_PORT_Y].nets[i];
         reason = odin3_net_valid(ynet) ? y_net_reason(lw, ynet) : NULL;
-        reason = reason == NULL && driven_by(lw, cell->port[TRI_PORT_A].nets[i], self, 1)
-                     ? k_tri_chain
-                     : reason;
     }
-    return reason;
+    return reason == NULL && tribuf_chained(lw, cell) ? k_tri_chain : reason;
 }
 
 /*
@@ -193,7 +204,7 @@ static const char *tribuf_reason(const lw_ctx *lw, const lw_cell *cell) {
  * same under --vtr-compat. The function differs from the IEEE one while the enable is low (Y
  * follows A, not z); on an inout port of the top the internal read of the port sees A, not the
  * external pin. A bus (several drivers on the Y net), an inout port of a module below the top, a
- * constant 0 or x enable and a $tribuf feeding a $tribuf stay an error: the registry has no
+ * constant 0, x or z enable and a $tribuf feeding a $tribuf stay an error: the registry has no
  * bit-level tri-state cell (PHASE3 decision 41(3B)(4)) and VPR has no tri-state. WARNING per cell.
  */
 odin3_status lw_build_tribuf(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {

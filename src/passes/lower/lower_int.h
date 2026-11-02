@@ -97,6 +97,9 @@ typedef enum lw_gate {
 /* The constants a builder may need: $_CONST0_, $_CONST1_, $_CONSTX_ (odin3_bit 0, 1, x). */
 enum { LW_N_CONST = 3 };
 
+/* Port positions of $tribuf: A EN Y. */
+enum { LW_TRI_PORT_A = 0, LW_TRI_PORT_EN = 1, LW_TRI_PORT_Y = 2 };
+
 /* One cached canonical constant net; fresh while the cell that created it is open. */
 typedef struct lw_const_slot {
     odin3_net_id net;
@@ -144,6 +147,10 @@ typedef struct lw_ctx {
     const odin3_lower_opts *opts;
     odin3_celltype_id gate[LW_G_COUNT];
     odin3_celltype_id constant[LW_N_CONST];
+    odin3_celltype_id tribuf; /* $tribuf */
+    uint8_t *tri_chain; /* per node ID of the module: a $tribuf whose data input a $tribuf drives */
+    odin3_celltype_id
+        const_z; /* $_CONSTZ_: never created by lower, but a $tribuf enable may be it */
     lw_const_slot const_slot[LW_N_CONST];
     odin3_prov_id prov;            /* the current cell's DERIVED record (0: none) */
     odin3_vec created;             /* odin3_node_id: the nodes of the open cell, creation order */

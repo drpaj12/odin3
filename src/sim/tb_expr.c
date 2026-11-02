@@ -638,6 +638,11 @@ static uint64_t finish(tb_ev *ev, const ev_frame *fr) {
         uint64_t sel = fr->val[0] < var->depth ? var->mem[fr->val[0]] : 0;
         return ext(sel, expr->width, fr->sgn && expr->sgn, fr->width);
     }
+    case E_HIER:
+        ev->failed = ev->failed || ev->const_only;
+        return ext(ev->const_only ? 0
+                                  : tb_inst_peek(&ev->tb->insts[expr->var], (uint32_t)expr->num),
+                   expr->width, false, fr->width);
     case E_BITSEL:
     case E_PART:
         return ext(finish_select(fr), expr->width, fr->sgn && expr->sgn, fr->width);
