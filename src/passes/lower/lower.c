@@ -251,6 +251,12 @@ static void report_run(lw_ctx *lw) {
                   "see --report",
                   lw->totals.async_bits, lw->totals.async_cells);
     }
+    if (lw->totals.tribuf_cells > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "lower: %" PRIu64 " '$tribuf' cells lowered with the enable dropped (each is "
+                  "warned of above)",
+                  lw->totals.tribuf_cells);
+    }
     odin3_strbuf info;
     odin3_strbuf_init(&info);
     uint32_t str = 0;

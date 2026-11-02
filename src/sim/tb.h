@@ -161,6 +161,7 @@ typedef struct tb_module {
     uint32_t nprocs;
     void **allocs; /* every parse allocation, freed with the module */
     uint32_t nallocs, cap_allocs;
+    uint64_t time_scale;         /* timescale unit / precision (power of ten), for %t */
     char timescale[TB_NAME];     /* VCD $timescale, from `timescale ("1 ns" when absent) */
     FILE *out;                   /* $display output (fd 1) */
     FILE *files[TB_MAX_FILES];   /* $fopen descriptors 3.. */

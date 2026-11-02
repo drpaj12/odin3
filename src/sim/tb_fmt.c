@@ -15,7 +15,8 @@ enum {
     BITS_PER_OCT = 3,
     BITS_PER_HEX = 4,
     BYTE_MASK = 0xFF,
-    MISS_CHARS = 4
+    MISS_CHARS = 4,
+    TIME_WIDTH = 20 /* default minimum field width of %t */
 };
 
 static unsigned digits_of(uint64_t val, unsigned base) {
@@ -132,6 +133,18 @@ static void put_dec(sbuf *out, const tb_expr *arg, uint64_t val, spec sp) {
     pad_to(out, text, pad);
 }
 
+/* %t: the time argument in the precision of the `timescale (LRM 21.2.1.5 defaults of $timeformat:
+ * units = precision, no decimals, no suffix), right aligned in 20 columns; %0t is minimal. The
+ * units come from the testbench's own `timescale; the LRM default precision (no `timescale) is the
+ * smallest precision in the design, which sim_tb does not see, so a testbench without a `timescale
+ * prints in its time unit (1 ns). */
+static void put_time(sbuf *out, uint64_t val, spec sp) {
+    char text[DEC_BUF];
+    (void)snprintf(text, sizeof text, "%llu", (unsigned long long)val);
+    padding pad = {sp.width < 0 ? (size_t)TIME_WIDTH : (size_t)sp.width, sp.zero ? '0' : ' '};
+    pad_to(out, text, pad);
+}
+
 static void put_string_value(sbuf *out, const tb_expr *arg, uint64_t val) {
     bool started = false;
     for (uint32_t shift = (arg->width + BITS_PER_BYTE - 1U) / BITS_PER_BYTE; shift > 0; shift--) {
@@ -163,6 +176,14 @@ static void put_arg(tb_ev *ev, sbuf *out, const tb_expr *arg, spec sp) {
     case 'o':
         put_radix(out, val, (radix){BASE_OCT, pad ? (bits + BITS_PER_OCT - 1U) / BITS_PER_OCT : 0});
         break;
+    case 't':
+        if (val > UINT64_MAX / ev->tb->time_scale) {
+            ev->failed = true;
+            ev->why = "%t: the time in the timescale precision does not fit in 64 bits";
+        } else {
+            put_time(out, val * ev->tb->time_scale, sp);
+        }
+        break;
     case 'c':
         put(out, &ch, 1);
         break;
@@ -184,7 +205,7 @@ bool tb_fmt_valid(const char *fmt, char *bad) {
         while (isdigit((unsigned char)*cur)) {
             cur++;
         }
-        if (strchr("dbhxocsm%", *cur) == NULL || *cur == '\0') {
+        if (strchr("dbhxocsmt%", *cur) == NULL || *cur == '\0') {
             *bad = *cur;
             return false;
         }

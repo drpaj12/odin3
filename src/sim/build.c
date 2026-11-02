@@ -312,12 +312,40 @@ static odin3_status expand(odin3_sim_builder *bld) {
 
 /* --- primary inputs and outputs --------------------------------------------------------------- */
 
+/* A driver pin of the net that is an OUT pin (a cell output): the inout pins of ports and cells
+ * share the driver partition but are not inside drivers. */
+static bool net_has_out_driver(const odin3_module *module, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(module, net);
+    uint32_t drivers = odin3_net_driver_count(module, net);
+    for (uint32_t i = 0; i < drivers; i++) {
+        if (odin3_pin_dir(module, pins.pins[i]) == ODIN3_DIR_OUT) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Whether every bit of an inout port node has a driver besides the port's own pin: such a port is
+ * driven from inside (a lowered tri-state, `lower` drops the enable) and is simulated as an output.
+ */
+static bool inout_driven_inside(const odin3_module *top, odin3_node_id pnode) {
+    odin3_pinslice pins = odin3_node_pins(top, pnode);
+    for (uint32_t k = 0; k < pins.count; k++) {
+        odin3_net_id net = odin3_pin_net(top, (odin3_pin_id){pins.first.v + k});
+        if (!odin3_net_valid(net) || !net_has_out_driver(top, net)) {
+            return false;
+        }
+    }
+    return pins.count > 0;
+}
+
 static odin3_status add_top_port(odin3_sim_builder *bld, uint32_t index) {
     const odin3_module *top = frame_module(bld, 0);
     odin3_node_id pnode = odin3_module_port(top, index);
     const odin3_celltype_def *def = odin3_celltype_get(bld->design, odin3_node_type(top, pnode));
     uint32_t name = odin3_wire_name(top, odin3_module_port_wire(top, index));
-    if (def->ports[0].dir == ODIN3_DIR_INOUT) {
+    bool inout = def->ports[0].dir == ODIN3_DIR_INOUT;
+    if (inout && !inout_driven_inside(top, pnode)) {
         odin3_sim_err_inout(bld, name);
         return ODIN3_ERR_INVALID_ARG;
     }

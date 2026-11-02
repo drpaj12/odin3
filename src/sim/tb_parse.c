@@ -21,7 +21,8 @@ enum {
     PREC_SHIFT = 8,
     CASE_MAX_ITEMS = 64,
     BLOCK_CAP0 = 8,
-    INST_CONNS_MAX = 16,
+    INST_CONNS_FIRST = 16, /* port connections allocated for a DUT instance at first */
+    INST_CONNS_MAX = 4096, /* the most port connections of one instance (bounded memory) */
     VARS_CAP0 = 32,
     OP_KEEP = 3, /* operator characters kept in tb_expr.op */
     MSG_EXTRA = 32,
@@ -1489,17 +1490,33 @@ static bool parse_conn(parser *pr, tb_conn *conn) {
     return true;
 }
 
+/* Room for one more connection: the array doubles (up to INST_CONNS_MAX) in the parse arena. */
+static bool grow_conns(parser *pr, tb_inst *inst, uint32_t *cap) {
+    if (inst->nconns < *cap) {
+        return true;
+    }
+    if (*cap >= INST_CONNS_MAX) {
+        return fail(pr, "more than 4096 port connections");
+    }
+    uint32_t bigger = *cap * 2U;
+    tb_conn *grown = pnew(pr, (size_t)bigger * sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    memcpy(grown, inst->conns, (size_t)inst->nconns * sizeof *grown);
+    inst->conns = grown;
+    *cap = bigger;
+    return true;
+}
+
 static bool parse_inst_conns(parser *pr, tb_inst *inst) {
-    uint32_t cap = INST_CONNS_MAX;
+    uint32_t cap = INST_CONNS_FIRST;
     inst->conns = pnew(pr, (size_t)cap * sizeof *inst->conns);
     if (inst->conns == NULL || !expect_op(pr, "(")) {
         return false;
     }
     while (!accept_op(pr, ")")) {
-        if (inst->nconns == cap) {
-            return fail(pr, "more than 16 port connections");
-        }
-        if (!parse_conn(pr, &inst->conns[inst->nconns++])) {
+        if (!grow_conns(pr, inst, &cap) || !parse_conn(pr, &inst->conns[inst->nconns++])) {
             return false;
         }
     }

@@ -62,6 +62,7 @@ static const lw_rule k_rules[] = {
     LW_RULE("$sr", sr),
     LW_RULE("$sshr", sshr),
     LW_RULE("$sub", sub),
+    LW_RULE("$tribuf", tribuf),
     LW_RULE("$xnor", xnor),
     LW_RULE("$xor", xor),
     {NULL, NULL, NULL},
@@ -105,7 +106,7 @@ const lw_rule *lw_rule_find(const char *type_name) {
 }
 
 /* Word types with no bit form, by design (spec §5.7, §7, §8, Peter's ruling 4 of PHASE3 #32). */
-static const char *const k_no_rule[] = {"$proc", "$tribuf", "$pow", "$memrd", "$memwr"};
+static const char *const k_no_rule[] = {"$proc", "$pow", "$memrd", "$memwr"};
 
 static bool listed(const char *const *names, size_t count, const char *type_name) {
     for (size_t i = 0; i < count; i++) {
@@ -130,9 +131,6 @@ void lw_log_no_rule(const lw_ctx *lw, odin3_node_id node, const char *type_name)
                   "lower: module '%s': '$pow' '%s' has no bit-level form (run opt first; Yosys "
                   "leaves it unmapped)",
                   module, label);
-    } else if (strcmp(type_name, "$tribuf") == 0) {
-        odin3_log(ODIN3_LOG_ERROR, "lower: '$tribuf' '%s' has no bit-level cell in the registry",
-                  label);
     } else if (strcmp(type_name, "$memrd") == 0 || strcmp(type_name, "$memwr") == 0) {
         odin3_log(ODIN3_LOG_ERROR, "lower: standalone $memrd/$memwr '%s' (use $mem)", label);
     } else {

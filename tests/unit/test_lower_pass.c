@@ -253,9 +253,53 @@ static void test_pow_has_no_bit_level_form(void) {
     expect_error(&ec);
 }
 
-static void test_tribuf_has_no_bit_level_cell(void) {
-    error_case ec = {"$tribuf", "t", "lower: '$tribuf' 't' has no bit-level cell in the registry"};
-    expect_error(&ec);
+/* After the collapse the A input pin drives the one net the Y output port reads. */
+static void expect_y_is_a(odin3_module *mod) {
+    odin3_net_id y_net = lf_wnet(&fix, mod, "Y", 0);
+    odin3_net_id a_net = lf_wnet(&fix, mod, "A", 0);
+    odin3_net_id live = odin3_net_live(mod, y_net) ? y_net : a_net;
+    TEST_ASSERT_TRUE(odin3_net_live(mod, live));
+    TEST_ASSERT_EQUAL_UINT32(1U, odin3_net_driver_count(mod, live));
+    TEST_ASSERT_EQUAL_UINT32(1U, odin3_net_sinks(mod, live).count);
+}
+
+/* $tribuf has a rule since the tinyriscv gpio inout: the sole driver of its output loses the enable
+ * (WARNING) and the output is the data net. */
+static void test_tribuf_is_lowered_with_a_warning(void) {
+    lf_cell_spec cs = {"$tribuf", NULL, 0, "t", {0}};
+    odin3_module *mod = lf_module(&fix, "m");
+    (void)lf_cell(&fix, mod, &cs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run_pass(""));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "lower: '$tribuf' 't': the sole driver"),
+                                 log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "the enable is dropped"), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "differs while the enable is low"), log_text);
+    TEST_ASSERT_EQUAL_UINT32(0, lf_count_type(&fix, mod, "$tribuf"));
+    expect_y_is_a(mod);
+}
+
+/* Two $tribuf cells on one Y net are a bus: the old located error, nothing changed. */
+static void test_tribuf_bus_is_an_error(void) {
+    lf_cell_spec cs = {"$tribuf", NULL, 0, "t", {0}};
+    odin3_module *mod = lf_module(&fix, "m");
+    (void)lf_cell_prefixed(&fix, mod, &cs, "p_");
+    cs.name = "u";
+    (void)lf_cell_prefixed(&fix, mod, &cs, "q_");
+    odin3_net_pair bus = {lf_wnet(&fix, mod, "p_Y", 0), lf_wnet(&fix, mod, "q_Y", 0)};
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_net_merge(mod, bus));
+    odin3_strbuf before;
+    odin3_strbuf_init(&before);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &before));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run_pass(""));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "has no bit-level cell in the registry"),
+                                 log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, "tri-state bus"), log_text);
+    odin3_strbuf after;
+    odin3_strbuf_init(&after);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lf_signature(&fix, &after));
+    TEST_ASSERT_EQUAL_STRING(before.data, after.data);
+    odin3_strbuf_free(&before);
+    odin3_strbuf_free(&after);
 }
 
 static void test_standalone_memrd_and_memwr_are_errors(void) {
@@ -361,7 +405,7 @@ static void test_every_rule_and_listed_name_is_a_word_type(void) {
     for (uint32_t i = 0; i < lw_rule_count(); i++) {
         check_rule_entry(lw_rule_at(i));
     }
-    static const char *const k_listed[] = {"$proc", "$tribuf", "$pow", "$memrd", "$memwr"};
+    static const char *const k_listed[] = {"$proc", "$pow", "$memrd", "$memwr"};
     for (size_t i = 0; i < sizeof k_listed / sizeof k_listed[0]; i++) {
         TEST_ASSERT_TRUE(lw_no_rule_listed(k_listed[i]));
         check_is_word_type(k_listed[i]);
@@ -385,7 +429,8 @@ int main(void) {
     RUN_TEST(test_read_blif_netlist_with_hard_cells_passes_through);
     RUN_TEST(test_read_blif_netlist_dffsre_passes_through);
     RUN_TEST(test_pow_has_no_bit_level_form);
-    RUN_TEST(test_tribuf_has_no_bit_level_cell);
+    RUN_TEST(test_tribuf_is_lowered_with_a_warning);
+    RUN_TEST(test_tribuf_bus_is_an_error);
     RUN_TEST(test_standalone_memrd_and_memwr_are_errors);
     RUN_TEST(test_standalone_memwr_is_an_error);
     RUN_TEST(test_an_unnamed_cell_is_named_by_its_id_in_the_error);

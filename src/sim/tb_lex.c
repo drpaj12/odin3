@@ -210,20 +210,54 @@ static void skip_to_eol(const char **cursor) {
     }
 }
 
-/* Keeps the time unit of `timescale <n> <unit> / <precision>: digits, optional blanks, letters
- * (1ns, 1 ns, 100 ps / 10 ps all work); stored as "<n> <unit>". The precision is ignored. */
-static void take_timescale(const char *text, tb_module *tb) {
-    while (*text == ' ' || *text == '\t') {
-        text++;
+/* One `timescale term "<1|10|100> <unit>" at *text (blanks allowed): its power of ten in seconds,
+ * with *text moved past it; TIME_BAD when it is not a term. */
+enum { TIME_BAD = 1000, TIME_UNITS = 6, TIME_STEP = 3, TIME_MAX_DIGITS = 3, TIME_MAX_EXP = 18 };
+
+static void skip_blanks(const char **text) {
+    while (**text == ' ' || **text == '\t') {
+        (*text)++;
     }
+}
+
+static int scan_time_term(const char **text) {
+    static const char *const UNITS[TIME_UNITS] = {"s", "ms", "us", "ns", "ps", "fs"};
+    const char *cur = *text;
+    skip_blanks(&cur);
+    size_t ndig = 0;
+    while (isdigit((unsigned char)cur[ndig])) {
+        ndig++;
+    }
+    if (ndig == 0 || ndig > TIME_MAX_DIGITS || cur[0] != '1' || strspn(cur + 1, "0") != ndig - 1U) {
+        return TIME_BAD;
+    }
+    cur += ndig;
+    skip_blanks(&cur);
+    size_t nlet = 0;
+    while (isalpha((unsigned char)cur[nlet])) {
+        nlet++;
+    }
+    for (int i = 0; i < TIME_UNITS; i++) {
+        if (strlen(UNITS[i]) == nlet && strncmp(cur, UNITS[i], nlet) == 0) {
+            *text = cur + nlet;
+            return (int)ndig - 1 - (i == 0 ? 0 : TIME_STEP * i);
+        }
+    }
+    return TIME_BAD;
+}
+
+/* Keeps the time unit of `timescale <n> <unit> / <precision>: digits, optional blanks, letters
+ * (1ns, 1 ns, 100 ps / 10 ps all work); stored as "<n> <unit>". time_scale is unit / precision
+ * (a power of ten, 1 without a valid precision): %t prints times in the precision (LRM 21.2.1.5).
+ */
+static void take_timescale(const char *text, tb_module *tb) {
+    skip_blanks(&text);
     size_t ndig = 0;
     while (isdigit((unsigned char)text[ndig])) {
         ndig++;
     }
     const char *unit = text + ndig;
-    while (*unit == ' ' || *unit == '\t') {
-        unit++;
-    }
+    skip_blanks(&unit);
     size_t nlet = 0;
     while (isalpha((unsigned char)unit[nlet])) {
         nlet++;
@@ -231,6 +265,21 @@ static void take_timescale(const char *text, tb_module *tb) {
     if (ndig > 0 && nlet > 0 && ndig + nlet + 2 <= sizeof tb->timescale) {
         (void)snprintf(tb->timescale, sizeof tb->timescale, "%.*s %.*s", (int)ndig, text, (int)nlet,
                        unit);
+    }
+    const char *cur = text;
+    int unit_exp = scan_time_term(&cur);
+    skip_blanks(&cur);
+    tb->time_scale = 1;
+    if (unit_exp == TIME_BAD || *cur != '/') {
+        return;
+    }
+    cur++;
+    int prec_exp = scan_time_term(&cur);
+    if (prec_exp == TIME_BAD || prec_exp > unit_exp || unit_exp - prec_exp > TIME_MAX_EXP) {
+        return;
+    }
+    for (int i = prec_exp; i < unit_exp; i++) {
+        tb->time_scale *= BASE_DEC;
     }
 }
 
@@ -287,6 +336,7 @@ bool tb_lex(const tb_source *src, tb_module *tb, tb_lexed *out) {
     uint32_t line = 1;
     const char *cursor = src->text;
     (void)strcpy(tb->timescale, "1 ns");
+    tb->time_scale = 1;
     uint32_t cap = LEX_TOKS0;
     out->toks = tb_alloc(tb, (size_t)cap * sizeof *out->toks);
     out->n = 0;

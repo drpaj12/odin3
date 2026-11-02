@@ -38,7 +38,7 @@ Flatten: after `flatten` the foreign net keeps its name `u.w` and the real child
 ## tinyriscv report
 
 - Elaboration: `tinyriscv_soc_top.v` elaborates with 2 warnings (the foreign reference nets).
-- `lower` fails: no bit-level `$tribuf` from the gpio inout (a separate gap, not fixed here).
+- `lower` failed: no bit-level `$tribuf` from the gpio inout (fixed in `fix/tribuf-simtb`: the enable is dropped, WARNING).
 - A patched copy (the inout replaced) lowers and simulates.
-- `sim_tb` limits an instance to 16 port connections and has no `%t` format; the tinyriscv testbench needs both
-  worked around.
+- `sim_tb` limited an instance to 16 port connections and had no `%t` format; both fixed in `fix/tribuf-simtb`
+  (4096 connections; `%t` in the timescale precision).

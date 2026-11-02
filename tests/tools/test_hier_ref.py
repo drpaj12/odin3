@@ -20,6 +20,17 @@ MICRO = ROOT / "tests" / "flatten" / "hierref.v"
 FLOW = "read_verilog --nolatches {src}; hierarchy --top top; proc; opt; flatten; opt; lower"
 
 
+def vector_rows(text: str) -> list[tuple[str, str]]:
+    """The (inputs, outputs) bit strings of each row of a `sim` vector file (inputs a b c ->
+    "abc" in declaration order, likewise the outputs; header lines start with #)."""
+    rows = []
+    for line in text.splitlines():
+        if line and not line.startswith("#"):
+            _, ins, outs = line.split()
+            rows.append((ins, outs))
+    return rows
+
+
 def run(script: str) -> subprocess.CompletedProcess[str]:
     assert ODIN3 is not None
     return subprocess.run([ODIN3, "--top", "top", "-p", script], capture_output=True, text=True)
@@ -33,7 +44,16 @@ class HierRefFlowTest(unittest.TestCase):
             done = run(f"{FLOW.format(src=MICRO)}; write_blif {blif}; sim 16 1 {vec}")
             self.assertEqual(done.returncode, 0, done.stderr)
             self.assertTrue(blif.read_text().startswith(".model top"))
-            self.assertTrue(vec.exists() and vec.read_text())
+            text = vec.read_text()
+            self.assertIn("# output r 1\n# output q 1\n# output y 1\n# output z 1\n", text)
+            rows = vector_rows(text)
+        self.assertEqual(len(rows), 16)
+        for ins, outs in rows:  # inputs: d a (clk is the clock); outputs: r q y z
+            a_in = int(ins[1])
+            # y reads the real child wire w = ~a; z and r read undriven foreign nets (0)
+            self.assertEqual(outs[2], str(1 - a_in), (ins, outs))
+            self.assertEqual((outs[0], outs[3]), ("0", "0"), (ins, outs))
+        self.assertEqual({outs[2] for _, outs in rows}, {"0", "1"})  # y toggles with a
         # one warning per reference, each saying the net is undriven
         warned = [ln for ln in done.stderr.splitlines() if "is not supported; it is treated" in ln]
         self.assertEqual(len(warned), 2, done.stderr)
