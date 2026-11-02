@@ -10,8 +10,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 - Hierarchical references into another module (`u_tinyriscv.u_regs.regs[26]` in tinyriscv_soc_top.v) are no
   longer an error: as Yosys does, the dotted path is an undriven net of that name (a bit select past its one bit
-  is x), with one WARNING per reference. Generate-block and named-block references resolve as before; hierarchical
-  calls, writes and references in constant expressions or port connections are still errors.
+  is x), with one WARNING per reference (a write to one drives that local net only). Generate-block and named-block
+  references resolve as before; hierarchical calls, indexed paths, `default_nettype none` and references in
+  constant expressions or port connections are still errors.
 - `loc-check`: the plain BLIF listing leaves out the modules flatten left unused, which plain `write_blif`
   no longer writes (#318). The `loc_micros_*` and `loc_vtr14_*` gate and LUT sweeps failed on those modules, and
   the totals of the designs that did compare looked like improvements; with the fix every pin holds in Release.

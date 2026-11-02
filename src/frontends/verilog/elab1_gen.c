@@ -841,7 +841,7 @@ odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_na
     odin3_status st = odin3_elab1_hier_comps(env, hier_name, &comps);
     env->cur_scope = saved;
     if (st != ODIN3_OK) {
-        return st == ODIN3_ERR_PARSE ? ODIN3_OK : st;
+        return st;
     }
     uint32_t count = odin3_ast_nchild(env->e1->parsed, hier_name);
     bool indexed = false;
@@ -850,6 +850,11 @@ odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_na
     }
     odin3_elab1_reach reach = {0, 0};
     odin3_elab1_path path = {comps, count, scope};
+    uint8_t net = env->nettype;
+    if (net == ODIN3_NETTYPE_NONE || net == ODIN3_AST_NET_DECL_TRI0 ||
+        net == ODIN3_AST_NET_DECL_TRI1 || net == ODIN3_AST_NET_DECL_TRIREG) {
+        return ODIN3_OK; /* the implicit net would be an error (EL-25): keep the old one */
+    }
     if (indexed || count < 2 || odin3_elab1_scope_walk(env, &path, &reach) != ODIN3_WALK_STOP ||
         reach.used != 0) {
         return ODIN3_OK;

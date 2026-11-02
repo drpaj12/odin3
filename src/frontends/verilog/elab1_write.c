@@ -2054,8 +2054,9 @@ static void w_hier_nets(e1w *wr) {
             continue;
         }
         odin3_elab1_warn_once(wr->e1, use->node,
-                              "hierarchical reference '%s' is not supported; it is read as an "
-                              "undriven net of that name (as Yosys does)",
+                              "hierarchical reference '%s' is not supported; it is treated as a "
+                              "net of the module with that name, not connected to the other "
+                              "module (as Yosys does)",
                               odin3_elab1_str(wr->e1, name));
         if (odin3_u64map_get(env->imp_names, name, NULL)) {
             continue;

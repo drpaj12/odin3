@@ -417,9 +417,10 @@ static void test_reference_errors(void) {
     run_one("module m;\n  wire w;\nendmodule\nmodule t;\n  m u ();\n  wire z;\n"
             "  assign z = u.w;\nendmodule\n");
     expect_clean();
-    et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:7:14: warning: hierarchical reference 'u.w' is not supported; it is read as an "
-              "undriven net of that name (as Yosys does)");
+    et_expect(
+        &rs, ODIN3_LOG_WARN,
+        "t.v:7:14: warning: hierarchical reference 'u.w' is not supported; it is treated as a "
+        "net of the module with that name, not connected to the other module (as Yosys does)");
     et_free(&rs);
     run_error(&(gen_case){LOOP_G "  wire z;\n  assign z = g[0].q;\nendmodule\n",
                           "t.v:7:14: error: 'g[0].q' is not declared"});
@@ -459,9 +460,11 @@ static void test_named_block_reference_errors(void) {
             "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = nope.count;\n"
             "  assign y = w;\nendmodule\n");
     expect_clean();
-    et_expect(&rs, ODIN3_LOG_WARN,
-              "t.v:6:18: warning: hierarchical reference 'nope.count' is not supported; it is read "
-              "as an undriven net of that name (as Yosys does)");
+    et_expect(
+        &rs, ODIN3_LOG_WARN,
+        "t.v:6:18: warning: hierarchical reference 'nope.count' is not supported; it is treated "
+        "as a net of the module with that name, not connected to the other module (as "
+        "Yosys does)");
     et_free(&rs);
     run_one("module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
             "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = blk.nope;\n"
