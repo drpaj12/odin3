@@ -626,6 +626,24 @@ static uint64_t finish_select(const ev_frame *fr) {
     return sel;
 }
 
+static uint64_t finish_mem(const tb_ev *ev, const ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    const tb_var *var = &ev->tb->vars[expr->var];
+    uint64_t sel = fr->val[0] < var->depth ? var->mem[fr->val[0]] : 0;
+    return ext(sel, expr->width, fr->sgn && expr->sgn, fr->width);
+}
+
+/* A hierarchical read: the DUT signal as of its last settle. Not a constant expression. */
+static uint64_t finish_hier(tb_ev *ev, const ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    if (ev->const_only) {
+        ev->failed = true;
+        return 0;
+    }
+    uint64_t val = tb_inst_peek(&ev->tb->insts[expr->var], (uint32_t)expr->num);
+    return ext(val, expr->width, false, fr->width);
+}
+
 static uint64_t finish(tb_ev *ev, const ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     switch (expr->kind) {
@@ -633,16 +651,10 @@ static uint64_t finish(tb_ev *ev, const ev_frame *fr) {
         return ext(expr->num, expr->width, fr->sgn, fr->width);
     case E_VAR:
         return ext(ev->tb->vars[expr->var].val, expr->width, fr->sgn, fr->width);
-    case E_MEM: {
-        const tb_var *var = &ev->tb->vars[expr->var];
-        uint64_t sel = fr->val[0] < var->depth ? var->mem[fr->val[0]] : 0;
-        return ext(sel, expr->width, fr->sgn && expr->sgn, fr->width);
-    }
+    case E_MEM:
+        return finish_mem(ev, fr);
     case E_HIER:
-        ev->failed = ev->failed || ev->const_only;
-        return ext(ev->const_only ? 0
-                                  : tb_inst_peek(&ev->tb->insts[expr->var], (uint32_t)expr->num),
-                   expr->width, false, fr->width);
+        return finish_hier(ev, fr);
     case E_BITSEL:
     case E_PART:
         return ext(finish_select(fr), expr->width, fr->sgn && expr->sgn, fr->width);

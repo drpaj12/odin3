@@ -95,7 +95,7 @@ static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
             odin3_log(
                 ODIN3_LOG_ERROR,
                 "testbench:%u: module `%s` has more than %d clock inputs; `%s` is one too many",
-                line, mod, (int)MAX_CLOCKS, conn->port);
+                line, mod, MAX_CLOCKS, conn->port);
             return false;
         }
         dut->clocks[dut->nclocks++] = (dut_clock){(int)(conn - dut->inst->conns), 0};
@@ -145,8 +145,8 @@ odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst) {
     return odin3_sim_build(design, id, &inst->sim);
 }
 
-odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, uint32_t *id,
-                            uint32_t *width) {
+odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path,
+                            tb_hier_sig *out) {
     odin3_status st = tb_inst_sim(design, inst);
     if (st == ODIN3_OK && inst->sigs == NULL) {
         st = odin3_sim_signals_create(inst->sim, &inst->sigs);
@@ -154,9 +154,10 @@ odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *pat
     if (st != ODIN3_OK) {
         return st;
     }
-    st = odin3_sim_signals_find(inst->sigs, odin3_bytes_cstr(path), id);
+    uint32_t id = 0;
+    st = odin3_sim_signals_find(inst->sigs, odin3_bytes_cstr(path), &id);
     const odin3_sim_signal *sig =
-        st == ODIN3_OK && *id != 0 ? odin3_sim_signals_at(inst->sigs, *id) : NULL;
+        st == ODIN3_OK && id != 0 ? odin3_sim_signals_at(inst->sigs, id) : NULL;
     if (sig == NULL) {
         if (st == ODIN3_OK) {
             odin3_log(ODIN3_LOG_ERROR, "testbench:%u: DUT `%s` (module `%s`) has no signal `%s`",
@@ -169,7 +170,7 @@ odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *pat
                   inst->line, path, inst->name);
         return ODIN3_ERR_INVALID_ARG;
     }
-    *width = sig->width;
+    *out = (tb_hier_sig){id, sig->width};
     return ODIN3_OK;
 }
 
@@ -224,8 +225,8 @@ static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     return changed;
 }
 
-static void observe_clock(tb_ev *ev, tb_dut *dut, uint32_t k) {
-    dut_clock *clock = &dut->clocks[k];
+static void observe_clock(tb_ev *ev, tb_dut *dut, uint32_t which) {
+    dut_clock *clock = &dut->clocks[which];
     const tb_expr *clk = dut->inst->conns[clock->conn].expr;
     if (clk == NULL) {
         return;
@@ -240,7 +241,7 @@ static void observe_clock(tb_ev *ev, tb_dut *dut, uint32_t k) {
         ev->why = "more than 64 clock edges between two NBA regions";
         return;
     }
-    dut->edges[dut->nedges++] = (dut_edge){(uint8_t)k, val != 0};
+    dut->edges[dut->nedges++] = (dut_edge){(uint8_t)which, val != 0};
 }
 
 void tb_dut_observe(tb_ev *ev, tb_dut *dut) {

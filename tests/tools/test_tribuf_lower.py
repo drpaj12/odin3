@@ -16,6 +16,7 @@ import os
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
 
 ODIN3 = os.environ.get("ODIN3_BIN")
@@ -29,7 +30,10 @@ def run(script: str, top: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run([ODIN3, "--top", top, "-p", script], capture_output=True, text=True)
 
 
-def tribuf_json(cells: list[tuple[str, list[object], list[object], list[object]]]) -> str:
+Bits = Sequence[object]
+
+
+def tribuf_json(cells: Sequence[tuple[str, Bits, Bits, Bits]]) -> str:
     """A Yosys JSON module `m` (inputs a b e1 e2, output y) of 1-bit `$tribuf` cells. Each cell is
     (name, A bits, EN bits, Y bits); a bit is a net number or the constant "0", "1", "x", "z"."""
     ports = {name: {"direction": "input", "bits": [num]} for name, num in

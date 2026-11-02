@@ -505,19 +505,17 @@ static bool begin_hier(parser *pr, bool *want) {
     pr->saw_hier = true;
     if (inst < 0) {
         return fail(pr, "hierarchical name whose first part is not a DUT instance of this "
-                        "testbench (declared before use)");
+                        "testbench");
     }
     char path[HIER_PATH] = "";
-    uint32_t sig = 0;
-    uint32_t width = 0;
+    tb_hier_sig sig = {0,
+                       1}; /* the first pass only finds the instances and the hierarchical names */
     pr->pos++;
     if (!hier_path(pr, path)) {
         return false;
     }
-    if (pr->lenient) {
-        width = 1; /* the first pass only finds the instances and whether a name is hierarchical */
-    } else if (tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, &sig, &width) !=
-               ODIN3_OK) {
+    if (!pr->lenient &&
+        tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, &sig) != ODIN3_OK) {
         pr->failed = true;
         return false;
     }
@@ -526,8 +524,8 @@ static bool begin_hier(parser *pr, bool *want) {
         return false;
     }
     expr->var = inst;
-    expr->num = sig;
-    expr->width = width;
+    expr->num = sig.id;
+    expr->width = sig.width;
     *want = false;
     return push_val(pr, expr);
 }

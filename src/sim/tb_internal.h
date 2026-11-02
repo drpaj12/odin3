@@ -81,11 +81,15 @@ void tb_dut_close(tb_dut *dut);
  */
 /* Builds the simulator of instance `inst` of tb->design if it has none. */
 odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst);
-/* Finds the signal `path` (relative to the DUT top, as odin3_sim_signals_find) of inst: its ID in
- * *id and width in *width. ODIN3_ERR_INVALID_ARG (logged) when the DUT has no such signal or it is
- * wider than 64 bits. */
-odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, uint32_t *id,
-                            uint32_t *width);
+/* A DUT signal found by path: its ID in the DUT's signal table and its width. */
+typedef struct tb_hier_sig {
+    uint32_t id;
+    uint32_t width;
+} tb_hier_sig;
+/* Finds the signal `path` (relative to the DUT top, as odin3_sim_signals_find) of inst. ODIN3_ERR_
+ * INVALID_ARG (logged) when the DUT has no such signal or it is wider than 64 bits. */
+odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path,
+                            tb_hier_sig *out);
 /* The value of signal `id` as of the last settle of the DUT. */
 uint64_t tb_inst_peek(const tb_inst *inst, uint32_t id);
 /* Frees the simulator and signal table of inst. */
