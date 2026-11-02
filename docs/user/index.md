@@ -5,6 +5,11 @@ Odin III is a Verilog synthesis front end and netlist tool for FPGA flows. It re
 optimises and maps it, and writes BLIF for VPR or Verilog with LPM cells. Every object in the
 output keeps a pointer to the HDL text it came from.
 
+Headline result, from the [paper](https://github.com/drpaj12/odin3/tree/main/docs/paper): every netlist Odin III
+produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and
+wirelength ratios against the Parmys flow inside a 1.20 gate; two designs differ from Parmys in multiplier count and five lose
+adders. Power is not measured. The hub is <https://github.com/drpaj12/YggdrasilIII>.
+
 This manual follows the layout of the VTR documentation: a getting-started page, an overview of
 the flow with one diagram per stage, then the references.
 
