@@ -29,7 +29,8 @@ Version 1.3.0, C ABI 7. Everything below is on `main` with tests; the table with
   {doc}`analysis`, {doc}`timing-attribution`).
 - Netlist editing API and edit events ({doc}`edit`).
 - Simulation and testbenches: `sim`, `sim_tb`, `testbench_gen`, `tb-compare`, `run_testbenches`, plusargs, `%t`, VCD, derived
-  clocks ({doc}`testbench`).
+  clocks ({doc}`testbench`); on main after 1.3.0 (Unreleased): up to 16 independent clocks per DUT instance and read-only
+  hierarchical reads (`dut.u_regs.r`) in testbenches ({doc}`testbench`), and the tested `$tribuf` exclusions of `lower` ({doc}`passes`).
 - Python binding, plugins and the ABI ({doc}`python-api`); reverse-engineering workflow ({doc}`re-workflow`).
 
 ```{toctree}
