@@ -10,9 +10,16 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 - Hierarchical references into another module (`u_tinyriscv.u_regs.regs[26]` in tinyriscv_soc_top.v) are no
   longer an error: as Yosys does, the dotted path is an undriven net of that name (a bit select past its one bit
-  is x), with one WARNING per reference (a write to one drives that local net only). Generate-block and named-block
-  references resolve as before; hierarchical calls, indexed paths, `default_nettype none` and references in
-  constant expressions or port connections are still errors.
+  is x), with one WARNING per reference (a write to one drives that local net only). The same holds in a port
+  connection (`leaf v(.a(u.w), ...)`; Yosys accepts it too), for a first component that is a function (`f.x`) and
+  for the module's own name before an undeclared name (`top.nope`); the module's own name before a declared name
+  is popped (`top.a` is `a`, as Yosys). A net declared with the escaped name (`wire \u.w ;`) is used, not a second
+  net. After `flatten` the foreign net keeps the name `u.w` and a child wire of that name becomes `u.w_1`; the
+  foreign net stays undriven and unconnected (as Yosys). Generate-block and named-block references resolve as
+  before. Still errors: an index on a path that names no block (`u[0].w`; Yosys makes a wire), a call (`u.f(1)`),
+  a parameter override (`#(.P(u.w))`), a constant expression (localparam, range bound, generate condition), a
+  path through a generate block that lacks the member (`g.sub.x`; Yosys makes a wire) and any reference under
+  `default_nettype none`, tri0, tri1 or trireg. Notes: `docs/notes/2026-11-02-hierarchical-references.md`.
 - `loc-check`: the plain BLIF listing leaves out the modules flatten left unused, which plain `write_blif`
   no longer writes (#318). The `loc_micros_*` and `loc_vtr14_*` gate and LUT sweeps failed on those modules, and
   the totals of the designs that did compare looked like improvements; with the fix every pin holds in Release.

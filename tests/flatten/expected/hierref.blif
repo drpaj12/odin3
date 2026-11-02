@@ -1,0 +1,22 @@
+.model top
+.inputs clk d a
+.outputs r q y z
+.names unconn
+.subckt $dff CLK=clk D[0]=unconn Q[0]=r
+.subckt $dff CLK=clk D[0]=d D[1]=q D[2]=u_r.regs_1[1] D[3]=u_r.regs_1[2] D[4]=u_r.regs_1[3] \
+  D[5]=u_r.regs_1[4] D[6]=u_r.regs_1[5] D[7]=u_r.regs_1[6] D[8]=u_r.regs_1[7] D[9]=u_r.regs_1[8] \
+  D[10]=u_r.regs_1[9] D[11]=u_r.regs_1[10] D[12]=u_r.regs_1[11] D[13]=u_r.regs_1[12] \
+  D[14]=u_r.regs_1[13] D[15]=u_r.regs_1[14] D[16]=u_r.regs_1[15] D[17]=u_r.regs_1[16] \
+  D[18]=u_r.regs_1[17] D[19]=u_r.regs_1[18] D[20]=u_r.regs_1[19] D[21]=u_r.regs_1[20] \
+  D[22]=u_r.regs_1[21] D[23]=u_r.regs_1[22] D[24]=u_r.regs_1[23] D[25]=u_r.regs_1[24] \
+  D[26]=u_r.regs_1[25] D[27]=u_r.regs_1[26] D[28]=u_r.regs_1[27] D[29]=u_r.regs_1[28] \
+  D[30]=u_r.regs_1[29] D[31]=u_r.regs_1[30] Q[0]=q Q[1]=u_r.regs_1[1] Q[2]=u_r.regs_1[2] \
+  Q[3]=u_r.regs_1[3] Q[4]=u_r.regs_1[4] Q[5]=u_r.regs_1[5] Q[6]=u_r.regs_1[6] Q[7]=u_r.regs_1[7] \
+  Q[8]=u_r.regs_1[8] Q[9]=u_r.regs_1[9] Q[10]=u_r.regs_1[10] Q[11]=u_r.regs_1[11] \
+  Q[12]=u_r.regs_1[12] Q[13]=u_r.regs_1[13] Q[14]=u_r.regs_1[14] Q[15]=u_r.regs_1[15] \
+  Q[16]=u_r.regs_1[16] Q[17]=u_r.regs_1[17] Q[18]=u_r.regs_1[18] Q[19]=u_r.regs_1[19] \
+  Q[20]=u_r.regs_1[20] Q[21]=u_r.regs_1[21] Q[22]=u_r.regs_1[22] Q[23]=u_r.regs_1[23] \
+  Q[24]=u_r.regs_1[24] Q[25]=u_r.regs_1[25] Q[26]=u_r.regs_1[26] Q[27]=u_r.regs_1[27] \
+  Q[28]=u_r.regs_1[28] Q[29]=u_r.regs_1[29] Q[30]=u_r.regs_1[30] Q[31]=u_r.regs_1[31]
+.subckt $not A[0]=a Y[0]=y
+.end

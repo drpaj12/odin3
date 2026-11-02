@@ -1,0 +1,2 @@
+E21_indexed.v:9:14: error:
+hierarchical reference 'u[0].w' is not supported

@@ -1,0 +1,2 @@
+E21_param_override.v:13:12: error:
+hierarchical reference 'u.w' is not supported

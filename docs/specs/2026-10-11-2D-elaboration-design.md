@@ -688,7 +688,7 @@ symbol table (`odin3_symtab_create`) and a resolution array.
 - **Checks** (each a located error, §9): an unresolved name ("'x' is not declared" — stage 1
   declares implicit nets, so a store from stage 1 never fails here; one from an adapter may); a
   duplicate declaration (M11, with both locations); a `HIER_NAME` that does not end in a
-  generate scope or named block of the same module (E21); a `CALL` that names no function, a
+  generate scope or named block of the same module (E21; a path into another module is accepted, see section 5.4, updated 2026-11-02); a `CALL` that names no function, a
   `TASK_CALL` that names no task.
 
 Cost O(nodes) with one `u64map` probe per name. The binding is stage 2's (freed with it); the
@@ -716,7 +716,8 @@ Made exact by 2D Task 13 (v4.9, agent defaults):
   name and assigning node. Task output arguments are not recorded here (Task 23).
 - **References into scopes.** The first component is found from the current scope outward to the
   module (a `BLOCK` symbol), the others in the reached scope (EL-22). A component naming no block
-  is E21; a block without that index is `'g[5].t' does not exist (generate block 'g[5]' was not
+  is an undriven net of the dotted name with a WARNING (accepted since 2026-11-02, as Yosys: an auto-wire; E21 only
+  with an index, under `default_nettype none`, tri0, tri1 or trireg, or in a constant expression); a block without that index is `'g[5].t' does not exist (generate block 'g[5]' was not
   elaborated)`; a last component with an index is E21; a last name not declared in the reached
   scope is `'blk.x' is not declared`. A `CALL` or `TASK_CALL` naming nothing is `'f' is not
   declared`.
@@ -1358,11 +1359,19 @@ A `HIER_NAME` whose first component resolves, from the current scope outward, to
 block or a named block of the **same module** is resolved component by component
 (`odin3_scope_child(st, scope, name, index)` for `g[2]`) and must end at a declaration in the
 reached scope (G7: `g[0].t`, `blk.count`). Any other hierarchical name — through an instance,
-upward, or into a function — is E21: "hierarchical reference 'u.w' is not supported". Indices
+upward, or into a function — was E21; since 2026-11-02 it is accepted as Yosys does it: a dotted name no declaration
+answers is an undriven net of that name in the reading module, one WARNING "hierarchical reference 'u.w' is not
+supported; it is treated as an undriven net of the module with that name, not connected to the other module", in
+any expression, port connection or process (`odin3_elab1_hier_classify`). The module's own name before a declared
+name is popped (`top.a` is `a`); a net declared with the escaped dotted name is that net. After `flatten` the
+foreign net keeps `u.w` and a child wire of that name becomes `u.w_1`. E21 stays for an indexed first component
+that names no block, a `CALL`/`TASK_CALL`, a parameter override, a constant expression (localparam, range bound,
+generate condition), a generate-block prefix with a missing member and any use under `default_nettype none`
+(notes: `docs/notes/2026-11-02-hierarchical-references.md`). Indices
 must be constant (after stage 1 they are `NUMBER`s). A reference into a block that was not
 selected is "'g[5].t' does not exist (generate block 'g[5]' was not elaborated)". A named
 `begin`/`end` block here means one of an `always` or `initial` of the same module scope (a block
-inside a function or task is not reachable by this path, E21): stage 1 accepts a path whose first
+inside a function or task is not reachable by this path): stage 1 accepts a path whose first
 component names one (v4.15: `blk.count`, before or after the block, inside a generate block too) and
 leaves the member to the binder ("'blk.nope' is not declared", §17 #38); a constant position that
 reads one is E21.
@@ -2277,7 +2286,7 @@ cases (2C §7.3) expect, at the node named:
 | N17 | the `VAR_DECL` | `variable type 'real' is not supported` (`time`, `realtime`) |
 | N18 | the `EVENT_DECL` | `named event 'e' is not supported` |
 | E20 | the `CALL` | `system function '$random' is not supported` |
-| E21 | the `HIER_NAME`/`CALL`/`TASK_CALL` | `hierarchical reference 'u.w' is not supported` |
+| E21 | the `HIER_NAME`/`CALL`/`TASK_CALL` (an error only for the cases listed in section 5.4; a path into another module is a WARNING since 2026-11-02) | `hierarchical reference 'u.w' is not supported` |
 | A4 | the second driver | `'y[3]' has two drivers (also driven at f.v:L:C)` (a whole-net conflict names the net: `'y' has two drivers …`) |
 | T10 | the later block's assignment | `'r[2]' is assigned in two always blocks (also at f.v:L:C)` |
 | T12 | the inner `TIMING_STMT` | `event control inside an always body is not supported` |

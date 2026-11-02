@@ -1100,12 +1100,27 @@ odin3_status odin3_elab1_genblk_name(odin3_elab1 *e1, uint32_t scope, uint32_t c
  * after the diagnostic; ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope);
 
-/* Whether hier_name, read in scope, is a reference into another module (or any path whose first
- * component is no generate or named block, and has no index): Yosys makes an undriven net of
- * the dotted name, and so do we (a warning). *foreign set; when it is, the dotted text is
- * appended to text. ODIN3_ERR_NO_MEMORY. */
-odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
-                                      bool *foreign, odin3_strbuf *text);
+/* What a HIER_NAME read in scope is, beyond a path into the module's own generate and named blocks
+ * (odin3_elab1_scope_ref). Yosys has no hierarchy in a name: a dotted name that no declaration
+ * answers is an auto-wire of that name, and so it is here (a warning). */
+typedef enum odin3_elab1_hier_kind {
+    ODIN3_HIER_PATH,     /* a path into the module's blocks, or an error of odin3_elab1_scope_ref */
+    ODIN3_HIER_FOREIGN,  /* an undriven net named by the dotted text (into another module) */
+    ODIN3_HIER_DECLARED, /* a net declared with the dotted text as its (escaped) name, or the
+                            module's own name before a declared name (`top.a`, Yosys pops the
+                            prefix) */
+} odin3_elab1_hier_kind;
+
+typedef struct odin3_elab1_hier_info {
+    odin3_elab1_hier_kind kind;
+    uint32_t name; /* FOREIGN and DECLARED: the net's name, interned in the design's strtab */
+} odin3_elab1_hier_info;
+
+/* Classifies hier_name read in scope. A name with an index, one under `default_nettype none (or
+ * tri0, tri1, trireg: the implicit net would be an error, EL-25) and one whose first component
+ * names a block of the scope are PATH. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_hier_classify(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                       odin3_elab1_hier_info *out);
 
 /* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
  * dropped while env->quiet). */

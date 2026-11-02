@@ -1,0 +1,2 @@
+E21_port.v:10:14: warning:
+hierarchical reference 'u.w' is not supported; it is treated as an undriven net

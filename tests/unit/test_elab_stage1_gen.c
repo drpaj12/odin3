@@ -419,8 +419,9 @@ static void test_reference_errors(void) {
     expect_clean();
     et_expect(
         &rs, ODIN3_LOG_WARN,
-        "t.v:7:14: warning: hierarchical reference 'u.w' is not supported; it is treated as a "
-        "net of the module with that name, not connected to the other module (as Yosys does)");
+        "t.v:7:14: warning: hierarchical reference 'u.w' is not supported; it is treated as an "
+        "undriven net of the module with that name, not connected to the other module (as Yosys "
+        "does; flatten keeps this name for the net and renames a child wire of the same name)");
     et_free(&rs);
     run_error(&(gen_case){LOOP_G "  wire z;\n  assign z = g[0].q;\nendmodule\n",
                           "t.v:7:14: error: 'g[0].q' is not declared"});
@@ -463,8 +464,9 @@ static void test_named_block_reference_errors(void) {
     et_expect(
         &rs, ODIN3_LOG_WARN,
         "t.v:6:18: warning: hierarchical reference 'nope.count' is not supported; it is treated "
-        "as a net of the module with that name, not connected to the other module (as "
-        "Yosys does)");
+        "as an undriven net of the module with that name, not connected to the other module (as "
+        "Yosys does; flatten keeps this name for the net and renames a child wire of the same "
+        "name)");
     et_free(&rs);
     run_one("module t(input clk, output [3:0] y);\n  always @(posedge clk) begin : blk\n"
             "    reg [3:0] count;\n    count = 0;\n  end\n  wire [3:0] w = blk.nope;\n"
@@ -486,6 +488,52 @@ static void test_foreign_reference_in_always(void) {
     TEST_ASSERT_EQUAL_UINT32(
         2, et_count_with(&rs, ODIN3_LOG_WARN, "hierarchical reference 'u.r.regs'"));
     et_free(&rs);
+}
+
+/* Yosys reads a dotted name that no declaration answers as an auto-wire of that name (0.69,
+ * checked with the binary): a port connection `.a(u.w)` and a function prefix `f.x` are accepted
+ * with the warning; the module's own name before a declared name is popped (`t.a` is `a`, no
+ * warning) and before an undeclared one stays (`t.nope`); a net declared as the escaped name
+ * `\u.w ` is that net (no second declaration, no warning). */
+static void test_foreign_reference_forms(void) {
+    run_one(
+        "module m(input a, output y);\n  assign y = a;\nendmodule\n"
+        "module t(input a, output y, output z);\n  m u (.a(a), .y(y));\n  m v (.a(u.w), .y(z));\n"
+        "endmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "reference 'u.w' is not"));
+    et_free(&rs);
+    run_one("module t(input a, output y);\n  function f;\n    input x;\n    f = x;\n"
+            "  endfunction\n  assign y = f.x;\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "reference 'f.x' is not"));
+    et_free(&rs);
+    run_one("module t(input a, output y, output z);\n  assign y = t.a;\n  assign z = t.nope;\n"
+            "endmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_WARN, "reference 't.a'"));
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "reference 't.nope' is not"));
+    TEST_ASSERT_EQUAL_UINT32(0, find(ODIN3_AST_HIER_NAME, "").v);
+    et_free(&rs);
+    run_one("module m(input a, output y);\n  assign y = a;\nendmodule\n"
+            "module t(input a, output y, output z);\n  m u (.a(a), .y(y));\n  wire \\u.w ;\n"
+            "  assign \\u.w = a;\n  assign z = u.w;\nendmodule\n");
+    expect_clean();
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_WARN, "hierarchical reference"));
+    et_free(&rs);
+}
+
+/* The errors that survive: a call (Yosys: Can't resolve function name), a path through a
+ * generate block that lacks the member (Yosys would make a wire `g.sub.x`). */
+static void test_foreign_reference_errors(void) {
+    run_error(&(gen_case){"module m(input a, output y);\n  assign y = a;\nendmodule\n"
+                          "module t(input a, output y, output z);\n  m u (.a(a), .y(y));\n"
+                          "  assign z = u.f(1);\nendmodule\n",
+                          "t.v:6:14: error: hierarchical reference 'u.f' is not supported"});
+    et_free(&rs);
+    run_error(&(gen_case){"module t(input a, output y, output z);\n  if (1) begin : g\n"
+                          "    wire s;\n  end\n  assign y = g.sub.x;\n  assign z = a;\nendmodule\n",
+                          "t.v:5:14: error: hierarchical reference 'g.sub.x' is not supported"});
 }
 
 /* --- misplaced and clashing names ---------------------------------------------------------- */
@@ -650,6 +698,8 @@ int main(void) {
     RUN_TEST(test_named_block_reference);
     RUN_TEST(test_named_block_reference_errors);
     RUN_TEST(test_foreign_reference_in_always);
+    RUN_TEST(test_foreign_reference_forms);
+    RUN_TEST(test_foreign_reference_errors);
     RUN_TEST(test_port_in_block);
     RUN_TEST(test_block_clash);
     RUN_TEST(test_scoped_defparam);
