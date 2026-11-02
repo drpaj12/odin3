@@ -3,10 +3,10 @@
 import os, re, sys
 NAME, CODE = "AnonSynth", "anonsynth"
 src = open("odin3.tex").read()
-# Odin and Odin II stay cited: they are named in the text, so blinding them would point to the author.
+# Self-work is blinded (Peter 2026-11-02): the Odin and Odin II papers and the VTR papers the author co-wrote are anonymous entries.
 keys = ["verilogTown","verilogtown2017","faruque2025gatebreaker",
         "gharibian2010finding","gharibian2013analyzing","gharibian2014identifying","jamieson2022datamining",
-        "sarihi2024seekers"]
+        "sarihi2024seekers", "jamieson2005odin", "jamieson2011odin2", "rose2012vtr", "luu2009vpr5"]
 amap = {k: "anon%02d" % (i + 1) for i, k in enumerate(keys)}
 def sub(old, new, s=None):
     global src
@@ -45,17 +45,12 @@ assert sep
 src = head + "\\bibliography{blind,joined}\n\n\\end{document}\n"
 src = re.sub(r"\\usepackage\[resetlabels\]\{multibib\}\n\\newcites\{all\}\{[^}]*\}\n", "", src)
 src = re.sub(r"% Part I keys[^\n]*\n\\nociteall\{[^}]*\}\n", "", src)
-# The glossary is inlined (the blind copy has no second file) and loses the self-citation of the thesis.
-gloss = open("glossary.tex").read()
-gloss = gloss.replace("~\\cite{jamiesonthesis}", "").replace("\\cite{jamiesonthesis,luuthesis}", "\\cite{luuthesis}")
-gloss = gloss.replace("(a cluster in)", "(a cluster)")
-# terms defined inline in the Introduction (tag ``% ref:``) are not repeated in the blind copy
-src = src.replace("\\input{glossary}\n", "".join(ln for ln in gloss.splitlines(True)
-                                                if not ln.startswith("%") and "% ref:" not in ln))
-if "jamiesonthesis" in src.replace("\\cite{jamiesonthesis}", "", 0) and False:
-    sys.exit("thesis")
 src = src.replace("~\\cite{jamiesonthesis}", "").replace("\\cite{jamiesonthesis,luuthesis}", "\\cite{luuthesis}")
-for pat, rep in [(r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\.~\\ref\{[^}]*\}\)", ")"),
+for pat, rep in [(r" \(the lineage is Fig\.~\\ref\{fig:prov\} of Part~II\)", ""),
+                 (r" \((?:the plugin model is )?Fig\.~\\ref\{fig:abi\} of Part~II\)", ""),
+                 (r" \((?:Table~\\ref\{[^}]*\} in )?Appendix~\\ref\{sec:moved2?\}[^)]*\)", ""),
+                 (r" Appendix~\\ref\{sec:moved\} gives the full text\.", ""),
+                 (r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\.~\\ref\{[^}]*\}\)", ")"),
                  (r" \(Part~II, Table~\\ref\{tab:compare\}, is the full comparison\)", ""),
                  (r" Part~II, Sec\.~\\ref\{sec:verify\} explains each method\.", ""),
                  (r"; Part~II, Sec\.~\\ref\{sec:background-detail\}\)", ")"),
@@ -64,88 +59,26 @@ for pat, rep in [(r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\
                  (r" \(Appendix~\\ref\{sec:(?:register|appmethod|releases|status)\}\)", ""),
                  (r"; Appendix~\\ref\{sec:[a-z]+\}", ""),
                  (r" Appendix~\\ref\{sec:releases\} gives the record by release\.", ""),
-                 (r"The IDs \(O1 to O17\) are those of the research log, which lists every hypothesis, including those that are not confirmed\.",
-                  "The IDs (O1 to O17) are those of the full version of this paper, which lists every hypothesis, including those that are not confirmed."),
+                 (r"are those of the research log, which lists every hypothesis, including those that are not confirmed\.",
+                  "are those of the full version of this paper, which lists every hypothesis, including those that are not confirmed."),
+                 (r" The history of each experiment \(what was tried first, what was fixed\) is in Appendix~\\ref\{sec:exprecords\}\.", ""),
                  (r"A failed one is a line in the research log and the Discussion\.",
                   "A failed one is reported in the Discussion."),
+                 (r" \(adder counts in Appendix~\\ref\{sec:exprecords\}\)", ""),
                  (r"\(Sec\.~\\ref\{sec:abi\}\)", "")]:
     src, n = re.subn(pat, rep, src)
     print("blind pattern", n, pat[:50])
-cut("Table~\\ref{tab:didnot} lists", "\\emph{What was not measured.}", "")
-cut("\\subsection{The platform features of v1.3.0}", "\\subsection{Odin III against Odin II and Yosys}", "")
-cut("\\item the platform features added since v1.0:", "\\item an account of the build with a Dark Factory", "")
 if "Part~II" in src:
     sys.exit("Part~II left: " + src[src.index("Part~II") - 80:src.index("Part~II") + 60])
-# ---- FCCM page budget: 8 pages plus references. The open version keeps everything. --------------
-# The suite paragraph shrinks to three sentences and the tree figure goes; the suite is Part II / open copy.
-cut("I call this new suite Yggdrasil~III, the world tree", "\n\\begin{figure*}[tp]\n\\centering\n\\odinfit{\\textwidth}{\\input{IMAGE/fig_yggdrasil}}",
-    "I call this new suite Yggdrasil~III. Odin~III is its trunk: every path through the suite passes its one provenance IR. "
-    "The other tools of the suite (an experiment runner and GUI, a simulation bridge, a game, a reverse-engineering tool, "
-    "a placement experiment, the circuit knowledge base and a record-and-replay viewer) branch from it and use it as a package. "
-    "All the code is public (URL withheld for review).\n")
-cut("\n\\begin{figure*}[tp]\n\\centering\n\\odinfit{\\textwidth}{\\input{IMAGE/fig_yggdrasil}}", "\\label{fig:yggdrasil}\n\\end{figure*}\n", "\n", keep_end=False)
 sub("the Mimir~III dataset (Fig.~\\ref{fig:yggdrasil}):", "the Mimir~III dataset:")
-# Table I is in Part II of the open version.
-cut("\\begin{table*}[t]\n\\caption{Odin II, Yosys (with Parmys) and Odin III compared}", "Table~\\ref{tab:compare-short} summarizes the differences. Yosys is", "")
-sub("Table~\\ref{tab:compare-short} summarizes the differences. Yosys is", "Odin~III differs from both predecessors in its core language, its netlist records, its provenance on every node and its linked ABC. Yosys is")
-# III-A technical text: one paragraph instead of six.
-cut("\\emph{Technical.} Odin~III reads a design into one IR and changes it one pass at a time.", "\\subsection{Checking against oracles}",
-    "\\emph{Technical.} Odin~III reads a design into one IR and changes it one pass at a time (Fig.~\\ref{fig:flow}). "
-    "Elaboration runs in two stages and the word-level passes follow Yosys~0.55; \\code{partial\\_map} binds multipliers, adders and RAMs to the blocks "
-    "the architecture lists, with Parmys's rule as the default; \\code{lower} turns word cells into bit cells; a linked ABC maps the logic to LUTs; "
-    "and \\code{write\\_blif --vtr} writes the BLIF that VPR reads. Where Odin~III and Parmys could differ, \\code{--vtr-compat} makes Odin~III do what "
-    "Parmys does and print a WARNING; where Parmys is wrong to the RTL, Odin~III stays correct and declares the difference (Sec.~\\ref{sec:parmys-bugs}).\n\n")
-# fig_flow_verify out (it is Fig. 2 of the open version).
-cut("\\begin{figure*}[t]\n\\centering\n\\odinfit{\\textwidth}{\\input{IMAGE/fig_flow_verify}}", "\\label{fig:flow-verify}\n\\end{figure*}\n", "", keep_end=False)
-cut("\\emph{Technical.} Figure~\\ref{fig:flow-verify} marks which technique checks which stage:", "\n\n\\subsection{One provenance-tracked IR}",
-    "\\emph{Technical.} The techniques are refinement proofs by SAT (\\code{lower-equiv}, \\code{opt-equiv}), random module generators checked against Yosys \\code{techmap}, "
-    "Verilator random vectors (\\code{fcheck}), golden BLIFs, and the exit-code convention of Sec.~\\ref{sec:abi-summary}.")
-# cost: v1.0 numbers only (the open version adds the separate extension-to-Yggdrasil table and the DeepSeek window).
-cut("\\emph{Second, separate: the extension to Yggdrasil~III.}", "\n% ------------------------------------------------------------------------------------------\n\\section{Experiments}",
-    "")
-# the companion Norns work is a sibling paper: no citation in the blind copy.
-sub(" The companion work on The Norns~III placement experiment~\\cite{nornsIII}, which uses the attribution, reports that it agreed with VPR's critical-path delay within 0.5\\% in 999 of 999 runs (a different property, not part of this verdict).", "")
-# identity cues: the coined idiom and the self-description
+sub(" (Fig.~\\ref{fig:yggdrasil}, in Part II)", "")
+src = re.sub(r"The other tools branch from it and use it as a package:[^\n]*\n", "The other tools of the suite (an experiment runner and GUI, a simulation bridge, a game, a reverse-engineering tool, a placement experiment, the circuit knowledge base and a record-and-replay viewer) branch from it and use it as a package. All the code is public (URL withheld for review).\n", src)
+sub(" The companion placement experiment~\\cite{nornsIII}, which uses the attribution, reports that it agreed with VPR's critical-path delay within 0.5\\% in 999 of 999 runs (a different property, not part of this verdict).", "")
 sub("After the ``MAIking software'' moment of December 2025, when AI coding agents began", "After the moment of December 2025 when AI coding agents began")
-sub("I state the caveats of this MAIking:", "I state the caveats of this build:")
-sub("Then came what I call the ``MAIking software'' moment of December 2025: AI coding agents", "Then came the moment of December 2025: AI coding agents")
-sub("For an experienced engineer like myself who has the burden of ``job'' this superpower has allowed me to MAIke again.", "For an experienced engineer with a full-time job, this superpower allows making software again.")
-# Background II-B to II-E trimmed (the open version keeps them in full).
-cut("\\emph{The Odin~II flow.}", "\\subsection{VTR and partial mapping}",
-    "\\emph{The Odin~II flow.} Odin~II~\\cite{jamieson2011odin2} parses Verilog into an abstract syntax tree (AST) and turns it into one flattened netlist of nodes, "
-    "pins, and nets; it reads the VPR architecture file to decide which multipliers, adders, and memories become dedicated blocks, and writes the rest as BLIF for ABC~\\cite{brayton2010abc}.\n\n"
-    "\\emph{The Yosys approach.} Yosys~\\cite{wolf2013yosys} parses Verilog into an AST, and \\code{genrtlil} turns each module into RTLIL, a word-level netlist with the hierarchy kept; "
-    "every later step (\\code{proc}, \\code{opt}, \\code{flatten}, \\code{techmap}, \\code{abc}) is a pass over RTLIL that never sees the AST.\n\n")
-cut("Both models attach to VTR~", "\\subsection{The provenance problem}",
-    "Both models attach to VTR~\\cite{luu2009vpr5,rose2012vtr,luu2014vtr7,murray2020vtr8}: a front end, ABC, then VPR's packing, placement, and routing on an XML-described architecture. "
-    "Luu's architecture description language~\\cite{luu2011packing} models each dedicated block's primitive, so a front end that reads the same file can map part of a design "
-    "onto those blocks and leave the rest soft for ABC; VTR~7.0~\\cite{luu2014vtr7} and the study of hard adders~\\cite{luu2014hardadders} carried this to adders. "
-    "Parmys~\\cite{parmys} brings the same partial mapping onto Yosys's word-level netlists and is now VTR's default front end.\n\n")
-cut("Synthesis modifies some of the designer's functional intention.", "\\subsection{Oracles, ASTs and elaboration}",
-    "Synthesis modifies the designer's structure: flattening removes the hierarchy, optimization merges and splits operators, and LUT mapping covers the logic with cells that no source line names. "
-    "I call the task of linking each object of the final netlist back to the HDL that produced it the \\emph{provenance problem}. "
-    "Earlier work addressed it in placement by recovering system-level information from the flat netlist~\\cite{gharibian2010finding,gharibian2013analyzing,gharibian2014identifying}, "
-    "later work applies data-mining clustering to such algorithms~\\cite{jamieson2022datamining}, and Goeders and Wilton trace signals of a high-level synthesis-built circuit back to their source for in-system debug~\\cite{goeders2014effective,goeders2015dynamic,goeders2017signaltracing}. "
-    "Each had to recover a link the synthesis tool didn't keep; Odin~III keeps it (Sec.~\\ref{sec:arch}).\n\n")
-cut("\\code{tools/run-oracle.sh} runs an oracle", "\n% ------------------------------------------------------------------------------------------\n\\section{The Innovations}",
-    "An oracle is run on a design and an architecture and its netlist, logs, and commit are stored as a golden; Odin~III's output is compared with the golden for identity after canonical renaming and for functional equivalence. "
-    "An oracle is trusted because it is the reference, not because it is always right (Sec.~\\ref{sec:parmys-bugs}). "
-    "An oracle makes the process much simpler than the original creation of Odin and Odin~II, which humans verified at high cost.\n")
-# further trims to reach 8 pages: the community question, the implications bullets, the AI-tools paragraph of the ABI.
-cut("The community may object to such a process.", "I call this new suite Yggdrasil~III.", "")
-cut("What implications does this work push to our field:", "\n% ------------------------------------------------------------------------------------------\n\\section{Future Work}",
-    "What this means for the field: the ``superpower'' of building complex software with agents is liberating for an experienced engineer, and for an inexperienced one it is an educational question, "
-    "whether it builds or limits the engineer's semantic knowledge of synthesis. I believe the path forward is that knowledge, developed through first-principles exercises (humans building and testing the system) "
-    "and the right moments for second-principle design, which is System Thinking~\\cite{cabrera2015systems}. What experiments I can now run is limited more by my imagination and time than by having to build the tool.\n")
-cut("The same boundary is how AI tools attach.", "\n\\subsection{Odin III against Odin II and Yosys}",
-    "The same boundary is how AI tools attach. Agents built Odin~III by driving its command-line scripts and reading its tools' exit codes (0 holds, 1 differs, 2 tool error, 3 hard failure, 4 unproven, 77 skipped), "
-    "and through the Python binding an agent can walk the IR and its provenance and add cell types, recording its decisions as DERIVED provenance records. "
-    "No hypothesis tests the ABI itself here; the suite papers use it.\n")
-cut("Its limits are the ones stated in the Introduction.", "\n\\begin{table}[t]\n\\caption{Agent cost of Odin~III v1.0", "")
-sub(" Active time passed 20\\,h on six of the 14 days because agents worked through the night.", "")
-sub(" The ABI keeps attributes as strings, node IDs are module-local, and there are no bulk readers. Hash names no longer depend on the build, and since \\code{odin3-flow} passes design paths relative to their common directory they do not depend on the directory either.", "")
-sub(": Phase~3 closed on the existing M2 and M3 data, because the front end to elaboration is the priority (PHASE3 decision 58).", ".")
-cut("\\emph{What was not measured.}", "What this means for the field", "")
+sub("We state the caveats of this MAIking:", "We state the caveats of this build:")
+sub("Then came what we call the ``MAIking software'' moment of December 2025: AI coding agents", "Then came the moment of December 2025: AI coding agents")
+sub("Gharibian et al.\\ addressed it in placement by recovering", "Earlier work addressed it in placement by recovering")
+sub("; our latest paper applies data-mining clustering to such algorithms", "; later work applies data-mining clustering to such algorithms")
 # authors and URLs
 sub("""\\author{\\IEEEauthorblockN{Peter Jamieson}
 \\IEEEauthorblockA{Electrical and Computer Engineering, Miami University\\\\
@@ -153,14 +86,15 @@ Oxford, OH, USA\\\\
 jamiespa@miamioh.edu}}""",
 """\\author{\\IEEEauthorblockN{Anonymous Author(s)}
 \\IEEEauthorblockA{Affiliation withheld for double-blind review}}""")
-sub("""started from nothing. I used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled me and cost a young engineer a year of work to learn the basics of Verilog synthesis. I wrote Odin~II~\\cite{jamieson2011odin2} in my extra time during my post-doc at Imperial College, while my future wife was out of the country, and there I learned to write a proper compiler front end:""",
+sub("""started from nothing. We used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end misled us and cost a young engineer a year of work to learn the basics of Verilog synthesis. We wrote Odin~II~\\cite{jamieson2011odin2} in our extra time during our post-doc at Imperial College, while the author's future wife was out of the country, and there we learned to write a proper compiler front end:""",
 """started from nothing. It used Icarus Verilog~\\cite{icarus} as the front end, but Icarus treats Verilog as a simulation language, and building synthesis on a simulator's front end cost a year of work to learn the basics of Verilog synthesis. Odin~II~\\cite{jamieson2011odin2} followed and wrote a proper compiler front end:""")
 sub("Odin~III is public at \\url{https://github.com/drpaj12/odin3}.", "Odin~III is public (URL withheld for review).")
 sub("as a package \\url{https://github.com/drpaj12/YggdrasilIII}.", "as a package (URL withheld for review).")
-sub("watched daily by the author of Odin and Odin~II", "watched daily by an experienced FPGA CAD developer")
+sub("watched daily by the author of Odin and Odin~II", "watched daily by a human")
+sub("original creation of Odin and Odin~II, which we verified", "original creation of earlier synthesis tools, which we verified")
 # future experiments: no names that point to the authors' earlier work
 sub("our earlier verilogTown \\cite{verilogTown}", "an earlier Verilog teaching game~\\cite{verilogTown}")
-sub("I wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and Odin~II in 2010.")
+sub("We wrote Odin in 2005 and Odin~II in 2010.", "Odin was written in 2005 and Odin~II in 2010.")
 sub("now called Midgard, to fit the Norse theme.", "now called Midgard~III.")
 sub("Other programs (Loki, Wyrd, Norns, Mimir) can drive", "Other programs of the suite can drive")
 sub("Verilog Synthesis for FPGAs - again\\\\", "Verilog Synthesis for FPGAs\\\\")
@@ -180,6 +114,9 @@ for f in figs:
     t = t.replace("\\odinsub{(verilogTown)}", "\\odinsub{(Verilog teaching game)}")
     t = re.sub(r"\\input\{IMAGE/fig_", r"\\input{IMAGE/blind/fig_", t)
     open("IMAGE/blind/%s.tex" % f, "w").write(t)
+for old in os.listdir("IMAGE/blind"):
+    if old.endswith(".tex") and old[:-4] not in figs:
+        os.remove(os.path.join("IMAGE/blind", old))
 src = src.replace("\\input{IMAGE/fig_", "\\input{IMAGE/blind/fig_")
 body = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("%"))
 for f in figs:
