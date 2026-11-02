@@ -2,7 +2,7 @@
 registry has none, VPR has no tri-state and Yosys `opt_expr -mux_undef` (so Parmys) drops the
 enable of a sole driver, so `lower` drives the output from the data input with a WARNING per
 cell (the function differs while the enable is low). Several tri-states on one net (a bus), an
-inout below the top, a constant 0 or x enable and a chain stay an error. The micro
+inout below the top, a constant 0, x or z enable and a chain stay an error. The micro
 tests/lower/tribuf_inout.v (inout and output tri-states on the top) runs through proc, opt, lower,
 write_blif and sim: write_blif and sim treat an inout port driven from inside as an output. With
 ODIN3_TINYRISCV_TOP set (the unmodified tinyriscv_soc_top.v) it also lowers. Run through CTest
@@ -11,10 +11,12 @@ ODIN3_TINYRISCV_TOP set (the unmodified tinyriscv_soc_top.v) it also lowers. Run
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
 import unittest
+from collections.abc import Sequence
 from pathlib import Path
 
 ODIN3 = os.environ.get("ODIN3_BIN")
@@ -26,6 +28,22 @@ WARNING = "the enable is dropped and the output is driven by the data input"
 def run(script: str, top: str) -> subprocess.CompletedProcess[str]:
     assert ODIN3 is not None
     return subprocess.run([ODIN3, "--top", top, "-p", script], capture_output=True, text=True)
+
+
+Bits = Sequence[object]
+
+
+def tribuf_json(cells: Sequence[tuple[str, Bits, Bits, Bits]]) -> str:
+    """A Yosys JSON module `m` (inputs a b e1 e2, output y) of 1-bit `$tribuf` cells. Each cell is
+    (name, A bits, EN bits, Y bits); a bit is a net number or the constant "0", "1", "x", "z"."""
+    ports = {name: {"direction": "input", "bits": [num]} for name, num in
+             (("a", 2), ("b", 3), ("e1", 4), ("e2", 5))}
+    ports["y"] = {"direction": "output", "bits": [7]}
+    body = {name: {"type": "$tribuf", "parameters": {"WIDTH": "1".rjust(32, "0")},
+                   "port_directions": {"A": "input", "EN": "input", "Y": "output"},
+                   "connections": {"A": a, "EN": en, "Y": y}} for name, a, en, y in cells}
+    return json.dumps({"creator": "test", "modules": {"m": {"attributes": {"top": 1},
+                                                           "ports": ports, "cells": body}}})
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest tribuf_lower_flow)")
@@ -80,6 +98,44 @@ class TribufLowerTest(unittest.TestCase):
         self.assertIn("has no bit-level cell in the registry", done.stderr)
         self.assertIn("tri-state bus", done.stderr)
         self.assertFalse(written)
+
+    def lower_json(self, text: str) -> tuple[subprocess.CompletedProcess[str], bool]:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "m.json", Path(tmp) / "o.blif"
+            src.write_text(text)
+            done = run(f"read_json {src}; hierarchy --top m; lower; write_blif {out}", "m")
+            return done, out.exists()
+
+    def test_constant_enables_are_refused_with_the_dead_enable_reason(self) -> None:
+        # EN tied to 0, x or z: the output is never driven by the data (z, x), or never at all,
+        # so dropping the enable would change the function more than the sole-driver case does.
+        for value in ("0", "x", "z"):
+            with self.subTest(enable=value):
+                done, written = self.lower_json(tribuf_json([("t", [2], [value], [7])]))
+                self.assertNotEqual(done.returncode, 0, done.stderr)
+                self.assertIn("has no bit-level cell in the registry", done.stderr)
+                self.assertIn("its enable is the constant 0, x or z", done.stderr)
+                self.assertFalse(written)
+
+    def test_constant_one_enable_is_the_sole_driver_case(self) -> None:
+        # EN tied to 1 is not dead: the cell is lowered with the warning, as for a live enable.
+        done, written = self.lower_json(tribuf_json([("t", [2], ["1"], [7])]))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn(WARNING, done.stderr)
+        self.assertTrue(written)
+
+    def test_tribuf_fed_by_a_tribuf_is_refused_in_both_cell_orders(self) -> None:
+        # t1 drives net 6 from a; t2 drives y from net 6: the chain stays an error, whichever
+        # of the two cells comes first in the module.
+        t1 = ("t1", [2], [4], [6])
+        t2 = ("t2", [6], [5], [7])
+        for cells in ([t1, t2], [t2, t1]):
+            with self.subTest(order=[c[0] for c in cells]):
+                done, written = self.lower_json(tribuf_json(cells))
+                self.assertNotEqual(done.returncode, 0, done.stderr)
+                self.assertIn("has no bit-level cell in the registry", done.stderr)
+                self.assertIn("its data input is the output of another $tribuf", done.stderr)
+                self.assertFalse(written)
 
     @unittest.skipUnless(os.environ.get("ODIN3_TINYRISCV_TOP"), "ODIN3_TINYRISCV_TOP not set")
     def test_unmodified_tinyriscv_soc_lowers(self) -> None:

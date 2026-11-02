@@ -6,6 +6,22 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added
+
+- `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its
+  own and its edges reach only the cells it clocks; new `odin3_sim_clock_edges` in `src/sim/sim.h`, an
+  internal simulator call, not the public ABI). More than 16 is an error naming the extra port. A clock bit in a multi-bit DUT port, and a cell with no clock pin
+  (a global-clock `$_FF_` such as a BLIF `.latch` with no control) in a DUT with two or more clock inputs, are
+  located errors (the cell would otherwise never be clocked).
+- `sim_tb`: read-only hierarchical references into a DUT, `dut.u_regs.r` and `dut.u.v[3]` (literal indices), resolved
+  through the DUT's signal table; the DUT instance may be declared after the use. A write (including `$readmemh` into a path), a variable
+  index, a part-select and a memory word (no names after `lower`) are located errors, reported at the line of the read
+  in the testbench file. Spec: `docs/specs/2026-10-31-testbench-design.md` 7a, 7b.
+
+### Fixed
+
+- `lower` of two chained `$tribuf` cells refused only one of the two orders: lowering the first hid the chain from the second. The chain is now found before any cell of the module is lowered (an allocation failure there is logged as such). A constant z enable (`$_CONSTZ_`) is refused like 0 and x.
+
 ## 1.3.0 (2026-11-02)
 
 **C ABI stays 7**: the public header changed since 1.2.0 only by additive exports (`odin3_edit_*`,

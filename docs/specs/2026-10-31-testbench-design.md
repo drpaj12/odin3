@@ -154,8 +154,27 @@ Deviations from the text above, as built (2026-10-31):
    arguments after a format string are appended in default decimal, a missing argument prints
    `<%d>`, `%0Nd` zero pads, `$finish` runs the postponed region (`$monitor`, `$strobe`) of its
    time step. `$finish` itself prints nothing here (vvp's "$finish called" line is not compared).
-7. A DUT with more than one clock input, a DUT port wider than 64 bits and any hierarchical name
-   are rejected, as listed in section 2.
+7. A DUT port wider than 64 bits is rejected, as listed in section 2. Since 2026-11-02 a DUT may have
+   up to 16 clock inputs and a hierarchical name may be read (see 7a, 7b).
+7a. Several clocks (`src/sim/tb_dut.c`, `odin3_sim_clock_edges` in `src/sim/eval.c`): each clock port
+   of a DUT instance is observed on its own; its edges, recorded in order, are replayed in the NBA region
+   and each reaches only the edge-triggered cells that input clocks; edges of different clocks in one time
+   step act together (cells sample the inputs as the active region left them), a second edge of the same
+   clock starts a new group (cells on derived clocks follow their usual rule). A DUT with one connected clock keeps the all-clocks edge of `odin3_sim_clock_edge`. More
+   than 16 clock inputs is an error that names the first extra port. A clock bit in a port wider than one bit is
+   an error (the other bits would never be driven). With two or more clock inputs, a cell with no clock pin
+   (a global-clock `$_FF_`, e.g. a BLIF `.latch` with no control) belongs to none of them: the DUT is refused,
+   naming the DUT and the cell. Test: `tests/tools/test_sim_tb_hier.py`.
+7b. Hierarchical reads (read only): `inst.sub.sig` and `inst.sig[3]` (literal indices) in any expression,
+   where `inst` is a DUT instance of the testbench (declared before or after the use: the parser makes a
+   first pass for the instance items and resolves the names in a second). The path is looked up in the
+   DUT's signal table (`odin3_sim_signals_find`, the S1 rules of `docs/specs/2026-10-21-s1-sim-api-design.md`
+   SA-5), at parse time because the width is needed; the value is the last settled one (2-state). Refused,
+   with a located error: a write or `$readmemh` to such a name, a variable index, a first part that is not
+   a DUT instance, a signal the netlist does not have, a signal wider than 64 bits. After `lower`, the words
+   of a memory have no names in the netlist (`u.mem[2]` is not a signal), so a memory word cannot be read (the
+   error says so). Part-selects of a hierarchical read (`u.r[3:0]`) are not supported; read the whole signal
+   or a literal bit. Errors carry the testbench file name and the line of the offending read.
 
 Gate results (2026-10-31, debug build, iverilog 12.0; tests in `tests/tb/`):
 (a) micros: comb, counter, fsm, mem (with `$readmemh`), misc (format, `$monitor`, `$strobe`,
