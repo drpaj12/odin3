@@ -165,20 +165,11 @@ static bool driven_by(const lw_ctx *lw, odin3_net_id net, const odin3_celltype_i
     return false;
 }
 
-/* True when a $tribuf drives a data input bit of the cell: as found before any cell was lowered
- * (tri_chain), so that the order of the cells does not decide; the live net when there is no mark.
- */
+/* True when a $tribuf drives a data input bit of the cell, as found before any cell was lowered
+ * (tri_chain), so that the order of the cells does not decide. Without the table (out of memory)
+ * every $tribuf counts as chained: an error, never a silent order dependence. */
 static bool tribuf_chained(const lw_ctx *lw, const lw_cell *cell) {
-    if (lw->tri_chain != NULL) {
-        return lw->tri_chain[cell->node.v] != 0;
-    }
-    const odin3_celltype_id self[] = {odin3_node_type(lw->module, cell->node)};
-    for (uint32_t i = 0; i < cell->port[TRI_PORT_A].n; i++) {
-        if (driven_by(lw, cell->port[TRI_PORT_A].nets[i], self, 1)) {
-            return true;
-        }
-    }
-    return false;
+    return lw->tri_chain == NULL || lw->tri_chain[cell->node.v] != 0;
 }
 
 /* The reason this $tribuf is kept as an error, or NULL when it is the sole driver of its Y bits

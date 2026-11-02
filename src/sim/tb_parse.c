@@ -477,24 +477,36 @@ static bool path_add(char *path, const char *text) {
     return true;
 }
 
+/* `.name` (the "." is read): appends it to path. */
+static bool hier_name(parser *pr, char *path) {
+    char piece[TB_NAME + 2U];
+    if (cur(pr)->kind != TK_ID) {
+        return false;
+    }
+    (void)snprintf(piece, sizeof piece, "%s%s", path[0] != '\0' ? "." : "", cur(pr)->text);
+    pr->pos++;
+    return path_add(path, piece);
+}
+
+/* `[number]` (the "[" is read): appends it to path. */
+static bool hier_index(parser *pr, char *path) {
+    char piece[TB_NAME + 2U];
+    if (cur(pr)->kind != TK_NUM || cur(pr)->sized) {
+        return false;
+    }
+    (void)snprintf(piece, sizeof piece, "[%llu]", (unsigned long long)cur(pr)->num);
+    pr->pos++;
+    return expect_op(pr, "]") && path_add(path, piece);
+}
+
 /* After `inst`: reads `.name` components and `[number]` indices into path (the part after the
  * instance name, as the DUT's signal table spells it). */
 static bool hier_path(parser *pr, char *path) {
     bool ok = true;
     while (ok && (is_op(pr, ".") || is_op(pr, "["))) {
-        char piece[TB_NAME + 2U];
-        if (accept_op(pr, ".")) {
-            ok = cur(pr)->kind == TK_ID;
-            (void)snprintf(piece, sizeof piece, "%s%s", path[0] != '\0' ? "." : "", cur(pr)->text);
-            pr->pos++;
-        } else {
-            pr->pos++;
-            ok = cur(pr)->kind == TK_NUM && !cur(pr)->sized;
-            (void)snprintf(piece, sizeof piece, "[%llu]", (unsigned long long)cur(pr)->num);
-            pr->pos++;
-            ok = ok && expect_op(pr, "]");
-        }
-        ok = ok && path_add(path, piece);
+        bool dot = is_op(pr, ".");
+        pr->pos++;
+        ok = dot ? hier_name(pr, path) : hier_index(pr, path);
     }
     return ok || fail(pr, "hierarchical name (name.name[number], constant indices only)");
 }

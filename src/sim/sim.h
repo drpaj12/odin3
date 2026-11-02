@@ -155,15 +155,25 @@ odin3_status odin3_sim_settle_events(odin3_sim *sim);
  */
 odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
 
+/* One edge of one clock input bit. */
+typedef struct odin3_sim_clock_event {
+    odin3_sim_bit at;
+    odin3_sim_event event;
+} odin3_sim_clock_event;
+
 /*
- * One edge of one clock input: like odin3_sim_clock_edge, but only input bit `at` (which must be a
- * clock, see odin3_sim_input_is_clock) is set, and only the edge-triggered cells that bit clocks
- * directly (and the cells on derived clocks that its edge changes) take the event. The other clock
- * inputs keep their values, so several clocks of a design can run independently. Same settling as
- * odin3_sim_clock_edge. ODIN3_ERR_INVALID_ARG (not logged, nothing changed) for another event or
- * a bit that is not a clock input. Allocates nothing.
+ * Edges of single clock inputs, together: like odin3_sim_clock_edge, but each event sets only its
+ * own input bit (which must be a clock, see odin3_sim_input_is_clock) and reaches only the
+ * edge-triggered cells that bit clocks directly (and the cells on derived clocks that the edges
+ * change). The other clock inputs keep their values, so several clocks of a design run
+ * independently. All events of one call act at the same instant: the cells take their inputs as
+ * settled before the call, whichever clock they hang on, and the design settles once at the end,
+ * as the NBA region of one time step does. Name a clock bit once per call. ODIN3_ERR_INVALID_ARG
+ * (not logged, nothing changed) for an event that is not a POSEDGE or NEGEDGE, a bit that is not a
+ * clock input, or a bit named twice. Allocates nothing.
  */
-odin3_status odin3_sim_clock_edge_input(odin3_sim *sim, odin3_sim_bit at, odin3_sim_event event);
+odin3_status odin3_sim_clock_edges(odin3_sim *sim, const odin3_sim_clock_event *edges,
+                                   uint32_t count);
 
 /*
  * Returns the simulator to its state right after the build: every value (inputs included, clocks

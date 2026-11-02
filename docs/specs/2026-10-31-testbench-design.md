@@ -158,8 +158,9 @@ Deviations from the text above, as built (2026-10-31):
    up to 16 clock inputs and a hierarchical name may be read (see 7a, 7b).
 7a. Several clocks (`src/sim/tb_dut.c`, `odin3_sim_clock_edge_input` in `src/sim/eval.c`): each clock port
    of a DUT instance is observed on its own; its edges, recorded in order, are replayed in the NBA region
-   and each reaches only the edge-triggered cells that input clocks (cells on derived clocks follow their
-   usual rule). A DUT with one connected clock keeps the all-clocks edge of `odin3_sim_clock_edge`. More
+   and each reaches only the edge-triggered cells that input clocks; edges of different clocks in one time
+   step act together (cells sample the inputs as the active region left them), a second edge of the same
+   clock starts a new group (cells on derived clocks follow their usual rule). A DUT with one connected clock keeps the all-clocks edge of `odin3_sim_clock_edge`. More
    than 16 clock inputs is an error that names the first extra port. Test: `tests/tools/test_sim_tb_hier.py`.
 7b. Hierarchical reads (read only): `inst.sub.sig` and `inst.sig[3]` (literal indices) in any expression,
    where `inst` is a DUT instance of the testbench (declared before or after the use: the parser makes a

@@ -9,7 +9,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ### Added
 
 - `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its
-  own and its edges reach only the cells it clocks; new `odin3_sim_clock_edge_input` in `src/sim/sim.h`, an
+  own and its edges reach only the cells it clocks; new `odin3_sim_clock_edges` in `src/sim/sim.h`, an
   internal simulator call, not the public ABI). More than 16 is an error naming the extra port.
 - `sim_tb`: read-only hierarchical references into a DUT, `dut.u_regs.r` and `dut.u.v[3]` (literal indices), resolved
   through the DUT's signal table; the DUT instance may be declared after the use. A write, a variable index and

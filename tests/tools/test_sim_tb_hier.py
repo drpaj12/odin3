@@ -111,6 +111,33 @@ def sim_tb(files: dict[str, str], tb_name: str, prefix: str = "proc; opt; lower;
         return done
 
 
+# Both clocks rise at the same time step: the register on clkb must see the value qa had before
+# that step's edges, not the one clka's edge just wrote.
+CROSS = """module cross(input clka, input clkb, input [3:0] d, output reg [3:0] qa,
+                output reg [3:0] qb);
+  always @(posedge clka) qa <= d;
+  always @(posedge clkb) qb <= qa;
+endmodule
+"""
+
+CROSS_TB = """module t;
+  reg clka = 0, clkb = 0;
+  reg [3:0] d = 5;
+  wire [3:0] qa, qb;
+  cross dut(.clka(clka), .clkb(clkb), .d(d), .qa(qa), .qb(qb));
+  initial begin
+    #1 clka = 1; clkb = 1;
+    #1 clka = 0; clkb = 0;
+    #1 $display("step1: %0d %0d", qa, qb);
+    d = 9;
+    #1 clka = 1; clkb = 1;
+    #1 $display("step2: %0d %0d", qa, qb);
+    $finish;
+  end
+endmodule
+"""
+
+
 @unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest sim_tb_hier_flow)")
 class MultiClockTest(unittest.TestCase):
     def test_each_clock_moves_only_its_own_registers(self) -> None:
@@ -118,6 +145,11 @@ class MultiClockTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
         self.assertEqual(done.stdout.split("\n")[:3],
                          ["a only: 3 0", "then b: 3 4", "a again: 9 4"])
+
+    def test_clocks_edging_together_sample_the_old_values(self) -> None:
+        done = sim_tb({"dut.v": CROSS, "tb.v": CROSS_TB}, "tb.v")
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        self.assertEqual(done.stdout.split("\n")[:2], ["step1: 5 0", "step2: 9 5"])
 
     def test_free_running_clocks_of_different_periods(self) -> None:
         # clka rises at 5, 15, ... 95 (10 edges); clkb at 7, 21, ... 91 (7 edges) before t = 100.
@@ -163,6 +195,13 @@ class HierarchicalReadTest(unittest.TestCase):
 
     def test_write_to_a_hierarchical_name_is_refused(self) -> None:
         tb = HIER_TB.replace("d = 5;", "d = 5; dut.u_leaf.r = 1;", 1)
+        done = sim_tb({"dut.v": TWO_LEVEL, "tb.v": tb}, "tb.v",
+                      prefix="hierarchy --top top; proc; opt; lower; ")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("unsupported", done.stderr)
+
+    def test_name_cut_off_at_the_end_of_the_file_is_an_error(self) -> None:
+        tb = HIER_TB.rsplit("endmodule", 1)[0] + "  initial $display(dut."
         done = sim_tb({"dut.v": TWO_LEVEL, "tb.v": tb}, "tb.v",
                       prefix="hierarchy --top top; proc; opt; lower; ")
         self.assertNotEqual(done.returncode, 0)

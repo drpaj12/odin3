@@ -289,24 +289,42 @@ bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
     return publish(ev, dut);
 }
 
-/* One replayed edge. A DUT with one clock input connected sends the edge to every clock of the
- * design, as the cycle simulator does; with several, each edge goes to its own clock only. */
-static odin3_status replay_edge(tb_dut *dut, dut_edge edge) {
-    odin3_sim_event event = edge.rise ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE;
-    if (dut->nclocks == 1) {
-        return odin3_sim_clock_edge(dut->sim, event);
+/* Replays edges[0..count) of one time step. A DUT with one clock input connected sends each edge
+ * to every clock of the design, as the cycle simulator does. With several, the edges of different
+ * clocks act together (the cells sample the inputs as the active region left them, whichever
+ * clock they hang on); a second edge of the same clock starts a new group. */
+static odin3_status replay_edges(tb_dut *dut) {
+    odin3_sim_clock_event group[MAX_CLOCKS];
+    uint32_t used = 0;
+    uint32_t mask = 0;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < dut->nedges; i++) {
+        dut_edge edge = dut->edges[i];
+        odin3_sim_event event = edge.rise ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE;
+        if (dut->nclocks == 1) {
+            st = odin3_sim_clock_edge(dut->sim, event);
+            continue;
+        }
+        if ((mask & (1U << edge.clock)) != 0) {
+            st = odin3_sim_clock_edges(dut->sim, group, used);
+            used = 0;
+            mask = 0;
+        }
+        const tb_conn *conn = &dut->inst->conns[dut->clocks[edge.clock].conn];
+        group[used++] = (odin3_sim_clock_event){{conn->sim_port, 0}, event};
+        mask |= 1U << edge.clock;
     }
-    const tb_conn *conn = &dut->inst->conns[dut->clocks[edge.clock].conn];
-    return odin3_sim_clock_edge_input(dut->sim, (odin3_sim_bit){conn->sim_port, 0}, event);
+    if (st == ODIN3_OK && used > 0) {
+        st = odin3_sim_clock_edges(dut->sim, group, used);
+    }
+    return st;
 }
 
 bool tb_dut_edges(tb_ev *ev, tb_dut *dut) {
     if (dut->nedges == 0) {
         return false;
     }
-    for (uint32_t i = 0; i < dut->nedges; i++) {
-        dut_status(ev, replay_edge(dut, dut->edges[i]));
-    }
+    dut_status(ev, replay_edges(dut));
     dut->nedges = 0;
     (void)publish(ev, dut);
     return true;
