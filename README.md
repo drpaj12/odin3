@@ -13,7 +13,7 @@ Release notes: [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provena
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
 
-Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.2.0 (`pyproject.toml`; the latest release tag is v1.1.1). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
+Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.3.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 ## Documentation
 
@@ -31,6 +31,33 @@ Start at the Yggdrasil III hub; every manual links to the others.
 - [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan and paper under `docs/`).
 - [Set up the whole suite](https://drpaj12.github.io/YggdrasilIII/getting-started.html) on a clean
   Linux or Windows machine, and [drive it with Claude Code](https://drpaj12.github.io/YggdrasilIII/ai-agent.html).
+
+## Features
+
+Version 1.3.0 on `main` (C ABI 7). Status: **works** = on `main` with tests; **limit** = works with a documented limit.
+Each line points to the manual page; the pass table is [`docs/PASSES.md`](docs/PASSES.md) and the changes are in
+[`CHANGELOG.md`](CHANGELOG.md).
+
+| Feature | Status | Manual |
+|---|---|---|
+| Inputs: SystemVerilog (slang adapter), Verilog-2005, BLIF, Yosys JSON, structural gate-level Verilog, VPR architecture files, project files (`.o3proj`, `.qsf`, Odin II) | works | [inputs](docs/user/inputs.md) |
+| Elaboration, `proc`, `opt`, `fsm`, `flatten`, `wreduce`, architecture-driven partial mapping (`hardmap`), `lower`, ABC for soft logic, LPM mapping, `dfflibmap`, `unmap` | works | [passes](docs/user/passes.md), [flow](docs/user/flow.md) |
+| One-command flow `odin3-flow` to a routed VPR result or LPM Verilog | works | [odin3-flow](docs/user/odin3-flow.md) |
+| Outputs: BLIF (plain and `--vtr`; `--reachable` writes the top and what it reaches; modules `flatten` left unused are not written and `=` in model and `.subckt` names is written `?`, so ABC can read hierarchical netlists), Yosys JSON, Verilog, dot, RTLIL | works | [outputs](docs/user/outputs.md) |
+| Provenance at every granularity: each output object traces to its HDL text, as a two-way granularity chain with labelled joins, readable from C and Python, with `names` look-ups and the map format | works | [provenance](docs/user/provenance.md) |
+| Hierarchical references: a dotted path into another module is an undriven net with a WARNING (as Yosys); generate-block and named-block references resolve | works (limits listed in CHANGELOG 1.3.0) | [inputs](docs/user/inputs.md), `docs/notes/2026-11-02-hierarchical-references.md` |
+| `$tribuf` sole-driver rule in `lower`: when a `$tribuf` is the only driver of its output the enable is dropped with a WARNING; a bus or other cases stay a located error | works | [passes](docs/user/passes.md), `docs/specs/2026-10-14-3B-lower-design.md` |
+| Flatten marking: modules `flatten` leaves unused are marked and not written by plain `write_blif` | works | [outputs](docs/user/outputs.md) |
+| Processor netlists (Seeker-Proc): hierarchical specialised-module netlists readable by ABC, dead generate branches not elaborated | works | CHANGELOG 1.3.0 |
+| Graph features: graphlet and orbit counts (undirected 2 to 5 nodes, 73 orbits; directed 2 to 4 nodes, 129 orbits), for a module or a subgraph, with signature comparison; own implementation, ORCA only as a test oracle; consumed by Loki III and Mimir III | works | [graphlets](docs/user/graphlets.md) |
+| SCOAP testability and signal probability per net (`scoap`) | works | [scoap](docs/user/scoap.md) |
+| Analysis: `write_dot` focus and colouring, `levelize`, `write_json --odin3` graph export, `prov-cover`, critical-path attribution to HDL | works | [analysis](docs/user/analysis.md), [timing-attribution](docs/user/timing-attribution.md) |
+| Netlist editing API (add and remove nodes and nets, connect and disconnect pins, edit tags) and edit events (added, param, rewired, removed) exported with `write_json --odin3` and `write_blif --edit-tags` | works | [edit](docs/user/edit.md) |
+| Cycle simulator `sim` (vectors, random inputs, VCD), toggle counting and `run_vectors` from Python, derived clocks (gated, muxed, divided) | works (2-state, cycle-based; derived-clock limits in the manual) | [edit](docs/user/edit.md), [python-api](docs/user/python-api.md), [testbench](docs/user/testbench.md) |
+| Testbenches: `sim_tb` interprets a Verilog testbench subset against RTL or netlist, `--plusarg` with `$test$plusargs` and `$value$plusargs`, `%t` in `$display`, up to 4096 named DUT port connections, `--vcd` waveform | works (2-state; subset limits in the manual) | [testbench](docs/user/testbench.md) |
+| `testbench_gen` writes a testbench for a design; `tools/tb-compare` runs one testbench on two designs; `run_testbenches` runs the testbenches declared in a project (`testbench` key, `on rtl\|netlist\|both`) | works | [testbench](docs/user/testbench.md) |
+| Reverse-engineering passes `submod`, `cone_check`, `raise` and the RE loop | works | [re-workflow](docs/user/re-workflow.md) |
+| Python binding (cffi) over the C ABI 7, plugin loading with `--plugin` and ABI check, `odin3_graph.py` reader of the JSON export | works | [python-api](docs/user/python-api.md) |
 
 ## Install
 
