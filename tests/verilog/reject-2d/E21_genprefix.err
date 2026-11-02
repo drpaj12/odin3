@@ -1,0 +1,2 @@
+E21_genprefix.v:8:14: error:
+hierarchical reference 'g.sub.x' is not supported

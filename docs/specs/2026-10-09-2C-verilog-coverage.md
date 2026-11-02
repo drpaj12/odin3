@@ -208,7 +208,7 @@ targets.
 | E18 | `$signed()`, `$unsigned()` | §17.8 | S | C p.191 | parsed (l:376–377); `$signed(a)+$signed(b)` and `$unsigned(s)>>1` E-: "Operation not supported" (nca:3700) | 11/0/1 | Y | MUST |
 | E19 | `$clog2` in constant context | §17.11.1 | — (2005) | — | OK= | 3/0/2 | Y | MUST |
 | E20 | Other system functions in expressions (`$random`, `$time`, `$rtoi`…) | §17 | N | B App.A p.193 "system names ignored" | P- (statement-only, y:896–903) | ~11/1/4 any `$` call | Y(w) | REJECT |
-| E21 | Hierarchical references in expressions (`u.w`) | §12.5 | N | B App.A p.197 "not supported" | E- (elaboration hangs) | 0 outside `defparam` | Y(w) | REJECT |
+| E21 | Hierarchical references in expressions (`u.w`) | §12.5 | N | B App.A p.197 "not supported" | E- (elaboration hangs) | 0 outside `defparam` | Y(w) | REJECT (2D, 2026-11-02: a path into another module is accepted with a warning, as Yosys) |
 | E22 | Expression bit-length rules (LHS takes part; context- vs self-determined) | §5.4 | S | **C §3.2.8 p.45** (`(a+b)>>1` vs `(0+a+b)>>1`); B App.A p.194 | `(0+a+b)>>1` OK=; **`(a+b)>>1` into 4 bits keeps the carry: *op2_add_shift_ctx* E≠** | everywhere | Y | MUST (2D) |
 | E23 | Signed expression rules: sign extension, mixed operands → unsigned | §5.5 | S | **C §7.3 p.188–191**; B §2.4.2 p.23 | E≠ throughout (*op_mixed_sign_extend*, *op2_signed_add_ext*, *op_signed_compare*, *fn2_signed_ret*) | 58/0/1 | Y | MUST (2D) |
 

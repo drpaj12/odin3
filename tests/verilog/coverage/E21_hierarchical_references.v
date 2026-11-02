@@ -1,4 +1,4 @@
-// E21: hierarchical references in expressions (REJECT) — variants: u.w, u.w[1] (a select on the last component wraps the name)
+// E21: hierarchical references in expressions (accepted with a warning since 2026-11-02: an undriven net, as Yosys; REJECT only for the cases in tests/verilog/reject-2d/E21_*) — variants: u.w, u.w[1] (a select on the last component wraps the name)
 module e21_sub (input [3:0] d, output [3:0] q);
   wire [3:0] w;
   assign w = d;

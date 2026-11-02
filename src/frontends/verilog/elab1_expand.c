@@ -509,6 +509,7 @@ odin3_status odin3_elab1_env_create(odin3_elab1 *e1, uint32_t def, odin3_elab1_e
     odin3_vec_init(&env->ports, sizeof(odin3_elab1_mport));
     odin3_vec_init(&env->implicit, sizeof(odin3_elab1_implicit_net));
     odin3_vec_init(&env->scan, sizeof(odin3_elab1_scan_frame));
+    odin3_vec_init(&env->hier_uses, sizeof(odin3_elab1_hier_use));
     odin3_status st = env_tables(env);
     st = st != ODIN3_OK ? st : record_module(env);
     if (st != ODIN3_OK) {

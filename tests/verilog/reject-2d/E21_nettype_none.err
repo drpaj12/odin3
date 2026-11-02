@@ -1,0 +1,2 @@
+E21_nettype_none.v:10:14: error:
+hierarchical reference 'u.w' is not supported

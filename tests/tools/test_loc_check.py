@@ -349,6 +349,36 @@ class ExpectTests(unittest.TestCase):
         self.assertEqual(text, "read_verilog d.v; proc")
 
 
+class UnusedModulesTests(unittest.TestCase):
+    """Only the INFO line of the final plain write_blif counts, not the union over the log."""
+
+    LINE = (
+        "odin3: info: write_blif: 2 modules that flatten left unused not written "
+        "(Yosys's flatten deletes them): {}"
+    )
+    PASS = "odin3: info: pass write_blif: 1.2 ms"
+
+    def test_final_write_only(self) -> None:
+        log = "\n".join(
+            [
+                self.LINE.format("early_a, early_b"),  # an earlier write_blif of the script
+                self.PASS,
+                "odin3: info: write_blif: --vtr: 'top': 1 .names",
+                self.PASS,
+                self.LINE.format("hr_regs, hr_leaf"),  # the final plain write
+                self.PASS,
+            ]
+        )
+        self.assertEqual(lc.unused_modules(log), {"hr_regs", "hr_leaf"})
+
+    def test_final_write_without_the_line(self) -> None:
+        log = "\n".join([self.LINE.format("early_a, early_b"), self.PASS, self.PASS])
+        self.assertEqual(lc.unused_modules(log), set())
+
+    def test_no_write_at_all(self) -> None:
+        self.assertEqual(lc.unused_modules("odin3: info: pass flatten: 1 ms"), set())
+
+
 class AbsentModuleTests(unittest.TestCase):
     """The objects of a module the read-back lacks are X-1 only where the expect file says so."""
 

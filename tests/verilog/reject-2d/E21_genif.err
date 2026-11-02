@@ -1,2 +1,2 @@
-E21.v:8:14: error:
+E21_genif.v:9:16: error:
 hierarchical reference 'u.w' is not supported

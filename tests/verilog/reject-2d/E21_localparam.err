@@ -1,0 +1,2 @@
+E21_localparam.v:9:18: error:
+hierarchical reference 'u.w' is not supported

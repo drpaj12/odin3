@@ -832,6 +832,66 @@ static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint
     return ODIN3_OK;
 }
 
+/* The comps as one net name (the dotted text), interned in the design's strtab. */
+static odin3_status dotted_name(odin3_elab1 *e1, const odin3_elab1_comp *comps, uint32_t count,
+                                uint32_t *name) {
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st = path_text(e1, comps, count, &text);
+    st = st != ODIN3_OK ? st : odin3_design_intern(e1->design, odin3_bytes_cstr(text.data), name);
+    odin3_strbuf_free(&text);
+    return st;
+}
+
+/* Whether the implicit net a dotted name would make is an error (EL-25): keep the old one. */
+static bool implicit_net_is_error(const odin3_elab1_env *env) {
+    uint8_t net = env->nettype;
+    return net == ODIN3_NETTYPE_NONE || net == ODIN3_AST_NET_DECL_TRI0 ||
+           net == ODIN3_AST_NET_DECL_TRI1 || net == ODIN3_AST_NET_DECL_TRIREG;
+}
+
+/* odin3_elab1_hier_classify with env->cur_scope already scope. */
+static odin3_status classify_in(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                odin3_elab1_hier_info *out) {
+    odin3_elab1_comp *comps = NULL;
+    odin3_status st = odin3_elab1_hier_comps(env, hier_name, &comps);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    uint32_t count = odin3_ast_nchild(env->e1->parsed, hier_name);
+    bool indexed = false;
+    for (uint32_t k = 0; k < count; k++) {
+        indexed = indexed || comps[k].has_index;
+    }
+    odin3_elab1_reach reach = {0, 0};
+    odin3_elab1_path path = {comps, count, scope};
+    if (implicit_net_is_error(env) || indexed || count < 2 ||
+        odin3_elab1_scope_walk(env, &path, &reach) != ODIN3_WALK_STOP || reach.used != 0) {
+        return ODIN3_OK;
+    }
+    /* Yosys: the module's own name before a declared name is popped (`top.a` is `a`). */
+    if (count == 2 && comps[0].name == odin3_ast_name(env->e1->parsed, env->module) &&
+        odin3_elab1_env_lookup(env, comps[1].name) != G_NONE) {
+        *out = (odin3_elab1_hier_info){ODIN3_HIER_DECLARED, comps[1].name};
+        return ODIN3_OK;
+    }
+    st = dotted_name(env->e1, comps, count, &out->name);
+    /* a net declared as the escaped name `\u.w ` is that net (Yosys finds it in its scope) */
+    bool declared = st == ODIN3_OK && odin3_elab1_env_lookup(env, out->name) != G_NONE;
+    out->kind = declared ? ODIN3_HIER_DECLARED : ODIN3_HIER_FOREIGN;
+    return st;
+}
+
+odin3_status odin3_elab1_hier_classify(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                       odin3_elab1_hier_info *out) {
+    *out = (odin3_elab1_hier_info){ODIN3_HIER_PATH, 0};
+    uint32_t saved = env->cur_scope;
+    env->cur_scope = scope;
+    odin3_status st = classify_in(env, hier_name, scope, out);
+    env->cur_scope = saved;
+    return st;
+}
+
 odin3_status odin3_elab1_scope_target(odin3_elab1_env *env, odin3_ast_id hier_name,
                                       uint32_t *slot) {
     return target_of(env, hier_name, slot, NULL);

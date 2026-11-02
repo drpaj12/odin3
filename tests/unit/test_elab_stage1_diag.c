@@ -110,9 +110,6 @@ static void test_reject_expression_and_declaration_rows(void) {
            "t.v:2:14: error: system function '$random' is not supported");
     REJECT("module m(output y);\n  assign y = u.f(1);\nendmodule\n",
            "t.v:2:14: error: hierarchical reference 'u.f' is not supported");
-    REJECT("module leaf (input a);\n  wire w = a;\nendmodule\nmodule m(input a, output y);\n"
-           "  leaf u (a);\n  assign y = u.w;\nendmodule\n",
-           "t.v:6:14: error: hierarchical reference 'u.w' is not supported");
     REJECT("module m;\n  tri0 t;\nendmodule\n", "t.v:2:3: error: net type 'tri0' is not supported");
     REJECT("module m;\n  tri1 t;\nendmodule\n", "t.v:2:3: error: net type 'tri1' is not supported");
     REJECT("module m;\n  trireg t;\nendmodule\n",

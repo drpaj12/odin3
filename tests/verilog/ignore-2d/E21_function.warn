@@ -1,0 +1,2 @@
+E21_function.v:8:14: warning:
+hierarchical reference 'f.x' is not supported; it is treated as an undriven net

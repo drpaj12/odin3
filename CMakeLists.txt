@@ -1445,7 +1445,7 @@ if(BUILD_TESTING)
                 --odin3 $<TARGET_FILE:odin3>
                 tests/flatten/hier.v tests/flatten/params.v tests/flatten/gen.v
                 tests/flatten/feed.v tests/flatten/keep.v tests/flatten/bb.v tests/flatten/mem.v
-                tests/flatten/nested.blif)
+                tests/flatten/hierref.v tests/flatten/nested.blif)
     set_tests_properties(flatten_sim_fixtures flatten_sim_roundtrip flatten_golden PROPERTIES
                          LABELS flatten SKIP_RETURN_CODE 77 TIMEOUT 600)
     # 6.1 gate-level netlist ingest (spec G-2 to G-7; fixtures tests/netlist, generator gen.sh,
@@ -3031,6 +3031,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_write_blif_reach
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(write_blif_reach PROPERTIES LABELS tools)
+    # Hierarchical references into another module (tinyriscv): the micro tests/flatten/hierref.v
+    # through proc, opt, flatten, opt, lower, write_blif and sim, and the flatten name collision.
+    add_test(NAME hier_ref_flow
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_hier_ref
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(hier_ref_flow PROPERTIES LABELS tools)
     # sim_tb $test$plusargs / $value$plusargs (--plusarg) and the lazy generate-branch check.
     add_test(NAME sim_tb_plusargs
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

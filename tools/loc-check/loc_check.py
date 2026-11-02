@@ -102,6 +102,10 @@ LINE_POOL = {*LINE_OK, ("blif", "node")}  # the pools that may pair by file and 
 GENERATED = re.compile(r"^\$[cnwm]\d+$")
 LOC_RE = re.compile(r"^(.*):(\d+)(?:\.\d+(?:-\d+\.\d+)?)?$")
 TOP_RE = re.compile(r"read_verilog: elaborated top '([^']+)'")
+# Plain write_blif leaves out the modules flatten left unused (Yosys's flatten deletes them) and
+# says so; they are no loss of the format, so the plain listing leaves them out of "before".
+UNUSED_RE = re.compile(r"write_blif: \d+ modules that flatten left unused not written [^:]*: (.*)$")
+WRITE_PASS_RE = re.compile(r"\bpass write_blif:")
 
 
 class ToolError(Exception):
@@ -854,6 +858,21 @@ def odin3_run(cfg: Config, script: str, work: Path, flags: Sequence[str] = ()) -
     return log
 
 
+def unused_modules(log: str) -> set[str]:
+    """The modules the final plain ``write_blif`` of the script left out as flatten leftovers: the
+    INFO line of the last ``write_blif`` pass only (the log of every earlier write is no part of
+    it), none when that pass printed no such line."""
+    names: set[str] = set()
+    pending: set[str] = set()
+    for line in log.splitlines():
+        found = UNUSED_RE.search(line)
+        if found:
+            pending = {name.strip() for name in found.group(1).split(", ")}
+        elif WRITE_PASS_RE.search(line):
+            names, pending = pending, set()  # the pass that printed the line ended here
+    return names
+
+
 def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, Result]:
     """before and after listings of every format of the level, or a ReadFail for a format."""
     template = (cfg.scripts / f"{level}.script").read_text(encoding="utf-8")
@@ -868,7 +887,9 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     paths = {fmt: work / f"W.{SUFFIX[fmt]}" for fmt in formats}
     before = work / "before.txt"
     commands = [level_script(template, subs), f"dump_locs --types {before}"]
-    commands += [WRITES[fmt][0].format(p=paths[fmt]) for fmt in formats]
+    # the plain write goes last: its INFO line is the one unused_modules reads
+    ordered = sorted(formats, key=lambda fmt: fmt == "plain")
+    commands += [WRITES[fmt][0].format(p=paths[fmt]) for fmt in ordered]
     log = odin3_run(cfg, "; ".join(commands), work)
     top = TOP_RE.search(log)
     flags = ["--top", top.group(1)] if top else []
@@ -878,6 +899,8 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     results: dict[str, Result] = {}
     written = written_facts(paths["json"], paths["verilog"])
     rows = parse_dump(before.read_text(encoding="utf-8"))
+    unused = unused_modules(log)
+    plain_rows = [r for r in rows if r.module not in unused]
     for fmt in formats:
         after = work / f"after-{fmt}.txt"
         script = f"{prefix}{WRITES[fmt][1].format(p=paths[fmt])}; dump_locs {after}"
@@ -886,7 +909,8 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
         except ScriptError as exc:
             results[fmt] = ReadFail(str(exc))
             continue
-        results[fmt] = Pair(rows, parse_dump(after.read_text(encoding="utf-8")), written)
+        shown = plain_rows if fmt == "plain" else rows
+        results[fmt] = Pair(shown, parse_dump(after.read_text(encoding="utf-8")), written)
     return results
 
 

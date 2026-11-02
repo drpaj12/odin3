@@ -136,6 +136,7 @@ void odin3_elab1_decl_free(odin3_elab1_env *env) {
     odin3_vec_free(&env->ports);
     odin3_vec_free(&env->implicit);
     odin3_vec_free(&env->scan);
+    odin3_vec_free(&env->hier_uses);
     odin3_u64map_destroy(env->imp_names);
     odin3_u64map_destroy(env->locals);
     env->imp_names = NULL;
@@ -498,7 +499,6 @@ static bool scan_skips(const odin3_ast *ast, odin3_ast_id node, uint32_t idx, od
     case ODIN3_AST_DELAY:
     case ODIN3_AST_STRENGTH:
     case ODIN3_AST_MINTYPMAX:
-    case ODIN3_AST_HIER_NAME:
         return true;
     default:
         return slot_skipped(ast, node, odin3_ast_kind_of(ast, node), idx);
@@ -616,6 +616,14 @@ static odin3_status scan_step(odin3_elab1_env *env, const odin3_elab1_scan_frame
     }
     if (kind == ODIN3_AST_IDENT) {
         return scan_ident(env, frame->node);
+    }
+    if (kind == ODIN3_AST_HIER_NAME) {
+        odin3_elab1_hier_use *use = odin3_vec_push(&env->hier_uses);
+        if (use == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *use = (odin3_elab1_hier_use){frame->node, env->cur_scope};
+        return ODIN3_OK; /* its parts are no names of this module's scope */
     }
     if (kind != ODIN3_AST_SEQ_BLOCK && kind != ODIN3_AST_FUNCTION_DECL &&
         kind != ODIN3_AST_TASK_DECL) {

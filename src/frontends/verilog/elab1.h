@@ -922,6 +922,12 @@ typedef struct odin3_elab1_implicit_net {
     odin3_ast_id use;
 } odin3_elab1_implicit_net;
 
+/* A HIER_NAME seen by the implicit-net scan and the generate scope it was read in. */
+typedef struct odin3_elab1_hier_use {
+    odin3_ast_id node;
+    uint32_t scope;
+} odin3_elab1_hier_use;
+
 /* A frame of the implicit-net scan: a node, or the end of a scope that node opened. */
 typedef struct odin3_elab1_scan_frame {
     odin3_ast_id node;
@@ -957,6 +963,7 @@ typedef struct odin3_elab1_env {
     odin3_u64map *imp_names; /* implicit (or reported-undeclared) names → 1 */
     odin3_u64map *locals;    /* names of the enclosing blocks and subroutines → depth count */
     odin3_vec scan;          /* odin3_elab1_scan_frame: the implicit-net scan's stack */
+    odin3_vec hier_uses;     /* odin3_elab1_hier_use: the HIER_NAMEs the scan met */
     uint8_t nettype;         /* the module's `default_nettype (odin3_elab1_nettype_at) */
 } odin3_elab1_env;
 
@@ -1092,6 +1099,28 @@ odin3_status odin3_elab1_genblk_name(odin3_elab1 *e1, uint32_t scope, uint32_t c
  * in scope (`blk.count`, I-1) is accepted unchecked: the binder finds its member. ODIN3_ERR_PARSE
  * after the diagnostic; ODIN3_ERR_NO_MEMORY. */
 odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint32_t scope);
+
+/* What a HIER_NAME read in scope is, beyond a path into the module's own generate and named blocks
+ * (odin3_elab1_scope_ref). Yosys has no hierarchy in a name: a dotted name that no declaration
+ * answers is an auto-wire of that name, and so it is here (a warning). */
+typedef enum odin3_elab1_hier_kind {
+    ODIN3_HIER_PATH,     /* a path into the module's blocks, or an error of odin3_elab1_scope_ref */
+    ODIN3_HIER_FOREIGN,  /* an undriven net named by the dotted text (into another module) */
+    ODIN3_HIER_DECLARED, /* a net declared with the dotted text as its (escaped) name, or the
+                            module's own name before a declared name (`top.a`, Yosys pops the
+                            prefix) */
+} odin3_elab1_hier_kind;
+
+typedef struct odin3_elab1_hier_info {
+    odin3_elab1_hier_kind kind;
+    uint32_t name; /* FOREIGN and DECLARED: the net's name, interned in the design's strtab */
+} odin3_elab1_hier_info;
+
+/* Classifies hier_name read in scope. A name with an index, one under `default_nettype none (or
+ * tri0, tri1, trireg: the implicit net would be an error, EL-25) and one whose first component
+ * names a block of the scope are PATH. ODIN3_ERR_NO_MEMORY. */
+odin3_status odin3_elab1_hier_classify(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                       odin3_elab1_hier_info *out);
 
 /* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
  * dropped while env->quiet). */
