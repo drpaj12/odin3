@@ -7,7 +7,8 @@ text and print as **[TODO: …]**.
 The paper has two parts. Part I (Sections I to VI, then the references) is the 8-page FCCM paper:
 the "final frontier" story of Odin, Odin II and Odin III, background, architecture, results,
 discussion and conclusion. Part II (Sections VII to XVI, after the references) describes the system
-in detail for its users after v1.0.
+in detail for its users after v1.0. Appendices A to C (after Part II) are records of the build method, the v1.0 phases and the
+releases after v1.0 (cleanup of 2026-11-02); Appendix D is the research log.
 
 ## Figures
 
