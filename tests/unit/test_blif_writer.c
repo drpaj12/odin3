@@ -931,6 +931,30 @@ static void test_inout_port_is_refused(void) {
     expect_baseline(IN_PATH);
 }
 
+/* An inout port driven from inside is written as an output in the top module only; the same port
+ * of a module below the top stays an inout and is refused (as `sim` treats only the top). */
+static void inout_driven_module(odin3_module *module) {
+    odin3_net_id in = odin3_wire_net(module, new_port(module, "i", ODIN3_DIR_IN, 1), 0);
+    odin3_net_id io = odin3_wire_net(module, new_port(module, "io", ODIN3_DIR_INOUT, 1), 0);
+    new_buffer(module, in, io);
+}
+
+static void test_driven_inout_of_the_top_is_an_output(void) {
+    inout_driven_module(new_module(design, "top"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){1}));
+    static char text[TEXT_MAX];
+    expect_contains(write_stable(text), ".inputs i\n.outputs io\n");
+}
+
+static void test_driven_inout_of_a_child_module_is_refused(void) {
+    inout_driven_module(new_module(design, "child"));
+    odin3_module *top = new_module(design, "top");
+    (void)new_port(top, "x", ODIN3_DIR_IN, 1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_top(design, (odin3_module_id){2}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_blif_write(design, OUT_PATH));
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(last_error, "BLIF has no inout ports"), last_error);
+}
+
 /* A registered type with non-default parameters has no BLIF form. */
 static void test_non_default_parameters_are_refused(void) {
     odin3_module *module = new_module(design, "top");
@@ -1695,6 +1719,8 @@ int main(void) {
     RUN_TEST(test_failed_write_keeps_destination);
     RUN_TEST(test_bad_arguments);
     RUN_TEST(test_inout_port_is_refused);
+    RUN_TEST(test_driven_inout_of_the_top_is_an_output);
+    RUN_TEST(test_driven_inout_of_a_child_module_is_refused);
     RUN_TEST(test_non_default_parameters_are_refused);
     RUN_TEST(test_registered_type_as_subckt);
     RUN_TEST(test_declared_parametric_model_written_as_declared);

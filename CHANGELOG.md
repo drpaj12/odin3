@@ -6,6 +6,22 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added
+
+- `lower` of `$tribuf` (the tinyriscv gpio `inout`). When the `$tribuf` is the sole driver of its output bits the
+  enable is dropped and the output is driven by the data input, with one WARNING per cell. This is the case Yosys
+  `opt_expr -mux_undef` collapses before Parmys maps anything (Parmys maps `$tribuf` itself to SKIP); the function
+  differs while the enable is low (the output follows the data instead of z), and on an inout port of the top the
+  internal read sees the data, not the external pin. A bus (several drivers on one net), an inout port of a module
+  below the top, a constant 0 or x enable and a `$tribuf` fed by a `$tribuf` stay a located error (`lower` changes
+  nothing). `tools/lower-check/lower_sim.py` excludes `$tribuf`, so the cells are not compared.
+  Spec: `docs/specs/2026-10-14-3B-lower-design.md` (§4 text, rule table, §9 ERROR and WARN tables, decision 11).
+- `write_blif` and `sim` take an inout port of the top module that every bit has a driver (besides the port's own
+  pin) as an output; any other inout is refused as before. Child modules keep the refusal in both.
+- `sim_tb`: up to 4096 named port connections on a DUT instance (was 16); `%t` in `$display`/`$write` prints the
+  time in the precision of the testbench's `` `timescale `` (units come from that timescale; without one, 1 ns); a
+  value that does not fit 64 bits in that precision is a run error.
+
 ### Fixed
 
 - Hierarchical references into another module (`u_tinyriscv.u_regs.regs[26]` in tinyriscv_soc_top.v) are no

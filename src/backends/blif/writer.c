@@ -1319,10 +1319,13 @@ static bool net_has_out_driver(const odin3_module *module, odin3_net_id net) {
 /* The direction BLIF sees for port `at`: an inout port of the module whose every bit has a driver
  * besides the port's own pin (a lowered tri-state, `lower` drops the enable) is an output; any
  * other inout stays INOUT, which BLIF cannot write. `of_module`: a port of the module being
- * written (not of a black-box model). */
+ * written (not of a black-box model). Only the design's top module gets this reading (as `sim`
+ * does, and as `lower` collapses an inout tri-state only there): an inout of a child module stays
+ * INOUT and is refused. */
 static odin3_dir blif_port_dir(const blif_writer *wr, const odin3_celltype_def *def, uint32_t at,
                                bool of_module) {
-    if (!of_module || def->ports[at].dir != ODIN3_DIR_INOUT) {
+    if (!of_module || def->ports[at].dir != ODIN3_DIR_INOUT ||
+        odin3_design_top(wr->design).v != odin3_module_id_of(wr->module).v) {
         return def->ports[at].dir;
     }
     odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, at), 0);

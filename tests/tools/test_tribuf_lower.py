@@ -1,6 +1,8 @@
 """`$tribuf` lowering (tinyriscv gpio inout). Yosys keeps a `$_TBUF_` bit cell on a port; the
-registry has none, VPR has no tri-state and Parmys drops the enable of a lone port driver, so
-`lower` drives the port from the data input with a WARNING per cell. The micro
+registry has none, VPR has no tri-state and Yosys `opt_expr -mux_undef` (so Parmys) drops the
+enable of a sole driver, so `lower` drives the output from the data input with a WARNING per
+cell (the function differs while the enable is low). Several tri-states on one net (a bus), an
+inout below the top, a constant 0 or x enable and a chain stay an error. The micro
 tests/lower/tribuf_inout.v (inout and output tri-states on the top) runs through proc, opt, lower,
 write_blif and sim: write_blif and sim treat an inout port driven from inside as an output. With
 ODIN3_TINYRISCV_TOP set (the unmodified tinyriscv_soc_top.v) it also lowers. Run through CTest
@@ -64,6 +66,20 @@ class TribufLowerTest(unittest.TestCase):
         self.assertIn("BLIF has no inout ports; cannot write port 'b'", blif.stderr)
         self.assertNotEqual(sim.returncode, 0)
         self.assertIn("cannot simulate inout port `b`", sim.stderr)
+
+    def test_bus_of_two_tristates_is_an_error_and_writes_nothing(self) -> None:
+        # Two drivers of one net: dropping both enables would short b into a (a bus short).
+        with tempfile.TemporaryDirectory() as tmp:
+            src, out = Path(tmp) / "m.v", Path(tmp) / "o.blif"
+            src.write_text("module m(input a, input b, input ea, input eb, output y);\n"
+                           "  assign y = ea ? a : 1'bz;\n  assign y = eb ? b : 1'bz;\nendmodule\n")
+            done = run(f"read_verilog {src}; hierarchy --top m; proc; opt; lower; write_blif {out}",
+                       "m")
+            written = out.exists()
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("has no bit-level cell in the registry", done.stderr)
+        self.assertIn("tri-state bus", done.stderr)
+        self.assertFalse(written)
 
     @unittest.skipUnless(os.environ.get("ODIN3_TINYRISCV_TOP"), "ODIN3_TINYRISCV_TOP not set")
     def test_unmodified_tinyriscv_soc_lowers(self) -> None:

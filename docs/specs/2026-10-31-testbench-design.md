@@ -60,7 +60,7 @@ $finish $stop $readmemh $readmemb $dumpfile $dumpvars` (the last two are accepte
 `--vcd`). Format specifiers: `%d %0d %Nd %b %0b %Nb %h %x %o %c %s %m %t %%` with an optional width or
 `0`; `%e %f %g %v` are rejected. `%t` prints the value in the precision of the `` `timescale ``
 (`unit / precision`, default `1 ns` with a factor of 1), right aligned in 20 columns (`%0t` minimal),
-the default of `$timeformat` (LRM 21.2.1.5; `$timeformat` itself is not parsed). A DUT instance takes
+the default of `$timeformat` (LRM 21.2.1.5; `$timeformat` itself is not parsed). The units come from the testbench's own `` `timescale `` (the LRM default for a file without one is the smallest precision in the design, which `sim_tb` does not see, so it prints in 1 ns); a time that does not fit 64 bits in that precision is a run error. A DUT instance takes
 up to 4096 port connections. `%d` pads to the digit count of the width unless `%0d`
 (LRM 17.1.1.2); signed regs print a sign. `$fopen(name, mode)` returns a descriptor with
 `$fdisplay(fd, ...)`; `fd` 1 is the output. `$readmemh/b(file, mem [, start [, end]])` fills a reg

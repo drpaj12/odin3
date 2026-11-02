@@ -792,9 +792,11 @@ then the options considered.
     async-write or multi-clock `$mem` are located errors; (5) word FFs and latches are checked
     against an independent reference stepper, Yosys's lowering and a formal check. *(Update 2026-11-02, agent
     default for the tinyriscv gpio `inout`: `$tribuf` is no longer an error in (4): `lower` drops the enable
-    and drives Y from A with a WARNING per cell, as Parmys does; Yosys keeps a `$_TBUF_` bit cell on a port,
-    which the registry does not have; no IR change. `write_blif` and `sim` read an inout port that has an
-    inside driver as an output.)* **Standing rule:**
+    and drives Y from A with a WARNING per cell when the `$tribuf` is the sole driver of its output (what
+    Yosys `opt_expr -mux_undef` and so Parmys collapse); a bus, an inout below the top, a constant 0/x enable
+    and a chained `$tribuf` stay a located error; Yosys keeps a `$_TBUF_` bit cell on a port, which the registry
+    does not have; no IR change. `write_blif` and `sim` read an inout port of the top that has an inside driver
+    as an output.)* **Standing rule:**
     Phase 3 VTR-mapping and flow decisions follow the agent's recommendation as an agent default
     logged here; Peter is asked only for IR/invariant changes, irreversible or outward-facing steps,
     and anything touching the reverse-engineering use (structural Verilog input, names, hierarchy,

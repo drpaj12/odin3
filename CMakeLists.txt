@@ -3048,6 +3048,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(tribuf_lower_flow PROPERTIES ENVIRONMENT
             "ODIN3_TINYRISCV_TOP=$ENV{HOME}/odin3-ws/external/tinyriscv/rtl/soc/tinyriscv_soc_top.v")
     endif()
+    # sim_tb: exactly 4096 port connections on a DUT instance simulate (the cap).
+    add_test(NAME sim_tb_conns_flow
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_sim_tb_conns
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_tb_conns_flow PROPERTIES LABELS tools)
     # sim_tb $test$plusargs / $value$plusargs (--plusarg) and the lazy generate-branch check.
     add_test(NAME sim_tb_plusargs
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

@@ -171,7 +171,7 @@ Details that decide gate counts, each with a test:
   after the pair results), exactly as `simplemap_reduce` appends `sig_a[i]` to `sig_t`.
 - `$eq` and `$ne` extend with the both-signed flag (§3.3). Yosys's `simplemap_eqne` passes
   `A_SIGNED` only; the two agree on every cell the Verilog front end makes.
-- `$tribuf` has no bit form in the registry (no `$_TBUF_`): a located error (§9, Peter's question 4).
+- `$tribuf` has no bit form in the registry (no `$_TBUF_`). Since 2026-11-02 the sole driver of its Y bits is collapsed to its data input with a WARNING (the case Yosys `opt_expr -mux_undef` and so Parmys collapse); a bus (several drivers on the net), an inout port of a module below the top, a constant 0 or x enable and a `$tribuf` fed by a `$tribuf` stay a located error (§9, Peter's question 4).
 
 ## 5. `$pmux`, shifts, arithmetic, comparisons: the `techmap.v` family (LW-6)
 
@@ -393,7 +393,7 @@ refinement against Yosys's own `memory_map` only (§14.4).
 | Cell | Treatment |
 |---|---|
 | `$sop`, `$lut` | `bit`: untouched (§1) |
-| `$tribuf` | lowered since 2026-11-02 (fix/tribuf-simtb): the enable is dropped and Y is A, with `lower: '$tribuf' '<cell>': the enable is dropped ...` (WARNING per cell), as Parmys does; Yosys keeps a `$_TBUF_` bit cell on a port, the registry has none (3E rejects a tri-state). Peter's question 4 was a located error |
+| `$tribuf` | lowered since 2026-11-02 (fix/tribuf-simtb) when it is the sole driver of its Y bits (the inout pin of the top module's own port does not count): the enable is dropped and Y is A, with `lower: '$tribuf' '<cell>': the sole driver of its output; the enable is dropped ...` (WARNING per cell). This is the case Yosys collapses (`opt_expr -mux_undef` turns `en ? a : 'bz` into `a` before Parmys maps anything; Parmys maps `$tribuf` itself to SKIP) and `elab2_trivtr_out.c` collapses under `--vtr-compat`. The function differs from the IEEE one while the enable is low (Y follows A, not z), and on an inout of the top the internal read sees A, not the external pin (`lower_sim.py` excludes `$tribuf`, so the cells are not compared). A bus, an inout of a module below the top, a constant 0/x enable and a chained `$tribuf` keep the error `lower: '$tribuf' '<cell>' has no bit-level cell in the registry and is not the sole driver of its output ...`. Peter's question 4 was a located error for all |
 | `$proc` | refused by the manager (O1) |
 | `$_CONST*_`, `$_BUF_`, all bit gates | untouched |
 | An `inout` or a net driven by a tristate type | not examined; `check` rules 4/E stay as they were |
@@ -428,8 +428,10 @@ or `$c<ID>`.
 | WARN | `lower: module 'm': falling-edge '<type>' '<cell>' gets a clock inverter` | per cell, `--neg-edge invert` |
 | WARN | `lower: module 'm': cell '<type>' '<cell>' has A_SIGNED != B_SIGNED: treated as unsigned (both-signed rule, Yosys simlib; PHASE2 #25)` | per mixed cell, once |
 | WARN | `lower: module 'm': '$mem' '<cell>' lowered to N flip-flops` | per `$mem`, so a missed `hardmap` is visible |
+| WARN | `lower: '$tribuf' '<cell>': the sole driver of its output; the enable is dropped and the output is driven by the data input (as Yosys opt_expr -mux_undef and Parmys); the function differs while the enable is low (the output follows the data instead of z) and an inout port reads the data internally, not the external pin` | per `$tribuf` collapsed |
+| WARN | `lower: N '$tribuf' cells lowered with the enable dropped (each is warned of above)` | once per design, if N > 0 |
 | DEBUG | `lower: module 'm': <type> '<cell>' -> B bit cells` | per cell |
-| ERROR | `lower: no lowering rule for cell type '<t>' ('<cell>')`; `lower: module 'm': '$pow' '<cell>' has no bit-level form (run opt first; Yosys leaves it unmapped)`; `lower: '$tribuf' '<cell>' has no bit-level cell in the registry`; `lower: standalone $memrd/$memwr '<cell>' (use $mem)`; the three `$mem` errors of §7; `lower: module 'm': asynchronous control on '<type>' '<cell>'` (`--async error`) | `ODIN3_ERR_INVALID_ARG` |
+| ERROR | `lower: no lowering rule for cell type '<t>' ('<cell>')`; `lower: module 'm': '$pow' '<cell>' has no bit-level form (run opt first; Yosys leaves it unmapped)`; `lower: '$tribuf' '<cell>' has no bit-level cell in the registry and is not the sole driver of its output, so its enable cannot be dropped: <reason>` (bus, inout below the top, constant 0/x enable, chained `$tribuf`); `lower: standalone $memrd/$memwr '<cell>' (use $mem)`; the three `$mem` errors of §7; `lower: module 'm': asynchronous control on '<type>' '<cell>'` (`--async error`) | `ODIN3_ERR_INVALID_ARG` |
 | ERROR | `lower: module 'm': '<type>' '<cell>' would create N nodes (cap C)`; `... '$mem' ... has N bits (cap 4194304) ...` | the caps of §11 (`ODIN3_ERR_INVALID_ARG`) |
 | ERROR | `lower needs more than N bytes (the design's budget is 60% of physical memory)` | the shared byte budget (`ODIN3_ERR_PARSE`, as 2F) |
 | ERROR | `lower: module 'm': node '<type>' '<cell>' is not in the netlist view after lowering` | the post-condition of §12.3 (`ODIN3_ERR_CHECK`; a bug) |
@@ -679,7 +681,7 @@ provenance primitives.
 | 8 | the fine FF family `$_DFFE_*`, `$_SDFF*_`, `$_DFF_PN0_`, `$_DFFSR_*` is never produced | `techmap` produces them; `dffunmap`/`opt -fast` re-infers `$_SDFFE_` | the registry has no such bit cell; the unmapped shape is `opt`'s input anyway |
 | 9 | each cell is built alone; no sharing between a comparison and a subtraction of the same operands | `alumacc` merges `$alu` nodes with equal operands when run on a whole module; `techmap`'s wrapper runs it per cell, so Yosys's `techmap` does not share either | `opt_merge` shares them afterwards in both |
 | 10 | constants are left in (`CI = 0`, shift stages on constants, `Y[k>0] = 0`) | `techmap` runs `opt_muxtree; opt_expr -fine` inside the shift and divider maps and `opt -fast` after | §2.2; the script adds `opt -fast` |
-| 11 | `$pow` and `$tribuf` are errors | `$pow` is left unmapped (`_TECHMAP_FAIL_`); `$tribuf` becomes `$_TBUF_` | no bit cells for them; Peter's question 4 |
+| 11 | `$pow` is an error; `$tribuf` is an error unless it is the sole driver of its output, then the enable is dropped (WARNING, 2026-11-02) | `$pow` is left unmapped (`_TECHMAP_FAIL_`); `$tribuf` becomes `$_TBUF_` | no bit cells for them; Peter's question 4; the sole-driver case is what Yosys `opt_expr -mux_undef` / Parmys collapse |
 | 12 | `$mem`: async write ports and write ports on different clocks or polarities are errors; reads past `SIZE` give x (one INFO line per such memory) | `memory_map` rejects the two errors as well; it leaves words past `SIZE` undriven | 2D never emits them; hand-built only |
 | 12b | `$mem`: a transparent read port is lowered with a write-to-read bypass against write ports on its clock net and edge (Yosys `memory_map`), with a WARNING (PHASE3 #40) | Parmys never reads `RD_TRANSPARENT`; its RAMs are read-first (`vtr_primitives.v`), so its netlists read the old value | Agent default (Peter may override); 2D never emits `RD_TRANSPARENT` 1 |
 | 13 | `$mem` `INIT` is kept | `hardmap` drops it with a warning (decision 6.5) | soft memories have somewhere to put it |
@@ -730,7 +732,7 @@ script text, 3 and 4 fix what is lowered and how, 5 confirms the evidence form.
    a histogram as the contract (tier T). *Recommended:* yes, as the PHASE3 3B row says. The
    alternative, ripple adders and array multipliers, is simpler to review and gives ABC the same
    function, but it is not "Yosys structures".
-4. **Cells with no bit form** (§5.7, §7, §8): `$pow` (non-constant), `$tribuf`, standalone
+4. **Cells with no bit form** (§5.7, §7, §8): `$pow` (non-constant), `$tribuf` (except a sole driver, 2026-11-02), standalone
    `$memrd`/`$memwr`, async-write or multi-clock `$mem`: located errors, no IR change.
    *Recommended:* yes. `$_TBUF_` would be an IR addition for Phase 6 (Altera); the other cells never
    occur in 2D's output.
