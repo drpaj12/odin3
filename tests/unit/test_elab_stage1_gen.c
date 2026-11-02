@@ -412,7 +412,8 @@ static void test_reference_errors(void) {
                           "t.v:7:14: error: 'g[5].t' does not exist (generate block 'g[5]' was not "
                           "elaborated)"});
     et_free(&rs);
-    /* a reference into another module is an undriven net of the dotted name, with a warning (Yosys) */
+    /* a reference into another module is an undriven net of the dotted name, with a warning (Yosys)
+     */
     run_one("module m;\n  wire w;\nendmodule\nmodule t;\n  m u ();\n  wire z;\n"
             "  assign z = u.w;\nendmodule\n");
     expect_clean();
@@ -479,7 +480,8 @@ static void test_foreign_reference_in_always(void) {
             "  always @(posedge clk) begin\n    a <= ~u.r.regs[26];\n    b <= ~u.r.regs[27];\n"
             "  end\nendmodule\nmodule sub;\nendmodule\n");
     expect_clean();
-    TEST_ASSERT_EQUAL_UINT32(2, et_count_with(&rs, ODIN3_LOG_WARN, "hierarchical reference 'u.r.regs'"));
+    TEST_ASSERT_EQUAL_UINT32(
+        2, et_count_with(&rs, ODIN3_LOG_WARN, "hierarchical reference 'u.r.regs'"));
     et_free(&rs);
 }
 

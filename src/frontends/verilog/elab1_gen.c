@@ -832,8 +832,8 @@ static odin3_status target_of(odin3_elab1_env *env, odin3_ast_id hier_name, uint
     return ODIN3_OK;
 }
 
-odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name,
-                                      uint32_t scope, bool *foreign, odin3_strbuf *text) {
+odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                      bool *foreign, odin3_strbuf *text) {
     *foreign = false;
     uint32_t saved = env->cur_scope;
     env->cur_scope = scope;

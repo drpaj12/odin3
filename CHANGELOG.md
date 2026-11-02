@@ -8,6 +8,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
+- Hierarchical references into another module (`u_tinyriscv.u_regs.regs[26]` in tinyriscv_soc_top.v) are no
+  longer an error: as Yosys does, the dotted path is an undriven net of that name (a bit select past its one bit
+  is x), with one WARNING per reference. Generate-block and named-block references resolve as before; hierarchical
+  calls, writes and references in constant expressions or port connections are still errors.
+- `loc-check`: the plain BLIF listing leaves out the modules flatten left unused, which plain `write_blif`
+  no longer writes (#318). The `loc_micros_*` and `loc_vtr14_*` gate and LUT sweeps failed on those modules, and
+  the totals of the designs that did compare looked like improvements; with the fix every pin holds in Release.
+
 - Processor netlists for Seeker-Proc (Leman Russ III round 7). `flatten` marks the modules it leaves unused
   (module attribute `odin3 flattened away`, not printed by the other writers) and plain `write_blif` no longer writes them (Yosys deletes them): the 28
   `.model` blocks after `proc; opt; flatten; opt; lower` were these 27 leftovers, and ABC cannot resolve their

@@ -102,6 +102,9 @@ LINE_POOL = {*LINE_OK, ("blif", "node")}  # the pools that may pair by file and 
 GENERATED = re.compile(r"^\$[cnwm]\d+$")
 LOC_RE = re.compile(r"^(.*):(\d+)(?:\.\d+(?:-\d+\.\d+)?)?$")
 TOP_RE = re.compile(r"read_verilog: elaborated top '([^']+)'")
+# Plain write_blif leaves out the modules flatten left unused (Yosys's flatten deletes them) and
+# says so; they are no loss of the format, so the plain listing leaves them out of "before".
+UNUSED_RE = re.compile(r"write_blif: \d+ modules that flatten left unused not written [^:]*: (.*)$")
 
 
 class ToolError(Exception):
@@ -878,6 +881,12 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
     results: dict[str, Result] = {}
     written = written_facts(paths["json"], paths["verilog"])
     rows = parse_dump(before.read_text(encoding="utf-8"))
+    unused: set[str] = set()
+    for line in log.splitlines():
+        found = UNUSED_RE.search(line)
+        if found:
+            unused |= {name.strip() for name in found.group(1).split(", ")}
+    plain_rows = [r for r in rows if r.module not in unused]
     for fmt in formats:
         after = work / f"after-{fmt}.txt"
         script = f"{prefix}{WRITES[fmt][1].format(p=paths[fmt])}; dump_locs {after}"
@@ -886,7 +895,8 @@ def run_design(cfg: Config, level: str, design: Path, work: Path) -> dict[str, R
         except ScriptError as exc:
             results[fmt] = ReadFail(str(exc))
             continue
-        results[fmt] = Pair(rows, parse_dump(after.read_text(encoding="utf-8")), written)
+        shown = plain_rows if fmt == "plain" else rows
+        results[fmt] = Pair(shown, parse_dump(after.read_text(encoding="utf-8")), written)
     return results
 
 

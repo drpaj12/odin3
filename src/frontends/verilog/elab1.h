@@ -1104,8 +1104,8 @@ odin3_status odin3_elab1_scope_ref(odin3_elab1 *e1, odin3_ast_id hier_name, uint
  * component is no generate or named block, and has no index): Yosys makes an undriven net of
  * the dotted name, and so do we (a warning). *foreign set; when it is, the dotted text is
  * appended to text. ODIN3_ERR_NO_MEMORY. */
-odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name,
-                                      uint32_t scope, bool *foreign, odin3_strbuf *text);
+odin3_status odin3_elab1_hier_foreign(odin3_elab1_env *env, odin3_ast_id hier_name, uint32_t scope,
+                                      bool *foreign, odin3_strbuf *text);
 
 /* odin3_elab1_scope_ref from env->cur_scope, the declaration's slot into *slot (diagnostics
  * dropped while env->quiet). */
