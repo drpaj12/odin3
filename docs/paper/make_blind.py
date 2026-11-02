@@ -64,6 +64,8 @@ for pat, rep in [(r" \(Part~II, Sec\.~\\ref\{[^}]*\}\)", ""), (r"; Part~II, Sec\
                  (r" \(Appendix~\\ref\{sec:(?:register|appmethod|releases|status)\}\)", ""),
                  (r"; Appendix~\\ref\{sec:[a-z]+\}", ""),
                  (r" Appendix~\\ref\{sec:releases\} gives the record by release\.", ""),
+                 (r"The IDs \(O1 to O17\) are those of the research log, which lists every hypothesis, including those that are not confirmed\.",
+                  "The IDs (O1 to O17) are those of the full version of this paper, which lists every hypothesis, including those that are not confirmed."),
                  (r"A failed one is a line in the research log and the Discussion\.",
                   "A failed one is reported in the Discussion."),
                  (r"\(Sec\.~\\ref\{sec:abi\}\)", "")]:
