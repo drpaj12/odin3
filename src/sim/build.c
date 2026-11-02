@@ -312,6 +312,19 @@ static odin3_status expand(odin3_sim_builder *bld) {
 
 /* --- primary inputs and outputs --------------------------------------------------------------- */
 
+/* A driver pin of the net that is an OUT pin (a cell output): the inout pins of ports and cells
+ * share the driver partition but are not inside drivers. */
+static bool net_has_out_driver(const odin3_module *module, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(module, net);
+    uint32_t drivers = odin3_net_driver_count(module, net);
+    for (uint32_t i = 0; i < drivers; i++) {
+        if (odin3_pin_dir(module, pins.pins[i]) == ODIN3_DIR_OUT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* Whether every bit of an inout port node has a driver besides the port's own pin: such a port is
  * driven from inside (a lowered tri-state, `lower` drops the enable) and is simulated as an output.
  */
@@ -319,7 +332,7 @@ static bool inout_driven_inside(const odin3_module *top, odin3_node_id pnode) {
     odin3_pinslice pins = odin3_node_pins(top, pnode);
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(top, (odin3_pin_id){pins.first.v + k});
-        if (!odin3_net_valid(net) || odin3_net_driver_count(top, net) < 2) {
+        if (!odin3_net_valid(net) || !net_has_out_driver(top, net)) {
             return false;
         }
     }

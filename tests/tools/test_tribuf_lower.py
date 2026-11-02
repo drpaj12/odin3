@@ -51,6 +51,20 @@ class TribufLowerTest(unittest.TestCase):
             self.assertEqual((outs[0], outs[1:3], outs[3]), (d, dv, d), (ins, outs))
         self.assertEqual(enables, {"0", "1"})  # the outputs follow the data with en low as well
 
+    def test_inout_without_an_inside_driver_is_still_refused(self) -> None:
+        # in_out2 is read, never driven: not an output, so BLIF and sim refuse it as before.
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "m.v"
+            src.write_text("module m(input d, input en, inout a, inout b, output o);\n"
+                           "  assign a = en ? d : 1'bz;\n  assign o = b;\nendmodule\n")
+            flow = f"read_verilog {src}; hierarchy --top m; proc; opt; lower; "
+            blif = run(flow + f"write_blif {Path(tmp) / 'o.blif'}", "m")
+            sim = run(flow + f"sim 4 1 {Path(tmp) / 'v.txt'}", "m")
+        self.assertNotEqual(blif.returncode, 0)
+        self.assertIn("BLIF has no inout ports; cannot write port 'b'", blif.stderr)
+        self.assertNotEqual(sim.returncode, 0)
+        self.assertIn("cannot simulate inout port `b`", sim.stderr)
+
     @unittest.skipUnless(os.environ.get("ODIN3_TINYRISCV_TOP"), "ODIN3_TINYRISCV_TOP not set")
     def test_unmodified_tinyriscv_soc_lowers(self) -> None:
         top = Path(os.environ["ODIN3_TINYRISCV_TOP"])

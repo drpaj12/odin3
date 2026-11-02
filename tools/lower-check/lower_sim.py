@@ -63,7 +63,7 @@ SKIP_REASONS = {
     "$div": f"{NO_HOOK}; covered by lower-diff (tier T)",
     "$mod": f"{NO_HOOK}; covered by lower-diff (tier T)",
     "$pow": f"{NO_HOOK}; lower has no rule for it",
-    "$tribuf": f"{NO_HOOK}; lower has no rule for it",
+    "$tribuf": f"{NO_HOOK}; lower drops its enable, so the cells are not compared",
     "$mem": MEM_REASON,
     "\\single_port_ram": HARD_REASON,  # (RTLIL spells a user cell type with a backslash)
     "\\dual_port_ram": HARD_REASON,

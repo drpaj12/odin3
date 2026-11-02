@@ -1303,6 +1303,19 @@ static void write_generators(blif_writer *wr) {
 
 /* --- ports --------------------------------------------------------------------------------- */
 
+/* A driver pin of the net that is an OUT pin (a cell output): the inout pins of ports and cells
+ * share the driver partition but are not inside drivers. */
+static bool net_has_out_driver(const odin3_module *module, odin3_net_id net) {
+    odin3_pinlist pins = odin3_net_pins(module, net);
+    uint32_t drivers = odin3_net_driver_count(module, net);
+    for (uint32_t i = 0; i < drivers; i++) {
+        if (odin3_pin_dir(module, pins.pins[i]) == ODIN3_DIR_OUT) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* The direction BLIF sees for port `at`: an inout port of the module whose every bit has a driver
  * besides the port's own pin (a lowered tri-state, `lower` drops the enable) is an output; any
  * other inout stays INOUT, which BLIF cannot write. `of_module`: a port of the module being
@@ -1315,7 +1328,7 @@ static odin3_dir blif_port_dir(const blif_writer *wr, const odin3_celltype_def *
     odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, at), 0);
     for (uint32_t k = 0; k < pins.count; k++) {
         odin3_net_id net = odin3_pin_net(wr->module, (odin3_pin_id){pins.first.v + k});
-        if (!odin3_net_valid(net) || odin3_net_driver_count(wr->module, net) < 2) {
+        if (!odin3_net_valid(net) || !net_has_out_driver(wr->module, net)) {
             return ODIN3_DIR_INOUT;
         }
     }

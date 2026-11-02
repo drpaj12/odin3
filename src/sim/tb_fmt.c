@@ -174,7 +174,8 @@ static void put_arg(tb_ev *ev, sbuf *out, const tb_expr *arg, spec sp) {
         put_radix(out, val, (radix){BASE_OCT, pad ? (bits + BITS_PER_OCT - 1U) / BITS_PER_OCT : 0});
         break;
     case 't':
-        put_time(out, val * ev->tb->time_scale, sp);
+        put_time(out, val > UINT64_MAX / ev->tb->time_scale ? UINT64_MAX : val * ev->tb->time_scale,
+                 sp);
         break;
     case 'c':
         put(out, &ch, 1);
