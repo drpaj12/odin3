@@ -541,8 +541,13 @@ typedef struct clock_scan {
 static odin3_status scan_clock_cell(const odin3_sim_builder *bld, odin3_sim *sim, clock_scan *scan,
                                     uint32_t cell) {
     const odin3_sim_flat *flat = &sim->cells[cell];
-    if (!odin3_sim_is_edge(flat->def) || (flat->def->flags & ODIN3_CT_CLOCK_PIN0) == 0 ||
-        flat->view.ports[0].width == 0) {
+    if (odin3_sim_is_edge(flat->def) && (flat->def->flags & ODIN3_CT_CLOCK_PIN0) == 0) {
+        if (sim->n_gclk++ == 0) { /* a global-clock cell: no clock net to find */
+            odin3_sim_cell_label(bld, flat, sim->gclk_label, sizeof sim->gclk_label);
+        }
+        return ODIN3_OK;
+    }
+    if (!odin3_sim_is_edge(flat->def) || flat->view.ports[0].width == 0) {
         return ODIN3_OK;
     }
     uint32_t slot = flat->view.ports[0].idx[0];

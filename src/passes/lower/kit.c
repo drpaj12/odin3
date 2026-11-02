@@ -159,6 +159,11 @@ static bool pin_fed_by_tribuf(const lw_ctx *lw, odin3_pin_id pin) {
 static void mark_tribuf_chains(lw_ctx *lw, uint32_t end) {
     odin3_util_free(lw->tri_chain);
     lw->tri_chain = odin3_util_calloc((size_t)end + 1U);
+    if (lw->tri_chain == NULL) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "lower: out of memory: cannot build the $tribuf chain table; every $tribuf of "
+                  "this module is refused");
+    }
     for (uint32_t id = 1; lw->tri_chain != NULL && id < end; id++) {
         odin3_node_id node = {id};
         if (!odin3_node_live(lw->module, node) ||

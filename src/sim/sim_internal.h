@@ -61,6 +61,9 @@ typedef struct odin3_sim_port {
     uint32_t width;
 } odin3_sim_port;
 
+/* Room for the label of the first cell with no clock pin (gclk_label). */
+enum { ODIN3_SIM_LABEL_MAX = 160 };
+
 /*
  * The program. values: n_values bytes, one per slot (0 or 1). cells: n_cells flat cells in
  * instance-expansion order. order: the n_cells cell indices in settle order (a topological order
@@ -102,6 +105,8 @@ struct odin3_sim {
     uint32_t *out_bits;
     uint32_t n_out_bits;
     uint32_t n_edge;
+    uint32_t n_gclk;                      /* edge-triggered cells with no clock pin ($_FF_) */
+    char gclk_label[ODIN3_SIM_LABEL_MAX]; /* the first of them: type and node name */
     uint32_t n_dclk;
     uint32_t *dclk_cell;
     uint32_t *dclk_slot;

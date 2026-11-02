@@ -159,6 +159,12 @@ static void print_to(run *rt, FILE *fp, const tb_expr *call, uint32_t first, boo
 static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
     const tb_expr *call = stmt->sys;
     char err[ERR_BUF] = "";
+    if (call->n >= 2 && call->list[1]->kind == E_HIER) {
+        rfail(rt, stmt,
+              "$readmem into a hierarchical path is not supported (writes into a DUT "
+              "signal by path are not supported)");
+        return;
+    }
     if (call->n < 2 || call->list[0]->kind != E_STR || call->list[1]->kind != E_VAR ||
         rt->tb->vars[call->list[1]->var].depth == 0) {
         rfail(rt, stmt, "$readmem expects (\"file\", array [, start [, end]])");

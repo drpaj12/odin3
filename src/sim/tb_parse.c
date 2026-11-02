@@ -496,7 +496,12 @@ static bool hier_index(parser *pr, char *path) {
     }
     (void)snprintf(piece, sizeof piece, "[%llu]", (unsigned long long)cur(pr)->num);
     pr->pos++;
-    return expect_op(pr, "]") && path_add(path, piece);
+    if (!is_op(pr, "]")) {
+        return fail(pr, "hierarchical name (name.name[number], constant indices only; "
+                        "part-selects are not supported)");
+    }
+    pr->pos++;
+    return path_add(path, piece);
 }
 
 /* After `inst`: reads `.name` components and `[number]` indices into path (the part after the
@@ -514,6 +519,7 @@ static bool hier_path(parser *pr, char *path) {
 /* `inst.path`: a read of a signal of the DUT instance, resolved now (the width is needed). */
 static bool begin_hier(parser *pr, bool *want) {
     int inst = pr->lenient ? 0 : find_inst(pr, cur(pr)->text);
+    uint32_t first = pr->pos; /* the instance name: the line of the read, for its errors */
     pr->saw_hier = true;
     if (inst < 0) {
         return fail(pr, "hierarchical name whose first part is not a DUT instance of this "
@@ -526,8 +532,9 @@ static bool begin_hier(parser *pr, bool *want) {
     if (!hier_path(pr, path)) {
         return false;
     }
+    tb_src_loc loc = {pr->file, pr->toks[first].line};
     if (!pr->lenient &&
-        tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, &sig) != ODIN3_OK) {
+        tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, loc, &sig) != ODIN3_OK) {
         pr->failed = true;
         return false;
     }

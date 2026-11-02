@@ -10,10 +10,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 - `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its
   own and its edges reach only the cells it clocks; new `odin3_sim_clock_edges` in `src/sim/sim.h`, an
-  internal simulator call, not the public ABI). More than 16 is an error naming the extra port.
+  internal simulator call, not the public ABI). More than 16 is an error naming the extra port. A clock bit in a multi-bit DUT port, and a cell with no clock pin
+  (a global-clock `$_FF_` such as a BLIF `.latch` with no control) in a DUT with two or more clock inputs, are
+  located errors (the cell would otherwise never be clocked).
 - `sim_tb`: read-only hierarchical references into a DUT, `dut.u_regs.r` and `dut.u.v[3]` (literal indices), resolved
-  through the DUT's signal table; the DUT instance may be declared after the use. A write, a variable index and
-  a memory word (no names after `lower`) are located errors. Spec: `docs/specs/2026-10-31-testbench-design.md` 7a, 7b.
+  through the DUT's signal table; the DUT instance may be declared after the use. A write (including `$readmemh` into a path), a variable
+  index, a part-select and a memory word (no names after `lower`) are located errors, reported at the line of the read
+  in the testbench file. Spec: `docs/specs/2026-10-31-testbench-design.md` 7a, 7b.
 - `lower` of `$tribuf` (the tinyriscv gpio `inout`). When the `$tribuf` is the sole driver of its output bits the
   enable is dropped and the output is driven by the data input, with one WARNING per cell. This is the case Yosys
   `opt_expr -mux_undef` collapses before Parmys maps anything (Parmys maps `$tribuf` itself to SKIP); the function
@@ -30,7 +33,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Fixed
 
-- `lower` of two chained `$tribuf` cells refused only one of the two orders: lowering the first hid the chain from the second. The chain is now found before any cell of the module is lowered. A constant z enable (`$_CONSTZ_`) is refused like 0 and x.
+- `lower` of two chained `$tribuf` cells refused only one of the two orders: lowering the first hid the chain from the second. The chain is now found before any cell of the module is lowered (an allocation failure there is logged as such). A constant z enable (`$_CONSTZ_`) is refused like 0 and x.
 - Hierarchical references into another module (`u_tinyriscv.u_regs.regs[26]` in tinyriscv_soc_top.v) are no
   longer an error: as Yosys does, the dotted path is an undriven net of that name (a bit select past its one bit
   is x), with one WARNING per reference (a write to one drives that local net only). The same holds in a port

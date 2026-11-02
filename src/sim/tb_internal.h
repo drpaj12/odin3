@@ -86,9 +86,14 @@ typedef struct tb_hier_sig {
     uint32_t id;
     uint32_t width;
 } tb_hier_sig;
+/* Where a hierarchical read stands in the testbench source, for its errors. */
+typedef struct tb_src_loc {
+    const char *file;
+    uint32_t line;
+} tb_src_loc;
 /* Finds the signal `path` (relative to the DUT top, as odin3_sim_signals_find) of inst. ODIN3_ERR_
- * INVALID_ARG (logged) when the DUT has no such signal or it is wider than 64 bits. */
-odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path,
+ * INVALID_ARG (logged at loc) when the DUT has no such signal or it is wider than 64 bits. */
+odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, tb_src_loc loc,
                             tb_hier_sig *out);
 /* The value of signal `id` as of the last settle of the DUT. */
 uint64_t tb_inst_peek(const tb_inst *inst, uint32_t id);

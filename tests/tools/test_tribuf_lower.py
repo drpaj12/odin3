@@ -124,14 +124,18 @@ class TribufLowerTest(unittest.TestCase):
         self.assertIn(WARNING, done.stderr)
         self.assertTrue(written)
 
-    def test_tribuf_fed_by_a_tribuf_is_refused(self) -> None:
-        # t1 drives net 6 from a; t2 drives y from net 6: the chain stays an error.
-        cells = [("t1", [2], [4], [6]), ("t2", [6], [5], [7])]
-        done, written = self.lower_json(tribuf_json(cells))
-        self.assertNotEqual(done.returncode, 0, done.stderr)
-        self.assertIn("has no bit-level cell in the registry", done.stderr)
-        self.assertIn("its data input is the output of another $tribuf", done.stderr)
-        self.assertFalse(written)
+    def test_tribuf_fed_by_a_tribuf_is_refused_in_both_cell_orders(self) -> None:
+        # t1 drives net 6 from a; t2 drives y from net 6: the chain stays an error, whichever
+        # of the two cells comes first in the module.
+        t1 = ("t1", [2], [4], [6])
+        t2 = ("t2", [6], [5], [7])
+        for cells in ([t1, t2], [t2, t1]):
+            with self.subTest(order=[c[0] for c in cells]):
+                done, written = self.lower_json(tribuf_json(cells))
+                self.assertNotEqual(done.returncode, 0, done.stderr)
+                self.assertIn("has no bit-level cell in the registry", done.stderr)
+                self.assertIn("its data input is the output of another $tribuf", done.stderr)
+                self.assertFalse(written)
 
     @unittest.skipUnless(os.environ.get("ODIN3_TINYRISCV_TOP"), "ODIN3_TINYRISCV_TOP not set")
     def test_unmodified_tinyriscv_soc_lowers(self) -> None:

@@ -155,6 +155,14 @@ odin3_status odin3_sim_settle_events(odin3_sim *sim);
  */
 odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event);
 
+/*
+ * The number of edge-triggered cells that have no clock pin (a `$_FF_`, e.g. from a BLIF `.latch`
+ * with no control): the clock they hang on is global, so they follow odin3_sim_clock_edge and
+ * odin3_sim_cycle but no single clock input of odin3_sim_clock_edges. *first, when not NULL, gets
+ * the label of the first one (type and node name), valid as long as sim lives; "" for none.
+ */
+uint32_t odin3_sim_global_clock_cells(const odin3_sim *sim, const char **first);
+
 /* One edge of one clock input bit. */
 typedef struct odin3_sim_clock_event {
     odin3_sim_bit at;

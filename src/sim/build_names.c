@@ -214,6 +214,13 @@ void odin3_sim_err_clock(const odin3_sim_builder *bld, const odin3_sim_flat *cel
               loc, cell->def->name, name_str(&node), name_str(&net));
 }
 
+void odin3_sim_cell_label(const odin3_sim_builder *bld, const odin3_sim_flat *cell, char *out,
+                          size_t size) {
+    name_buf node;
+    node_name(bld, cell->frame, cell->node, &node);
+    (void)snprintf(out, size, "`%s` node `%s`", cell->def->name, name_str(&node));
+}
+
 void odin3_sim_err_clock_inputs(const odin3_sim_builder *bld, const odin3_sim_flat *cell,
                                 odin3_sim_net_count net_count) {
     char loc[LOC_MAX];

@@ -210,6 +210,13 @@ bool odin3_sim_input_is_clock(const odin3_sim *sim, odin3_sim_bit at) {
     return bit_index(sim->in_ports, sim->n_in_ports, at, &index) && sim->in_clock[index] != 0;
 }
 
+uint32_t odin3_sim_global_clock_cells(const odin3_sim *sim, const char **first) {
+    if (first != NULL) {
+        *first = sim->gclk_label;
+    }
+    return sim->n_gclk;
+}
+
 /* One edge of the input bit `input`. */
 typedef struct input_edge {
     uint32_t input;
