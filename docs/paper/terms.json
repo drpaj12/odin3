@@ -108,6 +108,17 @@
   "intro": true
  },
  {
+  "key": "blif",
+  "name": "BLIF",
+  "definition": "The netlist text format that VPR reads.",
+  "depends": [
+   "netlist",
+   "VTR / VPR"
+  ],
+  "search": "\\bBLIF\\b",
+  "intro": true
+ },
+ {
   "key": "odin2",
   "name": "Odin II / Yosys / Parmys",
   "definition": "Odin II was the front end of VTR; Yosys is an open synthesis tool and Parmys the Yosys plugin that now serves VTR as its front end.",
@@ -260,28 +271,6 @@
   "intro": false
  },
  {
-  "key": "golden",
-  "name": "golden",
-  "definition": "The stored result of an oracle for a design, kept so that later runs compare against it.",
-  "depends": [
-   "oracle"
-  ],
-  "search": "golden",
-  "intro": false
- },
- {
-  "key": "pmap",
-  "name": "partial mapping",
-  "definition": "Binding the parts of a design that fit the architecture's dedicated blocks (multipliers, adders, memories) to those blocks and leaving the rest as gates for ABC~\\cite{jamiesonthesis}.",
-  "depends": [
-   "IR",
-   "LUT",
-   "ABC"
-  ],
-  "search": "partial.map|hardmap|hard.block",
-  "intro": false
- },
- {
   "key": "word",
   "name": "word cell / bit cell / lower",
   "definition": "A word cell is a multi-bit operator in the IR; a bit cell is a one-bit gate; the pass lower turns word cells into bit cells.",
@@ -304,14 +293,15 @@
   "intro": false
  },
  {
-  "key": "blif",
-  "name": "BLIF",
-  "definition": "The netlist text format that VPR reads.",
+  "key": "pmap",
+  "name": "partial mapping",
+  "definition": "Binding the parts of a design that fit the architecture's dedicated blocks (multipliers, adders, memories) to those blocks and leaving the rest as gates for ABC~\\cite{jamiesonthesis}.",
   "depends": [
-   "netlist",
-   "VTR / VPR"
+   "IR",
+   "LUT",
+   "ABC"
   ],
-  "search": "\\bBLIF\\b",
+  "search": "partial.map|hardmap|hard.block",
   "intro": false
  },
  {
@@ -325,38 +315,13 @@
   "intro": false
  },
  {
-  "key": "geomean",
-  "name": "geomean ratio",
-  "definition": "The geometric mean over designs of the ratio Odin III over Parmys; 1.0 means equal and below 1.0 is better for area and delay.",
+  "key": "golden",
+  "name": "golden",
+  "definition": "The stored result of an oracle for a design, kept so that later runs compare against it.",
   "depends": [
-   "golden",
-   "area",
-   "speed"
-  ],
-  "search": "geomean",
-  "intro": false
- },
- {
-  "key": "leg",
-  "name": "leg (P, O, O$'$)",
-  "definition": "One run of the quality-of-results harness: P is the Parmys flow (the baseline), O is Odin III with its linked ABC, and O$'$ is Odin III's netlist through VTR's own ABC stage.",
-  "depends": [
-   "VTR / VPR",
-   "ABC",
    "oracle"
   ],
-  "search": "\\blegs?\\b",
-  "intro": false
- },
- {
-  "key": "gate",
-  "name": "QoR gate",
-  "definition": "The acceptance bound on quality of results: geomean ratio at most 1.20 and no design above 1.50 on the gated metrics.",
-  "depends": [
-   "geomean ratio",
-   "leg (P, O, O$'$)"
-  ],
-  "search": "QoR gate|1\\.20 gate|gate of 1\\.20|1\\.20 and no",
+  "search": "golden",
   "intro": false
  },
  {
@@ -396,6 +361,41 @@
    "oracle"
   ],
   "search": "exit-code",
+  "intro": false
+ },
+ {
+  "key": "geomean",
+  "name": "geomean ratio",
+  "definition": "The geometric mean over designs of the ratio Odin III over Parmys; 1.0 means equal and below 1.0 is better for area and delay.",
+  "depends": [
+   "golden",
+   "area",
+   "speed"
+  ],
+  "search": "geomean",
+  "intro": false
+ },
+ {
+  "key": "leg",
+  "name": "leg (P, O, O$'$)",
+  "definition": "One run of the quality-of-results harness: P is the Parmys flow (the baseline), O is Odin III with its linked ABC, and O$'$ is Odin III's netlist through VTR's own ABC stage.",
+  "depends": [
+   "VTR / VPR",
+   "ABC",
+   "oracle"
+  ],
+  "search": "\\blegs?\\b",
+  "intro": false
+ },
+ {
+  "key": "gate",
+  "name": "QoR gate",
+  "definition": "The acceptance bound on quality of results: geomean ratio at most 1.20 and no design above 1.50 on the gated metrics.",
+  "depends": [
+   "geomean ratio",
+   "leg (P, O, O$'$)"
+  ],
+  "search": "QoR gate|1\\.20 gate|gate of 1\\.20|1\\.20 and no",
   "intro": false
  }
 ]

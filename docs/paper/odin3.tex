@@ -36,6 +36,9 @@
 \newcommand{\todo}[1]{\textbf{[TODO: #1]}}
 % Names from the code base.
 \newcommand{\code}[1]{\texttt{#1}}
+% Structured argument (Experiments): \argid{O1} opens it, \ah{Hypothesis} etc. start each part.
+\newcommand{\argid}[1]{\par\smallskip\noindent\textbf{#1}\nopagebreak}
+\newcommand{\ah}[1]{\par\noindent\textit{#1.}\ }
 
 \lstset{basicstyle=\ttfamily\scriptsize, columns=fullflexible, keepspaces=true,
         frame=single, framesep=2pt, xleftmargin=3pt, xrightmargin=3pt,
@@ -93,6 +96,7 @@ Its first step, elaboration, resolves parameters, generate loops and hierarchy a
 ABC then maps the gates of the netlist onto LUTs~\cite{brayton2010abc}. % def:abc
 After that, packing groups the LUTs and flip-flops into CLBs, placement chooses a site on the chip for each CLB, and routing chooses the wires between them~\cite{jamiesonthesis}. % def:prp
 The open-source flow that does all of this is VTR (Verilog-to-Routing), and VPR is its packing, placement and routing program~\cite{rose2012vtr,luuthesis}. % def:vtr
+VPR reads the netlist as BLIF, the Berkeley Logic Interchange Format~\cite{blif}. % def:blif
 A front end that gives VTR good results is not enough for the research I want to do. % why
 Synthesis changes the designer's structure: it flattens hierarchy, merges and splits operators, and covers logic with LUTs that no source line names. % why2
 The link from each object of the final netlist back to the HDL that produced it is its provenance, % def:prov
@@ -117,7 +121,7 @@ The reason for the provenance link is the Mimir~III dataset (Fig.~\ref{fig:yggdr
 
 \emph{Claims and experiments.}
 Each claim in this paper is a hypothesis, a statement that an experiment can confirm or fail to confirm. % def:hyp
-The experiment gives a verdict: USEFUL (confirmed under the stated gate or check), POSSIBLY GOOD (confirmed but narrow or fragile, so stated with the fragility and never as proof alone), INCONCLUSIVE (neither confirmed nor failed), or DISMISSED (failed). Sec.~\ref{sec:results} gives each confirmed hypothesis its experiment. A failed one is a line in the research log (Appendix~\ref{sec:register}) and the Discussion.
+The experiment gives a verdict: USEFUL (confirmed under the stated gate or check), POSSIBLY GOOD (confirmed but narrow or fragile, so stated with the fragility and never as proof alone), INCONCLUSIVE (neither confirmed nor failed), or DISMISSED (failed). Each hypothesis has a label, \emph{O1} to \emph{O17} (O for Odin~III), taken from the research log (Appendix~\ref{sec:register}). Sec.~\ref{sec:results} gives each hypothesis one argument: the hypothesis, its implication, the experiment, the methodology, the measurements, their interpretation and the conclusion with the verdict. A failed one is a line in the research log (Appendix~\ref{sec:register}) and the Discussion.
 
 \emph{The innovations in plain English.}
 \begin{enumerate}
@@ -157,31 +161,47 @@ I call this new suite Yggdrasil~III, the world tree (Fig.~\ref{fig:yggdrasil}). 
 \section{Background}
 \label{sec:background}
 
-\subsection{Glossary}
-\label{sec:glossary}
-
-Terms in dependency order: each uses only terms above it. The definitions of the basic FPGA and CAD terms follow the order and the wording of the thesis on heterogeneous FPGAs~\cite{jamiesonthesis} and of the thesis on architecture-aware packing and VTR~\cite{luuthesis}; the others describe Odin~III and its checks.
-
-\input{glossary}
+This section introduces, in the order in which the experiments need them, the ideas behind Odin~III: who introduced each, and which experiment of Sec.~\ref{sec:results} uses it. We start with the two open-source models of Verilog synthesis and their internal representations, then VTR and the binding of dedicated blocks, the provenance problem, the oracles and checks that give the evidence, and last the measure of quality. The basic FPGA and CAD terms of the Introduction follow the thesis on heterogeneous FPGAs~\cite{jamiesonthesis} and the thesis on architecture-aware packing and VTR~\cite{luuthesis}.
 
 \subsection{Two open-source models of Verilog synthesis}
 
-\emph{The Odin~II flow.} Odin~II~\cite{jamieson2011odin2} parses Verilog with Bison and Flex into an abstract syntax tree (AST); passes over the AST and the module hierarchy turn it into one flattened netlist of nodes, pins, and nets. It reads the VPR architecture file to decide which multipliers, adders, and memories become dedicated blocks, writes the rest as BLIF for ABC~\cite{brayton2010abc} to map to LUTs, and includes a netlist simulator.
+\emph{The Odin~II flow.} Odin~II~\cite{jamieson2011odin2} parses Verilog with Bison and Flex into an \emph{abstract syntax tree} (AST), the tree of declarations, statements and expressions of the HDL text with their source locations~\cite{ast}. % def:ast
+Passes over the AST and the module hierarchy turn it into one flattened netlist of nodes, pins, and nets. It reads the VPR architecture file to decide which multipliers, adders, and memories become dedicated blocks, writes the rest as BLIF for ABC~\cite{brayton2010abc} to map to LUTs, and includes a netlist simulator.
 
-\emph{The Yosys approach.} Yosys~\cite{wolf2013yosys} parses Verilog into an AST, and \code{genrtlil} turns each module into RTLIL, a word-level netlist of wires, cells, processes and memories, with the hierarchy kept. From then on, every step is a pass over RTLIL that never sees the AST: \code{proc}, the \code{opt} family, \code{flatten}, \code{techmap} and \code{abc}. Yosys is the reference open synthesis suite, with a large pass library and SystemVerilog and VHDL through plugins~\cite{yosysslang,ghdl}.
+\emph{The Yosys approach.} Yosys~\cite{wolf2013yosys} parses Verilog into an AST, and \code{genrtlil} turns each module into RTLIL, a netlist of wires, cells, processes and memories with the hierarchy kept. Its cells come in two kinds. A \emph{word cell} is a multi-bit operator such as an adder or a multiplexer, and a \emph{bit cell} is a one-bit gate; the pass \code{lower} turns word cells into bit cells (Odin~III's name for the step; Yosys does it in \code{techmap}). % def:word
+From then on, every step is a pass over RTLIL that never sees the AST. The word-level passes that Odin~III re-implements from Yosys~0.55 are \code{proc}, which turns processes into multiplexers and flip-flops; \code{opt}, which cleans up; \code{fsm}, which recodes state machines; \code{wreduce}, which narrows widths; and \code{flatten}, which inlines the hierarchy. % def:passes
+Yosys is the reference open synthesis suite, with a large pass library and SystemVerilog and VHDL through plugins~\cite{yosysslang,ghdl}.
 
-\subsection{VTR and partial mapping}
+Odin~III takes the RTLIL route with its own split between elaboration and the passes (Sec.~\ref{sec:arch}). Experiments O4 and O10 test its \code{lower} against the proof and against Yosys's \code{techmap}.
 
-Both models attach to VTR~\cite{luu2009vpr5,rose2012vtr,luu2014vtr7,murray2020vtr8}: a front end, ABC, then VPR's packing, placement, and routing on an XML-described architecture. Jason Luu's work brought in partial mapping. His architecture description language~\cite{luu2011packing} describes logic blocks with hierarchy, modes, and complex interconnects, and models each dedicated block's primitive, so a front end that reads the same file can map part of a design onto those blocks and leave the rest soft for ABC. VTR~7.0~\cite{luu2014vtr7} and the study of hard adders and carry chains~\cite{luu2014hardadders} carried this to adders, with front-end optimizations that ease the restrictions hardened arithmetic places on logic synthesis. Parmys~\cite{parmys} brings the same partial mapping onto Yosys's word-level netlists, runs inside VTR's pinned Yosys~0.55, and is now VTR's default front end.
+\subsection{VTR and dedicated blocks}
+
+Both models attach to VTR~\cite{luu2009vpr5,rose2012vtr,luu2014vtr7,murray2020vtr8}: a front end, ABC, then VPR's packing, placement, and routing on an XML-described architecture. Jason Luu's work brought in \emph{partial mapping}: binding the parts of a design that fit the dedicated blocks of the architecture (multipliers, adders, memories) to those blocks and leaving the rest as gates for ABC. % def:pmap
+His architecture description language~\cite{luu2011packing} describes logic blocks with hierarchy, modes, and complex interconnects, and models each dedicated block's primitive, so a front end that reads the same file can do the binding. VTR~7.0~\cite{luu2014vtr7} and the study of hard adders and carry chains~\cite{luu2014hardadders} carried this to adders, with front-end optimizations that ease the restrictions hardened arithmetic places on logic synthesis. Parmys~\cite{parmys} brings the same partial mapping onto Yosys's word-level netlists, runs inside VTR's pinned Yosys~0.55, and is now VTR's default front end. Experiments O1, O11 and O12 compare Odin~III's partial mapping with Parmys's.
 
 \subsection{The provenance problem}
 \label{sec:provenance-problem}
 
-Synthesis modifies some of the designer's functional intention. Flattening removes the hierarchy, optimization merges and splits operators, and LUT mapping covers the logic with cells that have no source line names. I call the task of linking each object of the final netlist back to the HDL that produced it the \emph{provenance problem}; it is one of the major pieces of this work going forward. Gharibian et al.\ addressed it in placement: simulated annealing produces a flattened design that loses its HDL hierarchy, so they recovered system-level information from the flat netlist and analyzed its correlation with locality in FPGA placement~\cite{gharibian2010finding,gharibian2013analyzing}, then identified and placed clusters found in the placement data~\cite{gharibian2014identifying}. Our latest paper applies data-mining clustering to such combinatorial optimization algorithms~\cite{jamieson2022datamining}. Goeders and Wilton address the same problem in in-system debug: signals in a high-level synthesis-built circuit must be traced back to their source, and they developed signal-tracing and debug techniques for such circuits on FPGAs~\cite{goeders2014effective,goeders2015dynamic,goeders2017signaltracing}. Each line of work had to recover a link the synthesis tool didn't keep. Odin~III keeps it (Sec.~\ref{sec:arch}), so its analysis flow (provenance coverage, \code{levelize}, graph export; Part~II, Sec.~\ref{sec:re-graph}) can redo the placement-correlation experiment with the link to the HDL measured rather than recovered.
+Synthesis modifies some of the designer's functional intention. Flattening removes the hierarchy, optimization merges and splits operators, and LUT mapping covers the logic with cells that have no source line names. I call the task of linking each object of the final netlist back to the HDL that produced it the \emph{provenance problem}; it is one of the major pieces of this work going forward. Gharibian et al.\ addressed it in placement: simulated annealing produces a flattened design that loses its HDL hierarchy, so they recovered system-level information from the flat netlist and analyzed its correlation with locality in FPGA placement~\cite{gharibian2010finding,gharibian2013analyzing}, then identified and placed clusters found in the placement data~\cite{gharibian2014identifying}. Our latest paper applies data-mining clustering to such combinatorial optimization algorithms~\cite{jamieson2022datamining}. Goeders and Wilton address the same problem in in-system debug: signals in a high-level synthesis-built circuit must be traced back to their source, and they developed signal-tracing and debug techniques for such circuits on FPGAs~\cite{goeders2014effective,goeders2015dynamic,goeders2017signaltracing}. Each line of work had to recover a link the synthesis tool didn't keep. Odin~III keeps it in a \emph{lineage DAG}, the append-only graph of source, imported and derived records, with labelled joins, that sits behind each provenance ID (Sec.~\ref{sec:arch}). % def:lineage
+Its analysis flow (provenance coverage, \code{levelize}, graph export; Part~II, Sec.~\ref{sec:re-graph}) can redo the placement-correlation experiment with the link to the HDL measured rather than recovered. Experiments O14 to O17 test the lineage DAG, its exports, its cost and its use for timing.
 
-\subsection{Oracles, ASTs and elaboration}
+\subsection{Oracles and checks}
 
-\code{tools/run-oracle.sh} runs an oracle on a design and an architecture and stores its netlist, logs, and commit as a golden; Odin~III's output is compared with the golden for identity after canonical renaming and for functional equivalence. An oracle is trusted because it is the reference, not because it is always right (Sec.~\ref{sec:parmys-bugs}). Odin~II transforms the AST into one flat netlist, while Yosys builds each module separately and flattens later as a pass on the graph; Odin~III takes the RTLIL route with its own split (Sec.~\ref{sec:arch}; Part~II, Sec.~\ref{sec:background-detail}).  We note that an oracle makes the process much simpler than the original creation of Odin and Odin II.  We verified our original work with humans, which was costly.
+An oracle makes the process much simpler than the original creation of Odin and Odin~II, which we verified with humans, at high cost. \code{tools/run-oracle.sh} runs an oracle on a design and an architecture and stores its netlist, logs, and commit as a \emph{golden}: the stored result that later runs compare against. % def:golden
+An oracle is trusted because it is the reference, not because it is always right (Sec.~\ref{sec:parmys-bugs}).
+
+The comparison has four forms. \emph{Equivalence} is a proof, by SAT, that two designs give the same outputs, and \emph{refinement} that one design's behaviours are among the other's; a design past the size limit of the solver is left unproven. % def:equiv
+Equivalence checking of logic circuits is built into ABC~\cite{mishchenko2005fraigs,brayton2010abc}, whose combinational check experiment O8 uses. The \emph{functional check} (\code{fcheck}) is VTR's random check: build the RTL and the netlist with Verilator~\cite{verilator} and drive both with 50,000 random vectors. % def:fcheck
+\emph{Determinism} is the property that rerunning gives byte-identical output. % def:det
+The \emph{exit-code discipline} is our convention that a list of expected differences never turns an unproven result into a pass: tools report 0 holds, 1 differs, 2 tool error, 3 hard failure, 4 unproven, 77 skipped. % def:exit
+Experiments O4, O5 and O10 use equivalence, O6 the functional check, O7 determinism and O9 the oracle comparison itself.
+
+\subsection{Measuring quality of results}
+
+VTR measures a flow by running its designs through ABC, packing, placement and routing and reading the area and speed measures of the Introduction from VPR~\cite{rose2012vtr,luu2014vtr7,murray2020vtr8}. We summarise a run over many designs by the \emph{geomean ratio}: the geometric mean over designs of the ratio Odin~III over Parmys, so that 1.0 means equal and below 1.0 is better for area and delay. % def:geomean
+A \emph{leg} is one run of the quality-of-results harness \code{vtr-qor}: leg~P is the Parmys flow (the baseline), leg~O is Odin~III with its linked ABC, and leg~O$'$ is Odin~III's netlist through VTR's own ABC stage. % def:leg
+The \emph{QoR gate} is our acceptance bound: geomean ratio at most 1.20 and no design above 1.50 on the gated metrics. % def:gate
+The gate is the authors' choice; it says comparable and not equal. Experiments O1 and O2 use it.
 
 % ------------------------------------------------------------------------------------------
 \section{The Innovations}
@@ -303,9 +323,9 @@ Table~\ref{tab:compare-short} summarizes the differences (Part~II, Table~\ref{ta
 \subsection{Setup, designs and metrics}
 
 % setup: docs/PHASE3.md (M2 run), docs/ORACLES.md; machine: docs/PHASE0.md decision 29
-The benchmarks are the VTR~7.0 designs on \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}, run through VTR commit \code{3c9a4d23}, whose Yosys~0.55 and Parmys are the baseline. The local set is the 15 designs that fit the development laptop; the largest five (\code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}) were left out because of the weakness of my machine and nothing is claimed for them. Smaller micro-benchmarks (68 to 539 designs, per experiment) test single passes. Each design is run once unless the experiment says otherwise.
+The benchmarks are the VTR~7.0 designs on \code{k6\_frac\_N10\_frac\_chain\_mem32K\_40nm}, run through VTR commit \code{3c9a4d23}, whose Yosys~0.55 and Parmys are the baseline. The local set is the 15 designs that fit the development laptop; the largest five (\code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}) were left out because of the weakness of my machine and nothing is claimed for them. Smaller micro-benchmarks (68 to 539 designs, per experiment) test single passes. Each design is run once unless the experiment says otherwise. \emph{M2} names the table of the QoR harness for the 15 designs on VTR commit \code{3c9a4d23}, after the fix of lost RAMs (Sec.~\ref{sec:q-qor}).
 
-Of the three measures of a good result (Sec.~\ref{sec:intro}), the paper measures two. \emph{Area} is read from VPR: LUTs, CLBs and the minimum channel width $W$. \emph{Speed} is the CPD and the routed wirelength from VPR. Near-critical paths are a tool feature of v1.1.1 (the critical path and the paths within a window are reported and joined to the HDL); no experiment here measures them (idea U5, Sec.~\ref{sec:future}). \emph{Power} is not measured, and I make no claim about it. The multi-metric target for the Mimir~III dataset (low area, high speed on the critical and near-critical paths, low power) is the reason the provenance link matters, not a result of this paper.
+Of the three measures of a good result (Sec.~\ref{sec:intro}), the paper measures two. \emph{Area} is read from VPR: LUTs, CLBs and the minimum channel width $W$. \emph{Speed} is the CPD and the routed wirelength from VPR. Near-critical paths are a tool feature of v1.1.1 (the critical path and the paths within a window are reported and joined to the HDL); no experiment here measures them (Sec.~\ref{sec:future}). \emph{Power} is not measured, and I make no claim about it. The multi-metric target for the Mimir~III dataset (low area, high speed on the critical and near-critical paths, low power) is the reason the provenance link matters, not a result of this paper.
 
 \subsection{Gates, checks and statistics}
 
@@ -375,9 +395,9 @@ Total & 49,509 & 7.95\,G \\
 \label{fig:flow-verify}
 \end{figure*}
 
-Each subsection states a hypothesis, the experiment, the result and the verdict. The IDs (O1 to O17) are those of the research log (Appendix~\ref{sec:register}), which lists every hypothesis, including those that are not confirmed.
+Each result is one argument with seven parts, always in this order: the \emph{hypothesis} (what we claim), its \emph{implication} (why it matters if true), the \emph{experiment} (what is run, on what, against what), the \emph{methodology} (the measure and the gate), the \emph{measurements} (the numbers), their \emph{interpretation} (what the numbers mean) and the \emph{conclusion} with its verdict. The labels \emph{O1} to \emph{O17} are those of the research log (Appendix~\ref{sec:register}), which lists every hypothesis, including those that are not confirmed. The arguments build on one another: first the baseline and the quality of results, then the checks of function, then the defects the checks found, then provenance. The history of each experiment (what was tried first, what was fixed) is in Appendix~\ref{sec:exprecords}.
 
-\subsection{Quality of results against Parmys (O1, O2)}
+\subsection{Quality of results against Parmys (O2, O1)}
 \label{sec:q-qor}
 
 % O1, O2: docs/PHASE3.md decision 3(b); the vtr-qor table of the M2 run after the RAM-loss fix, 2026-10-21 (odin3-golden qor/3c9a4d23b27d/M2-post-fix: qor.md, ratios.csv, NOTE.md)
@@ -415,40 +435,90 @@ Geomean (15) & 1.041 & 1.012 & 0.985 & 0.986 & 1.034 \\
 \end{tabular}
 \end{table}
 
-\textbf{Hypothesis O1.} The netlists of Odin~III, passed through VTR's own ABC stage (leg O$'$), route in VPR and are comparable in quality to the Parmys flow (leg P): the geomean of the ratio O$'$/P is at most 1.20 and no design is above 1.50 on CLBs, channel width, delay and wirelength, and the multiplier and memory counts are equal or the difference is explained (the QoR gate). The hypothesis as first written named O/P, with the linked ABC; the QoR table was run for leg O$'$ only, so the verdict below is on O$'$/P. \textbf{Experiment.} The 15 designs, one run each, leg O$'$ against leg P (Table~\ref{tab:m2}). \textbf{Result.} Odin~III's netlist of every one of the 15 designs routed in VPR. The geomean ratios O$'$/P are 1.041 for LUTs, 1.012 for CLBs, 1.000 for memories, 1.002 for multipliers, 0.985 for minimum channel width, 0.986 for critical-path delay, and 1.034 for routed wirelength, inside the gate, and no design exceeds 1.50 on a gated metric; the worst gated ratios are 1.288 (\code{stereovision3} wirelength) and 1.233 (\code{ch\_intrinsics} wirelength). The one LUT outlier is \code{blob\_merge} (1.78$\times$), whose CLB ratio is only 1.04. The equal-or-explained rule is not met on multipliers: \code{stereovision1} packs 44 multipliers against Parmys's 43 (ratio 1.023) and \code{stereovision2} 194 against 192 (1.010), and the table gives no explanation. The harness also prints its \code{hardblocks\_lost} warning for five designs, whose adders have no reader after VTR's ABC stage and are swept by VPR (\code{mkPktMerge} 19, \code{boundtop} 90, \code{mkSMAdapter4B} 35, \code{stereovision1} 120 and \code{mkDelayWorker32B} 706 adders); the cause was not investigated. \textbf{Verdict: POSSIBLY GOOD.} The four gated ratios are inside the bound, but two designs differ from Parmys on hard blocks without an explanation and five lose adders, so the gate as written is not fully met and the result is stated with that fragility. Per-design parity was never the claim; the gate says comparable (O3, the retired parity exit, is INCONCLUSIVE and sits in the log only).
+\argid{O2}
+\ah{Hypothesis} The Parmys leg reproduces VTR's own golden results.
+\ah{Implication} If true, the Parmys flow is a valid baseline for every comparison below; if false, no ratio against it means anything.
+\ah{Experiment} The 21 designs of VTR's QoR task, run through the Parmys flow and compared with VTR's stored results.
+\ah{Methodology} Four metrics (the geomean ratios of Sec.~\ref{sec:methodology}) and byte equality of the BLIF with the stored golden.
+\ah{Measurements} All 21 route; the geomeans are within 0.5\% of VTR's golden results on all four metrics; the BLIF is byte-identical to the stored golden on all 21.
+\ah{Interpretation} Our copy of the baseline behaves like the one VTR publishes, to within half a percent.
+\ah{Conclusion} The baseline is valid. Verdict: USEFUL.
 
-An earlier run showed \code{mkPktMerge} and \code{boundtop} packing no memory blocks, a real bug found by the oracle comparison: VTR's ABC step lost RAMs whose outputs drove primary outputs directly, and plain \code{opt} turned \code{x} multiplexer data into constants. The fix adds a port buffer and uses Parmys's \code{opt -full} after \code{flatten}, and \code{vtr-qor} now flags any lost hard block. Both designs pack all their memories (15 and 1, equal to Parmys). With its linked ABC (leg O), Odin~III also routes \code{arm\_core} in 148\,s. No O-leg QoR table was run for v1.0: Phase~3 closed on the existing M2 and M3 data, because the front end to elaboration is the priority (PHASE3 decision 58).
-
-\textbf{Hypothesis O2.} The Parmys leg reproduces VTR's own golden results, so it is a valid baseline. \textbf{Experiment.} The 21 designs of VTR's QoR task. \textbf{Result.} All 21 route, the geomeans are within 0.5\% of VTR's golden results on all four metrics, and the BLIF is byte-identical to the stored golden on all 21. \textbf{Verdict: USEFUL} (it supports the validity of O1).
+\argid{O1}
+\ah{Hypothesis} The netlists of Odin~III, passed through VTR's own ABC stage (leg O$'$), route in VPR and are comparable in quality to the Parmys flow (leg P).
+\ah{Implication} If true, a researcher can swap the front end of VTR for Odin~III and expect a result of about the same quality, which is the claim that makes Odin~III usable as a front end (parity per design was never the claim).
+\ah{Experiment} The 15 designs that fit the development laptop, one run each, leg O$'$ against leg P on the architecture and VTR commit of Sec.~\ref{sec:methodology} (Table~\ref{tab:m2}). The linked-ABC leg O was not tabulated for v1.0.
+\ah{Methodology} The ratio O$'$/P of LUTs, CLBs, minimum channel width $W$, critical-path delay and routed wirelength, and of multiplier and memory counts. The QoR gate: the geomean of the ratio is at most 1.20 and no design is above 1.50 on CLBs, $W$, delay and wirelength, and the multiplier and memory counts are equal or the difference is explained.
+\ah{Measurements} Every one of the 15 netlists routed. The geomean ratios are 1.041 for LUTs, 1.012 for CLBs, 1.000 for memories, 1.002 for multipliers, 0.985 for $W$, 0.986 for delay and 1.034 for wirelength. No design exceeds 1.50 on a gated metric; the worst gated ratios are 1.288 (\code{stereovision3} wirelength) and 1.233 (\code{ch\_intrinsics} wirelength). The one LUT outlier is \code{blob\_merge} (1.78$\times$), whose CLB ratio is only 1.04. Two designs differ in multiplier count with no explanation: \code{stereovision1} packs 44 against Parmys's 43 (ratio 1.023) and \code{stereovision2} 194 against 192 (1.010). The harness warns \code{hardblocks\_lost} for five designs whose adders have no reader after VTR's ABC stage (\code{mkPktMerge} 19, \code{boundtop} 90, \code{mkSMAdapter4B} 35, \code{stereovision1} 120 and \code{mkDelayWorker32B} 706 adders); the cause was not investigated.
+\ah{Interpretation} On average Odin~III's netlists need 4\% more LUTs, 1\% more CLBs and 3\% more wire than Parmys's, and are 1\% to 2\% faster and narrower, all inside the 20\% bound. The rule on hard blocks is not met: two designs pack one or two more multipliers, and five designs lose adders that VPR then sweeps.
+\ah{Conclusion} The four gated ratios hold, but the gate as written is not fully met, so the result is narrow. Verdict: POSSIBLY GOOD.
 
 \subsection{Refinement proof of lower (O4, O10)}
 \label{sec:q-proof}
 \label{sec:verify-evidence}
 
 % O4, O10: docs/PHASE3.md and the measured-results table (Part II, tab:measured)
-\textbf{Hypothesis O4.} \code{lower} is a refinement of the word-level design on the micro-benchmarks. \textbf{Experiment.} The refinement proof \code{lower-equiv} on 272 micro designs, and a sweep over 526 fixtures. \textbf{Result.} 399 ok, 140 expected and 0 unexpected results; the sweep compared 518 and found no difference, the other 8 being unproven at the SAT size limit. \textbf{Verdict: USEFUL.}
+\argid{O4}
+\ah{Hypothesis} \code{lower} is a refinement of the word-level design on the micro-benchmarks.
+\ah{Implication} If true, the step that turns word cells into bit cells never changes what a design does, so later quality differences are not caused by it.
+\ah{Experiment} The refinement proof \code{lower-equiv} on 272 micro designs, and a sweep over 526 fixtures.
+\ah{Methodology} A proof outcome per design: ok, expected difference, unexpected difference or unproven (past the size limit of the SAT solver).
+\ah{Measurements} 399 ok, 140 expected and 0 unexpected results. The sweep compared 518 fixtures and found no difference; the other 8 are unproven at the size limit.
+\ah{Interpretation} None of the 539 proof results shows an unexpected behaviour change; the expected differences are listed in advance.
+\ah{Conclusion} \code{lower} keeps the design's behaviour on these micros. Verdict: USEFUL.
 
-\textbf{Hypothesis O10.} \code{lower} agrees with Yosys~0.55's \code{techmap} on random modules. \textbf{Experiment.} A generator of random Verilog modules, \code{lower-gen-diff}. \textbf{Result.} 200 ok of 200 seeds; a 5,000-seed run gave 4,830 ok, 142 structural differences that are proved equivalent, 28 empty designs and no bug. \textbf{Verdict: USEFUL.}
+\argid{O10}
+\ah{Hypothesis} \code{lower} agrees with Yosys~0.55's \code{techmap} on random modules.
+\ah{Implication} If true, an independent implementation of the same step gives the same logic, which is evidence that neither is wrong in the same way.
+\ah{Experiment} The generator of random Verilog modules \code{lower-gen-diff} feeds both tools; the outputs are compared.
+\ah{Methodology} A structural comparison per seed, and an equivalence proof where the structures differ.
+\ah{Measurements} 200 ok of 200 seeds. A 5,000-seed run gave 4,830 ok, 142 structural differences that are proved equivalent, 28 empty designs and no bug.
+\ah{Interpretation} All 4,972 non-empty cases agree in logic: 4,830 are the same circuit and 142 differ in structure but are proved equivalent.
+\ah{Conclusion} \code{lower} and \code{techmap} agree. Verdict: USEFUL.
 
-\subsection{Function against the source (O6)}
+\subsection{Function against the source (O6, O7, O8)}
 
 % O6: docs/PHASE3.md fcheck results (exit flow, 15 designs)
-\textbf{Hypothesis.} Odin~III's netlists behave like the RTL. \textbf{Experiment.} \code{fcheck} drives the RTL and the netlist with 50,000 random vectors, on the 15 designs. \textbf{Result.} Odin~III's O-leg netlists pass on 12 of the 15; the other 3 (\code{raygentop}, \code{boundtop}, \code{stereovision0}) are untested, not Odin~III bugs. The same check fails the Parmys netlist on 8 of the 15, among them through the defect D2b (Sec.~\ref{sec:parmys-bugs}). \textbf{Verdict: USEFUL.}
-
-\subsection{Determinism (O7)}
+\argid{O6}
+\ah{Hypothesis} Odin~III's netlists behave like the RTL.
+\ah{Implication} If true, the netlists can be used in place of the source for any experiment that measures behaviour.
+\ah{Experiment} \code{fcheck} builds the RTL and the netlist and drives both on the 15 designs.
+\ah{Methodology} 50,000 random vectors per design; a design passes when all outputs agree.
+\ah{Measurements} Odin~III's O-leg netlists pass on 12 of the 15. The other 3 (\code{raygentop}, \code{boundtop}, \code{stereovision0}) are untested, not Odin~III bugs. The same check fails the Parmys netlist on 8 of the 15, one of them through the lost borrow bit of Sec.~\ref{sec:parmys-bugs}.
+\ah{Interpretation} Where the check can run, Odin~III always matches the RTL, and Parmys does not on 8 of the 15.
+\ah{Conclusion} Function is preserved on 12 of 15 designs, with 3 untested. Verdict: USEFUL.
 
 % O7: docs/PHASE3.md exit flow rerun
-\textbf{Hypothesis.} Rerunning the exit flow gives byte-identical netlists. \textbf{Experiment.} The 15 designs, the exit flow rerun. \textbf{Result.} 15 of 15 are byte-identical. \textbf{Verdict: USEFUL.}
-
-\subsection{The VerilogEval corpus (O8)}
+\argid{O7}
+\ah{Hypothesis} Rerunning the exit flow gives byte-identical netlists.
+\ah{Implication} If true, a result can be reproduced and a difference between two runs has a cause that is not chance.
+\ah{Experiment} The exit flow rerun on the 15 designs.
+\ah{Methodology} Byte equality of the written netlist.
+\ah{Measurements} 15 of 15 are byte-identical.
+\ah{Interpretation} Nothing in the flow depends on time, memory addresses or hash order.
+\ah{Conclusion} The flow is deterministic on these designs. Verdict: USEFUL.
 
 % O8: docs/V1.1.0.md corpus test
-\textbf{Hypothesis.} The SystemVerilog front end and the cmos6 gate flow run the VerilogEval references. \textbf{Experiment.} A corpus test that pins all 156 references. \textbf{Result.} 146 elaborate through the front end and the gate flow; 10 are refused with a pinned reason (two explicit casts and eight inferred latches, which the cmos6 library has no cell for). The first run (\#265) gave 144 and 12; two compound bit-select assignments were fixed later. A 20-design sample compared with Yosys's techmapped output through ABC's combinational equivalence check shows all 20 equivalent. \textbf{Verdict: USEFUL.}
+\argid{O8}
+\ah{Hypothesis} The SystemVerilog front end and the cmos6 gate flow run the VerilogEval references.
+\ah{Implication} If true, the front end handles a corpus of designs that it was not built around, so it can serve other tools that need such a corpus.
+\ah{Experiment} A corpus test that pins all 156 references through the front end and the gate flow.
+\ah{Methodology} A reference passes when it elaborates; a refusal must carry a pinned reason. A 20-design sample is compared with Yosys's techmapped output through ABC's combinational equivalence check.
+\ah{Measurements} 146 elaborate; 10 are refused with a pinned reason (two explicit casts and eight inferred latches, which the cmos6 library has no cell for). All 20 sampled designs are equivalent.
+\ah{Interpretation} About 94\% (146 of 156) of the references run, and each refusal is understood.
+\ah{Conclusion} The corpus runs, with ten known refusals. Verdict: USEFUL.
 
 \subsection{Equivalence on the 14 small VTR designs (O5)}
 
 % O5: docs/PHASE2.md exit; docs/PHASE3.md
-\textbf{Hypothesis.} Odin~III's netlists are equivalent to Parmys's on the 14 small VTR designs. \textbf{Experiment.} \code{equiv-check} on the 14. \textbf{Result.} At the Phase~2 exit 9 of the 14 were proved equivalent and 5 were untested at the SAT size limit. After \code{lower}, 8 are proven equivalent, 1 is empty, 5 are unproven, and none differs. \textbf{Verdict: INCONCLUSIVE.} No counterexample was found, but five designs are past the size limit of the proof.
+\argid{O5}
+\ah{Hypothesis} Odin~III's netlists are equivalent to Parmys's on the 14 small VTR designs.
+\ah{Implication} If true, the front end is a drop-in replacement on real designs, not only on micros.
+\ah{Experiment} \code{equiv-check} on the 14 designs, at the Phase~2 exit and after \code{lower}.
+\ah{Methodology} A SAT proof of equivalence; a design past the size limit of the solver is unproven, not failed.
+\ah{Measurements} At the Phase~2 exit 9 of the 14 were proved equivalent and 5 were untested at the size limit. After \code{lower}, 8 are proven equivalent, 1 is empty, 5 are unproven and none differs.
+\ah{Interpretation} The proof found no counterexample, but for 5 of 14 designs it cannot say.
+\ah{Conclusion} The numbers do not decide the question. Verdict: INCONCLUSIVE.
 
 \subsection{Defects found in the Parmys flow (O9)}
 \label{sec:parmys-bugs}
@@ -475,32 +545,83 @@ D19 & splitting a multiplier on operand B sign-extends the low product & \code{d
 \end{table}
 
 % O9: docs/ORACLES.md and docs/PHASE3.md defect log
-\textbf{Hypothesis.} Checking against oracles finds defects in the Parmys flow. \textbf{Experiment.} Probes, \code{fcheck}, and \code{miter}/\code{sat} counterexamples wherever Odin~III and Parmys disagree. \textbf{Result.} Table~\ref{tab:parmys-bugs} lists six defects, each with its evidence. The oracles are the truth of production, but not always the truth: where they disagree, a probe or equivalence check decides which matches the RTL, and Odin~III follows the RTL and reports the divergence. D1, where Parmys pads signed adder operands with \code{unconn} instead of sign-extending them, is also declared, and I ruled it RTL-correct for Odin~III. We will report these to the VTR and Yosys projects in good faith. The comparison also found defects in Odin~III itself: the lost memories of Sec.~\ref{sec:q-qor} surfaced only because the QoR table disagreed with the oracle. \textbf{Verdict: USEFUL.}
+\argid{O9}
+\ah{Hypothesis} Checking against oracles finds defects in the Parmys flow.
+\ah{Implication} If true, the oracle method does more than confirm our work: it finds mistakes in the references we compare against, which the open-source projects can fix.
+\ah{Experiment} Probes, \code{fcheck} and \code{miter}/\code{sat} counterexamples wherever Odin~III and Parmys disagree.
+\ah{Methodology} Where the two disagree, a probe or an equivalence check decides which matches the RTL; Odin~III follows the RTL and reports the divergence.
+\ah{Measurements} Table~\ref{tab:parmys-bugs} lists six defects, each with its evidence (the labels D2b, D4, D17 and D19 are the numbers of the project's defect log). A seventh, D1, where Parmys pads signed adder operands with \code{unconn} instead of sign-extending them, is declared, and I ruled it RTL-correct for Odin~III. The comparison also found defects in Odin~III: the lost memories of Sec.~\ref{sec:q-qor} surfaced because the QoR table disagreed with the oracle.
+\ah{Interpretation} Six mistakes in a production flow were found by comparison alone, and the comparison also caught our own mistakes. We will report these to the VTR and Yosys projects in good faith.
+\ah{Conclusion} Oracles find defects in both directions. Verdict: USEFUL.
+
+\subsection{Component checks (O11, O12)}
+
+% O11, O12: docs/PHASE3.md measured results (Part II, tab:measured)
+\argid{O11}
+\ah{Hypothesis} The partial-mapping rules reproduce Parmys's.
+\ah{Implication} If true, differences in hard-block counts come from other steps and not from the mapping rule itself.
+\ah{Experiment} Hard-cell and flip-flop counts on 12 big VTR designs.
+\ah{Methodology} Each count difference is traced by reading to a cause.
+\ah{Measurements} Every difference was explained by reading (fsm recoding, flip-flop-bit merge, the order of \code{wreduce}, \code{opt\_share}) and none came from a mapping rule.
+\ah{Interpretation} The explanations are reasoning about the code, not a test that would fail if they were wrong.
+\ah{Conclusion} Consistent with the hypothesis, narrow. Verdict: POSSIBLY GOOD.
+
+\argid{O12}
+\ah{Hypothesis} The BLIF and in-memory exchanges with the linked ABC give equivalent results.
+\ah{Implication} If true, the faster in-memory path to ABC can replace the BLIF exchange without changing the result.
+\ah{Experiment} Equivalence and LUT ratio on the 29 k6 goldens.
+\ah{Methodology} The equivalence check of Sec.~\ref{sec:background} and the ratio of LUT counts.
+\ah{Measurements} Every finished design is equivalent, with LUT ratios 0.95 to 1.02 and 1.077 for \code{sha}. Part~II gives the measured table.
+\ah{Interpretation} Where ABC finished, the two exchanges agree; the runs that did not finish are not covered.
+\ah{Conclusion} Agreement on finished runs only. Verdict: POSSIBLY GOOD.
 
 \subsection{Provenance at every granularity (O14, O15)}
 \label{sec:q-prov}
 
 % O14, O15: docs/V1.2.0.md (line 42, 165, 1101-1117; known gaps lines 97-103); CMakeLists.txt construct_golden (2465), construct_bytes (2474); tests/unit/test_prov_label.c (joins)
-\textbf{Hypothesis O14.} Provenance records the construct chain and the joins correctly, and leaves every writer's output unchanged. \textbf{Experiment.} Three checks. The ctest \code{construct\_golden} reads each design of \code{tests/loc/constructs}, runs \code{check}, and compares the construct table dump with its stored golden file, which fixes the chain of constructs of every object. The unit test \code{test\_prov\_label} checks the joins: two expressions of one statement are no join, and two blocks are a join, with its parents in key order. The ctest \code{construct\_bytes} and a sweep of 539 micro designs against a build of main compare every writer output under the four \code{--prov-ast} modes. \textbf{Result.} 541 ctest cases pass, 0 fail (2 skip), among them \code{construct\_golden}, \code{construct\_bytes} and \code{test\_prov\_label}; all lint steps pass; the writer outputs are byte-identical across the modes on 539 micro designs (8,927 files per side). \textbf{Verdict: USEFUL.} The chain and joins match the goldens and the unit checks, and no writer output changes. The read back of the exports is a different property (O15).
+\argid{O14}
+\ah{Hypothesis} Provenance records the construct chain and the joins correctly, and leaves every writer's output unchanged.
+\ah{Implication} If true, the property that the dataset rests on is right, and turning provenance on costs no change in any netlist a downstream tool reads.
+\ah{Experiment} Three checks: the ctest \code{construct\_golden} reads each design of \code{tests/loc/constructs}, runs \code{check} and compares the construct table dump with its stored golden file; the unit test \code{test\_prov\_label} checks joins; the ctest \code{construct\_bytes} and a sweep of 539 micro designs compare every writer output under the four \code{--prov-ast} modes against a build of main.
+\ah{Methodology} Golden-file equality for the chain; two expressions of one statement are no join and two blocks are a join, with parents in key order; byte equality of writer outputs.
+\ah{Measurements} 541 ctest cases pass, 0 fail (2 skip), among them the three checks; all lint steps pass; the writer outputs are byte-identical across the modes on 539 micro designs (8,927 files per side).
+\ah{Interpretation} The chain and joins match the goldens and the unit checks, and no writer output changes in about 9,000 files.
+\ah{Conclusion} Provenance is recorded correctly and costs no output change. Verdict: USEFUL.
 
-\textbf{Hypothesis O15.} The name map plus the netlist can be read back to the same netlist. \textbf{Experiment.} A write and read-back on 68 micro designs. \textbf{Result.} BLIF with the map is idempotent on 68 of 68, JSON with \code{read\_json} on 68 of 68 and Verilog with \code{read\_verilog -netlist; proc} on 68 of 68 (\code{docs/user/provenance.md}). The first run gave 68, 4 and 23 of 68; PRs \#301 to \#303 closed the gaps. \textbf{Verdict: USEFUL.} The check covers the 68 micros and not the large designs.
+\argid{O15}
+\ah{Hypothesis} The name map plus the netlist can be read back to the same netlist.
+\ah{Implication} If true, a tool that has only the exported files, with no Odin~III running, can recover each object's source.
+\ah{Experiment} A write and read-back of each export on 68 micro designs.
+\ah{Methodology} Idempotence of BLIF with the map, \code{read\_json} for JSON and \code{read\_verilog -netlist; proc} for Verilog (\code{docs/user/provenance.md}).
+\ah{Measurements} BLIF with the map is idempotent on 68 of 68, JSON on 68 of 68 and Verilog on 68 of 68.
+\ah{Interpretation} All three exports round trip on the micros; the check does not cover the large designs.
+\ah{Conclusion} The exports are faithful on the micros. Verdict: USEFUL.
 
 \subsection{The cost of recording constructs (O16)}
 \label{sec:q-cost}
 
 % O16: docs/V1.2.0-task4-gate.txt (n=7 alternating runs per mode)
-\textbf{Hypothesis O16.} Recording the construct chain at elaboration (\code{--prov-ast refs}) costs at most 5\% of read time and 10\,MB of memory on large designs. \textbf{Experiment.} Five large designs (\code{LU32PEEng}, \code{LU64PEEng}, \code{arm\_core}, \code{mcml} and \code{mkDelayWorker32B}), seven alternating runs per mode, \code{read\_verilog} time and peak memory. \textbf{Result.} The time ratios are 1.037 (\code{LU32PEEng}), 0.998 (\code{LU64PEEng}), 1.067 (\code{arm\_core}), 1.029 (\code{mcml}) and 1.054 (\code{mkDelayWorker32B}); the memory difference is under 1\,MB on all five. \textbf{Verdict: DISMISSED.} Two designs exceed 5\%, by 0.4 and 1.7 percentage points: the extra read time is 1.8\,ms on \code{mkDelayWorker32B} (33.7 to 35.5\,ms) and 2.7\,ms on \code{arm\_core} (39.1 to 41.8\,ms), against run-to-run standard deviations of 1.2 and 1.5\,ms in the off mode. The margin is small against that noise, but the bound was set in advance and was not tuned. The command-line default therefore became \code{off}; the Python API and \code{odin3-flow --prov} use \code{refs}.
+\argid{O16}
+\ah{Hypothesis} Recording the construct chain at elaboration (\code{--prov-ast refs}) costs at most 5\% of read time and 10\,MB of memory on large designs.
+\ah{Implication} If true, the full chain could be on by default for every user.
+\ah{Experiment} Five large designs (\code{LU32PEEng}, \code{LU64PEEng}, \code{arm\_core}, \code{mcml} and \code{mkDelayWorker32B}), seven alternating runs per mode.
+\ah{Methodology} \code{read\_verilog} time and peak memory; the bound was set in advance and not tuned.
+\ah{Measurements} The time ratios are 1.037 (\code{LU32PEEng}), 0.998 (\code{LU64PEEng}), 1.067 (\code{arm\_core}), 1.029 (\code{mcml}) and 1.054 (\code{mkDelayWorker32B}); the memory difference is under 1\,MB on all five. Two designs exceed 5\%, by 1.7 and 0.4 percentage points: the extra read time is 2.7\,ms on \code{arm\_core} (39.1 to 41.8\,ms) and 1.8\,ms on \code{mkDelayWorker32B} (33.7 to 35.5\,ms), against run-to-run standard deviations of 1.5 and 1.2\,ms in the off mode.
+\ah{Interpretation} The memory bound holds. The time bound fails on two of five designs by a margin close to the noise, but it was fixed in advance, so it is a failure.
+\ah{Conclusion} The command-line default is therefore \code{off}; the Python API and \code{odin3-flow --prov} use \code{refs}. Verdict: DISMISSED.
 
 \subsection{Timing attribution to HDL (O17)}
 \label{sec:q-timing}
 
 % O17: docs/V1.1.1.md lines 22, 55-66; the Norns III repository, docs/paper/r5-results.tex (999 of 999)
-\textbf{Hypothesis.} Joining VPR's timing report to the HDL does not change VPR's result. \textbf{Experiment.} A report-only run with and without the extra report on three designs, and an unmatched-atom check on six. \textbf{Result.} The \code{.net}, \code{.place} and \code{.route} files and the critical-path delay are identical on the three; no atom is unmatched on the six. The companion work on The Norns~III placement experiment~\cite{nornsIII}, which uses the attribution, reports that it agreed with VPR's critical-path delay within 0.5\% in 999 of 999 runs (a different property, not part of this verdict). \textbf{Verdict: POSSIBLY GOOD}, narrow: the identity check covers three designs.
-
-\subsection{Component checks (O11, O12)}
-
-% O11, O12: docs/PHASE3.md measured results (Part II, tab:measured)
-\textbf{Hypotheses.} The partial-mapping rules (3C) reproduce Parmys's; the BLIF and in-memory exchanges with the linked ABC (3D-7) give equivalent results. \textbf{Experiments.} Hard-cell and flip-flop counts on 12 big VTR designs; equivalence and LUT ratio on the 29 k6 goldens. \textbf{Result.} Every count difference was explained by reading (fsm recoding, flip-flop-bit merge, the order of \code{wreduce}, \code{opt\_share}) and none came from a mapping rule; every finished design is equivalent, with LUT ratios 0.95 to 1.02 and 1.077 for \code{sha}. \textbf{Verdict: POSSIBLY GOOD} for both, because the explanations are not a test and the unfinished ABC runs are not covered. Part~II gives the measured table.
+\argid{O17}
+\ah{Hypothesis} Joining VPR's timing report to the HDL does not change VPR's result.
+\ah{Implication} If true, the critical path of a design can be traced to its source lines at no cost to the result being traced.
+\ah{Experiment} A report-only run with and without the extra report on three designs, and an unmatched-atom check on six.
+\ah{Methodology} Identity of the \code{.net}, \code{.place} and \code{.route} files and of the critical-path delay; the count of atoms that the join cannot match.
+\ah{Measurements} The three files and the delay are identical on the three designs; no atom is unmatched on the six. The companion placement experiment~\cite{nornsIII}, which uses the attribution, reports that it agreed with VPR's critical-path delay within 0.5\% in 999 of 999 runs (a different property, not part of this verdict).
+\ah{Interpretation} The attribution adds information and changes nothing on these designs; three designs are few.
+\ah{Conclusion} The attribution is neutral on three designs. Verdict: POSSIBLY GOOD, narrow.
 
 % ------------------------------------------------------------------------------------------
 \section{Discussion and Limits}
@@ -547,15 +668,15 @@ could not supply, and how did that knowledge enter the specification?  Many clai
 
 Five hypotheses are untested. Each is the idea and the experiment it needs, nothing more.
 
-\textbf{U1, the cost of provenance names in VPR.} The names added to the netlist do not change VPR's result or run time. The experiment is the Oprov leg of the QoR harness: the same 15 designs through VPR with the provenance names against without, comparing the four result metrics and the run time.
+	extbf{the cost of provenance names in VPR.} The names added to the netlist do not change VPR's result or run time. The experiment is the Oprov leg of the QoR harness: the same 15 designs through VPR with the provenance names against without, comparing the four result metrics and the run time.
 
-\textbf{U2, the five largest VTR designs.} Odin~III also stays inside the QoR gate on \code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}. The experiment is legs P and O$'$ on a machine with more memory, with the same gate.
+	extbf{the five largest VTR designs.} Odin~III also stays inside the QoR gate on \code{mcml}, \code{LU32PEEng}, \code{bgm}, \code{LU8PEEng} and \code{LU64PEEng}. The experiment is legs P and O$'$ on a machine with more memory, with the same gate.
 
-\textbf{U3, latches with reset and the \code{\$\_DFFSR\_*} cell types.} They map correctly. The experiment adds them to the micro set and runs the refinement proof and the functional check.
+	extbf{latches with reset and the \code{\$\_DFFSR\_*} cell types.} They map correctly. The experiment adds them to the micro set and runs the refinement proof and the functional check.
 
-\textbf{U4, the plain-LUT architecture on \code{mkDelayWorker32B}.} It passes through ABC. The experiment is a rerun with a limit longer than the 3,600\,s that stopped it.
+	extbf{the plain-LUT architecture on \code{mkDelayWorker32B}.} It passes through ABC. The experiment is a rerun with a limit longer than the 3,600\,s that stopped it.
 
-\textbf{U5, near-critical paths attributed to HDL objects.} The Mimir~III dataset can say why a structure sits on a critical or near-critical path. The experiment uses the v1.1.1 timing attribution with a window, reports per HDL construct the share of near-critical paths over the 15 designs, and checks that VPR's result is unchanged.
+	extbf{near-critical paths attributed to HDL objects.} The Mimir~III dataset can say why a structure sits on a critical or near-critical path. The experiment uses the v1.1.1 timing attribution with a window, reports per HDL construct the share of near-critical paths over the 15 designs, and checks that VPR's result is unchanged.
 
 % ------------------------------------------------------------------------------------------
 \section{Conclusion}
@@ -2597,6 +2718,21 @@ VHDL (ADR D11) and FF feature matching (4.6) still come later.
 \caption{The v1.1.0 SystemVerilog path: slang parses and elaborates, the C++ shim rebuilds Odin III's AST through the C ABI, and the existing gate flow writes the structural Verilog back out.}
 \label{fig:sv}
 \end{figure}
+\section{Record: the Experiments of Part I}
+\label{sec:exprecords}
+
+This appendix keeps the history that the arguments of Sec.~\ref{sec:results} leave out: what each experiment showed first, what was fixed and what was retired. Each entry names the argument it belongs to.
+
+\emph{O1, the first QoR run.} The hypothesis as first written named the ratio O/P, with the linked ABC; the QoR table was run for leg O$'$ only, so the verdict in Sec.~\ref{sec:q-qor} is on O$'$/P. An earlier run showed \code{mkPktMerge} and \code{boundtop} packing no memory blocks, a real bug found by the oracle comparison: VTR's ABC step lost RAMs whose outputs drove primary outputs directly, and plain \code{opt} turned \code{x} multiplexer data into constants. The fix adds a port buffer and uses Parmys's \code{opt -full} after \code{flatten}, and \code{vtr-qor} now flags any lost hard block. Both designs then pack all their memories (15 and 1, equal to Parmys). With its linked ABC (leg O), Odin~III also routes \code{arm\_core} in 148\,s. No O-leg QoR table was run for v1.0: Phase~3 closed on the existing M2 and M3 data, because the front end to elaboration is the priority (PHASE3 decision 58). The retired parity exit (O3, per-design parity with Parmys) is INCONCLUSIVE and sits in the research log only.
+
+\emph{O5, the equivalence runs.} The Phase~2 exit proved 9 of the 14 designs equivalent and left 5 untested at the SAT size limit. After \code{lower}, 8 are proven, 1 is empty and 5 are unproven; no design differs.
+
+\emph{O8, the first corpus run.} The first run (\#265) gave 144 elaborating and 12 refused; two compound bit-select assignments were fixed later, giving 146 and 10.
+
+\emph{O15, the first read-back run.} The first run gave 68, 4 and 23 of 68 for BLIF, JSON and Verilog; PRs \#301 to \#303 closed the gaps.
+
+\emph{O16, the choice of default.} The bound of 5\% was set in advance and was not tuned after the measurement. The margin is small against the noise, but the command-line default became \code{off} for it.
+
 \section{Record: Research Log}
 \label{sec:register}
 
