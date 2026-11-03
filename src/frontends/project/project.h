@@ -179,6 +179,22 @@ typedef struct odin3_proj_testbench {
     odin3_loc at;
 } odin3_proj_testbench;
 
+/* One flow statement of a schema 2 project (docs/specs/2026-11-03-v1.4-silicon-provenance.md):
+ * its words after the key are strtab IDs in flowwords[first, first + count). */
+typedef enum odin3_proj_flowrec_kind {
+    ODIN3_PROJ_FLOW_TOOL = 1,
+    ODIN3_PROJ_FLOW_DEF,
+    ODIN3_PROJ_FLOW_STEP,
+    ODIN3_PROJ_FLOW_PROVLINK,
+    ODIN3_PROJ_FLOW_VAR
+} odin3_proj_flowrec_kind;
+
+typedef struct odin3_proj_flowrec {
+    uint8_t kind; /* odin3_proj_flowrec_kind */
+    uint32_t first, count;
+    odin3_loc at;
+} odin3_proj_flowrec;
+
 typedef struct odin3_project {
     odin3_design *design;
     odin3_proj_path entry;
@@ -190,6 +206,9 @@ typedef struct odin3_project {
     odin3_vec libext;           /* uint32_t; empty = ".v" at lookup */
     odin3_vec defines, params, arch, rules, rule_cells, inventory, overrides, override_params;
     odin3_vec testbenches; /* odin3_proj_testbench, in listing order */
+    odin3_vec flowrecs;    /* odin3_proj_flowrec, in listing order (schema 2) */
+    odin3_vec flowwords;   /* uint32_t: strtab IDs of the words of every flowrec */
+    uint8_t schema;        /* 0 = no schema statement (schema 1), else 1 or 2 */
     uint32_t top;          /* "mod" or "lib.mod" as given; 0 = auto */
     odin3_loc top_at;
     odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
@@ -208,6 +227,10 @@ typedef struct odin3_project {
     odin3_u64map *lib_keys;   /* resolved of every libfiles entry */
     odin3_proj_limits limits;
 } odin3_project;
+
+/* Appends one flow statement (words: strtab IDs). */
+odin3_status odin3_project_add_flowrec(odin3_project *proj, odin3_proj_flowrec_kind kind,
+                                       const uint32_t *words, uint32_t count, odin3_loc at);
 
 /* --- lifetime (the design calls these; others use odin3_design_get_project) ---------------- */
 
@@ -232,7 +255,8 @@ typedef enum odin3_proj_err_kind {
     ODIN3_PROJ_ERR_AMBIGUOUS_REVISION,
     ODIN3_PROJ_ERR_UNKNOWN_REVISION,
     ODIN3_PROJ_ERR_INCLUDE_NOT_FOUND,
-    ODIN3_PROJ_ERR_INCLUDE_CYCLE
+    ODIN3_PROJ_ERR_INCLUDE_CYCLE,
+    ODIN3_PROJ_ERR_UNSUPPORTED_SCHEMA
 } odin3_proj_err_kind;
 
 /* The DESIGN §4.0 name of kind ("missing_file", …); "?" for an unknown value. */

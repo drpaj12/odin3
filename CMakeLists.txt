@@ -1738,6 +1738,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_project_quartus PRIVATE
         ODIN3_QUARTUS_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/quartus")
     odin3_add_unit_test(test_project_testbench)
+    odin3_add_unit_test(test_project_flows)
     odin3_add_unit_test(test_project_o3proj)
     target_compile_definitions(test_project_o3proj PRIVATE
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")

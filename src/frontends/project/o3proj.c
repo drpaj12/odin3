@@ -33,6 +33,7 @@ typedef struct o3_reader {
     odin3_vec ids;        /* uint32_t: map cells */
     odin3_vec kvs;        /* odin3_proj_kv: cell parameters */
     odin3_strbuf scratch; /* map cells joined; an import's resolved path */
+    uint32_t stmts;       /* statements read so far (`schema` must be the first) */
 } o3_reader;
 
 struct o3_key;
@@ -701,6 +702,316 @@ static odin3_status key_testbench(o3_reader *rd, const o3_stmt *st) {
     return res != ODIN3_OK ? res : odin3_project_add_testbench(rd->proj, &tb);
 }
 
+
+/* --- schema 2: tools, flows, steps, provenance links (v1.4) -------------------------------- */
+
+enum { SCHEMA_MAX = 2, FLOW_MAX_PAIRS = 99 };
+
+static const char *const k_stages[] = {"hdl",    "ir",     "gates",     "luts",      "packed",
+                                       "placed", "routed", "gds",       "extracted", "recovered"};
+static const char *const k_link_kinds[] = {"id",     "name",           "cone",
+                                           "fine",   "join",           "resize",
+                                           "physical_origin", "location_match", "structural_match"};
+static const char *const k_confidences[] = {"exact", "high", "medium", "low", "ambiguous"};
+
+static bool in_list(odin3_bytes word, const char *const *list, size_t count) {
+    for (size_t i = 0; i < count; i++) {
+        if (odin3_proj_bytes_is(word, list[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The flowrec of kind whose word w0 (and w1 when has1) are those IDs; NULL when none. */
+static const odin3_proj_flowrec *flow_find(const o3_reader *rd, odin3_proj_flowrec_kind kind,
+                                           uint32_t w0, bool has1, uint32_t w1) {
+    const odin3_proj_flowrec *recs = rd->proj->flowrecs.data;
+    const uint32_t *words = rd->proj->flowwords.data;
+    for (size_t i = 0; i < rd->proj->flowrecs.len; i++) {
+        const uint32_t *w = words + recs[i].first;
+        if (recs[i].kind == kind && w[0] == w0 && (!has1 || w[1] == w1)) {
+            return &recs[i];
+        }
+    }
+    return NULL;
+}
+
+/* Schema 2 must have been declared first; every statement's words are interned into rd->ids. */
+static odin3_status flow_begin(o3_reader *rd, const o3_stmt *st) {
+    if (rd->proj->schema != SCHEMA_MAX) {
+        return syntax(rd, st, "needs `schema 2` as the first statement of the file", NULL);
+    }
+    odin3_vec_clear(&rd->ids);
+    for (uint32_t i = 0; i < st->nargs; i++) {
+        uint32_t id = 0;
+        odin3_status res = intern(rd, st->args[i].text, &id);
+        uint32_t *slot = res == ODIN3_OK ? odin3_vec_push(&rd->ids) : NULL;
+        if (slot == NULL) {
+            return res != ODIN3_OK ? res : ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = id;
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status flow_commit(o3_reader *rd, const o3_stmt *st, odin3_proj_flowrec_kind kind) {
+    return odin3_project_add_flowrec(rd->proj, kind, rd->ids.data, (uint32_t)rd->ids.len, st->at);
+}
+
+/* schema <n>: only as the first statement; 1 and 2 are known, a larger count is refused. */
+static odin3_status key_schema(o3_reader *rd, const o3_stmt *st) {
+    odin3_bytes word = st->args[0].text;
+    if (rd->stmts != 1) {
+        return syntax(rd, st, "schema must be the first statement of the file", &word);
+    }
+    if (!is_digits(word) || word.len > 3) {
+        return syntax(rd, st, "schema expects a number", &word);
+    }
+    unsigned value = 0;
+    for (size_t i = 0; i < word.len; i++) {
+        value = value * 10U + (unsigned)(((const char *)word.ptr)[i] - '0');
+    }
+    if (value == 0) {
+        return syntax(rd, st, "schema expects 1 or 2", &word);
+    }
+    if (value > SCHEMA_MAX) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNSUPPORTED_SCHEMA,
+                    "this Odin III reads project schema 1 and 2", &word);
+    }
+    rd->proj->schema = (uint8_t)value;
+    return ODIN3_OK;
+}
+
+/* tool <id> required|optional <exe> [version-arg <a>] [module <m>] [env <VAR>] */
+static odin3_status key_tool(o3_reader *rd, const o3_stmt *st) {
+    static const char *const kws[] = {"version-arg", "module", "env"};
+    if (st->nargs % 2U == 0 || !is_ident(st->args[0].text)) {
+        return st->nargs % 2U == 0 ? usage(rd, st, NULL)
+                                   : syntax(rd, st, "expected a tool id", &st->args[0].text);
+    }
+    if (!arg_is(st, 1, "required") && !arg_is(st, 1, "optional")) {
+        return syntax(rd, st, "tool expects required or optional", &st->args[1].text);
+    }
+    unsigned seen = 0;
+    for (uint32_t i = 3; i < st->nargs; i += 2) {
+        unsigned bit = 0;
+        for (unsigned k = 0; k < 3; k++) {
+            bit = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? 1U << k : bit;
+        }
+        if (bit == 0) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown tool keyword",
+                        &st->args[i].text);
+        }
+        if ((seen & bit) != 0) {
+            return syntax(rd, st, "repeated tool keyword", &st->args[i].text);
+        }
+        seen |= bit;
+    }
+    odin3_status res = flow_begin(rd, st);
+    if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_TOOL, *(uint32_t *)rd->ids.data, false, 0)) {
+        return syntax(rd, st, "tool given twice", &st->args[0].text);
+    }
+    return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_TOOL);
+}
+
+/* flowdef <name> [description <text>] */
+static odin3_status key_flowdef(o3_reader *rd, const o3_stmt *st) {
+    if (st->nargs == 2 || (st->nargs == 3 && !arg_is(st, 1, "description"))) {
+        return usage(rd, st, NULL);
+    }
+    if (!is_ident(st->args[0].text)) {
+        return syntax(rd, st, "expected a flow name", &st->args[0].text);
+    }
+    odin3_status res = flow_begin(rd, st);
+    if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_DEF, *(uint32_t *)rd->ids.data, false, 0)) {
+        return syntax(rd, st, "flow given twice", &st->args[0].text);
+    }
+    return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_DEF);
+}
+
+/* The comma-separated ids of word must each be an earlier step of flow. */
+static odin3_status step_needs(o3_reader *rd, const o3_stmt *st, uint32_t flow, odin3_bytes word) {
+    const char *text = word.ptr;
+    size_t start = 0;
+    for (size_t i = 0; i <= word.len; i++) {
+        if (i < word.len && text[i] != ',') {
+            continue;
+        }
+        odin3_bytes piece = {(const uint8_t *)text + start, i - start};
+        uint32_t id = 0;
+        odin3_status res = ODIN3_OK;
+        if (piece.len == 0) {
+            return syntax(rd, st, "needs expects step ids separated by commas", &word);
+        }
+        res = intern(rd, piece, &id);
+        if (res != ODIN3_OK) {
+            return res;
+        }
+        if (flow_find(rd, ODIN3_PROJ_FLOW_STEP, flow, true, id) == NULL) {
+            return syntax(rd, st, "needs names a step that is not defined earlier in the flow",
+                          &piece);
+        }
+        start = i + 1;
+    }
+    return ODIN3_OK;
+}
+
+/* Whether word is `role=path` with both parts non-empty. */
+static bool is_role_path(odin3_bytes word) {
+    const char *text = word.ptr;
+    const char *eq = word.len > 0 ? memchr(text, '=', word.len) : NULL;
+    return eq != NULL && eq != text && (size_t)(eq - text) + 1 < word.len;
+}
+
+/* step <flow> <id> stage <s> tool <t> [needs a,b] [in role=path]... [out role=path]... [args text] */
+static odin3_status key_step(o3_reader *rd, const o3_stmt *st) {
+    static const char *const kws[] = {"stage", "tool", "needs", "in", "out", "args"};
+    enum { KW_STAGE, KW_TOOL, KW_NEEDS, KW_IN, KW_OUT, KW_ARGS, KW_REPEATABLE = 3 };
+    if (st->nargs % 2U != 0 || st->nargs < 6) {
+        return usage(rd, st, NULL);
+    }
+    odin3_status res = flow_begin(rd, st);
+    if (res != ODIN3_OK) {
+        return res;
+    }
+    const uint32_t *ids = rd->ids.data;
+    if (flow_find(rd, ODIN3_PROJ_FLOW_DEF, ids[0], false, 0) == NULL) {
+        return syntax(rd, st, "step names a flow that is not defined", &st->args[0].text);
+    }
+    if (!is_ident(st->args[1].text)) {
+        return syntax(rd, st, "expected a step id", &st->args[1].text);
+    }
+    if (flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, ids[1]) != NULL) {
+        return syntax(rd, st, "step given twice", &st->args[1].text);
+    }
+    unsigned seen = 0;
+    for (uint32_t i = 2; i < st->nargs; i += 2) {
+        odin3_bytes value = st->args[i + 1].text;
+        int kw = -1;
+        for (int k = 0; k <= KW_ARGS; k++) {
+            kw = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? k : kw;
+        }
+        if (kw < 0) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown step keyword",
+                        &st->args[i].text);
+        }
+        if (kw != KW_IN && kw != KW_OUT && (seen & (1U << kw)) != 0) {
+            return syntax(rd, st, "repeated step keyword", &st->args[i].text);
+        }
+        seen |= 1U << kw;
+        if (kw == KW_STAGE && !in_list(value, k_stages, sizeof k_stages / sizeof k_stages[0])) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown stage", &value);
+        }
+        if (kw == KW_TOOL) {
+            uint32_t tool = 0;
+            res = intern(rd, value, &tool);
+            if (res == ODIN3_OK && !odin3_proj_bytes_is(value, "odin3") &&
+                flow_find(rd, ODIN3_PROJ_FLOW_TOOL, tool, false, 0) == NULL) {
+                return syntax(rd, st, "tool is not declared (use a `tool` statement)", &value);
+            }
+        }
+        if (res == ODIN3_OK && kw == KW_NEEDS) {
+            res = step_needs(rd, st, ids[0], value);
+        }
+        if (res == ODIN3_OK && (kw == KW_IN || kw == KW_OUT) && !is_role_path(value)) {
+            return syntax(rd, st, "expected role=path", &value);
+        }
+        if (res != ODIN3_OK) {
+            return res;
+        }
+    }
+    if ((seen & (1U << KW_STAGE)) == 0 || (seen & (1U << KW_TOOL)) == 0) {
+        return usage(rd, st, NULL);
+    }
+    return flow_commit(rd, st, ODIN3_PROJ_FLOW_STEP);
+}
+
+/* Whether the word after the `kind` keyword of a provlink is text. */
+static bool provlink_kind_is(const o3_stmt *st, const char *text) {
+    for (uint32_t i = 2; i + 1 < st->nargs; i += 2) {
+        if (arg_is(st, i, "kind")) {
+            return arg_is(st, i + 1, text);
+        }
+    }
+    return false;
+}
+
+/* provlink <flow> <step> from <prev> kind <k> [key <f>] [scope <s>] [confidence <c>] */
+static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
+    static const char *const kws[] = {"from", "kind", "key", "scope", "confidence"};
+    enum { KW_FROM, KW_KIND, KW_KEY, KW_SCOPE, KW_CONF };
+    if (st->nargs % 2U != 0 || st->nargs < 6) {
+        return usage(rd, st, NULL);
+    }
+    odin3_status res = flow_begin(rd, st);
+    if (res != ODIN3_OK) {
+        return res;
+    }
+    const uint32_t *ids = rd->ids.data;
+    if (flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, ids[1]) == NULL) {
+        return syntax(rd, st, "provlink names a step that is not defined in the flow",
+                      &st->args[1].text);
+    }
+    unsigned seen = 0;
+    uint32_t from = 0;
+    for (uint32_t i = 2; i < st->nargs; i += 2) {
+        odin3_bytes value = st->args[i + 1].text;
+        int kw = -1;
+        for (int k = 0; k <= KW_CONF; k++) {
+            kw = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? k : kw;
+        }
+        if (kw < 0) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown provlink keyword",
+                        &st->args[i].text);
+        }
+        if ((seen & (1U << kw)) != 0) {
+            return syntax(rd, st, "repeated provlink keyword", &st->args[i].text);
+        }
+        seen |= 1U << kw;
+        if (kw == KW_FROM) {
+            res = intern(rd, value, &from);
+            if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, from) == NULL &&
+                from != ids[1]) {
+                return syntax(rd, st, "from names a step that is not defined in the flow", &value);
+            }
+        }
+        if (kw == KW_KIND &&
+            !in_list(value, k_link_kinds, sizeof k_link_kinds / sizeof k_link_kinds[0])) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown link kind", &value);
+        }
+        if (kw == KW_CONF &&
+            !in_list(value, k_confidences, sizeof k_confidences / sizeof k_confidences[0])) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown confidence", &value);
+        }
+        if (res != ODIN3_OK) {
+            return res;
+        }
+    }
+    if ((seen & ((1U << KW_FROM) | (1U << KW_KIND))) != ((1U << KW_FROM) | (1U << KW_KIND))) {
+        return usage(rd, st, NULL);
+    }
+    if (from == ids[1] && !provlink_kind_is(st, "physical_origin")) {
+        return syntax(rd, st, "a step links to itself only with kind physical_origin", NULL);
+    }
+    return flow_commit(rd, st, ODIN3_PROJ_FLOW_PROVLINK);
+}
+
+/* flow-var <flow> <name> <value> */
+static odin3_status key_flowvar(o3_reader *rd, const o3_stmt *st) {
+    odin3_status res = flow_begin(rd, st);
+    if (res != ODIN3_OK) {
+        return res;
+    }
+    if (flow_find(rd, ODIN3_PROJ_FLOW_DEF, *(uint32_t *)rd->ids.data, false, 0) == NULL) {
+        return syntax(rd, st, "flow-var names a flow that is not defined", &st->args[0].text);
+    }
+    if (!is_ident(st->args[1].text)) {
+        return syntax(rd, st, "expected a variable name", &st->args[1].text);
+    }
+    return flow_commit(rd, st, ODIN3_PROJ_FLOW_VAR);
+}
+
 /* --- statements ---------------------------------------------------------------------------- */
 
 static const o3_key k_keys[] = {
@@ -728,6 +1039,19 @@ static const o3_key k_keys[] = {
      key_testbench},
     {"flow", 1, 1, "flow <script.o3>", key_flow},
     {"abc_script", 1, 1, "abc_script <file>", key_abc_script},
+    {"schema", 1, 1, "schema <1|2>", key_schema},
+    {"tool", 3, MAX_ARGS,
+     "tool <id> required|optional <exe> [version-arg <a>] [module <m>] [env <VAR>]", key_tool},
+    {"flowdef", 1, 3, "flowdef <name> [description <text>]", key_flowdef},
+    {"step", 6, MAX_ARGS,
+     "step <flow> <id> stage <stage> tool <tool> [needs <id>,...] [in <role>=<path>]... "
+     "[out <role>=<path>]... [args <text>]",
+     key_step},
+    {"provlink", 6, MAX_ARGS,
+     "provlink <flow> <step> from <prev-step> kind <kind> [key <f>] [scope <s>] "
+     "[confidence <c>]",
+     key_provlink},
+    {"flow-var", 3, 3, "flow-var <flow> <name> <value>", key_flowvar},
     {"import", 1, 3, "import <file.qpf|file.qsf> [revision <name>]", key_import},
 };
 
@@ -744,6 +1068,7 @@ static odin3_status statement(o3_reader *rd) {
     if (key == NULL) {
         return fail(rd, at, ODIN3_PROJ_ERR_UNKNOWN_KEY, "unknown key", &words[0].text);
     }
+    rd->stmts++;
     o3_stmt st = {words + 1, (uint32_t)rd->words.len - 1, at, key};
     if (st.nargs < key->lo || st.nargs > key->hi) {
         return usage(rd, &st, NULL);

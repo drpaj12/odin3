@@ -582,12 +582,13 @@ static void test_error_kind_names(void) {
         "unknown_revision",
         "include_not_found",
         "include_cycle",
+        "unsupported_schema",
     };
     for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
         TEST_ASSERT_EQUAL_STRING(kinds[i], odin3_proj_err_kind_name((odin3_proj_err_kind)(i + 1)));
     }
     TEST_ASSERT_EQUAL_STRING("?", odin3_proj_err_kind_name((odin3_proj_err_kind)0));
-    TEST_ASSERT_EQUAL_STRING("?", odin3_proj_err_kind_name((odin3_proj_err_kind)14));
+    TEST_ASSERT_EQUAL_STRING("?", odin3_proj_err_kind_name((odin3_proj_err_kind)15));
 }
 
 /* ignored and duplicates: sorted by bytes (Python's code-point order on UTF-8), unique. */
