@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shutil
+import subprocess
 import sys
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
@@ -28,7 +31,7 @@ CONFIDENCES = ("exact", "high", "medium", "low", "ambiguous")
 OBJECT_KINDS = ("module", "block", "stmt", "net", "port", "cell", "lut", "ble", "clb", "site",
                 "device")
 _HOME = "/home" + "/"  # built from parts: the repo forbids the literal in tracked files
-_PRIVATE = re.compile(r"(^|[\s=:\"'(,])(" + _HOME + r"|/Users/|/root/|[A-Za-z]:\\\\)")
+_PRIVATE = re.compile(r"(^|[\s=:\"'(,])(" + _HOME + r"|/Users/|/root/|[A-Za-z]:\\)")
 
 
 class PrivacyError(ValueError):
@@ -150,16 +153,42 @@ class StepWriter:
 
 # --- the FPGA flows: step files from a version 2 name map --------------------------------------
 
-def _span_text(file: str, span: str) -> str:
-    return f"{file}:{span}"
+def _rel_file(file: str, root: Path | None) -> str:
+    """A source file name without an absolute prefix: relative to ``root`` when it lies under
+    it, else the base name (the same rule as ``silicon_flow._rel``)."""
+    if not (file.startswith("/") or _PRIVATE.search(file)):
+        return file
+    if root is not None:
+        try:
+            return Path(file).resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            pass
+    return re.split(r"[\\/]", file)[-1]
+
+
+def odin3_version(binary: Path | str | None = None) -> str:
+    """First line of ``odin3 --version`` (the binary given, ``$ODIN3_CLI`` or ``odin3`` on PATH);
+    empty when none can be run."""
+    exe = str(binary) if binary else os.environ.get("ODIN3_CLI") or shutil.which("odin3")
+    if not exe:
+        return ""
+    try:
+        res = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False,
+                             timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    lines = res.stdout.strip().splitlines()
+    return lines[0].strip() if res.returncode == 0 and lines else ""
 
 
 def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: str,
-               blif_name: str, tools: Sequence[tuple[str, str]] = ()) -> Path:
+               blif_name: str, tools: Sequence[tuple[str, str]] = (),
+               root: Path | None = None) -> Path:
     """Write ``out/prov`` for a ``--prov`` run from its name map: stages ``hdl`` (constructs),
     ``luts`` (objects of the BLIF, link ``fine`` to the constructs of their record chain), and
     ``placed`` (atoms with a site record, link ``name`` to the LUT object) when
-    ``odin3-prov-post`` added ``A`` lines. The chains stay in the map (``recs``)."""
+    ``odin3-prov-post`` added ``A`` lines. The chains stay in the map (``recs``). Source file
+    names are made relative to ``root`` (base name when outside it or ``root`` is None)."""
     import name_map_v2
 
     nm = name_map_v2.read_name_map(map_path)
@@ -172,7 +201,7 @@ def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: 
     for number, c in enumerate(nm.constructs, 1):
         span = name_map_v2.span_of(c.span, nm.files, c.file) if c.span else None
         row = obj("hdl", f"c{number}", "block" if c.level in ("module", "block") else "stmt",
-                  c.name or f"c{number}", "hdl", src=[{"file": span.file, "span":
+                  c.name or f"c{number}", "hdl", src=[{"file": _rel_file(span.file, root), "span":
                   f"{span.line}.{span.col}-{span.end_line}.{span.end_col}"}] if span else [])
         row["attrs"] = {"level": c.level, "parent": f"hdl:c{c.parent}" if c.parent else None}
         hdl_rows.append(row)
@@ -191,7 +220,7 @@ def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: 
         for r in nm.provenance(o):
             loc = nm.location(r)
             if loc is not None:
-                chain_src.append({"file": loc.file,
+                chain_src.append({"file": _rel_file(loc.file, root),
                                   "span": f"{loc.line}.{loc.col}-{loc.end_line}.{loc.end_col}"})
         kind = {"net": "net", "node": "cell", "wire": "net"}.get(o.kind, "net")
         if o.level == "lut":
@@ -236,7 +265,11 @@ def main(argv: Sequence[str] | None = None) -> int:
               file=sys.stderr)
         return 1
     top = maps[0].name.split(".")[0]
-    fpga_steps(maps[0], flow_dir, top, top, "", maps[0].name[:-6])
+    try:
+        fpga_steps(maps[0], flow_dir, top, top, odin3_version(), maps[0].name[:-6])
+    except PrivacyError as exc:
+        print(f"odin3-prov-steps: {exc}", file=sys.stderr)
+        return 2
     print(f"wrote {flow_dir / 'prov' / 'index.json'}")
     return 0
 

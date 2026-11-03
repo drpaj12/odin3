@@ -89,8 +89,11 @@ hierarchical extraction, one object per standard cell). The `device` object kind
 `odin3-flow --prov` writes the same files after the name map: stage `hdl` (the construct table, `C`
 lines), stage `luts` (the `O` and `N` lines; link `fine` to the constructs of the record chain, `recs`
 to the records). `odin3-prov-steps FLOW_DIR` (or `python3 tools/flow/prov_steps.py FLOW_DIR`) converts a past
-`--prov` run. Stages `packed` and `placed` (the `A`, `Q` and `K` lines written by `odin3-prov-post`) are
-written as `placed` objects with `recs` when the map has atoms. Without `--prov` no step files are written.
+`--prov` run. When `odin3-prov-post` has added `A` lines, one more stage `placed` is written (one `site`
+object per atom, link `name` to the LUT object, `recs` from the atom). Stage `packed` (BLE, CLB), the
+`Q`/`K` join links and an `ir` stage are not written in v1.4, and the index lists no design `inputs`
+(the map and the BLIF are recorded as step `outputs` with their sha256). Source file names are made
+relative to the design directory (base name when outside it). Without `--prov` no step files are written.
 
 ## The Loki contract
 

@@ -249,6 +249,21 @@ class OdinOnlyStepsTest(unittest.TestCase):
             equiv = json.loads((out / "prov" / index["steps"][3]["file"]).read_text())
             self.assertEqual(equiv["check"]["result"], "equivalent")
             self.assertNotIn("/home" + "/", (out / "prov" / "index.json").read_text())
+            self.assertTrue(index["odin3_version"].startswith("odin3 "))
+            self.assertEqual(run.log, [f"{x}: ok" for x in sf.ODIN_ONLY])
+            self.assertEqual(sorted(run.seconds), sorted(sf.ODIN_ONLY))
+
+    def test_privacy_error_fails_the_run_with_a_log(self) -> None:
+        from unittest import mock
+
+        import prov_steps
+        design = MICRO / "bm_DL_4_bit_comparator.v"
+        with tempfile.TemporaryDirectory() as tmp:
+            run = sf.Run(design, "bm_DL_4_bit_comparator", Path(tmp), LIB,
+                         sf.Tools(odin3=Path(ODIN3)), "", sf.ODIN_ONLY, REPO_ROOT)
+            with mock.patch.object(sf, "_do_step", side_effect=prov_steps.PrivacyError("x: path")):
+                self.assertEqual(sf.run(run), 1)
+            self.assertEqual(run.log, ["read: FAILED x: path"])
 
     def test_missing_tools_are_named(self) -> None:
         t = sf.Tools(odin3=Path("odin3"))
@@ -272,6 +287,7 @@ class VtrProvStepsTest(unittest.TestCase):
             index = json.loads((Path(tmp) / "prov" / "index.json").read_text())
             self.assertEqual([s["stage"] for s in index["steps"]], ["hdl", "luts"])
             self.assertEqual(index["flow"], "fpga-vtr")
+            self.assertTrue(index["odin3_version"].startswith("odin3 "))
 
     def test_flow_without_prov_writes_none(self) -> None:
         import odin3_flow

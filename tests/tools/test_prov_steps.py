@@ -83,6 +83,12 @@ class StepWriterTest(unittest.TestCase):
                 w.add_step("elab", "ir", {"id": "odin3", "version": ""}, None,
                            inputs=[{"role": "design", "path": "/tmp/x.v"}])
 
+    def test_windows_path_is_private(self) -> None:
+        with self.assertRaises(ps.PrivacyError):
+            ps._check_private("C:" + chr(92) + "x", "t")
+        with self.assertRaises(ps.PrivacyError):
+            ps._check_private({"a": ["see D:" + chr(92) + "y.v"]}, "t")
+
     def test_unknown_names_are_refused(self) -> None:
         with self.assertRaises(ValueError):
             ps.link("a:b", "nonsense")
@@ -90,6 +96,39 @@ class StepWriterTest(unittest.TestCase):
             ps.link("a:b", "name", "certain")
         with self.assertRaises(ValueError):
             ps.obj("nowhere", "x", "cell", "x", "hdl")
+
+
+FIXTURE = REPO_ROOT / "tests" / "tools" / "fixtures" / "prov_post" / "bm_DL_logic_w_Dff"
+
+
+class AbsolutePathMapTest(unittest.TestCase):
+    """Name-map F lines may hold absolute paths (the stored fixtures do)."""
+
+    def copy_run(self, work: Path) -> Path:
+        run = work / "run"
+        (run / "odin3").mkdir(parents=True)
+        for p in (FIXTURE / "odin3").iterdir():
+            (run / "odin3" / p.name).write_bytes(p.read_bytes())
+        return run
+
+    def test_main_relativizes_absolute_sources(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.copy_run(Path(tmp))
+            names = next((run / "odin3").glob("*.names"))
+            self.assertRegex(names.read_text(), r"\nF\tf1\t/")
+            self.assertEqual(ps.main([str(run)]), 0)
+            text = "".join(p.read_text() for p in (run / "prov").iterdir())
+            self.assertNotIn("/tmp/", text)
+            self.assertIn("bm_DL_logic_w_Dff.v", text)
+            self.assertEqual(schema_check.check_dir(run / "prov", SCHEMAS), [])
+
+    def test_main_reports_privacy_error(self) -> None:
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = self.copy_run(Path(tmp))
+            with mock.patch.object(ps, "fpga_steps", side_effect=ps.PrivacyError("bad path")):
+                self.assertEqual(ps.main([str(run)]), 2)
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")

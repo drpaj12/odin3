@@ -585,7 +585,9 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         if args.timing_attr and result.steps[-1].ok and result.vpr_run_dir is not None:
             timing_step(args, top, blif, result.vpr_run_dir, result)
     if args.prov and result.steps[-1].ok:
-        prov_steps.fpga_steps(map_path(blif), args.out, top, top, "", blif.name)
+        prov_steps.fpga_steps(map_path(blif), args.out, top, top,
+                              prov_steps.odin3_version(args.odin3), blif.name,
+                              root=design_root(args.designs))
         result.summary["prov_steps"] = "prov/index.json"
     return blif if result.steps[-1].ok else None
 
@@ -629,6 +631,7 @@ def silicon_run(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     log.write_text("\n".join(run.log) + "\n")
     result.steps.append(StepResult("silicon", code == 0, log, time.monotonic() - start))
     result.summary["silicon_steps"] = run.log
+    result.summary["silicon_seconds"] = run.seconds
     result.summary["prov_steps"] = "prov/index.json"
     return args.out if code == 0 else None
 

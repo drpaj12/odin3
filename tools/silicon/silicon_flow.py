@@ -515,6 +515,7 @@ class Run:
     steps: tuple[str, ...] = TOP_STEPS
     root: Path = field(default_factory=Path)
     log: list[str] = field(default_factory=list)
+    seconds: dict[str, float] = field(default_factory=dict)  # wall clock per step (not in log)
 
 
 def _tool_entry(t: Tools, name: str) -> dict[str, str]:
@@ -550,10 +551,13 @@ def run(r: Run) -> int:
         started = time.time()
         try:
             _do_step(r, writer, step, state, root, clock)
-        except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
+            # ValueError includes prov_steps.PrivacyError (an absolute path about to be written)
             r.log.append(f"{step}: FAILED {exc}")
+            r.seconds[step] = round(time.time() - started, 1)
             return 1
-        r.log.append(f"{step}: ok {time.time() - started:.1f}s")
+        r.log.append(f"{step}: ok")
+        r.seconds[step] = round(time.time() - started, 1)
     writer.finish()
     return 0
 
