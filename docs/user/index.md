@@ -23,13 +23,14 @@ suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilII
 
 ## Features at a glance
 
-Version 1.3.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
+Version 1.4.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
 [repository README](https://github.com/drpaj12/odin3#features).
 
 - Inputs and outputs: {doc}`inputs`, {doc}`outputs`, {doc}`odin3-flow`.
 - Passes: elaboration, `proc`, `opt`, `fsm`, `flatten`, `wreduce`, partial mapping, `lower` (with the `$tribuf` sole-driver
   rule), ABC, LPM, `unmap` ({doc}`passes`).
-- Provenance at every granularity ({doc}`provenance`).
+- Provenance at every granularity ({doc}`provenance`), written as step files at every stage ({doc}`provenance-files`).
+- Silicon flow: Odin III to a routed SKY130 layout and back, no Yosys ({doc}`silicon-flow`); flows described in the project file ({doc}`project-flows`).
 - Graph features: graphlets and orbits, SCOAP, analysis and timing attribution ({doc}`graphlets`, {doc}`scoap`,
   {doc}`analysis`, {doc}`timing-attribution`).
 - Netlist editing API and edit events ({doc}`edit`).
@@ -48,6 +49,9 @@ passes
 inputs
 outputs
 provenance
+provenance-files
+project-flows
+silicon-flow
 analysis
 graphlets
 edit

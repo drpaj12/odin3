@@ -1,0 +1,40 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 72,
+   "port": 5
+  },
+  "by_link_kind": {
+   "fine": 77
+  },
+  "by_origin": {
+   "hdl": 77
+  },
+  "objects": 77
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "exact",
+   "from_step": "read",
+   "key": "src",
+   "kind": "fine",
+   "scope": null
+  }
+ ],
+ "map": null,
+ "needs": [
+  "read"
+ ],
+ "objects_file": "02-elab.objects.jsonl",
+ "outputs": [],
+ "schema": 1,
+ "stage": "ir",
+ "step": "elab",
+ "tool": {
+  "id": "odin3",
+  "version": "odin3 1.4.0 (ABI 7)"
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "design": "bm_DL_4_bit_comparator",
+ "flow": "fpga-vtr",
+ "inputs": [],
+ "kind": "odin3-prov-index",
+ "odin3_version": "",
+ "project": null,
+ "schema": 1,
+ "steps": [
+  {
+   "count": 12,
+   "file": "01-read.json",
+   "id": "read",
+   "needs": [],
+   "objects": "01-read.objects.jsonl",
+   "objects_sha256": "a4d5171bced601fb9f9a59af24cc61d460cf2bd19c9a497d010a34d660a6f185",
+   "sha256": "77ce47569a1e3b1154e3b535da2bee7e961403e6c483fd10af9fc92e8ec85d0a",
+   "stage": "hdl",
+   "tool": {
+    "id": "odin3",
+    "version": ""
+   }
+  },
+  {
+   "count": 14,
+   "file": "02-map.json",
+   "id": "map",
+   "needs": [
+    "read"
+   ],
+   "objects": "02-map.objects.jsonl",
+   "objects_sha256": "9fd794d16bd3d9db6912ca724d92fc9cdd45afbadb96816850504faad8cd6f89",
+   "sha256": "976868569e104ceb1eba4e6a7b4ae49c274cbddb7bb505149f490cb4c3f15482",
+   "stage": "luts",
+   "tool": {
+    "id": "odin3",
+    "version": ""
+   }
+  }
+ ],
+ "tools": [],
+ "top": "bm_DL_4_bit_comparator"
+}

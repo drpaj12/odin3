@@ -1,0 +1,130 @@
+{
+ "census": {
+  "steps": [
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 17,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s00_link",
+    "total": 17
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 17,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s01_floorplan",
+    "total": 17
+   },
+   {
+    "inserted": 3,
+    "inserted_kinds": {
+     "tap": 3
+    },
+    "kept": 17,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s02_tapcell",
+    "total": 20
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 20,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s03_pdn",
+    "total": 20
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 3,
+    "moved": 17,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s04_global_place",
+    "total": 20
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 19,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 1,
+    "step": "s05_repair_design",
+    "total": 20
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 3,
+    "moved": 17,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s06_detailed_place",
+    "total": 20
+   }
+  ]
+ },
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 20
+  },
+  "by_link_kind": {
+   "name": 16,
+   "resize": 1
+  },
+  "by_origin": {
+   "hdl": 17,
+   "physical:tap": 3
+  },
+  "objects": 20
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "exact",
+   "from_step": "map",
+   "key": "instance",
+   "kind": "name",
+   "scope": null
+  },
+  {
+   "confidence": "exact",
+   "from_step": "place",
+   "key": null,
+   "kind": "physical_origin",
+   "scope": "inserted"
+  }
+ ],
+ "map": null,
+ "needs": [
+  "netlist"
+ ],
+ "objects_file": "06-place.objects.jsonl",
+ "outputs": [],
+ "schema": 1,
+ "stage": "placed",
+ "step": "place",
+ "tool": {
+  "id": "openroad",
+  "version": "f12e2f474102bfb875eeee57fb610d7d7de17770"
+ }
+}

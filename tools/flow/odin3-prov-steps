@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# odin3-prov-steps: write the provenance step files (prov/) of an odin3-flow --prov output directory.
+# Exit codes: 0 ok; 1 no name map; 2 usage error. See prov_steps.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/prov_steps.py" "$@"

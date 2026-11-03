@@ -1,0 +1,53 @@
+{
+ "census": null,
+ "check": {
+  "detail": "17/17 logic cells joined",
+  "name": "name_free_join",
+  "result": "ok"
+ },
+ "counts": {
+  "by_kind": {
+   "cell": 46
+  },
+  "by_link_kind": {
+   "id": 46,
+   "location_match": 46
+  },
+  "by_origin": {
+   "hdl": 17,
+   "physical:fill": 26,
+   "physical:tap": 3
+  },
+  "objects": 46
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "exact",
+   "from_step": "extract",
+   "key": null,
+   "kind": "id",
+   "scope": null
+  },
+  {
+   "confidence": "high",
+   "from_step": "route",
+   "key": "master,x,y",
+   "kind": "location_match",
+   "scope": null
+  }
+ ],
+ "map": null,
+ "needs": [
+  "extract"
+ ],
+ "objects_file": "11-recover.objects.jsonl",
+ "outputs": [],
+ "schema": 1,
+ "stage": "recovered",
+ "step": "recover",
+ "tool": {
+  "id": "join",
+  "version": ""
+ }
+}

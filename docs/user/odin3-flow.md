@@ -7,6 +7,7 @@ and, when VTR is available, VPR. It uses only the Python standard library.
 odin3-flow design.v [more.v ...] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml]
            [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--timing-attr]
            [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
+           [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 ```
 
 | Option | Meaning |
@@ -18,10 +19,11 @@ odin3-flow design.v [more.v ...] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml
 | `--family FAMILY` | LPM device family for `--target lpm` |
 | `--vpr`, `--no-vpr` | run VPR after Odin III; default on when `VTR_ROOT` is set; `vtr` target only |
 | `--analysis` | also write the dot, JSON, levelize and locations files; `vtr` target only |
-| `--prov` | write the BLIF with hash names and the version 2 name map `odin3/<top>.blif.names` next to it (`read_verilog --prov-ast refs`, `write_blif --name-style hash --prov-map`): every net's records, full source spans and construct chain (the format and what the records mean: {doc}`provenance`). VPR reads that BLIF. A step `prov` checks the map; `vtr` target only |
+| `--prov` | also writes the provenance step files `prov/` ({doc}`provenance-files`); write the BLIF with hash names and the version 2 name map `odin3/<top>.blif.names` next to it (`read_verilog --prov-ast refs`, `write_blif --name-style hash --prov-map`): every net's records, full source spans and construct chain (the format and what the records mean: {doc}`provenance`). VPR reads that BLIF. A step `prov` checks the map; `vtr` target only |
 | `--timing-attr` | attribute the critical path to HDL statements, modules and words: writes `timing/attribution.json` and `timing/summary.txt` (see {doc}`timing-attribution`); needs `--target vtr` and VPR. It uses the name map, so it implies `--prov`: no second BLIF is written. **Behaviour change since version 1.1.1:** VPR now reads the hash-name BLIF, so the net names in VPR's own files (`.net`, `.place`, `.route`, its reports and logs) are hash names (`h3k9...`) where they were the short names (`$n12`). The CPD, LUT count, channel width and wirelength do not change (the tests check the CPD and LUTs on both routes); only the names do. A script that reads net names out of VPR's files of a `--timing-attr` run must use `--timing-legacy` (the way back to the old names and the old second BLIF), or look the hash up in `<top>.blif.names` |
 | `--timing-paths N` | setup paths VPR reports and the attribution uses (default 100); implies `--timing-attr`. VPR gets `--timing_report_npaths N` only when N is not 100 |
 | `--timing-legacy` | with `--timing-attr`: the version 1.1.1 route (a short-name BLIF for VPR plus a second BLIF with provenance names, line-level spans, no chain) instead of the name map |
+| `--target silicon` | Odin III to a routed SKY130 layout and back with provenance step files; see {doc}`silicon-flow`. With `--tools DIR` (user-space tools), `--pdk DIR` (the `sky130A` directory), `--steps a,b` (a subset of `read,elab,map,equiv,netlist,place,route,gds,extract,lvs,recover`) and `--clock PORT` (switches clock-tree synthesis on). Exactly one design file |
 | `--odin3 PATH` | the `odin3` binary; default `odin3` on `PATH`, else `build/release/odin3` |
 | `--out DIR` | output directory; default `odin3_out/<top>` |
 

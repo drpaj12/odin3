@@ -6,6 +6,19 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added (1.4.0, silicon flow and provenance step files)
+
+- Project files: `schema 2` and the statements `tool`, `flowdef`, `step`, `provlink`, `flow-var` describe named flows,
+  ordered steps and the provenance relationship of each step; `dump_project` adds `schema`, `tools`, `flows` for schema 2
+  files only. Schema 1 files load and dump unchanged. New error kind `unsupported_schema`. Spec:
+  `docs/specs/2026-11-03-v1.4-silicon-provenance.md`; manual: `docs/user/project-flows.md`.
+- Silicon flow (`tools/silicon`, `odin3-flow --target silicon`): Odin III to a routed SKY130 layout and back, no Yosys.
+  `lib/sky130hd.o3lib` (84 cells, generated from Liberty by `tools/silicon/liberty_to_o3lib.py`). OpenROAD, Magic, Netgen,
+  KLayout and the PDK are optional user-space tools; tests skip without them. Manual: `docs/user/silicon-flow.md`.
+- Provenance step files (`tools/flow/prov_steps.py`, `docs/schemas/*.json`, `tools/silicon/schema_check.py`,
+  `odin3-prov-steps`): one manifest per step at every stage; `odin3-flow --prov` writes them for the VTR flow too.
+  Manual: `docs/user/provenance-files.md`. The C ABI stays 7.
+
 ### Added
 
 - `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its

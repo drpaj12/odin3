@@ -201,6 +201,32 @@ class CensusJoinTest(unittest.TestCase):
                               ("sky130_fd_sc_hd__fill_1", 0, 0): "FILL_0"})
 
 
+class FixtureTest(unittest.TestCase):
+    """tests/silicon/comparator is a stored run of the whole flow (the Loki reader tests use it)."""
+
+    FIX = REPO_ROOT / "tests" / "silicon" / "comparator"
+
+    def test_stored_run_is_valid(self) -> None:
+        self.assertEqual(schema_check.check_dir(self.FIX / "prov", SCHEMAS), [])
+        index = json.loads((self.FIX / "prov" / "index.json").read_text())
+        self.assertEqual([s["stage"] for s in index["steps"]],
+                         ["hdl", "ir", "gates", "gates", "gates", "placed", "routed", "gds",
+                          "extracted", "extracted", "recovered"])
+        join = json.loads((self.FIX / "join.json").read_text())
+        self.assertEqual((join["join_rate"], join["logic_with_hdl_chain"]), (1.0, 17))
+
+    def test_vtr_fixture_is_valid(self) -> None:
+        fix = REPO_ROOT / "tests" / "silicon" / "comparator-vtr" / "prov"
+        self.assertEqual(schema_check.check_dir(fix, SCHEMAS), [])
+        index = json.loads((fix / "index.json").read_text())
+        self.assertEqual([s["stage"] for s in index["steps"]], ["hdl", "luts"])
+
+    def test_no_private_path_in_the_fixture(self) -> None:
+        for path in self.FIX.rglob("*"):
+            if path.is_file():
+                self.assertNotIn("/home/", path.read_text(), path.name)
+
+
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
 class OdinOnlyStepsTest(unittest.TestCase):
     def test_read_elab_map_equiv_netlist(self) -> None:
@@ -233,6 +259,30 @@ class OdinOnlyStepsTest(unittest.TestCase):
         self.assertEqual(sf.missing(t, sf.ODIN_ONLY), [])
 
 
+@unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
+class VtrProvStepsTest(unittest.TestCase):
+    def test_flow_prov_writes_step_files(self) -> None:
+        import odin3_flow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            code = odin3_flow.main([str(MICRO / "bm_DL_4_bit_comparator.v"), "--prov", "--no-vpr",
+                                    "--odin3", ODIN3, "--out", tmp])
+            self.assertEqual(code, 0)
+            self.assertEqual(schema_check.check_dir(Path(tmp) / "prov", SCHEMAS), [])
+            index = json.loads((Path(tmp) / "prov" / "index.json").read_text())
+            self.assertEqual([s["stage"] for s in index["steps"]], ["hdl", "luts"])
+            self.assertEqual(index["flow"], "fpga-vtr")
+
+    def test_flow_without_prov_writes_none(self) -> None:
+        import odin3_flow
+
+        with tempfile.TemporaryDirectory() as tmp:
+            code = odin3_flow.main([str(MICRO / "bm_DL_4_bit_comparator.v"), "--no-vpr",
+                                    "--odin3", ODIN3, "--out", tmp])
+            self.assertEqual(code, 0)
+            self.assertFalse((Path(tmp) / "prov").exists())
+
+
 @unittest.skipUnless(ODIN3 and TOOLS, "ODIN3_CLI or ODIN3_SILICON_TOOLS not set")
 class FullFlowTest(unittest.TestCase):
     def run_design(self, name: str, clock: str) -> tuple[Path, dict[str, object]]:
@@ -256,6 +306,8 @@ class FullFlowTest(unittest.TestCase):
         cen = json.loads((out / "census.json").read_text())
         self.assertEqual(cen[-1]["inserted_kinds"], {"fill": 26})
         self.assertEqual(sum(c["renamed"] + c["removed"] for c in cen), 0)
+        stored = json.loads((REPO_ROOT / "tests/silicon/comparator/census.json").read_text())
+        self.assertEqual(cen, stored)
 
     def test_shift_register_with_clock(self) -> None:
         out, join = self.run_design("bm_DL_4_bit_shift_register", "Clock")

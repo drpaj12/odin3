@@ -1,0 +1,39 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 46
+  },
+  "by_link_kind": {
+   "id": 46
+  },
+  "by_origin": {
+   "hdl": 17,
+   "physical:fill": 26,
+   "physical:tap": 3
+  },
+  "objects": 46
+ },
+ "inputs": [],
+ "links": [],
+ "map": null,
+ "needs": [
+  "route"
+ ],
+ "objects_file": "08-gds.objects.jsonl",
+ "outputs": [
+  {
+   "path": "bm_DL_4_bit_comparator.gds",
+   "role": "gds",
+   "sha256": "797c1438baf3b0043d2a1040f9eb5615a980d340a41608a31da255772f234b3b"
+  }
+ ],
+ "schema": 1,
+ "stage": "gds",
+ "step": "gds",
+ "tool": {
+  "id": "klayout",
+  "version": ""
+ }
+}

@@ -1,0 +1,50 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 46
+  },
+  "by_link_kind": {
+   "location_match": 46
+  },
+  "by_origin": {
+   "unknown": 46
+  },
+  "objects": 46
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "high",
+   "from_step": "gds",
+   "key": "master,x,y",
+   "kind": "location_match",
+   "scope": null
+  }
+ ],
+ "map": null,
+ "needs": [
+  "gds"
+ ],
+ "objects_file": "09-extract.objects.jsonl",
+ "outputs": [
+  {
+   "path": "ext_hier.spice",
+   "role": "spice",
+   "sha256": "9d0127ec53e639b72bd66caf20debab3adeca7d5878871fd863b779cf58d6e30"
+  },
+  {
+   "path": "ext_flat.spice",
+   "role": "spice",
+   "sha256": "dcecb3badc05bbeee6a4d9ce32c5ca128a4f29d8ff9d90ef2ce5bdd1148ab3b7"
+  }
+ ],
+ "schema": 1,
+ "stage": "extracted",
+ "step": "extract",
+ "tool": {
+  "id": "magic",
+  "version": "8.3.465"
+ }
+}

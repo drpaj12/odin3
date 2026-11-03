@@ -225,7 +225,8 @@ def relative_chains(rows: Sequence[Mapping[str, str]], root: Path) -> list[dict[
 
 def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]]) -> None:
     with path.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=["inst", "odin_name", "master", "src_chain", "tie"])
+        w = csv.DictWriter(fh, fieldnames=["inst", "odin_name", "master", "src_chain", "tie"],
+                           lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 
@@ -369,7 +370,7 @@ def census(out: Path) -> list[dict[str, Any]]:
         rows.append(c)
         prev = cur
     with (out / "census.csv").open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]))
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
         w.writeheader()
         for r in rows:
             w.writerow({**r, "inserted_kinds": json.dumps(r["inserted_kinds"], sort_keys=True)})
@@ -671,7 +672,7 @@ def _openroad(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any],
                            "confidence": "exact"},
                           {"from_step": "route", "kind": "physical_origin", "key": None,
                            "scope": "inserted", "confidence": "exact"}])
-        (out / "census.json").write_text(json.dumps(st["census"], indent=1, sort_keys=True))
+        (out / "census.json").write_text(json.dumps(st["census"], indent=1, sort_keys=True) + "\n")
 
 
 def _extract(r: Run, w: prov_steps.StepWriter, st: dict[str, Any], needs: Sequence[str]) -> None:
@@ -726,7 +727,7 @@ def _recover(r: Run, w: prov_steps.StepWriter, st: dict[str, Any], needs: Sequen
                                            and x["attrs"]["join"] == "matched"
                                            and PHYS_RE.search(x["type"]) is None),
                **names}
-    (out / "join.json").write_text(json.dumps(summary, indent=1, sort_keys=True))
+    (out / "join.json").write_text(json.dumps(summary, indent=1, sort_keys=True) + "\n")
     w.add_step("recover", "recovered", {"id": "join", "version": ""}, rows, needs=needs,
                check={"name": "name_free_join", "result": "ok" if matched == logic else "partial",
                       "detail": f"{matched}/{logic} logic cells joined"},

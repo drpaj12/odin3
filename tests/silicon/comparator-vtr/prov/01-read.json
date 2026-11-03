@@ -1,0 +1,37 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "block": 2,
+   "stmt": 10
+  },
+  "by_link_kind": {},
+  "by_origin": {
+   "hdl": 12
+  },
+  "objects": 12
+ },
+ "inputs": [],
+ "links": [],
+ "map": {
+  "file": "bm_DL_4_bit_comparator.blif.names",
+  "sha256": "2db51b5e4cc224a356a730d21dcf15f78d1412f04f257f1444e8f772066242db"
+ },
+ "needs": [],
+ "objects_file": "01-read.objects.jsonl",
+ "outputs": [
+  {
+   "path": "bm_DL_4_bit_comparator.blif.names",
+   "role": "map",
+   "sha256": "2db51b5e4cc224a356a730d21dcf15f78d1412f04f257f1444e8f772066242db"
+  }
+ ],
+ "schema": 1,
+ "stage": "hdl",
+ "step": "read",
+ "tool": {
+  "id": "odin3",
+  "version": ""
+ }
+}

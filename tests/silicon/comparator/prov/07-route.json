@@ -1,0 +1,86 @@
+{
+ "census": {
+  "steps": [
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 20,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s09_global_route",
+    "total": 20
+   },
+   {
+    "inserted": 0,
+    "inserted_kinds": {},
+    "kept": 20,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s10_detail_route",
+    "total": 20
+   },
+   {
+    "inserted": 26,
+    "inserted_kinds": {
+     "fill": 26
+    },
+    "kept": 20,
+    "moved": 0,
+    "removed": 0,
+    "renamed": 0,
+    "resized": 0,
+    "step": "s11_fill",
+    "total": 46
+   }
+  ]
+ },
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 46
+  },
+  "by_link_kind": {
+   "id": 20
+  },
+  "by_origin": {
+   "hdl": 17,
+   "physical:fill": 26,
+   "physical:tap": 3
+  },
+  "objects": 46
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "exact",
+   "from_step": "place",
+   "key": "instance",
+   "kind": "id",
+   "scope": null
+  },
+  {
+   "confidence": "exact",
+   "from_step": "route",
+   "key": null,
+   "kind": "physical_origin",
+   "scope": "inserted"
+  }
+ ],
+ "map": null,
+ "needs": [
+  "place"
+ ],
+ "objects_file": "07-route.objects.jsonl",
+ "outputs": [],
+ "schema": 1,
+ "stage": "routed",
+ "step": "route",
+ "tool": {
+  "id": "openroad",
+  "version": "f12e2f474102bfb875eeee57fb610d7d7de17770"
+ }
+}

@@ -1,0 +1,12 @@
+{"attrs":{"level":"module","parent":null},"id":"hdl:c1","kind":"block","links":[],"name":"bm_DL_4_bit_comparator","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"3.1-27.10"}],"stage":"hdl"}
+{"attrs":{"level":"block","parent":"hdl:c1"},"id":"hdl:c2","kind":"block","links":[],"name":"c2","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"9.2-26.5"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c2"},"id":"hdl:c3","kind":"stmt","links":[],"name":"c3","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"9.9-26.5"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c3"},"id":"hdl:c4","kind":"stmt","links":[],"name":"c4","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"10.2-26.5"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c4"},"id":"hdl:c5","kind":"stmt","links":[],"name":"c5","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"17.3-20.13"}],"stage":"hdl"}
+{"attrs":{"level":"expr","parent":"hdl:c5"},"id":"hdl:c6","kind":"stmt","links":[],"name":"c6","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"17.7-17.12"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c4"},"id":"hdl:c7","kind":"stmt","links":[],"name":"c7","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"22.3-25.13"}],"stage":"hdl"}
+{"attrs":{"level":"expr","parent":"hdl:c7"},"id":"hdl:c8","kind":"stmt","links":[],"name":"c8","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"22.7-22.12"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c4"},"id":"hdl:c9","kind":"stmt","links":[],"name":"c9","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"12.3-15.13"}],"stage":"hdl"}
+{"attrs":{"level":"expr","parent":"hdl:c9"},"id":"hdl:c10","kind":"stmt","links":[],"name":"c10","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"12.6-12.12"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c1"},"id":"hdl:c11","kind":"stmt","links":[],"name":"c11","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"4.2-4.16"}],"stage":"hdl"}
+{"attrs":{"level":"stmt","parent":"hdl:c1"},"id":"hdl:c12","kind":"stmt","links":[],"name":"c12","origin":"hdl","src":[{"file":"bm_DL_4_bit_comparator.v","span":"5.2-5.16"}],"stage":"hdl"}

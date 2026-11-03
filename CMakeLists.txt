@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(odin3 VERSION 1.3.0 LANGUAGES C)
+project(odin3 VERSION 1.4.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
@@ -620,7 +620,7 @@ install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_a
               tools/flow/prov_why.py tools/flow/runrecord.py tools/flow/flow_record.py
               tools/flow/prov_steps.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
-install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post
+install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post tools/flow/odin3-prov-steps
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
 install(FILES tools/silicon/silicon_flow.py tools/silicon/klayout_gds.py
