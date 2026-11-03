@@ -647,7 +647,8 @@ static void dump_kind(json *jw, const char *name, odin3_proj_flowrec_kind kind, 
     raw(jw, "],\n");
 }
 
-/* Schema 2 files only: "schema", "tools" and "flows" (a schema 1 file dumps as before). */
+/* Files with flow or tool statements only: "schema", "tools" and "flows". A bare `schema 2` file
+ * dumps exactly like a schema 1 file. */
 static void dump_flows(json *jw) {
     field(jw, "schema");
     number(jw, jw->proj->schema);
@@ -662,7 +663,7 @@ odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {
     json jw = {proj, &text, ODIN3_OK};
     raw(&jw, "{\n");
     dump_lists(&jw);
-    if (proj->schema == 2) {
+    if (proj->schema == 2 && proj->flowrecs.len > 0) {
         dump_flows(&jw);
     }
     field(&jw, "flow");

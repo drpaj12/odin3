@@ -845,7 +845,22 @@ static odin3_status key_flowdef(o3_reader *rd, const o3_stmt *st) {
     return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_DEF);
 }
 
-/* The comma-separated ids of word must each be an earlier step of flow. */
+/* Whether piece equals one of the comma-separated ids of text[0, start). */
+static bool needs_seen(const char *text, size_t start, odin3_bytes piece) {
+    size_t from = 0;
+    for (size_t i = 0; i < start; i++) {
+        if (text[i] != ',') {
+            continue;
+        }
+        if (i - from == piece.len && memcmp(text + from, piece.ptr, piece.len) == 0) {
+            return true;
+        }
+        from = i + 1;
+    }
+    return false;
+}
+
+/* The comma-separated ids of word must each be an earlier step of flow, each named once. */
 static odin3_status step_needs(o3_reader *rd, const o3_stmt *st, uint32_t flow, odin3_bytes word) {
     const char *text = word.ptr;
     size_t start = 0;
@@ -858,6 +873,9 @@ static odin3_status step_needs(o3_reader *rd, const o3_stmt *st, uint32_t flow, 
         odin3_status res = ODIN3_OK;
         if (piece.len == 0) {
             return syntax(rd, st, "needs expects step ids separated by commas", &word);
+        }
+        if (needs_seen(text, start, piece)) {
+            return syntax(rd, st, "needs names the same step twice", &piece);
         }
         res = intern(rd, piece, &id);
         if (res != ODIN3_OK) {
@@ -1040,8 +1058,12 @@ static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
     if ((seen & need) != need) {
         return usage(rd, st, NULL);
     }
-    if (from != ids[1] && flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, from) == NULL) {
+    const odin3_proj_flowrec *prev = flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, from);
+    if (prev == NULL) {
         return syntax(rd, st, "from names a step that is not defined in the flow", NULL);
+    }
+    if (prev > flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, ids[1])) {
+        return syntax(rd, st, "from names a step that comes after the linked step", NULL);
     }
     if (from == ids[1] && !provlink_kind_is(st, "physical_origin")) {
         return syntax(rd, st, "a step links to itself only with kind physical_origin", NULL);
@@ -1055,11 +1077,15 @@ static odin3_status key_flowvar(o3_reader *rd, const o3_stmt *st) {
     if (res != ODIN3_OK) {
         return res;
     }
-    if (flow_find(rd, ODIN3_PROJ_FLOW_DEF, *(uint32_t *)rd->ids.data, false, 0) == NULL) {
+    const uint32_t *ids = rd->ids.data;
+    if (flow_find(rd, ODIN3_PROJ_FLOW_DEF, ids[0], false, 0) == NULL) {
         return syntax(rd, st, "flow-var names a flow that is not defined", &st->args[0].text);
     }
     if (!is_ident(st->args[1].text)) {
         return syntax(rd, st, "expected a variable name", &st->args[1].text);
+    }
+    if (flow_find(rd, ODIN3_PROJ_FLOW_VAR, ids[0], true, ids[1]) != NULL) {
+        return syntax(rd, st, "flow-var given twice", &st->args[1].text);
     }
     return flow_commit(rd, st, ODIN3_PROJ_FLOW_VAR);
 }

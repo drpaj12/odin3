@@ -134,6 +134,14 @@ static void test_schema1_explicit(void) {
     TEST_ASSERT_NULL(strstr(dump(), "\"flows\""));
 }
 
+static void test_schema2_bare_dump(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_o3("schema 2\ntop m\n"));
+    const char *text = dump();
+    TEST_ASSERT_NULL(strstr(text, "\"schema\""));
+    TEST_ASSERT_NULL(strstr(text, "\"flows\""));
+    TEST_ASSERT_NULL(strstr(text, "\"tools\""));
+}
+
 static void reset_project(void) {
     odin3_design_destroy(design);
     design = odin3_design_create();
@@ -217,6 +225,13 @@ static void test_provlink_errors(void) {
     expect_error(text, (err_spec){"syntax", "not defined"});
     (void)snprintf(text, sizeof text, "%sflow-var a 1x y\n", pre);
     expect_error(text, (err_spec){"syntax", "variable name"});
+    (void)snprintf(text, sizeof text, "%sflow-var a x y\nflow-var a x z\n", pre);
+    expect_error(text, (err_spec){"syntax", "flow-var given twice"});
+    (void)snprintf(text, sizeof text, "%sprovlink a s from t kind name\n", pre);
+    expect_error(text, (err_spec){"syntax", "comes after"});
+    (void)snprintf(text, sizeof text,
+                   "%sstep a u stage luts tool odin3 needs s,t,s\n", pre);
+    expect_error(text, (err_spec){"syntax", "same step twice"});
 }
 
 static void test_tool_errors(void) {
@@ -234,6 +249,7 @@ int main(void) {
     RUN_TEST(test_dump);
     RUN_TEST(test_schema1_dump_unchanged);
     RUN_TEST(test_schema1_explicit);
+    RUN_TEST(test_schema2_bare_dump);
     RUN_TEST(test_errors);
     RUN_TEST(test_flow_errors);
     RUN_TEST(test_step_errors);
