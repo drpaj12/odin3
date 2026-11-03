@@ -229,8 +229,7 @@ static void test_provlink_errors(void) {
     expect_error(text, (err_spec){"syntax", "flow-var given twice"});
     (void)snprintf(text, sizeof text, "%sprovlink a s from t kind name\n", pre);
     expect_error(text, (err_spec){"syntax", "comes after"});
-    (void)snprintf(text, sizeof text,
-                   "%sstep a u stage luts tool odin3 needs s,t,s\n", pre);
+    (void)snprintf(text, sizeof text, "%sstep a u stage luts tool odin3 needs s,t,s\n", pre);
     expect_error(text, (err_spec){"syntax", "same step twice"});
 }
 
