@@ -7,6 +7,8 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
+Version 1.4.0 (part of the Yggdrasil III hub snapshot [v1.4.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.4.0/docs/versions.md)).
+
 **What it is today.** The trunk of Yggdrasil III (hub: <https://github.com/drpaj12/YggdrasilIII>). A C17 framework with
 one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
 Verilog-2005, BLIF, Yosys JSON, structural Verilog) -> two-stage elaboration -> `proc`, `opt`, `fsm`, `wreduce`, `flatten`
@@ -17,7 +19,7 @@ produced for the 15 VTR benchmarks that fit the development laptop routes in VPR
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
 
-**Status: version 1.4.0 (unreleased; tag after merge; the latest tagged release is 1.3.0).** Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.4.0 (released 2026-11-03, tag `v1.4.0`).** Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
