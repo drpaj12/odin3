@@ -157,8 +157,12 @@ class FlowRecord(TmpCase):
         params = self.run_flow()["params"]
         assert isinstance(params, dict)
         self.assertEqual(params["odin3.abc.lut"]["conf"], "given")
-        self.assertEqual(params["odin3.abc.unset_options"]["conf"], "default")
-        self.assertRegex(params["odin3.abc.unset_options"]["source"], r"args\.c:\d+$")
+        unset = params["odin3.abc.unset_options"]
+        if (ROOT / ".git").exists():  # flow_record.build_record: a git tree gives the source line
+            self.assertEqual(unset["conf"], "default")
+            self.assertRegex(unset["source"], r"args\.c:\d+$")
+        else:  # the source tarball has no git metadata: recorded as default-unrecorded, by design
+            self.assertEqual(unset["conf"], "default-unrecorded")
         self.assertEqual(params["tool.abc_commit"]["conf"], "given")
         self.assertEqual(params["run.seed"]["value"], "none")
         self.assertNotIn("odin3.cmd.top", params)
