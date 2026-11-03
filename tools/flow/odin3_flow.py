@@ -4,6 +4,7 @@ section 2.1).
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
         [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--timing-attr]
         [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
+        [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
 copied) writes ``odin3/<top>.blif``. Target ``lpm``: the 5.1 LPM script (tools/flow/lpm.script)
@@ -29,6 +30,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import prov_steps
 import qor_legs
 import qor_parse
 import timing_attr
@@ -43,7 +45,7 @@ DEFAULT_K = 6
 STEP_TIMEOUT_S = 3600
 DOT_MAX_NODES = 100000
 NOT_HARD = ("clb", "io", "EMPTY", "inpad", "outpad")  # packer block types that are not hard blocks
-TARGETS = ("vtr", "lpm")
+TARGETS = ("vtr", "lpm", "silicon")
 VPR_DEFAULT_PATHS = timing_attr.DEFAULT_PATHS  # --timing_report_npaths when VPR is not told
 _MODULE = re.compile(r"^\s*module\s+\\?([A-Za-z_][A-Za-z0-9_$]*)", re.M)
 _HARD_BLOCKS = re.compile(r"^Netlist (\w+) blocks:\s*(\d+)", re.M)
@@ -70,6 +72,10 @@ class FlowArgs:
     prov: bool = False  # --prov: the BLIF has hash names and a version 2 name map (v1.2.0)
     timing_legacy: bool = False  # --timing-legacy: the v1.1.1 route, a second provenance BLIF
     keep_results: bool = False  # --keep-results: keep VPR's .net, .place and .route (prov_post)
+    tools: Path | None = None  # --tools: user-space tools directory of --target silicon
+    pdk: Path | None = None  # --pdk: the sky130A directory
+    steps: str = ""  # --steps: comma list of silicon steps (default all)
+    clock: str = ""  # --clock: clock port of the silicon design (enables CTS)
 
 
 @dataclass(frozen=True)
@@ -578,6 +584,9 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         vpr_step(args, blif, k, result)
         if args.timing_attr and result.steps[-1].ok and result.vpr_run_dir is not None:
             timing_step(args, top, blif, result.vpr_run_dir, result)
+    if args.prov and result.steps[-1].ok:
+        prov_steps.fpga_steps(map_path(blif), args.out, top, top, "", blif.name)
+        result.summary["prov_steps"] = "prov/index.json"
     return blif if result.steps[-1].ok else None
 
 
@@ -600,6 +609,30 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     return written if lint.ok else None
 
 
+def silicon_run(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
+    """Target ``silicon``: tools/silicon/silicon_flow.py (steps, step files, optional tools)."""
+    sys.path.insert(0, str(HERE.parent / "silicon"))
+    import silicon_flow
+
+    steps = tuple(x for x in args.steps.split(",") if x) or silicon_flow.TOP_STEPS
+    tools = silicon_flow.discover(args.odin3, args.tools, args.pdk)
+    gone = silicon_flow.missing(tools, steps)
+    if gone:
+        raise UsageError("silicon steps need tools that are not installed:\n  "
+                         + "\n  ".join(gone) + "\n(see docs/user/silicon-flow.md; "
+                         "--steps read,elab,map,equiv,netlist needs none)")
+    run = silicon_flow.Run(args.designs[0], top, args.out, silicon_flow.default_lib(), tools,
+                           args.clock, steps, design_root(args.designs))
+    start = time.monotonic()
+    code = silicon_flow.run(run)
+    log = args.out / "silicon.log"
+    log.write_text("\n".join(run.log) + "\n")
+    result.steps.append(StepResult("silicon", code == 0, log, time.monotonic() - start))
+    result.summary["silicon_steps"] = run.log
+    result.summary["prov_steps"] = "prov/index.json"
+    return args.out if code == 0 else None
+
+
 def run_flow(args: FlowArgs) -> FlowResult:
     """Run every step; stop at the first that fails. UsageError for a bad input."""
     if args.target not in TARGETS:
@@ -607,6 +640,8 @@ def run_flow(args: FlowArgs) -> FlowResult:
     for design in args.designs:
         if not design.is_file():
             raise UsageError(f"no such design file: {design}")
+    if args.target == "silicon" and len(args.designs) != 1:
+        raise UsageError("--target silicon takes exactly one design file")
     if args.analysis and args.target != "vtr":
         raise UsageError("--analysis applies to --target vtr only (levelize needs bits)")
     if args.timing_attr and (args.target != "vtr" or not args.vpr):
@@ -614,7 +649,7 @@ def run_flow(args: FlowArgs) -> FlowResult:
     if args.timing_paths < 1:
         raise UsageError("--timing-paths needs a positive number")
     if args.prov and args.target != "vtr":
-        raise UsageError("--prov applies to --target vtr only")
+        raise UsageError("--prov applies to --target vtr only (silicon always writes prov/)")
     if args.timing_legacy and not args.timing_attr:
         raise UsageError("--timing-legacy needs --timing-attr")
     if args.timing_legacy and args.prov:
@@ -629,7 +664,7 @@ def run_flow(args: FlowArgs) -> FlowResult:
     qor_legs.REPO_ROOT = resource_root()  # the module seam: where $LIB (lib/vtr.o3lib) is
     result = FlowResult(ok=False)
     args.out.mkdir(parents=True, exist_ok=True)
-    step_fn = vtr_steps if args.target == "vtr" else lpm_steps
+    step_fn = {"vtr": vtr_steps, "lpm": lpm_steps, "silicon": silicon_run}[args.target]
     result.ok = step_fn(args, top, result) is not None
     result.summary["seconds"] = {st.name: round(st.seconds, 3) for st in result.steps}
     (args.out / "summary.json").write_text(json.dumps(result.summary, indent=2) + "\n")
@@ -707,6 +742,12 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--keep-results", action="store_true",
                     help="keep VPR's .net, .place and .route in vpr/run (odin3-prov-post reads "
                          "them); needs --vpr")
+    ap.add_argument("--tools", type=Path, help="--target silicon: the user-space tools directory "
+                    "(OpenROAD, Magic, Netgen, KLayout, PDK; or set ODIN3_SILICON_TOOLS)")
+    ap.add_argument("--pdk", type=Path, help="--target silicon: the sky130A directory of the PDK")
+    ap.add_argument("--steps", default="", help="--target silicon: comma list of steps (read,"
+                    "elab,map,equiv,netlist,place,route,gds,extract,lvs,recover; default all)")
+    ap.add_argument("--clock", default="", help="--target silicon: the clock port (enables CTS)")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -726,7 +767,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
-                    attr, paths, prov, ns.timing_legacy, ns.keep_results)
+                    attr, paths, prov, ns.timing_legacy, ns.keep_results,
+                    ns.tools.resolve() if ns.tools else None,
+                    ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

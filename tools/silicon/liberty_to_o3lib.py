@@ -1,105 +1,124 @@
 #!/usr/bin/env python3
-"""Liberty -> .o3lib for a sky130_fd_sc_hd subset (outside Odin III core, gatemap G-1).
+"""Liberty to .o3lib for a sky130_fd_sc_hd subset (outside Odin III core, gatemap G-1).
 
-Keeps cells whose name ends _1 with one output with a `function`, <= 6 inputs, no power-down tricks,
-plus posedge D flip-flops without set/reset. Skips multi-output cells (conb_1 tie, adders).
+Keeps cells whose name ends _1 with one output with a ``function`` and 1 to 6 inputs, plus
+positive-edge D flip-flops without set or reset. Skips multi-output cells (``conb_1`` tie, adders),
+power, delay, tri-state, latch and clock cells. The header records the Liberty file's sha256.
+
 Usage: liberty_to_o3lib.py LIB.lib OUT.o3lib [NAME]
 """
+
+from __future__ import annotations
+
 import hashlib
 import re
 import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+EXCLUDED = re.compile(r"__(lpflow|clkdlybuf|dlygate|dlymetal|ebufn|einv|dl[a-z]|clkbuf|clkinv)")
+MAX_INPUTS = 6
 
 
-def blocks(text, start_pat):
-    """Yield (name, body) for each top-level `cell ("x") { ... }` by brace counting."""
-    for m in re.finditer(start_pat, text):
+def blocks(text: str, pattern: str) -> Iterator[tuple[str, str]]:
+    """(name, body) of each ``name ("x") { ... }`` block by brace counting."""
+    for m in re.finditer(pattern, text):
         i = text.index("{", m.end() - 1)
         depth, j = 0, i
         while True:
             c = text[j]
-            if c == "{":
-                depth += 1
-            elif c == "}":
-                depth -= 1
-                if depth == 0:
-                    break
+            depth += c == "{"
+            depth -= c == "}"
+            if depth == 0:
+                break
             j += 1
         yield m.group(1), text[i + 1:j]
 
 
-def conv_fn(f):
-    toks = re.findall(r"[A-Za-z_][A-Za-z0-9_]*|[!&|^*+()']|\d", f)
-    out = []
-    for t in toks:
-        if t == "!":
-            out.append("~")
-        elif t == "*":
-            out.append("&")
-        elif t == "+":
-            out.append("|")
-        elif t == "'":
+def convert_function(func: str) -> str | None:
+    """A Liberty function in .o3lib syntax; None when it uses the postfix ``'``."""
+    out: list[str] = []
+    for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*|[!&|^*+()']|\d", func):
+        if tok == "'":
             return None
-        else:
-            out.append(t)
+        out.append({"!": "~", "*": "&", "+": "|"}.get(tok, tok))
     return " ".join(out)
 
 
-def pins(body):
-    res = []
+def pins(body: str) -> list[tuple[str, str, str | None]]:
+    found = []
     for name, pb in blocks(body, r'\bpin\s*\(\s*"([^"]+)"\s*\)\s*\{'):
-        d = re.search(r'direction\s*:\s*"?(\w+)', pb).group(1)
-        fn = re.search(r'\bfunction\s*:\s*"([^"]*)"', pb)
-        res.append((name, d, fn.group(1) if fn else None))
-    return res
+        direction = re.search(r'direction\s*:\s*"?(\w+)', pb)
+        func = re.search(r'\bfunction\s*:\s*"([^"]*)"', pb)
+        found.append((name, direction.group(1) if direction else "",
+                      func.group(1) if func else None))
+    return found
 
 
-def main():
-    lib, out = sys.argv[1], sys.argv[2]
-    name = sys.argv[3] if len(sys.argv) > 3 else "sky130hd"
-    text = open(lib).read()
+def flip_flop(name: str, body: str, area: str, outs: list[tuple[str, str, str | None]]
+              ) -> tuple[list[str], str]:
+    """The .o3lib lines of a plain posedge D flip-flop, or ([], reason)."""
+    ff = re.search(r'\bff\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)', body)
+    clk = re.search(r'clocked_on\s*:\s*"([^"]+)"', body)
+    nxt = re.search(r'next_state\s*:\s*"([^"]+)"', body)
+    if ff is None or clk is None or nxt is None:
+        return [], "seq not plain posedge D"
+    if re.search(r"\b(clear|preset)\s*:", body) or not re.fullmatch(r"\w+", nxt.group(1)) \
+            or "!" in clk.group(1) or len(outs) != 1 or outs[0][2] != ff.group(1):
+        return [], "seq not plain posedge D"
+    q = outs[0][0]
+    return [f"cell {name} gate area {area}",
+            f"  in {clk.group(1)} 1 clock ; in {nxt.group(1)} 1 ; out {q} 1",
+            f"  seq {q} <= {nxt.group(1)} @ posedge {clk.group(1)} init x", "end"], ""
+
+
+def convert_cell(name: str, body: str) -> tuple[list[str], str]:
+    """The .o3lib lines of one Liberty cell, or ([], reason it is skipped)."""
+    if EXCLUDED.search(name):
+        return [], "excluded: power/delay/tristate/latch/clock cell"
+    area_m = re.search(r"\barea\s*:\s*([0-9.]+)", body)
+    area = f"{float(area_m.group(1)):g}" if area_m else "0"
+    ps = pins(body)
+    ins = [p for p in ps if p[1] == "input"]
+    outs = [p for p in ps if p[1] == "output"]
+    if re.search(r"\bff\s*\(", body):
+        return flip_flop(name, body, area, outs)
+    if len(outs) != 1 or outs[0][2] is None or not 1 <= len(ins) <= MAX_INPUTS:
+        return [], "not single-output comb"
+    func = convert_function(outs[0][2])
+    if func is None:
+        return [], "fn syntax"
+    out_pin = outs[0][0]
+    return [f"cell {name} gate area {area}",
+            "  " + " ; ".join(f"in {p[0]} 1" for p in ins) + f" ; out {out_pin} 1",
+            f"  fn {out_pin} = {func}", "end"], ""
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) not in (2, 3):
+        print("usage: liberty_to_o3lib.py LIB.lib OUT.o3lib [NAME]", file=sys.stderr)
+        return 2
+    lib = Path(argv[0])
+    name = argv[2] if len(argv) == 3 else "sky130hd"
+    text = lib.read_text()
     digest = hashlib.sha256(text.encode()).hexdigest()
-    lines = [f"# generated by tools/silicon/liberty_to_o3lib.py from {lib.split('/')[-1]} "
-             f"(sha256 {digest}); sky130_fd_sc_hd _1 subset",
-             f"library {name}", ""]
-    n = 0
-    skipped = []
+    lines = [f"# generated by tools/silicon/liberty_to_o3lib.py from {lib.name} (sha256 {digest}); "
+             f"sky130_fd_sc_hd _1 subset", f"library {name}", ""]
+    count = 0
+    skipped: list[tuple[str, str]] = []
     for cname, body in blocks(text, r'\bcell\s*\(\s*"([^"]+)"\s*\)\s*\{'):
         if not cname.endswith("_1") or "sky130_fd_sc_hd__" not in cname:
             continue
-        if re.search(r"__(lpflow|clkdlybuf|dlygate|dlymetal|ebufn|einv|dl[a-z]|clkbuf|clkinv)", cname):
-            skipped.append((cname, "excluded: power/delay/tristate/latch/clock cell"))
-            continue
-        area = re.search(r"\barea\s*:\s*([0-9.]+)", body).group(1)
-        area = f"{float(area):g}"
-        ps = pins(body)
-        ins = [p for p in ps if p[1] == "input"]
-        outs = [p for p in ps if p[1] == "output"]
-        ff = re.search(r'\bff\s*\(\s*"([^"]+)"\s*,\s*"([^"]+)"\s*\)', body)
-        if ff:
-            clk = re.search(r'clocked_on\s*:\s*"([^"]+)"', body).group(1)
-            nxt = re.search(r'next_state\s*:\s*"([^"]+)"', body).group(1)
-            if re.search(r"\b(clear|preset)\s*:", body) or not re.fullmatch(r"\w+", nxt) \
-                    or "!" in clk or len(outs) != 1 or outs[0][2] != ff.group(1):
-                skipped.append((cname, "seq not plain posedge D"))
-                continue
-            lines += [f"cell {cname} gate area {area}",
-                      f"  in {clk} 1 clock ; in {nxt} 1 ; out {outs[0][0]} 1",
-                      f"  seq {outs[0][0]} <= {nxt} @ posedge {clk} init x", "end"]
-            n += 1
-            continue
-        if len(outs) != 1 or outs[0][2] is None or not 1 <= len(ins) <= 6:
-            skipped.append((cname, "not single-output comb"))
-            continue
-        f = conv_fn(outs[0][2])
-        if f is None:
-            skipped.append((cname, "fn syntax"))
-            continue
-        lines += [f"cell {cname} gate area {area}",
-                  "  " + " ; ".join(f"in {p[0]} 1" for p in ins) + f" ; out {outs[0][0]} 1",
-                  f"  fn {outs[0][0]} = {f}", "end"]
-        n += 1
-    open(out, "w").write("\n".join(lines) + "\n")
-    print(f"{n} cells written; skipped {len(skipped)}: {skipped}")
+        cell, why = convert_cell(cname, body)
+        if cell:
+            lines += cell
+            count += 1
+        else:
+            skipped.append((cname, why))
+    Path(argv[1]).write_text("\n".join(lines) + "\n")
+    print(f"{count} cells written; skipped {len(skipped)}")
+    return 0
 
 
-main()
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -180,8 +180,8 @@ static void test_step_errors(void) {
     expect_error(text, "unknown_option", "unknown step keyword");
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 in nopath\n", pre);
     expect_error(text, "syntax", "role=path");
-    (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3\nstep a s stage ir tool odin3\n",
-                   pre);
+    (void)snprintf(text, sizeof text,
+                   "%sstep a s stage ir tool odin3\nstep a s stage ir tool odin3\n", pre);
     expect_error(text, "syntax", "given twice");
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 out x=y z\n", pre);
     expect_error(text, "syntax", "usage");

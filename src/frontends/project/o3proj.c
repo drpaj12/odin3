@@ -702,16 +702,21 @@ static odin3_status key_testbench(o3_reader *rd, const o3_stmt *st) {
     return res != ODIN3_OK ? res : odin3_project_add_testbench(rd->proj, &tb);
 }
 
-
 /* --- schema 2: tools, flows, steps, provenance links (v1.4) -------------------------------- */
 
 enum { SCHEMA_MAX = 2, FLOW_MAX_PAIRS = 99 };
 
-static const char *const k_stages[] = {"hdl",    "ir",     "gates",     "luts",      "packed",
-                                       "placed", "routed", "gds",       "extracted", "recovered"};
-static const char *const k_link_kinds[] = {"id",     "name",           "cone",
-                                           "fine",   "join",           "resize",
-                                           "physical_origin", "location_match", "structural_match"};
+static const char *const k_stages[] = {"hdl",    "ir",     "gates", "luts",      "packed",
+                                       "placed", "routed", "gds",   "extracted", "recovered"};
+static const char *const k_link_kinds[] = {"id",
+                                           "name",
+                                           "cone",
+                                           "fine",
+                                           "join",
+                                           "resize",
+                                           "physical_origin",
+                                           "location_match",
+                                           "structural_match"};
 static const char *const k_confidences[] = {"exact", "high", "medium", "low", "ambiguous"};
 
 static bool in_list(odin3_bytes word, const char *const *list, size_t count) {
@@ -809,7 +814,8 @@ static odin3_status key_tool(o3_reader *rd, const o3_stmt *st) {
         seen |= bit;
     }
     odin3_status res = flow_begin(rd, st);
-    if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_TOOL, *(uint32_t *)rd->ids.data, false, 0)) {
+    if (res == ODIN3_OK &&
+        flow_find(rd, ODIN3_PROJ_FLOW_TOOL, *(uint32_t *)rd->ids.data, false, 0)) {
         return syntax(rd, st, "tool given twice", &st->args[0].text);
     }
     return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_TOOL);
@@ -824,7 +830,8 @@ static odin3_status key_flowdef(o3_reader *rd, const o3_stmt *st) {
         return syntax(rd, st, "expected a flow name", &st->args[0].text);
     }
     odin3_status res = flow_begin(rd, st);
-    if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_DEF, *(uint32_t *)rd->ids.data, false, 0)) {
+    if (res == ODIN3_OK &&
+        flow_find(rd, ODIN3_PROJ_FLOW_DEF, *(uint32_t *)rd->ids.data, false, 0)) {
         return syntax(rd, st, "flow given twice", &st->args[0].text);
     }
     return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_DEF);
@@ -864,10 +871,55 @@ static bool is_role_path(odin3_bytes word) {
     return eq != NULL && eq != text && (size_t)(eq - text) + 1 < word.len;
 }
 
-/* step <flow> <id> stage <s> tool <t> [needs a,b] [in role=path]... [out role=path]... [args text] */
+enum { KW_STAGE, KW_TOOL, KW_NEEDS, KW_IN, KW_OUT, KW_ARGS, KW_STEP_COUNT };
+
+static const char *const k_step_kws[KW_STEP_COUNT] = {"stage", "tool", "needs",
+                                                      "in",    "out",  "args"};
+
+/* The value of one step keyword: a known stage, a declared tool, earlier steps, role=path. */
+static odin3_status step_value(o3_reader *rd, const o3_stmt *st, int kw, uint32_t flow,
+                               odin3_bytes value) {
+    if (kw == KW_STAGE && !in_list(value, k_stages, sizeof k_stages / sizeof k_stages[0])) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown stage", &value);
+    }
+    if (kw == KW_TOOL && !odin3_proj_bytes_is(value, "odin3")) {
+        uint32_t tool = 0;
+        odin3_status res = intern(rd, value, &tool);
+        if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_TOOL, tool, false, 0) == NULL) {
+            return syntax(rd, st, "tool is not declared (use a `tool` statement)", &value);
+        }
+        return res;
+    }
+    if (kw == KW_NEEDS) {
+        return step_needs(rd, st, flow, value);
+    }
+    if ((kw == KW_IN || kw == KW_OUT) && !is_role_path(value)) {
+        return syntax(rd, st, "expected role=path", &value);
+    }
+    return ODIN3_OK;
+}
+
+/* One keyword/value pair at args[i]; seen holds the keywords met (in and out may repeat). */
+static odin3_status step_pair(o3_reader *rd, const o3_stmt *st, uint32_t i, uint32_t flow,
+                              unsigned *seen) {
+    int kw = -1;
+    for (int k = 0; k < KW_STEP_COUNT; k++) {
+        kw = odin3_proj_bytes_is(st->args[i].text, k_step_kws[k]) ? k : kw;
+    }
+    if (kw < 0) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown step keyword",
+                    &st->args[i].text);
+    }
+    if (kw != KW_IN && kw != KW_OUT && (*seen & (1U << kw)) != 0) {
+        return syntax(rd, st, "repeated step keyword", &st->args[i].text);
+    }
+    *seen |= 1U << kw;
+    return step_value(rd, st, kw, flow, st->args[i + 1].text);
+}
+
+/* step <flow> <id> stage <s> tool <t> [needs a,b] [in role=path]... [out role=path]... [args text]
+ */
 static odin3_status key_step(o3_reader *rd, const o3_stmt *st) {
-    static const char *const kws[] = {"stage", "tool", "needs", "in", "out", "args"};
-    enum { KW_STAGE, KW_TOOL, KW_NEEDS, KW_IN, KW_OUT, KW_ARGS, KW_REPEATABLE = 3 };
     if (st->nargs % 2U != 0 || st->nargs < 6) {
         return usage(rd, st, NULL);
     }
@@ -886,45 +938,13 @@ static odin3_status key_step(o3_reader *rd, const o3_stmt *st) {
         return syntax(rd, st, "step given twice", &st->args[1].text);
     }
     unsigned seen = 0;
-    for (uint32_t i = 2; i < st->nargs; i += 2) {
-        odin3_bytes value = st->args[i + 1].text;
-        int kw = -1;
-        for (int k = 0; k <= KW_ARGS; k++) {
-            kw = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? k : kw;
-        }
-        if (kw < 0) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown step keyword",
-                        &st->args[i].text);
-        }
-        if (kw != KW_IN && kw != KW_OUT && (seen & (1U << kw)) != 0) {
-            return syntax(rd, st, "repeated step keyword", &st->args[i].text);
-        }
-        seen |= 1U << kw;
-        if (kw == KW_STAGE && !in_list(value, k_stages, sizeof k_stages / sizeof k_stages[0])) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown stage", &value);
-        }
-        if (kw == KW_TOOL) {
-            uint32_t tool = 0;
-            res = intern(rd, value, &tool);
-            if (res == ODIN3_OK && !odin3_proj_bytes_is(value, "odin3") &&
-                flow_find(rd, ODIN3_PROJ_FLOW_TOOL, tool, false, 0) == NULL) {
-                return syntax(rd, st, "tool is not declared (use a `tool` statement)", &value);
-            }
-        }
-        if (res == ODIN3_OK && kw == KW_NEEDS) {
-            res = step_needs(rd, st, ids[0], value);
-        }
-        if (res == ODIN3_OK && (kw == KW_IN || kw == KW_OUT) && !is_role_path(value)) {
-            return syntax(rd, st, "expected role=path", &value);
-        }
-        if (res != ODIN3_OK) {
-            return res;
-        }
+    for (uint32_t i = 2; res == ODIN3_OK && i < st->nargs; i += 2) {
+        res = step_pair(rd, st, i, ids[0], &seen);
     }
-    if ((seen & (1U << KW_STAGE)) == 0 || (seen & (1U << KW_TOOL)) == 0) {
+    if (res == ODIN3_OK && ((seen & (1U << KW_STAGE)) == 0 || (seen & (1U << KW_TOOL)) == 0)) {
         return usage(rd, st, NULL);
     }
-    return flow_commit(rd, st, ODIN3_PROJ_FLOW_STEP);
+    return res != ODIN3_OK ? res : flow_commit(rd, st, ODIN3_PROJ_FLOW_STEP);
 }
 
 /* Whether the word after the `kind` keyword of a provlink is text. */
@@ -937,10 +957,42 @@ static bool provlink_kind_is(const o3_stmt *st, const char *text) {
     return false;
 }
 
+enum { PL_FROM, PL_KIND, PL_KEY, PL_SCOPE, PL_CONF, PL_COUNT };
+
+static const char *const k_pl_kws[PL_COUNT] = {"from", "kind", "key", "scope", "confidence"};
+
+/* One provlink keyword/value pair at args[i]; from receives the `from` step id. */
+static odin3_status provlink_pair(o3_reader *rd, const o3_stmt *st, uint32_t i, unsigned *seen,
+                                  uint32_t *from) {
+    odin3_bytes value = st->args[i + 1].text;
+    int kw = -1;
+    for (int k = 0; k < PL_COUNT; k++) {
+        kw = odin3_proj_bytes_is(st->args[i].text, k_pl_kws[k]) ? k : kw;
+    }
+    if (kw < 0) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown provlink keyword",
+                    &st->args[i].text);
+    }
+    if ((*seen & (1U << kw)) != 0) {
+        return syntax(rd, st, "repeated provlink keyword", &st->args[i].text);
+    }
+    *seen |= 1U << kw;
+    if (kw == PL_FROM) {
+        return intern(rd, value, from);
+    }
+    if (kw == PL_KIND &&
+        !in_list(value, k_link_kinds, sizeof k_link_kinds / sizeof k_link_kinds[0])) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown link kind", &value);
+    }
+    if (kw == PL_CONF &&
+        !in_list(value, k_confidences, sizeof k_confidences / sizeof k_confidences[0])) {
+        return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown confidence", &value);
+    }
+    return ODIN3_OK;
+}
+
 /* provlink <flow> <step> from <prev> kind <k> [key <f>] [scope <s>] [confidence <c>] */
 static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
-    static const char *const kws[] = {"from", "kind", "key", "scope", "confidence"};
-    enum { KW_FROM, KW_KIND, KW_KEY, KW_SCOPE, KW_CONF };
     if (st->nargs % 2U != 0 || st->nargs < 6) {
         return usage(rd, st, NULL);
     }
@@ -955,41 +1007,18 @@ static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
     }
     unsigned seen = 0;
     uint32_t from = 0;
-    for (uint32_t i = 2; i < st->nargs; i += 2) {
-        odin3_bytes value = st->args[i + 1].text;
-        int kw = -1;
-        for (int k = 0; k <= KW_CONF; k++) {
-            kw = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? k : kw;
-        }
-        if (kw < 0) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown provlink keyword",
-                        &st->args[i].text);
-        }
-        if ((seen & (1U << kw)) != 0) {
-            return syntax(rd, st, "repeated provlink keyword", &st->args[i].text);
-        }
-        seen |= 1U << kw;
-        if (kw == KW_FROM) {
-            res = intern(rd, value, &from);
-            if (res == ODIN3_OK && flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, from) == NULL &&
-                from != ids[1]) {
-                return syntax(rd, st, "from names a step that is not defined in the flow", &value);
-            }
-        }
-        if (kw == KW_KIND &&
-            !in_list(value, k_link_kinds, sizeof k_link_kinds / sizeof k_link_kinds[0])) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown link kind", &value);
-        }
-        if (kw == KW_CONF &&
-            !in_list(value, k_confidences, sizeof k_confidences / sizeof k_confidences[0])) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown confidence", &value);
-        }
-        if (res != ODIN3_OK) {
-            return res;
-        }
+    for (uint32_t i = 2; res == ODIN3_OK && i < st->nargs; i += 2) {
+        res = provlink_pair(rd, st, i, &seen, &from);
     }
-    if ((seen & ((1U << KW_FROM) | (1U << KW_KIND))) != ((1U << KW_FROM) | (1U << KW_KIND))) {
+    unsigned need = (1U << PL_FROM) | (1U << PL_KIND);
+    if (res != ODIN3_OK) {
+        return res;
+    }
+    if ((seen & need) != need) {
         return usage(rd, st, NULL);
+    }
+    if (from != ids[1] && flow_find(rd, ODIN3_PROJ_FLOW_STEP, ids[0], true, from) == NULL) {
+        return syntax(rd, st, "from names a step that is not defined in the flow", NULL);
     }
     if (from == ids[1] && !provlink_kind_is(st, "physical_origin")) {
         return syntax(rd, st, "a step links to itself only with kind physical_origin", NULL);

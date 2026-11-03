@@ -189,7 +189,8 @@ def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]
                      f"({net}));\n")
     for m in re.finditer(r"^\s*assign\s+(\S+)\s*=\s*1'b([01])\s*;", text, re.M):
         idx = len(ties) + len(extra)
-        extra.append(f"  {CONB} o3_tie_a{idx} (.{'HI' if m.group(2) == '1' else 'LO'}({m.group(1)}));\n")
+        pin = "HI" if m.group(2) == "1" else "LO"
+        extra.append(f"  {CONB} o3_tie_a{idx} (.{pin}({m.group(1)}));\n")
         ties.append((m.group(1), m.group(2)))
     text = re.sub(r"^\s*assign\s+\S+\s*=\s*1'b[01]\s*;\n?", "", text, flags=re.M)
     text = text.replace("endmodule", "".join(extra) + "endmodule", 1)
@@ -203,7 +204,7 @@ def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]
     for m in re.finditer(r"^\s*(sky130_fd_sc_hd__\w+)\s+(\S+)\s*\(", text, re.M):
         master, inst = m.groups()
         if inst.startswith("o3_tie_"):
-            val = "1" if f".HI(" in text[m.end():m.end() + 20] else "0"
+            val = "1" if ".HI(" in text[m.end():m.end() + 20] else "0"
             rows.append({"inst": inst, "odin_name": "", "master": master,
                          "src_chain": "|".join(const_src[val]), "tie": val})
             continue
@@ -213,15 +214,20 @@ def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]
     return rows
 
 
-def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]], root: Path) -> None:
+def relative_chains(rows: Sequence[Mapping[str, str]], root: Path) -> list[dict[str, str]]:
+    """The rows with every source span's file relative to root (no absolute path is kept)."""
+    out = []
+    for r in rows:
+        parts = [split_span(x, root) for x in r["src_chain"].split("|") if x]
+        out.append({**r, "src_chain": "|".join(f"{p['file']}:{p['span']}" for p in parts)})
+    return out
+
+
+def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]]) -> None:
     with path.open("w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=["inst", "odin_name", "master", "src_chain", "tie"])
         w.writeheader()
-        for r in rows:
-            chain = "|".join(
-                f"{split_span(s, root)['file']}:{split_span(s, root)['span']}"
-                for s in r["src_chain"].split("|") if s)
-            w.writerow({**r, "src_chain": chain})
+        w.writerows(rows)
 
 
 # --- OpenROAD, KLayout, Magic, Netgen ---------------------------------------------------------
@@ -229,7 +235,9 @@ def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]], root: Path) ->
 def run_openroad(t: Tools, out: Path, top: str, clock: str) -> None:
     assert t.openroad is not None and t.pdk is not None
     env = {"PDK": str(t.pdk), "OUT": str(out), "TOP": top, "CLK": clock}
-    r = _run([t.openroad, "-no_splash", "-exit", HERE / "openroad_flow.tcl"], env=env)
+    (out / "or").mkdir(exist_ok=True)
+    r = _run([t.openroad, "-no_splash", "-exit", HERE / "openroad_flow.tcl"], cwd=out / "or",
+             env=env)  # OpenROAD (2022) writes route.guide into its cwd
     (out / "openroad.log").write_text(r.stdout + r.stderr)
     if r.returncode != 0 or not (out / "or" / "route.def").is_file():
         raise RuntimeError(f"openroad failed (rc {r.returncode}); see openroad.log")
@@ -579,18 +587,15 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
     elif step == "map":
         _odin(r, "map")
         st["locs"] = read_locs(out / "locs.txt")
-        st["prov"] = clean_netlist(out / "g.v", out / "clean.v", st["locs"])
-        write_prov_csv(out / "prov.csv", st["prov"], root)
+        st["prov"] = relative_chains(clean_netlist(out / "g.v", out / "clean.v", st["locs"]), root)
+        write_prov_csv(out / "prov.csv", st["prov"])
         w.add_step("map", "gates", odin, gates_objects(st["prov"], st.get("ir", {}), root),
                    needs=needs, outputs=_outs(out, ["gates.blif", "g.v"]),
                    links=[{"from_step": "elab", "kind": "cone", "key": "src", "scope": None,
                            "confidence": "medium"}])
     elif step == "equiv":
-        eq = _run([sys.executable, t.odin3.parents[2] / "tools/equiv-check/equiv_check.py",
-                   out / "rtl.blif", out / "gates.blif"]) \
-            if (t.odin3.parents[2] / "tools/equiv-check/equiv_check.py").is_file() else None
-        if eq is None:
-            raise RuntimeError("tools/equiv-check not found next to the odin3 build")
+        checker = HERE.parent / "equiv-check" / "equiv_check.py"
+        eq = _run([sys.executable, checker, out / "rtl.blif", out / "gates.blif"])
         (out / "equiv.txt").write_text(f"exit {eq.returncode}\n{eq.stdout}{eq.stderr}")
         w.add_step("equiv", "gates", {"id": "equiv-check", "version": ""}, None, needs=needs,
                    check={"name": "equiv-check", "result": "equivalent" if eq.returncode == 0
@@ -729,3 +734,56 @@ def _recover(r: Run, w: prov_steps.StepWriter, st: dict[str, Any], needs: Sequen
                        "confidence": "exact"},
                       {"from_step": "route", "kind": "location_match", "key": "master,x,y",
                        "scope": None, "confidence": "high"}])
+
+
+def default_lib() -> Path:
+    """lib/sky130hd.o3lib of this checkout, or of the installed data directory."""
+    for cand in (HERE.parents[1] / "lib" / "sky130hd.o3lib",
+                 HERE.parents[1] / "data" / "lib" / "sky130hd.o3lib"):
+        if cand.is_file():
+            return cand
+    return HERE.parents[1] / "lib" / "sky130hd.o3lib"
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI: silicon_flow.py DESIGN.v --top T --out DIR [--tools DIR] [--pdk DIR] [--odin3 PATH]
+    [--steps a,b] [--clock PORT]. Exit 0 ok, 1 a step failed, 2 usage or missing tools."""
+    import argparse
+
+    ap = argparse.ArgumentParser(prog="silicon_flow", description=(__doc__ or "").split("\n")[0])
+    ap.add_argument("design", type=Path)
+    ap.add_argument("--top", required=True)
+    ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--tools", type=Path, help="user-space tools directory (see the manual)")
+    ap.add_argument("--pdk", type=Path, help="the sky130A directory of the PDK")
+    ap.add_argument("--odin3", type=Path, default=None)
+    ap.add_argument("--steps", default=",".join(TOP_STEPS), help="comma list of steps")
+    ap.add_argument("--clock", default="", help="clock port (enables CTS)")
+    ap.add_argument("--lib", type=Path, default=None)
+    ns = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
+    steps = tuple(x for x in ns.steps.split(",") if x)
+    bad = [x for x in steps if x not in TOP_STEPS]
+    if bad:
+        print(f"silicon_flow: unknown step(s) {', '.join(bad)} ({', '.join(TOP_STEPS)})",
+              file=sys.stderr)
+        return 2
+    odin3 = (ns.odin3 or Path(shutil.which("odin3") or HERE.parents[1] / "build/release/odin3"))
+    if not odin3.is_file():
+        print(f"silicon_flow: no odin3 binary at {odin3}", file=sys.stderr)
+        return 2
+    t = discover(odin3.resolve(), ns.tools, ns.pdk)
+    gone = missing(t, steps)
+    if gone:
+        print("silicon_flow: missing tools for the requested steps:\n  " + "\n  ".join(gone),
+              file=sys.stderr)
+        return SKIP_EXIT if os.environ.get("ODIN3_SILICON_SKIP") else 2
+    run_ = Run(ns.design.resolve(), ns.top, ns.out.resolve(), (ns.lib or default_lib()).resolve(),
+               t, ns.clock, steps)
+    code = run(run_)
+    for line in run_.log:
+        print(line)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(main())

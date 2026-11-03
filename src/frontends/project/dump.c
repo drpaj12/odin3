@@ -435,7 +435,6 @@ static void dump_lists(json *jw) {
     }
 }
 
-
 /* --- flows (schema 2) ---------------------------------------------------------------------- */
 
 typedef struct str_view {

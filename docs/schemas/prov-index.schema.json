@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prov-index.schema.json",
+  "title": "Odin III provenance index (prov/index.json)",
+  "type": "object",
+  "required": [
+    "schema",
+    "kind",
+    "flow",
+    "design",
+    "top",
+    "odin3_version",
+    "tools",
+    "steps"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "kind": {
+      "const": "odin3-prov-index"
+    },
+    "flow": {
+      "type": "string"
+    },
+    "design": {
+      "type": "string"
+    },
+    "top": {
+      "type": "string"
+    },
+    "odin3_version": {
+      "type": "string"
+    },
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "path_alias": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "path",
+          "sha256"
+        ],
+        "properties": {
+          "role": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "stage",
+          "file",
+          "objects",
+          "sha256",
+          "objects_sha256",
+          "count",
+          "needs",
+          "tool"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "hdl",
+              "ir",
+              "gates",
+              "luts",
+              "packed",
+              "placed",
+              "routed",
+              "gds",
+              "extracted",
+              "recovered"
+            ]
+          },
+          "file": {
+            "type": "string"
+          },
+          "objects": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "objects_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "count": {
+            "type": "integer"
+          },
+          "needs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "tool": {
+            "type": "object",
+            "required": [
+              "id",
+              "version"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

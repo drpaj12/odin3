@@ -17,6 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 for _sub in (
     "tools/blif",
+    "tools/silicon",
     "tools/blif-vtr-check",
     "tools/vtr-models",
     "tools/netlist-compare",
