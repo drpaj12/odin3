@@ -1,0 +1,214 @@
+{
+ "design": "bm_DL_4_bit_comparator.v",
+ "flow": "silicon-sky130",
+ "inputs": [
+  {
+   "path": "bm_DL_4_bit_comparator.v",
+   "role": "design",
+   "sha256": "5ecc1423e461df6c75f0cc84e670b29f4f158e84df8451b289897598cb15f337"
+  }
+ ],
+ "kind": "odin3-prov-index",
+ "odin3_version": "odin3 1.4.0 (ABI 7)",
+ "project": null,
+ "schema": 1,
+ "steps": [
+  {
+   "count": 10,
+   "file": "01-read.json",
+   "id": "read",
+   "needs": [],
+   "objects": "01-read.objects.jsonl",
+   "objects_sha256": "351fce3703baec66b39bd8cb04e530fb43a269dc6070ea3d92054ab2f0413017",
+   "sha256": "2a973a1c1d9131899adc104d356cb31c2f8ff26869109eb3928ef05882c887ce",
+   "stage": "hdl",
+   "tool": {
+    "id": "odin3",
+    "version": "odin3 1.4.0 (ABI 7)"
+   }
+  },
+  {
+   "count": 77,
+   "file": "02-elab.json",
+   "id": "elab",
+   "needs": [
+    "read"
+   ],
+   "objects": "02-elab.objects.jsonl",
+   "objects_sha256": "9d8618fad927d9093742302e3a05bd37709ad74ca735d84b0dc401a35988bb27",
+   "sha256": "0d9b9f14440d6fe64f8e3fa403a376fb8ad1bac928e5e2f30253703a00fe2be4",
+   "stage": "ir",
+   "tool": {
+    "id": "odin3",
+    "version": "odin3 1.4.0 (ABI 7)"
+   }
+  },
+  {
+   "count": 17,
+   "file": "03-map.json",
+   "id": "map",
+   "needs": [
+    "elab"
+   ],
+   "objects": "03-map.objects.jsonl",
+   "objects_sha256": "350245d099a3f63b7f4d011f31652b9fa3cb90f3ce0fa689c8138ce620570d8f",
+   "sha256": "7983aef6dab169533f8f164bcd58fdff30c6b3bfb2f778592de26d640c36d58d",
+   "stage": "gates",
+   "tool": {
+    "id": "odin3",
+    "version": "odin3 1.4.0 (ABI 7)"
+   }
+  },
+  {
+   "count": 0,
+   "file": "04-equiv.json",
+   "id": "equiv",
+   "needs": [
+    "map"
+   ],
+   "objects": null,
+   "objects_sha256": null,
+   "sha256": "44c964da576153c83cb61cd5ad32c98067e52c357ec9bee2e3f0924b3aeea9ba",
+   "stage": "gates",
+   "tool": {
+    "id": "equiv-check",
+    "version": ""
+   }
+  },
+  {
+   "count": 0,
+   "file": "05-netlist.json",
+   "id": "netlist",
+   "needs": [
+    "map"
+   ],
+   "objects": null,
+   "objects_sha256": null,
+   "sha256": "360efe108f40d8b37ce78c8044fafd197c1e343ef86c274ac45082bec587ed95",
+   "stage": "gates",
+   "tool": {
+    "id": "clean_netlist",
+    "version": ""
+   }
+  },
+  {
+   "count": 20,
+   "file": "06-place.json",
+   "id": "place",
+   "needs": [
+    "netlist"
+   ],
+   "objects": "06-place.objects.jsonl",
+   "objects_sha256": "fece35e2eded9796bbcbaa34e5984d925a1db173257a306b2a3818b15557aa6c",
+   "sha256": "24e96a89e90064ebd24e25c612d287cbc91f24ba6474cfd34d8ec457d8b45b1a",
+   "stage": "placed",
+   "tool": {
+    "id": "openroad",
+    "version": "f12e2f474102bfb875eeee57fb610d7d7de17770"
+   }
+  },
+  {
+   "count": 46,
+   "file": "07-route.json",
+   "id": "route",
+   "needs": [
+    "place"
+   ],
+   "objects": "07-route.objects.jsonl",
+   "objects_sha256": "784241032bd98671ebef9061217eab0b1fc76e00fb5474fce889f22e21a3a488",
+   "sha256": "3d9c78eeca4ed1a0ee2b4290e7db53a198062fba9a86329e688ee5836a6f0ae9",
+   "stage": "routed",
+   "tool": {
+    "id": "openroad",
+    "version": "f12e2f474102bfb875eeee57fb610d7d7de17770"
+   }
+  },
+  {
+   "count": 46,
+   "file": "08-gds.json",
+   "id": "gds",
+   "needs": [
+    "route"
+   ],
+   "objects": "08-gds.objects.jsonl",
+   "objects_sha256": "0fbde87b693e6eb5a85d0b64102768507ca5584a397084a4cbd0d0ec8829e500",
+   "sha256": "b3a1a1ba26436b4cd69ad9b126d0fb038c56018a3e478151e8d3c070e7f3b262",
+   "stage": "gds",
+   "tool": {
+    "id": "klayout",
+    "version": ""
+   }
+  },
+  {
+   "count": 46,
+   "file": "09-extract.json",
+   "id": "extract",
+   "needs": [
+    "gds"
+   ],
+   "objects": "09-extract.objects.jsonl",
+   "objects_sha256": "3272108588b003f8b2303bcdf02293d0918eeaf8a9ee7fd2c2ec4f9282aca809",
+   "sha256": "5023423071ad4e8e06655552266883d579288d516075c8052328b900b70159a0",
+   "stage": "extracted",
+   "tool": {
+    "id": "magic",
+    "version": "8.3.465"
+   }
+  },
+  {
+   "count": 0,
+   "file": "10-lvs.json",
+   "id": "lvs",
+   "needs": [
+    "extract"
+   ],
+   "objects": null,
+   "objects_sha256": null,
+   "sha256": "38f03d93cecdc883d585baba483584f2ae4b3cff09cc7a6ab78d52fdec368e14",
+   "stage": "extracted",
+   "tool": {
+    "id": "netgen",
+    "version": "Netgen 1.5.272 compiled on Tue Mar  5 23:16:53 UTC 2024"
+   }
+  },
+  {
+   "count": 46,
+   "file": "11-recover.json",
+   "id": "recover",
+   "needs": [
+    "extract"
+   ],
+   "objects": "11-recover.objects.jsonl",
+   "objects_sha256": "322fe0d6253b8a6bd506ea1301de1b161656ab78a4f4559e1ecf298d1ad07e52",
+   "sha256": "ca129d2cbfa81dcd645c0b524fdcc85bf4e8d4d3e3cb8084ebaaf08ba492e1af",
+   "stage": "recovered",
+   "tool": {
+    "id": "join",
+    "version": ""
+   }
+  }
+ ],
+ "tools": [
+  {
+   "id": "openroad",
+   "path_alias": "",
+   "version": "f12e2f474102bfb875eeee57fb610d7d7de17770"
+  },
+  {
+   "id": "magic",
+   "path_alias": "",
+   "version": "8.3.465"
+  },
+  {
+   "id": "netgen",
+   "path_alias": "",
+   "version": "Netgen 1.5.272 compiled on Tue Mar  5 23:16:53 UTC 2024"
+  },
+  {
+   "id": "odin3",
+   "path_alias": "",
+   "version": "odin3 1.4.0 (ABI 7)"
+  }
+ ],
+ "top": "bm_DL_4_bit_comparator"
+}

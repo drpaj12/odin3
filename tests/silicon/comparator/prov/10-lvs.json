@@ -1,0 +1,29 @@
+{
+ "census": null,
+ "check": {
+  "detail": "Final result: Circuits match uniquely.",
+  "name": "netgen_lvs",
+  "result": "match"
+ },
+ "counts": {
+  "by_kind": {},
+  "by_link_kind": {},
+  "by_origin": {},
+  "objects": 0
+ },
+ "inputs": [],
+ "links": [],
+ "map": null,
+ "needs": [
+  "extract"
+ ],
+ "objects_file": null,
+ "outputs": [],
+ "schema": 1,
+ "stage": "extracted",
+ "step": "lvs",
+ "tool": {
+  "id": "netgen",
+  "version": "Netgen 1.5.272 compiled on Tue Mar  5 23:16:53 UTC 2024"
+ }
+}

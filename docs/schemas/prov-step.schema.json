@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prov-step.schema.json",
+  "title": "Odin III provenance step header (prov/NN-step.json)",
+  "type": "object",
+  "required": [
+    "schema",
+    "step",
+    "stage",
+    "tool",
+    "objects_file",
+    "needs",
+    "inputs",
+    "outputs",
+    "links",
+    "counts",
+    "census",
+    "check",
+    "map"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "step": {
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "hdl",
+        "ir",
+        "gates",
+        "luts",
+        "packed",
+        "placed",
+        "routed",
+        "gds",
+        "extracted",
+        "recovered"
+      ]
+    },
+    "tool": {
+      "type": "object",
+      "required": [
+        "id",
+        "version"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "objects_file": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "needs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "inputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "path"
+        ]
+      }
+    },
+    "outputs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "role",
+          "path"
+        ]
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "from_step",
+          "kind",
+          "confidence"
+        ],
+        "properties": {
+          "from_step": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "id",
+              "name",
+              "cone",
+              "fine",
+              "join",
+              "resize",
+              "physical_origin",
+              "location_match",
+              "structural_match"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "exact",
+              "high",
+              "medium",
+              "low",
+              "ambiguous"
+            ]
+          }
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "required": [
+        "objects",
+        "by_kind",
+        "by_origin",
+        "by_link_kind"
+      ],
+      "properties": {
+        "objects": {
+          "type": "integer"
+        }
+      }
+    },
+    "census": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "check": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        }
+      }
+    },
+    "map": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

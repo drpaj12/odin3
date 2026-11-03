@@ -1,0 +1,50 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "cell": 17
+  },
+  "by_link_kind": {
+   "cone": 570
+  },
+  "by_origin": {
+   "hdl": 17
+  },
+  "objects": 17
+ },
+ "inputs": [],
+ "links": [
+  {
+   "confidence": "medium",
+   "from_step": "elab",
+   "key": "src",
+   "kind": "cone",
+   "scope": null
+  }
+ ],
+ "map": null,
+ "needs": [
+  "elab"
+ ],
+ "objects_file": "03-map.objects.jsonl",
+ "outputs": [
+  {
+   "path": "gates.blif",
+   "role": "blif",
+   "sha256": "f9b7491d17c8472f4c39a5e47ea15cb05d99538f9d16840597f732f18829a07c"
+  },
+  {
+   "path": "g.v",
+   "role": "v",
+   "sha256": "e0f9b4b85b9763371f6ad015f2386afe3e809f03f0b36272a4b7cea950b09e41"
+  }
+ ],
+ "schema": 1,
+ "stage": "gates",
+ "step": "map",
+ "tool": {
+  "id": "odin3",
+  "version": "odin3 1.4.0 (ABI 7)"
+ }
+}

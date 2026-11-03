@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "prov-object.schema.json",
+  "title": "Odin III provenance object (one line of prov/NN-step.objects.jsonl)",
+  "type": "object",
+  "required": [
+    "id",
+    "stage",
+    "kind",
+    "name",
+    "origin",
+    "links"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z]+:.+"
+    },
+    "stage": {
+      "enum": [
+        "hdl",
+        "ir",
+        "gates",
+        "luts",
+        "packed",
+        "placed",
+        "routed",
+        "gds",
+        "extracted",
+        "recovered"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "module",
+        "block",
+        "stmt",
+        "net",
+        "port",
+        "cell",
+        "lut",
+        "ble",
+        "clb",
+        "site",
+        "device"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "type": {
+      "type": "string"
+    },
+    "origin": {
+      "type": "string",
+      "pattern": "^(hdl|unknown|physical:[a-z_]+)$"
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "to",
+          "kind",
+          "confidence"
+        ],
+        "properties": {
+          "to": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "id",
+              "name",
+              "cone",
+              "fine",
+              "join",
+              "resize",
+              "physical_origin",
+              "location_match",
+              "structural_match"
+            ]
+          },
+          "confidence": {
+            "enum": [
+              "exact",
+              "high",
+              "medium",
+              "low",
+              "ambiguous"
+            ]
+          }
+        }
+      }
+    },
+    "attrs": {
+      "type": "object"
+    },
+    "src": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "file",
+          "span"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "span": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "recs": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

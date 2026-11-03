@@ -26,22 +26,22 @@ def run(argv: list[str]) -> subprocess.CompletedProcess[str]:
 
 class VersionTest(unittest.TestCase):
     @unittest.skipUnless(CLI, "ODIN3_CLI not set (run CTest python_tools)")
-    def test_version_is_1_3_0(self) -> None:
+    def test_version_is_1_4_0(self) -> None:
         out = run([CLI, "--version"])
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertRegex(out.stdout, r"^odin3 1\.3\.0 \(ABI \d+\)\n")
+        self.assertRegex(out.stdout, r"^odin3 1\.4\.0 \(ABI \d+\)\n")
         self.assertRegex(out.stdout.split("\n")[1], r"^commit ([0-9a-f]{40}|unknown)(-dirty)?$")
 
-    def test_header_version_is_1_3_0(self) -> None:
+    def test_header_version_is_1_4_0(self) -> None:
         # odin3_version_string() is built from these three macros (src/api/version.c).
         header = (helpers.REPO_ROOT / "include" / "odin3" / "odin3.h").read_text()
         parts = [re.search(rf"#define ODIN3_VERSION_{name} (\d+)", header)
                  for name in ("MAJOR", "MINOR", "PATCH")]
-        self.assertEqual([m.group(1) if m else None for m in parts], ["1", "3", "0"])
+        self.assertEqual([m.group(1) if m else None for m in parts], ["1", "4", "0"])
 
-    def test_pyproject_version_is_1_3_0(self) -> None:
+    def test_pyproject_version_is_1_4_0(self) -> None:
         text = (helpers.REPO_ROOT / "pyproject.toml").read_text()
-        self.assertRegex(text, r'(?m)^version = "1\.3\.0"$')
+        self.assertRegex(text, r'(?m)^version = "1\.4\.0"$')
 
 
 @unittest.skipUnless(CLI, "ODIN3_CLI not set (run CTest python_tools)")
@@ -64,7 +64,7 @@ class InstallTreeTest(unittest.TestCase):
             # The installed CLI runs without the build tree (RPATH to ../lib).
             ver = run([str(prefix / "bin" / "odin3"), "--version"])
             self.assertEqual(ver.returncode, 0, ver.stderr)
-            self.assertIn("odin3 1.3.0", ver.stdout)
+            self.assertIn("odin3 1.4.0", ver.stdout)
 
 
 class TarballTest(unittest.TestCase):
@@ -74,7 +74,7 @@ class TarballTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             out = run([str(MAKE_TARBALL), "--out", tmp])
             self.assertEqual(out.returncode, 0, out.stderr[-500:])
-            tarball = Path(tmp) / "odin3-1.3.0.tar.gz"
+            tarball = Path(tmp) / "odin3-1.4.0.tar.gz"
             sums = Path(tmp) / "SHA256SUMS"
             self.assertTrue(tarball.is_file())
             self.assertTrue(sums.is_file())
@@ -84,12 +84,12 @@ class TarballTest(unittest.TestCase):
                 names = tar.getnames()
             for prefix in ("third_party/abc/", "third_party/unity/"):
                 self.assertTrue(
-                    any(n.startswith(f"odin3-1.3.0/{prefix}") and n.endswith(".c")
+                    any(n.startswith(f"odin3-1.4.0/{prefix}") and n.endswith(".c")
                         for n in names), prefix)
-            self.assertIn("odin3-1.3.0/CMakeLists.txt", names)
+            self.assertIn("odin3-1.4.0/CMakeLists.txt", names)
             with tarfile.open(tarball) as tar:
                 for sub in ("abc", "unity"):
-                    stamp = tar.extractfile(f"odin3-1.3.0/third_party/{sub}/.odin3-commit")
+                    stamp = tar.extractfile(f"odin3-1.4.0/third_party/{sub}/.odin3-commit")
                     assert stamp is not None
                     sha = run(["git", "-C", str(helpers.REPO_ROOT / "third_party" / sub),
                                "rev-parse", "HEAD"]).stdout.strip()

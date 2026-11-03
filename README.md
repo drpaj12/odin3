@@ -11,19 +11,19 @@ object in the output can be traced to the HDL text it came from.
 one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
 Verilog-2005, BLIF, Yosys JSON, structural Verilog) -> two-stage elaboration -> `proc`, `opt`, `fsm`, `wreduce`, `flatten`
 (re-implementing Yosys 0.55 behaviour) -> architecture-driven partial mapping and ABC -> BLIF for VPR or LPM Verilog.
-Since v1.0 it also has graph features (graphlet orbit counts, SCOAP), a netlist editing API, a cycle simulator with testbench
+Version 1.4 adds a silicon flow (Odin III to a routed SKY130 layout and back, with no Yosys in the path) and provenance step files at every stage, for the LUT/VTR flows as well. Since v1.0 it also has graph features (graphlet orbit counts, SCOAP), a netlist editing API, a cycle simulator with testbench
 support, and processor-netlist handling. Headline result (paper, [`docs/paper/`](docs/paper/README.md)): every netlist it
 produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
 
-**Status: version 1.3.0 (tag on the merge commit; the latest tagged release is 1.2.0).** Version 1.2.0 added provenance at every granularity; 1.3.0 adds netlist editing, simulation toggle counting, graphlets and front-end fixes, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
-Release notes: [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
+**Status: version 1.4.0 (unreleased; tag after merge; the latest tagged release is 1.3.0).** Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+Release notes: [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
 
-Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.3.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
+Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.4.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 ## Documentation
 
@@ -44,7 +44,7 @@ Start at the Yggdrasil III hub; every manual links to the others.
 
 ## Features
 
-Version 1.3.0 on `main` (C ABI 7). Status: **works** = on `main` with tests; **limit** = works with a documented limit.
+Version 1.4.0 on this branch (C ABI 7). Status: **works** = on `main` with tests; **limit** = works with a documented limit.
 Each line points to the manual page; the pass table is [`docs/PASSES.md`](docs/PASSES.md) and the changes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -54,6 +54,9 @@ Each line points to the manual page; the pass table is [`docs/PASSES.md`](docs/P
 | Elaboration, `proc`, `opt`, `fsm`, `flatten`, `wreduce`, architecture-driven partial mapping (`hardmap`), `lower`, ABC for soft logic, LPM mapping, `dfflibmap`, `unmap` | works | [passes](docs/user/passes.md), [flow](docs/user/flow.md) |
 | One-command flow `odin3-flow` to a routed VPR result or LPM Verilog | works | [odin3-flow](docs/user/odin3-flow.md) |
 | Outputs: BLIF (plain and `--vtr`; `--reachable` writes the top and what it reaches; modules `flatten` left unused are not written and `=` in model and `.subckt` names is written `?`, so ABC can read hierarchical netlists), Yosys JSON, Verilog, dot, RTLIL | works | [outputs](docs/user/outputs.md) |
+| Silicon flow (v1.4): Odin III maps to SKY130 `sky130_fd_sc_hd` cells (`abc --gates`, `dfflibmap`), OpenROAD (own Tcl, no Yosys) places and routes, KLayout writes GDS, Magic extracts, Netgen checks LVS, a name-free join takes extracted cells back to the HDL; OpenROAD, Magic, Netgen, KLayout and the PDK are optional user-space tools | works on two small designs (limits in the manual) | [silicon-flow](docs/user/silicon-flow.md) |
+| Provenance step files (v1.4): a machine-readable manifest per flow step (HDL, IR, gates or LUTs, placed, routed, GDS, extracted, recovered) with links to the previous stage, JSON Schemas, written by the silicon flow and by `odin3-flow --prov`; Loki reads them | works | [provenance-files](docs/user/provenance-files.md) |
+| Flows in the project file (v1.4): `schema 2`, `tool`, `flowdef`, `step`, `provlink`, `flow-var`; schema 1 files load unchanged | works | [project-flows](docs/user/project-flows.md) |
 | Provenance at every granularity: each output object traces to its HDL text, as a two-way granularity chain with labelled joins, readable from C and Python, with `names` look-ups and the map format | works | [provenance](docs/user/provenance.md) |
 | Hierarchical references: a dotted path into another module is an undriven net with a WARNING (as Yosys); generate-block and named-block references resolve | works (limits listed in CHANGELOG 1.3.0) | [inputs](docs/user/inputs.md), `docs/notes/2026-11-02-hierarchical-references.md` |
 | `$tribuf` sole-driver rule in `lower`: when a `$tribuf` is the only driver of its output the enable is dropped with a WARNING; a bus or other cases stay a located error | works | [passes](docs/user/passes.md), `docs/specs/2026-10-14-3B-lower-design.md` |
@@ -80,19 +83,19 @@ From source (Ubuntu 24.04, native or WSL2; CMake 3.28 or later for the default
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git && cd odin3
 cmake --preset release && cmake --build --preset release
-cmake --install build/release --prefix "$HOME/odin3-1.3.0"
+cmake --install build/release --prefix "$HOME/odin3-1.4.0"
 ```
 
 Or from the release's source tarball, which carries the ABC and Unity submodules and needs no git:
 
 ```sh
-tar xzf odin3-1.3.0.tar.gz && cd odin3-1.3.0
+tar xzf odin3-1.4.0.tar.gz && cd odin3-1.4.0
 cmake --preset release && cmake --build --preset release
-cmake --install build/release --prefix "$HOME/odin3-1.3.0"
+cmake --install build/release --prefix "$HOME/odin3-1.4.0"
 ```
 
 Or the Python wheel from the GitHub release (bundles `libodin3`, ABC, the `odin3` CLI and
-`odin3-flow`): `pip install odin3-1.3.0-py3-none-linux_x86_64.whl`.
+`odin3-flow`): `pip install odin3-1.4.0-py3-none-linux_x86_64.whl`.
 
 Then follow the manual's getting-started page: one command, `odin3-flow`, takes a Verilog design
 to a routed VPR result (with `VTR_ROOT` set) or to LPM Verilog.

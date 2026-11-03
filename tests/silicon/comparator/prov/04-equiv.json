@@ -1,0 +1,29 @@
+{
+ "census": null,
+ "check": {
+  "detail": "equiv-check: equivalent (abc cec)",
+  "name": "equiv-check",
+  "result": "equivalent"
+ },
+ "counts": {
+  "by_kind": {},
+  "by_link_kind": {},
+  "by_origin": {},
+  "objects": 0
+ },
+ "inputs": [],
+ "links": [],
+ "map": null,
+ "needs": [
+  "map"
+ ],
+ "objects_file": null,
+ "outputs": [],
+ "schema": 1,
+ "stage": "gates",
+ "step": "equiv",
+ "tool": {
+  "id": "equiv-check",
+  "version": ""
+ }
+}

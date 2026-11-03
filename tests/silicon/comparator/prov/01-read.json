@@ -1,0 +1,33 @@
+{
+ "census": null,
+ "check": null,
+ "counts": {
+  "by_kind": {
+   "stmt": 10
+  },
+  "by_link_kind": {},
+  "by_origin": {
+   "hdl": 10
+  },
+  "objects": 10
+ },
+ "inputs": [
+  {
+   "path": "bm_DL_4_bit_comparator.v",
+   "role": "design",
+   "sha256": "5ecc1423e461df6c75f0cc84e670b29f4f158e84df8451b289897598cb15f337"
+  }
+ ],
+ "links": [],
+ "map": null,
+ "needs": [],
+ "objects_file": "01-read.objects.jsonl",
+ "outputs": [],
+ "schema": 1,
+ "stage": "hdl",
+ "step": "read",
+ "tool": {
+  "id": "odin3",
+  "version": "odin3 1.4.0 (ABI 7)"
+ }
+}

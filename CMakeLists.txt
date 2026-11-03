@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(odin3 VERSION 1.3.0 LANGUAGES C)
+project(odin3 VERSION 1.4.0 LANGUAGES C)
 
 # --- Options -----------------------------------------------------------------
 option(ODIN3_WITH_ABC "Build third_party/abc (libabc-pic, the abc tool; the adapter from 3D-2)"
@@ -618,10 +618,16 @@ install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
               tools/flow/timing_report.py tools/flow/name_map_v2.py tools/flow/prov_post.py
               tools/flow/prov_why.py tools/flow/runrecord.py tools/flow/flow_record.py
+              tools/flow/prov_steps.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
-install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post
+install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post tools/flow/odin3-prov-steps
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
+install(FILES tools/silicon/silicon_flow.py tools/silicon/klayout_gds.py
+              tools/silicon/liberty_to_o3lib.py tools/silicon/schema_check.py
+              tools/silicon/openroad_flow.tcl tools/silicon/magic_extract.tcl
+        DESTINATION ${_odin3_share_dir}/tools/silicon)
+install(FILES tools/equiv-check/equiv_check.py DESTINATION ${_odin3_share_dir}/tools/equiv-check)
 
 # --- Plugins --------------------------------------------------------------------
 add_library(example_plugin MODULE plugins/example_c/example_plugin.c)
@@ -1738,6 +1744,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_project_quartus PRIVATE
         ODIN3_QUARTUS_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/quartus")
     odin3_add_unit_test(test_project_testbench)
+    odin3_add_unit_test(test_project_flows)
     odin3_add_unit_test(test_project_o3proj)
     target_compile_definitions(test_project_o3proj PRIVATE
         ODIN3_O3PROJ_DATA="${PROJECT_SOURCE_DIR}/tests/unit/data/project/o3proj")
@@ -2885,6 +2892,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     # ODIN3_BENCH_PROC: test_bench_proc_report's check that a Debug bench_proc refuses to run.
     list(APPEND _tools_env "ODIN3_BENCH_PROC=$<TARGET_FILE:bench_proc>")
     set_tests_properties(python_tools PROPERTIES LABELS tools ENVIRONMENT "${_tools_env}")
+    # v1.4 silicon flow (docs/user/silicon-flow.md): the full Odin III to GDS run of two micros.
+    # Needs OpenROAD, Magic, Netgen, KLayout and the sky130A PDK (ODIN3_SILICON_TOOLS names the
+    # user-space tools directory); without them unittest skips and the test is reported skipped.
+    set(ODIN3_SILICON_TOOLS "$ENV{ODIN3_SILICON_TOOLS}" CACHE PATH
+        "User-space silicon tools directory for the silicon_flow test (empty: it skips)")
+    add_test(NAME silicon_flow
+        COMMAND ${Python3_EXECUTABLE} -m unittest tests.tools.test_silicon.FullFlowTest -v
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(silicon_flow PROPERTIES LABELS silicon TIMEOUT 1800
+        SKIP_REGULAR_EXPRESSION "skipped"
+        ENVIRONMENT "ODIN3_CLI=$<TARGET_FILE:odin3>;ODIN3_SILICON_TOOLS=${ODIN3_SILICON_TOOLS}")
     # Phase 7 Task 11: build the pip wheel (compiles ABC) in a temp venv, install it in a fresh
     # one and read a BLIF through it. Needs network for the pinned build tools.
     odin3_add_sweep_test(wheel_build LABEL sweep

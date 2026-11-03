@@ -45,6 +45,8 @@ static const vec_slot k_vecs[] = {
     {offsetof(odin3_project, overrides), sizeof(odin3_proj_override)},
     {offsetof(odin3_project, override_params), sizeof(odin3_proj_kv)},
     {offsetof(odin3_project, testbenches), sizeof(odin3_proj_testbench)},
+    {offsetof(odin3_project, flowrecs), sizeof(odin3_proj_flowrec)},
+    {offsetof(odin3_project, flowwords), sizeof(uint32_t)},
     {offsetof(odin3_project, ignored), sizeof(uint32_t)},
     {offsetof(odin3_project, duplicates), sizeof(uint32_t)},
 };
@@ -108,6 +110,7 @@ static const char *const k_kind_names[] = {
     "unknown_revision",
     "include_not_found",
     "include_cycle",
+    "unsupported_schema",
 };
 
 const char *odin3_proj_err_kind_name(odin3_proj_err_kind kind) {
@@ -778,6 +781,18 @@ odin3_status odin3_project_add_testbench(odin3_project *proj, const odin3_proj_t
         }
     }
     return push_copy(&proj->testbenches, tb);
+}
+
+odin3_status odin3_project_add_flowrec(odin3_project *proj, odin3_proj_flowrec_kind kind,
+                                       const uint32_t *words, uint32_t count, odin3_loc at) {
+    odin3_proj_flowrec rec = {(uint8_t)kind, (uint32_t)proj->flowwords.len, count, at};
+    for (uint32_t i = 0; i < count; i++) {
+        odin3_status st = push_id(&proj->flowwords, words[i]);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return push_copy(&proj->flowrecs, &rec);
 }
 
 odin3_status odin3_project_add_ignored(odin3_project *proj, odin3_bytes name) {
