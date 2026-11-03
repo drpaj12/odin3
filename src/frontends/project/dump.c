@@ -448,8 +448,8 @@ static str_view id_bytes(const json *jw, uint32_t str) {
 }
 
 static bool id_is(const json *jw, uint32_t str, const char *text) {
-    str_view b = id_bytes(jw, str);
-    return b.len == strlen(text) && memcmp(b.ptr, text, b.len) == 0;
+    str_view sv = id_bytes(jw, str);
+    return sv.len == strlen(text) && memcmp(sv.ptr, text, sv.len) == 0;
 }
 
 static const uint32_t *rec_words(const json *jw, const odin3_proj_flowrec *rec) {
@@ -459,33 +459,38 @@ static const uint32_t *rec_words(const json *jw, const odin3_proj_flowrec *rec) 
 /* The word after keyword kw (from position first on), if there is one. */
 static bool kw_value(const json *jw, const odin3_proj_flowrec *rec, uint32_t first, const char *kw,
                      uint32_t *value) {
-    const uint32_t *w = rec_words(jw, rec);
+    const uint32_t *wd = rec_words(jw, rec);
     for (uint32_t i = first; i + 1 < rec->count; i += 2) {
-        if (id_is(jw, w[i], kw)) {
-            *value = w[i + 1];
+        if (id_is(jw, wd[i], kw)) {
+            *value = wd[i + 1];
             return true;
         }
     }
     return false;
 }
 
-static void optional_kw(json *jw, const odin3_proj_flowrec *rec, uint32_t first, const char *kw,
-                        const char *field_name) {
+/* A keyword of a statement and the JSON field its value is written to. */
+typedef struct kw_field {
+    const char *kw;
+    const char *field;
+} kw_field;
+
+static void optional_kw(json *jw, const odin3_proj_flowrec *rec, uint32_t first, kw_field kf) {
     uint32_t value = 0;
-    key(jw, field_name, false);
-    bool present = kw_value(jw, rec, first, kw, &value);
+    key(jw, kf.field, false);
+    bool present = kw_value(jw, rec, first, kf.kw, &value);
     string_or_null(jw, present, value);
 }
 
 /* A comma list as a JSON array of strings. */
 static void comma_list(json *jw, uint32_t str) {
-    str_view b = id_bytes(jw, str);
+    str_view sv = id_bytes(jw, str);
     size_t start = 0;
     raw(jw, "[");
-    for (size_t i = 0; i <= b.len; i++) {
-        if (i == b.len || b.ptr[i] == ',') {
+    for (size_t i = 0; i <= sv.len; i++) {
+        if (i == sv.len || sv.ptr[i] == ',') {
             raw(jw, start > 0 ? ", " : "");
-            string_bytes(jw, b.ptr + start, i - start);
+            string_bytes(jw, sv.ptr + start, i - start);
             start = i + 1;
         }
     }
@@ -494,24 +499,24 @@ static void comma_list(json *jw, uint32_t str) {
 
 /* The  words after keyword kw, as [{"role", "path"}]. */
 static void role_paths(json *jw, const odin3_proj_flowrec *rec, const char *kw) {
-    const uint32_t *w = rec_words(jw, rec);
+    const uint32_t *wd = rec_words(jw, rec);
     bool first = true;
     raw(jw, "[");
     for (uint32_t i = 2; i + 1 < rec->count; i += 2) {
-        if (!id_is(jw, w[i], kw)) {
+        if (!id_is(jw, wd[i], kw)) {
             continue;
         }
-        str_view b = id_bytes(jw, w[i + 1]);
+        str_view sv = id_bytes(jw, wd[i + 1]);
         size_t eq = 0;
-        while (eq < b.len && b.ptr[eq] != '=') {
+        while (eq < sv.len && sv.ptr[eq] != '=') {
             eq++;
         }
         raw(jw, first ? "{" : ", {");
         first = false;
         key(jw, "role", true);
-        string_bytes(jw, b.ptr, eq);
+        string_bytes(jw, sv.ptr, eq);
         key(jw, "path", false);
-        string_bytes(jw, b.ptr + eq + 1, b.len - eq - 1);
+        string_bytes(jw, sv.ptr + eq + 1, sv.len - eq - 1);
         raw(jw, "}");
     }
     raw(jw, "]");
@@ -520,34 +525,34 @@ static void role_paths(json *jw, const odin3_proj_flowrec *rec, const char *kw) 
 static void write_provlink(json *jw, const odin3_proj_flowrec *rec) {
     raw(jw, "{");
     key(jw, "from", true);
-    uint32_t v = 0;
-    (void)kw_value(jw, rec, 2, "from", &v);
-    string_id(jw, v);
+    uint32_t val = 0;
+    (void)kw_value(jw, rec, 2, "from", &val);
+    string_id(jw, val);
     key(jw, "kind", false);
-    (void)kw_value(jw, rec, 2, "kind", &v);
-    string_id(jw, v);
-    optional_kw(jw, rec, 2, "key", "key");
-    optional_kw(jw, rec, 2, "scope", "scope");
-    optional_kw(jw, rec, 2, "confidence", "confidence");
+    (void)kw_value(jw, rec, 2, "kind", &val);
+    string_id(jw, val);
+    optional_kw(jw, rec, 2, (kw_field){"key", "key"});
+    optional_kw(jw, rec, 2, (kw_field){"scope", "scope"});
+    optional_kw(jw, rec, 2, (kw_field){"confidence", "confidence"});
     raw(jw, "}");
 }
 
 static void write_step(json *jw, const odin3_proj_flowrec *rec) {
-    const uint32_t *w = rec_words(jw, rec);
+    const uint32_t *wd = rec_words(jw, rec);
     const odin3_vec *recs = &jw->proj->flowrecs;
-    uint32_t v = 0;
+    uint32_t val = 0;
     raw(jw, "{");
     key(jw, "id", true);
-    string_id(jw, w[1]);
+    string_id(jw, wd[1]);
     key(jw, "stage", false);
-    (void)kw_value(jw, rec, 2, "stage", &v);
-    string_id(jw, v);
+    (void)kw_value(jw, rec, 2, "stage", &val);
+    string_id(jw, val);
     key(jw, "tool", false);
-    (void)kw_value(jw, rec, 2, "tool", &v);
-    string_id(jw, v);
+    (void)kw_value(jw, rec, 2, "tool", &val);
+    string_id(jw, val);
     key(jw, "needs", false);
-    if (kw_value(jw, rec, 2, "needs", &v)) {
-        comma_list(jw, v);
+    if (kw_value(jw, rec, 2, "needs", &val)) {
+        comma_list(jw, val);
     } else {
         raw(jw, "[]");
     }
@@ -555,14 +560,14 @@ static void write_step(json *jw, const odin3_proj_flowrec *rec) {
     role_paths(jw, rec, "in");
     key(jw, "out", false);
     role_paths(jw, rec, "out");
-    optional_kw(jw, rec, 2, "args", "args");
+    optional_kw(jw, rec, 2, (kw_field){"args", "args"});
     key(jw, "provlinks", false);
     raw(jw, "[");
     bool first = true;
     for (size_t i = 0; i < recs->len; i++) {
         const odin3_proj_flowrec *pl = odin3_vec_cat(recs, i);
         const uint32_t *pw = rec_words(jw, pl);
-        if (pl->kind == ODIN3_PROJ_FLOW_PROVLINK && pw[0] == w[0] && pw[1] == w[1]) {
+        if (pl->kind == ODIN3_PROJ_FLOW_PROVLINK && pw[0] == wd[0] && pw[1] == wd[1]) {
             raw(jw, first ? "" : ", ");
             first = false;
             write_provlink(jw, pl);
@@ -572,35 +577,35 @@ static void write_step(json *jw, const odin3_proj_flowrec *rec) {
 }
 
 static void write_tool(json *jw, const odin3_proj_flowrec *rec) {
-    const uint32_t *w = rec_words(jw, rec);
+    const uint32_t *wd = rec_words(jw, rec);
     raw(jw, "{");
     key(jw, "id", true);
-    string_id(jw, w[0]);
+    string_id(jw, wd[0]);
     key(jw, "required", false);
-    raw(jw, id_is(jw, w[1], "required") ? "true" : "false");
+    raw(jw, id_is(jw, wd[1], "required") ? "true" : "false");
     key(jw, "exe", false);
-    string_id(jw, w[2]);
-    optional_kw(jw, rec, 3, "version-arg", "version_arg");
-    optional_kw(jw, rec, 3, "module", "module");
-    optional_kw(jw, rec, 3, "env", "env");
+    string_id(jw, wd[2]);
+    optional_kw(jw, rec, 3, (kw_field){"version-arg", "version_arg"});
+    optional_kw(jw, rec, 3, (kw_field){"module", "module"});
+    optional_kw(jw, rec, 3, (kw_field){"env", "env"});
     raw(jw, "}");
 }
 
 static void write_flow(json *jw, const odin3_proj_flowrec *rec) {
-    const uint32_t *w = rec_words(jw, rec);
+    const uint32_t *wd = rec_words(jw, rec);
     const odin3_vec *recs = &jw->proj->flowrecs;
     raw(jw, "{");
     key(jw, "name", true);
-    string_id(jw, w[0]);
+    string_id(jw, wd[0]);
     key(jw, "description", false);
-    string_or_null(jw, rec->count == 3, rec->count == 3 ? w[2] : 0);
+    string_or_null(jw, rec->count == 3, rec->count == 3 ? wd[2] : 0);
     key(jw, "vars", false);
     raw(jw, "{");
     bool first = true;
     for (size_t i = 0; i < recs->len; i++) {
         const odin3_proj_flowrec *vr = odin3_vec_cat(recs, i);
         const uint32_t *vw = rec_words(jw, vr);
-        if (vr->kind == ODIN3_PROJ_FLOW_VAR && vw[0] == w[0]) {
+        if (vr->kind == ODIN3_PROJ_FLOW_VAR && vw[0] == wd[0]) {
             raw(jw, first ? "" : ", ");
             first = false;
             string_id(jw, vw[1]);
@@ -614,7 +619,7 @@ static void write_flow(json *jw, const odin3_proj_flowrec *rec) {
     first = true;
     for (size_t i = 0; i < recs->len; i++) {
         const odin3_proj_flowrec *sr = odin3_vec_cat(recs, i);
-        if (sr->kind == ODIN3_PROJ_FLOW_STEP && rec_words(jw, sr)[0] == w[0]) {
+        if (sr->kind == ODIN3_PROJ_FLOW_STEP && rec_words(jw, sr)[0] == wd[0]) {
             raw(jw, first ? "" : ", ");
             first = false;
             write_step(jw, sr);
@@ -623,30 +628,32 @@ static void write_flow(json *jw, const odin3_proj_flowrec *rec) {
     raw(jw, "]}");
 }
 
+typedef void (*rec_writer)(json *jw, const odin3_proj_flowrec *rec);
+
+/* `"name": [...]`, the statements of one kind written by write. */
+static void dump_kind(json *jw, const char *name, odin3_proj_flowrec_kind kind, rec_writer write) {
+    const odin3_vec *recs = &jw->proj->flowrecs;
+    field(jw, name);
+    raw(jw, "[");
+    bool first = true;
+    for (size_t i = 0; i < recs->len; i++) {
+        const odin3_proj_flowrec *rec = odin3_vec_cat(recs, i);
+        if (rec->kind == kind) {
+            raw(jw, first ? "" : ", ");
+            first = false;
+            write(jw, rec);
+        }
+    }
+    raw(jw, "],\n");
+}
+
 /* Schema 2 files only: "schema", "tools" and "flows" (a schema 1 file dumps as before). */
 static void dump_flows(json *jw) {
-    const odin3_vec *recs = &jw->proj->flowrecs;
     field(jw, "schema");
     number(jw, jw->proj->schema);
     raw(jw, ",\n");
-    for (int pass = 0; pass < 2; pass++) {
-        field(jw, pass == 0 ? "tools" : "flows");
-        raw(jw, "[");
-        bool first = true;
-        for (size_t i = 0; i < recs->len; i++) {
-            const odin3_proj_flowrec *rec = odin3_vec_cat(recs, i);
-            if (rec->kind == (pass == 0 ? ODIN3_PROJ_FLOW_TOOL : ODIN3_PROJ_FLOW_DEF)) {
-                raw(jw, first ? "" : ", ");
-                first = false;
-                if (pass == 0) {
-                    write_tool(jw, rec);
-                } else {
-                    write_flow(jw, rec);
-                }
-            }
-        }
-        raw(jw, "],\n");
-    }
+    dump_kind(jw, "tools", ODIN3_PROJ_FLOW_TOOL, write_tool);
+    dump_kind(jw, "flows", ODIN3_PROJ_FLOW_DEF, write_flow);
 }
 
 odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {

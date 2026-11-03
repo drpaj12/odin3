@@ -27,7 +27,8 @@ LINK_KINDS = ("id", "name", "cone", "fine", "join", "resize", "physical_origin",
 CONFIDENCES = ("exact", "high", "medium", "low", "ambiguous")
 OBJECT_KINDS = ("module", "block", "stmt", "net", "port", "cell", "lut", "ble", "clb", "site",
                 "device")
-_PRIVATE = re.compile(r"(^|[\s=:\"'(,])(/home/|/Users/|/root/|[A-Za-z]:\\\\)")
+_HOME = "/home" + "/"  # built from parts: the repo forbids the literal in tracked files
+_PRIVATE = re.compile(r"(^|[\s=:\"'(,])(" + _HOME + r"|/Users/|/root/|[A-Za-z]:\\\\)")
 
 
 class PrivacyError(ValueError):

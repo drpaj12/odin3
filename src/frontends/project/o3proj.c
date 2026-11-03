@@ -704,7 +704,7 @@ static odin3_status key_testbench(o3_reader *rd, const o3_stmt *st) {
 
 /* --- schema 2: tools, flows, steps, provenance links (v1.4) -------------------------------- */
 
-enum { SCHEMA_MAX = 2, FLOW_MAX_PAIRS = 99 };
+enum { SCHEMA_MAX = 2, SCHEMA_RADIX = 10, STEP_MIN_ARGS = 6, SCHEMA_DIGITS = 3 };
 
 static const char *const k_stages[] = {"hdl",    "ir",     "gates", "luts",      "packed",
                                        "placed", "routed", "gds",   "extracted", "recovered"};
@@ -734,8 +734,8 @@ static const odin3_proj_flowrec *flow_find(const o3_reader *rd, odin3_proj_flowr
     const odin3_proj_flowrec *recs = rd->proj->flowrecs.data;
     const uint32_t *words = rd->proj->flowwords.data;
     for (size_t i = 0; i < rd->proj->flowrecs.len; i++) {
-        const uint32_t *w = words + recs[i].first;
-        if (recs[i].kind == kind && w[0] == w0 && (!has1 || w[1] == w1)) {
+        const uint32_t *fw = words + recs[i].first;
+        if (recs[i].kind == kind && fw[0] == w0 && (!has1 || fw[1] == w1)) {
             return &recs[i];
         }
     }
@@ -770,12 +770,12 @@ static odin3_status key_schema(o3_reader *rd, const o3_stmt *st) {
     if (rd->stmts != 1) {
         return syntax(rd, st, "schema must be the first statement of the file", &word);
     }
-    if (!is_digits(word) || word.len > 3) {
+    if (!is_digits(word) || word.len > SCHEMA_DIGITS) {
         return syntax(rd, st, "schema expects a number", &word);
     }
     unsigned value = 0;
     for (size_t i = 0; i < word.len; i++) {
-        value = value * 10U + (unsigned)(((const char *)word.ptr)[i] - '0');
+        value = value * SCHEMA_RADIX + (unsigned)(((const char *)word.ptr)[i] - '0');
     }
     if (value == 0) {
         return syntax(rd, st, "schema expects 1 or 2", &word);
@@ -788,32 +788,40 @@ static odin3_status key_schema(o3_reader *rd, const o3_stmt *st) {
     return ODIN3_OK;
 }
 
+/* The keyword/value pairs after `tool <id> required|optional <exe>`: known, none repeated. */
+static odin3_status tool_keywords(o3_reader *rd, const o3_stmt *st) {
+    static const char *const kws[] = {"version-arg", "module", "env"};
+    unsigned seen = 0;
+    for (uint32_t idx = 3; idx < st->nargs; idx += 2) {
+        unsigned bit = 0;
+        for (unsigned k = 0; k < sizeof kws / sizeof kws[0]; k++) {
+            bit = odin3_proj_bytes_is(st->args[idx].text, kws[k]) ? 1U << k : bit;
+        }
+        if (bit == 0) {
+            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown tool keyword",
+                        &st->args[idx].text);
+        }
+        if ((seen & bit) != 0) {
+            return syntax(rd, st, "repeated tool keyword", &st->args[idx].text);
+        }
+        seen |= bit;
+    }
+    return ODIN3_OK;
+}
+
 /* tool <id> required|optional <exe> [version-arg <a>] [module <m>] [env <VAR>] */
 static odin3_status key_tool(o3_reader *rd, const o3_stmt *st) {
-    static const char *const kws[] = {"version-arg", "module", "env"};
-    if (st->nargs % 2U == 0 || !is_ident(st->args[0].text)) {
-        return st->nargs % 2U == 0 ? usage(rd, st, NULL)
-                                   : syntax(rd, st, "expected a tool id", &st->args[0].text);
+    if (st->nargs % 2U == 0) {
+        return usage(rd, st, NULL);
+    }
+    if (!is_ident(st->args[0].text)) {
+        return syntax(rd, st, "expected a tool id", &st->args[0].text);
     }
     if (!arg_is(st, 1, "required") && !arg_is(st, 1, "optional")) {
         return syntax(rd, st, "tool expects required or optional", &st->args[1].text);
     }
-    unsigned seen = 0;
-    for (uint32_t i = 3; i < st->nargs; i += 2) {
-        unsigned bit = 0;
-        for (unsigned k = 0; k < 3; k++) {
-            bit = odin3_proj_bytes_is(st->args[i].text, kws[k]) ? 1U << k : bit;
-        }
-        if (bit == 0) {
-            return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown tool keyword",
-                        &st->args[i].text);
-        }
-        if ((seen & bit) != 0) {
-            return syntax(rd, st, "repeated tool keyword", &st->args[i].text);
-        }
-        seen |= bit;
-    }
-    odin3_status res = flow_begin(rd, st);
+    odin3_status res = tool_keywords(rd, st);
+    res = res != ODIN3_OK ? res : flow_begin(rd, st);
     if (res == ODIN3_OK &&
         flow_find(rd, ODIN3_PROJ_FLOW_TOOL, *(uint32_t *)rd->ids.data, false, 0)) {
         return syntax(rd, st, "tool given twice", &st->args[0].text);
@@ -876,9 +884,18 @@ enum { KW_STAGE, KW_TOOL, KW_NEEDS, KW_IN, KW_OUT, KW_ARGS, KW_STEP_COUNT };
 static const char *const k_step_kws[KW_STEP_COUNT] = {"stage", "tool", "needs",
                                                       "in",    "out",  "args"};
 
+/* One step keyword with its value, in the flow `flow`. */
+typedef struct step_arg {
+    int kw;
+    uint32_t flow;
+    odin3_bytes value;
+} step_arg;
+
 /* The value of one step keyword: a known stage, a declared tool, earlier steps, role=path. */
-static odin3_status step_value(o3_reader *rd, const o3_stmt *st, int kw, uint32_t flow,
-                               odin3_bytes value) {
+static odin3_status step_value(o3_reader *rd, const o3_stmt *st, const step_arg *arg) {
+    int kw = arg->kw;
+    uint32_t flow = arg->flow;
+    odin3_bytes value = arg->value;
     if (kw == KW_STAGE && !in_list(value, k_stages, sizeof k_stages / sizeof k_stages[0])) {
         return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown stage", &value);
     }
@@ -900,27 +917,28 @@ static odin3_status step_value(o3_reader *rd, const o3_stmt *st, int kw, uint32_
 }
 
 /* One keyword/value pair at args[i]; seen holds the keywords met (in and out may repeat). */
-static odin3_status step_pair(o3_reader *rd, const o3_stmt *st, uint32_t i, uint32_t flow,
+static odin3_status step_pair(o3_reader *rd, const o3_stmt *st, uint32_t idx, uint32_t flow,
                               unsigned *seen) {
     int kw = -1;
     for (int k = 0; k < KW_STEP_COUNT; k++) {
-        kw = odin3_proj_bytes_is(st->args[i].text, k_step_kws[k]) ? k : kw;
+        kw = odin3_proj_bytes_is(st->args[idx].text, k_step_kws[k]) ? k : kw;
     }
     if (kw < 0) {
         return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown step keyword",
-                    &st->args[i].text);
+                    &st->args[idx].text);
     }
     if (kw != KW_IN && kw != KW_OUT && (*seen & (1U << kw)) != 0) {
-        return syntax(rd, st, "repeated step keyword", &st->args[i].text);
+        return syntax(rd, st, "repeated step keyword", &st->args[idx].text);
     }
     *seen |= 1U << kw;
-    return step_value(rd, st, kw, flow, st->args[i + 1].text);
+    step_arg arg = {kw, flow, st->args[idx + 1].text};
+    return step_value(rd, st, &arg);
 }
 
 /* step <flow> <id> stage <s> tool <t> [needs a,b] [in role=path]... [out role=path]... [args text]
  */
 static odin3_status key_step(o3_reader *rd, const o3_stmt *st) {
-    if (st->nargs % 2U != 0 || st->nargs < 6) {
+    if (st->nargs % 2U != 0 || st->nargs < STEP_MIN_ARGS) {
         return usage(rd, st, NULL);
     }
     odin3_status res = flow_begin(rd, st);
@@ -962,23 +980,27 @@ enum { PL_FROM, PL_KIND, PL_KEY, PL_SCOPE, PL_CONF, PL_COUNT };
 static const char *const k_pl_kws[PL_COUNT] = {"from", "kind", "key", "scope", "confidence"};
 
 /* One provlink keyword/value pair at args[i]; from receives the `from` step id. */
-static odin3_status provlink_pair(o3_reader *rd, const o3_stmt *st, uint32_t i, unsigned *seen,
-                                  uint32_t *from) {
-    odin3_bytes value = st->args[i + 1].text;
+typedef struct pl_state {
+    unsigned seen;
+    uint32_t from;
+} pl_state;
+
+static odin3_status provlink_pair(o3_reader *rd, const o3_stmt *st, uint32_t idx, pl_state *state) {
+    odin3_bytes value = st->args[idx + 1].text;
     int kw = -1;
     for (int k = 0; k < PL_COUNT; k++) {
-        kw = odin3_proj_bytes_is(st->args[i].text, k_pl_kws[k]) ? k : kw;
+        kw = odin3_proj_bytes_is(st->args[idx].text, k_pl_kws[k]) ? k : kw;
     }
     if (kw < 0) {
         return fail(rd, st->at, ODIN3_PROJ_ERR_UNKNOWN_OPTION, "unknown provlink keyword",
-                    &st->args[i].text);
+                    &st->args[idx].text);
     }
-    if ((*seen & (1U << kw)) != 0) {
-        return syntax(rd, st, "repeated provlink keyword", &st->args[i].text);
+    if ((state->seen & (1U << kw)) != 0) {
+        return syntax(rd, st, "repeated provlink keyword", &st->args[idx].text);
     }
-    *seen |= 1U << kw;
+    state->seen |= 1U << kw;
     if (kw == PL_FROM) {
-        return intern(rd, value, from);
+        return intern(rd, value, &state->from);
     }
     if (kw == PL_KIND &&
         !in_list(value, k_link_kinds, sizeof k_link_kinds / sizeof k_link_kinds[0])) {
@@ -993,7 +1015,7 @@ static odin3_status provlink_pair(o3_reader *rd, const o3_stmt *st, uint32_t i, 
 
 /* provlink <flow> <step> from <prev> kind <k> [key <f>] [scope <s>] [confidence <c>] */
 static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
-    if (st->nargs % 2U != 0 || st->nargs < 6) {
+    if (st->nargs % 2U != 0 || st->nargs < STEP_MIN_ARGS) {
         return usage(rd, st, NULL);
     }
     odin3_status res = flow_begin(rd, st);
@@ -1005,11 +1027,12 @@ static odin3_status key_provlink(o3_reader *rd, const o3_stmt *st) {
         return syntax(rd, st, "provlink names a step that is not defined in the flow",
                       &st->args[1].text);
     }
-    unsigned seen = 0;
-    uint32_t from = 0;
-    for (uint32_t i = 2; res == ODIN3_OK && i < st->nargs; i += 2) {
-        res = provlink_pair(rd, st, i, &seen, &from);
+    pl_state state = {0, 0};
+    for (uint32_t idx = 2; res == ODIN3_OK && idx < st->nargs; idx += 2) {
+        res = provlink_pair(rd, st, idx, &state);
     }
+    unsigned seen = state.seen;
+    uint32_t from = state.from;
     unsigned need = (1U << PL_FROM) | (1U << PL_KIND);
     if (res != ODIN3_OK) {
         return res;

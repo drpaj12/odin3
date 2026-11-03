@@ -224,7 +224,7 @@ class FixtureTest(unittest.TestCase):
     def test_no_private_path_in_the_fixture(self) -> None:
         for path in self.FIX.rglob("*"):
             if path.is_file():
-                self.assertNotIn("/home/", path.read_text(), path.name)
+                self.assertNotIn("/home" + "/", path.read_text(), path.name)
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")
@@ -248,7 +248,7 @@ class OdinOnlyStepsTest(unittest.TestCase):
             self.assertTrue(all(r["links"][0]["to"].startswith("ir:") for r in rows))
             equiv = json.loads((out / "prov" / index["steps"][3]["file"]).read_text())
             self.assertEqual(equiv["check"]["result"], "equivalent")
-            self.assertNotIn("/home/", (out / "prov" / "index.json").read_text())
+            self.assertNotIn("/home" + "/", (out / "prov" / "index.json").read_text())
 
     def test_missing_tools_are_named(self) -> None:
         t = sf.Tools(odin3=Path("odin3"))

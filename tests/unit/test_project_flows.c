@@ -99,23 +99,25 @@ static const char *const k_ok =
     "provlink si place from place kind physical_origin scope inserted\n"
     "flow-var si clock_port Clock\n";
 
+static void assert_has(const char *text, const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, needle), needle);
+}
+
 static void test_dump(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, read_o3(k_ok));
     const char *text = dump();
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(text, "\"schema\": 2,"), text);
-    TEST_ASSERT_NOT_NULL(strstr(text, "{\"id\": \"openroad\", \"required\": true, \"exe\": "
-                                      "\"openroad\", \"version_arg\": \"-version\", "
-                                      "\"module\": null, \"env\": null}"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "\"module\": \"klayout.db\""));
-    TEST_ASSERT_NOT_NULL(strstr(text, "\"name\": \"si\", \"description\": \"Odin III to GDS\", "
-                                      "\"vars\": {\"clock_port\": \"Clock\"}"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "\"needs\": [\"elab\"], \"in\": [{\"role\": \"lib\", "
-                                      "\"path\": \"a.o3lib\"}], \"out\": [{\"role\": \"netlist\", "
-                                      "\"path\": \"g.v\"}], \"args\": \"x y\""));
-    TEST_ASSERT_NOT_NULL(strstr(text, "{\"from\": \"map\", \"kind\": \"name\", \"key\": "
-                                      "\"instance\", \"scope\": null, \"confidence\": null}"));
-    TEST_ASSERT_NOT_NULL(strstr(text, "\"kind\": \"physical_origin\", \"key\": null, "
-                                      "\"scope\": \"inserted\""));
+    assert_has(text, "\"schema\": 2,");
+    assert_has(text, "{\"id\": \"openroad\", \"required\": true, \"exe\": \"openroad\", "
+                     "\"version_arg\": \"-version\", \"module\": null, \"env\": null}");
+    assert_has(text, "\"module\": \"klayout.db\"");
+    assert_has(text, "\"name\": \"si\", \"description\": \"Odin III to GDS\", "
+                     "\"vars\": {\"clock_port\": \"Clock\"}");
+    assert_has(text, "\"needs\": [\"elab\"], \"in\": [{\"role\": \"lib\", \"path\": "
+                     "\"a.o3lib\"}], \"out\": [{\"role\": \"netlist\", \"path\": \"g.v\"}], "
+                     "\"args\": \"x y\"");
+    assert_has(text, "{\"from\": \"map\", \"kind\": \"name\", \"key\": \"instance\", "
+                     "\"scope\": null, \"confidence\": null}");
+    assert_has(text, "\"kind\": \"physical_origin\", \"key\": null, \"scope\": \"inserted\"");
 }
 
 static void test_schema1_dump_unchanged(void) {
@@ -139,54 +141,58 @@ static void reset_project(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_project(design, &proj));
 }
 
-static void expect_error(const char *text, const char *kind, const char *detail) {
+typedef struct err_spec {
+    const char *kind, *detail;
+} err_spec;
+
+static void expect_error(const char *text, err_spec want) {
     reset_project();
     TEST_ASSERT_NOT_EQUAL(ODIN3_OK, read_o3(text));
     TEST_ASSERT_EQUAL_INT(1, errors);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(captured, kind), captured);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(captured, detail), captured);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(captured, want.kind), captured);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(captured, want.detail), captured);
 }
 
 static void test_errors(void) {
-    expect_error("schema 3\n", "unsupported_schema", "'3'");
-    expect_error("top m\nschema 2\n", "syntax", "first statement");
-    expect_error("schema 0\n", "syntax", "1 or 2");
-    expect_error("schema x\n", "syntax", "number");
-    expect_error("flowdef a\n", "syntax", "schema 2");
-    expect_error("step a b stage ir tool odin3\n", "syntax", "schema 2");
+    expect_error("schema 3\n", (err_spec){"unsupported_schema", "'3'"});
+    expect_error("top m\nschema 2\n", (err_spec){"syntax", "first statement"});
+    expect_error("schema 0\n", (err_spec){"syntax", "1 or 2"});
+    expect_error("schema x\n", (err_spec){"syntax", "number"});
+    expect_error("flowdef a\n", (err_spec){"syntax", "schema 2"});
+    expect_error("step a b stage ir tool odin3\n", (err_spec){"syntax", "schema 2"});
 }
 
 static void test_flow_errors(void) {
-    expect_error("schema 2\nflowdef 1x\n", "syntax", "flow name");
-    expect_error("schema 2\nflowdef a\nflowdef a\n", "syntax", "given twice");
-    expect_error("schema 2\nflowdef a nonsense x\n", "syntax", "usage");
-    expect_error("schema 2\nstep a s stage ir tool odin3\n", "syntax", "not defined");
+    expect_error("schema 2\nflowdef 1x\n", (err_spec){"syntax", "flow name"});
+    expect_error("schema 2\nflowdef a\nflowdef a\n", (err_spec){"syntax", "given twice"});
+    expect_error("schema 2\nflowdef a nonsense x\n", (err_spec){"syntax", "usage"});
+    expect_error("schema 2\nstep a s stage ir tool odin3\n", (err_spec){"syntax", "not defined"});
 }
 
 static void test_step_errors(void) {
     const char *pre = "schema 2\nflowdef a\n";
     char text[512];
     (void)snprintf(text, sizeof text, "%sstep a s stage nope tool odin3\n", pre);
-    expect_error(text, "unknown_option", "unknown stage");
+    expect_error(text, (err_spec){"unknown_option", "unknown stage"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool ghost\n", pre);
-    expect_error(text, "syntax", "not declared");
+    expect_error(text, (err_spec){"syntax", "not declared"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 needs t\n", pre);
-    expect_error(text, "syntax", "not defined earlier");
+    expect_error(text, (err_spec){"syntax", "not defined earlier"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 needs s\n", pre);
-    expect_error(text, "syntax", "not defined earlier");
+    expect_error(text, (err_spec){"syntax", "not defined earlier"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 stage gds\n", pre);
-    expect_error(text, "syntax", "repeated step keyword");
+    expect_error(text, (err_spec){"syntax", "repeated step keyword"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 colour red\n", pre);
-    expect_error(text, "unknown_option", "unknown step keyword");
+    expect_error(text, (err_spec){"unknown_option", "unknown step keyword"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 in nopath\n", pre);
-    expect_error(text, "syntax", "role=path");
+    expect_error(text, (err_spec){"syntax", "role=path"});
     (void)snprintf(text, sizeof text,
                    "%sstep a s stage ir tool odin3\nstep a s stage ir tool odin3\n", pre);
-    expect_error(text, "syntax", "given twice");
+    expect_error(text, (err_spec){"syntax", "given twice"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir tool odin3 out x=y z\n", pre);
-    expect_error(text, "syntax", "usage");
+    expect_error(text, (err_spec){"syntax", "usage"});
     (void)snprintf(text, sizeof text, "%sstep a s stage ir\n", pre);
-    expect_error(text, "syntax", "usage");
+    expect_error(text, (err_spec){"syntax", "usage"});
 }
 
 static void test_provlink_errors(void) {
@@ -194,31 +200,33 @@ static void test_provlink_errors(void) {
                       "tool odin3 needs s\n";
     char text[512];
     (void)snprintf(text, sizeof text, "%sprovlink a q from s kind name\n", pre);
-    expect_error(text, "syntax", "not defined in the flow");
+    expect_error(text, (err_spec){"syntax", "not defined in the flow"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from q kind name\n", pre);
-    expect_error(text, "syntax", "not defined in the flow");
+    expect_error(text, (err_spec){"syntax", "not defined in the flow"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from s kind weird\n", pre);
-    expect_error(text, "unknown_option", "unknown link kind");
+    expect_error(text, (err_spec){"unknown_option", "unknown link kind"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from s kind name confidence sure\n", pre);
-    expect_error(text, "unknown_option", "unknown confidence");
+    expect_error(text, (err_spec){"unknown_option", "unknown confidence"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from t kind name\n", pre);
-    expect_error(text, "syntax", "itself only");
+    expect_error(text, (err_spec){"syntax", "itself only"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from s kind name kind id\n", pre);
-    expect_error(text, "syntax", "repeated provlink keyword");
+    expect_error(text, (err_spec){"syntax", "repeated provlink keyword"});
     (void)snprintf(text, sizeof text, "%sprovlink a t from s scope x\n", pre);
-    expect_error(text, "syntax", "usage");
+    expect_error(text, (err_spec){"syntax", "usage"});
     (void)snprintf(text, sizeof text, "%sflow-var nope x y\n", pre);
-    expect_error(text, "syntax", "not defined");
+    expect_error(text, (err_spec){"syntax", "not defined"});
     (void)snprintf(text, sizeof text, "%sflow-var a 1x y\n", pre);
-    expect_error(text, "syntax", "variable name");
+    expect_error(text, (err_spec){"syntax", "variable name"});
 }
 
 static void test_tool_errors(void) {
-    expect_error("schema 2\ntool a maybe x\n", "syntax", "required or optional");
-    expect_error("schema 2\ntool a required x\ntool a required y\n", "syntax", "given twice");
-    expect_error("schema 2\ntool a required x env\n", "syntax", "usage");
-    expect_error("schema 2\ntool a required x colour red\n", "unknown_option", "tool keyword");
-    expect_error("schema 2\ntool a required x env A env B\n", "syntax", "repeated");
+    expect_error("schema 2\ntool a maybe x\n", (err_spec){"syntax", "required or optional"});
+    expect_error("schema 2\ntool a required x\ntool a required y\n",
+                 (err_spec){"syntax", "given twice"});
+    expect_error("schema 2\ntool a required x env\n", (err_spec){"syntax", "usage"});
+    expect_error("schema 2\ntool a required x colour red\n",
+                 (err_spec){"unknown_option", "tool keyword"});
+    expect_error("schema 2\ntool a required x env A env B\n", (err_spec){"syntax", "repeated"});
 }
 
 int main(void) {

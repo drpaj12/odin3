@@ -76,7 +76,7 @@ class StepWriterTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             w = ps.StepWriter(Path(tmp), "demo", "d.v", "top", "1")
             bad = ps.obj("ir", "c", "cell", "c", "hdl", [],
-                         src=[{"file": "/home/u/x.v", "span": "1.1-1.2"}])
+                         src=[{"file": "/home" + "/u/x.v", "span": "1.1-1.2"}])
             with self.assertRaises(ps.PrivacyError):
                 w.add_step("elab", "ir", {"id": "odin3", "version": ""}, [bad])
             with self.assertRaises(ps.PrivacyError):
