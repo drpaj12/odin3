@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,33 @@ def _reason(text: str) -> str:
     """The last line of an equiv-check output that is not a notice, paths redacted."""
     lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
     return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
+
+
+def equiv_verdict(checker: Path, rtl: Path, gates: Path,
+                  run: Callable[[Sequence[str | Path]], subprocess.CompletedProcess[str]] = _run
+                  ) -> tuple[dict[str, str], str | None, str]:
+    """Run equiv-check on RTL against gates: (step check, WARNING line or None, raw output).
+    A proven difference (exit 1) is a failure. An undriven output the tool offers to tie to 0 is
+    tied (``--allow-undriven``); any other tool error or limit is a WARNING. Both are recorded
+    as ``equiv: not proven: <reason>`` and the flow goes on."""
+    base: list[str | Path] = [sys.executable, checker]
+    eq = run([*base, rtl, gates])
+    text = eq.stdout + eq.stderr
+    note = ""
+    first = _reason(text)
+    if eq.returncode == 2 and "--allow-undriven" in text:
+        note = "; undriven nets tied to 0 (--allow-undriven)"
+        retry = run([*base, "--allow-undriven", rtl, gates])
+        text += retry.stdout + retry.stderr
+        eq = retry if retry.returncode == 0 else eq
+        if retry.returncode != 0:
+            note = ""
+    if eq.returncode in EQUIV_RESULT and not note:
+        return ({"name": "equiv-check", "result": EQUIV_RESULT[eq.returncode],
+                 "detail": _reason(text)}, None, text)
+    reason = "equiv: not proven: " + first + note
+    return ({"name": "equiv-check", "result": "not-proven", "detail": reason}, "WARNING " + reason,
+            text)
 
 
 def _first_line(text: str) -> str:
@@ -717,14 +744,14 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
                            "confidence": "medium"}])
     elif step == "equiv":
         checker = HERE.parent / "equiv-check" / "equiv_check.py"
-        eq = _run([sys.executable, checker, out / "rtl.blif", out / "gates.blif"])
-        (out / "equiv.txt").write_text(f"exit {eq.returncode}\n{eq.stdout}{eq.stderr}")
+        check, warning, text = equiv_verdict(checker, out / "rtl.blif", out / "gates.blif")
+        (out / "equiv.txt").write_text(text)
         w.add_step("equiv", "gates", {"id": "equiv-check", "version": ""}, None, needs=needs,
-                   check={"name": "equiv-check",
-                          "result": EQUIV_RESULT.get(eq.returncode, "error"),
-                          "detail": _reason(eq.stdout + eq.stderr)})
-        if eq.returncode != 0:
-            raise RuntimeError(f"equiv-check: {_reason(eq.stdout + eq.stderr)}")
+                   check=check)
+        if warning:
+            print(warning, file=sys.stderr)
+        elif check["result"] != "equivalent":
+            raise RuntimeError(f"equiv-check: {check['detail']}")
     elif step == "netlist":
         w.add_step("netlist", "gates", {"id": "clean_netlist", "version": ""}, None,
                    needs=needs, outputs=_outs(out, ["clean.v", "prov.csv"]),

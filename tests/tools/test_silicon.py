@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -235,6 +236,56 @@ class RefSpiceTest(unittest.TestCase):
     def test_alias_group_without_layout_port_is_left_alone(self) -> None:
         rename, _groups = sf.port_aliases("assign p = q;\n", ["z"])
         self.assertEqual(rename, {})
+
+
+class EquivVerdictTest(unittest.TestCase):
+    """An equivalence the tool cannot decide is a WARNING and `not proven`, not a stop."""
+
+    @staticmethod
+    def fake(*replies: tuple[int, str]) -> tuple[list[list[str]], object]:
+        calls: list[list[str]] = []
+        queue = list(replies)
+
+        def run(argv: object) -> subprocess.CompletedProcess[str]:
+            calls.append([str(a) for a in argv])  # type: ignore[attr-defined]
+            code, text = queue.pop(0)
+            return subprocess.CompletedProcess([], code, text, "")
+
+        return calls, run
+
+    def test_equivalent(self) -> None:
+        calls, run = self.fake((0, "equiv-check: equivalent (abc dsec)\n"))
+        check, warn, _text = sf.equiv_verdict(Path("c.py"), Path("a"), Path("b"), run)  # type: ignore[arg-type]
+        self.assertEqual(check["result"], "equivalent")
+        self.assertIsNone(warn)
+        self.assertEqual(len(calls), 1)
+
+    def test_undriven_output_is_tied_to_zero_and_not_proven(self) -> None:
+        msg = ("equiv-check: /a/b.blif: undriven net raddr_o[0] reaches primary output "
+               "raddr_o[0]; pass --allow-undriven to tie it to 0\n")
+        calls, run = self.fake((2, msg), (0, "equiv-check: equivalent (abc dsec)\n"))
+        check, warn, _text = sf.equiv_verdict(Path("c.py"), Path("a"), Path("b"), run)  # type: ignore[arg-type]
+        self.assertIn("--allow-undriven", calls[1])
+        self.assertEqual(check["result"], "not-proven")
+        self.assertTrue(check["detail"].startswith("equiv: not proven: "))
+        self.assertIn("undriven net raddr_o[0]", check["detail"])
+        self.assertIn("tied to 0", check["detail"])
+        self.assertNotIn("/a/b.blif", check["detail"])
+        self.assertIsNotNone(warn)
+        self.assertTrue(str(warn).startswith("WARNING equiv: not proven"))
+
+    def test_tool_limit_is_not_proven(self) -> None:
+        _calls, run = self.fake((2, "equiv-check: /t/x.blif:3: unsupported: latch q is clocked\n"))
+        check, warn, _text = sf.equiv_verdict(Path("c.py"), Path("a"), Path("b"), run)  # type: ignore[arg-type]
+        self.assertEqual(check["result"], "not-proven")
+        self.assertIn("equiv: not proven: equiv-check: <path>:3: unsupported", check["detail"])
+        self.assertIsNotNone(warn)
+
+    def test_a_proven_difference_still_fails(self) -> None:
+        _calls, run = self.fake((1, "equiv-check: NOT equivalent\n"))
+        check, warn, _text = sf.equiv_verdict(Path("c.py"), Path("a"), Path("b"), run)  # type: ignore[arg-type]
+        self.assertEqual(check["result"], "not-equivalent")
+        self.assertIsNone(warn)
 
 
 class CensusJoinTest(unittest.TestCase):
