@@ -30,7 +30,17 @@ link_design $top
 if {$clk ne ""} { create_clock -name clk -period 10 [get_ports $clk] }
 snap s00_link
 
-initialize_floorplan -utilization 25 -aspect_ratio 1 -core_space 6 -site unithd
+# A design of one cell or none gives a core with no site row at 25 percent utilization (the PDN
+# step then stops on "empty command name"): use a fixed 30 um core for it. Others are unchanged.
+set n_logic [llength [[ord::get_db_block] getInsts]]  ;# before tap cells
+if {$n_logic <= 1} {
+  set hi 36.0
+  puts "SMALL_DESIGN $n_logic cells: fixed core"
+  initialize_floorplan -die_area "0 0 42 42" \
+    -core_area "6 6 $hi $hi" -site unithd
+} else {
+  initialize_floorplan -utilization 25 -aspect_ratio 1 -core_space 6 -site unithd
+}
 make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
 make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
 make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46
@@ -56,9 +66,22 @@ add_pdn_connect -layers {met4 met5}
 pdngen
 snap s03_pdn
 
-global_placement -skip_io -density 0.5
-place_pins -hor_layers met3 -ver_layers met2
-global_placement -density 0.5
+# RePlAce diverges (GPL-0304) on a design of one logic cell or none: put the cell at the core
+# centre and let detailed_placement legalize it (the tap cells are fixed already).
+if {$n_logic <= 1} {
+  puts "SMALL_DESIGN $n_logic cells: centre placement, no global_placement"
+  set core [[ord::get_db_block] getCoreArea]
+  foreach i [[ord::get_db_block] getInsts] {
+    $i setOrient R0
+    $i setLocation [expr {([$core xMin] + [$core xMax]) / 2}] [expr {([$core yMin] + [$core yMax]) / 2}]
+    $i setPlacementStatus PLACED
+  }
+  place_pins -hor_layers met3 -ver_layers met2
+} else {
+  global_placement -skip_io -density 0.5
+  place_pins -hor_layers met3 -ver_layers met2
+  global_placement -density 0.5
+}
 snap s04_global_place
 
 set_wire_rc -signal -layer met2
