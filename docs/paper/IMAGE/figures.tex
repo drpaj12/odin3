@@ -1,7 +1,7 @@
 % Standalone build of every TikZ figure, one per page, at print size and in the paper's fonts
 % (Times, Helvetica, Courier as IEEEtran sets them). Not part of the paper or the Overleaf zip:
 % `make figures` compiles it and splits the pages into IMAGE/svg/*.svg and preview PNGs.
-% The [OT1]{fontenc} line is a no-op under pdfLaTeX and makes XeTeX/Tectonic use Times too.
+% The [OT1]{fontenc} line is a no-op under pdfLaTeX.
 \documentclass[multi=odinfig, border=2pt]{standalone}
 \usepackage[OT1]{fontenc}
 \renewcommand{\rmdefault}{ptm}
