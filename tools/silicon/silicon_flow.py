@@ -276,6 +276,15 @@ def run_magic(t: Tools, out: Path, top: str) -> None:
             raise RuntimeError(f"magic ({mode}) failed; see magic_{mode}/magic.log")
 
 
+def ref_instance_line(inst: str, master: str, pins: Sequence[str],
+                      conn: Mapping[str, str]) -> str:
+    """One instance line of the reference SPICE. A pin the netlist leaves open (an unused
+    output, such as the HI pin of a tie cell) gets a net of its own: an empty field would drop
+    the pin from the line and move every later pin one place up."""
+    nets = [conn.get(p) or f"nc_{inst}_{p}" for p in pins]
+    return f"X{inst} " + " ".join(nets) + f" {master}"
+
+
 def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     """Netgen LVS of the hierarchical extraction against the OpenROAD netlist."""
     assert t.netgen is not None and t.pdk is not None
@@ -299,7 +308,7 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
         conn = {k: v.strip() for k, v in re.findall(r"\.(\w+)\(([^)]*)\)", body)}
         for p, n in pg.items():
             conn.setdefault(p, n)
-        lines.append(f"X{inst} " + " ".join(conn.get(p, "") for p in pins[master]) + f" {master}")
+        lines.append(ref_instance_line(inst, master, pins[master], conn))
     lines.append(f".ends {top}")
     (out / "ref.spice").write_text(cells + "\n" + "\n".join(lines) + "\n")
     setup = t.pdk / "libs.tech/netgen/sky130A_setup.tcl"

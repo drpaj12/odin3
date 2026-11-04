@@ -170,6 +170,17 @@ class LabelAndRedactTest(unittest.TestCase):
         prov_steps._check_private(sf._first_line("/home" + "/u/x.blif: bad net"), "t")
 
 
+class RefSpiceTest(unittest.TestCase):
+    def test_open_pin_gets_its_own_net(self) -> None:
+        pins = ["VGND", "VNB", "VPB", "VPWR", "HI", "LO"]
+        conn = {"VGND": "VSS", "VNB": "VSS", "VPB": "VDD", "VPWR": "VDD", "LO": "zero", "HI": ""}
+        line = sf.ref_instance_line("t0", "sky130_fd_sc_hd__conb_1", pins, conn)
+        self.assertEqual(line, "Xt0 VSS VSS VDD VDD nc_t0_HI zero sky130_fd_sc_hd__conb_1")
+        self.assertEqual(len(line.split()), len(pins) + 2)
+        absent = {k: v for k, v in conn.items() if k != "HI"}
+        self.assertEqual(sf.ref_instance_line("t0", "sky130_fd_sc_hd__conb_1", pins, absent), line)
+
+
 class CensusJoinTest(unittest.TestCase):
     def dump(self, out: Path, name: str, rows: list[tuple[str, str, int, int]]) -> None:
         (out / "or").mkdir(exist_ok=True)
@@ -322,14 +333,16 @@ class VtrProvStepsTest(unittest.TestCase):
 
 @unittest.skipUnless(ODIN3 and TOOLS, "ODIN3_CLI or ODIN3_SILICON_TOOLS not set")
 class FullFlowTest(unittest.TestCase):
-    def run_design(self, name: str, clock: str) -> tuple[Path, dict[str, object]]:
+    def run_design(self, name: str, clock: str,
+                   src: Path | None = None) -> tuple[Path, dict[str, object]]:
         tools = sf.discover(Path(ODIN3), Path(TOOLS), None)
         gone = sf.missing(tools, sf.TOP_STEPS)
         if gone:
             self.skipTest("missing: " + "; ".join(gone))
         tmp = tempfile.mkdtemp()
         out = Path(tmp)
-        run = sf.Run(MICRO / f"{name}.v", name, out, LIB, tools, clock, sf.TOP_STEPS, REPO_ROOT)
+        design = src or MICRO / f"{name}.v"
+        run = sf.Run(design, name, out, LIB, tools, clock, sf.TOP_STEPS, REPO_ROOT)
         self.assertEqual(sf.run(run), 0, run.log)
         return out, json.loads((out / "join.json").read_text())
 
@@ -345,6 +358,18 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(sum(c["renamed"] + c["removed"] for c in cen), 0)
         stored = json.loads((REPO_ROOT / "tests/silicon/comparator/census.json").read_text())
         self.assertEqual(cen, stored)
+
+    def test_tie_only_design_reaches_lvs_match(self) -> None:
+        """One logic cell (a tie): the floorplan used to have no row and the PDN step stopped;
+        RePlAce diverged on a single cell; the open HI pin broke the reference SPICE."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "zero.v"
+            src.write_text("module zero_top(output z);\n  assign z = 1'b0;\nendmodule\n")
+            out, join = self.run_design("zero_top", "", src)
+        self.assertEqual(join["logic_cells"], 1)
+        self.assertEqual(join["join_rate"], 1.0)
+        self.assertEqual(schema_check.check_dir(out / "prov", SCHEMAS), [])
+        self.assertIn("Netlists match uniquely", (out / "lvs.log").read_text())
 
     def test_shift_register_with_clock(self) -> None:
         out, join = self.run_design("bm_DL_4_bit_shift_register", "Clock")
