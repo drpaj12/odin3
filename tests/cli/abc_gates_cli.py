@@ -160,8 +160,8 @@ class AbcGatesCli(unittest.TestCase):
                       run.text)
         self.assertEqual(run.instances().count("DFF"), 1)
         verdict = run.equiv()
-        self.assertEqual(verdict.returncode, 2, verdict.stdout + verdict.stderr)
-        self.assertIn("is clocked by internal net", verdict.stdout + verdict.stderr)
+        # equiv-check reads the clock inverter as a falling-edge register on clk
+        self.assertEqual(verdict.returncode, 0, verdict.stdout + verdict.stderr)
 
     def test_nf_script(self) -> None:
         for lib in LIBRARIES:

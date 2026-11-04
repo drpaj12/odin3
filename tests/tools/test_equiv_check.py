@@ -208,6 +208,18 @@ class EquivCheckNoAbcTest(unittest.TestCase):
         self.assertIn("more than one clock domain", check(cx("l_re.blif"),
                                                           cx("clk_two_domains.blif"))[2])
 
+    def test_inverted_clock_is_the_opposite_edge(self) -> None:
+        """A latch on the rising edge of NOT(clk) is a falling-edge flip-flop on clk (and the
+        reverse); the gate-level netlist of a negedge register has this form."""
+        for name, same, other in (("clk_inverted_re.blif", "l_fe.blif", "l_re.blif"),
+                                  ("clk_inverted_fe.blif", "l_re.blif", "l_fe.blif")):
+            with self.subTest(name):
+                code, out, err = check(cx(same), cx(name))
+                self.assertEqual(code, 0, out + err)
+                code, out, _ = check(cx(other), cx(name))
+                self.assertEqual(code, 1, out)
+                self.assertIn("latch clocking differs", out)
+
     def test_empty_non_blackbox_model(self) -> None:
         code, _, err = check(cx("bb_a.blif"), cx("bb_b.blif"))
         self.assertEqual(code, 2)

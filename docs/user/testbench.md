@@ -71,6 +71,8 @@ asynchronous reset: the `$adff` form of `tests/tb` is not simulated before `lowe
 reset is seen at the next edge, so a design that resets between edges differs from iverilog (a counter
 `always @(posedge clk or posedge rst)` with `rst` raised between edges shows its reset one clock late).
 
+Known issue: the release build `build/release/odin3` cannot simulate the derived clock net `CLK` of darkriscv (the testbench run needs the main-branch binary, which can).
+
 Other known limits of derived clocks. A clock that is constant 1 (`wire k = clk | 1'b1;`) never has an
 edge in a 2-state simulator, while iverilog sees x become 1 at time 0 as a rising edge, so one extra
 clocked update happens there only. A derived clock that never settles (a register that clocks itself,

@@ -1,0 +1,8 @@
+# Falling edge of the inverted clock: a rising-edge flip-flop on clk1.
+.model top
+.inputs d clk1 clk2
+.outputs q
+.names clk1 nclk
+0 1
+.latch d q fe nclk 0
+.end

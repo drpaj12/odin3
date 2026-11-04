@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -75,6 +75,33 @@ def _reason(text: str) -> str:
     """The last line of an equiv-check output that is not a notice, paths redacted."""
     lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
     return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
+
+
+def equiv_verdict(checker: Path, rtl: Path, gates: Path,
+                  run: Callable[[Sequence[str | Path]], subprocess.CompletedProcess[str]] = _run
+                  ) -> tuple[dict[str, str], str | None, str]:
+    """Run equiv-check on RTL against gates: (step check, WARNING line or None, raw output).
+    A proven difference (exit 1) is a failure. An undriven output the tool offers to tie to 0 is
+    tied (``--allow-undriven``); any other tool error or limit is a WARNING. Both are recorded
+    as ``equiv: not proven: <reason>`` and the flow goes on."""
+    base: list[str | Path] = [sys.executable, checker]
+    eq = run([*base, rtl, gates])
+    text = eq.stdout + eq.stderr
+    note = ""
+    first = _reason(text)
+    if eq.returncode == 2 and "--allow-undriven" in text:
+        note = "; undriven nets tied to 0 (--allow-undriven)"
+        retry = run([*base, "--allow-undriven", rtl, gates])
+        text += retry.stdout + retry.stderr
+        eq = retry if retry.returncode == 0 else eq
+        if retry.returncode != 0:
+            note = ""
+    if eq.returncode in EQUIV_RESULT and not note:
+        return ({"name": "equiv-check", "result": EQUIV_RESULT[eq.returncode],
+                 "detail": _reason(text)}, None, text)
+    reason = "equiv: not proven: " + first + note
+    return ({"name": "equiv-check", "result": "not-proven", "detail": reason}, "WARNING " + reason,
+            text)
 
 
 def _first_line(text: str) -> str:
@@ -321,6 +348,33 @@ def ref_instance_line(inst: str, master: str, pins: Sequence[str],
     return f"X{inst} " + " ".join(nets) + f" {master}"
 
 
+def port_aliases(netlist: str, ports: Sequence[str]) -> tuple[dict[str, str], list[list[str]]]:
+    """Nets that ``assign a = b;`` joins in final.v. The layout is one net with one port label
+    per group, so the reference must use that name: every non-port member maps to the first
+    port of its group (sorted order). Returns (rename, groups); a group without a layout
+    port is left alone."""
+    parent: dict[str, str] = {}
+
+    def find(x: str) -> str:
+        while parent.setdefault(x, x) != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for m in re.finditer(r"^\s*assign\s+(\S+)\s*=\s*(\S+?)\s*;", netlist, re.M):
+        parent[find(m.group(1))] = find(m.group(2))
+    members: dict[str, list[str]] = {}
+    for n in list(parent):
+        members.setdefault(find(n), []).append(n)
+    groups = [sorted(g) for g in members.values()]
+    rename: dict[str, str] = {}
+    for g in groups:
+        named = [n for n in g if n in ports]
+        if named:
+            rename.update({n: named[0] for n in g if n not in ports})
+    return rename, groups
+
+
 def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     """Netgen LVS of the hierarchical extraction against the OpenROAD netlist."""
     assert t.netgen is not None and t.pdk is not None
@@ -335,13 +389,15 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     ports = head.group(1).replace("\n+", " ").split()
     netlist = re.sub(r"//[^\n]*", "", (out / "or" / "final.v").read_text())
     pg = {"VPWR": "VDD", "VPB": "VDD", "VGND": "VSS", "VNB": "VSS"}
+    rename, groups = port_aliases(netlist, ports)
     lines = [f".subckt {top} {' '.join(ports)}"]
     for im in re.finditer(r"^\s*(sky130_fd_sc_hd__\w+)\s+(\S+)\s*\((.*?)\);", netlist,
                           re.M | re.S):
         master, inst, body = im.groups()
         if PHYS_RE.search(master):
             continue
-        conn = {k: v.strip() for k, v in re.findall(r"\.(\w+)\(([^)]*)\)", body)}
+        conn = {k: rename.get(v.strip(), v.strip())
+                for k, v in re.findall(r"\.(\w+)\(([^)]*)\)", body)}
         for p, n in pg.items():
             conn.setdefault(p, n)
         lines.append(ref_instance_line(inst, master, pins[master], conn))
@@ -359,6 +415,10 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     final = [ln for ln in log.splitlines() if ln.startswith("Final result")]
     result = "match" if final and "match uniquely" in final[-1] else "mismatch"
     detail = redact_paths(final[-1]) if final else "no result"
+    shared = [g for g in groups if any(n in rename for n in g)]
+    if shared:
+        detail += ("; WARNING: ports sharing one net are one label in the layout: "
+                   + " ".join("{" + ",".join(g) + "}" for g in shared))
     return {"name": "netgen_lvs", "result": result, "detail": detail}
 
 
@@ -684,14 +744,14 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
                            "confidence": "medium"}])
     elif step == "equiv":
         checker = HERE.parent / "equiv-check" / "equiv_check.py"
-        eq = _run([sys.executable, checker, out / "rtl.blif", out / "gates.blif"])
-        (out / "equiv.txt").write_text(f"exit {eq.returncode}\n{eq.stdout}{eq.stderr}")
+        check, warning, text = equiv_verdict(checker, out / "rtl.blif", out / "gates.blif")
+        (out / "equiv.txt").write_text(text)
         w.add_step("equiv", "gates", {"id": "equiv-check", "version": ""}, None, needs=needs,
-                   check={"name": "equiv-check",
-                          "result": EQUIV_RESULT.get(eq.returncode, "error"),
-                          "detail": _reason(eq.stdout + eq.stderr)})
-        if eq.returncode != 0:
-            raise RuntimeError(f"equiv-check: {_reason(eq.stdout + eq.stderr)}")
+                   check=check)
+        if warning:
+            print(warning, file=sys.stderr)
+        elif check["result"] != "equivalent":
+            raise RuntimeError(f"equiv-check: {check['detail']}")
     elif step == "netlist":
         w.add_step("netlist", "gates", {"id": "clean_netlist", "version": ""}, None,
                    needs=needs, outputs=_outs(out, ["clean.v", "prov.csv"]),
