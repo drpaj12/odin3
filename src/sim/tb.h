@@ -91,7 +91,8 @@ typedef enum {
     S_WHILE,
     S_REPEAT,
     S_FOREVER,
-    S_SYS
+    S_SYS,
+    S_CALL /* task call: task = index into tb_module.tasks, args/n = the actual arguments */
 } tb_skind;
 
 typedef struct tb_event_term {
@@ -112,6 +113,9 @@ struct tb_stmt {
     tb_event_term *terms;
     uint32_t nterms;
     tb_expr *sys; /* S_SYS: the call */
+    tb_expr **args; /* S_CALL: actual arguments, n of them */
+    char *callee;   /* S_CALL: the task name until the parse links it */
+    int task;
     uint32_t line;
 };
 
@@ -154,6 +158,18 @@ typedef struct tb_proc_def {
     bool always;
 } tb_proc_def;
 
+/* A task: static storage, its formal arguments are variables of the module (copied in on a call
+ * for input and inout, copied out for output and inout). */
+enum { TB_ARG_IN = 1, TB_ARG_OUT = 2 };
+typedef struct tb_task {
+    char name[TB_NAME];
+    tb_stmt *body;
+    int *vars; /* variable index of each formal argument */
+    uint8_t *dir; /* TB_ARG_IN | TB_ARG_OUT per argument */
+    uint32_t nargs;
+    uint32_t line;
+} tb_task;
+
 typedef struct tb_module {
     char name[TB_NAME];
     tb_var *vars;
@@ -164,6 +180,8 @@ typedef struct tb_module {
     uint32_t nassigns;
     tb_proc_def *procs;
     uint32_t nprocs;
+    tb_task *tasks;
+    uint32_t ntasks;
     void **allocs; /* every parse allocation, freed with the module */
     uint32_t nallocs, cap_allocs;
     uint64_t time_scale;         /* timescale unit / precision (power of ten), for %t */
