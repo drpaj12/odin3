@@ -150,7 +150,7 @@ import sys
 import tempfile
 import time
 import traceback
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1431,14 +1431,34 @@ def _is_buffer(cell: blif.Names) -> bool:
     return not value("0") and value("1")
 
 
-def _clock_source(net: str, buffers: dict[str, str], inputs: set[str]) -> str | None:
-    """Follow single-input buffers (output net -> input net) back from ``net``; the primary
-    input reached, or None."""
+def _is_inverter(cell: blif.Names) -> bool:
+    """True if a single-input cover computes NOT, however it is written."""
+    if len(cell.inputs) != 1 or not cell.rows:
+        return False
+    on_set = cell.rows[0][1] == "1"
+    matched = {bit: any(plane in (bit, "-") for plane, _ in cell.rows) for bit in "01"}
+    value = {bit: matched[bit] if on_set else not matched[bit] for bit in "01"}
+    return value["0"] and not value["1"]
+
+
+def _clock_source(net: str, buffers: dict[str, str], inputs: set[str],
+                  inverters: Mapping[str, str] | None = None) -> tuple[str, bool] | None:
+    """Follow single-input buffers and inverters (output net -> input net) back from ``net``;
+    the primary input reached and whether the path inverts it, or None."""
     seen: set[str] = set()
-    while net not in inputs and net in buffers and net not in seen:
+    inverted = False
+    while net not in inputs and net not in seen:
         seen.add(net)
-        net = buffers[net]
-    return net if net in inputs else None
+        if net in buffers:
+            net = buffers[net]
+        elif inverters and net in inverters:
+            net, inverted = inverters[net], not inverted
+        else:
+            break
+    return (net, inverted) if net in inputs else None
+
+
+_OPPOSITE_EDGE = {"re": "fe", "fe": "re"}
 
 
 def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
@@ -1451,8 +1471,9 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
     """
     domains: set[tuple[str, str]] = set()
     buffers = {n.output: n.inputs[0] for n in flat.names if _is_buffer(n)}  # once, not per latch
+    inverters = {n.output: n.inputs[0] for n in flat.names if _is_inverter(n)}
     inputs = set(flat.inputs)
-    sources: dict[str, str | None] = {}
+    sources: dict[str, tuple[str, bool] | None] = {}
     for latch in flat.latches:
         if latch.ltype is None:
             domains.add(("untyped", "-"))
@@ -1465,13 +1486,15 @@ def clock_domain(flat: Flat, ports: dict[str, str]) -> tuple[str, str] | None:
             domains.add((latch.ltype, blif.NO_CONTROL))
             continue
         if latch.control not in sources:
-            sources[latch.control] = _clock_source(latch.control, buffers, inputs)
-        source = sources[latch.control]
-        if source is None:
+            sources[latch.control] = _clock_source(latch.control, buffers, inputs, inverters)
+        found = sources[latch.control]
+        if found is None:
             raise EquivError(f"{flat.path}:{latch.line}: unsupported: latch "
                              f"{show(latch.output)} is clocked by internal net "
                              f"{show(latch.control)}")
-        domains.add((latch.ltype, ports[source]))
+        source, inverted = found
+        ltype = _OPPOSITE_EDGE.get(latch.ltype, latch.ltype) if inverted else latch.ltype
+        domains.add((ltype, ports[source]))
     if len(domains) > 1:
         raise UnprovenError(f"unproven: {flat.path}: unsupported: more than one clock domain "
                             f"(type, clock): {sorted(domains)}")
