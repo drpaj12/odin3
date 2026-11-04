@@ -81,8 +81,8 @@ second list, "References (Parts I and II)", of every work cited in either part. 
 package makes it: Part II cites with `\citeall{...}`, and `\nociteall{...}` right after
 `\begin{document}` adds the Part I keys in Part I citation order, so a work has the same number in
 both lists. multibib writes a second aux file, `all.aux`, so BibTeX runs twice: on `odin3.aux` and on
-`all.aux`. Overleaf runs both automatically (it uses latexmk), and so does `make` with Tectonic or
-`LATEX=latexmk`. With a plain `pdflatex` loop, run `bibtex odin3` and `bibtex all` between passes. When
+`all.aux`. Overleaf runs both automatically (it uses latexmk), and so does `make` (it calls
+`latexmk -pdf`). With a plain `pdflatex` loop, run `bibtex odin3` and `bibtex all` between passes. When
 Part I gains or loses a citation, regenerate the `\nociteall` list from the order of `\bibitem`
 keys in the Part I `.bbl`.
 
@@ -105,18 +105,16 @@ runs BibTeX itself (see below). pdfLaTeX warns that `fig_ast.pdf` is PDF 1.7. Th
 
 ## Build locally (optional)
 
-No TeX Live is installed here. The local path is [Tectonic](https://tectonic-typesetting.github.io)
-0.17.0: the static `x86_64-unknown-linux-musl` release, with its SHA-256 checked against the
-GitHub release. It lives at `~/odin3-ws/work/tools/tectonic/tectonic` and fetches TeX packages on
-demand. Tectonic is XeTeX-based, so the Makefile compiles through a wrapper that loads
-`[OT1]{fontenc}`. That makes Tectonic use the same Times/Courier Type 1 fonts as pdfLaTeX, so
-line breaks, page count and figure fits match Overleaf.
+The local path is the machine's own TeX Live (`pdflatex`, `bibtex`, `latexmk` in `/usr/bin`); nothing
+is downloaded at build time. `IEEEtran.cls` and `IEEEtran.bst` (V1.8b, LPPL 1.3; see
+`IEEEtran-NOTICE.md`) sit beside `odin3.tex`, so the build does not depend on the TeX Live version of
+the class. Last checked: 44 pages, 0 undefined references.
 
 The figure helpers run from a venv at `~/odin3-ws/work/tools/venv` with `pymupdf` and
 `cairosvg` installed. CairoSVG also needs the system `libcairo2`.
 
 ```bash
-make                  # build/odin3.pdf (Tectonic); make LATEX=latexmk for a TeX Live install
+make                  # build/odin3.pdf (latexmk -pdf -interaction=nonstopmode)
 make figures          # standalone figures -> build/figures.pdf -> IMAGE/svg/*.svg
 make fig-ast          # IMAGE/fig_ast.svg -> IMAGE/fig_ast.pdf
 make zip              # odin3-paper.zip for Overleaf
