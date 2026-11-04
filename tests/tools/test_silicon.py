@@ -149,6 +149,27 @@ endmodule
         self.assertEqual(got["o3_tie_1"]["links"][0]["kind"], "cone")
 
 
+class LabelAndRedactTest(unittest.TestCase):
+    def test_gds_labels_cts_buffers_like_placed(self) -> None:
+        buf = "sky130_fd_sc_hd__clkbuf_4"
+        comps = {(buf, 10, 20): "clkbuf_0", (sf.CONB, 0, 0): "o3_tie_0",
+                 ("sky130_fd_sc_hd__buf_1", 5, 5): "rbuf", ("sky130_fd_sc_hd__nand2_1", 1, 1): "u1"}
+        seen = {"clkbuf_0": "s07_cts", "rbuf": "s05_repair_design", "u1": "s00_link"}
+        got = {o["name"]: o["origin"] for o in sf.gds_objects(comps, {"u1"}, seen)}
+        self.assertEqual(got["clkbuf_0"], "physical:cts_buffer")
+        self.assertEqual(got["rbuf"], "physical:repair_buffer")
+        self.assertEqual(got["u1"], "hdl")
+        self.assertEqual(got["o3_tie_0"], "physical:tie")
+
+    def test_redact_paths_keeps_the_reason(self) -> None:
+        text = "error: cannot read /abs/dir/x.blif: undriven net raddr_o[0] (C:\\w\\y.v)"
+        got = sf.redact_paths(text)
+        self.assertEqual(got, "error: cannot read <path>: undriven net raddr_o[0] (<path>)")
+        self.assertEqual(sf.redact_paths("a/b relative and 1/2"), "a/b relative and 1/2")
+        import prov_steps
+        prov_steps._check_private(sf._first_line("/home" + "/u/x.blif: bad net"), "t")
+
+
 class CensusJoinTest(unittest.TestCase):
     def dump(self, out: Path, name: str, rows: list[tuple[str, str, int, int]]) -> None:
         (out / "or").mkdir(exist_ok=True)

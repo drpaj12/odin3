@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,8 +60,17 @@ def _run(argv: Sequence[str | Path], cwd: Path | None = None, env: Mapping[str, 
                           stdin=subprocess.DEVNULL, check=False)
 
 
+_ABS_PATH = re.compile(r"(?<![\w.~-])(?:/[^\s'\"(),:;]*|[A-Za-z]:\\[^\s'\"(),;]*)")
+
+
+def redact_paths(text: str) -> str:
+    """Replace absolute paths by ``<path>``; the step files refuse a path, the reason stays."""
+    return _ABS_PATH.sub("<path>", text)
+
+
 def _first_line(text: str) -> str:
-    return (text.strip().splitlines() or [""])[0][:120]
+    """First line of a tool's output, paths redacted, cut to 120 characters."""
+    return redact_paths((text.strip().splitlines() or [""])[0])[:120]
 
 
 def discover(odin3: Path, tools_dir: Path | None, pdk: Path | None) -> Tools:
@@ -502,6 +511,18 @@ def placed_objects(stage: str, dump: Mapping[str, Mapping[str, str]],
     return rows
 
 
+def gds_objects(comps: Mapping[tuple[str, int, int], str], hdl_names: Collection[str],
+                first_seen: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Rows of the gds step. A physical cell is labelled from the step that first showed it, as
+    at ``placed`` and ``routed``, so a clock-tree buffer is ``physical:cts_buffer`` here too."""
+    return [prov_steps.obj("gds", f"{m}@{x},{y}", "cell", name,
+                           "hdl" if name in hdl_names
+                           else f"physical:{kind_of(m, first_seen.get(name, ''))}",
+                           [prov_steps.link(f"routed:{name}", "id")], type=m,
+                           attrs={"master": m, "x": x, "y": y})
+            for (m, x, y), name in sorted(comps.items())]
+
+
 # --- the runner -------------------------------------------------------------------------------
 
 @dataclass
@@ -617,12 +638,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
     elif step == "gds":
         run_klayout(t, out, top)
         comps = def_components(out / "or" / "route.def")
-        rows = [prov_steps.obj("gds", f"{m}@{x},{y}", "cell", name,
-                               "hdl" if name in {p["inst"] for p in st.get("prov", [])}
-                               else f"physical:{kind_of(m, 'x')}",
-                               [prov_steps.link(f"routed:{name}", "id")], type=m,
-                               attrs={"master": m, "x": x, "y": y})
-                for (m, x, y), name in sorted(comps.items())]
+        rows = gds_objects(comps, {p["inst"] for p in st.get("prov", [])}, _first_seen(out))
         w.add_step("gds", "gds", {"id": "klayout", "version": t.versions.get("klayout", "")},
                    rows, needs=needs, outputs=_outs(out, [f"{top}.gds"]))
     elif step == "extract":
