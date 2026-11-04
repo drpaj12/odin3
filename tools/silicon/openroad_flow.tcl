@@ -41,6 +41,17 @@ if {$n_logic <= 1} {
 } else {
   initialize_floorplan -utilization 25 -aspect_ratio 1 -core_space 6 -site unithd
 }
+# Precheck: the pins sit on the die edge, about 0.9 per um of perimeter (Prob023: 153 on 168 um).
+# Size the die from the pin count when the floorplan gives too few; the log line is reported.
+set n_pins [llength [[ord::get_db_block] getBTerms]]
+set die [[ord::get_db_block] getDieArea]
+set die_side [expr {min([$die dx], [$die dy]) / double([[ord::get_db_block] getDbUnitsPerMicron])}]
+set need_side [expr {ceil($n_pins / 0.8 / 4.0) + 12}]
+if {$need_side > $die_side} {
+  puts "WARNING precheck: $n_pins pins need a die side of $need_side um, floorplan gave [format %.1f $die_side]: die enlarged"
+  initialize_floorplan -die_area "0 0 $need_side $need_side" \
+    -core_area "6 6 [expr {$need_side - 6}] [expr {$need_side - 6}]" -site unithd
+}
 make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
 make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
 make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46

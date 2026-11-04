@@ -251,6 +251,30 @@ def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]]) -> None:
 
 # --- OpenROAD, KLayout, Magic, Netgen ---------------------------------------------------------
 
+OUT_OF_SCOPE_EXIT = 3
+NEEDS = {"elab": ["read"], "map": ["elab"], "equiv": ["map"], "netlist": ["map"],
+         "place": ["netlist"], "route": ["place"], "gds": ["route"], "extract": ["gds"],
+         "lvs": ["extract"], "recover": ["extract"]}
+
+
+class OutOfScope(RuntimeError):
+    """The design does not fit what the flow can place and route; the reason is recorded in the
+    step files and printed as a WARNING, never dropped silently."""
+
+
+def precheck_warnings(log: str) -> list[str]:
+    """The ``WARNING precheck`` lines the Tcl driver printed when it adapted the floorplan."""
+    return [ln.strip() for ln in log.splitlines() if ln.startswith("WARNING precheck")]
+
+
+def openroad_reason(log: str) -> str:
+    """The first ``[ERROR code] text`` line of an OpenROAD log, paths redacted."""
+    for ln in log.splitlines():
+        if ln.startswith("[ERROR"):
+            return redact_paths(ln.strip())[:200]
+    return ""
+
+
 def run_openroad(t: Tools, out: Path, top: str, clock: str) -> None:
     assert t.openroad is not None and t.pdk is not None
     env = {"PDK": str(t.pdk), "OUT": str(out), "TOP": top, "CLK": clock}
@@ -259,6 +283,9 @@ def run_openroad(t: Tools, out: Path, top: str, clock: str) -> None:
              env=env)  # OpenROAD (2022) writes route.guide into its cwd
     (out / "openroad.log").write_text(r.stdout + r.stderr)
     if r.returncode != 0 or not (out / "or" / "route.def").is_file():
+        reason = openroad_reason(r.stdout + r.stderr)
+        if reason:
+            raise OutOfScope(reason)
         raise RuntimeError(f"openroad failed (rc {r.returncode}); see openroad.log")
 
 
@@ -594,6 +621,8 @@ def run(r: Run) -> int:
         started = time.time()
         try:
             _do_step(r, writer, step, state, root, clock)
+        except OutOfScope as exc:
+            return _out_of_scope(r, writer, step, str(exc), started)
         except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
             # ValueError includes prov_steps.PrivacyError (an absolute path about to be written)
             r.log.append(f"{step}: FAILED {exc}")
@@ -603,6 +632,20 @@ def run(r: Run) -> int:
         r.seconds[step] = round(time.time() - started, 1)
     writer.finish()
     return 0
+
+
+def _out_of_scope(r: Run, w: prov_steps.StepWriter, step: str, reason: str,
+                  started: float) -> int:
+    """Record 'out of scope: <reason>' as a check-only step, finish the index, print a WARNING."""
+    text = f"out of scope: {reason}"
+    w.add_step(step, "gates", {"id": "silicon-flow", "version": ""}, None,
+               needs=NEEDS.get(step, []),
+               check={"name": "scope", "result": "out-of-scope", "detail": text})
+    w.finish()
+    print(f"WARNING: {r.design.name}: {step}: {text}", file=sys.stderr)
+    r.log.append(f"{step}: OUT OF SCOPE {reason}")
+    r.seconds[step] = round(time.time() - started, 1)
+    return OUT_OF_SCOPE_EXIT
 
 
 def _odin(r: Run, upto: str) -> None:
@@ -616,9 +659,7 @@ def _odin(r: Run, upto: str) -> None:
 def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], root: Path,
              odin: Mapping[str, str]) -> None:
     out, t, top = r.out, r.tools, r.top
-    needs = {"elab": ["read"], "map": ["elab"], "equiv": ["map"], "netlist": ["map"],
-             "place": ["netlist"], "route": ["place"], "gds": ["route"], "extract": ["gds"],
-             "lvs": ["extract"], "recover": ["extract"]}.get(step, [])
+    needs = NEEDS.get(step, [])
     if step in ("read", "elab"):
         if "ir" not in st:
             _odin(r, "elab")
@@ -689,6 +730,9 @@ def _openroad(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any],
         st["or_done"] = True
         st["census"] = census(out)
         st["seen"] = _first_seen(out)
+        st["precheck"] = precheck_warnings((out / "openroad.log").read_text())
+        for warning in st["precheck"]:
+            print(warning, file=sys.stderr)
     seen: Mapping[str, str] = st["seen"]
     prov = {p["inst"]: p for p in st.get("prov", [])}
     if not prov:  # the netlist step was not run in this process: read the side table
@@ -701,6 +745,8 @@ def _openroad(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any],
         cen = [c for c in st["census"] if c["step"] < "s09"]
         w.add_step("place", "placed", _tool_entry(t, "openroad"), rows, needs=needs,
                    census={"steps": cen}, outputs=_outs(out, []),
+                   check={"name": "precheck", "result": "adapted",
+                          "detail": "; ".join(st["precheck"])} if st["precheck"] else None,
                    links=[{"from_step": "map", "kind": "name", "key": "instance", "scope": None,
                            "confidence": "exact"},
                           {"from_step": "place", "kind": "physical_origin", "key": None,

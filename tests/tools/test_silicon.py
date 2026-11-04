@@ -170,6 +170,42 @@ class LabelAndRedactTest(unittest.TestCase):
         prov_steps._check_private(sf._first_line("/home" + "/u/x.blif: bad net"), "t")
 
 
+class ScopeTest(unittest.TestCase):
+    LOG = ("x\n[INFO PPL-0001] a\n[ERROR PPL-0024] Number of pins 202 exceeds max possible 153.\n"
+           "Error: openroad_flow.tcl, 84 PPL-0024\n")
+
+    def test_reason_is_the_first_error_line(self) -> None:
+        self.assertEqual(sf.openroad_reason(self.LOG),
+                         "[ERROR PPL-0024] Number of pins 202 exceeds max possible 153.")
+        self.assertEqual(sf.openroad_reason("fine\n"), "")
+
+    def test_precheck_lines(self) -> None:
+        log = "a\nWARNING precheck: 202 pins need a die side of 76 um: die enlarged\nb\n"
+        self.assertEqual(sf.precheck_warnings(log),
+                         ["WARNING precheck: 202 pins need a die side of 76 um: die enlarged"])
+        self.assertEqual(sf.precheck_warnings("none"), [])
+
+    def test_out_of_scope_is_recorded_not_dropped(self) -> None:
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest import mock
+        design = MICRO / "bm_DL_4_bit_comparator.v"
+        with tempfile.TemporaryDirectory() as tmp:
+            run = sf.Run(design, "bm_DL_4_bit_comparator", Path(tmp), LIB,
+                         sf.Tools(odin3=Path(ODIN3)), "", sf.ODIN_ONLY, REPO_ROOT)
+            err = StringIO()
+            boom = mock.patch.object(sf, "_do_step",
+                                     side_effect=sf.OutOfScope("[ERROR GPL-0302] x"))
+            with boom, redirect_stderr(err):
+                self.assertEqual(sf.run(run), sf.OUT_OF_SCOPE_EXIT)
+            self.assertIn("WARNING", err.getvalue())
+            self.assertEqual(run.log, ["read: OUT OF SCOPE [ERROR GPL-0302] x"])
+            head = json.loads(next((Path(tmp) / "prov").glob("*-read.json")).read_text())
+            self.assertEqual(head["check"]["result"], "out-of-scope")
+            self.assertIn("out of scope: [ERROR GPL-0302] x", head["check"]["detail"])
+            self.assertTrue((Path(tmp) / "prov" / "index.json").is_file())
+
+
 class RefSpiceTest(unittest.TestCase):
     def test_reason_skips_notices_and_paths(self) -> None:
         text = ("equiv-check: notice: /a/b/rtl.blif: 8 latch(es) treated as 0\n"
