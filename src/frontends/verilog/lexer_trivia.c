@@ -118,6 +118,12 @@ static void record(odin3_vl_state *st, const vl_comment *cm) {
         return;
     }
     odin3_loc end = {vl_loc(st, cm->hi - 1).v + 1};
+    /* A comment that runs to the end of its file (an included file with no final newline) has
+     * its last byte's successor in the next buffer: it then has no recorded end. */
+    if (odin3_srcman_buffer_of(st->cur.sm, end).v !=
+        odin3_srcman_buffer_of(st->cur.sm, cm->first).v) {
+        end.v = 0;
+    }
     odin3_bytes text = vl_bytes(st, cm->text_lo, cm->text_hi);
     if (text.len > st->run->limits.comment_bytes) {
         text.len = st->run->limits.comment_bytes;
