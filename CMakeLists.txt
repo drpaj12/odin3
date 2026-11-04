@@ -145,6 +145,9 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/register.c
     src/passes/raise/raise.c
     src/passes/raise/register.c
+    src/passes/tristate/tristate.c
+    src/passes/tristate/split.c
+    src/passes/tristate/register.c
     src/passes/unmap/unmap.c
     src/passes/unmap/register.c
     src/passes/unmap/kit.c
