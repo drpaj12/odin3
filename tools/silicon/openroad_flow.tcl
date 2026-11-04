@@ -29,13 +29,27 @@ read_verilog $out/clean.v
 link_design $top
 if {$clk ne ""} { create_clock -name clk -period 10 [get_ports $clk] }
 snap s00_link
+proc cell_area_um2 {} {
+  set blk [ord::get_db_block]
+  set dbu [expr {double([$blk getDbUnitsPerMicron])}]
+  set a 0.0
+  foreach i [$blk getInsts] {
+    set m [$i getMaster]
+    set a [expr {$a + ([$m getWidth] / $dbu) * ([$m getHeight] / $dbu)}]
+  }
+  return $a
+}
 
 # A design of one cell or none gives a core with no site row at 25 percent utilization (the PDN
 # step then stops on "empty command name"): use a fixed 30 um core for it. Others are unchanged.
 set n_logic [llength [[ord::get_db_block] getInsts]]  ;# before tap cells
-if {$n_logic <= 1} {
+# Rows shorter than the tap distance (14 um) get no tap cell, so the wells (VPB, VNB) are tied to
+# no supply and LVS sees nets of their own (Q-L13: 8 LVS mismatches): a core predicted below
+# 16 um a side gets the fixed core as well.
+set core_pred [expr {sqrt([cell_area_um2] / 0.25)}]
+if {$n_logic <= 1 || $core_pred < 16.0} {
   set hi 36.0
-  puts "SMALL_DESIGN $n_logic cells: fixed core"
+  puts "WARNING precheck: $n_logic cells, predicted core side [format %.1f $core_pred] um: fixed core"
   initialize_floorplan -die_area "0 0 42 42" \
     -core_area "6 6 $hi $hi" -site unithd
 } else {
@@ -52,12 +66,15 @@ if {$need_side > $die_side} {
   initialize_floorplan -die_area "0 0 $need_side $need_side" \
     -core_area "6 6 [expr {$need_side - 6}] [expr {$need_side - 6}]" -site unithd
 }
-make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
-make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
-make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46
-make_tracks met3 -x_offset 0.34 -x_pitch 0.68 -y_offset 0.34 -y_pitch 0.68
-make_tracks met4 -x_offset 0.46 -x_pitch 0.92 -y_offset 0.46 -y_pitch 0.92
-make_tracks met5 -x_offset 1.70 -x_pitch 3.40 -y_offset 1.70 -y_pitch 3.40
+proc tracks {} {
+  make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
+  make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
+  make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46
+  make_tracks met3 -x_offset 0.34 -x_pitch 0.68 -y_offset 0.34 -y_pitch 0.68
+  make_tracks met4 -x_offset 0.46 -x_pitch 0.92 -y_offset 0.46 -y_pitch 0.92
+  make_tracks met5 -x_offset 1.70 -x_pitch 3.40 -y_offset 1.70 -y_pitch 3.40
+}
+tracks
 snap s01_floorplan
 
 tapcell -distance 14 -tapcell_master sky130_fd_sc_hd__tapvpwrvgnd_1
