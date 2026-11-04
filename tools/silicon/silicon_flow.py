@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -60,8 +60,26 @@ def _run(argv: Sequence[str | Path], cwd: Path | None = None, env: Mapping[str, 
                           stdin=subprocess.DEVNULL, check=False)
 
 
+_ABS_PATH = re.compile(r"(?<![\w.~-])(?:/[^\s'\"(),:;]*|[A-Za-z]:\\[^\s'\"(),;]*)")
+
+
+def redact_paths(text: str) -> str:
+    """Replace absolute paths by ``<path>``; the step files refuse a path, the reason stays."""
+    return _ABS_PATH.sub("<path>", text)
+
+
+EQUIV_RESULT = {0: "equivalent", 1: "not-equivalent"}  # any other exit code: a tool error
+
+
+def _reason(text: str) -> str:
+    """The last line of an equiv-check output that is not a notice, paths redacted."""
+    lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
+    return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
+
+
 def _first_line(text: str) -> str:
-    return (text.strip().splitlines() or [""])[0][:120]
+    """First line of a tool's output, paths redacted, cut to 120 characters."""
+    return redact_paths((text.strip().splitlines() or [""])[0])[:120]
 
 
 def discover(odin3: Path, tools_dir: Path | None, pdk: Path | None) -> Tools:
@@ -233,6 +251,30 @@ def write_prov_csv(path: Path, rows: Sequence[Mapping[str, str]]) -> None:
 
 # --- OpenROAD, KLayout, Magic, Netgen ---------------------------------------------------------
 
+OUT_OF_SCOPE_EXIT = 3
+NEEDS = {"elab": ["read"], "map": ["elab"], "equiv": ["map"], "netlist": ["map"],
+         "place": ["netlist"], "route": ["place"], "gds": ["route"], "extract": ["gds"],
+         "lvs": ["extract"], "recover": ["extract"]}
+
+
+class OutOfScope(RuntimeError):
+    """The design does not fit what the flow can place and route; the reason is recorded in the
+    step files and printed as a WARNING, never dropped silently."""
+
+
+def precheck_warnings(log: str) -> list[str]:
+    """The ``WARNING precheck`` lines the Tcl driver printed when it adapted the floorplan."""
+    return [ln.strip() for ln in log.splitlines() if ln.startswith("WARNING precheck")]
+
+
+def openroad_reason(log: str) -> str:
+    """The first ``[ERROR code] text`` line of an OpenROAD log, paths redacted."""
+    for ln in log.splitlines():
+        if ln.startswith("[ERROR"):
+            return redact_paths(ln.strip())[:200]
+    return ""
+
+
 def run_openroad(t: Tools, out: Path, top: str, clock: str) -> None:
     assert t.openroad is not None and t.pdk is not None
     env = {"PDK": str(t.pdk), "OUT": str(out), "TOP": top, "CLK": clock}
@@ -241,6 +283,9 @@ def run_openroad(t: Tools, out: Path, top: str, clock: str) -> None:
              env=env)  # OpenROAD (2022) writes route.guide into its cwd
     (out / "openroad.log").write_text(r.stdout + r.stderr)
     if r.returncode != 0 or not (out / "or" / "route.def").is_file():
+        reason = openroad_reason(r.stdout + r.stderr)
+        if reason:
+            raise OutOfScope(reason)
         raise RuntimeError(f"openroad failed (rc {r.returncode}); see openroad.log")
 
 
@@ -267,6 +312,15 @@ def run_magic(t: Tools, out: Path, top: str) -> None:
             raise RuntimeError(f"magic ({mode}) failed; see magic_{mode}/magic.log")
 
 
+def ref_instance_line(inst: str, master: str, pins: Sequence[str],
+                      conn: Mapping[str, str]) -> str:
+    """One instance line of the reference SPICE. A pin the netlist leaves open (an unused
+    output, such as the HI pin of a tie cell) gets a net of its own: an empty field would drop
+    the pin from the line and move every later pin one place up."""
+    nets = [conn.get(p) or f"nc_{inst}_{p}" for p in pins]
+    return f"X{inst} " + " ".join(nets) + f" {master}"
+
+
 def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     """Netgen LVS of the hierarchical extraction against the OpenROAD netlist."""
     assert t.netgen is not None and t.pdk is not None
@@ -290,8 +344,11 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
         conn = {k: v.strip() for k, v in re.findall(r"\.(\w+)\(([^)]*)\)", body)}
         for p, n in pg.items():
             conn.setdefault(p, n)
-        lines.append(f"X{inst} " + " ".join(conn.get(p, "") for p in pins[master]) + f" {master}")
+        lines.append(ref_instance_line(inst, master, pins[master], conn))
     lines.append(f".ends {top}")
+    if len(lines) == 2:  # no cell: the reference has no element and netgen refuses to compare
+        return {"name": "netgen_lvs", "result": "not-applicable",
+                "detail": "no cells in the design; nothing to compare"}
     (out / "ref.spice").write_text(cells + "\n" + "\n".join(lines) + "\n")
     setup = t.pdk / "libs.tech/netgen/sky130A_setup.tcl"
     (out / "lvs.tcl").write_text(f'lvs "{out}/ext_hier.spice {top}" "{out}/ref.spice {top}" '
@@ -301,7 +358,8 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     log = (out / "lvs.log").read_text() if (out / "lvs.log").is_file() else ""
     final = [ln for ln in log.splitlines() if ln.startswith("Final result")]
     result = "match" if final and "match uniquely" in final[-1] else "mismatch"
-    return {"name": "netgen_lvs", "result": result, "detail": final[-1] if final else "no result"}
+    detail = redact_paths(final[-1]) if final else "no result"
+    return {"name": "netgen_lvs", "result": result, "detail": detail}
 
 
 # --- census, join -----------------------------------------------------------------------------
@@ -502,6 +560,18 @@ def placed_objects(stage: str, dump: Mapping[str, Mapping[str, str]],
     return rows
 
 
+def gds_objects(comps: Mapping[tuple[str, int, int], str], hdl_names: Collection[str],
+                first_seen: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Rows of the gds step. A physical cell is labelled from the step that first showed it, as
+    at ``placed`` and ``routed``, so a clock-tree buffer is ``physical:cts_buffer`` here too."""
+    return [prov_steps.obj("gds", f"{m}@{x},{y}", "cell", name,
+                           "hdl" if name in hdl_names
+                           else f"physical:{kind_of(m, first_seen.get(name, ''))}",
+                           [prov_steps.link(f"routed:{name}", "id")], type=m,
+                           attrs={"master": m, "x": x, "y": y})
+            for (m, x, y), name in sorted(comps.items())]
+
+
 # --- the runner -------------------------------------------------------------------------------
 
 @dataclass
@@ -551,6 +621,8 @@ def run(r: Run) -> int:
         started = time.time()
         try:
             _do_step(r, writer, step, state, root, clock)
+        except OutOfScope as exc:
+            return _out_of_scope(r, writer, step, str(exc), started)
         except (RuntimeError, OSError, ValueError, subprocess.TimeoutExpired) as exc:
             # ValueError includes prov_steps.PrivacyError (an absolute path about to be written)
             r.log.append(f"{step}: FAILED {exc}")
@@ -560,6 +632,20 @@ def run(r: Run) -> int:
         r.seconds[step] = round(time.time() - started, 1)
     writer.finish()
     return 0
+
+
+def _out_of_scope(r: Run, w: prov_steps.StepWriter, step: str, reason: str,
+                  started: float) -> int:
+    """Record 'out of scope: <reason>' as a check-only step, finish the index, print a WARNING."""
+    text = f"out of scope: {reason}"
+    w.add_step(step, "gates", {"id": "silicon-flow", "version": ""}, None,
+               needs=NEEDS.get(step, []),
+               check={"name": "scope", "result": "out-of-scope", "detail": text})
+    w.finish()
+    print(f"WARNING: {r.design.name}: {step}: {text}", file=sys.stderr)
+    r.log.append(f"{step}: OUT OF SCOPE {reason}")
+    r.seconds[step] = round(time.time() - started, 1)
+    return OUT_OF_SCOPE_EXIT
 
 
 def _odin(r: Run, upto: str) -> None:
@@ -573,9 +659,7 @@ def _odin(r: Run, upto: str) -> None:
 def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], root: Path,
              odin: Mapping[str, str]) -> None:
     out, t, top = r.out, r.tools, r.top
-    needs = {"elab": ["read"], "map": ["elab"], "equiv": ["map"], "netlist": ["map"],
-             "place": ["netlist"], "route": ["place"], "gds": ["route"], "extract": ["gds"],
-             "lvs": ["extract"], "recover": ["extract"]}.get(step, [])
+    needs = NEEDS.get(step, [])
     if step in ("read", "elab"):
         if "ir" not in st:
             _odin(r, "elab")
@@ -603,10 +687,11 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         eq = _run([sys.executable, checker, out / "rtl.blif", out / "gates.blif"])
         (out / "equiv.txt").write_text(f"exit {eq.returncode}\n{eq.stdout}{eq.stderr}")
         w.add_step("equiv", "gates", {"id": "equiv-check", "version": ""}, None, needs=needs,
-                   check={"name": "equiv-check", "result": "equivalent" if eq.returncode == 0
-                          else "not-equivalent", "detail": _first_line(eq.stdout + eq.stderr)})
+                   check={"name": "equiv-check",
+                          "result": EQUIV_RESULT.get(eq.returncode, "error"),
+                          "detail": _reason(eq.stdout + eq.stderr)})
         if eq.returncode != 0:
-            raise RuntimeError("equiv-check: gates are not equivalent to the RTL")
+            raise RuntimeError(f"equiv-check: {_reason(eq.stdout + eq.stderr)}")
     elif step == "netlist":
         w.add_step("netlist", "gates", {"id": "clean_netlist", "version": ""}, None,
                    needs=needs, outputs=_outs(out, ["clean.v", "prov.csv"]),
@@ -617,12 +702,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
     elif step == "gds":
         run_klayout(t, out, top)
         comps = def_components(out / "or" / "route.def")
-        rows = [prov_steps.obj("gds", f"{m}@{x},{y}", "cell", name,
-                               "hdl" if name in {p["inst"] for p in st.get("prov", [])}
-                               else f"physical:{kind_of(m, 'x')}",
-                               [prov_steps.link(f"routed:{name}", "id")], type=m,
-                               attrs={"master": m, "x": x, "y": y})
-                for (m, x, y), name in sorted(comps.items())]
+        rows = gds_objects(comps, {p["inst"] for p in st.get("prov", [])}, _first_seen(out))
         w.add_step("gds", "gds", {"id": "klayout", "version": t.versions.get("klayout", "")},
                    rows, needs=needs, outputs=_outs(out, [f"{top}.gds"]))
     elif step == "extract":
@@ -631,7 +711,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         res = run_lvs(t, out, top)
         w.add_step("lvs", "extracted", {"id": "netgen", "version": t.versions.get("netgen", "")},
                    None, needs=needs, check=res)
-        if res["result"] != "match":
+        if res["result"] == "mismatch":
             raise RuntimeError(f"LVS: {res['detail']}")
     elif step == "recover":
         _recover(r, w, st, needs)
@@ -650,6 +730,9 @@ def _openroad(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any],
         st["or_done"] = True
         st["census"] = census(out)
         st["seen"] = _first_seen(out)
+        st["precheck"] = precheck_warnings((out / "openroad.log").read_text())
+        for warning in st["precheck"]:
+            print(warning, file=sys.stderr)
     seen: Mapping[str, str] = st["seen"]
     prov = {p["inst"]: p for p in st.get("prov", [])}
     if not prov:  # the netlist step was not run in this process: read the side table
@@ -662,6 +745,8 @@ def _openroad(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any],
         cen = [c for c in st["census"] if c["step"] < "s09"]
         w.add_step("place", "placed", _tool_entry(t, "openroad"), rows, needs=needs,
                    census={"steps": cen}, outputs=_outs(out, []),
+                   check={"name": "precheck", "result": "adapted",
+                          "detail": "; ".join(st["precheck"])} if st["precheck"] else None,
                    links=[{"from_step": "map", "kind": "name", "key": "instance", "scope": None,
                            "confidence": "exact"},
                           {"from_step": "place", "kind": "physical_origin", "key": None,

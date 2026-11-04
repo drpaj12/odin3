@@ -149,6 +149,81 @@ endmodule
         self.assertEqual(got["o3_tie_1"]["links"][0]["kind"], "cone")
 
 
+class LabelAndRedactTest(unittest.TestCase):
+    def test_gds_labels_cts_buffers_like_placed(self) -> None:
+        buf = "sky130_fd_sc_hd__clkbuf_4"
+        comps = {(buf, 10, 20): "clkbuf_0", (sf.CONB, 0, 0): "o3_tie_0",
+                 ("sky130_fd_sc_hd__buf_1", 5, 5): "rbuf", ("sky130_fd_sc_hd__nand2_1", 1, 1): "u1"}
+        seen = {"clkbuf_0": "s07_cts", "rbuf": "s05_repair_design", "u1": "s00_link"}
+        got = {o["name"]: o["origin"] for o in sf.gds_objects(comps, {"u1"}, seen)}
+        self.assertEqual(got["clkbuf_0"], "physical:cts_buffer")
+        self.assertEqual(got["rbuf"], "physical:repair_buffer")
+        self.assertEqual(got["u1"], "hdl")
+        self.assertEqual(got["o3_tie_0"], "physical:tie")
+
+    def test_redact_paths_keeps_the_reason(self) -> None:
+        text = "error: cannot read /abs/dir/x.blif: undriven net raddr_o[0] (C:\\w\\y.v)"
+        got = sf.redact_paths(text)
+        self.assertEqual(got, "error: cannot read <path>: undriven net raddr_o[0] (<path>)")
+        self.assertEqual(sf.redact_paths("a/b relative and 1/2"), "a/b relative and 1/2")
+        import prov_steps
+        prov_steps._check_private(sf._first_line("/home" + "/u/x.blif: bad net"), "t")
+
+
+class ScopeTest(unittest.TestCase):
+    LOG = ("x\n[INFO PPL-0001] a\n[ERROR PPL-0024] Number of pins 202 exceeds max possible 153.\n"
+           "Error: openroad_flow.tcl, 84 PPL-0024\n")
+
+    def test_reason_is_the_first_error_line(self) -> None:
+        self.assertEqual(sf.openroad_reason(self.LOG),
+                         "[ERROR PPL-0024] Number of pins 202 exceeds max possible 153.")
+        self.assertEqual(sf.openroad_reason("fine\n"), "")
+
+    def test_precheck_lines(self) -> None:
+        log = "a\nWARNING precheck: 202 pins need a die side of 76 um: die enlarged\nb\n"
+        self.assertEqual(sf.precheck_warnings(log),
+                         ["WARNING precheck: 202 pins need a die side of 76 um: die enlarged"])
+        self.assertEqual(sf.precheck_warnings("none"), [])
+
+    def test_out_of_scope_is_recorded_not_dropped(self) -> None:
+        from contextlib import redirect_stderr
+        from io import StringIO
+        from unittest import mock
+        design = MICRO / "bm_DL_4_bit_comparator.v"
+        with tempfile.TemporaryDirectory() as tmp:
+            run = sf.Run(design, "bm_DL_4_bit_comparator", Path(tmp), LIB,
+                         sf.Tools(odin3=Path(ODIN3)), "", sf.ODIN_ONLY, REPO_ROOT)
+            err = StringIO()
+            boom = mock.patch.object(sf, "_do_step",
+                                     side_effect=sf.OutOfScope("[ERROR GPL-0302] x"))
+            with boom, redirect_stderr(err):
+                self.assertEqual(sf.run(run), sf.OUT_OF_SCOPE_EXIT)
+            self.assertIn("WARNING", err.getvalue())
+            self.assertEqual(run.log, ["read: OUT OF SCOPE [ERROR GPL-0302] x"])
+            head = json.loads(next((Path(tmp) / "prov").glob("*-read.json")).read_text())
+            self.assertEqual(head["check"]["result"], "out-of-scope")
+            self.assertIn("out of scope: [ERROR GPL-0302] x", head["check"]["detail"])
+            self.assertTrue((Path(tmp) / "prov" / "index.json").is_file())
+
+
+class RefSpiceTest(unittest.TestCase):
+    def test_reason_skips_notices_and_paths(self) -> None:
+        text = ("equiv-check: notice: /a/b/rtl.blif: 8 latch(es) treated as 0\n"
+                "equiv-check: error: latch $n21 is clocked by internal net, see /a/b/c.blif\n")
+        self.assertEqual(sf._reason(text),
+                         "equiv-check: error: latch $n21 is clocked by internal net, see <path>")
+        self.assertEqual(sf._reason(""), "gates are not equivalent to the RTL")
+
+    def test_open_pin_gets_its_own_net(self) -> None:
+        pins = ["VGND", "VNB", "VPB", "VPWR", "HI", "LO"]
+        conn = {"VGND": "VSS", "VNB": "VSS", "VPB": "VDD", "VPWR": "VDD", "LO": "zero", "HI": ""}
+        line = sf.ref_instance_line("t0", "sky130_fd_sc_hd__conb_1", pins, conn)
+        self.assertEqual(line, "Xt0 VSS VSS VDD VDD nc_t0_HI zero sky130_fd_sc_hd__conb_1")
+        self.assertEqual(len(line.split()), len(pins) + 2)
+        absent = {k: v for k, v in conn.items() if k != "HI"}
+        self.assertEqual(sf.ref_instance_line("t0", "sky130_fd_sc_hd__conb_1", pins, absent), line)
+
+
 class CensusJoinTest(unittest.TestCase):
     def dump(self, out: Path, name: str, rows: list[tuple[str, str, int, int]]) -> None:
         (out / "or").mkdir(exist_ok=True)
@@ -301,14 +376,16 @@ class VtrProvStepsTest(unittest.TestCase):
 
 @unittest.skipUnless(ODIN3 and TOOLS, "ODIN3_CLI or ODIN3_SILICON_TOOLS not set")
 class FullFlowTest(unittest.TestCase):
-    def run_design(self, name: str, clock: str) -> tuple[Path, dict[str, object]]:
+    def run_design(self, name: str, clock: str,
+                   src: Path | None = None) -> tuple[Path, dict[str, object]]:
         tools = sf.discover(Path(ODIN3), Path(TOOLS), None)
         gone = sf.missing(tools, sf.TOP_STEPS)
         if gone:
             self.skipTest("missing: " + "; ".join(gone))
         tmp = tempfile.mkdtemp()
         out = Path(tmp)
-        run = sf.Run(MICRO / f"{name}.v", name, out, LIB, tools, clock, sf.TOP_STEPS, REPO_ROOT)
+        design = src or MICRO / f"{name}.v"
+        run = sf.Run(design, name, out, LIB, tools, clock, sf.TOP_STEPS, REPO_ROOT)
         self.assertEqual(sf.run(run), 0, run.log)
         return out, json.loads((out / "join.json").read_text())
 
@@ -324,6 +401,27 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(sum(c["renamed"] + c["removed"] for c in cen), 0)
         stored = json.loads((REPO_ROOT / "tests/silicon/comparator/census.json").read_text())
         self.assertEqual(cen, stored)
+
+    def test_tie_only_design_reaches_lvs_match(self) -> None:
+        """One logic cell (a tie): the floorplan used to have no row and the PDN step stopped;
+        RePlAce diverged on a single cell; the open HI pin broke the reference SPICE."""
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "zero.v"
+            src.write_text("module zero_top(output z);\n  assign z = 1'b0;\nendmodule\n")
+            out, join = self.run_design("zero_top", "", src)
+        self.assertEqual(join["logic_cells"], 1)
+        self.assertEqual(join["join_rate"], 1.0)
+        self.assertEqual(schema_check.check_dir(out / "prov", SCHEMAS), [])
+        self.assertIn("Netlists match uniquely", (out / "lvs.log").read_text())
+
+    def test_wire_only_design_completes_with_lvs_not_applicable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "wire.v"
+            src.write_text("module wire_top(input a, output z);\n  assign z = a;\nendmodule\n")
+            out, _join = self.run_design("wire_top", "", src)
+        self.assertEqual(schema_check.check_dir(out / "prov", SCHEMAS), [])
+        lvs = json.loads(next((out / "prov").glob("*-lvs.json")).read_text())
+        self.assertEqual(lvs["check"]["result"], "not-applicable")
 
     def test_shift_register_with_clock(self) -> None:
         out, join = self.run_design("bm_DL_4_bit_shift_register", "Clock")

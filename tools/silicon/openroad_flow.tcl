@@ -29,14 +29,52 @@ read_verilog $out/clean.v
 link_design $top
 if {$clk ne ""} { create_clock -name clk -period 10 [get_ports $clk] }
 snap s00_link
+proc cell_area_um2 {} {
+  set blk [ord::get_db_block]
+  set dbu [expr {double([$blk getDbUnitsPerMicron])}]
+  set a 0.0
+  foreach i [$blk getInsts] {
+    set m [$i getMaster]
+    set a [expr {$a + ([$m getWidth] / $dbu) * ([$m getHeight] / $dbu)}]
+  }
+  return $a
+}
 
-initialize_floorplan -utilization 25 -aspect_ratio 1 -core_space 6 -site unithd
-make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
-make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
-make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46
-make_tracks met3 -x_offset 0.34 -x_pitch 0.68 -y_offset 0.34 -y_pitch 0.68
-make_tracks met4 -x_offset 0.46 -x_pitch 0.92 -y_offset 0.46 -y_pitch 0.92
-make_tracks met5 -x_offset 1.70 -x_pitch 3.40 -y_offset 1.70 -y_pitch 3.40
+# A design of one cell or none gives a core with no site row at 25 percent utilization (the PDN
+# step then stops on "empty command name"): use a fixed 30 um core for it. Others are unchanged.
+set n_logic [llength [[ord::get_db_block] getInsts]]  ;# before tap cells
+# Rows shorter than the tap distance (14 um) get no tap cell, so the wells (VPB, VNB) are tied to
+# no supply and LVS sees nets of their own (Q-L13: 8 LVS mismatches): a core predicted below
+# 16 um a side gets the fixed core as well.
+set core_pred [expr {sqrt([cell_area_um2] / 0.25)}]
+if {$n_logic <= 1 || $core_pred < 16.0} {
+  set hi 36.0
+  puts "WARNING precheck: $n_logic cells, predicted core side [format %.1f $core_pred] um: fixed core"
+  initialize_floorplan -die_area "0 0 42 42" \
+    -core_area "6 6 $hi $hi" -site unithd
+} else {
+  initialize_floorplan -utilization 25 -aspect_ratio 1 -core_space 6 -site unithd
+}
+# Precheck: the pins sit on the die edge, about 0.9 per um of perimeter (Prob023: 153 on 168 um).
+# Size the die from the pin count when the floorplan gives too few; the log line is reported.
+set n_pins [llength [[ord::get_db_block] getBTerms]]
+set die [[ord::get_db_block] getDieArea]
+set die_side [expr {min([$die dx], [$die dy]) / double([[ord::get_db_block] getDbUnitsPerMicron])}]
+set need_side [expr {ceil($n_pins / 0.8 / 4.0) + 12}]
+if {$need_side > $die_side} {
+  puts "WARNING precheck: $n_pins pins need a die side of $need_side um, floorplan gave [format %.1f $die_side]: die enlarged"
+  initialize_floorplan -die_area "0 0 $need_side $need_side" \
+    -core_area "6 6 [expr {$need_side - 6}] [expr {$need_side - 6}]" -site unithd
+}
+proc tracks {} {
+  make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
+  make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34
+  make_tracks met2 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.23 -y_pitch 0.46
+  make_tracks met3 -x_offset 0.34 -x_pitch 0.68 -y_offset 0.34 -y_pitch 0.68
+  make_tracks met4 -x_offset 0.46 -x_pitch 0.92 -y_offset 0.46 -y_pitch 0.92
+  make_tracks met5 -x_offset 1.70 -x_pitch 3.40 -y_offset 1.70 -y_pitch 3.40
+}
+tracks
 snap s01_floorplan
 
 tapcell -distance 14 -tapcell_master sky130_fd_sc_hd__tapvpwrvgnd_1
@@ -56,9 +94,22 @@ add_pdn_connect -layers {met4 met5}
 pdngen
 snap s03_pdn
 
-global_placement -skip_io -density 0.5
-place_pins -hor_layers met3 -ver_layers met2
-global_placement -density 0.5
+# RePlAce diverges (GPL-0304) on a design of one logic cell or none: put the cell at the core
+# centre and let detailed_placement legalize it (the tap cells are fixed already).
+if {$n_logic <= 1} {
+  puts "SMALL_DESIGN $n_logic cells: centre placement, no global_placement"
+  set core [[ord::get_db_block] getCoreArea]
+  foreach i [[ord::get_db_block] getInsts] {
+    $i setOrient R0
+    $i setLocation [expr {([$core xMin] + [$core xMax]) / 2}] [expr {([$core yMin] + [$core yMax]) / 2}]
+    $i setPlacementStatus PLACED
+  }
+  place_pins -hor_layers met3 -ver_layers met2
+} else {
+  global_placement -skip_io -density 0.5
+  place_pins -hor_layers met3 -ver_layers met2
+  global_placement -density 0.5
+}
 snap s04_global_place
 
 set_wire_rc -signal -layer met2
