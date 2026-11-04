@@ -223,6 +223,19 @@ class RefSpiceTest(unittest.TestCase):
         absent = {k: v for k, v in conn.items() if k != "HI"}
         self.assertEqual(sf.ref_instance_line("t0", "sky130_fd_sc_hd__conb_1", pins, absent), line)
 
+    def test_aliased_ports_use_the_layout_port_name(self) -> None:
+        """`assign out[6] = out[0];` in final.v: the layout keeps one port name for the net."""
+        text = "wire x;\n assign out[12] = out[0];\n assign out[6] = out[0];\n assign w = a[1];\n"
+        ports = ["a[1]", "out[6]", "VDD", "VSS"]
+        rename, groups = sf.port_aliases(text, ports)
+        self.assertEqual(rename, {"out[0]": "out[6]", "out[12]": "out[6]", "w": "a[1]"})
+        self.assertEqual(groups, [["out[0]", "out[12]", "out[6]"], ["a[1]", "w"]])
+        self.assertEqual(sf.port_aliases("wire x;\n", ports), ({}, []))
+
+    def test_alias_group_without_layout_port_is_left_alone(self) -> None:
+        rename, _groups = sf.port_aliases("assign p = q;\n", ["z"])
+        self.assertEqual(rename, {})
+
 
 class CensusJoinTest(unittest.TestCase):
     def dump(self, out: Path, name: str, rows: list[tuple[str, str, int, int]]) -> None:
