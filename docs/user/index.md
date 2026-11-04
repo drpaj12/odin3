@@ -5,7 +5,7 @@ Odin III is a Verilog synthesis front end and netlist tool for FPGA flows. It re
 optimises and maps it, and writes BLIF for VPR or Verilog with LPM cells. Every object in the
 output keeps a pointer to the HDL text it came from.
 
-Headline result, from the [paper](https://github.com/drpaj12/odin3/tree/main/docs/paper): every netlist Odin III
+Headline result, from the paper (kept locally by the author): every netlist Odin III
 produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and
 wirelength ratios against the Parmys flow inside a 1.20 gate; two designs differ from Parmys in multiplier count and five lose
 adders. Power is not measured. The hub is <https://github.com/drpaj12/YggdrasilIII>.
@@ -16,7 +16,7 @@ the flow with one diagram per stage, then the references.
 Beyond the manual: the [v1.2.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.2.0.md)
 (provenance at every granularity; see the {doc}`provenance` page; version 1.3.0 changes are in the CHANGELOG), the [v1.1.1 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.1.md)
 (critical-path attribution to HDL), the [v1.1.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.0.md)
-(SystemVerilog and the VerilogEval run; the [v1.0 notes](https://github.com/drpaj12/odin3/blob/main/docs/RELEASE-NOTES-1.0.md) are older), the [paper](https://github.com/drpaj12/odin3/tree/main/docs/paper),
+(SystemVerilog and the VerilogEval run; the [v1.0 notes](https://github.com/drpaj12/odin3/blob/main/docs/RELEASE-NOTES-1.0.md) are older),
 and the [token, model and time cost](https://github.com/drpaj12/odin3/blob/main/docs/log_cost_of_tokens_and_time.md)
 of building Odin III. The other Yggdrasil III pieces are linked in the sidebar; setting up the whole
 suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilIII/getting-started.html).

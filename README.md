@@ -14,7 +14,7 @@ one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. St
 Verilog-2005, BLIF, Yosys JSON, structural Verilog) -> two-stage elaboration -> `proc`, `opt`, `fsm`, `wreduce`, `flatten`
 (re-implementing Yosys 0.55 behaviour) -> architecture-driven partial mapping and ABC -> BLIF for VPR or LPM Verilog.
 Version 1.4 adds a silicon flow (Odin III to a routed SKY130 layout and back, with no Yosys in the path) and provenance step files at every stage, for the LUT/VTR flows as well. Since v1.0 it also has graph features (graphlet orbit counts, SCOAP), a netlist editing API, a cycle simulator with testbench
-support, and processor-netlist handling. Headline result (paper, [`docs/paper/`](docs/paper/README.md)): every netlist it
+support, and processor-netlist handling. Headline result (from the paper, kept locally by the author): every netlist it
 produced for the 15 VTR benchmarks that fit the development laptop routes in VPR, with geomean CLB, channel-width, delay and
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
@@ -22,7 +22,7 @@ five lose adders, so the equal-or-explained rule is not met; power is not measur
 **Status: version 1.4.0 (released 2026-11-03, tag `v1.4.0`).** Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
-[`docs/DESIGN.md`](docs/DESIGN.md). Paper: [`docs/paper/`](docs/paper/README.md). Token, model and
+[`docs/DESIGN.md`](docs/DESIGN.md). Paper: kept locally by the author. Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
 
 Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.4.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
@@ -40,7 +40,7 @@ Start at the Yggdrasil III hub; every manual links to the others.
   [GUI](https://drpaj12.github.io/wyrd/wyrd-gui-tutorial.pdf).
 - [Loki III manual](https://drpaj12.github.io/loki/).
 - [Verdandi III manual](https://drpaj12.github.io/verdandiIII/).
-- [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan and paper under `docs/`).
+- [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan under `docs/`).
 - [Set up the whole suite](https://drpaj12.github.io/YggdrasilIII/getting-started.html) on a clean
   Linux or Windows machine, and [drive it with Claude Code](https://drpaj12.github.io/YggdrasilIII/ai-agent.html).
 
@@ -128,7 +128,7 @@ and how goldens are made: [`docs/ORACLES.md`](docs/ORACLES.md). Every pass:
 | `tools/` | `flow` (`odin3-flow`), `vtr-qor`, `equiv-check`, `netlist-compare`, `release`, checkers |
 | `tests/` | `unit/` (Unity), `golden/`, `micro/`, `tools/` |
 | `third_party/` | `abc` (Berkeley ABC), `unity` (submodules) |
-| `docs/` | Spec, IR, passes, oracles, ADRs, phase logs, user manual (`user/`), paper (`paper/`) |
+| `docs/` | Spec, IR, passes, oracles, ADRs, phase logs, user manual (`user/`) |
 
 ## Resources and acknowledgements
 
@@ -145,10 +145,9 @@ Odin III builds on, links, or is measured against these projects:
 | [Unity](https://github.com/ThrowTheSwitch/Unity) | C unit-test framework (submodule) |
 | [Sphinx](https://www.sphinx-doc.org/) and [MyST](https://myst-parser.readthedocs.io/) | The user manual |
 | [scikit-build-core](https://github.com/scikit-build/scikit-build-core) and [cffi](https://github.com/python-cffi/cffi) | The Python wheel and binding |
-| [Claude Code](https://code.claude.com/docs) | Odin III was built by AI coding agents under the architect's specification and review; process, time and token cost are in [`docs/paper/`](docs/paper/) and [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md) |
+| [Claude Code](https://code.claude.com/docs) | Odin III was built by AI coding agents under the architect's specification and review; process, time and token cost are in [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md) |
 
-Exact oracle versions and commits are in [`docs/ORACLES.md`](docs/ORACLES.md); full references in
-[`docs/paper/joined.bib`](docs/paper/joined.bib).
+Exact oracle versions and commits are in [`docs/ORACLES.md`](docs/ORACLES.md); full references are in the paper bibliography, kept locally by the author.
 
 ## License
 
