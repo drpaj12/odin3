@@ -68,6 +68,15 @@ def redact_paths(text: str) -> str:
     return _ABS_PATH.sub("<path>", text)
 
 
+EQUIV_RESULT = {0: "equivalent", 1: "not-equivalent"}  # any other exit code: a tool error
+
+
+def _reason(text: str) -> str:
+    """The last line of an equiv-check output that is not a notice, paths redacted."""
+    lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
+    return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
+
+
 def _first_line(text: str) -> str:
     """First line of a tool's output, paths redacted, cut to 120 characters."""
     return redact_paths((text.strip().splitlines() or [""])[0])[:120]
@@ -310,6 +319,9 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
             conn.setdefault(p, n)
         lines.append(ref_instance_line(inst, master, pins[master], conn))
     lines.append(f".ends {top}")
+    if len(lines) == 2:  # no cell: the reference has no element and netgen refuses to compare
+        return {"name": "netgen_lvs", "result": "not-applicable",
+                "detail": "no cells in the design; nothing to compare"}
     (out / "ref.spice").write_text(cells + "\n" + "\n".join(lines) + "\n")
     setup = t.pdk / "libs.tech/netgen/sky130A_setup.tcl"
     (out / "lvs.tcl").write_text(f'lvs "{out}/ext_hier.spice {top}" "{out}/ref.spice {top}" '
@@ -319,7 +331,8 @@ def run_lvs(t: Tools, out: Path, top: str) -> dict[str, str]:
     log = (out / "lvs.log").read_text() if (out / "lvs.log").is_file() else ""
     final = [ln for ln in log.splitlines() if ln.startswith("Final result")]
     result = "match" if final and "match uniquely" in final[-1] else "mismatch"
-    return {"name": "netgen_lvs", "result": result, "detail": final[-1] if final else "no result"}
+    detail = redact_paths(final[-1]) if final else "no result"
+    return {"name": "netgen_lvs", "result": result, "detail": detail}
 
 
 # --- census, join -----------------------------------------------------------------------------
@@ -633,10 +646,11 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         eq = _run([sys.executable, checker, out / "rtl.blif", out / "gates.blif"])
         (out / "equiv.txt").write_text(f"exit {eq.returncode}\n{eq.stdout}{eq.stderr}")
         w.add_step("equiv", "gates", {"id": "equiv-check", "version": ""}, None, needs=needs,
-                   check={"name": "equiv-check", "result": "equivalent" if eq.returncode == 0
-                          else "not-equivalent", "detail": _first_line(eq.stdout + eq.stderr)})
+                   check={"name": "equiv-check",
+                          "result": EQUIV_RESULT.get(eq.returncode, "error"),
+                          "detail": _reason(eq.stdout + eq.stderr)})
         if eq.returncode != 0:
-            raise RuntimeError("equiv-check: gates are not equivalent to the RTL")
+            raise RuntimeError(f"equiv-check: {_reason(eq.stdout + eq.stderr)}")
     elif step == "netlist":
         w.add_step("netlist", "gates", {"id": "clean_netlist", "version": ""}, None,
                    needs=needs, outputs=_outs(out, ["clean.v", "prov.csv"]),
@@ -656,7 +670,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         res = run_lvs(t, out, top)
         w.add_step("lvs", "extracted", {"id": "netgen", "version": t.versions.get("netgen", "")},
                    None, needs=needs, check=res)
-        if res["result"] != "match":
+        if res["result"] == "mismatch":
             raise RuntimeError(f"LVS: {res['detail']}")
     elif step == "recover":
         _recover(r, w, st, needs)

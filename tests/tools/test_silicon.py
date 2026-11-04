@@ -171,6 +171,13 @@ class LabelAndRedactTest(unittest.TestCase):
 
 
 class RefSpiceTest(unittest.TestCase):
+    def test_reason_skips_notices_and_paths(self) -> None:
+        text = ("equiv-check: notice: /a/b/rtl.blif: 8 latch(es) treated as 0\n"
+                "equiv-check: error: latch $n21 is clocked by internal net, see /a/b/c.blif\n")
+        self.assertEqual(sf._reason(text),
+                         "equiv-check: error: latch $n21 is clocked by internal net, see <path>")
+        self.assertEqual(sf._reason(""), "gates are not equivalent to the RTL")
+
     def test_open_pin_gets_its_own_net(self) -> None:
         pins = ["VGND", "VNB", "VPB", "VPWR", "HI", "LO"]
         conn = {"VGND": "VSS", "VNB": "VSS", "VPB": "VDD", "VPWR": "VDD", "LO": "zero", "HI": ""}
@@ -370,6 +377,15 @@ class FullFlowTest(unittest.TestCase):
         self.assertEqual(join["join_rate"], 1.0)
         self.assertEqual(schema_check.check_dir(out / "prov", SCHEMAS), [])
         self.assertIn("Netlists match uniquely", (out / "lvs.log").read_text())
+
+    def test_wire_only_design_completes_with_lvs_not_applicable(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "wire.v"
+            src.write_text("module wire_top(input a, output z);\n  assign z = a;\nendmodule\n")
+            out, _join = self.run_design("wire_top", "", src)
+        self.assertEqual(schema_check.check_dir(out / "prov", SCHEMAS), [])
+        lvs = json.loads(next((out / "prov").glob("*-lvs.json")).read_text())
+        self.assertEqual(lvs["check"]["result"], "not-applicable")
 
     def test_shift_register_with_clock(self) -> None:
         out, join = self.run_design("bm_DL_4_bit_shift_register", "Clock")
