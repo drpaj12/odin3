@@ -135,7 +135,7 @@ CPUINFO = Path("/proc/cpuinfo")
 PROC_LOCKS = Path("/proc/locks")
 # doctor's probe that a capped child scope can be made in the heavy slice (the brief's argv).
 SYSTEMD_PROBE: tuple[str, ...] = (
-    "systemd-run", "--user", "--scope", "-q", "--slice=odin3-heavy.slice", "true")
+    "systemd-run", "--user", "--scope", "-q", "--slice=odin3-heavy0.slice", "true")
 # docs/ORACLES.md pins VTR's Yosys (the Parmys host) at this version.
 YOSYS_PIN = "Yosys 0.55"
 # tools/heavy-run must keep the scope alive past an OOM kill (PR #58), or a capped job takes the
@@ -158,7 +158,8 @@ ABC_STAGE_GLOBS = tuple(g for g in qor_parse.STAGE_GLOBS if g != "parmys.out")
 NOT_OK = frozenset({qor_sched.FAILED, qor_sched.CAPPED, qor_sched.TIMEOUT, qor_sched.ABORTED})
 KEY12_TEXT = re.compile(r"[0-9a-f]{12}")
 LATEST = "latest"
-HEAVY_SLICES = ("odin3-heavy.slice", qor_heavy.XL_SLICE)
+HEAVY_SLICES = ("odin3-heavy0.slice", "odin3-heavy1.slice", "odin3-heavysolo.slice",
+                qor_heavy.XL_SLICE, "odin3-heavy.slice")  # the last: the old single slice
 VERDICTS_SKIPPED = MappingProxyType({"fcheck": "skipped", "equiv": "skipped", "rerun": "skipped"})
 EXIT_INCOMPLETE = 3
 GATE_EXIT = MappingProxyType({qor_table.PASS: EXIT_OK, qor_table.FAIL: EXIT_FAIL,
@@ -1711,6 +1712,12 @@ def _lock_item() -> CheckResult:
     own = heavy_run_holding(lock)
     if own is not None:
         return True, f"{lock} held by this heavy run ({own})"
+    slots = [lock.with_name(f"{lock.name}.{k}") for k in (0, 1)]
+    held = [(k, w) for k, w in enumerate(
+        [next(((m, p) for m, p in lock_holders(f) if m != "READ"), None) for f in slots]) if w]
+    if len(held) == len(slots):
+        return False, (f"{lock} has both slots busy (pids {held[0][1][1]} and {held[1][1][1]}: "
+                       "other heavy runs)")
     holders = lock_holders(lock)
     writers = [(mode, pid) for mode, pid in holders if mode != "READ"]
     if writers:

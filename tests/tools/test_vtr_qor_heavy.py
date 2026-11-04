@@ -303,6 +303,34 @@ class LockTest(HeavyTestBase):
         self.assert_heavy(err, 4, f"heavy lock {self.lock} is busy (--no-wait)")
         self.assertFalse(self.record.exists())
 
+    def test_slot_locks_busy_probe(self) -> None:
+        """Two slots (2026-11-04): busy only when both slot locks are held; a solo/xl run needs
+        both free. A legacy lock held exclusively (old binary) is busy; a shared one is not."""
+        slots = [self.lock.with_name(f"{self.lock.name}.{k}") for k in (0, 1)]
+        self.assertFalse(qor_heavy._lock_busy(self.lock))
+        fds = []
+
+        def hold(path: Path, how: int) -> None:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+            fcntl.flock(fd, how)
+            fds.append(fd)
+
+        try:
+            hold(slots[0], fcntl.LOCK_EX)
+            self.assertFalse(qor_heavy._lock_busy(self.lock))  # slot 1 is free
+            self.assertTrue(qor_heavy._lock_busy(self.lock, solo=True))
+            hold(slots[1], fcntl.LOCK_EX)
+            self.assertTrue(qor_heavy._lock_busy(self.lock))
+        finally:
+            for fd in fds:
+                os.close(fd)
+        shared = os.open(self.lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        try:
+            fcntl.flock(shared, fcntl.LOCK_SH)
+            self.assertFalse(qor_heavy._lock_busy(self.lock))
+        finally:
+            os.close(shared)
+
     def test_lock_wait_message(self) -> None:
         fake = self.fake_heavy_run(0, take_lock=True)
         fd = self.hold_lock()

@@ -1,8 +1,9 @@
 """Tests for tools/heavy-run (two slots), tools/build-locked and odin3_add_sweep_test (2E plan
 point (p), ruling C1; two slots 2026-11-04).
 
-Every test runs under a private ODIN3_HEAVY_DIR and a private slice prefix (ODIN3_HEAVY_SLICE_PREFIX
-=odin3-htest), so the gate never touches the machine's heavy locks, queued flags or slices. The argv tests use fake flock, systemctl and systemd-run scripts on PATH
+Every test runs under a private ODIN3_HEAVY_DIR and a private slice prefix
+(ODIN3_HEAVY_SLICE_PREFIX=odin3-htest), so the gate never touches the machine's heavy locks, queued
+flags or slices. The argv tests use fake flock, systemctl and systemd-run scripts on PATH
 that log their argv; the lock tests use the real flock(1) with the fake systemd-run (which runs
 the job in place) to show that the lock is held for the job's whole life. The live probe at the
 end runs the real heavy-run (`true`) and reads the slice's cap back; it is skipped without a
@@ -41,7 +42,8 @@ FAKE_SYSTEMCTL = """#!{bash}
 echo "systemctl $*" >>"$FAKE_LOG"
 exit "${{FAKE_SYSTEMCTL_RC:-0}}"
 """
-# flock: heavy-run calls `flock -s -w N 9` (legacy lock), then `flock -x -n 8` / `-x -n 7` (slots) or
+# flock: heavy-run calls `flock -s -w N 9` (legacy lock), then `flock -x -n 8` / `-x -n 7` (slots)
+# or
 # `-x -w N 8` / `-x -w N 7` on the slot descriptors; build-locked probes with `flock -s -n FILE
 # true` per lock file, then `flock -s 9`, `-s 8`, `-s 7`. FAKE_FLOCK_RC is the status, only for
 # calls whose argv contains FAKE_FLOCK_ONLY when that is set.
@@ -623,7 +625,7 @@ class TwoSlotsTest(FakeTools):
         self.release("b")
         _wait_for(lambda: self.started("c"), "the third job to take the freed slot")
         self.assertEqual(self.slot_of("c"), self.slot_of("b"))
-        self.assertFalse(self.started("c") and (self.heavy / f"odin3-heavy.queued.{c.pid}").exists())
+        self.assertFalse((self.heavy / f"odin3-heavy.queued.{c.pid}").exists())
         for tag, proc in (("a", a), ("b", b), ("c", c)):
             self.release(tag)
             self.finish(proc)
