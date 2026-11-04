@@ -213,18 +213,29 @@ def reexec_argv(argv: Sequence[str], script: Path, *, xl: bool = False) -> list[
     return [*head, sys.executable, "-I", str(script), *argv]
 
 
-def _lock_busy(lock: Path) -> bool:
-    """Probe the heavy lock as ``flock -n`` would (exclusive, non-blocking), then release it at
-    once: ``heavy-run`` takes it for real."""
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC, 0o666)
+def _probe_busy(path: Path, flags: int) -> bool:
+    """True when a non-blocking flock of ``path`` with ``flags`` fails; the probe lock is
+    released at once (closing the only descriptor releases a lock taken on it)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_CLOEXEC, 0o666)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(fd, flags | fcntl.LOCK_NB)
     except BlockingIOError:
         return True
     finally:
-        os.close(fd)  # closing the only descriptor releases a lock taken on it
+        os.close(fd)
     return False
+
+
+def _lock_busy(lock: Path, *, solo: bool = False) -> bool:
+    """Probe the heavy locks as ``tools/heavy-run`` would take them, then release them at once:
+    ``heavy-run`` takes them for real. Busy when an old-binary heavy run holds the legacy lock
+    exclusively, or when both slot locks (``<lock>.0``, ``<lock>.1``) are held (``solo``/xl need
+    both free, so one held slot is busy)."""
+    if _probe_busy(lock, fcntl.LOCK_SH):
+        return True
+    held = [_probe_busy(lock.with_name(f"{lock.name}.{k}"), fcntl.LOCK_EX) for k in (0, 1)]
+    return any(held) if solo else all(held)
 
 
 def _holds_lock(lock: Path) -> bool:
@@ -296,7 +307,7 @@ def reexec_under_lock(
     # process's own (descriptor 9): it is not busy, and fd 9 goes on to heavy-run, whose nested
     # path (cgroup plus fd 9) runs the tool in place (review M4).
     holding = _holds_lock(lock)
-    if not holding and _lock_busy(lock):
+    if not holding and _lock_busy(lock, solo=xl):
         if no_wait:
             raise HeavyError(EXIT_LOCK_BUSY, f"heavy lock {lock} is busy (--no-wait)")
         print(f"{PREFIX}waiting for the heavy lock {lock}", file=sys.stderr, flush=True)

@@ -3,17 +3,21 @@
 #
 # Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
 #
-# - Refused (exit 2) inside a heavy run, i.e. when this process's cgroup is in odin3-heavy.slice or
-#   odin3-heavyxl.slice, whether or not it still holds the heavy lock's descriptor (a Python parent
+# - Refused (exit 2) inside a heavy run, i.e. when this process's cgroup is in a heavy slice
+#   (odin3-heavy0.slice, odin3-heavy1.slice, odin3-heavysolo.slice, odin3-heavyxl.slice, or the
+#   old odin3-heavy.slice), whether or not it still holds the heavy lock's descriptor (a Python parent
 #   closes fd 9 unless given pass_fds=(9,)): its shared lock would wait forever on the heavy run's
 #   exclusive one. A set ODIN3_HEAVY_SLICE outside those slices is stale: ignored with a warning.
 # - Writer preference: while any $DIR/odin3-heavy.queued.<pid> names a live tools/heavy-run (one
 #   waiting for the lock), it waits, so a stream of overlapping builds cannot starve a queued
 #   heavy job. A flag whose PID is dead, or is now another program (a reused PID after a
 #   heavy-run was SIGKILLed), is stale: it is removed and ignored.
-# - Then it takes $DIR/odin3-heavy.lock shared: builds share it with each other and exclude a
-#   heavy run, which takes it exclusively. When a heavy run holds it, it says so before waiting,
-#   then runs `exec flock -s $DIR/odin3-heavy.lock cmake --build <args>`; exits with cmake's status.
+# - Then it takes the legacy lock $DIR/odin3-heavy.lock and both slot locks $DIR/odin3-heavy.lock.0
+#   and .1 shared, in that order (heavy-run takes one slot, or slot 0 then 1, exclusive, and the
+#   legacy lock shared): builds share them with each other and exclude every heavy run, and a
+#   heavy run excludes builds, as with the single lock before the two slots. It says so before
+#   waiting when a heavy run holds one, then holds all three on fds 9, 8 and 7 (inherited by
+#   every build child) and runs `exec cmake --build <args>`; exits with cmake's status.
 #
 # DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only); the flags are polled
 # every ODIN3_HEAVY_POLL seconds (default 5).
@@ -25,13 +29,15 @@ lock=$dir/odin3-heavy.lock
 # The heavy slice this process runs in according to its cgroup, or nothing (as tools/heavy-run
 # checks). ODIN3_HEAVY_CGROUP replaces /proc/self/cgroup (tests only).
 heavy_slice_of_cgroup() {
-    local cgroup s
+    local cgroup s p
     cgroup=$(cat "${ODIN3_HEAVY_CGROUP:-/proc/self/cgroup}" 2>/dev/null) || return 0
-    for s in odin3-heavy.slice odin3-heavyxl.slice; do
-        if [[ $cgroup == */"$s"/* ]]; then
-            echo "$s"
-            return 0
-        fi
+    for p in "${ODIN3_HEAVY_SLICE_PREFIX:-odin3-heavy}" odin3-heavy; do
+        for s in "${p}0.slice" "${p}1.slice" "${p}solo.slice" "${p}xl.slice" "$p.slice"; do
+            if [[ $cgroup == */"$s"/* ]]; then
+                echo "$s"
+                return 0
+            fi
+        done
     done
 }
 
@@ -79,7 +85,13 @@ while pid=$(queued_pid) && [[ -n $pid ]]; do
     fi
     sleep "$poll"
 done
-if ! flock -s -n "$lock" true; then
+busy=0
+for f in "$lock" "$lock.0" "$lock.1"; do
+    flock -s -n "$f" true || busy=1
+done
+if [[ $busy -eq 1 ]]; then
     echo "build-locked: waiting for the heavy run that holds $lock" >&2
 fi
-exec flock -s "$lock" cmake --build "$@"
+exec 9>>"$lock" 8>>"$lock.0" 7>>"$lock.1" || exit 2
+flock -s 9 && flock -s 8 && flock -s 7 || exit 2
+exec cmake --build "$@"

@@ -235,7 +235,7 @@ class ParseCorpusTest(unittest.TestCase):
         self.put("a.v", "module a; endmodule\n")
         proc = self.run_heavy(ODIN3_HEAVY_OK="1")
         self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
-        self.assertEqual(self.calls(), ["systemd-run --slice=odin3-heavy.slice", "check a.v"])
+        self.assertEqual(self.calls(), ["systemd-run --slice=odin3-heavy0.slice", "check a.v"])
         self.assertIn("1 files, 1 passed", proc.stdout)
         self.put("b.v", "FAIL\n")
         self.assertEqual(self.run_heavy(ODIN3_HEAVY_OK="1").returncode, 1)  # the sweep's status

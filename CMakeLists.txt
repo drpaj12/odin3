@@ -966,8 +966,8 @@ endif()
 # --- Tests ----------------------------------------------------------------------
 include(CTest)
 # Heavy runs (2E plan point (p), ruling C1): every sweep and sweep-xl CTest goes through
-# odin3_add_sweep_test(), which runs it via tools/heavy-run (one heavy job machine-wide, inside
-# the odin3-heavy.slice memory cap). Builds go through tools/build-locked.
+# odin3_add_sweep_test(), which runs it via tools/heavy-run (at most two heavy jobs machine-wide, each in its
+# own 6G slice odin3-heavy0.slice / odin3-heavy1.slice; --solo and --xl take both). Builds go through tools/build-locked.
 set(ODIN3_HEAVY_RUN "${PROJECT_SOURCE_DIR}/tools/heavy-run")
 include(${PROJECT_SOURCE_DIR}/cmake/Odin3Sweep.cmake)
 if(BUILD_TESTING)

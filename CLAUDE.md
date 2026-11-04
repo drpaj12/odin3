@@ -31,6 +31,13 @@ tools/lint.sh                                            # the gate; /lint wraps
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # once
 ```
 
+Heavy runs (sweeps, large benchmarks): `ODIN3_HEAVY_OK=1 tools/heavy-run <cmd>`. Two slots since
+2026-11-04: at most two heavy jobs at once, each in its own 6G slice (`odin3-heavy0.slice`,
+`odin3-heavy1.slice`); the log line says which slot. `--solo` takes both slots (use it when
+wall-clock time is a measured result); `--xl` takes both for a 9G job (needs `ODIN3_HEAVY_XL_OK=1`).
+A third job waits (`ODIN3_HEAVY_WAIT`, then exit 77). Builds go through `tools/build-locked`, which
+waits for every heavy job and is waited for by them. Details: header of `tools/heavy-run`.
+
 Oracles and comparison (see `docs/ORACLES.md`):
 
 ```bash
