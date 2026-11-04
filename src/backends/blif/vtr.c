@@ -2,8 +2,8 @@
  * options (VB-4), legal names (VB-10), and the `.names` covers and their normalisation (VB-6). */
 #include "backends/blif/vtr.h"
 
-#include "frontends/arch/arch.h"
 #include "backends/common/attrs.h"
+#include "frontends/arch/arch.h"
 #include "ir/celltype.h"
 #include "ir/ids.h"
 #include "ir/lut.h"
@@ -840,7 +840,7 @@ static odin3_status check_node(vtr_walk *walk, odin3_node_id node) {
     if (kind == VK_PORT_INOUT) {
         /* the shell of an inout the `tristate` pass split into p_i/p_o/p_oe: not written */
         return odin3_port_is_split_shell(walk->design, walk->top, node) ? ODIN3_OK
-                                                                         : refuse_inout(walk, node);
+                                                                        : refuse_inout(walk, node);
     }
     if (kind == VK_PORT_IN || kind == VK_CONST) {
         return ODIN3_OK;

@@ -33,7 +33,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-
 typedef struct ts_opts {
     bool strict;
 } ts_opts;
@@ -46,13 +45,24 @@ typedef struct ts_types {
 typedef enum ts_net_class {
     TS_NET_INTERNAL, /* reaches no port: becomes logic */
     TS_NET_INOUT,    /* on a $port_inout of the top (port index in the second field) */
-    TS_NET_LEAVE     /* a top output, a port below the top or a foreign driver: left alone */
+    TS_NET_OUT,      /* on a $port_out of the top only: a bus of tri-states there becomes logic */
+    TS_NET_LEAVE     /* a port below the top or a foreign driver: left alone */
 } ts_net_class;
 
 typedef struct ts_net_info {
     ts_net_class cls;
     uint32_t port; /* the inout port's index, for TS_NET_INOUT */
+    bool foreign; /* TS_NET_LEAVE because a driver is not a $tribuf (an instance, a gate, a port) */
 } ts_net_info;
+
+/* The ports of a $tribuf, in the cell type's order (a port node has one port, slot A). */
+typedef enum ts_slot { TS_SLOT_A = 0, TS_SLOT_EN = 1, TS_SLOT_Y = 2 } ts_slot;
+
+/* A bit of a slot. */
+typedef struct ts_slot_at {
+    ts_slot slot;
+    uint32_t bit;
+} ts_slot_at;
 
 /* One bit of a $tribuf that becomes logic. */
 typedef struct ts_rec {
@@ -75,6 +85,9 @@ typedef struct ts_ctx {
 
 /* Runs the pass over every module. */
 odin3_status ts_run(odin3_pass_ctx *pass, odin3_design *design, const ts_opts *opts);
+
+/* The net on bit `bit` of a slot of the node. */
+odin3_net_id ts_slot_net(const ts_ctx *tc, odin3_node_id node, ts_slot_at at);
 
 /* True when the node is a live $tribuf of the module. */
 bool ts_is_tribuf(const ts_ctx *tc, odin3_node_id node);
@@ -101,11 +114,11 @@ void ts_warn(const ts_ctx *tc, odin3_node_id at, const char *kind, const char *w
 /* The name of a net for messages: wire[bit] or $n<id>. */
 void ts_net_label(const ts_ctx *tc, odin3_net_id net, char *out, size_t size);
 
-/* k >= 2 drivers of ynet (recs in source order) become a $pmux whose output is ynet. */
-odin3_status ts_pmux(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net_id ynet);
+/* ndrv >= 2 drivers of ynet (recs in source order) become a $pmux whose output is ynet. */
+odin3_status ts_pmux(ts_ctx *tc, const ts_rec *recs, uint32_t ndrv, odin3_net_id ynet);
 
-/* *out = the OR of the enables of the k >= 1 drivers. */
-odin3_status ts_or_enables(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net_id *out);
+/* *out = the OR of the enables of the ndrv >= 1 drivers. */
+odin3_status ts_or_enables(ts_ctx *tc, const ts_rec *recs, uint32_t ndrv, odin3_net_id *out);
 
 /* Phase 1: the internal nets (tristate.c). Phase 2: the top's inout ports (split.c). */
 odin3_status ts_convert_internal(ts_ctx *tc);

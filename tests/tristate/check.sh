@@ -40,6 +40,7 @@ run_case excl_bus "" "internal net 'b' converted to logic"
 run_case sub_bus "" "tristate: bus;2 drivers converted to logic"
 run_case sub_inout SPLIT "inout: port sda;split into sda_i/sda_o/sda_oe"
 run_case bus8 SPLIT "inout: port db;split into db_i/db_o/db_oe"
+run_case repl_inout SPLIT "inout: port dq;split into dq_i/dq_o/dq_oe"
 
 # a conflict-capable bus: converted with the bus conflict said, no simulation compare
 "$odin3" --top top -p "read_verilog $dir/sub_bus.v; proc; opt; flatten; tristate" >"$work/c.log" 2>&1 ||

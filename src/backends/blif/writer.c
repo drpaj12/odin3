@@ -4,12 +4,12 @@
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
+#include "backends/common/attrs.h"
 #include "backends/common/hash_rows.h"
 #include "backends/common/hdl_loc.h"
 #include "backends/prov_name.h"
 #include "frontends/arch/arch.h"
 #include "frontends/blif/attrs.h"
-#include "backends/common/attrs.h"
 #include "ir/celltype.h"
 #include "ir/edit_events.h"
 #include "ir/ids.h"
@@ -1373,8 +1373,7 @@ static odin3_status port_line(blif_writer *wr, const odin3_celltype_def *def, ui
     odin3_dir dir = blif_port_dir(wr, def, at, of_module);
     odin3_status st = port_keyword(wr, &def->ports[at], dir, &word);
     int64_t prev = prev_written_port(wr, at, of_module);
-    if (st == ODIN3_OK &&
-        (prev < 0 || dir != blif_port_dir(wr, def, (uint32_t)prev, of_module))) {
+    if (st == ODIN3_OK && (prev < 0 || dir != blif_port_dir(wr, def, (uint32_t)prev, of_module))) {
         if (prev >= 0) {
             wr_end(wr);
         }

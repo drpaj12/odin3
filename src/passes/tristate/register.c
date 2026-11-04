@@ -27,5 +27,5 @@ static odin3_status tristate_pass_run(odin3_pass_ctx *ctx, odin3_design *design,
     return ts_run(ctx, design, &opts);
 }
 
-const odin3_pass_def odin3_pass_tristate = {"tristate", "tristate [--strict]", tristate_pass_run,
-                                            NULL,       false,                 ODIN3_PASS_PROCESSES_REFUSE};
+const odin3_pass_def odin3_pass_tristate = {
+    "tristate", "tristate [--strict]", tristate_pass_run, NULL, false, ODIN3_PASS_PROCESSES_REFUSE};

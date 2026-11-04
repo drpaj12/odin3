@@ -75,19 +75,23 @@ ts_net_info ts_classify(const ts_ctx *tc, odin3_net_id net) {
     odin3_pinlist pins = odin3_net_pins(tc->module, net);
     uint32_t drivers = odin3_net_driver_count(tc->module, net);
     ts_scan scan = {0, 0, 0};
-    ts_net_info leave = {TS_NET_LEAVE, 0};
+    ts_net_info leave = {TS_NET_LEAVE, 0, false};
+    ts_net_info foreign = {TS_NET_LEAVE, 0, true};
     for (uint32_t i = 0; i < pins.count; i++) {
         if (!scan_pin(tc, pins.pins[i], i < drivers, &scan)) {
-            return leave;
+            return foreign;
         }
     }
     if (scan.inouts == 0 && scan.outs == 0) {
-        return (ts_net_info){TS_NET_INTERNAL, 0};
+        return (ts_net_info){TS_NET_INTERNAL, 0, false};
     }
-    if (!tc->is_top || scan.outs != 0 || scan.inouts != 1U) {
+    if (!tc->is_top || (scan.outs != 0 && scan.inouts != 0) || scan.inouts > 1U) {
         return leave;
     }
-    return (ts_net_info){TS_NET_INOUT, scan.port};
+    if (scan.inouts == 0) {
+        return (ts_net_info){TS_NET_OUT, 0, false};
+    }
+    return (ts_net_info){TS_NET_INOUT, scan.port, false};
 }
 
 void ts_net_label(const ts_ctx *tc, odin3_net_id net, char *out, size_t size) {
@@ -97,7 +101,8 @@ void ts_net_label(const ts_ctx *tc, odin3_net_id net, char *out, size_t size) {
         (void)snprintf(out, size, "$n%" PRIu32, net.v);
         return;
     }
-    const char *name = odin3_strtab_get(odin3_design_strtab(tc->design), odin3_wire_name(mod, wb.wire));
+    const char *name =
+        odin3_strtab_get(odin3_design_strtab(tc->design), odin3_wire_name(mod, wb.wire));
     if (odin3_wire_width(mod, wb.wire) == 1U) {
         (void)snprintf(out, size, "%s", name);
     } else {
@@ -144,11 +149,8 @@ odin3_status ts_const(ts_ctx *tc, unsigned which, odin3_net_id *out) {
     }
     odin3_net_id net = {0};
     odin3_status st = odin3_net_create(tc->module, 0, odin3_module_prov(tc->module), &net);
-    odin3_node_spec spec = {which == TS_CONST_ZERO ? tc->types.const0 : tc->types.constx,
-                            0,
-                            odin3_module_prov(tc->module),
-                            NULL,
-                            0};
+    odin3_node_spec spec = {which == TS_CONST_ZERO ? tc->types.const0 : tc->types.constx, 0,
+                            odin3_module_prov(tc->module), NULL, 0};
     odin3_netvec port = {&net, 1};
     st = st == ODIN3_OK ? odin3_node_create_connected(tc->module, &spec, &port, NULL) : st;
     if (st == ODIN3_OK) {
@@ -192,34 +194,37 @@ typedef struct ts_work {
 } ts_work;
 
 static int rec_cmp(const void *lhs, const void *rhs) {
-    const ts_rec *a = lhs;
-    const ts_rec *b = rhs;
-    if (a->net.v != b->net.v) {
-        return a->net.v < b->net.v ? -1 : 1;
+    const ts_rec *left = lhs;
+    const ts_rec *right = rhs;
+    if (left->net.v != right->net.v) {
+        return left->net.v < right->net.v ? -1 : 1;
     }
-    return a->node.v == b->node.v ? 0 : (a->node.v < b->node.v ? -1 : 1);
+    if (left->node.v == right->node.v) {
+        return 0;
+    }
+    return left->node.v < right->node.v ? -1 : 1;
 }
 
-static void work_free(ts_work *w) {
-    odin3_vec_free(&w->recs);
-    odin3_vec_free(&w->nodes);
-    odin3_vec_free(&w->merges);
-    odin3_vec_free(&w->buf);
-    odin3_u64map_destroy(w->ynets);
+static void work_free(ts_work *wk) {
+    odin3_vec_free(&wk->recs);
+    odin3_vec_free(&wk->nodes);
+    odin3_vec_free(&wk->merges);
+    odin3_vec_free(&wk->buf);
+    odin3_u64map_destroy(wk->ynets);
 }
 
 /* Notes the Y nets of every live $tribuf (they must not feed another converted cell). */
-static odin3_status note_ynets(const ts_ctx *tc, ts_work *w) {
+static odin3_status note_ynets(const ts_ctx *tc, ts_work *wk) {
     uint32_t end = odin3_module_node_end(tc->module);
     for (uint32_t id = 1; id < end; id++) {
         odin3_node_id node = {id};
         if (!ts_is_tribuf(tc, node)) {
             continue;
         }
-        odin3_pinslice ys = odin3_node_port(tc->module, node, 2);
+        odin3_pinslice ys = odin3_node_port(tc->module, node, (uint32_t)TS_SLOT_Y);
         for (uint32_t bit = 0; bit < ys.count; bit++) {
             odin3_net_id net = odin3_pin_net(tc->module, (odin3_pin_id){ys.first.v + bit});
-            odin3_status st = odin3_u64map_put(w->ynets, (odin3_kv){net.v, 1});
+            odin3_status st = odin3_u64map_put(wk->ynets, (odin3_kv){net.v, 1});
             if (st != ODIN3_OK) {
                 return st;
             }
@@ -228,90 +233,134 @@ static odin3_status note_ynets(const ts_ctx *tc, ts_work *w) {
     return ODIN3_OK;
 }
 
-static odin3_net_id port_net(const ts_ctx *tc, odin3_node_id node, uint32_t port, uint32_t bit) {
-    odin3_pinslice s = odin3_node_port(tc->module, node, port);
-    return odin3_pin_net(tc->module, (odin3_pin_id){s.first.v + bit});
+odin3_net_id ts_slot_net(const ts_ctx *tc, odin3_node_id node, ts_slot_at at) {
+    odin3_pinslice pins = odin3_node_port(tc->module, node, (uint32_t)at.slot);
+    return odin3_pin_net(tc->module, (odin3_pin_id){pins.first.v + at.bit});
+}
+
+/* An internal net, or a top output with at least two drivers (a single driver there is `lower`'s:
+ * it drops the enable with its own WARNING). */
+static bool net_converts(const ts_ctx *tc, odin3_net_id net) {
+    ts_net_info info = ts_classify(tc, net);
+    return info.cls == TS_NET_INTERNAL ||
+           (info.cls == TS_NET_OUT && odin3_net_driver_count(tc->module, net) >= 2U);
 }
 
 /* True when every bit of the cell is on an internal net and its inputs are no tri-state output. */
-static bool cell_converts(const ts_ctx *tc, const ts_work *w, odin3_node_id node) {
-    uint32_t width = odin3_node_port(tc->module, node, 2).count;
-    odin3_net_id en = port_net(tc, node, 1, 0);
-    if (!odin3_net_valid(en) || odin3_u64map_get(w->ynets, en.v, NULL)) {
-        return false;
+static bool cell_converts(const ts_ctx *tc, const ts_work *wk, odin3_node_id node) {
+    uint32_t width = odin3_node_port(tc->module, node, (uint32_t)TS_SLOT_Y).count;
+    odin3_net_id en = ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_EN, 0});
+    if (!odin3_net_valid(en) || odin3_u64map_get(wk->ynets, en.v, NULL)) {
+        return false; /* a tri-state fed by a tri-state (a bidirectional switch) makes a loop */
     }
     for (uint32_t bit = 0; bit < width; bit++) {
-        odin3_net_id net = port_net(tc, node, 2, bit);
-        odin3_net_id data = port_net(tc, node, 0, bit);
+        odin3_net_id net = ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_Y, bit});
+        odin3_net_id data = ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_A, bit});
         if (!odin3_net_valid(net) || !odin3_net_valid(data) || net.v == data.v ||
-            odin3_u64map_get(w->ynets, data.v, NULL) ||
-            ts_classify(tc, net).cls != TS_NET_INTERNAL) {
+            odin3_u64map_get(wk->ynets, data.v, NULL) || !net_converts(tc, net)) {
             return false;
         }
     }
     return true;
 }
 
-static odin3_status add_cell(const ts_ctx *tc, ts_work *w, odin3_node_id node) {
-    uint32_t width = odin3_node_port(tc->module, node, 2).count;
-    odin3_node_id *dead = odin3_vec_push(&w->nodes);
+/* A WARNING for a $tribuf left alone because another driver shares its net. */
+static void say_left(const ts_ctx *tc, const ts_work *wk, odin3_node_id node) {
+    uint32_t width = odin3_node_port(tc->module, node, (uint32_t)TS_SLOT_Y).count;
+    for (uint32_t bit = 0; bit < width; bit++) {
+        odin3_net_id net = ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_Y, bit});
+        odin3_net_id data = ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_A, bit});
+        if (odin3_net_valid(net) && odin3_net_valid(data) &&
+            odin3_u64map_get(wk->ynets, data.v, NULL)) {
+            char label[TS_LABEL_CAP];
+            ts_net_label(tc, net, label, sizeof label);
+            ts_warn(tc, node, "tristate", label,
+                    "not converted: its data is the output of another tri-state (a bidirectional "
+                    "switch); converting would make a combinational loop");
+            return;
+        }
+        if (odin3_net_valid(net) && ts_classify(tc, net).foreign) {
+            char label[TS_LABEL_CAP];
+            ts_net_label(tc, net, label, sizeof label);
+            ts_warn(tc, node, "tristate", label,
+                    "not converted: another driver that is not a tri-state (an instance output, a "
+                    "gate or a port) shares the net; `lower` will refuse it");
+            return;
+        }
+    }
+}
+
+static odin3_status add_cell(const ts_ctx *tc, ts_work *wk, odin3_node_id node) {
+    uint32_t width = odin3_node_port(tc->module, node, (uint32_t)TS_SLOT_Y).count;
+    odin3_node_id *dead = odin3_vec_push(&wk->nodes);
     if (dead == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     *dead = node;
     for (uint32_t bit = 0; bit < width; bit++) {
-        ts_rec *rec = odin3_vec_push(&w->recs);
+        ts_rec *rec = odin3_vec_push(&wk->recs);
         if (rec == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        *rec = (ts_rec){port_net(tc, node, 2, bit), port_net(tc, node, 0, bit),
-                        port_net(tc, node, 1, 0), node};
+        *rec = (ts_rec){ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_Y, bit}),
+                        ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_A, bit}),
+                        ts_slot_net(tc, node, (ts_slot_at){TS_SLOT_EN, 0}), node};
     }
     return ODIN3_OK;
 }
 
-static odin3_status collect(const ts_ctx *tc, ts_work *w) {
-    odin3_status st = note_ynets(tc, w);
+static odin3_status collect(const ts_ctx *tc, ts_work *wk) {
+    odin3_status st = note_ynets(tc, wk);
     uint32_t end = odin3_module_node_end(tc->module);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};
-        if (ts_is_tribuf(tc, node) && cell_converts(tc, w, node)) {
-            st = add_cell(tc, w, node);
+        if (ts_is_tribuf(tc, node) && cell_converts(tc, wk, node)) {
+            st = add_cell(tc, wk, node);
+        } else if (ts_is_tribuf(tc, node)) {
+            say_left(tc, wk, node);
         }
     }
-    if (st == ODIN3_OK && w->recs.len > 1) {
-        qsort(w->recs.data, w->recs.len, sizeof(ts_rec), rec_cmp);
+    if (st == ODIN3_OK && wk->recs.len > 1) {
+        qsort(wk->recs.data, wk->recs.len, sizeof(ts_rec), rec_cmp);
     }
     return st;
 }
 
-/* One net with k >= 2 drivers: a $pmux, A = x, the last driver first (as elab2_trilogic.c). */
-odin3_status ts_pmux(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net_id ynet) {
+/* Fills buf with the data nets of the drivers, then their enables, the last driver first, and
+ * nodes with the driver cells. */
+static odin3_status pmux_inputs(const ts_rec *recs, uint32_t ndrv, odin3_vec *buf,
+                                odin3_vec *nodes) {
+    for (uint32_t pass = 0; pass < 2U; pass++) {
+        for (uint32_t i = ndrv; i > 0; i--) {
+            odin3_net_id *slot = odin3_vec_push(buf);
+            if (slot == NULL) {
+                return ODIN3_ERR_NO_MEMORY;
+            }
+            *slot = pass == 0 ? recs[i - 1U].data : recs[i - 1U].enable;
+        }
+    }
+    for (uint32_t i = 0; i < ndrv; i++) {
+        odin3_node_id *slot = odin3_vec_push(nodes);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = recs[i].node;
+    }
+    return ODIN3_OK;
+}
+
+/* ndrv >= 2 drivers: a $pmux, A = x, the last driver first (as elab2_trilogic.c). */
+odin3_status ts_pmux(ts_ctx *tc, const ts_rec *recs, uint32_t ndrv, odin3_net_id ynet) {
     odin3_net_id xnet = {0};
     odin3_status st = ts_const(tc, TS_CONST_X, &xnet);
     odin3_vec buf;
     odin3_vec nodes;
     odin3_vec_init(&buf, sizeof(odin3_net_id));
     odin3_vec_init(&nodes, sizeof(odin3_node_id));
-    for (uint32_t pass = 0; st == ODIN3_OK && pass < 2U; pass++) {
-        for (uint32_t i = k; st == ODIN3_OK && i > 0; i--) {
-            odin3_net_id *slot = odin3_vec_push(&buf);
-            st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-            if (slot != NULL) {
-                *slot = pass == 0 ? recs[i - 1U].data : recs[i - 1U].enable;
-            }
-        }
-    }
-    for (uint32_t i = 0; st == ODIN3_OK && i < k; i++) {
-        odin3_node_id *slot = odin3_vec_push(&nodes);
-        st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
-        if (slot != NULL) {
-            *slot = recs[i].node;
-        }
-    }
-    odin3_value params[2] = {odin3_value_int(1), odin3_value_int((int64_t)k)};
+    st = st == ODIN3_OK ? pmux_inputs(recs, ndrv, &buf, &nodes) : st;
+    odin3_value params[2] = {odin3_value_int(1), odin3_value_int((int64_t)ndrv)};
     const odin3_net_id *nets = buf.data;
-    odin3_netvec ports[4] = {{&xnet, 1}, {nets, k}, {nets + k, k}, {&ynet, 1}};
+    odin3_netvec ports[4] = {{&xnet, 1}, {nets, ndrv}, {nets + ndrv, ndrv}, {&ynet, 1}};
     ts_make mk = {tc->types.pmux, params, 2, ports};
     st = st == ODIN3_OK ? ts_make_node(tc, &mk, nodes.data, nodes.len) : st;
     odin3_vec_free(&buf);
@@ -319,11 +368,11 @@ odin3_status ts_pmux(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net_id yn
     return st;
 }
 
-/* *out = the OR of the enables of k >= 1 drivers: a chain of $_OR_ gates. */
-odin3_status ts_or_enables(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net_id *out) {
+/* *out = the OR of the enables of ndrv >= 1 drivers: a chain of $_OR_ gates. */
+odin3_status ts_or_enables(ts_ctx *tc, const ts_rec *recs, uint32_t ndrv, odin3_net_id *out) {
     odin3_net_id acc = recs[0].enable;
     odin3_status st = ODIN3_OK;
-    for (uint32_t i = 1; st == ODIN3_OK && i < k; i++) {
+    for (uint32_t i = 1; st == ODIN3_OK && i < ndrv; i++) {
         odin3_net_id next = {0};
         st = odin3_net_create(tc->module, 0, odin3_module_prov(tc->module), &next);
         odin3_net_id pair[2] = {acc, recs[i].enable};
@@ -336,11 +385,11 @@ odin3_status ts_or_enables(ts_ctx *tc, const ts_rec *recs, uint32_t k, odin3_net
     return st;
 }
 
-static void warn_net(const ts_ctx *tc, const ts_rec *rec, uint32_t k) {
+static void warn_net(const ts_ctx *tc, const ts_rec *rec, uint32_t ndrv) {
     char label[TS_LABEL_CAP];
     char text[TS_MSG_CAP];
     ts_net_label(tc, rec->net, label, sizeof label);
-    if (k == 1U) {
+    if (ndrv == 1U) {
         (void)snprintf(text, sizeof text,
                        "1 driver converted to logic (the enable is dropped and the net follows the "
                        "data, as Yosys opt_expr -mux_undef and Parmys do)");
@@ -349,18 +398,18 @@ static void warn_net(const ts_ctx *tc, const ts_rec *rec, uint32_t k) {
                        "%" PRIu32 " drivers converted to logic (no driver enabled: x; the enables "
                        "are not proved exclusive: two enabled at once is a bus conflict and gives "
                        "the OR of the enabled data)",
-                       k);
+                       ndrv);
     }
     ts_warn(tc, rec->node, "tristate", label, text);
 }
 
-static odin3_status emit_run(ts_ctx *tc, ts_work *w, const ts_rec *recs, uint32_t k) {
-    warn_net(tc, &recs[0], k);
+static odin3_status emit_run(ts_ctx *tc, ts_work *wk, const ts_rec *recs, uint32_t ndrv) {
+    warn_net(tc, &recs[0], ndrv);
     tc->converted++;
-    if (k >= 2U) {
-        return ts_pmux(tc, recs, k, recs[0].net);
+    if (ndrv >= 2U) {
+        return ts_pmux(tc, recs, ndrv, recs[0].net);
     }
-    odin3_net_pair *pair = odin3_vec_push(&w->merges);
+    odin3_net_pair *pair = odin3_vec_push(&wk->merges);
     if (pair == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
@@ -368,45 +417,46 @@ static odin3_status emit_run(ts_ctx *tc, ts_work *w, const ts_rec *recs, uint32_
     return ODIN3_OK;
 }
 
-static odin3_status apply(ts_ctx *tc, ts_work *w) {
+static odin3_status apply(ts_ctx *tc, ts_work *wk) {
     odin3_status st = ODIN3_OK;
-    const odin3_node_id *dead = w->nodes.data;
-    for (size_t i = 0; st == ODIN3_OK && i < w->nodes.len; i++) {
+    const odin3_node_id *dead = wk->nodes.data;
+    for (size_t i = 0; st == ODIN3_OK && i < wk->nodes.len; i++) {
         st = odin3_node_delete(tc->module, dead[i]);
     }
-    const odin3_net_pair *pairs = w->merges.data;
-    for (size_t i = 0; st == ODIN3_OK && i < w->merges.len; i++) {
+    const odin3_net_pair *pairs = wk->merges.data;
+    for (size_t i = 0; st == ODIN3_OK && i < wk->merges.len; i++) {
         st = odin3_net_merge(tc->module, pairs[i]);
     }
     return st;
 }
 
 odin3_status ts_convert_internal(ts_ctx *tc) {
-    ts_work w = {.ynets = odin3_u64map_create(0)};
-    odin3_vec_init(&w.recs, sizeof(ts_rec));
-    odin3_vec_init(&w.nodes, sizeof(odin3_node_id));
-    odin3_vec_init(&w.merges, sizeof(odin3_net_pair));
-    odin3_vec_init(&w.buf, sizeof(odin3_net_id));
-    odin3_status st = w.ynets != NULL ? collect(tc, &w) : ODIN3_ERR_NO_MEMORY;
-    const ts_rec *recs = w.recs.data;
-    if (st == ODIN3_OK && tc->opts->strict && w.recs.len > 0) {
+    ts_work wk = {.ynets = odin3_u64map_create(0)};
+    odin3_vec_init(&wk.recs, sizeof(ts_rec));
+    odin3_vec_init(&wk.nodes, sizeof(odin3_node_id));
+    odin3_vec_init(&wk.merges, sizeof(odin3_net_pair));
+    odin3_vec_init(&wk.buf, sizeof(odin3_net_id));
+    odin3_status st = wk.ynets != NULL ? collect(tc, &wk) : ODIN3_ERR_NO_MEMORY;
+    const ts_rec *recs = wk.recs.data;
+    if (st == ODIN3_OK && tc->opts->strict && wk.recs.len > 0) {
         char label[TS_LABEL_CAP];
         ts_net_label(tc, recs[0].net, label, sizeof label);
-        odin3_log(ODIN3_LOG_ERROR,
-                  "tristate: net '%s': internal tri-state nets are not supported with --strict (D3)",
-                  label);
+        odin3_log(
+            ODIN3_LOG_ERROR,
+            "tristate: net '%s': internal tri-state nets are not supported with --strict (D3)",
+            label);
         st = ODIN3_ERR_INVALID_ARG;
     }
-    for (size_t i = 0; st == ODIN3_OK && i < w.recs.len;) {
+    for (size_t i = 0; st == ODIN3_OK && i < wk.recs.len;) {
         size_t j = i + 1U;
-        while (j < w.recs.len && recs[j].net.v == recs[i].net.v) {
+        while (j < wk.recs.len && recs[j].net.v == recs[i].net.v) {
             j++;
         }
-        st = emit_run(tc, &w, recs + i, (uint32_t)(j - i));
+        st = emit_run(tc, &wk, recs + i, (uint32_t)(j - i));
         i = j;
     }
-    st = st == ODIN3_OK ? apply(tc, &w) : st;
-    work_free(&w);
+    st = st == ODIN3_OK ? apply(tc, &wk) : st;
+    work_free(&wk);
     return st;
 }
 
