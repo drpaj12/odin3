@@ -202,6 +202,21 @@ static void test_comment_after_include(void) {
     expect_spelled(in_top.items[0].loc.v, "t.v", 1, 19);
 }
 
+/* A line comment that ends an included file (no final newline), the `include followed by a blank,
+ * is recorded: its end is the end of its buffer, not a loc of the next one (pipelined_fft_256). */
+static void test_comment_ends_include(void) {
+    put("inc2.vh", odin3_bytes_cstr("wire w; // last, no newline"), NULL);
+    lex_file("`include \"inc2.vh\" \nwire v;\n");
+    TEST_ASSERT_EQUAL_INT(TOK_WIRE, next());
+    odin3_srcbuf_id inc = odin3_srcman_buffer_of(sm, loc.loc);
+    while (next() != 0) {
+    }
+    TEST_ASSERT_EQUAL_UINT32(1, odin3_ast_comment_count(ast));
+    odin3_ast_comment_span in_inc = comments_of_file(inc);
+    TEST_ASSERT_EQUAL_UINT32(1, in_inc.n);
+    TEST_ASSERT_EQUAL_STRING(" last, no newline", in_inc.items[0].text);
+}
+
 /* A comment inside a macro argument is not recorded. */
 static void test_comment_in_macro_argument(void) {
     lex_file("`define ID(x) x\nwire a = `ID(b /* gone */);\n");
@@ -267,6 +282,7 @@ int main(void) {
     RUN_TEST(test_based_digits_across_two_macros);
     RUN_TEST(test_token_after_loc0_blank);
     RUN_TEST(test_comment_after_include);
+    RUN_TEST(test_comment_ends_include);
     RUN_TEST(test_comment_in_macro_argument);
     RUN_TEST(test_trace_macro_after_include);
     RUN_TEST(test_error_in_use_prints_chains);
