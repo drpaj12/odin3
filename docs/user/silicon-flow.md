@@ -141,3 +141,13 @@ repair, no DRC deck beyond OpenROAD's route report. Device-level (transistor) ob
 `extracted` stage holds cells (see {doc}`provenance-files`). The join uses the DEF of the golden run; a real
 scanned chip has no DEF (the Leman Russ lane covers extraction from an unknown layout). Tools are optional:
 without them the silicon tests skip.
+
+Equivalence that cannot be decided is a warning, not a stop. A proven difference stops the flow. An
+output the design declares but never drives is tied to 0 (`--allow-undriven`), and any other tool
+limit (such as an unsupported clock form) is printed as `WARNING equiv: not proven: <reason>`; the
+`equiv` step file records `equiv: not proven: <reason>` and the flow goes on to place, route and LVS.
+A register on the inverted clock counts as a register on the opposite edge of that clock.
+
+Output ports that the design joins with `assign` (`assign out[6] = out[0];`) are one net in the layout
+and keep one port label there. LVS gives the reference netlist the label the layout kept and lists the
+joined names in the step detail as a WARNING.
