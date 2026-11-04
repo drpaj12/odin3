@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -13,7 +14,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Drafts skip CI. A PR touching only docs/** and *.md reports code=false, so build/test jobs skip
+    # (a skipped job satisfies a required check); the docs job still runs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    outputs:
+      code: ${{ steps.f.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: f
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          code=true
+          if [ "$EVENT" = pull_request ]; then
+            if git diff --name-only "$BASE...$HEAD" | grep -qvE '^(docs/|.*\.md$)'; then code=true; else code=false; fi
+          fi
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: lint
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -37,6 +63,8 @@ jobs:
         run: tools/lint.sh
 
   build:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: build (${{ matrix.cc }})
     runs-on: ubuntu-24.04
     # The debug leg builds and runs the ASan + UBSan suite for the vendored slang (1209 objects
@@ -121,6 +149,8 @@ jobs:
         run: ccache --show-stats
 
   docs:
+    needs: changes
+    if: needs.changes.result == 'success'
     name: docs
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -163,17 +193,23 @@ jobs:
   # reported as "build (gcc)" / "build (clang)", so this single job stands in for both.
   ci:
     name: ci
-    needs: [lint, build, docs]
-    if: always()
+    needs: [changes, lint, build, docs]
+    # Drafts skip CI (the changes job is skipped), so the aggregator skips too.
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-24.04
     steps:
       - name: Require lint, build and docs to have succeeded
         env:
+          CODE: ${{ needs.changes.outputs.code }}
           LINT_RESULT: ${{ needs.lint.result }}
           BUILD_RESULT: ${{ needs.build.result }}
           DOCS_RESULT: ${{ needs.docs.result }}
         run: |
-          echo "lint=$LINT_RESULT build=$BUILD_RESULT docs=$DOCS_RESULT"
+          echo "code=$CODE lint=$LINT_RESULT build=$BUILD_RESULT docs=$DOCS_RESULT"
+          # A docs-only PR (code=false) skips lint and build; docs must still succeed.
+          if [ "$CODE" = false ]; then
+            [ "$LINT_RESULT" = skipped ] && [ "$BUILD_RESULT" = skipped ] && [ "$DOCS_RESULT" = success ] && exit 0
+          fi
           if [ "$LINT_RESULT" != success ] || [ "$BUILD_RESULT" != success ] \
              || [ "$DOCS_RESULT" != success ]; then
             echo "::error::lint, build and docs must all succeed"
