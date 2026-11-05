@@ -244,5 +244,38 @@ class DdgTest(GraphTestBase):
         self.assertFalse(reaches(graph, "q", "p"))
 
 
+@unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest graph_views)")
+class ScoapProvTest(GraphTestBase):
+    def run_scoap(self, flags: str) -> dict[str, Any]:
+        src = self.dir / "t.v"
+        src.write_text(DDG)
+        out = self.dir / "s.json"
+        script = f"read_verilog --nolatches {src}; proc; scoap {flags} --out {out}"
+        done = subprocess.run([str(ODIN3), "-p", script], capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        result: dict[str, Any] = json.loads(out.read_text())
+        return result
+
+    def test_prov_keys_join_to_ddg(self) -> None:
+        plain = self.run_scoap("")
+        withp = self.run_scoap("--prov")
+        for net in plain["modules"][0]["nets"]:
+            self.assertNotIn("driver", net)
+        self.assertEqual(
+            [
+                {k: v for k, v in n.items() if k not in ("driver", "wire", "prov", "src")}
+                for n in withp["modules"][0]["nets"]
+            ],
+            plain["modules"][0]["nets"],
+        )
+        graph = self.graphs(DDG, "ddg")[0]
+        wire_id = {n["label"]: n["id"] for n in graph["nodes"] if n["kind"] == "signal"}
+        by_wire = {f"w{n['wire']}": n for n in withp["modules"][0]["nets"] if n["wire"]}
+        net = by_wire[wire_id["w"]]
+        self.assertNotEqual(net["driver"], 0)
+        self.assertTrue(net["src"], "the net has an HDL span")
+        self.assertEqual(net["driver"], [e["via"] for e in graph["edges"] if e["op"] == "$and"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

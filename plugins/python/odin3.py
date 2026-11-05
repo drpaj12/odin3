@@ -677,6 +677,7 @@ class Design:
         sigprob: int = 0,
         seed: int = 1,
         threshold: float = 0.01,
+        prov: bool = False,
     ) -> dict[str, Any]:
         """Run the scoap pass and return its JSON (schema odin3-scoap, version 3).
 
@@ -688,7 +689,8 @@ class Design:
         simulator refuses the netlist (combinational loop, multiple drivers) the run is skipped
         with a WARNING, "sigprob_ran" is False, "sigprob_vectors" is 0, p1_ppm is -1 on every net
         and the top module's "rare" is None. Module summaries are also stored as module
-        attributes odin3:scoap_*. See docs/user/scoap.md.
+        attributes odin3:scoap_*. With prov=True every net also has driver (node id, 0 none), wire
+        (primary wire id, 0 none), prov (record id) and src (HDL spans). See docs/user/scoap.md.
         """
         import json
         import tempfile
@@ -696,6 +698,7 @@ class Design:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "scoap.json"
             words = ["--out", _quote(out), "--top", str(top)] + ["--sequential"] * sequential
+            words += ["--prov"] * prov
             if sigprob > 0:
                 words += ["--sigprob", str(sigprob), "--seed", str(seed)]
                 words += ["--threshold", repr(threshold)]
