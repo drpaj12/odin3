@@ -283,6 +283,29 @@ static void take_timescale(const char *text, tb_module *tb) {
     }
 }
 
+/* The directives that have no effect on a testbench run: the preprocessor passes them through
+ * and the rest of their line is dropped. */
+static bool ignorable_directive(const char *scan) {
+    static const char *const NAMES[] = {"`default_nettype",
+                                        "`celldefine",
+                                        "`endcelldefine",
+                                        "`resetall",
+                                        "`begin_keywords",
+                                        "`end_keywords",
+                                        "`unconnected_drive",
+                                        "`nounconnected_drive",
+                                        "`pragma",
+                                        NULL};
+    for (size_t i = 0; NAMES[i] != NULL; i++) {
+        size_t len = strlen(NAMES[i]);
+        if (strncmp(scan, NAMES[i], len) == 0 && !isalnum((unsigned char)scan[len]) &&
+            scan[len] != '_') {
+            return true;
+        }
+    }
+    return false;
+}
+
 /* One step over blanks, a comment or a `timescale line: 1 skipped, 0 at a token, -1 error. */
 static int skip_step(const char **cursor, uint32_t *line, const char *file, tb_module *tb) {
     const char *scan = *cursor;
@@ -291,7 +314,7 @@ static int skip_step(const char **cursor, uint32_t *line, const char *file, tb_m
             (*line)++;
         }
         (*cursor)++;
-    } else if (scan[0] == '/' && scan[1] == '/') {
+    } else if ((scan[0] == '/' && scan[1] == '/') || (*scan == '`' && ignorable_directive(scan))) {
         skip_to_eol(cursor);
     } else if (*scan == '`' && strncmp(scan, "`timescale", TIMESCALE_LEN) == 0) {
         take_timescale(scan + TIMESCALE_LEN, tb);

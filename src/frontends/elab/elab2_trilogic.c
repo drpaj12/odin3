@@ -108,7 +108,7 @@ odin3_status odin3_elab2_tri_bus_label(const odin3_elab2 *e2, odin3_elab2_tri_re
 }
 
 /* The messages about the bus of a cell. */
-typedef enum tri_msg { MSG_WARN, MSG_OVERLAP, MSG_MIX, MSG_BELOW_TOP, MSG_BELOW_TOP_OUT } tri_msg;
+typedef enum tri_msg { MSG_WARN, MSG_OVERLAP, MSG_MIX } tri_msg;
 
 /* One located message about the bus of rec, at its driver. */
 static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg msg) {
@@ -131,19 +131,6 @@ static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg ms
                               "internal net (D3)",
                               text);
             break;
-        case MSG_BELOW_TOP:
-            odin3_elab2_error(e2, at,
-                              "tri-state driver on '%s' of an inout port of a module below the "
-                              "top is not supported (D3)",
-                              text);
-            break;
-        case MSG_BELOW_TOP_OUT:
-            odin3_elab2_error(e2, at,
-                              "tri-state driver on '%s' of an output port of a module below the "
-                              "top is not supported: the instance may drive a top-level port, "
-                              "where z must stay (D3)",
-                              text);
-            break;
         default:
             odin3_elab2_warn(e2, at,
                              "tri-state drivers on internal net '%s' converted to logic (no "
@@ -153,28 +140,6 @@ static odin3_status bus_say(odin3_elab2 *e2, odin3_elab2_tri_rec rec, tri_msg ms
         }
     }
     odin3_strbuf_free(&name);
-    return st;
-}
-
-/* An inout pin of a child instance on a net that becomes logic: the bus is not ours to merge. */
-static odin3_status child_inout_error(odin3_elab2 *e2, odin3_elab2_tri_rec rec,
-                                      const odin3_elab2_inout_pin *pin) {
-    odin3_strbuf name;
-    odin3_strbuf place;
-    odin3_strbuf_init(&name);
-    odin3_strbuf_init(&place);
-    odin3_status st = odin3_elab2_tri_bus_label(e2, rec, &name);
-    st = st != ODIN3_OK ? st : odin3_elab2_where(e2, rec.at, &place);
-    if (st == ODIN3_OK) {
-        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, rec.at),
-                          "net '%s' is driven by inout port '%s' of instance '%s' and by logic at "
-                          "%s; an inout pin cannot share a net with converted tri-state drivers "
-                          "(D3)",
-                          name.data != NULL ? name.data : "net", pin->port, pin->instance,
-                          place.data != NULL ? place.data : "?");
-    }
-    odin3_strbuf_free(&name);
-    odin3_strbuf_free(&place);
     return st;
 }
 
@@ -209,16 +174,13 @@ static y_nets count_y(const odin3_elab2 *e2, odin3_elab2_tri_rec rec) {
 
 /* True when the cell becomes logic. A cell on a top-level port keeps its handling (Yosys's
  * `tribuf -logic` keeps the $tribuf when any bit of the net is on an output port); the other
- * cases that cannot be logic are located errors and the cell stays. *st is a hard failure. */
+ * cases that cannot be logic are located errors and the cell stays; a cell on a port of a module
+ * below the top stays without an error (the `tristate` pass, after `flatten`, resolves it). *st is
+ * a hard failure. */
 static bool becomes_logic(odin3_elab2 *e2, odin3_elab2_tri_rec rec, odin3_status *st) {
     y_nets nets = count_y(e2, rec);
-    if (nets.below_top) {
-        *st = bus_say(e2, rec, MSG_BELOW_TOP);
-        return false;
-    }
-    if (nets.below_out) {
-        *st = bus_say(e2, rec, MSG_BELOW_TOP_OUT);
-        return false;
+    if (nets.below_top || nets.below_out) {
+        return false; /* the $tribuf stays: the `tristate` pass resolves it after `flatten` */
     }
     if (nets.port != 0 && nets.internal != 0) {
         *st = bus_say(e2, rec, MSG_MIX);
@@ -228,8 +190,8 @@ static bool becomes_logic(odin3_elab2 *e2, odin3_elab2_tri_rec rec, odin3_status
         return false;
     }
     if (nets.child) {
-        *st = child_inout_error(e2, rec, &nets.pin);
-        return false;
+        return false; /* the $tribuf stays: the `tristate` pass sees the child's pin after `flatten`
+                       */
     }
     return true;
 }

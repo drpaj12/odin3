@@ -67,7 +67,7 @@ run against them, checks the sha256 values, that every link target is an object,
 |---|---|---|
 | `id` | the same object, by construction (a writer or a copy) | exact |
 | `name` | same instance name in the previous stage | exact |
-| `cone` | a mapped gate to the RTL objects whose spans it shares (gatemap G-2, coarse) | medium |
+| `cone` | a mapped gate to the RTL objects whose spans it shares (gatemap G-2, coarse). In the silicon flow the target is the `hdl` statement object of each source span of the gate's chain; the `ir` cells of that span carry a `fine` link to the same object (one link per span, linear in gates) | medium |
 | `fine` | per-object record chain (name map `R` and `C` lines) | exact |
 | `join` | an optimisation join (the name map `Q` and `K` lines) | as recorded |
 | `resize` | same name, other master | exact |

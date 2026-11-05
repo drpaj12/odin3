@@ -53,8 +53,14 @@ class Tools:
     versions: dict[str, str] = field(default_factory=dict)
 
 
+# Seconds one external tool run may take (OpenROAD, Magic, Netgen, KLayout). The flat Magic
+# extraction of des (79,679 cells with taps and fill) needs more than an hour, so the limit is
+# 6 hours; ODIN3_SILICON_TOOL_TIMEOUT overrides it.
+TOOL_TIMEOUT = int(os.environ.get("ODIN3_SILICON_TOOL_TIMEOUT", "21600"))
+
+
 def _run(argv: Sequence[str | Path], cwd: Path | None = None, env: Mapping[str, str] | None = None,
-         timeout: int = 3600) -> subprocess.CompletedProcess[str]:
+         timeout: int = TOOL_TIMEOUT) -> subprocess.CompletedProcess[str]:
     return subprocess.run([str(a) for a in argv], capture_output=True, text=True, cwd=cwd,
                           env=dict(os.environ, **env) if env else None, timeout=timeout,
                           stdin=subprocess.DEVNULL, check=False)
@@ -72,8 +78,11 @@ EQUIV_RESULT = {0: "equivalent", 1: "not-equivalent"}  # any other exit code: a 
 
 
 def _reason(text: str) -> str:
-    """The last line of an equiv-check output that is not a notice, paths redacted."""
+    """The last ``equiv-check:`` line that is not a notice (else the last line that is not one),
+    paths redacted. ABC text after that line ("Networks are UNDECIDED", "hi") is not the reason."""
     lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
+    tool = [ln for ln in lines if ln.startswith("equiv-check:")]
+    lines = tool or lines
     return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
 
 
@@ -175,15 +184,57 @@ def _rel(path: Path, base: Path) -> str:
         return path.name
 
 
-def odin_script(lib: Path, design: Path, top: str, out: Path, upto: str) -> str:
-    """The Odin III script of the ``elab`` (word level) or ``map`` (gates) run."""
+def odin_script(lib: Path, design: Path, top: str, out: Path, upto: str,
+                strict_tristate: bool = False) -> str:
+    """The Odin III script of the ``elab`` (word level) or ``map`` (gates) run. ``tristate`` runs
+    after ``flatten`` (a WARNING per conversion; ``strict_tristate``: a conversion is an error)."""
+    tri = "tristate --strict" if strict_tristate else "tristate"
     head = f"read_techlib {lib}; read_verilog --nolatches {design}; hierarchy --top {top}; " \
-           f"proc; flatten; opt; lower --neg-edge keep"
+           f"proc; flatten; {tri}; opt; lower --neg-edge keep"
     if upto == "elab":
         return f"{head}; dump_locs --types {out}/elab_locs.txt"
     return (f"{head}; write_blif --gates-as-names {out}/rtl.blif; abc --gates {LIB_NAME}; "
             f"dfflibmap {LIB_NAME}; write_blif --gates-as-names {out}/gates.blif; "
             f"dump_locs --types {out}/locs.txt; write_verilog {out}/g.v")
+
+
+def set_param(text: str, top: str, name: str, value: str) -> str:
+    """``text`` with the default of parameter ``name`` of module ``top`` set to ``value``.
+
+    Odin III has no parameter override on the command line and the netlist has no parameters, so a
+    testbench that instantiates ``top #(.NAME(v))`` needs the netlist built with that value. Only
+    the first ``parameter NAME = ...`` in the module body or header is rewritten (the text up to the
+    next ``,``, ``;`` or ``)``)."""
+    mod = re.search(rf"\bmodule\s+{re.escape(top)}\b.*?\bendmodule\b", text, re.S)
+    if mod is None:
+        raise ValueError(f"--param: module {top} not found")
+    decl = re.compile(rf"(\bparameter\s+(?:signed\s+)?(?:\[[^\]]*\]\s*)?{re.escape(name)}\s*=\s*)"
+                      r"[^,;)]+")
+    body, n = decl.subn(lambda m: m.group(1) + value, mod.group(0), count=1)
+    if n == 0:
+        raise ValueError(f"--param: module {top} has no 'parameter {name} = ...'")
+    return text[:mod.start()] + body + text[mod.end():]
+
+
+def parametrised_design(design: Path, top: str, params: Sequence[str], out: Path) -> Path:
+    """A copy of ``design`` with the ``NAME=VALUE`` defaults set, in ``out/param_src`` beside
+    symlinks to the other files of the design's directory (includes keep resolving). The copy
+    has the original's file name, so provenance spans name the same file."""
+    src = out / "param_src"
+    src.mkdir(parents=True, exist_ok=True)
+    for other in design.parent.iterdir():
+        link = src / other.name
+        if other.name != design.name and other.is_file() and not link.exists():
+            link.symlink_to(other)
+    text = design.read_text()
+    for item in params:
+        name, eq, value = item.partition("=")
+        if not eq or not value:
+            raise ValueError(f"--param {item!r}: expected NAME=VALUE")
+        text = set_param(text, top, name, value)
+    dst = src / design.name
+    dst.write_text(text)
+    return dst
 
 
 def read_locs(path: Path) -> dict[str, tuple[str, list[str]]]:
@@ -207,12 +258,18 @@ def _legal(name: str) -> str:
     return name if re.fullmatch(r"[A-Za-z_]\w*", name) else "o3_" + re.sub(r"\W", "_", name)
 
 
+# An assign target: a name, with an optional bit select that may follow a space ("n [0]").
+LHS = r"[^\s=\[]+(?:\s*\[[^\]]*\])?"
+
+
 def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]]]
                   ) -> list[dict[str, str]]:
-    """Strip attributes and comments, legalise names, give every constant a ``conb_1`` tie cell.
+    """Strip attributes, comments and ``signed``, legalise names, tie every constant to ``conb_1``.
     Returns the prov rows: inst, odin_name, master, src_chain, tie (value or "")."""
     text = re.sub(r"\(\*.*?\*\)", "", gv.read_text(), flags=re.S)
     text = re.sub(r"//[^\n]*", "", text)
+    # OpenROAD's STA Verilog reader (STA-0164) rejects "signed"; the net is a bit vector either way.
+    text = re.sub(r"\b(input|output|inout|wire|reg)\s+signed\b", r"\1", text)
     names: dict[str, str] = {}
 
     def esc(m: re.Match[str]) -> str:
@@ -232,12 +289,12 @@ def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]
     for net, val in ties:
         extra.append(f"  wire {net};\n  {CONB} o3_tie_{net[11:]} (.{'HI' if val == '1' else 'LO'}"
                      f"({net}));\n")
-    for m in re.finditer(r"^\s*assign\s+(\S+)\s*=\s*1'b([01])\s*;", text, re.M):
+    for m in re.finditer(rf"^\s*assign\s+({LHS})\s*=\s*1'b([01])\s*;", text, re.M):
         idx = len(ties) + len(extra)
         pin = "HI" if m.group(2) == "1" else "LO"
         extra.append(f"  {CONB} o3_tie_a{idx} (.{pin}({m.group(1)}));\n")
         ties.append((m.group(1), m.group(2)))
-    text = re.sub(r"^\s*assign\s+\S+\s*=\s*1'b[01]\s*;\n?", "", text, flags=re.M)
+    text = re.sub(rf"^\s*assign\s+{LHS}\s*=\s*1'b[01]\s*;\n?", "", text, flags=re.M)
     text = text.replace("endmodule", "".join(extra) + "endmodule", 1)
     clean.write_text(text)
     const_src: dict[str, list[str]] = {"0": [], "1": []}
@@ -572,16 +629,21 @@ def ir_objects(ir: Mapping[str, tuple[str, list[str]]], hdl: Mapping[str, str], 
 
 def gates_objects(prov: Sequence[Mapping[str, str]], ir: Mapping[str, tuple[str, list[str]]],
                   root: Path) -> list[dict[str, Any]]:
-    by_span: dict[str, list[str]] = {}
-    for name, (_, spans) in ir.items():
+    """Gate rows. A gate's ``cone`` links go to the HDL statement objects of its source chain
+    (those that some IR cell also carries), one link per span. The IR cells that share a span
+    are the other end of their ``fine`` links to the same object, so the IR set of a gate is
+    recoverable and the number of links is linear in gates (all-pairs gate/IR links took more than
+    6 GiB on a 17,565-gate design)."""
+    known: set[str] = set()
+    for _, spans in ir.values():
         for s in spans:
             sp = split_span(s, root)
-            by_span.setdefault(f"{sp['file']}:{sp['span']}", []).append(name)
+            known.add(f"{sp['file']}:{sp['span']}")
     rows = []
     for r in prov:
         chain = [x for x in r["src_chain"].split("|") if x]
-        targets = sorted({n for c in chain for n in by_span.get(c, [])})
-        links = [prov_steps.link(f"ir:{n}", "cone", "medium") for n in targets]
+        targets = sorted({c for c in chain if c in known})
+        links = [prov_steps.link(f"hdl:{c}", "cone", "medium") for c in targets]
         origin = "hdl" if links else ("physical:tie" if r["tie"] else "unknown")
         rows.append(prov_steps.obj("gates", r["inst"], "cell", r["inst"], origin, links,
                                    type=r["master"], src=_spans(chain),
@@ -646,6 +708,7 @@ class Run:
     root: Path = field(default_factory=Path)
     log: list[str] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=dict)  # wall clock per step (not in log)
+    strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
 
 
 def _tool_entry(t: Tools, name: str) -> dict[str, str]:
@@ -709,7 +772,7 @@ def _out_of_scope(r: Run, w: prov_steps.StepWriter, step: str, reason: str,
 
 
 def _odin(r: Run, upto: str) -> None:
-    script = odin_script(r.lib, r.design, r.top, r.out, upto)
+    script = odin_script(r.lib, r.design, r.top, r.out, upto, r.strict_tristate)
     res = _run([r.tools.odin3, "-p", script], cwd=r.design.parent)
     (r.out / f"odin_{upto}.log").write_text(res.stdout + res.stderr)
     if res.returncode != 0:
@@ -740,7 +803,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         write_prov_csv(out / "prov.csv", st["prov"])
         w.add_step("map", "gates", odin, gates_objects(st["prov"], st.get("ir", {}), root),
                    needs=needs, outputs=_outs(out, ["gates.blif", "g.v"]),
-                   links=[{"from_step": "elab", "kind": "cone", "key": "src", "scope": None,
+                   links=[{"from_step": "read", "kind": "cone", "key": "src", "scope": None,
                            "confidence": "medium"}])
     elif step == "equiv":
         checker = HERE.parent / "equiv-check" / "equiv_check.py"
@@ -897,7 +960,8 @@ def default_lib() -> Path:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI: silicon_flow.py DESIGN.v --top T --out DIR [--tools DIR] [--pdk DIR] [--odin3 PATH]
-    [--steps a,b] [--clock PORT]. Exit 0 ok, 1 a step failed, 2 usage or missing tools."""
+    [--steps a,b] [--clock PORT] [--param NAME=VALUE]. Exit 0 ok, 1 a step failed, 2 usage or
+    missing tools."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="silicon_flow", description=(__doc__ or "").split("\n")[0])
@@ -910,6 +974,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--steps", default=",".join(TOP_STEPS), help="comma list of steps")
     ap.add_argument("--clock", default="", help="clock port (enables CTS)")
     ap.add_argument("--lib", type=Path, default=None)
+    ap.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
+                    help="set the default of a parameter of the top module (a testbench that "
+                         "overrides it needs the netlist built with its value); repeatable")
     ns = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     steps = tuple(x for x in ns.steps.split(",") if x)
     bad = [x for x in steps if x not in TOP_STEPS]
@@ -927,7 +994,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("silicon_flow: missing tools for the requested steps:\n  " + "\n  ".join(gone),
               file=sys.stderr)
         return SKIP_EXIT if os.environ.get("ODIN3_SILICON_SKIP") else 2
-    run_ = Run(ns.design.resolve(), ns.top, ns.out.resolve(), (ns.lib or default_lib()).resolve(),
+    design = ns.design.resolve()
+    if ns.param:
+        try:
+            design = parametrised_design(design, ns.top, ns.param, ns.out.resolve())
+        except ValueError as exc:
+            print(f"silicon_flow: {exc}", file=sys.stderr)
+            return 2
+    run_ = Run(design, ns.top, ns.out.resolve(), (ns.lib or default_lib()).resolve(),
                t, ns.clock, steps)
     code = run(run_)
     for line in run_.log:
