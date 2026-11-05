@@ -181,12 +181,13 @@ keeps them in a separate list of the same table, beside their record, and writes
 | Flag | Written by | Meaning |
 |---|---|---|
 | `hier=<text>` | Odin III | the record's hierarchy string (escaped); absent when empty |
+| `uid=<n>` | Odin III, only with the environment variable `ODIN3_PROV_UID=1` | the record's ID in the design's store. The `r<n>` numbers count the records of one file, so two maps written in one run disagree on them; `uid` is the same in both, so a record can be followed from one dump to another. Off by default: a restored design numbers its store again, so its map would differ from the first one's. A reader that does not know it keeps it |
 | `stale=t<n>` | restore | on an `R` record only: the post-Odin record was made stale by the pass run `t<n>` (see [Restore](#restore-from-a-map)); the last flag. An `A`, `Q` or `K` line has no such flag: it carries `t<n>` in its `stale` field |
 | `x=<n>`, `y=<n>`, `sub=<n>` | `odin3-prov-post` | the grid column, row and subtile of a `site` record, from the `.place` |
 | `layer=<n>` | `odin3-prov-post` | the layer, when the `.place` has the column |
 
 The full flag list, then, is `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`,
-`chain=span`, `capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, `stale=t<n>`,
+`chain=span`, `capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, `uid=<n>`, `stale=t<n>`,
 `x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. (`stale=t<n>` is a flag of `R` records only; an `A`, `Q` or `K` line has the field `stale`, `-` when current, else `t<n>`.) The writers do not yet write `cell=<type>` (a record
 does not know the cell type of the hard object it made).
 

@@ -21,6 +21,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- The version 2 name map writes `uid=<store ID>` on `R` lines when `ODIN3_PROV_UID=1` is set. The `r<n>` numbers count the
+  records of one file, so two maps from one run disagree on them; the store ID is the same in both, so a record can be
+  followed from the proc dump to the final one. Off by default (a restored design numbers its store again). New CTest
+  `lineage` (`tests/lineage/case_fsm.v`): the LUTs of a case, of an independent statement and of a state machine trace to
+  their own source lines.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
   top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
   instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.
