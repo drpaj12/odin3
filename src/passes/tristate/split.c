@@ -165,10 +165,11 @@ static odin3_status bit_drive(ts_ctx *tc, const sp_port *sp, uint32_t bit, odin3
     return st;
 }
 
-/* The new input p_i takes over the port's net j: the net of p_i merges into it, so every reader (and
- * every wire name) now sees p_i. The shell's pin stays on the net, because IR rule 9 ties a port's
- * pin k to the net of its wire bit k and a port wire cannot be rebound (odin3_wire_add_alias). An
- * inout pin may share a net with a driver (rule 4), and the shell is skipped by the writers. */
+/* The new input p_i takes over the port's net j: the net of p_i merges into it, so every reader
+ * (and every wire name) now sees p_i. The shell's pin stays on the net, because IR rule 9 ties a
+ * port's pin k to the net of its wire bit k and a port wire cannot be rebound
+ * (odin3_wire_add_alias). An inout pin may share a net with a driver (rule 4), and the shell is
+ * skipped by the writers. */
 static odin3_status take_over(const ts_ctx *tc, const sp_port *sp, uint32_t bit,
                               odin3_net_id from) {
     odin3_net_id net = ((const odin3_net_id *)sp->nets.data)[bit];
