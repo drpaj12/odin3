@@ -627,7 +627,7 @@ install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
 install(FILES tools/silicon/silicon_flow.py tools/silicon/klayout_gds.py
-              tools/silicon/liberty_to_o3lib.py tools/silicon/schema_check.py
+              tools/silicon/liberty_to_o3lib.py tools/silicon/schema_check.py tools/silicon/gate_sim.py
               tools/silicon/openroad_flow.tcl tools/silicon/magic_extract.tcl
         DESTINATION ${_odin3_share_dir}/tools/silicon)
 install(FILES tools/equiv-check/equiv_check.py DESTINATION ${_odin3_share_dir}/tools/equiv-check)
