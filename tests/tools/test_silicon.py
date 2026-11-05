@@ -8,6 +8,8 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +25,7 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 TOOLS = os.environ.get("ODIN3_SILICON_TOOLS", "")
 MICRO = REPO_ROOT / "tests" / "micro" / "verilog" / "micro"
 LIB = REPO_ROOT / "lib" / "sky130hd.o3lib"
+HERE_TCL = REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl"
 SCHEMAS = REPO_ROOT / "docs" / "schemas"
 
 LIBERTY = """library (x) {
@@ -136,6 +139,35 @@ endmodule
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "1"], ["/r/a.v:2.5-2.9"])
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "0"], [""])
 
+    def test_constant_assign_to_a_bit_select_gets_a_tie_cell(self) -> None:
+        """OpenROAD turns "assign n [0] = 1'b0;" into a POWER net it cannot route (DRT-0305)."""
+        gv_text = ("module m (a, y);\n  input a;\n  output y;\n  wire [1:0] n ;\n"
+                   "  assign n [0] = 1'b0;\n  assign n[1] = 1'b1;\n"
+                   "  sky130_fd_sc_hd__and2_1 u (.A(n [0]), .B(n[1]), .X(y));\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            gv, clean = Path(tmp) / "g.v", Path(tmp) / "clean.v"
+            gv.write_text(gv_text)
+            rows = sf.clean_netlist(gv, clean, {})
+            text = clean.read_text()
+            self.assertNotIn("assign", text)
+            self.assertNotIn("1'b", text)
+            self.assertIn(".LO(n [0])", text)
+            self.assertIn(".HI(n[1])", text)
+            self.assertEqual(sorted(r["tie"] for r in rows if r["tie"]), ["0", "1"])
+
+    def test_signed_stripped_from_declarations(self) -> None:
+        gv_text = ("module m (a, y);\n  input signed [3:0] a;\n  output signed y;\n"
+                   "  wire signed [31:0] o3_pos ;\n  reg signed q;\n"
+                   "  sky130_fd_sc_hd__buf_1 u (.A(a), .X(y));\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            gv, clean = Path(tmp) / "g.v", Path(tmp) / "clean.v"
+            gv.write_text(gv_text)
+            sf.clean_netlist(gv, clean, {})
+            text = clean.read_text()
+            self.assertNotIn("signed", text)
+            self.assertIn("wire [31:0] o3_pos ;", text)
+            self.assertIn("input [3:0] a;", text)
+
     def test_tie_origin_labels(self) -> None:
         rows = [{"inst": "o3_tie_0", "odin_name": "", "master": sf.CONB, "src_chain": "",
                  "tie": "0"},
@@ -146,8 +178,99 @@ endmodule
         self.assertEqual(got["o3_tie_0"]["origin"], "physical:tie")
         self.assertEqual(got["o3_tie_0"]["links"], [])
         self.assertEqual(got["o3_tie_1"]["origin"], "hdl")
-        self.assertEqual(got["o3_tie_1"]["links"][0]["to"], "ir:$k")
+        self.assertEqual(got["o3_tie_1"]["links"][0]["to"], "hdl:a.v:2.5-2.9")
         self.assertEqual(got["o3_tie_1"]["links"][0]["kind"], "cone")
+
+    def test_gate_links_are_linear_in_cells(self) -> None:
+        """Many IR cells share a span: one link per span of the gate chain, not per IR cell."""
+        ir = {f"$c{i}": ("$_AND_", ["a.v:1.1-9.9"]) for i in range(2000)}
+        ir["$one"] = ("$_NOT_", ["a.v:3.1-3.4"])
+        rows = [{"inst": f"g{i}", "odin_name": "", "master": "m",
+                 "src_chain": "a.v:1.1-9.9|a.v:3.1-3.4|a.v:7.1-7.2", "tie": ""} for i in range(50)]
+        got = sf.gates_objects(rows, ir, Path("."))
+        self.assertEqual(sum(len(o["links"]) for o in got), 50 * 2)  # a.v:7.1-7.2 is not in the IR
+        self.assertEqual([lk["to"] for lk in got[0]["links"]],
+                         ["hdl:a.v:1.1-9.9", "hdl:a.v:3.1-3.4"])
+
+
+class OpenroadDriverTest(unittest.TestCase):
+    def test_probe_cells_are_dont_use(self) -> None:
+        """repair_design picked probe_p_8 as a repeater; global routing died on it (sha3_low)."""
+        tcl = (REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl").read_text()
+        line = [x for x in tcl.splitlines() if x.startswith("set_dont_use")]
+        self.assertEqual(len(line), 1)
+        self.assertIn("sky130_fd_sc_hd__probe_p_8", line[0])
+        self.assertIn("sky130_fd_sc_hd__probec_p_8", line[0])
+        self.assertLess(tcl.index("link_design"), tcl.index("set_dont_use"))  # needs a network
+        self.assertLess(tcl.index("set_dont_use"), tcl.index("\nrepair_design\n"))
+
+
+class ToolTimeoutTest(unittest.TestCase):
+    def test_default_tool_timeout_is_six_hours(self) -> None:
+        """Magic needed more than the old 3600 s on des; the limit is now 6 h (env override)."""
+        want = int(os.environ.get("ODIN3_SILICON_TOOL_TIMEOUT", "21600"))
+        self.assertEqual(sf.TOOL_TIMEOUT, want)
+        self.assertGreaterEqual(sf.TOOL_TIMEOUT, 7200)
+        self.assertEqual(sf._run.__defaults__[-1], sf.TOOL_TIMEOUT)  # type: ignore[index]
+
+
+class ParamTest(unittest.TestCase):
+    SRC = """module sub (input a);
+  parameter ARST_LVL = 1'b1;
+endmodule
+module top (input a, output y);
+  parameter ARST_LVL = 1'b1; // reset level
+  parameter [3:0] W = 4'd2;
+  sub s (a);
+endmodule
+"""
+
+    def test_set_param_changes_only_the_top_module_default(self) -> None:
+        out = sf.set_param(self.SRC, "top", "ARST_LVL", "1'b0")
+        self.assertEqual(out.count("ARST_LVL = 1'b1"), 1)  # the sub module's is untouched
+        self.assertIn("parameter ARST_LVL = 1'b0; // reset level", out)
+        self.assertIn("parameter [3:0] W = 4'd9;", sf.set_param(self.SRC, "top", "W", "4'd9"))
+
+    def test_set_param_errors(self) -> None:
+        with self.assertRaises(ValueError):
+            sf.set_param(self.SRC, "nope", "W", "1")
+        with self.assertRaises(ValueError):
+            sf.set_param(self.SRC, "top", "MISSING", "1")
+
+    def test_parametrised_design_keeps_name_and_siblings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "src").mkdir()
+            (d / "src" / "design.v").write_text(self.SRC)
+            (d / "src" / "defs.v").write_text("`define X 1\n")
+            got = sf.parametrised_design(d / "src" / "design.v", "top", ["ARST_LVL=1'b0"], d / "o")
+            self.assertEqual(got, d / "o" / "param_src" / "design.v")
+            self.assertIn("ARST_LVL = 1'b0", got.read_text())
+            self.assertEqual((got.parent / "defs.v").read_text(), "`define X 1\n")
+            self.assertIn("ARST_LVL = 1'b1", (d / "src" / "design.v").read_text())
+
+
+@unittest.skipUnless(shutil.which("tclsh"), "needs tclsh")
+class DieEdgeSnapTest(unittest.TestCase):
+    """The Tcl driver keeps the die edge 0.17 um or more from the last met1 to met4 track
+    (DRT-0255 on des: a 732.615 um die left 0.065 um to the last met2 track)."""
+
+    def snap(self, die: float) -> float:
+        tcl = (HERE_TCL).read_text()
+        procs = re.search(r"proc edge_ok .*?\nproc snap_edge .*?\n}\n", tcl, re.S)
+        self.assertIsNotNone(procs)
+        script = (procs.group(0) if procs else "") + f"\nputs [snap_edge {die}]\n"
+        out = subprocess.run(["tclsh"], input=script, capture_output=True, text=True, check=True)
+        return float(out.stdout.strip())
+
+    def test_des_die_is_enlarged(self) -> None:
+        self.assertEqual(self.snap(732.615), 733.185)
+
+    def test_small_fixed_die_is_enlarged_a_little(self) -> None:
+        self.assertEqual(self.snap(42.0), 42.26)
+
+    def test_a_good_edge_is_unchanged(self) -> None:
+        self.assertEqual(self.snap(733.185), 733.185)
 
 
 class LabelAndRedactTest(unittest.TestCase):
@@ -214,6 +337,11 @@ class RefSpiceTest(unittest.TestCase):
         self.assertEqual(sf._reason(text),
                          "equiv-check: error: latch $n21 is clocked by internal net, see <path>")
         self.assertEqual(sf._reason(""), "gates are not equivalent to the RTL")
+
+    def test_reason_is_the_equiv_check_line_not_abc_trailing_text(self) -> None:
+        text = ("equiv-check: unproven: ABC dsec ended UNDECIDED (its own time or depth limit)\n"
+                "Reached timeout (60 seconds) in frame 501.\nNetworks are UNDECIDED.\nhi\n")
+        self.assertEqual(sf._reason(text), text.splitlines()[0])
 
     def test_open_pin_gets_its_own_net(self) -> None:
         pins = ["VGND", "VNB", "VPB", "VPWR", "HI", "LO"]
@@ -384,7 +512,7 @@ class OdinOnlyStepsTest(unittest.TestCase):
             rows = [json.loads(x) for x in gates]
             self.assertEqual(len(rows), 17)
             self.assertTrue(all(r["origin"] == "hdl" and r["links"] for r in rows))
-            self.assertTrue(all(r["links"][0]["to"].startswith("ir:") for r in rows))
+            self.assertTrue(all(r["links"][0]["to"].startswith("hdl:") for r in rows))
             equiv = json.loads((out / "prov" / index["steps"][3]["file"]).read_text())
             self.assertEqual(equiv["check"]["result"], "equivalent")
             self.assertNotIn("/home" + "/", (out / "prov" / "index.json").read_text())

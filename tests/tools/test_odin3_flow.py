@@ -262,6 +262,37 @@ class FileList(unittest.TestCase):
         self.assertIn("unknown option '--bogus-option'", log)
 
 
+class TristateHook(FlowCase):
+    """The tristate pass runs after flatten in the default vtr flow (post-1.4, Peter 2026-11-04)."""
+
+    SRC = ("module sub(input d, input en, inout p);\nassign p = en ? d : 1'bz;\nendmodule\n"
+           "module top(input d, input en, output y);\nwire w;\n"
+           "sub u(.d(d), .en(en), .p(w));\nassign y = w ^ 1'b1;\nendmodule\n")
+
+    def test_script_text(self) -> None:
+        self.assertEqual(flow.tristate_script("a; flatten; opt", False),
+                         "a; flatten; tristate; opt")
+        self.assertEqual(flow.tristate_script("a; flatten; opt", True),
+                         "a; flatten; tristate --strict; opt")
+        self.assertEqual(flow.tristate_script("a; opt", False), "a; opt")
+
+    @needs_odin3
+    def test_internal_tristate_goes_through_with_a_warning(self) -> None:
+        src = self.tmp / "t.v"
+        src.write_text(self.SRC)
+        code, out, err = self.run_flow(str(src), "--no-vpr")
+        self.assertEqual(code, 0, out + err)
+        log = (self.tmp / "out" / "odin3" / "odin3.log").read_text()
+        self.assertIn("warning: tristate: w", log)
+
+    @needs_odin3
+    def test_strict_keeps_the_error(self) -> None:
+        src = self.tmp / "t.v"
+        src.write_text(self.SRC)
+        code, out, err = self.run_flow(str(src), "--no-vpr", "--strict-tristate")
+        self.assertEqual(code, 1, out + err)
+
+
 class Luts(unittest.TestCase):
     def test_luts_count_only_nontrivial_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

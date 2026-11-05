@@ -1694,6 +1694,23 @@ static bool parse_item(parser *pr) {
     return parse_instance(pr);
 }
 
+/* Moves pr->pos to the `module` token of `top` (the first module when top is NULL), so a bench
+ * of several files can name its top module wherever it stands among the other modules. */
+static void locate_top(parser *pr, const char *top, uint32_t ntoks) {
+    if (top == NULL) {
+        return;
+    }
+    for (uint32_t i = 0; i + 1U < ntoks; i++) {
+        const tb_tok *tok = &pr->toks[i];
+        if (tok->kind == TK_ID && strcmp(tok->text, "module") == 0 &&
+            pr->toks[i + 1U].kind == TK_ID && strcmp(pr->toks[i + 1U].text, top) == 0) {
+            pr->pos = i;
+            return;
+        }
+    }
+    pr->pos = 0;
+}
+
 static bool parse_header(parser *pr, const char *top) {
     if (!accept_kw(pr, "module") || cur(pr)->kind != TK_ID) {
         return fail(pr, "file does not start with a module");
@@ -1701,8 +1718,7 @@ static bool parse_header(parser *pr, const char *top) {
     (void)snprintf(pr->tb->name, sizeof pr->tb->name, "%s", cur(pr)->text);
     pr->pos++;
     if (top != NULL && strcmp(top, pr->tb->name) != 0) {
-        return fail(pr,
-                    "--top names a module that is not the first (one testbench module per file)");
+        return fail(pr, "--top names a module that is not in the testbench files");
     }
     if (accept_op(pr, "(") && !expect_op(pr, ")")) {
         return false;
@@ -1715,7 +1731,7 @@ static void parse_items(parser *pr) {
         if (cur(pr)->kind == TK_EOF) {
             fail(pr, "missing endmodule");
         } else if (is_kw(pr, "module")) {
-            fail(pr, "more than one module in the file");
+            fail(pr, "module inside a module");
         } else {
             (void)parse_item(pr);
         }
@@ -1750,11 +1766,9 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
         }
         tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
     }
+    locate_top(&pr, top, lexed.n);
     if (!pr.failed && parse_header(&pr, top)) {
         parse_items(&pr);
-    }
-    if (!pr.failed && cur(&pr)->kind != TK_EOF) {
-        fail(&pr, "more than one module in the file");
     }
     odin3_vec_free(&pr.ents);
     odin3_vec_free(&pr.vals);

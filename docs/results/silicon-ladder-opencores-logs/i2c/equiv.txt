@@ -1,0 +1,3 @@
+equiv-check: equivalent (abc dsec)
+equiv-check: notice: ~/odin3-ws/work/silicon-ladder-out/i2c/flow/rtl.blif: 200 latch(es) with init 2/3 (don't care/unknown) treated as 0
+equiv-check: notice: ~/odin3-ws/work/silicon-ladder-out/i2c/flow/gates.blif: 195 latch(es) with init 2/3 (don't care/unknown) treated as 0
