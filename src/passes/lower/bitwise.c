@@ -11,6 +11,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 /* Port positions: unary A Y; binary A B Y; $mux A B S Y. */
 enum { PORT_A = 0, PORT_B = 1, PORT_S = 2, PORT_Y_UNARY = 1, PORT_Y_BINARY = 2, PORT_Y_MUX = 3 };
@@ -172,6 +173,18 @@ static bool tribuf_chained(const lw_ctx *lw, const lw_cell *cell) {
     return lw->tri_chain == NULL || lw->tri_chain[cell->node.v] != 0;
 }
 
+/* True when `flatten` left the module unused (ODIN3_ATTR_FLATTENED_AWAY): its ports are never
+ * reached, so a $tribuf on one is no error. */
+static bool module_flattened_away(const lw_ctx *lw) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(lw->design),
+                           odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key)) {
+        return false;
+    }
+    odin3_objref self = {ODIN3_OBJ_MODULE, odin3_module_id_of(lw->module).v};
+    return odin3_attr_get(lw->module, self, key) != NULL;
+}
+
 /* The reason this $tribuf is kept as an error, or NULL when it is the sole driver of its Y bits
  * (what Yosys `opt_expr -mux_undef` and so Parmys collapse). */
 static const char *tribuf_reason(const lw_ctx *lw, const lw_cell *cell) {
@@ -201,12 +214,30 @@ static const char *tribuf_reason(const lw_ctx *lw, const lw_cell *cell) {
 odin3_status lw_build_tribuf(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
     char label[LW_LABEL_LEN];
     lw_node_label(lw, cell->node, label, sizeof label);
+    if (module_flattened_away(lw)) { /* no netlist is written from it: Y follows A, quietly */
+        lw_bits_clear(out);
+        odin3_status st = odin3_vec_reserve(&out->v, cell->port[TRI_PORT_Y].n);
+        for (uint32_t i = 0; st == ODIN3_OK && i < cell->port[TRI_PORT_Y].n; i++) {
+            st = lw_bits_push(out, cell->port[TRI_PORT_A].nets[i]);
+        }
+        return st;
+    }
     const char *reason = tribuf_reason(lw, cell);
     if (reason != NULL) {
+        char net[LW_LABEL_LEN] = "?";
+        odin3_net_id ynet =
+            cell->port[TRI_PORT_Y].n > 0 ? cell->port[TRI_PORT_Y].nets[0] : (odin3_net_id){0};
+        odin3_wirebit wb =
+            odin3_net_valid(ynet) ? odin3_net_primary(lw->module, ynet) : (odin3_wirebit){{0}, 0};
+        if (wb.wire.v != 0) {
+            (void)snprintf(net, sizeof net, "%s",
+                           odin3_strtab_get(odin3_design_strtab(lw->design),
+                                            odin3_wire_name(lw->module, wb.wire)));
+        }
         odin3_log(ODIN3_LOG_ERROR,
-                  "lower: '$tribuf' '%s' has no bit-level cell in the registry and is not the sole "
-                  "driver of its output, so its enable cannot be dropped: %s",
-                  label, reason);
+                  "lower: '$tribuf' '%s' (output net '%s') has no bit-level cell in the registry "
+                  "and is not the sole driver of its output, so its enable cannot be dropped: %s",
+                  label, net, reason);
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_log(ODIN3_LOG_WARN,

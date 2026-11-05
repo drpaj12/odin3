@@ -764,13 +764,13 @@ static void test_tribuf_internal_disjoint(void) {
  * keeps a $tribuf there); elaboration is per module and cannot tell, so it is a located error
  * rather than a silent z-to-x change (probe d3h). */
 static void test_tribuf_below_top(void) {
-    read_failing("module sub (input d, input en, output y);\n"
-                 "  assign y = en ? d : 'bz;\nendmodule\n"
-                 "module top (input d, input en, output y);\n"
-                 "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
-    expect_error((at_loc){2, 10},
-                 "tri-state driver on 'y' of an output port of a module below the top is not "
-                 "supported: the instance may drive a top-level port, where z must stay (D3)");
+    /* the $tribuf stays in the child: the `tristate` pass resolves it after `flatten` */
+    read_src("module sub (input d, input en, output y);\n"
+             "  assign y = en ? d : 'bz;\nendmodule\n"
+             "module top (input d, input en, output y);\n"
+             "  sub u (.d(d), .en(en), .y(y));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, diag_errors());
 }
 
 /* A net with a tri-state driver and an ordinary one stays A4's located error (spec 17 #79). */
@@ -813,23 +813,22 @@ static void test_tribuf_port_and_internal(void) {
 
 /* An inout port of a module below the top cannot be converted (its pin is a driver too). */
 static void test_tribuf_below_top_inout(void) {
-    read_failing("module sub (input d, input en, inout p);\n"
-                 "  assign p = en ? d : 'bz;\nendmodule\n"
-                 "module top (input d, input en, inout p);\n"
-                 "  sub u (.d(d), .en(en), .p(p));\nendmodule\n");
-    expect_error((at_loc){2, 10},
-                 "tri-state driver on 'p' of an inout port of a module below the top is not "
-                 "supported (D3)");
+    read_src("module sub (input d, input en, inout p);\n"
+             "  assign p = en ? d : 'bz;\nendmodule\n"
+             "module top (input d, input en, inout p);\n"
+             "  sub u (.d(d), .en(en), .p(p));\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, diag_errors());
 }
 
-/* A child's inout pin and a converted tri-state driver on one net: a located error. */
+/* A child's inout pin and a tri-state driver on one net: the $tribuf stays for the `tristate`
+ * pass (after `flatten` the child's pin is gone or its own drivers join the bus). */
 static void test_tribuf_with_child_inout(void) {
-    read_failing("module sub (inout p);\nendmodule\n"
-                 "module top (input d, input en);\n  wire bus;\n  sub u (.p(bus));\n"
-                 "  assign bus = en ? d : 'bz;\nendmodule\n");
-    expect_error((at_loc){6, 10},
-                 "net 'bus' is driven by inout port 'p' of instance 'u' and by logic at "
-                 "t.v:6:10; an inout pin cannot share a net with converted tri-state drivers (D3)");
+    read_src("module sub (inout p);\nendmodule\n"
+             "module top (input d, input en);\n  wire bus;\n  sub u (.p(bus));\n"
+             "  assign bus = en ? d : 'bz;\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, diag_errors());
 }
 
 /* A lone 'bz is the constant, wherever. */
