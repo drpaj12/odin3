@@ -205,6 +205,21 @@ class OpenroadDriverTest(unittest.TestCase):
         self.assertLess(tcl.index("set_dont_use"), tcl.index("\nrepair_design\n"))
 
 
+class NameSurvivalTest(unittest.TestCase):
+    def test_counts_match_the_per_name_search(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "t.gds").write_bytes(b"\x00\x01HDR o3__c1 end\x00\xffxx\x02plain\x00")
+            (out / "ext_hier.spice").write_text("X0 a b o3__c2 sky\nX1 o3__c22 o3__c3_x\n")
+            (out / "ext_flat.spice").write_text(".subckt t o3__c2\n")
+            names = [{"inst": n} for n in ("o3__c1", "o3__c2", "o3__c22", "o3__c3", "zz")]
+            got = sf.name_survival(out, "t", names)
+            self.assertEqual(got["names_in_gds"], 1)  # o3__c1 only (substring of a run)
+            self.assertEqual(got["names_in_gds_with_klayout_properties"], 0)
+            self.assertEqual(got["names_in_extracted_spice"], 2)  # o3__c2 and o3__c22, whole words
+            self.assertEqual(got["odin_instances"], 5)
+
+
 class ToolTimeoutTest(unittest.TestCase):
     def test_default_tool_timeout_is_six_hours(self) -> None:
         """Magic needed more than the old 3600 s on des; the limit is now 6 h (env override)."""

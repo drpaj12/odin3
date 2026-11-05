@@ -584,15 +584,32 @@ def extracted_cells(ext: Path, sizes: Mapping[str, tuple[int, int]]) -> list[dic
 
 
 def name_survival(out: Path, top: str, prov: Sequence[Mapping[str, str]]) -> dict[str, int]:
+    """How many Odin III names survive in the GDS (as a substring of a text string of the file)
+    and in the extracted SPICE (as a whole word). One pass over each file, not one per name:
+    the per-name search took more than an hour on des (18,686 names, 24 MB of SPICE)."""
     gds = (out / f"{top}.gds").read_bytes()
     named = (out / f"{top}.named.gds").read_bytes() if (out / f"{top}.named.gds").is_file() else b""
     spice = (out / "ext_hier.spice").read_text() + (out / "ext_flat.spice").read_text()
     names = [p["inst"] for p in prov]
     return {"odin_instances": len(names),
-            "names_in_gds": sum(1 for n in names if n.encode() in gds),
-            "names_in_gds_with_klayout_properties": sum(1 for n in names if n.encode() in named),
-            "names_in_extracted_spice": sum(
-                1 for n in names if re.search(rf"\b{re.escape(n)}\b", spice))}
+            "names_in_gds": _count_in_strings(names, gds),
+            "names_in_gds_with_klayout_properties": _count_in_strings(names, named),
+            "names_in_extracted_spice": _count_words(names, spice)}
+
+
+def _count_in_strings(names: Sequence[str], blob: bytes) -> int:
+    """Names that occur as a substring of a printable run of ``blob`` (names are printable)."""
+    runs = set(re.findall(rb"[\x20-\x7e]+", blob))
+    return sum(1 for n in names
+               if n.encode() in runs or any(n.encode() in r for r in runs))
+
+
+def _count_words(names: Sequence[str], text: str) -> int:
+    """Names that occur as a whole word (``\\bname\\b``) in ``text``."""
+    words = set(re.findall(r"\w+", text))
+    return sum(1 for n in names
+               if (n in words if re.fullmatch(r"\w+", n)
+                   else re.search(rf"\b{re.escape(n)}\b", text)))
 
 
 # --- provenance objects per stage -------------------------------------------------------------
