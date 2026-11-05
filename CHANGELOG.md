@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `scoap --prov`: every net row that has a wire names it (`wire`) with the bit (`bit`), also when the wire is only an alias
+  of the net or the net is a bit of a port wire (output ports and registers after mapping); on ch_intrinsics the viewer found
+  a wire on 107 of 319 rows.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
   top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
   instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.
