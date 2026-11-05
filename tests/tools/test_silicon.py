@@ -193,6 +193,15 @@ endmodule
                          ["hdl:a.v:1.1-9.9", "hdl:a.v:3.1-3.4"])
 
 
+class ToolTimeoutTest(unittest.TestCase):
+    def test_default_tool_timeout_is_six_hours(self) -> None:
+        """Magic needed more than the old 3600 s on des; the limit is now 6 h (env override)."""
+        want = int(os.environ.get("ODIN3_SILICON_TOOL_TIMEOUT", "21600"))
+        self.assertEqual(sf.TOOL_TIMEOUT, want)
+        self.assertGreaterEqual(sf.TOOL_TIMEOUT, 7200)
+        self.assertEqual(sf._run.__defaults__[-1], sf.TOOL_TIMEOUT)  # type: ignore[index]
+
+
 class ParamTest(unittest.TestCase):
     SRC = """module sub (input a);
   parameter ARST_LVL = 1'b1;
