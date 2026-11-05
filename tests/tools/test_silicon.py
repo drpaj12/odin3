@@ -139,6 +139,22 @@ endmodule
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "1"], ["/r/a.v:2.5-2.9"])
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "0"], [""])
 
+    def test_constant_assign_to_a_bit_select_gets_a_tie_cell(self) -> None:
+        """OpenROAD turns "assign n [0] = 1'b0;" into a POWER net it cannot route (DRT-0305)."""
+        gv_text = ("module m (a, y);\n  input a;\n  output y;\n  wire [1:0] n ;\n"
+                   "  assign n [0] = 1'b0;\n  assign n[1] = 1'b1;\n"
+                   "  sky130_fd_sc_hd__and2_1 u (.A(n [0]), .B(n[1]), .X(y));\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            gv, clean = Path(tmp) / "g.v", Path(tmp) / "clean.v"
+            gv.write_text(gv_text)
+            rows = sf.clean_netlist(gv, clean, {})
+            text = clean.read_text()
+            self.assertNotIn("assign", text)
+            self.assertNotIn("1'b", text)
+            self.assertIn(".LO(n [0])", text)
+            self.assertIn(".HI(n[1])", text)
+            self.assertEqual(sorted(r["tie"] for r in rows if r["tie"]), ["0", "1"])
+
     def test_signed_stripped_from_declarations(self) -> None:
         gv_text = ("module m (a, y);\n  input signed [3:0] a;\n  output signed y;\n"
                    "  wire signed [31:0] o3_pos ;\n  reg signed q;\n"
