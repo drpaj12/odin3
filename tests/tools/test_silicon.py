@@ -281,6 +281,11 @@ class RefSpiceTest(unittest.TestCase):
                          "equiv-check: error: latch $n21 is clocked by internal net, see <path>")
         self.assertEqual(sf._reason(""), "gates are not equivalent to the RTL")
 
+    def test_reason_is_the_equiv_check_line_not_abc_trailing_text(self) -> None:
+        text = ("equiv-check: unproven: ABC dsec ended UNDECIDED (its own time or depth limit)\n"
+                "Reached timeout (60 seconds) in frame 501.\nNetworks are UNDECIDED.\nhi\n")
+        self.assertEqual(sf._reason(text), text.splitlines()[0])
+
     def test_open_pin_gets_its_own_net(self) -> None:
         pins = ["VGND", "VNB", "VPB", "VPWR", "HI", "LO"]
         conn = {"VGND": "VSS", "VNB": "VSS", "VPB": "VDD", "VPWR": "VDD", "LO": "zero", "HI": ""}

@@ -72,8 +72,11 @@ EQUIV_RESULT = {0: "equivalent", 1: "not-equivalent"}  # any other exit code: a 
 
 
 def _reason(text: str) -> str:
-    """The last line of an equiv-check output that is not a notice, paths redacted."""
+    """The last ``equiv-check:`` line that is not a notice (else the last line that is not one),
+    paths redacted. ABC text after that line ("Networks are UNDECIDED", "hi") is not the reason."""
     lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
+    tool = [ln for ln in lines if ln.startswith("equiv-check:")]
+    lines = tool or lines
     return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
 
 
