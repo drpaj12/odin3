@@ -6,9 +6,10 @@
 #include "ir/prov.h"
 #include "util/str.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 
-enum { FIRST_PRINTABLE = 0x20 };
+enum { FIRST_PRINTABLE = 0x20, GV_FMT_MAX = 512 };
 
 odin3_status gv_put_str(odin3_strbuf *out, const char *text) {
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr("\""));
@@ -54,4 +55,38 @@ odin3_status gv_put_prov(gv_run *run, odin3_strbuf *out, odin3_prov_id prov) {
     }
     odin3_strbuf_free(&text);
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("]")) : st;
+}
+
+void gv_w_raw(gv_w *wr, const char *text) {
+    if (wr->st == ODIN3_OK) {
+        wr->st = odin3_strbuf_append(wr->out, odin3_bytes_cstr(text));
+    }
+}
+
+void gv_w_fmt(gv_w *wr, const char *fmt, ...) {
+    if (wr->st != ODIN3_OK) {
+        return;
+    }
+    char buf[GV_FMT_MAX];
+    va_list args;
+    va_start(args, fmt);
+    int len = vsnprintf(buf, sizeof buf, fmt, args);
+    va_end(args);
+    if (len < 0 || (size_t)len >= sizeof buf) {
+        wr->st = ODIN3_ERR_INVALID_ARG;
+        return;
+    }
+    wr->st = odin3_strbuf_append(wr->out, (odin3_bytes){(const uint8_t *)buf, (size_t)len});
+}
+
+void gv_w_str(gv_w *wr, const char *text) {
+    if (wr->st == ODIN3_OK) {
+        wr->st = gv_put_str(wr->out, text != NULL ? text : "");
+    }
+}
+
+void gv_w_prov(gv_w *wr, odin3_prov_id prov) {
+    if (wr->st == ODIN3_OK) {
+        wr->st = gv_put_prov(wr->run, wr->out, prov);
+    }
 }
