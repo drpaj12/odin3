@@ -8,6 +8,8 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +25,7 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 TOOLS = os.environ.get("ODIN3_SILICON_TOOLS", "")
 MICRO = REPO_ROOT / "tests" / "micro" / "verilog" / "micro"
 LIB = REPO_ROOT / "lib" / "sky130hd.o3lib"
+HERE_TCL = REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl"
 SCHEMAS = REPO_ROOT / "docs" / "schemas"
 
 LIBERTY = """library (x) {
@@ -148,6 +151,29 @@ endmodule
         self.assertEqual(got["o3_tie_1"]["origin"], "hdl")
         self.assertEqual(got["o3_tie_1"]["links"][0]["to"], "ir:$k")
         self.assertEqual(got["o3_tie_1"]["links"][0]["kind"], "cone")
+
+
+@unittest.skipUnless(shutil.which("tclsh"), "needs tclsh")
+class DieEdgeSnapTest(unittest.TestCase):
+    """The Tcl driver keeps the die edge 0.17 um or more from the last met1 to met4 track
+    (DRT-0255 on des: a 732.615 um die left 0.065 um to the last met2 track)."""
+
+    def snap(self, die: float) -> float:
+        tcl = (HERE_TCL).read_text()
+        procs = re.search(r"proc edge_ok .*?\nproc snap_edge .*?\n}\n", tcl, re.S)
+        self.assertIsNotNone(procs)
+        script = (procs.group(0) if procs else "") + f"\nputs [snap_edge {die}]\n"
+        out = subprocess.run(["tclsh"], input=script, capture_output=True, text=True, check=True)
+        return float(out.stdout.strip())
+
+    def test_des_die_is_enlarged(self) -> None:
+        self.assertEqual(self.snap(732.615), 733.185)
+
+    def test_small_fixed_die_is_enlarged_a_little(self) -> None:
+        self.assertEqual(self.snap(42.0), 42.26)
+
+    def test_a_good_edge_is_unchanged(self) -> None:
+        self.assertEqual(self.snap(733.185), 733.185)
 
 
 class LabelAndRedactTest(unittest.TestCase):
