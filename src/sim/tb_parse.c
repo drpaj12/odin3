@@ -1718,8 +1718,7 @@ static bool parse_header(parser *pr, const char *top) {
     (void)snprintf(pr->tb->name, sizeof pr->tb->name, "%s", cur(pr)->text);
     pr->pos++;
     if (top != NULL && strcmp(top, pr->tb->name) != 0) {
-        return fail(pr,
-                    "--top names a module that is not in the testbench files");
+        return fail(pr, "--top names a module that is not in the testbench files");
     }
     if (accept_op(pr, "(") && !expect_op(pr, ")")) {
         return false;

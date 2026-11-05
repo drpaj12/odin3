@@ -86,20 +86,22 @@ static bool take_plusarg(odin3_bytes *args, tb_args *out) {
     return true;
 }
 
-/* Takes the next word as the next entry of table[cap][len]; false (after saying why) when the
- * table is full or the word is missing or too long. */
-static bool take_listed(odin3_bytes *args, char *table, size_t cap, size_t len, uint32_t *count,
-                        const char *what) {
-    if (*count >= cap) {
-        odin3_log(ODIN3_LOG_ERROR, "sim_tb: at most %zu %s are allowed", cap, what);
+/* Takes the next word as an include directory (-I). */
+static bool take_incdir(odin3_bytes *args, tb_args *out) {
+    if (out->n_incdirs >= MAX_INCDIRS) {
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: at most %d -I directories are allowed", MAX_INCDIRS);
         return false;
     }
-    if (!take(args, table + (size_t)*count * len, len)) {
-        odin3_log(ODIN3_LOG_ERROR, "sim_tb: missing or too long %s", what);
+    return take(args, out->incdir[out->n_incdirs++], PATH_MAX_LEN);
+}
+
+/* Takes the next word as a define (-D name or name=value). */
+static bool take_define(odin3_bytes *args, tb_args *out) {
+    if (out->n_defines >= MAX_DEFINES) {
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: at most %d -D defines are allowed", MAX_DEFINES);
         return false;
     }
-    (*count)++;
-    return true;
+    return take(args, out->define[out->n_defines++], DEFINE_LEN);
 }
 
 static odin3_status usage(void) {
@@ -107,6 +109,23 @@ static odin3_status usage(void) {
                                "<file>] [--vcd <file>] [--plusarg <text>]... [-I <dir>]... "
                                "[-D <name[=value]>]... <tb.v>...");
     return ODIN3_ERR_INVALID_ARG;
+}
+
+/* -I and -D with their value, or a testbench file name. */
+static bool take_other(odin3_bytes word, odin3_bytes *args, tb_args *out) {
+    if (word_is(word, "-I")) {
+        return take_incdir(args, out);
+    }
+    if (word_is(word, "-D")) {
+        return take_define(args, out);
+    }
+    if (out->n_files >= MAX_TB_FILES || word.len >= PATH_MAX_LEN) {
+        return false;
+    }
+    memcpy(out->file[out->n_files], word.ptr, word.len);
+    out->file[out->n_files][word.len] = '\0';
+    out->n_files++;
+    return true;
 }
 
 static odin3_status parse_args(odin3_bytes args, tb_args *out) {
@@ -126,18 +145,8 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
             ok = take(&args, out->vcd, sizeof out->vcd);
         } else if (word_is(word, "--plusarg")) {
             ok = take_plusarg(&args, out);
-        } else if (word_is(word, "-I")) {
-            ok = take_listed(&args, &out->incdir[0][0], MAX_INCDIRS, PATH_MAX_LEN, &out->n_incdirs,
-                             "include directories");
-        } else if (word_is(word, "-D")) {
-            ok = take_listed(&args, &out->define[0][0], MAX_DEFINES, DEFINE_LEN, &out->n_defines,
-                             "-D defines");
-        } else if (out->n_files < MAX_TB_FILES && word.len < PATH_MAX_LEN) {
-            memcpy(out->file[out->n_files], word.ptr, word.len);
-            out->file[out->n_files][word.len] = '\0';
-            out->n_files++;
         } else {
-            ok = false;
+            ok = take_other(word, &args, out);
         }
         if (!ok) {
             return usage();
@@ -147,19 +156,16 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
 }
 
 /* Splits "name=value" (value may be empty or absent) into a preprocessor define. */
-static odin3_pp_define make_define(char *text) {
-    char *eq = strchr(text, '=');
+static odin3_pp_define make_define(const char *text) {
+    const char *eq = strchr(text, '=');
     if (eq == NULL) {
         return (odin3_pp_define){odin3_bytes_cstr(text), {NULL, 0}, false};
     }
-    *eq = '\0';
-    return (odin3_pp_define){odin3_bytes_cstr(text), odin3_bytes_cstr(eq + 1), true};
+    return (odin3_pp_define){{text, (size_t)(eq - text)}, odin3_bytes_cstr(eq + 1), true};
 }
 
-static odin3_status intern_path(odin3_design *design, const char *path, uint32_t *id) {
-    char real[PATH_MAX_LEN];
-    const char *use = realpath(path, real) != NULL ? real : path;
-    return odin3_strtab_intern(odin3_design_strtab(design), odin3_bytes_cstr(use), id);
+static odin3_status intern_path(const odin3_design *design, const char *path, uint32_t *id) {
+    return odin3_strtab_intern(odin3_design_strtab(design), odin3_bytes_cstr(path), id);
 }
 
 /* Runs every testbench file through the Verilog preprocessor (macros, `ifdef, `include with the
