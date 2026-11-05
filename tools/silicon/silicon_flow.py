@@ -72,8 +72,11 @@ EQUIV_RESULT = {0: "equivalent", 1: "not-equivalent"}  # any other exit code: a 
 
 
 def _reason(text: str) -> str:
-    """The last line of an equiv-check output that is not a notice, paths redacted."""
+    """The last ``equiv-check:`` line that is not a notice (else the last line that is not one),
+    paths redacted. ABC text after that line ("Networks are UNDECIDED", "hi") is not the reason."""
     lines = [ln for ln in text.strip().splitlines() if "notice:" not in ln]
+    tool = [ln for ln in lines if ln.startswith("equiv-check:")]
+    lines = tool or lines
     return redact_paths(lines[-1] if lines else "gates are not equivalent to the RTL")[:200]
 
 
@@ -249,6 +252,10 @@ def _legal(name: str) -> str:
     return name if re.fullmatch(r"[A-Za-z_]\w*", name) else "o3_" + re.sub(r"\W", "_", name)
 
 
+# An assign target: a name, with an optional bit select that may follow a space ("n [0]").
+LHS = r"[^\s=\[]+(?:\s*\[[^\]]*\])?"
+
+
 def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]]]
                   ) -> list[dict[str, str]]:
     """Strip attributes, comments and ``signed``, legalise names, tie every constant to ``conb_1``.
@@ -276,12 +283,12 @@ def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]
     for net, val in ties:
         extra.append(f"  wire {net};\n  {CONB} o3_tie_{net[11:]} (.{'HI' if val == '1' else 'LO'}"
                      f"({net}));\n")
-    for m in re.finditer(r"^\s*assign\s+(\S+)\s*=\s*1'b([01])\s*;", text, re.M):
+    for m in re.finditer(rf"^\s*assign\s+({LHS})\s*=\s*1'b([01])\s*;", text, re.M):
         idx = len(ties) + len(extra)
         pin = "HI" if m.group(2) == "1" else "LO"
         extra.append(f"  {CONB} o3_tie_a{idx} (.{pin}({m.group(1)}));\n")
         ties.append((m.group(1), m.group(2)))
-    text = re.sub(r"^\s*assign\s+\S+\s*=\s*1'b[01]\s*;\n?", "", text, flags=re.M)
+    text = re.sub(rf"^\s*assign\s+{LHS}\s*=\s*1'b[01]\s*;\n?", "", text, flags=re.M)
     text = text.replace("endmodule", "".join(extra) + "endmodule", 1)
     clean.write_text(text)
     const_src: dict[str, list[str]] = {"0": [], "1": []}
