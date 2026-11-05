@@ -1,0 +1,7 @@
+equiv-check: notice: $HOME/odin3-ws/work/sifix3-out/ladder2/wb_lcd/flow/rtl.blif: 566 latch(es) with init 2/3 (don't care/unknown) treated as 0
+equiv-check: notice: $HOME/odin3-ws/work/sifix3-out/ladder2/wb_lcd/flow/gates.blif: 636 latch(es) with init 2/3 (don't care/unknown) treated as 0
+equiv-check: unproven: ABC dsec ended UNDECIDED (its own time or depth limit, not --timeout)
+Reached timeout (60 seconds) in frame 515.
+Networks are UNDECIDED.   Time =   158.24 sec
+The unsolved reduced miter is written into file "sm01.aig".
+hi

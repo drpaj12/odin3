@@ -1,0 +1,20 @@
+{
+ "runs": {
+  "0": {
+   "bad_lines": 0,
+   "ok": true,
+   "reason": ""
+  },
+  "1": {
+   "bad_lines": 0,
+   "ok": true,
+   "reason": ""
+  },
+  "x": {
+   "bad_lines": 285,
+   "ok": false,
+   "reason": "pass text missing or FAIL lines"
+  }
+ },
+ "verdict": "x-pessimism"
+}
