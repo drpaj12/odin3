@@ -45,7 +45,7 @@ exit "${{FAKE_SYSTEMCTL_RC:-0}}"
 # flock: heavy-run calls `flock -s -w N 9` (legacy lock), then `flock -x -n 8` / `-x -n 7` (slots)
 # or
 # `-x -w N 8` / `-x -w N 7` on the slot descriptors; build-locked probes with `flock -s -n FILE
-# true` per lock file, then `flock -s 9`, `-s 8`, `-s 7`. FAKE_FLOCK_RC is the status, only for
+# true` per lock file, then `flock -s -n 9`, `-n 8`, `-n 7`. FAKE_FLOCK_RC is the status, only for
 # calls whose argv contains FAKE_FLOCK_ONLY when that is set.
 FAKE_FLOCK = """#!{bash}
 flag=no
@@ -113,6 +113,8 @@ class FakeTools(unittest.TestCase):
         self.env["FAKE_LOG"] = str(self.log)
         self.env["ODIN3_HEAVY_DIR"] = str(self.heavy)
         self.env["ODIN3_HEAVY_SLICE_PREFIX"] = PREFIX
+        self.env["ODIN3_BUILD_SLICE"] = f"{PREFIX}-build.slice"
+        self.build_lock = self.heavy / "odin3-build.lock"
         # outside any heavy slice by default, even when ctest itself runs under heavy-run
         outside = self.dir / "cgroup-outside"
         outside.write_text(CGROUP_OUT)
@@ -146,7 +148,7 @@ class HeavyRunTest(FakeTools):
         # ... then the first free slot, exclusive, without waiting
         self.assertEqual(calls[1], f"flock -x -n 8 | flag=yes fd9={self.lock}")
         self.assertEqual(calls[2], f"systemctl --user set-property --runtime {PREFIX}0.slice "
-                                   "MemoryMax=6G MemorySwapMax=0")
+                                   "MemoryMax=5G MemorySwapMax=0")
         # the flag is gone once the slot is held; the job runs in a named scope of the slice
         unit = re.fullmatch(rf"systemd-run --user --scope -q "
                             rf"--unit=({PREFIX}-[0-9]+-[0-9]+) "
@@ -235,9 +237,13 @@ class HeavyRunTest(FakeTools):
             calls = self.calls()
             self.assertRegex(calls[1], rf"^flock -x -w [0-9]+ 8 \| flag=yes fd9={self.lock}$")
             self.assertRegex(calls[2], rf"^flock -x -w [0-9]+ 7 \| flag=yes fd9={self.lock}$")
-            self.assertEqual(calls[3], f"systemctl --user set-property --runtime "
+            k = 3
+            if name == "solo":  # --solo also takes the build lock
+                self.assertRegex(calls[3], rf"^flock -x -w [0-9]+ 6 \| flag=yes fd9={self.lock}$")
+                k = 4
+            self.assertEqual(calls[k], f"systemctl --user set-property --runtime "
                                        f"{PREFIX}{name}.slice MemoryMax={cap} MemorySwapMax=0")
-            self.assertRegex(calls[4], rf"^systemd-run --user --scope -q "
+            self.assertRegex(calls[k + 1], rf"^systemd-run --user --scope -q "
                                        rf"--unit={PREFIX}-[0-9]+-[0-9]+ "
                                        rf"--slice={PREFIX}{name}\.slice -p OOMPolicy=continue true "
                                        rf"\| slice={PREFIX}{name}\.slice")
@@ -311,7 +317,7 @@ class NestingTest(FakeTools):
     def test_nested_xl(self) -> None:
         run = self.inside(HEAVY_RUN, "--xl", "true")
         self.assertEqual(run.returncode, 2)
-        self.assertEqual(run.stderr, f"heavy-run: --xl inside {PREFIX}0.slice (6G): run the xl "
+        self.assertEqual(run.stderr, f"heavy-run: --xl inside {PREFIX}0.slice (5G): run the xl "
                                      "job on its own\n")
         run = self.inside(HEAVY_RUN, "--xl", "echo", "xl", slice_name=f"{PREFIX}xl.slice")
         self.assertEqual(run.returncode, 0, run.stderr)
@@ -398,7 +404,8 @@ class NestingTest(FakeTools):
         self.assertIn("build-locked: warning: ODIN3_HEAVY_SLICE=odin3-heavy.slice is set outside",
                       run.stderr)
         self.assertIn("(not in that slice); ignoring it", run.stderr)
-        self.assertEqual(self.calls()[-1], "cmake --build --preset debug")
+        self.assertEqual([c for c in self.calls() if c.startswith("cmake")],
+                         ["cmake --build --preset debug -j 4"])
 
     def test_nested_with_the_real_lock(self) -> None:
         """A heavy run whose job calls heavy-run and build-locked: no wait on its own lock."""
@@ -500,7 +507,7 @@ class RealLockTest(FakeTools):
 
     def test_build_waits_for_the_holder(self) -> None:
         self.heavy.mkdir()
-        holder = os.open(self.lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        holder = os.open(self.build_lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
         try:
             fcntl.flock(holder, fcntl.LOCK_EX)
             build = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
@@ -508,57 +515,91 @@ class RealLockTest(FakeTools):
                                      stderr=subprocess.PIPE)
             time.sleep(1.0)
             self.assertIsNone(build.poll())
-            self.assertEqual(self.calls(), [])
+            self.assertEqual([c for c in self.calls() if c.startswith("cmake")], [])
         finally:
             os.close(holder)
         _, err = build.communicate(timeout=30)
         self.assertEqual(build.returncode, 0)
-        self.assertEqual(err, f"build-locked: waiting for the heavy run that holds {self.lock}\n")
-        self.assertEqual(self.calls(), ["cmake --build --preset debug"])
+        self.assertEqual(err, f"build-locked: waiting for the build that holds {self.build_lock}\n")
+        self.assertIn("cmake --build --preset debug -j 4", self.calls())
+
+    def test_legacy_and_slot_locks_do_not_block_a_build(self) -> None:
+        self.heavy.mkdir()
+        holders = [os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+                   for f in (self.lock, self.slot0, self.slot1)]
+        try:
+            for fd in holders:
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            run = self.run_tool(BUILD_LOCKED, "--preset", "debug")
+        finally:
+            for fd in holders:
+                os.close(fd)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stderr, "")
 
 
 class BuildLockedTest(FakeTools):
-    def test_waits_for_a_live_queued_heavy_run(self) -> None:
+    """Fake flock/systemd-run/cmake: the build lane's slice cap and its -j cap."""
+
+    def build(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return self.run_tool(BUILD_LOCKED, *args)
+
+    def cmake_call(self) -> str:
+        return [c for c in self.calls() if c.startswith("cmake")][0]
+
+    def test_runs_in_the_capped_build_slice(self) -> None:
+        run = self.build("--preset", "debug", "-j2")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stderr, "")
+        calls = self.calls()
+        self.assertEqual(calls[0], f"flock -x -n 9 | flag=no fd9={self.build_lock}")
+        self.assertEqual(calls[1], f"systemctl --user set-property --runtime {PREFIX}-build.slice "
+                                   "MemoryMax=4G MemorySwapMax=0")
+        self.assertRegex(calls[2], rf"^systemd-run --user --scope -q --unit=odin3-build-[0-9]+-"
+                                   rf"[0-9]+ --slice={PREFIX}-build\.slice -p OOMPolicy=continue "
+                                   rf"cmake --build --preset debug -j2 ")
+        self.assertEqual(self.cmake_call(), "cmake --build --preset debug -j2")
+
+    def test_takes_no_heavy_lock_and_ignores_queue_flags(self) -> None:
         self.heavy.mkdir()
-        dead = subprocess.Popen(["true"])
-        dead.wait()
-        dead_flag = self.heavy / f"odin3-heavy.queued.{dead.pid}"
-        dead_flag.write_text(f"{dead.pid}\n")
-        # a live PID that is not a heavy-run (a reused PID): stale too
-        other = subprocess.Popen(["sleep", "30"], stdout=subprocess.DEVNULL,
-                                 stderr=subprocess.DEVNULL)
-        other_flag = self.heavy / f"odin3-heavy.queued.{other.pid}"
-        other_flag.write_text(f"{other.pid}\n")
-        live = subprocess.Popen([BASH, "-c", "exec -a heavy-run sleep 30"],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            (self.heavy / f"odin3-heavy.queued.{live.pid}").write_text(f"{live.pid}\n")
-            build = subprocess.Popen(
-                [BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
-                env={**self.env, "ODIN3_HEAVY_POLL": "0.1"},
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            time.sleep(1.0)
-            self.assertIsNone(build.poll())  # still waiting for the live heavy run
-            self.assertEqual(self.calls(), [])
-            self.assertFalse(dead_flag.exists())
-            self.assertFalse(other_flag.exists())
-            live.send_signal(signal.SIGTERM)
-            live.wait()
-            _, err = build.communicate(timeout=30)
-        finally:
-            for proc in (live, other):
-                proc.kill()
-                proc.wait()
-        self.assertEqual(build.returncode, 0)
-        self.assertEqual(err, f"build-locked: waiting for queued heavy run {live.pid}\n")
-        self.assertEqual(self.calls(), [
-            f"flock -s -n {self.lock} true | flag=no fd9=none",
-            f"flock -s -n {self.slot0} true | flag=no fd9=none",
-            f"flock -s -n {self.slot1} true | flag=no fd9=none",
-            f"flock -s 9 | flag=no fd9={self.lock}",
-            f"flock -s 8 | flag=no fd9={self.lock}",
-            f"flock -s 7 | flag=no fd9={self.lock}",
-            "cmake --build --preset debug"])
+        (self.heavy / f"odin3-heavy.queued.{os.getpid()}").write_text("x\n")
+        run = self.build("--preset", "debug")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertFalse(any("odin3-heavy.lock" in c for c in self.calls()))
+
+    def test_parallelism_is_clamped_to_four(self) -> None:
+        cases = [
+            (("-j8",), "cmake --build -j4", True),
+            (("-j", "16", "--target", "x"), "cmake --build -j 4 --target x", True),
+            (("--parallel", "9"), "cmake --build --parallel 4", True),
+            (("--parallel=12",), "cmake --build --parallel=4", True),
+            (("-j",), "cmake --build -j 4", False),
+            (("-j3",), "cmake --build -j3", False),
+            (("--preset", "d"), "cmake --build --preset d -j 4", False),
+            (("--preset", "d", "--", "-v"), "cmake --build --preset d -j 4 -- -v", False),
+            (("--preset", "d", "--", "-j20"), "cmake --build --preset d -- -j4", True),
+        ]
+        for args, want, noted in cases:
+            with self.subTest(args=args):
+                self.log.unlink(missing_ok=True)
+                run = self.build(*args)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                self.assertEqual(self.cmake_call(), want)
+                self.assertEqual("clamped to -j4" in run.stderr, noted, run.stderr)
+
+    def test_no_systemd_builds_uncapped_with_a_warning(self) -> None:
+        run = self.run_tool(BUILD_LOCKED, "--preset", "debug", FAKE_SYSTEMCTL_RC="1")
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn("building uncapped", run.stderr)
+        self.assertEqual(self.cmake_call(), "cmake --build --preset debug -j 4")
+
+    def test_exit_status_is_cmakes(self) -> None:
+        cmake = self.dir / "bad-cmake" / "cmake"
+        cmake.parent.mkdir()
+        _write_exec(cmake, "#!{bash}\nexit 7\n")
+        run = self.run_tool(BUILD_LOCKED, "x", PATH=f"{cmake.parent}:{self.env['PATH']}")
+        self.assertEqual(run.returncode, 7)
 
 
 class TwoSlotsTest(FakeTools):
@@ -665,52 +706,87 @@ class TwoSlotsTest(FakeTools):
         self.finish(a)
         self.finish(b)
 
-    def test_a_build_blocks_and_is_blocked(self) -> None:
-        cmake = self.dir / "slow-cmake" / "cmake"
+    def start_build(self, tag: str) -> subprocess.Popen[str]:
+        """A build whose cmake writes <tag>.bstarted, then waits for <tag>.bgo."""
+        cmake = self.dir / f"cmake-{tag}" / "cmake"
         cmake.parent.mkdir()
-        _write_exec(cmake, f"#!{{bash}}\ntouch {self.dir}/build.started\n"
-                           f"while [ ! -e {self.dir}/build.go ]; do sleep 0.05; done\n")
-        a = self.start("a")
-        _wait_for(lambda: self.started("a"), "the job to start")
-        build = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
-                                 env={**self.env, "PATH": f"{cmake.parent}:{self.env['PATH']}"},
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.procs.append(build)
-        time.sleep(1.0)
-        self.assertFalse((self.dir / "build.started").exists())  # a job on one slot blocks it
+        _write_exec(cmake, f"#!{{bash}}\ntouch {self.dir}/{tag}.bstarted\n"
+                           f"while [ ! -e {self.dir}/{tag}.bgo ]; do sleep 0.05; done\n")
+        proc = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
+                                env={**self.env, "PATH": f"{cmake.parent}:{self.env['PATH']}"},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.procs.append(proc)
+        return proc
+
+    def build_started(self, tag: str) -> bool:
+        return (self.dir / f"{tag}.bstarted").exists()
+
+    def test_a_build_runs_while_both_slots_are_busy(self) -> None:
+        """The 2026-11-05 starvation: builds never wait for, or hold off, heavy jobs."""
+        a, b = self.start("a"), self.start("b")
+        _wait_for(lambda: self.started("a") and self.started("b"), "both jobs to start")
+        build = self.start_build("x")
+        _wait_for(lambda: self.build_started("x"), "the build to run beside two heavy jobs")
+        c = self.start("c", ODIN3_HEAVY_WAIT="60")  # a queued job is not held off by the build
+        time.sleep(0.5)
         self.release("a")
-        _wait_for((self.dir / "build.started").exists, "the build to start")
-        self.finish(a)
-        b = self.start("b", ODIN3_HEAVY_WAIT="60")  # the running build blocks a job (both slots)
-        time.sleep(1.0)
-        self.assertFalse(self.started("b"))
-        self.assertTrue(list(self.heavy.glob("odin3-heavy.queued.*")))
-        (self.dir / "build.go").touch()
+        _wait_for(lambda: self.started("c"), "the queued job to take the freed slot")
+        (self.dir / "x.bgo").touch()
         _, err = build.communicate(timeout=30)
         self.assertEqual(build.returncode, 0, err)
-        _wait_for(lambda: self.started("b"), "the job to start after the build")
-        self.release("b")
-        self.finish(b)
+        for tag, proc in (("b", b), ("c", c)):
+            self.release(tag)
+            self.finish(proc)
+        self.finish(a)
 
-    def test_a_queued_job_holds_off_new_builds(self) -> None:
+    def test_a_queued_job_does_not_hold_off_a_build(self) -> None:
         a, b = self.start("a"), self.start("b")
         _wait_for(lambda: self.started("a") and self.started("b"), "both jobs to start")
         c = self.start("c", ODIN3_HEAVY_WAIT="60")
         _wait_for(lambda: bool(list(self.heavy.glob("odin3-heavy.queued.*"))), "the queue flag")
-        build = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
-                                 env={**self.env, "ODIN3_HEAVY_POLL": "0.1"},
-                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.procs.append(build)
-        time.sleep(1.0)
-        self.assertIsNone(build.poll())
-        self.assertFalse(any(c.startswith("cmake") for c in self.calls()))  # no build yet
+        build = self.start_build("x")
+        _wait_for(lambda: self.build_started("x"), "the build to start despite the queue flag")
+        (self.dir / "x.bgo").touch()
+        _, err = build.communicate(timeout=30)
+        self.assertEqual(build.returncode, 0, err)
         for tag, proc in (("a", a), ("b", b), ("c", c)):
             self.release(tag)
             self.finish(proc)
+
+    def test_two_builds_serialise(self) -> None:
+        one = self.start_build("one")
+        _wait_for(lambda: self.build_started("one"), "the first build")
+        two = self.start_build("two")
+        time.sleep(1.0)
+        self.assertFalse(self.build_started("two"))
+        (self.dir / "one.bgo").touch()
+        _, err = one.communicate(timeout=30)
+        self.assertEqual(one.returncode, 0, err)
+        _wait_for(lambda: self.build_started("two"), "the second build after the first")
+        (self.dir / "two.bgo").touch()
+        _, err = two.communicate(timeout=30)
+        self.assertEqual(two.returncode, 0, err)
+        self.assertIn("waiting for the build that holds", err)
+
+    def test_solo_waits_for_a_running_build_and_blocks_builds(self) -> None:
+        build = self.start_build("x")
+        _wait_for(lambda: self.build_started("x"), "the build")
+        s = self.start("s", "--solo", ODIN3_HEAVY_WAIT="60")
+        time.sleep(1.0)
+        self.assertFalse(self.started("s"))  # holds both slots, waits for the build lock
+        (self.dir / "x.bgo").touch()
         _, err = build.communicate(timeout=30)
         self.assertEqual(build.returncode, 0, err)
-        self.assertEqual([c for c in self.calls() if c.startswith("cmake")],
-                         ["cmake --build --preset debug"])
+        _wait_for(lambda: self.started("s"), "the solo job after the build")
+        build2 = self.start_build("y")
+        time.sleep(1.0)
+        self.assertFalse(self.build_started("y"))  # a solo run holds off builds
+        self.release("s")
+        self.finish(s)
+        _wait_for(lambda: self.build_started("y"), "the build after the solo run")
+        (self.dir / "y.bgo").touch()
+        _, err = build2.communicate(timeout=30)
+        self.assertEqual(build2.returncode, 0, err)
 
     def test_nested_call_reuses_its_slot(self) -> None:
         """A job that calls heavy-run (in its slice, fd 9 inherited) neither takes nor waits for
@@ -746,6 +822,7 @@ class TwoSlotsTest(FakeTools):
         _wait_for(lambda: self.started("a"), "the job to start after the old holder")
         self.release("a")
         self.finish(a)
+
 
 
 class SweepTestFunctionTest(unittest.TestCase):
@@ -791,7 +868,7 @@ class LiveProbeTest(unittest.TestCase):
             self.assertEqual(run.returncode, 0, run.stderr)
             show = subprocess.run(["systemctl", "--user", "show", slice_name, "-p", "MemoryMax"],
                                   capture_output=True, text=True, timeout=30, check=False)
-            self.assertEqual(show.stdout.strip(), "MemoryMax=6442450944")
+            self.assertEqual(show.stdout.strip(), "MemoryMax=5368709120")
         finally:
             subprocess.run(["systemctl", "--user", "stop", slice_name], capture_output=True,
                            timeout=30, check=False)

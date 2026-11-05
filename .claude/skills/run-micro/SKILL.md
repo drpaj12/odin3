@@ -8,7 +8,7 @@ description: Use before claiming any micro benchmark or pass "works", at the end
 Never claim a micro passes unless this skill ran the sweeps and you saw the table and the exit code.
 
 ## 1. Build
-`cmake --preset debug && tools/build-locked --preset debug -j4` (ASan+UBSan; the lock waits for heavy runs). Stop and report on build failure.
+`cmake --preset debug && tools/build-locked --preset debug -j4` (ASan+UBSan; one build at a time, -j capped at 4). Stop and report on build failure.
 
 ## 2. Run
 `.claude/skills/run-micro/run-micro.sh` (read it first). It runs the CTest micro sweeps of the current build (`build/debug/odin3`; `PRESET=release` for the release tree):
