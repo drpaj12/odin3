@@ -7,6 +7,7 @@
  */
 #include "ir/celltype.h"
 #include "passes/builtin.h"
+#include "passes/graphviews/gv.h"
 #include "passes/scoap/sc_opts.h"
 #include "util/alloc.h"
 #include "util/clock.h"
@@ -22,7 +23,7 @@ static const double k_default_threshold = 0.01;
 static const double k_half = 0.5;
 
 static const char k_usage[] =
-    "scoap: usage: scoap [--sequential] [--out FILE] [--top N] [--focus F] [--sigprob V] "
+    "scoap: usage: scoap [--sequential] [--prov] [--out FILE] [--top N] [--focus F] [--sigprob V] "
     "[--seed S] [--threshold P]";
 
 /* --- options --------------------------------------------------------------------------------- */
@@ -106,6 +107,10 @@ static odin3_status parse_word(odin3_bytes word, odin3_bytes *rest, sc_opts *ob,
         ob->seq = true;
         return ODIN3_OK;
     }
+    if (odin3_pass_arg_is(word, "--prov")) {
+        ob->prov = true;
+        return ODIN3_OK;
+    }
     if (odin3_pass_arg_is(word, "--out")) {
         odin3_bytes file = odin3_pass_arg_next(rest);
         return file.ptr != NULL && file.len > 0 ? odin3_strbuf_append(&ob->out, file)
@@ -165,26 +170,30 @@ static const char *net_text(const sc_model *md, uint32_t id, char *fallback, siz
     return fallback;
 }
 
-/* The net's primary wire and bit (additive keys), so a net that has no name of its own can still
- * be joined to the netlist by the wire it belongs to. */
-static odin3_status put_wire_bit(odin3_strbuf *out, const sc_model *md, uint32_t id) {
-    odin3_wirebit prim = odin3_net_primary(md->mod, (odin3_net_id){id});
-    if (!odin3_wire_valid(prim.wire)) {
-        return ODIN3_OK;
-    }
-    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(", \"wire\": "));
-    const char *wname = odin3_strtab_get(odin3_design_strtab(odin3_module_design(md->mod)),
-                                         odin3_wire_name(md->mod, prim.wire));
-    st = st == ODIN3_OK ? gl_put_escaped(out, wname) : st;
-    return st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"bit\": %u", (unsigned)prim.bit) : st;
+typedef struct sc_view {
+    const sc_model *md;
+    const sc_opts *opts;
+    const uint8_t *sel; /* nets reported; NULL: every live net */
+    const int32_t *ppm; /* NULL without --sigprob */
+    gv_run *gv;         /* NULL without --prov */
+} sc_view;
+
+/* --prov: the join keys of net id: driver node, primary wire, provenance record and HDL spans. */
+static odin3_status put_net_prov(odin3_strbuf *out, const sc_model *md, gv_run *gv, uint32_t id) {
+    odin3_net_id net = {id};
+    odin3_pin_id pin = odin3_net_driver(md->mod, net);
+    uint32_t driver = pin.v != 0 ? odin3_pin_node(md->mod, pin).v : 0;
+    odin3_status st = odin3_strbuf_appendf(out, ", \"driver\": %u, \"wire\": %u, ", driver,
+                                           odin3_net_primary(md->mod, net).wire.v);
+    return st == ODIN3_OK ? gv_put_prov(gv, out, odin3_net_prov(md->mod, net)) : st;
 }
 
-static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id,
-                            const int32_t *ppm) {
+static odin3_status put_net(odin3_strbuf *out, const sc_view *vw, uint32_t id) {
+    const sc_model *md = vw->md;
+    const int32_t *ppm = vw->ppm;
     char fallback[NUM_BUF];
     odin3_status st = odin3_strbuf_appendf(out, "{\"id\": %u, \"name\": ", (unsigned)id);
     st = st == ODIN3_OK ? gl_put_escaped(out, net_text(md, id, fallback, sizeof fallback)) : st;
-    st = st == ODIN3_OK ? put_wire_bit(out, md, id) : st;
     st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"cc0\": %lld, \"cc1\": %lld, \"co\": %lld",
                                                (long long)md->cc[0][id], (long long)md->cc[1][id],
                                                (long long)md->co[id])
@@ -196,6 +205,9 @@ static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id,
     }
     if (st == ODIN3_OK && ppm != NULL) {
         st = odin3_strbuf_appendf(out, ", \"p1_ppm\": %d", ppm[id]);
+    }
+    if (st == ODIN3_OK && vw->gv != NULL) {
+        st = put_net_prov(out, md, vw->gv, id);
     }
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("}")) : st;
 }
@@ -212,13 +224,6 @@ static odin3_status put_top(odin3_strbuf *out, const char *label, sc_entry *list
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("]")) : st;
 }
 
-typedef struct sc_view {
-    const sc_model *md;
-    const sc_opts *opts;
-    const uint8_t *sel; /* nets reported; NULL: every live net */
-    const int32_t *ppm; /* NULL without --sigprob */
-} sc_view;
-
 static bool net_reported(const sc_view *vw, uint32_t id) {
     return vw->md->live[id] != 0 && (vw->sel == NULL || vw->sel[id] != 0);
 }
@@ -231,7 +236,7 @@ static odin3_status put_nets(odin3_strbuf *out, const sc_view *vw) {
             continue;
         }
         st = odin3_strbuf_append(out, odin3_bytes_cstr(first ? "\n      " : ",\n      "));
-        st = st == ODIN3_OK ? put_net(out, vw->md, id, vw->ppm) : st;
+        st = st == ODIN3_OK ? put_net(out, vw, id) : st;
         first = false;
     }
     return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("\n    ]")) : st;
@@ -377,6 +382,7 @@ typedef struct sc_run {
     bool use_groups;
     odin3_module_id top;
     int32_t *ppm;
+    gv_run *gv;       /* --prov: the HDL location context */
     bool sigprob_ran; /* --sigprob simulated (false: not asked, or skipped) */
     uint64_t nets, cells, unreachable;
     uint32_t sweeps, modules;
@@ -442,7 +448,7 @@ static odin3_status put_module(odin3_strbuf *body, sc_run *run, uint32_t id, boo
     sc_model md;
     odin3_status st = solve_module(&md, mod, mname, run->opts->seq);
     uint8_t *sel = st == ODIN3_OK ? focus_nets(run, id, mod) : NULL;
-    sc_view view = {&md, run->opts, sel, id == run->top.v ? run->ppm : NULL};
+    sc_view view = {&md, run->opts, sel, id == run->top.v ? run->ppm : NULL, run->gv};
     st = st == ODIN3_OK ? put_head(body, &md, mname, first) : st;
     st = st == ODIN3_OK ? put_nets(body, &view) : st;
     st = st == ODIN3_OK ? put_lists(body, &view) : st;
@@ -515,6 +521,12 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
     odin3_status st = parse_args(args, &ob);
     sc_run run;
     memset(&run, 0, sizeof run);
+    gv_run gvr = {design, NULL, NULL, 0};
+    if (ob.prov) {
+        gvr.hdl = odin3_hdl_ctx_create(design, "scoap");
+        run.gv = &gvr;
+        st = gvr.hdl != NULL ? st : ODIN3_ERR_NO_MEMORY;
+    }
     odin3_strbuf body;
     odin3_strbuf_init(&body);
     double start = odin3_now_ms();
@@ -533,6 +545,7 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
                   ob.seq ? "seq" : "comb", run.sweeps, (unsigned long long)run.unreachable,
                   (odin3_now_ms() - start));
     }
+    odin3_hdl_ctx_destroy(gvr.hdl);
     odin3_util_free(run.ppm);
     gl_groups_free(&run.groups);
     odin3_strbuf_free(&body);
@@ -542,7 +555,7 @@ static odin3_status scoap_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_b
 
 const odin3_pass_def odin3_pass_scoap = {
     "scoap",
-    "scoap [--sequential] [--out FILE] [--top N] [--focus F] [--sigprob V] [--seed S] "
+    "scoap [--sequential] [--prov] [--out FILE] [--top N] [--focus F] [--sigprob V] [--seed S] "
     "[--threshold P]: SCOAP testability measures (CC0, CC1, CO; SC0, SC1, SO) of every net as "
     "module attributes odin3:scoap_* and a JSON file, optional signal probability",
     scoap_run,

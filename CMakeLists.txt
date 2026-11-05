@@ -131,6 +131,8 @@ add_library(odin3_core OBJECT
     src/passes/graphviews/gv_pass.c
     src/passes/graphviews/gv_common.c
     src/passes/graphviews/gv_stg.c
+    src/passes/graphviews/gv_cfg.c
+    src/passes/graphviews/gv_ddg.c
     src/passes/scoap/scoap.c
     src/passes/scoap/sc_fn.c
     src/passes/scoap/sc_model.c
@@ -3700,6 +3702,205 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         set_tests_properties(tristate_micro PROPERTIES SKIP_RETURN_CODE 77)
     endif()
 
+    # Tests that need no Yosys (loc-check, prov-cover, odin3-flow, gatemap smoke, opt-run sweep
+    # and the design lists they share). Registered outside the Yosys 0.55 block below so CI,
+    # which has no Yosys 0.55, runs them.
+    set(_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
+    set(_micro_expect --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/micro_expect_fail.txt
+        --root ${_micro_dir})
+    file(GLOB _json_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/*.v)
+    list(SORT _json_micros)
+    set(_json_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro)
+    set(_json_default ${PROJECT_SOURCE_DIR}/tests/icells/plain_mux.v
+        ${_json_micro_dir}/bm_DL_2_1_mux.v ${_json_micro_dir}/bm_DL_D_flipflop.v
+        ${_json_micro_dir}/bm_my_D_latch2.v ${_json_micro_dir}/bm_DL_4_1_mux.v
+        ${_json_micro_dir}/ff.v ${_json_micro_dir}/bm_DL_2_cascaded_flip_flops.v
+        ${_json_micro_dir}/bm_DL_logic_w_Dff.v ${_json_micro_dir}/bm_DL_structural_logic.v)
+    if(DEFINED ENV{VTR_ROOT})
+        set(_json_vtr_root $ENV{VTR_ROOT})
+    else()
+        set(_json_vtr_root $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing)
+    endif()
+    set(_json_vtr_dir ${_json_vtr_root}/vtr_flow/benchmarks/verilog)
+    set(_json_vtr14)
+    foreach(_d IN ITEMS single_wire single_ff and_latch multiclock_output_and_latch
+            multiclock_separate_and_latch multiclock_reader_writer ch_intrinsics
+            ch_intrinsics_nolatches diffeq1 diffeq2 mkPktMerge sha blob_merge stereovision3)
+        list(APPEND _json_vtr14 ${_json_vtr_dir}/${_d}.v)
+    endforeach()
+    # 5.4e (spec 5.4 T-3; tools/loc-check): how many objects keep an HDL location through write
+    # and read-back, per format (word and LPM: JSON, Verilog; gate and LUT: also BLIF VTR and
+    # plain BLIF), counted by class X-1 to X-9. loc_<level>: a default set of the smaller
+    # designs (the json_<level> set; loc_lpm: the 5.1 LPM micros), no Yosys needed.
+    # loc_micros_<level> and loc_vtr14_<level> (label sweep, excluded from CI): all 68 micros and
+    # the 14 small VTR designs, smallest first, one level at a time, never in parallel with
+    # another lane's sweep or a heavy run. tests/loc/expect.txt lists the designs a level cannot
+    # take; tests/loc/techlib.txt the designs that read a tech library first.
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/loc_tmp)
+    set(_loc_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/loc_tmp
+        ${PROJECT_SOURCE_DIR}/tools/loc-check/loc-check
+        --odin3 $<TARGET_FILE:odin3> --expect ${PROJECT_SOURCE_DIR}/tests/loc/expect.txt
+        --pins ${PROJECT_SOURCE_DIR}/tests/loc/pins.txt)
+    # SET names the design set: the key of its pinned class counts in tests/loc/pins.txt (a
+    # count above its pin fails; below it prints a note to lower the pin).
+    function(odin3_add_loc_test name)
+        cmake_parse_arguments(ARG "" "LEVEL;LABELS;SET" "FILES" ${ARGN})
+        add_test(NAME ${name}
+            COMMAND ${_loc_run} --level ${ARG_LEVEL} --set ${ARG_SET} --smallest-first
+                ${ARG_FILES})
+        set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}" TIMEOUT 3600)
+    endfunction()
+    file(GLOB _loc_lpm ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_*.v
+                       ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_s[dp]*.v)
+    list(SORT _loc_lpm)
+    # A Debug and a Release build leave the same design: opt -full leaves no unread constant
+    # driver behind (the Debug-only settle sweep of opt_expr once made two; the micros sweep
+    # pins are Release counts). The micro has two FFs and nothing constant.
+    add_test(NAME opt_full_no_stray_consts
+        COMMAND sh -c "\"$0\" -p \"read_verilog $1; proc; opt; wreduce; opt_clean; opt -full; dump_locs --types $2\" && ! grep -q 'node:[$]_CONST' \"$2\""
+                $<TARGET_FILE:odin3>
+                ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/bm_DL_logic_w_Dff.v
+                ${PROJECT_BINARY_DIR}/loc_tmp/opt_full_consts.txt)
+    set_tests_properties(opt_full_no_stray_consts PROPERTIES LABELS "loc;unit")
+    odin3_add_loc_test(loc_word LEVEL word SET default LABELS "loc;unit" FILES ${_json_default})
+    odin3_add_loc_test(loc_lpm LEVEL lpm SET lpm LABELS "loc;unit" FILES ${_loc_lpm})
+    odin3_add_loc_test(loc_micros_word LEVEL word SET micros LABELS "sweep;loc" FILES ${_json_micros})
+    odin3_add_loc_test(loc_micros_lpm LEVEL lpm SET micros LABELS "sweep;loc" FILES ${_json_micros})
+    if(ODIN3_WITH_ABC)
+        foreach(_lvl IN ITEMS gate lut)
+            odin3_add_loc_test(loc_${_lvl} LEVEL ${_lvl} SET default LABELS "loc;unit"
+                FILES ${_json_default})
+            odin3_add_loc_test(loc_micros_${_lvl} LEVEL ${_lvl} SET micros LABELS "sweep;loc"
+                FILES ${_json_micros})
+        endforeach()
+    else()
+        # ABC is off: the gate and LUT levels cannot run. A named skip (CTest "Skipped", exit
+        # 77) in their place, so the gap shows in every report instead of the tests missing.
+        message(STATUS "loc-check: ODIN3_WITH_ABC is off, loc_gate and loc_lut are skipped")
+        foreach(_lvl IN ITEMS gate lut)
+            add_test(NAME loc_${_lvl}
+                COMMAND sh -c
+                    "echo 'loc_${_lvl}: SKIPPED, the ${_lvl} level needs ABC (ODIN3_WITH_ABC is off)'; exit 77")
+            set_tests_properties(loc_${_lvl} PROPERTIES LABELS "loc;unit" SKIP_RETURN_CODE 77)
+        endforeach()
+    endif()
+    if(EXISTS ${_json_vtr_dir}/sha.v)
+        odin3_add_loc_test(loc_vtr14_word LEVEL word SET vtr14 LABELS "sweep;loc"
+            FILES ${_json_vtr14})
+        if(ODIN3_WITH_ABC)
+            foreach(_lvl IN ITEMS gate lut)
+                odin3_add_loc_test(loc_vtr14_${_lvl} LEVEL ${_lvl} SET vtr14
+                    LABELS "sweep;loc" FILES ${_json_vtr14})
+            endforeach()
+        endif()
+    endif()
+    # 6.5b (spec 6 section 5; tools/prov-cover): how many final-netlist objects (LUTs, latches,
+    # hard blocks, LPM instances) have an HDL location, per design and leg: (a) BLIF after abc
+    # in memory, (b) written and read back with --hdl-locs, (c) the LPM flow in memory and read
+    # back with -netlist. prov_cover_<micro>: the loc default set, all legs (a and b need ABC).
+    # tests/prov/expect.txt lists the known defects (a listed leg that passes is stale).
+    # prov_cover_sweep (label sweep, ODIN3_HEAVY_OK): legs a and b on the 14 small VTR designs,
+    # smallest first, tests/prov/expect_vtr14.txt; prov_cover_sweep_lpm: leg c on the LPM micros.
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/prov_tmp)
+    set(_prov_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/prov_tmp
+        ${PROJECT_SOURCE_DIR}/tools/prov-cover/prov-cover --odin3 $<TARGET_FILE:odin3>)
+    if(ODIN3_WITH_ABC)
+        set(_prov_legs a,b,c)
+    else()
+        set(_prov_legs c)
+    endif()
+    foreach(_f IN LISTS _json_default)
+        get_filename_component(_n ${_f} NAME_WE)
+        add_test(NAME prov_cover_${_n}
+            COMMAND ${_prov_run} --legs ${_prov_legs}
+                --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect.txt ${_f})
+        set_tests_properties(prov_cover_${_n} PROPERTIES LABELS "prov;unit" TIMEOUT 600)
+    endforeach()
+    odin3_add_sweep_test(prov_cover_sweep_lpm LABEL sweep
+        COMMAND ${_prov_run} --legs c --smallest-first ${_loc_lpm})
+    if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
+        odin3_add_sweep_test(prov_cover_sweep LABEL sweep
+            COMMAND ${_prov_run} --legs a,b --smallest-first
+                --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14.txt ${_json_vtr14})
+        # 6.5c: leg d, VPR (pack and place only) on the written BLIF of leg b; every placed
+        # block and atom is joined to the read-back by name (tools/prov-cover/vpr_leg.py).
+        # Needs VTR's vpr binary; tests/prov/expect_vtr14_d.txt lists the known defects.
+        if(EXISTS ${_json_vtr_root}/vpr/vpr)
+            odin3_add_sweep_test(prov_cover_sweep_place LABEL sweep
+                COMMAND ${_prov_run} --legs d --smallest-first
+                    --vpr ${_json_vtr_root}/vpr/vpr
+                    --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14_d.txt
+                    ${_json_vtr14})
+        endif()
+        # 7.3 (spec 7 section 2.1 F-6): the flow script with VPR on single_ff and
+        # ch_intrinsics, smallest first. Needs VTR's vpr and ODIN3_HEAVY_OK.
+        if(EXISTS ${_json_vtr_root}/vpr/vpr)
+            set(_flow_vpr ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow
+                --odin3 $<TARGET_FILE:odin3> --vpr)
+            odin3_add_sweep_test(flow_vpr_sweep LABEL sweep
+                COMMAND ${CMAKE_COMMAND} -E env VTR_ROOT=${_json_vtr_root}
+                    ${PROJECT_SOURCE_DIR}/tools/flow/flow-sweep.sh ${_flow_vpr}
+                    --out-base ${PROJECT_BINARY_DIR}/flow_tmp/sweep
+                    ${_json_vtr_dir}/single_ff.v ${_json_vtr_dir}/ch_intrinsics.v)
+        endif()
+    endif()
+    # 7.3 (spec 7 section 2.1; tools/flow/odin3_flow.py): a micro through the flow script.
+    # flow_vtr_<micro>: target vtr without VPR (the vtr-qor O-leg script, BLIF written);
+    # flow_lpm_<micro>: target lpm (the 5.1 LPM script, then the -icells read-back). VTR_ROOT
+    # is unset: neither needs VTR. flow_vtr_* need ABC.
+    set(_flow_run ${CMAKE_COMMAND} -E env --unset=VTR_ROOT
+        ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow --odin3 $<TARGET_FILE:odin3>)
+    file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/flow_tmp)
+    if(ODIN3_WITH_ABC)
+        foreach(_n IN ITEMS bm_DL_logic_w_Dff bm_DL_2_cascaded_flip_flops)
+            add_test(NAME flow_vtr_${_n}
+                COMMAND ${_flow_run} --top ${_n} --no-vpr
+                    --out ${PROJECT_BINARY_DIR}/flow_tmp/vtr_${_n}
+                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/${_n}.v)
+            set_tests_properties(flow_vtr_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
+        endforeach()
+    endif()
+    foreach(_n IN ITEMS lpm_add_sub altsyncram_sp)
+        add_test(NAME flow_lpm_${_n}
+            COMMAND ${_flow_run} --target lpm --top ${_n}_micro
+                --out ${PROJECT_BINARY_DIR}/flow_tmp/lpm_${_n}
+                ${PROJECT_SOURCE_DIR}/tests/lpm/${_n}.v)
+        set_tests_properties(flow_lpm_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
+    endforeach()
+    if(ODIN3_WITH_ABC)
+        set(_gatemap_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+            --odin3 $<TARGET_FILE:odin3> --jobs 2 --mem-cap 2G --gatemap-run
+            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib
+            --opt-arg=--equiv-check=${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
+        # Floors: the measured count of compared micros less 5 percent (release build,
+        # 2026-10-22, 539 micros each): generic_gates 439, cmos6 437.
+        foreach(_gm_lib IN ITEMS generic cmos6)
+            if(_gm_lib STREQUAL "generic")
+                set(_gm_name generic_gates)
+                set(_gm_floor 417)
+            else()
+                set(_gm_name cmos6)
+                set(_gm_floor 415)
+            endif()
+            set(_gm_arg --opt-arg=--lib=${_gm_name}=${PROJECT_SOURCE_DIR}/lib/${_gm_name}.o3lib)
+            add_test(NAME gatemap_smoke_${_gm_lib}
+                COMMAND ${_gatemap_sweep} --jobs 1 ${_gm_arg} --opt-arg=--remap
+                        --root ${_micro_dir}
+                        ${_micro_dir}/micro/bm_DL_logic_w_Dff.v
+                        ${_micro_dir}/micro/bm_DL_2_1_mux.v
+                        ${_micro_dir}/micro/bm_DL_4_bit_comparator.v
+                        ${_micro_dir}/micro/bm_DL_4_bit_shift_register.v)
+            set_tests_properties(gatemap_smoke_${_gm_lib} PROPERTIES LABELS "tools;gatemap"
+                                 SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        endforeach()
+    endif()
+    set(_opt_run_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
+        --odin3 $<TARGET_FILE:odin3> --opt-run
+        --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 1 --mem-cap 3G)
+    odin3_add_sweep_test(opt_micro LABEL sweep
+        COMMAND ${_opt_run_sweep} ${_micro_expect} ${_micro_dir})
+
+
     # Yosys 0.55 as VTR pins it (2D plan point (p)): the oracle of every 2D-2F comparison. Found
     # only in the VTR build (never PATH, which may hold another Yosys) and accepted only when
     # `yosys -V` says 0.55; otherwise no 0.55 test is registered (CI has none: they run locally
@@ -4131,9 +4332,6 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --trio auto --jobs 2 --mem-cap 3G)
         set(_proc_bridge --equiv --pass proc
             --equiv-check ${PROJECT_SOURCE_DIR}/tools/equiv-check/equiv-check)
-        set(_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog)
-        set(_micro_expect --expect-fail ${PROJECT_SOURCE_DIR}/tests/proc/micro_expect_fail.txt
-            --root ${_micro_dir})
         odin3_add_sweep_test(proc_diff_micro LABEL sweep
             COMMAND ${_proc_sweep} --proc-diff ${_micro_expect} ${_micro_dir})
         odin3_add_sweep_test(proc_bridge_micro LABEL sweep
@@ -4379,14 +4577,6 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # tests/json/yosys/<level>/*.json are read and fixpointed; with Yosys 0.55 they are also
         # compared with Yosys's own reading of the same file (tests/json/yosys/gen.sh makes them).
         # tests/json/expect.txt lists every design a level cannot take, with its reason.
-        file(GLOB _json_micros ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/*.v)
-        list(SORT _json_micros)
-        set(_json_micro_dir ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro)
-        set(_json_default ${PROJECT_SOURCE_DIR}/tests/icells/plain_mux.v
-            ${_json_micro_dir}/bm_DL_2_1_mux.v ${_json_micro_dir}/bm_DL_D_flipflop.v
-            ${_json_micro_dir}/bm_my_D_latch2.v ${_json_micro_dir}/bm_DL_4_1_mux.v
-            ${_json_micro_dir}/ff.v ${_json_micro_dir}/bm_DL_2_cascaded_flip_flops.v
-            ${_json_micro_dir}/bm_DL_logic_w_Dff.v ${_json_micro_dir}/bm_DL_structural_logic.v)
         file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/json_tmp)
         set(_json_abc_env "")
         if(ODIN3_WITH_ABC)
@@ -4421,161 +4611,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # 5.3c Task 5 step 3: the 14 small VTR designs (PHASE2 #30; qor_sched.EQUIV_REQUIRED) at the LUT
         # level only: R-1 and equiv-check, no QoR and no big benchmark (they are untested for
         # equivalence, PHASE3 #16 amended). Smallest first; label sweep, plain test.
-        if(DEFINED ENV{VTR_ROOT})
-            set(_json_vtr_root $ENV{VTR_ROOT})
-        else()
-            set(_json_vtr_root $ENV{HOME}/odin3-ws/external/vtr-verilog-to-routing)
-        endif()
-        set(_json_vtr_dir ${_json_vtr_root}/vtr_flow/benchmarks/verilog)
-        set(_json_vtr14)
-        foreach(_d IN ITEMS single_wire single_ff and_latch multiclock_output_and_latch
-                multiclock_separate_and_latch multiclock_reader_writer ch_intrinsics
-                ch_intrinsics_nolatches diffeq1 diffeq2 mkPktMerge sha blob_merge stereovision3)
-            list(APPEND _json_vtr14 ${_json_vtr_dir}/${_d}.v)
-        endforeach()
         if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
             odin3_add_json_test(json_vtr14_lut LEVEL lut LABELS "sweep;json"
                 FLAGS --smallest-first FILES ${_json_vtr14})
         endif()
-        # 5.4e (spec 5.4 T-3; tools/loc-check): how many objects keep an HDL location through write
-        # and read-back, per format (word and LPM: JSON, Verilog; gate and LUT: also BLIF VTR and
-        # plain BLIF), counted by class X-1 to X-9. loc_<level>: a default set of the smaller
-        # designs (the json_<level> set; loc_lpm: the 5.1 LPM micros), no Yosys needed.
-        # loc_micros_<level> and loc_vtr14_<level> (label sweep, excluded from CI): all 68 micros and
-        # the 14 small VTR designs, smallest first, one level at a time, never in parallel with
-        # another lane's sweep or a heavy run. tests/loc/expect.txt lists the designs a level cannot
-        # take; tests/loc/techlib.txt the designs that read a tech library first.
-        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/loc_tmp)
-        set(_loc_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/loc_tmp
-            ${PROJECT_SOURCE_DIR}/tools/loc-check/loc-check
-            --odin3 $<TARGET_FILE:odin3> --expect ${PROJECT_SOURCE_DIR}/tests/loc/expect.txt
-            --pins ${PROJECT_SOURCE_DIR}/tests/loc/pins.txt)
-        # SET names the design set: the key of its pinned class counts in tests/loc/pins.txt (a
-        # count above its pin fails; below it prints a note to lower the pin).
-        function(odin3_add_loc_test name)
-            cmake_parse_arguments(ARG "" "LEVEL;LABELS;SET" "FILES" ${ARGN})
-            add_test(NAME ${name}
-                COMMAND ${_loc_run} --level ${ARG_LEVEL} --set ${ARG_SET} --smallest-first
-                    ${ARG_FILES})
-            set_tests_properties(${name} PROPERTIES LABELS "${ARG_LABELS}" TIMEOUT 3600)
-        endfunction()
-        file(GLOB _loc_lpm ${PROJECT_SOURCE_DIR}/tests/lpm/lpm_*.v
-                           ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_s[dp]*.v)
-        list(SORT _loc_lpm)
-        # A Debug and a Release build leave the same design: opt -full leaves no unread constant
-        # driver behind (the Debug-only settle sweep of opt_expr once made two; the micros sweep
-        # pins are Release counts). The micro has two FFs and nothing constant.
-        add_test(NAME opt_full_no_stray_consts
-            COMMAND sh -c "\"$0\" -p \"read_verilog $1; proc; opt; wreduce; opt_clean; opt -full; dump_locs --types $2\" && ! grep -q 'node:[$]_CONST' \"$2\""
-                    $<TARGET_FILE:odin3>
-                    ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/bm_DL_logic_w_Dff.v
-                    ${PROJECT_BINARY_DIR}/loc_tmp/opt_full_consts.txt)
-        set_tests_properties(opt_full_no_stray_consts PROPERTIES LABELS "loc;unit")
-        odin3_add_loc_test(loc_word LEVEL word SET default LABELS "loc;unit" FILES ${_json_default})
-        odin3_add_loc_test(loc_lpm LEVEL lpm SET lpm LABELS "loc;unit" FILES ${_loc_lpm})
-        odin3_add_loc_test(loc_micros_word LEVEL word SET micros LABELS "sweep;loc" FILES ${_json_micros})
-        odin3_add_loc_test(loc_micros_lpm LEVEL lpm SET micros LABELS "sweep;loc" FILES ${_json_micros})
-        if(ODIN3_WITH_ABC)
-            foreach(_lvl IN ITEMS gate lut)
-                odin3_add_loc_test(loc_${_lvl} LEVEL ${_lvl} SET default LABELS "loc;unit"
-                    FILES ${_json_default})
-                odin3_add_loc_test(loc_micros_${_lvl} LEVEL ${_lvl} SET micros LABELS "sweep;loc"
-                    FILES ${_json_micros})
-            endforeach()
-        else()
-            # ABC is off: the gate and LUT levels cannot run. A named skip (CTest "Skipped", exit
-            # 77) in their place, so the gap shows in every report instead of the tests missing.
-            message(STATUS "loc-check: ODIN3_WITH_ABC is off, loc_gate and loc_lut are skipped")
-            foreach(_lvl IN ITEMS gate lut)
-                add_test(NAME loc_${_lvl}
-                    COMMAND sh -c
-                        "echo 'loc_${_lvl}: SKIPPED, the ${_lvl} level needs ABC (ODIN3_WITH_ABC is off)'; exit 77")
-                set_tests_properties(loc_${_lvl} PROPERTIES LABELS "loc;unit" SKIP_RETURN_CODE 77)
-            endforeach()
-        endif()
-        if(EXISTS ${_json_vtr_dir}/sha.v)
-            odin3_add_loc_test(loc_vtr14_word LEVEL word SET vtr14 LABELS "sweep;loc"
-                FILES ${_json_vtr14})
-            if(ODIN3_WITH_ABC)
-                foreach(_lvl IN ITEMS gate lut)
-                    odin3_add_loc_test(loc_vtr14_${_lvl} LEVEL ${_lvl} SET vtr14
-                        LABELS "sweep;loc" FILES ${_json_vtr14})
-                endforeach()
-            endif()
-        endif()
-        # 6.5b (spec 6 section 5; tools/prov-cover): how many final-netlist objects (LUTs, latches,
-        # hard blocks, LPM instances) have an HDL location, per design and leg: (a) BLIF after abc
-        # in memory, (b) written and read back with --hdl-locs, (c) the LPM flow in memory and read
-        # back with -netlist. prov_cover_<micro>: the loc default set, all legs (a and b need ABC).
-        # tests/prov/expect.txt lists the known defects (a listed leg that passes is stale).
-        # prov_cover_sweep (label sweep, ODIN3_HEAVY_OK): legs a and b on the 14 small VTR designs,
-        # smallest first, tests/prov/expect_vtr14.txt; prov_cover_sweep_lpm: leg c on the LPM micros.
-        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/prov_tmp)
-        set(_prov_run ${CMAKE_COMMAND} -E env TMPDIR=${PROJECT_BINARY_DIR}/prov_tmp
-            ${PROJECT_SOURCE_DIR}/tools/prov-cover/prov-cover --odin3 $<TARGET_FILE:odin3>)
-        if(ODIN3_WITH_ABC)
-            set(_prov_legs a,b,c)
-        else()
-            set(_prov_legs c)
-        endif()
-        foreach(_f IN LISTS _json_default)
-            get_filename_component(_n ${_f} NAME_WE)
-            add_test(NAME prov_cover_${_n}
-                COMMAND ${_prov_run} --legs ${_prov_legs}
-                    --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect.txt ${_f})
-            set_tests_properties(prov_cover_${_n} PROPERTIES LABELS "prov;unit" TIMEOUT 600)
-        endforeach()
-        odin3_add_sweep_test(prov_cover_sweep_lpm LABEL sweep
-            COMMAND ${_prov_run} --legs c --smallest-first ${_loc_lpm})
-        if(ODIN3_WITH_ABC AND EXISTS ${_json_vtr_dir}/sha.v)
-            odin3_add_sweep_test(prov_cover_sweep LABEL sweep
-                COMMAND ${_prov_run} --legs a,b --smallest-first
-                    --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14.txt ${_json_vtr14})
-            # 6.5c: leg d, VPR (pack and place only) on the written BLIF of leg b; every placed
-            # block and atom is joined to the read-back by name (tools/prov-cover/vpr_leg.py).
-            # Needs VTR's vpr binary; tests/prov/expect_vtr14_d.txt lists the known defects.
-            if(EXISTS ${_json_vtr_root}/vpr/vpr)
-                odin3_add_sweep_test(prov_cover_sweep_place LABEL sweep
-                    COMMAND ${_prov_run} --legs d --smallest-first
-                        --vpr ${_json_vtr_root}/vpr/vpr
-                        --expect ${PROJECT_SOURCE_DIR}/tests/prov/expect_vtr14_d.txt
-                        ${_json_vtr14})
-            endif()
-            # 7.3 (spec 7 section 2.1 F-6): the flow script with VPR on single_ff and
-            # ch_intrinsics, smallest first. Needs VTR's vpr and ODIN3_HEAVY_OK.
-            if(EXISTS ${_json_vtr_root}/vpr/vpr)
-                set(_flow_vpr ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow
-                    --odin3 $<TARGET_FILE:odin3> --vpr)
-                odin3_add_sweep_test(flow_vpr_sweep LABEL sweep
-                    COMMAND ${CMAKE_COMMAND} -E env VTR_ROOT=${_json_vtr_root}
-                        ${PROJECT_SOURCE_DIR}/tools/flow/flow-sweep.sh ${_flow_vpr}
-                        --out-base ${PROJECT_BINARY_DIR}/flow_tmp/sweep
-                        ${_json_vtr_dir}/single_ff.v ${_json_vtr_dir}/ch_intrinsics.v)
-            endif()
-        endif()
-        # 7.3 (spec 7 section 2.1; tools/flow/odin3_flow.py): a micro through the flow script.
-        # flow_vtr_<micro>: target vtr without VPR (the vtr-qor O-leg script, BLIF written);
-        # flow_lpm_<micro>: target lpm (the 5.1 LPM script, then the -icells read-back). VTR_ROOT
-        # is unset: neither needs VTR. flow_vtr_* need ABC.
-        set(_flow_run ${CMAKE_COMMAND} -E env --unset=VTR_ROOT
-            ${PROJECT_SOURCE_DIR}/tools/flow/odin3-flow --odin3 $<TARGET_FILE:odin3>)
-        file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/flow_tmp)
-        if(ODIN3_WITH_ABC)
-            foreach(_n IN ITEMS bm_DL_logic_w_Dff bm_DL_2_cascaded_flip_flops)
-                add_test(NAME flow_vtr_${_n}
-                    COMMAND ${_flow_run} --top ${_n} --no-vpr
-                        --out ${PROJECT_BINARY_DIR}/flow_tmp/vtr_${_n}
-                        ${PROJECT_SOURCE_DIR}/tests/micro/verilog/micro/${_n}.v)
-                set_tests_properties(flow_vtr_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
-            endforeach()
-        endif()
-        foreach(_n IN ITEMS lpm_add_sub altsyncram_sp)
-            add_test(NAME flow_lpm_${_n}
-                COMMAND ${_flow_run} --target lpm --top ${_n}_micro
-                    --out ${PROJECT_BINARY_DIR}/flow_tmp/lpm_${_n}
-                    ${PROJECT_SOURCE_DIR}/tests/lpm/${_n}.v)
-            set_tests_properties(flow_lpm_${_n} PROPERTIES LABELS "flow;unit" TIMEOUT 300)
-        endforeach()
         # 3B Task 9 (spec 14.4, 14.5): the lower corpus over the micros, smallest first, through
         # heavy-run: lower_run_micro (ODIN3_OK, check FULL, the netlist view written as BLIF),
         # lower_sim_micro (the simulator before and after; a type without a hook is `skipped`,
@@ -4645,15 +4684,6 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     set(_gm_floor 415)
                 endif()
                 set(_gm_arg --opt-arg=--lib=${_gm_name}=${PROJECT_SOURCE_DIR}/lib/${_gm_name}.o3lib)
-                add_test(NAME gatemap_smoke_${_gm_lib}
-                    COMMAND ${_gatemap_sweep} --jobs 1 ${_gm_arg} --opt-arg=--remap
-                            --root ${_micro_dir}
-                            ${_micro_dir}/micro/bm_DL_logic_w_Dff.v
-                            ${_micro_dir}/micro/bm_DL_2_1_mux.v
-                            ${_micro_dir}/micro/bm_DL_4_bit_comparator.v
-                            ${_micro_dir}/micro/bm_DL_4_bit_shift_register.v)
-                set_tests_properties(gatemap_smoke_${_gm_lib} PROPERTIES LABELS "tools;gatemap"
-                                     SKIP_RETURN_CODE 77 TIMEOUT 1800)
                 odin3_add_sweep_test(gatemap_micro_${_gm_lib} LABEL sweep
                     COMMAND ${_gatemap_sweep} ${_gm_arg} --opt-arg=--remap
                             --min-compared-total ${_gm_floor} ${_lower_micro_expect}
@@ -4708,11 +4738,6 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         # Odin III only (ODIN3_OK, check FULL, iterations below the cap; the largest count is
         # printed). The micros that 2D or proc reject are tests/proc/micro_expect_fail.txt. One
         # child at a time under 3G. Run: ODIN3_HEAVY_OK=1 ctest --preset sweep -R '^opt_micro$'.
-        set(_opt_run_sweep ${PROJECT_SOURCE_DIR}/tools/elab-check/elab-sweep
-            --odin3 $<TARGET_FILE:odin3> --opt-run
-            --techlib ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib --jobs 1 --mem-cap 3G)
-        odin3_add_sweep_test(opt_micro LABEL sweep
-            COMMAND ${_opt_run_sweep} ${_micro_expect} ${_micro_dir})
         # opt_gen_vs_yosys: 200 seeds of the --opt generator through opt-diff's steps 3-5 (the
         # Phase 2 script and `opt -full`); nightly runs 5,000 and the same files against Yosys
         # 0.69 (--yosys-069: a disagreement is `oracle drift`, reported, never a failure).

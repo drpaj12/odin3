@@ -9,6 +9,7 @@
 
 typedef struct sc_opts {
     bool seq;
+    bool prov; /* --prov: driver, wire, prov and src per net */
     uint32_t top_n;
     uint64_t vectors; /* --sigprob */
     uint64_t seed;

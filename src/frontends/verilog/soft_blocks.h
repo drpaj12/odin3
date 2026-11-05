@@ -31,6 +31,20 @@ uint32_t odin3_soft_blocks_missing(const odin3_design *design);
 enum { SOFT_DIR_CAP = 4096 };
 
 /*
+ * Vendor primitives (OpenCores intake, 2026-11-04): `read_verilog --vendor-prims` reads an instance
+ * of an undefined module named like a common FPGA vendor primitive (IBUF, IBUFG, OBUF, OBUFT,
+ * IOBUF, BUFG, ODDR2, IDDR2) from Odin III's own behavioural model, lib/soft_primitives/<name>.v,
+ * as a library unit, with one WARNING per primitive: the model stands in for the vendor's, whose
+ * clocking and I/O timing the soft logic does not have. A module the design or its libraries define
+ * is never replaced. The bit is set in the soft mask the reader is handed (the arch's missing
+ * models use the low SOFT_BLOCK_COUNT bits).
+ */
+#define SOFT_VENDOR_BIT (1U << 31)
+
+/* True when name is one of the vendor primitives the library has a model of. */
+bool odin3_vendor_prim_known(const char *name);
+
+/*
  * The directory of the bodies (lib/soft_primitives, installed as share/odin3/soft_primitives) into
  * dir (SOFT_DIR_CAP bytes): $ODIN3_SOFT_PRIMITIVES_DIR when set (the only candidate then; every
  * `<name>.v` in it that a design needs is parsed as Verilog, so point it only at a directory you
