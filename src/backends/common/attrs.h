@@ -4,6 +4,9 @@
 #ifndef ODIN3_BACKENDS_COMMON_ATTRS_H
 #define ODIN3_BACKENDS_COMMON_ATTRS_H
 
+#include "ir/design.h"
+#include "ir/ids.h"
+#include "ir/module.h"
 #include "ir/value.h"
 #include "odin3/odin3.h"
 #include "util/hash.h"
@@ -15,6 +18,15 @@
 
 /* The prefix of the attribute that holds one parameter of a module or black-box instance. */
 #define ODIN3_ATTR_PARAM_PREFIX "parameter:"
+
+/* The node attribute (integer 1) the `tristate` pass puts on the shell of an inout port it split
+ * into p_i/p_o/p_oe: the IR cannot remove a port, so the netlist writers that have no inout
+ * (BLIF) leave the shell out. */
+#define ODIN3_ATTR_TRISTATE_SPLIT "tristate_split"
+
+/* True when the port node of the module carries ODIN3_ATTR_TRISTATE_SPLIT. */
+bool odin3_port_is_split_shell(const odin3_design *design, const odin3_module *module,
+                               odin3_node_id node);
 
 /* Where an attribute goes. */
 typedef enum odin3_wattr_role {

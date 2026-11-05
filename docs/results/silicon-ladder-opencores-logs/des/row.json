@@ -1,0 +1,23 @@
+{
+ "design": "des",
+ "clock_port": "clk",
+ "steps_ok": [
+  "read",
+  "elab",
+  "map",
+  "equiv",
+  "netlist"
+ ],
+ "steps_reached": 5,
+ "stop": "place: OUT OF SCOPE [ERROR DRT-0255] Maze Route cannot find path of net o3__n730 in worker of routeBox ( 724495 193195 ) ( 732615 241495 ).",
+ "peak_rss_mb": 4216.3,
+ "wall_s": 674.64,
+ "flow_rc": 3,
+ "odin_cells": 18686,
+ "lvs": "not run",
+ "drc_violations": "not run",
+ "equiv": "equivalent",
+ "equiv_detail": "equiv-check: equivalent (abc dsec)",
+ "sim_rtl": "pass (DES Test done)",
+ "sim_gate": "not run (no final.v)"
+}

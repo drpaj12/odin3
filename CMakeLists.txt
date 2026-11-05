@@ -145,6 +145,9 @@ add_library(odin3_core OBJECT
     src/passes/cone_check/register.c
     src/passes/raise/raise.c
     src/passes/raise/register.c
+    src/passes/tristate/tristate.c
+    src/passes/tristate/split.c
+    src/passes/tristate/register.c
     src/passes/unmap/unmap.c
     src/passes/unmap/register.c
     src/passes/unmap/kit.c
@@ -624,7 +627,7 @@ install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(FILES ${_odin3_share_qor} DESTINATION ${_odin3_share_dir}/tools/vtr-qor)
 install(FILES tools/silicon/silicon_flow.py tools/silicon/klayout_gds.py
-              tools/silicon/liberty_to_o3lib.py tools/silicon/schema_check.py
+              tools/silicon/liberty_to_o3lib.py tools/silicon/schema_check.py tools/silicon/gate_sim.py
               tools/silicon/openroad_flow.tcl tools/silicon/magic_extract.tcl
         DESTINATION ${_odin3_share_dir}/tools/silicon)
 install(FILES tools/equiv-check/equiv_check.py DESTINATION ${_odin3_share_dir}/tools/equiv-check)
@@ -3940,6 +3943,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/elab/accept)
         set_tests_properties(elab_tribuf_default_equiv PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
+        # The tristate pass (brief odin3-tristate-pass): internal tri-states to logic, top inouts split,
+        # simulated against iverilog on the RTL. Exit 77 (skip) without iverilog.
+        add_test(NAME tristate_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/tristate/check.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/tristate)
+        set_tests_properties(tristate_micro PROPERTIES SKIP_RETURN_CODE 77)
         # PHASE2 decision 28: a lone tri-state driver of a top-level output loses its enable
         # under --vtr-compat as in Parmys: the WARNING, and the sp-splice netlist identical to the
         # Parmys golden (tests/golden/vtr_tristate). Exit 77 (skip) as above.

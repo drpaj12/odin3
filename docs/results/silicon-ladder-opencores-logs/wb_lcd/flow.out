@@ -1,0 +1,6 @@
+read: ok
+elab: ok
+map: ok
+equiv: ok
+netlist: ok
+place: OUT OF SCOPE [ERROR STA-0164] <path> line 36, syntax error

@@ -517,6 +517,10 @@ static void consider(const verilog_writer *wr, vw_pick *pick, odin3_wirebit wb, 
         return;
     }
     uint32_t port = wire_port(wr, wb.wire);
+    if (port != 0 && odin3_port_is_split_shell(wr->design, wr->mod.module,
+                                               odin3_module_port(wr->mod.module, port - 1U))) {
+        return; /* the shell of an inout the `tristate` pass split: it names no net */
+    }
     if (port != 0 && wr->mod.def->ports[port - 1].dir != ODIN3_DIR_OUT) {
         pick->driving_ports++;
         rank = RANK_DRIVING_PORT;

@@ -1,0 +1,3 @@
+iverilog rc=0
+vvp rc=0
+VERDICT pass (DES Test done)

@@ -204,7 +204,11 @@ static bool is_logic(uint8_t kind) {
 static bool shares(odin3_drv prev, uint8_t next) {
     bool prev_bus = prev.kind == ODIN3_DRV_TRIBUF || prev.kind == ODIN3_DRV_INOUT_PIN;
     bool next_bus = next == ODIN3_DRV_TRIBUF || next == ODIN3_DRV_INOUT_PIN;
-    return prev_bus && next_bus;
+    /* an instance may drive a bus through a tri-state of its module: the `tristate` pass sorts it
+     * out after `flatten` (a net that stays with an instance output and another driver is left
+     * for `lower` to refuse) */
+    return (prev_bus && next_bus) || (prev_bus && next == ODIN3_DRV_INSTANCE) ||
+           (prev.kind == ODIN3_DRV_INSTANCE && next_bus);
 }
 
 static uint64_t claim_key(odin3_wirebit wb) {
