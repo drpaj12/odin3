@@ -1,33 +1,37 @@
 #!/usr/bin/env bash
-# build-locked: `cmake --build` that never overlaps a heavy run (2E plan point (p), ruling C1).
+# build-locked: `cmake --build` in its own lane, so builds neither wait for heavy runs nor stall them
+# (2E plan point (p), ruling C1; own build lane since 2026-11-05, Peter: three lanes, 5+5+4 GiB
+# = 14 GiB = 60% of 23 GiB).
 #
 # Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
 #
 # - Refused (exit 2) inside a heavy run, i.e. when this process's cgroup is in a heavy slice
 #   (odin3-heavy0.slice, odin3-heavy1.slice, odin3-heavysolo.slice, odin3-heavyxl.slice, or the
-#   old odin3-heavy.slice), whether or not it still holds the heavy lock's descriptor (a Python parent
-#   closes fd 9 unless given pass_fds=(9,)): its shared lock would wait forever on the heavy run's
-#   exclusive one. A set ODIN3_HEAVY_SLICE outside those slices is stale: ignored with a warning.
-# - Writer preference: while any $DIR/odin3-heavy.queued.<pid> names a live tools/heavy-run (one
-#   waiting for the lock), it waits, so a stream of overlapping builds cannot starve a queued
-#   heavy job. A flag whose PID is dead, or is now another program (a reused PID after a
-#   heavy-run was SIGKILLed), is stale: it is removed and ignored.
-# - Then it takes the legacy lock $DIR/odin3-heavy.lock and both slot locks $DIR/odin3-heavy.lock.0
-#   and .1 shared (heavy-run takes one slot, or slot 0 then 1, exclusive, and the legacy lock
-#   shared): builds share them with each other and exclude every heavy run, and a heavy run
-#   excludes builds. It says so before waiting when a heavy run holds one. Acquisition is
-#   all-or-nothing: try-lock (`flock -s -n`) fds 9, 8, 7; if one is busy, unlock the ones taken,
-#   block (shared) on the busy file alone, then retry the set. A build therefore never holds one
-#   slot while waiting for the other, which would block heavy jobs queued for the held slot.
-#   Once all three are held (inherited by every build child) it runs `exec cmake --build <args>`;
-#   exits with cmake's status.
+#   old odin3-heavy.slice): the build would run under the heavy job's memory cap, and inside a
+#   --solo run, which holds the build lock, it would wait forever. Build before the heavy run.
+#   A set ODIN3_HEAVY_SLICE outside those slices is stale: ignored with a warning.
+# - One build at a time machine-wide: it takes ONLY $DIR/odin3-build.lock, exclusive, on fd 9
+#   (inherited by every build child, released when the last of them exits). Busy: it says so
+#   ("waiting for the build that holds ...", a --solo heavy run holds it too) and blocks.
+#   It takes neither the heavy slot locks nor the legacy lock odin3-heavy.lock, and it does not
+#   look at the odin3-heavy.queued.* flags: builds and heavy jobs never wait for each other,
+#   except --solo, which takes the build lock as well (a quiet machine for wall-time results).
+#   A stream of builds can delay a waiting --solo run (flock is not fair); old-binary heavy
+#   callers (exclusive on the legacy lock) no longer interact with builds at all.
+# - Memory: the build runs in the user slice odin3-build.slice (MemoryMax=4G, MemorySwapMax=0, set
+#   with `systemctl --user set-property --runtime` like heavy-run's), via
+#   `systemd-run --user --scope -q --unit=<u> --slice=S -p OOMPolicy=continue cmake --build ...`;
+#   the scope and (under the real DIR) the slice are stopped when it returns. Without systemd or
+#   a --user manager it warns and builds uncapped. Exits with cmake's status.
+# - Parallelism is capped at -j4: -jN, -j N, --parallel[=| ]N (before or after `--`) above 4, or
+#   without a number, are clamped to 4 with a note on stderr; with no -j at all `-j 4` is added.
 #
-# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only); the flags are polled
-# every ODIN3_HEAVY_POLL seconds (default 5).
+# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only). ODIN3_BUILD_SLICE
+# (default odin3-build.slice) and ODIN3_BUILD_JOBS_MAX (default 4) are for the tests only.
 set -uo pipefail
 
 dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
-lock=$dir/odin3-heavy.lock
+lock=$dir/odin3-build.lock
 
 # The heavy slice this process runs in according to its cgroup, or nothing (as tools/heavy-run
 # checks). ODIN3_HEAVY_CGROUP replaces /proc/self/cgroup (tests only).
@@ -46,8 +50,8 @@ heavy_slice_of_cgroup() {
 
 in_slice=$(heavy_slice_of_cgroup)
 if [[ -n $in_slice ]]; then
-    echo "build-locked: refused inside a heavy run ($in_slice): the build would wait forever" \
-        "on the heavy lock; build before starting the heavy run" >&2
+    echo "build-locked: refused inside a heavy run ($in_slice): the build would run under the" \
+        "heavy job's memory cap (or wait forever on a --solo run); build before the heavy run" >&2
     exit 2
 fi
 if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
@@ -55,61 +59,88 @@ if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
         "run (not in that slice); ignoring it" >&2
     unset ODIN3_HEAVY_SLICE
 fi
-poll=${ODIN3_HEAVY_POLL:-5}
 mkdir -p "$dir" || exit 2
 
-# True when pid is a running tools/heavy-run.
-is_heavy_run() {
-    local cmdline
-    [[ $1 =~ ^[0-9]+$ ]] || return 1
-    cmdline=$(tr '\0' ' ' 2>/dev/null <"/proc/$1/cmdline") || return 1
-    [[ $cmdline == *heavy-run* ]]
-}
+slice=${ODIN3_BUILD_SLICE:-odin3-build.slice}
+max=${ODIN3_BUILD_JOBS_MAX:-4}
 
-# The PID of the first queued heavy run that is still alive, or nothing; stale flags are removed.
-queued_pid() {
-    local flag pid
-    for flag in "$dir"/odin3-heavy.queued.*; do
-        [[ -e $flag ]] || continue
-        pid=${flag##*.}
-        if is_heavy_run "$pid"; then
-            echo "$pid"
-            return
-        fi
-        rm -f "$flag"
-    done
-}
-
-said=0
-while pid=$(queued_pid) && [[ -n $pid ]]; do
-    if [[ $said -eq 0 ]]; then
-        echo "build-locked: waiting for queued heavy run $pid" >&2
-        said=1
-    fi
-    sleep "$poll"
-done
-busy=0
-for f in "$lock" "$lock.0" "$lock.1"; do
-    flock -s -n "$f" true || busy=1
-done
-if [[ $busy -eq 1 ]]; then
-    echo "build-locked: waiting for the heavy run that holds $lock" >&2
+exec 9>>"$lock" || exit 2
+if ! flock -x -n 9; then
+    echo "build-locked: waiting for the build that holds $lock" >&2
+    flock -x 9 || exit 2
 fi
-exec 9>>"$lock" 8>>"$lock.0" 7>>"$lock.1" || exit 2
-# Never hold part of the set while waiting for the rest: a shared hold on slot 0 while blocked on
-# slot 1 starved heavy jobs queued for slot 0 (seen 2026-11-05). Try all three without waiting;
-# if one is busy, release those taken and block on that one file alone (holding nothing else,
-# released at once), then try the whole set again. No polling.
-while :; do
-    busy=""
-    for fd in 9 8 7; do
-        if ! flock -s -n "$fd"; then
-            case $fd in 9) busy=$lock ;; 8) busy=$lock.0 ;; *) busy=$lock.1 ;; esac
-            break
-        fi
-    done
-    [[ -z $busy ]] && break
-    for fd in 9 8 7; do flock -u "$fd" || exit 2; done
-    flock -s "$busy" true || exit 2
+
+# clamp N: sets CV to N, or to $max when N is 0 (bare -j), empty or above $max; note when it moved.
+CV=
+clamped=0
+clamp() {
+    CV=$1
+    if [[ ! $CV =~ ^[0-9]+$ ]] || ((CV == 0 || CV > max)); then
+        [[ $CV =~ ^[0-9]+$ && $CV -gt 0 ]] && clamped=$CV
+        CV=$max
+    fi
+}
+
+argv=("$@")
+out=()
+seen=0
+native=0
+n=${#argv[@]}
+i=0
+while ((i < n)); do
+    a=${argv[i]}
+    i=$((i + 1))
+    if [[ $native -eq 0 && $a == -- ]]; then
+        native=1
+        dashdash=${#out[@]}
+        out+=("$a")
+        continue
+    fi
+    case $a in
+        -j | --parallel)
+            seen=1
+            nxt=${argv[i]:-}
+            v=0
+            if [[ $nxt =~ ^[0-9]+$ ]]; then
+                v=$nxt
+                i=$((i + 1))
+            fi
+            clamp "$v"
+            out+=("$a" "$CV") ;;
+        -j[0-9]*)
+            seen=1
+            clamp "${a#-j}"
+            out+=("-j$CV") ;;
+        --parallel=*)
+            seen=1
+            clamp "${a#--parallel=}"
+            out+=("--parallel=$CV") ;;
+        *) out+=("$a") ;;
+    esac
 done
-exec cmake --build "$@"
+if [[ $clamped -ne 0 ]]; then
+    echo "build-locked: note: parallelism $clamped clamped to -j$max (build lane cap)" >&2
+fi
+if [[ $seen -eq 0 ]]; then
+    if [[ $native -eq 1 ]]; then
+        out=("${out[@]:0:dashdash}" -j "$max" "${out[@]:dashdash}")
+    else
+        out+=(-j "$max")
+    fi
+fi
+
+if command -v systemd-run >/dev/null 2>&1 &&
+    systemctl --user set-property --runtime "$slice" MemoryMax=4G MemorySwapMax=0 2>/dev/null; then
+    unit=odin3-build-$$-$(date +%s%N)
+    systemd-run --user --scope -q --unit="$unit" --slice="$slice" -p OOMPolicy=continue \
+        cmake --build "${out[@]}"
+    rc=$?
+    systemctl --user stop "$unit.scope" >/dev/null 2>&1
+    if [[ $dir == /tmp/claude-1000 || ${ODIN3_HEAVY_STOP_SLICE:-} == 1 ]]; then
+        systemctl --user stop "$slice" >/dev/null 2>&1
+    fi
+    exit $rc
+fi
+echo "build-locked: warning: cannot set up $slice (no systemd --user manager?); building uncapped" \
+    >&2
+exec cmake --build "${out[@]}"

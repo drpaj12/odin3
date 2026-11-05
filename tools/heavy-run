@@ -2,22 +2,30 @@
 # heavy-run: run one heavy job (a sweep, a large benchmark, a long fuzz run) in one of two memory-capped
 # systemd slices, at most two heavy jobs machine-wide (2E plan point (p), ruling C1; the standing
 # heavy-run rule; two slots since 2026-11-04, Peter: 23 GB RAM, parallel memory <= 60%).
+# Three lanes since 2026-11-05: two heavy slots (5G each) plus the build lane (tools/build-locked,
+# 4G, one build at a time): 5+5+4 = 14 GiB = 60% of 23 GiB when all three are busy.
 #
 # Usage: tools/heavy-run [--xl | --solo] <cmd...>
 #
 # - Two slots. Slot k (k = 0, 1) is an exclusive flock(2) on $DIR/odin3-heavy.lock.k plus its own
-#   slice odin3-heavyk.slice (MemoryMax=6G, MemorySwapMax=0). A job takes the first free slot (0
+#   slice odin3-heavyk.slice (MemoryMax=5G, MemorySwapMax=0). A job takes the first free slot (0
 #   before 1); with both busy it waits on whichever frees first, for ODIN3_HEAVY_WAIT seconds
 #   (default 14400), then exits 77 "heavy-run: lock busy for <N> s; skipped". The slot is told on
 #   stderr: "heavy-run: slot k (odin3-heavyk.slice)", and exported as ODIN3_HEAVY_SLOT. The two slice
-#   caps add up to 12G (<= 60% of 23G). The slices are siblings (systemd nests a slice under the
-#   one its name extends at a dash, so odin3-heavy-0.slice would sit inside odin3-heavy.slice).
-# - --solo takes BOTH slots (an exclusive machine): for runs whose wall-clock time is a measured
-#   result. Slice odin3-heavysolo.slice, 6G. --xl takes both slots too, for a 9G job: slice
-#   odin3-heavyxl.slice, 9G, and the gate ODIN3_HEAVY_XL_OK=1 (the controller exports it by hand only
-#   when no agent is running). Both take slot 0, then slot 1, within one ODIN3_HEAVY_WAIT. A
-#   waiting solo run holds slot 0 meanwhile, so new jobs only get slot 1; there is no strict
-#   fairness between a waiting solo run and queued normal jobs for a freed slot 1.
+#   caps add up to 10G; with the 4G build lane 14G. The slices are siblings (systemd nests a slice
+#   under the one its name extends at a dash, so odin3-heavy-0.slice would sit inside
+#   odin3-heavy.slice).
+# - --solo takes BOTH slots AND the build lock $DIR/odin3-build.lock (exclusive, fd 6): an exclusive
+#   machine with no build running meanwhile, for runs whose wall-clock time is a measured result.
+#   It waits for a running build, and builds wait for it. Slice odin3-heavysolo.slice, 6G.
+#   --xl takes both slots too (not the build lock), for a 9G job: slice odin3-heavyxl.slice, 9G
+#   (unchanged), and the gate ODIN3_HEAVY_XL_OK=1 (the controller exports it by hand only when no
+#   agent is running). xl plus a running build is 9+4 = 13G, which must still fit the 60% rule
+#   (13.8G of 23G); xl itself leaves no free slot. Both take slot 0, then slot 1 (then, for
+#   --solo, the build lock), within one ODIN3_HEAVY_WAIT. A build holds only its own lock and
+#   waits for nothing else, so this order cannot deadlock. A waiting solo run holds slot 0
+#   meanwhile, so new jobs only get slot 1; there is no strict fairness between a waiting solo
+#   run and queued normal jobs for a freed slot 1.
 # - Exits 77 (CTest's skip) unless ODIN3_HEAVY_OK=1. Also 77 without systemd-run, or when the slice
 #   cannot be set up (no systemd --user manager). Caps are set with
 #   `systemctl --user set-property --runtime S MemoryMax=.. MemorySwapMax=0`, after the slot is held.
@@ -25,11 +33,12 @@
 #   `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE ...`, so every child stays inside S
 #   (a bare nested --scope lands in app.slice, outside the cap).
 # - Descriptors: the job inherits fd 9 (the legacy lock odin3-heavy.lock, taken SHARED), fd 8 (slot
-#   0's lock file) and fd 7 (slot 1's); a job in slot k holds only the lock on fd 8 or 7 that is its
-#   slot (the other is closed), a solo/xl job holds both. The slot locks live as long as the job's
-#   processes, even if this wrapper is killed. The legacy lock exists for one release only: it
-#   keeps an old-binary caller (exclusive on odin3-heavy.lock) serialised against new jobs, which
-#   share it with each other; remove it with the old binaries.
+#   0's lock file) and fd 7 (slot 1's), plus fd 6 (the build lock) for --solo; a job in slot k
+#   holds only the lock on fd 8 or 7 that is its slot (the other is closed), a solo/xl job holds
+#   both. The slot locks live as long as the job's processes, even if this wrapper is killed. The
+#   legacy lock exists for one release only: it keeps an old-binary caller (exclusive on
+#   odin3-heavy.lock) serialised against new jobs, which share it with each other; remove it with
+#   the old binaries. Builds no longer take it, so old binaries and builds do not interact.
 # - Nested: the evidence is this process's cgroup, never a variable alone (a leaked variable cannot
 #   put a process into a slice; only `systemd-run --slice` does). The slice names the slot.
 #   - In a heavy slice (odin3-heavy0/1/solo/xl.slice, or the old odin3-heavy.slice) and holding
@@ -42,17 +51,15 @@
 #     descriptor; the parent must pass fd 9 (Python: pass_fds=(9,))". The rule: a driver that
 #     spawns nested heavy steps keeps fd 9 open in them (shell does by default; Python's
 #     subprocess closes it unless given pass_fds=(9,)).
-#   - Outside a heavy slice but with a heavy lock open on an inherited descriptor (started under
-#     tools/build-locked, which keeps its shared locks open in every build child): exits 2 at
-#     once, "run the sweep outside the build"; waiting would block on its own process tree.
+#   - Outside a heavy slice but with a heavy or build lock open on an inherited descriptor
+#     (started under tools/build-locked, which keeps the build lock open in every build child):
+#     exits 2 at once, "run the sweep outside the build"; --solo would wait on its own build.
 #   - Otherwise a set ODIN3_HEAVY_SLICE is stale: ignored with a warning (unset), and the run
 #     takes the normal path.
-# - Writer preference: its PID goes to $DIR/odin3-heavy.queued.<pid> while it waits for a lock,
-#   so tools/build-locked starts no new build meanwhile. The flag is removed once the slot is
-#   held, and on any exit. Builds take the legacy lock and BOTH slot locks shared, all-or-nothing
-#   (try-lock the set; if one is busy, release the rest and block on that one alone), so a build
-#   waits for every heavy job and a heavy job for every build, as with the single lock, but a
-#   waiting build never holds one slot and so never blocks a heavy job queued for it.
+# - Writer preference: its PID goes to $DIR/odin3-heavy.queued.<pid> while it waits for a lock.
+#   The flag is removed once the slot is held, and on any exit. tools/build-locked ignores these
+#   flags since 2026-11-05 (own build lane); before that a build took the slot locks shared and a
+#   waiting build starved queued jobs (seen 2026-11-05: slot 0 idle 2.5 h).
 # - Each wait runs in the background (`flock -x -w N` on the descriptor), so a signal ends it at
 #   once and a timeout is told apart from the job's own exit status. With both slots busy two
 #   waiters race; the first to get its lock wins, the other is killed and its descriptor closed.
@@ -68,8 +75,8 @@
 # (default odin3-heavy; tests only) renames the slices and units, so a test never touches the live
 # ones; the cgroup check also knows the default names. Only the holder of the machine's slot owns
 # S, so under another DIR S is not stopped (another agent's job may be in it) unless
-# ODIN3_HEAVY_STOP_SLICE=1 (tests only). tools/build-locked refuses to run under heavy-run: its
-# shared locks would wait forever on the exclusive slot.
+# ODIN3_HEAVY_STOP_SLICE=1 (tests only). tools/build-locked refuses to run under heavy-run (the
+# build would run under the job's cap, or wait forever on a --solo run's build lock).
 set -uo pipefail
 
 skip() {
@@ -88,6 +95,7 @@ if [[ $# -eq 0 ]]; then
 fi
 dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
 lock=$dir/odin3-heavy.lock
+build_lock=$dir/odin3-build.lock
 prefix=${ODIN3_HEAVY_SLICE_PREFIX:-odin3-heavy}
 
 # The heavy slice this process runs in according to its cgroup, or nothing. A cgroup is
@@ -107,13 +115,15 @@ heavy_slice_of_cgroup() {
 }
 
 # True when one of this shell's descriptors (fd 9, inherited from heavy-run; or build-locked's)
-# has a heavy lock open: the legacy file or a slot's.
+# has a heavy lock open: the legacy file, a slot's or the build lock.
 holds_lock_fd() {
-    local fd target base
+    local fd target base bl
     base=$(readlink -f "$lock" 2>/dev/null) || return 1
+    bl=$(readlink -f "$build_lock" 2>/dev/null) || return 1
     for fd in /proc/$$/fd/*; do
         target=$(readlink "$fd" 2>/dev/null) || continue
-        [[ $target == "$base" || $target == "$base".0 || $target == "$base".1 ]] && return 0
+        [[ $target == "$base" || $target == "$base".0 || $target == "$base".1 ||
+            $target == "$bl" ]] && return 0
     done
     return 1
 }
@@ -128,7 +138,7 @@ if [[ -n $in_slice ]]; then
     case $mode in
         xl)
             if [[ $in_slice != "${prefix}xl.slice" && $in_slice != odin3-heavyxl.slice ]]; then
-                echo "heavy-run: --xl inside $in_slice (6G): run the xl job on its own" >&2
+                echo "heavy-run: --xl inside $in_slice (5G): run the xl job on its own" >&2
                 exit 2
             fi ;;
         solo)
@@ -157,7 +167,8 @@ fi
 if [[ ${ODIN3_HEAVY_OK:-} != 1 ]]; then
     skip "ODIN3_HEAVY_OK is not 1"
 fi
-mem=6G
+mem=5G
+[[ $mode == solo ]] && mem=6G
 if [[ $mode == xl ]]; then
     if [[ ${ODIN3_HEAVY_XL_OK:-} != 1 ]]; then
         skip "--xl needs ODIN3_HEAVY_XL_OK=1 (an idle machine)"
@@ -249,6 +260,10 @@ if [[ $mode == slot ]]; then
 else
     lock_wait -x 8
     lock_wait -x 7
+    if [[ $mode == solo ]]; then
+        exec 6>>"$build_lock" || exit 2
+        lock_wait -x 6 # a quiet machine: no build meanwhile
+    fi
     slot=$mode
     slice=${prefix}${mode}.slice
 fi
