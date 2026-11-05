@@ -4,6 +4,7 @@
 
 #include "backends/blif/isop.h"
 #include "backends/blif/vtr.h"
+#include "backends/common/attrs.h"
 #include "backends/common/hash_rows.h"
 #include "backends/common/hdl_loc.h"
 #include "backends/prov_name.h"
@@ -1348,15 +1349,32 @@ static odin3_status port_keyword(blif_writer *wr, const odin3_port_def *port, od
     return ODIN3_OK;
 }
 
+/* True for the shell of a split inout port (tristate): the file has no such port. */
+static bool port_is_shell(const blif_writer *wr, uint32_t at, bool of_module) {
+    return of_module &&
+           odin3_port_is_split_shell(wr->design, wr->module, odin3_module_port(wr->module, at));
+}
+
+/* The port before `at` that the file has, or -1 for none. */
+static int64_t prev_written_port(const blif_writer *wr, uint32_t at, bool of_module) {
+    for (int64_t prev = (int64_t)at - 1; prev >= 0; prev--) {
+        if (!port_is_shell(wr, (uint32_t)prev, of_module)) {
+            return prev;
+        }
+    }
+    return -1;
+}
+
 /* Starts a new .inputs/.outputs line for port `at` when its direction differs from the previous
- * port's. */
+ * written port's. */
 static odin3_status port_line(blif_writer *wr, const odin3_celltype_def *def, uint32_t at,
                               bool of_module) {
     const char *word = NULL;
     odin3_dir dir = blif_port_dir(wr, def, at, of_module);
     odin3_status st = port_keyword(wr, &def->ports[at], dir, &word);
-    if (st == ODIN3_OK && (at == 0 || dir != blif_port_dir(wr, def, at - 1, of_module))) {
-        if (at > 0) {
+    int64_t prev = prev_written_port(wr, at, of_module);
+    if (st == ODIN3_OK && (prev < 0 || dir != blif_port_dir(wr, def, (uint32_t)prev, of_module))) {
+        if (prev >= 0) {
             wr_end(wr);
         }
         wr_begin(wr, word);
@@ -1369,7 +1387,12 @@ static odin3_status write_module_ports(blif_writer *wr) {
     const odin3_celltype_def *def =
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     odin3_status st = ODIN3_OK;
+    bool any = false;
     for (uint32_t i = 0; st == ODIN3_OK && i < def->n_ports; i++) {
+        if (port_is_shell(wr, i, true)) {
+            continue;
+        }
+        any = true;
         st = port_line(wr, def, i, true);
         uint32_t width = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0).count;
         for (uint32_t k = 0; st == ODIN3_OK && k < width; k++) {
@@ -1383,7 +1406,7 @@ static odin3_status write_module_ports(blif_writer *wr) {
     if (st != ODIN3_OK) {
         return wr_fail(wr, st);
     }
-    if (def->n_ports > 0) {
+    if (any) {
         wr_end(wr);
     }
     return wr->st;
@@ -1460,6 +1483,9 @@ static odin3_status write_port_buffers(blif_writer *wr) {
         odin3_celltype_get(wr->design, odin3_module_celltype(wr->module));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < odin3_module_port_count(wr->module); i++) {
+        if (port_is_shell(wr, i, true)) {
+            continue;
+        }
         odin3_pinslice pins = odin3_node_port(wr->module, odin3_module_port(wr->module, i), 0);
         bool vtr_out = wr->vtr && blif_port_dir(wr, def, i, true) == ODIN3_DIR_OUT;
         for (uint32_t k = 0; st == ODIN3_OK && k < pins.count; k++) {

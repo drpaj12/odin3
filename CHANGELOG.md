@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
+  top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
+  instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.
 - `sim_tb`: a DUT instance may have several independent clock inputs (up to 16; each clock port is observed on its
   own and its edges reach only the cells it clocks; new `odin3_sim_clock_edges` in `src/sim/sim.h`, an
   internal simulator call, not the public ABI). More than 16 is an error naming the extra port. A clock bit in a multi-bit DUT port, and a cell with no clock pin

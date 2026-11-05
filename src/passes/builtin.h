@@ -47,6 +47,9 @@ extern const odin3_pass_def odin3_pass_cone_check;
 extern const odin3_pass_def odin3_pass_raise;
 /* src/passes/unmap/register.c (v1.0.4): unmap. */
 extern const odin3_pass_def odin3_pass_unmap;
+
+/* src/passes/tristate/register.c: tristate. */
+extern const odin3_pass_def odin3_pass_tristate;
 extern const odin3_pass_def odin3_pass_preprocess;
 extern const odin3_pass_def odin3_pass_proc;
 /* src/passes/opt/register.c (2F Task 4): the eight opt passes. */

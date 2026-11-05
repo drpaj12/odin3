@@ -184,6 +184,84 @@ class HelpText(unittest.TestCase):
             self.assertRegex(out, rf"{option}\s+\S")  # every option has a help text
 
 
+class FileList(unittest.TestCase):
+    """-f lists, -I, -D and --read-opt (the OpenCores intake: usbhostslave, pipelined_fft_256)."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = Path(tmp.name)
+        (self.tmp / "inc").mkdir()
+        (self.tmp / "src").mkdir()
+        (self.tmp / "inc" / "defs.vh").write_text("`define W 4\n")
+        (self.tmp / "src" / "top.v").write_text(
+            '`include "defs.vh"\nmodule top(input [`W-1:0] a, b, output [`W-1:0] y);\n'
+            "`ifdef INVERT\nassign y = ~(a & b);\n`else\nassign y = a & b;\n`endif\nendmodule\n")
+
+    def test_expand_filelist(self) -> None:
+        lst = self.tmp / "files.f"
+        lst.write_text("// c\n+incdir+inc+inc2\n+define+A=1+B\n-D C -I inc3 -Dd src/top.v # tail\n")
+        with mock.patch("pathlib.Path.cwd", return_value=self.tmp):
+            files, incs, defs = flow.expand_filelist(lst)
+        self.assertEqual(files, [self.tmp / "src" / "top.v"])
+        self.assertEqual([Path(i).name for i in incs], ["inc", "inc2", "inc3"])
+        self.assertEqual(defs, ["A=1", "B", "C", "d"])
+
+    def test_unsupported_option_is_refused(self) -> None:
+        lst = self.tmp / "bad.f"
+        lst.write_text("-y libdir\n")
+        with self.assertRaises(flow.UsageError):
+            flow.expand_filelist(lst)
+
+    def test_nested_filelists(self) -> None:
+        (self.tmp / "sub").mkdir()
+        (self.tmp / "sub" / "in.f").write_text("x.v\n")
+        (self.tmp / "top.f").write_text("-F sub/in.f\n")
+        files, _, _ = flow.expand_filelist(self.tmp / "top.f")
+        self.assertEqual(files, [(Path.cwd() / "x.v").resolve()])
+
+    def test_parse_args_collects_everything(self) -> None:
+        (self.tmp / "files.f").write_text("+incdir+inc\n+define+INVERT=1\n")
+        args = flow.parse_args([str(self.tmp / "src" / "top.v"), "-f", str(self.tmp / "files.f"),
+                                "-I", str(self.tmp / "inc"), "-D", "X",
+                                "--read-opt=--auto-blackbox",
+                                "--out", str(self.tmp / "o")])
+        self.assertEqual(args.defines, ("X", "INVERT=1"))
+        self.assertEqual(args.read_opts, ("--auto-blackbox",))
+        self.assertTrue(all(Path(i).is_absolute() for i in args.incdirs))
+
+    def test_no_design_is_a_usage_error(self) -> None:
+        with self.assertRaises(SystemExit):
+            flow.parse_args(["--out", str(self.tmp / "o")])
+
+    @needs_odin3
+    def test_flow_reads_include_and_define(self) -> None:
+        (self.tmp / "files.f").write_text("+incdir+inc\n+define+INVERT=1\nsrc/top.v\n")
+        with mock.patch.dict(os.environ, env_without_vtr(), clear=True):
+            old = Path.cwd()
+            os.chdir(self.tmp)
+            try:
+                code, out, err = run_main(flow.main, ["-f", "files.f", "--no-vpr", "--odin3", ODIN3,
+                                                      "--out", str(self.tmp / "out")])
+            finally:
+                os.chdir(old)
+        self.assertEqual(code, 0, out + err)
+        blif = (self.tmp / "out" / "odin3" / "top.blif").read_text()
+        self.assertIn("11 0", blif)  # INVERT: a NAND, not an AND
+
+    @needs_odin3
+    def test_read_opt_reaches_read_verilog(self) -> None:
+        with mock.patch.dict(os.environ, env_without_vtr(), clear=True):
+            code, out, err = run_main(flow.main, [str(self.tmp / "src" / "top.v"), "-I",
+                                                  str(self.tmp / "inc"),
+                                                  "--read-opt=--bogus-option",
+                                                  "--no-vpr", "--odin3", ODIN3,
+                                                  "--out", str(self.tmp / "out")])
+        self.assertEqual(code, 1, out + err)
+        log = (self.tmp / "out" / "odin3" / "odin3.log").read_text()
+        self.assertIn("unknown option '--bogus-option'", log)
+
+
 class Luts(unittest.TestCase):
     def test_luts_count_only_nontrivial_names(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

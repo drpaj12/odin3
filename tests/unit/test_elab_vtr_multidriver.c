@@ -329,14 +329,15 @@ static void test_vtr_child_inout_keeps_tribuf(void) {
     TEST_ASSERT_FALSE(same_net("q", 0, "d", 0));
 }
 
-/* Below the top the output may reach a top-level port, where z must stay: the existing error. */
+/* Below the top the output may reach a top-level port, where z must stay: the $tribuf stays (it was
+ * an error before the `tristate` pass; the pass or `lower` decides after `flatten`). */
 static void test_vtr_submodule_output_still_errors(void) {
     pass_src src = {k_vtr, "module sub(d, en, q);\ninput d, en;\noutput q;\n"
                            "assign q = en ? d : 1'bz;\nendmodule\n"
                            "module t(d, en, q);\ninput d, en;\noutput q;\n"
                            "sub u(.d(d), .en(en), .q(q));\nendmodule\n"};
     pt_read_with(&src);
-    TEST_ASSERT_NOT_EQUAL_INT(ODIN3_OK, pt_rs.status);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, pt_rs.status);
     TEST_ASSERT_EQUAL_UINT32(0, pt_warnings_with("--vtr-compat drops the enable"));
 }
 
