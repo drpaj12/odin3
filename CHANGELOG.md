@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `scoap --prov`: every net row that has a wire names it (`wire`) with the bit (`bit`), also when the wire is only an alias
+  of the net or the net is a bit of a port wire (output ports and registers after mapping); on ch_intrinsics the viewer found
+  a wire on 107 of 319 rows.
 - The version 2 name map writes `uid=<store ID>` on `R` lines when `ODIN3_PROV_UID=1` is set. The `r<n>` numbers count the
   records of one file, so two maps from one run disagree on them; the store ID is the same in both, so a record can be
   followed from the proc dump to the final one. Off by default (a restored design numbers its store again). New CTest
