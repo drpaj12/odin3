@@ -207,9 +207,16 @@ static void test_casex_wildcard(void) {
                       "S always [O0<-O1]\n");
 }
 
+/* An x bit of a plain case item stays x (RTLIL reads it as a wildcard: Yosys, Parmys), with one
+ * WARNING that a simulator would match nothing. */
 static void test_plain_case_keeps_x(void) {
-    pt_read_clean("module t(input [1:0] sel, input a, output reg y);\n"
-                  "  always @* case (sel) 2'bx1: y = a; default: y = 1'b0; endcase\nendmodule\n");
+    pt_read_src("module t(input [1:0] sel, input a, output reg y);\n"
+                "  always @* case (sel) 2'bx1: y = a; default: y = 1'b0; endcase\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_diag_errors());
+    TEST_ASSERT_EQUAL_UINT32(1, pt_warnings_with("case item has x or z bits"));
+    TEST_ASSERT_EQUAL_UINT32(1, pt_soft_warnings());
+    pt_expect_ir_ok();
     odin3_node_id proc = pt_proc_node(0);
     pt_expect_dump(0, "I6 O3\n"
                       "C0 [O1<-O2] sw0+1\n"
