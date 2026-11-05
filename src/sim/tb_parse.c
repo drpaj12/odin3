@@ -158,10 +158,11 @@ static int add_var(parser *pr, const char *name, var_shape shape) {
     if (pr->scope[0] != '\0') {
         (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
         name = scoped;
-        if (strlen(scoped) >= TB_NAME) {
-            fail(pr, "task variable name too long");
-            return -1;
-        }
+    }
+    size_t name_len = strlen(name);
+    if (name_len >= TB_NAME) {
+        fail(pr, "task variable name too long");
+        return -1;
     }
     if (find_exact(pr, name) >= 0) {
         fail(pr, "redeclared name");
@@ -181,7 +182,7 @@ static int add_var(parser *pr, const char *name, var_shape shape) {
     }
     tb_var *var = &tb->vars[tb->nvars];
     memset(var, 0, sizeof *var);
-    (void)snprintf(var->name, sizeof var->name, "%s", name);
+    memcpy(var->name, name, name_len);
     var->width = shape.width;
     var->sgn = shape.sgn;
     var->is_wire = shape.is_wire;
