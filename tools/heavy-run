@@ -2,8 +2,9 @@
 # heavy-run: run one heavy job (a sweep, a large benchmark, a long fuzz run) in one of two memory-capped
 # systemd slices, at most two heavy jobs machine-wide (2E plan point (p), ruling C1; the standing
 # heavy-run rule; two slots since 2026-11-04, Peter: 23 GB RAM, parallel memory <= 60%).
-# Three lanes since 2026-11-05: two heavy slots (5G each) plus the build lane (tools/build-locked,
-# 4G, one build at a time): 5+5+4 = 14 GiB = 60% of 23 GiB when all three are busy.
+# Four lanes since 2026-11-05: two heavy slots (5G each) plus two build slots (tools/build-locked,
+# 3G each): 5+5+3+3 = 16 GiB of 23 when all are busy, above the old 60% rule, by Peter's request
+# for parallel builds.
 #
 # Usage: tools/heavy-run [--xl | --solo] <cmd...>
 #
@@ -12,18 +13,18 @@
 #   before 1); with both busy it waits on whichever frees first, for ODIN3_HEAVY_WAIT seconds
 #   (default 14400), then exits 77 "heavy-run: lock busy for <N> s; skipped". The slot is told on
 #   stderr: "heavy-run: slot k (odin3-heavyk.slice)", and exported as ODIN3_HEAVY_SLOT. The two slice
-#   caps add up to 10G; with the 4G build lane 14G. The slices are siblings (systemd nests a slice
+#   caps add up to 10G; with the two 3G build slots 16G. The slices are siblings (systemd nests a slice
 #   under the one its name extends at a dash, so odin3-heavy-0.slice would sit inside
 #   odin3-heavy.slice).
-# - --solo takes BOTH slots AND the build lock $DIR/odin3-build.lock (exclusive, fd 6): an exclusive
-#   machine with no build running meanwhile, for runs whose wall-clock time is a measured result.
-#   It waits for a running build, and builds wait for it. Slice odin3-heavysolo.slice, 6G.
-#   --xl takes both slots too (not the build lock), for a 9G job: slice odin3-heavyxl.slice, 9G
+# - --solo takes BOTH slots AND both build locks $DIR/odin3-build.lock.0 and .1 (exclusive, fds 6
+#   and 5) and the legacy $DIR/odin3-build.lock (exclusive, fd 4; an old-binary build holds that
+#   one): an exclusive machine with no build running meanwhile, for runs whose wall-clock time is
+#   a measured result. It waits for running builds, and builds wait for it. Slice odin3-heavysolo.slice, 6G.
+#   --xl takes both slots too (not the build locks), for a 9G job: slice odin3-heavyxl.slice, 9G
 #   (unchanged), and the gate ODIN3_HEAVY_XL_OK=1 (the controller exports it by hand only when no
-#   agent is running). xl plus a running build is 9+4 = 13G, which must still fit the 60% rule
-#   (13.8G of 23G); xl itself leaves no free slot. Both take slot 0, then slot 1 (then, for
-#   --solo, the build lock), within one ODIN3_HEAVY_WAIT. A build holds only its own lock and
-#   waits for nothing else, so this order cannot deadlock. A waiting solo run holds slot 0
+#   agent is running). xl plus two running builds is 9+6 = 15G (of 23G); xl itself leaves no free slot. Both take slot 0, then slot 1 (then, for
+#   --solo, the build locks), within one ODIN3_HEAVY_WAIT. A build never takes a heavy lock and
+#   takes its slot before the legacy build lock, so this order cannot deadlock. A waiting solo run holds slot 0
 #   meanwhile, so new jobs only get slot 1; there is no strict fairness between a waiting solo
 #   run and queued normal jobs for a freed slot 1.
 # - Exits 77 (CTest's skip) unless ODIN3_HEAVY_OK=1. Also 77 without systemd-run, or when the slice
@@ -33,7 +34,7 @@
 #   `systemd-run --user --scope -q --slice=$ODIN3_HEAVY_SLICE ...`, so every child stays inside S
 #   (a bare nested --scope lands in app.slice, outside the cap).
 # - Descriptors: the job inherits fd 9 (the legacy lock odin3-heavy.lock, taken SHARED), fd 8 (slot
-#   0's lock file) and fd 7 (slot 1's), plus fd 6 (the build lock) for --solo; a job in slot k
+#   0's lock file) and fd 7 (slot 1's), plus fds 6, 5 and 4 (the build locks) for --solo; a job in slot k
 #   holds only the lock on fd 8 or 7 that is its slot (the other is closed), a solo/xl job holds
 #   both. The slot locks live as long as the job's processes, even if this wrapper is killed. The
 #   legacy lock exists for one release only: it keeps an old-binary caller (exclusive on
@@ -52,7 +53,7 @@
 #     spawns nested heavy steps keeps fd 9 open in them (shell does by default; Python's
 #     subprocess closes it unless given pass_fds=(9,)).
 #   - Outside a heavy slice but with a heavy or build lock open on an inherited descriptor
-#     (started under tools/build-locked, which keeps the build lock open in every build child):
+#     (started under tools/build-locked, which keeps its build locks open in every build child):
 #     exits 2 at once, "run the sweep outside the build"; --solo would wait on its own build.
 #   - Otherwise a set ODIN3_HEAVY_SLICE is stale: ignored with a warning (unset), and the run
 #     takes the normal path.
@@ -76,7 +77,7 @@
 # ones; the cgroup check also knows the default names. Only the holder of the machine's slot owns
 # S, so under another DIR S is not stopped (another agent's job may be in it) unless
 # ODIN3_HEAVY_STOP_SLICE=1 (tests only). tools/build-locked refuses to run under heavy-run (the
-# build would run under the job's cap, or wait forever on a --solo run's build lock).
+# build would run under the job's cap, or wait forever on a --solo run's build locks).
 set -uo pipefail
 
 skip() {
@@ -123,7 +124,7 @@ holds_lock_fd() {
     for fd in /proc/$$/fd/*; do
         target=$(readlink "$fd" 2>/dev/null) || continue
         [[ $target == "$base" || $target == "$base".0 || $target == "$base".1 ||
-            $target == "$bl" ]] && return 0
+            $target == "$bl" || $target == "$bl".0 || $target == "$bl".1 ]] && return 0
     done
     return 1
 }
@@ -261,8 +262,11 @@ else
     lock_wait -x 8
     lock_wait -x 7
     if [[ $mode == solo ]]; then
-        exec 6>>"$build_lock" || exit 2
-        lock_wait -x 6 # a quiet machine: no build meanwhile
+        exec 6>>"$build_lock.0" 5>>"$build_lock.1" 4>>"$build_lock" || exit 2
+        # a quiet machine: no build meanwhile; the legacy lock last (see build-locked's header)
+        lock_wait -x 6
+        lock_wait -x 5
+        lock_wait -x 4
     fi
     slot=$mode
     slice=${prefix}${mode}.slice

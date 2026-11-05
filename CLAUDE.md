@@ -31,13 +31,15 @@ tools/lint.sh                                            # the gate; /lint wraps
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt   # once
 ```
 
-Heavy runs (sweeps, large benchmarks): `ODIN3_HEAVY_OK=1 tools/heavy-run <cmd>`. Three lanes since
-2026-11-05 (5+5+4 GiB = 14 GiB = 60% of 23 GiB): two heavy slots, each in its own 5G slice
-(`odin3-heavy0.slice`, `odin3-heavy1.slice`; the log line says which), and one build lane. `--solo`
-takes both slots AND the build lock (use it when wall-clock time is a measured result); `--xl`
-takes both slots for a 9G job (needs `ODIN3_HEAVY_XL_OK=1`; xl plus a build must fit the 60% rule).
-A third job waits (`ODIN3_HEAVY_WAIT`, then exit 77). Builds go through `tools/build-locked`: one
-build at a time (`odin3-build.lock`), in `odin3-build.slice` (4G), `-j` capped at 4. Builds and
+Heavy runs (sweeps, large benchmarks): `ODIN3_HEAVY_OK=1 tools/heavy-run <cmd>`. Four lanes since
+2026-11-05 (5+5+3+3 = 16 GiB of 23; above the old 60% rule, by Peter's request for parallel
+builds): two heavy slots, each in its own 5G slice (`odin3-heavy0.slice`, `odin3-heavy1.slice`; the
+log line says which), and two build slots. `--solo` takes both heavy slots AND both build locks
+(use it when wall-clock time is a measured result); `--xl`
+takes both slots for a 9G job (needs `ODIN3_HEAVY_XL_OK=1`; xl plus two builds is 15 GiB).
+A third job waits (`ODIN3_HEAVY_WAIT`, then exit 77). Builds go through `tools/build-locked`: two
+builds at once (`odin3-build.lock.0`/`.1`; a third waits), each in `odin3-build0.slice` /
+`odin3-build1.slice` (3G), `-j` capped at 3. Builds and
 heavy jobs never wait for each other (except `--solo`). Details: headers of both tools.
 
 Oracles and comparison (see `docs/ORACLES.md`):

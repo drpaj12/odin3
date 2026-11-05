@@ -1,37 +1,48 @@
 #!/usr/bin/env bash
 # build-locked: `cmake --build` in its own lane, so builds neither wait for heavy runs nor stall them
-# (2E plan point (p), ruling C1; own build lane since 2026-11-05, Peter: three lanes, 5+5+4 GiB
-# = 14 GiB = 60% of 23 GiB).
+# (2E plan point (p), ruling C1; own build lane since 2026-11-05; two build slots since 2026-11-05,
+# Peter: "can the builds be in parallel").
 #
-# Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j4
+# Usage: tools/build-locked <cmake --build args...>   e.g. tools/build-locked --preset debug -j3
 #
 # - Refused (exit 2) inside a heavy run, i.e. when this process's cgroup is in a heavy slice
 #   (odin3-heavy0.slice, odin3-heavy1.slice, odin3-heavysolo.slice, odin3-heavyxl.slice, or the
 #   old odin3-heavy.slice): the build would run under the heavy job's memory cap, and inside a
-#   --solo run, which holds the build lock, it would wait forever. Build before the heavy run.
+#   --solo run, which holds both build locks, it would wait forever. Build before the heavy run.
 #   A set ODIN3_HEAVY_SLICE outside those slices is stale: ignored with a warning.
-# - One build at a time machine-wide: it takes ONLY $DIR/odin3-build.lock, exclusive, on fd 9
-#   (inherited by every build child, released when the last of them exits). Busy: it says so
-#   ("waiting for the build that holds ...", a --solo heavy run holds it too) and blocks.
+# - Two build slots. Slot k (k = 0, 1) is an exclusive flock(2) on $DIR/odin3-build.lock.k (fd 9
+#   for slot 0, fd 8 for slot 1, inherited by every build child, released when the last of them
+#   exits). A build takes slot 0 if free, else slot 1, without waiting; with both busy it says so
+#   ("waiting for a free build slot ...") and waits on both, the first to free wins. Like
+#   tools/heavy-run it never holds one lock while waiting for another that a third party could
+#   hold forever: the slot comes first, then the legacy lock below, and --solo takes the legacy
+#   lock only after both slots, so the orders cannot deadlock.
+# - Legacy lock, for one release: an old build-locked held ONE exclusive $DIR/odin3-build.lock. A
+#   new build also holds that file SHARED (fd 5) once it has its slot: new builds share it with
+#   each other, and an old-binary build (exclusive) and a new build exclude each other, so a mixed
+#   fleet still serialises. --solo takes it exclusive. Remove this once no old binary runs.
 #   It takes neither the heavy slot locks nor the legacy lock odin3-heavy.lock, and it does not
 #   look at the odin3-heavy.queued.* flags: builds and heavy jobs never wait for each other,
-#   except --solo, which takes the build lock as well (a quiet machine for wall-time results).
-#   A stream of builds can delay a waiting --solo run (flock is not fair); old-binary heavy
-#   callers (exclusive on the legacy lock) no longer interact with builds at all.
-# - Memory: the build runs in the user slice odin3-build.slice (MemoryMax=4G, MemorySwapMax=0, set
+#   except --solo, which takes both build locks as well (a quiet machine for wall-time results).
+#   A stream of builds can delay a waiting --solo run (flock is not fair).
+# - Memory: slot k runs in the user slice odin3-buildk.slice (MemoryMax=3G, MemorySwapMax=0, set
 #   with `systemctl --user set-property --runtime` like heavy-run's), via
 #   `systemd-run --user --scope -q --unit=<u> --slice=S -p OOMPolicy=continue cmake --build ...`;
 #   the scope and (under the real DIR) the slice are stopped when it returns. Without systemd or
 #   a --user manager it warns and builds uncapped. Exits with cmake's status.
-# - Parallelism is capped at -j4: -jN, -j N, --parallel[=| ]N (before or after `--`) above 4, or
-#   without a number, are clamped to 4 with a note on stderr; with no -j at all `-j 4` is added.
+#   Budget: 3+3 (builds) + 5+5 (heavy slots) = 16 GiB of 23, which is above the old 60% rule
+#   (13.8 GiB); this is by Peter's request for parallel builds.
+# - Parallelism is capped at -j3 per build: -jN, -j N, --parallel[=| ]N (before or after `--`)
+#   above 3, or without a number, are clamped to 3 with a note on stderr; with no -j at all `-j 3`
+#   is added.
 #
-# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only). ODIN3_BUILD_SLICE
-# (default odin3-build.slice) and ODIN3_BUILD_JOBS_MAX (default 4) are for the tests only.
+# DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only).
+# ODIN3_BUILD_SLICE_PREFIX (default odin3-build; slices <prefix>0.slice, <prefix>1.slice) and
+# ODIN3_BUILD_JOBS_MAX (default 3) are for the tests only.
 set -uo pipefail
 
 dir=${ODIN3_HEAVY_DIR:-/tmp/claude-1000}
-lock=$dir/odin3-build.lock
+lock=$dir/odin3-build.lock # legacy single lock; slots are $lock.0 and $lock.1
 
 # The heavy slice this process runs in according to its cgroup, or nothing (as tools/heavy-run
 # checks). ODIN3_HEAVY_CGROUP replaces /proc/self/cgroup (tests only).
@@ -61,13 +72,53 @@ if [[ -n ${ODIN3_HEAVY_SLICE:-} ]]; then
 fi
 mkdir -p "$dir" || exit 2
 
-slice=${ODIN3_BUILD_SLICE:-odin3-build.slice}
-max=${ODIN3_BUILD_JOBS_MAX:-4}
+prefix=${ODIN3_BUILD_SLICE_PREFIX:-odin3-build}
+max=${ODIN3_BUILD_JOBS_MAX:-3}
 
-exec 9>>"$lock" || exit 2
-if ! flock -x -n 9; then
-    echo "build-locked: waiting for the build that holds $lock" >&2
-    flock -x 9 || exit 2
+exec 9>>"$lock.0" 8>>"$lock.1" 5>>"$lock" || exit 2
+
+# Take a slot: 0 if free, else 1; with both busy two waiters race and the first to hold wins.
+# The waits run in the background so a signal ends them at once (bash defers a trap until a
+# foreground child exits); a lock a killed waiter took on the shared descriptor in the race is
+# closed below.
+waiters=()
+trap 'kill "${waiters[@]}" 2>/dev/null; exit 130' INT
+trap 'kill "${waiters[@]}" 2>/dev/null; exit 143' TERM HUP
+if flock -x -n 9; then
+    slot=0
+elif flock -x -n 8; then
+    slot=1
+else
+    echo "build-locked: waiting for a free build slot ($lock.0 and $lock.1 are both held)" >&2
+    flock -x 9 &
+    w0=$!
+    flock -x 8 &
+    w1=$!
+    waiters=("$w0" "$w1")
+    done_pid=
+    wait -n -p done_pid "$w0" "$w1"
+    rc=$?
+    if [[ $done_pid == "$w0" ]]; then other=$w1; else other=$w0; fi
+    if [[ $rc -ne 0 ]]; then
+        kill "${waiters[@]}" 2>/dev/null
+        echo "build-locked: flock failed (exit $rc)" >&2
+        exit 2
+    fi
+    kill "$other" 2>/dev/null
+    wait "$other" 2>/dev/null
+    waiters=()
+    [[ $done_pid == "$w0" ]] && slot=0 || slot=1
+fi
+# Close the other slot's descriptor: it may hold a lock the killed waiter took in the race.
+if [[ $slot == 0 ]]; then exec 8>&-; else exec 9>&-; fi
+slice=${prefix}${slot}.slice
+# The legacy lock, shared; blocks only on an old-binary build (exclusive) or a --solo run.
+if ! flock -s -n 5; then
+    echo "build-locked: waiting for the old-style build or solo run that holds $lock" >&2
+    flock -s 5 &
+    waiters=($!)
+    wait "$!" || exit 2
+    waiters=()
 fi
 
 # clamp N: sets CV to N, or to $max when N is 0 (bare -j), empty or above $max; note when it moved.
@@ -119,7 +170,7 @@ while ((i < n)); do
     esac
 done
 if [[ $clamped -ne 0 ]]; then
-    echo "build-locked: note: parallelism $clamped clamped to -j$max (build lane cap)" >&2
+    echo "build-locked: note: parallelism $clamped clamped to -j$max (build slot cap)" >&2
 fi
 if [[ $seen -eq 0 ]]; then
     if [[ $native -eq 1 ]]; then
@@ -130,7 +181,7 @@ if [[ $seen -eq 0 ]]; then
 fi
 
 if command -v systemd-run >/dev/null 2>&1 &&
-    systemctl --user set-property --runtime "$slice" MemoryMax=4G MemorySwapMax=0 2>/dev/null; then
+    systemctl --user set-property --runtime "$slice" MemoryMax=3G MemorySwapMax=0 2>/dev/null; then
     unit=odin3-build-$$-$(date +%s%N)
     systemd-run --user --scope -q --unit="$unit" --slice="$slice" -p OOMPolicy=continue \
         cmake --build "${out[@]}"

@@ -20,7 +20,7 @@ already leaves out `mcml` and `LU32PEEng`).
 This machine is WSL2 on Windows: 12 cores, 23 GiB RAM for the VM, and a 472 GB `C:` drive that the
 VM disk grows into. An out-of-memory kill or a full `C:` kills the whole VM, not one process. So
 heavy runs use two locked slots (`tools/heavy-run`, 5 GiB each, 9 GiB with `--xl`, no swap; builds
-have their own 4 GiB lane in `tools/build-locked` and do not wait for them). A sweep of the four big designs, about 12 h for three legs, would block the machine for a
+have two 3 GiB slots in `tools/build-locked` and do not wait for them). A sweep of the four big designs, about 12 h for three legs, would block the machine for a
 day. That is the reason for this directory.
 
 The caps are not about the bigger machine's size: `tools/heavy-run` and `vtr-qor` apply the same

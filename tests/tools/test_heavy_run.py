@@ -113,8 +113,10 @@ class FakeTools(unittest.TestCase):
         self.env["FAKE_LOG"] = str(self.log)
         self.env["ODIN3_HEAVY_DIR"] = str(self.heavy)
         self.env["ODIN3_HEAVY_SLICE_PREFIX"] = PREFIX
-        self.env["ODIN3_BUILD_SLICE"] = f"{PREFIX}-build.slice"
+        self.env["ODIN3_BUILD_SLICE_PREFIX"] = f"{PREFIX}-build"
         self.build_lock = self.heavy / "odin3-build.lock"
+        self.bslot0 = self.heavy / "odin3-build.lock.0"
+        self.bslot1 = self.heavy / "odin3-build.lock.1"
         # outside any heavy slice by default, even when ctest itself runs under heavy-run
         outside = self.dir / "cgroup-outside"
         outside.write_text(CGROUP_OUT)
@@ -238,9 +240,11 @@ class HeavyRunTest(FakeTools):
             self.assertRegex(calls[1], rf"^flock -x -w [0-9]+ 8 \| flag=yes fd9={self.lock}$")
             self.assertRegex(calls[2], rf"^flock -x -w [0-9]+ 7 \| flag=yes fd9={self.lock}$")
             k = 3
-            if name == "solo":  # --solo also takes the build lock
-                self.assertRegex(calls[3], rf"^flock -x -w [0-9]+ 6 \| flag=yes fd9={self.lock}$")
-                k = 4
+            if name == "solo":  # --solo also takes both build slots, then the legacy build lock
+                for j, fd in enumerate((6, 5, 4)):
+                    self.assertRegex(calls[3 + j],
+                                     rf"^flock -x -w [0-9]+ {fd} \| flag=yes fd9={self.lock}$")
+                k = 6
             self.assertEqual(calls[k], f"systemctl --user set-property --runtime "
                                        f"{PREFIX}{name}.slice MemoryMax={cap} MemorySwapMax=0")
             self.assertRegex(calls[k + 1], rf"^systemd-run --user --scope -q "
@@ -405,7 +409,7 @@ class NestingTest(FakeTools):
                       run.stderr)
         self.assertIn("(not in that slice); ignoring it", run.stderr)
         self.assertEqual([c for c in self.calls() if c.startswith("cmake")],
-                         ["cmake --build --preset debug -j 4"])
+                         ["cmake --build --preset debug -j 3"])
 
     def test_nested_with_the_real_lock(self) -> None:
         """A heavy run whose job calls heavy-run and build-locked: no wait on its own lock."""
@@ -505,31 +509,60 @@ class RealLockTest(FakeTools):
         self.assertEqual(run.stderr, "heavy-run: lock busy for 1 s; skipped\n")
         self.assertEqual(self.calls(), [])
 
-    def test_build_waits_for_the_holder(self) -> None:
-        self.heavy.mkdir()
-        holder = os.open(self.build_lock, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+    def hold(self, *files: Path) -> list[int]:
+        self.heavy.mkdir(exist_ok=True)
+        fds = [os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND) for f in files]
+        for fd in fds:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+        return fds
+
+    def popen_build(self) -> subprocess.Popen[str]:
+        return subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
+                                env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def test_build_waits_for_both_slots(self) -> None:
+        holders = self.hold(self.bslot0, self.bslot1)
         try:
-            fcntl.flock(holder, fcntl.LOCK_EX)
-            build = subprocess.Popen([BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
-                                     env=self.env, stdout=subprocess.PIPE,
-                                     stderr=subprocess.PIPE)
+            build = self.popen_build()
             time.sleep(1.0)
             self.assertIsNone(build.poll())
             self.assertEqual([c for c in self.calls() if c.startswith("cmake")], [])
         finally:
-            os.close(holder)
+            for fd in holders:
+                os.close(fd)
         _, err = build.communicate(timeout=30)
         self.assertEqual(build.returncode, 0)
-        self.assertEqual(err, f"build-locked: waiting for the build that holds {self.build_lock}\n")
-        self.assertIn("cmake --build --preset debug -j 4", self.calls())
+        self.assertEqual(err, f"build-locked: waiting for a free build slot ({self.build_lock}.0 "
+                              f"and {self.build_lock}.1 are both held)\n")
+        self.assertIn("cmake --build --preset debug -j 3", self.calls())
 
-    def test_legacy_and_slot_locks_do_not_block_a_build(self) -> None:
-        self.heavy.mkdir()
-        holders = [os.open(f, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
-                   for f in (self.lock, self.slot0, self.slot1)]
+    def test_build_takes_the_free_slot(self) -> None:
+        holders = self.hold(self.bslot0)
         try:
+            run = self.run_tool(BUILD_LOCKED, "--preset", "debug")
+        finally:
             for fd in holders:
-                fcntl.flock(fd, fcntl.LOCK_EX)
+                os.close(fd)
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(run.stderr, "")
+        self.assertIn(f"--slice={PREFIX}-build1.slice", "\n".join(self.calls()))
+
+    def test_old_binary_exclusive_lock_still_serialises_a_build(self) -> None:
+        holders = self.hold(self.build_lock)
+        try:
+            build = self.popen_build()
+            time.sleep(1.0)
+            self.assertIsNone(build.poll())
+        finally:
+            for fd in holders:
+                os.close(fd)
+        _, err = build.communicate(timeout=30)
+        self.assertEqual(build.returncode, 0, err)
+        self.assertIn("old-style build or solo run", err)
+
+    def test_heavy_locks_do_not_block_a_build(self) -> None:
+        holders = self.hold(self.lock, self.slot0, self.slot1)
+        try:
             run = self.run_tool(BUILD_LOCKED, "--preset", "debug")
         finally:
             for fd in holders:
@@ -552,11 +585,12 @@ class BuildLockedTest(FakeTools):
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertEqual(run.stderr, "")
         calls = self.calls()
-        self.assertEqual(calls[0], f"flock -x -n 9 | flag=no fd9={self.build_lock}")
-        self.assertEqual(calls[1], f"systemctl --user set-property --runtime {PREFIX}-build.slice "
-                                   "MemoryMax=4G MemorySwapMax=0")
-        self.assertRegex(calls[2], rf"^systemd-run --user --scope -q --unit=odin3-build-[0-9]+-"
-                                   rf"[0-9]+ --slice={PREFIX}-build\.slice -p OOMPolicy=continue "
+        self.assertEqual(calls[0], f"flock -x -n 9 | flag=no fd9={self.bslot0}")
+        self.assertEqual(calls[1], f"flock -s -n 5 | flag=no fd9={self.bslot0}")
+        self.assertEqual(calls[2], f"systemctl --user set-property --runtime {PREFIX}-build0.slice "
+                                   "MemoryMax=3G MemorySwapMax=0")
+        self.assertRegex(calls[3], rf"^systemd-run --user --scope -q --unit=odin3-build-[0-9]+-"
+                                   rf"[0-9]+ --slice={PREFIX}-build0\.slice -p OOMPolicy=continue "
                                    rf"cmake --build --preset debug -j2 ")
         self.assertEqual(self.cmake_call(), "cmake --build --preset debug -j2")
 
@@ -568,17 +602,19 @@ class BuildLockedTest(FakeTools):
         self.assertEqual(run.stderr, "")
         self.assertFalse(any("odin3-heavy.lock" in c for c in self.calls()))
 
-    def test_parallelism_is_clamped_to_four(self) -> None:
+    def test_parallelism_is_clamped_to_three(self) -> None:
         cases = [
-            (("-j8",), "cmake --build -j4", True),
-            (("-j", "16", "--target", "x"), "cmake --build -j 4 --target x", True),
-            (("--parallel", "9"), "cmake --build --parallel 4", True),
-            (("--parallel=12",), "cmake --build --parallel=4", True),
-            (("-j",), "cmake --build -j 4", False),
+            (("-j8",), "cmake --build -j3", True),
+            (("-j", "16", "--target", "x"), "cmake --build -j 3 --target x", True),
+            (("--parallel", "9"), "cmake --build --parallel 3", True),
+            (("--parallel=12",), "cmake --build --parallel=3", True),
+            (("-j4",), "cmake --build -j3", True),
+            (("-j",), "cmake --build -j 3", False),
+            (("-j2",), "cmake --build -j2", False),
             (("-j3",), "cmake --build -j3", False),
-            (("--preset", "d"), "cmake --build --preset d -j 4", False),
-            (("--preset", "d", "--", "-v"), "cmake --build --preset d -j 4 -- -v", False),
-            (("--preset", "d", "--", "-j20"), "cmake --build --preset d -- -j4", True),
+            (("--preset", "d"), "cmake --build --preset d -j 3", False),
+            (("--preset", "d", "--", "-v"), "cmake --build --preset d -j 3 -- -v", False),
+            (("--preset", "d", "--", "-j20"), "cmake --build --preset d -- -j3", True),
         ]
         for args, want, noted in cases:
             with self.subTest(args=args):
@@ -586,13 +622,13 @@ class BuildLockedTest(FakeTools):
                 run = self.build(*args)
                 self.assertEqual(run.returncode, 0, run.stderr)
                 self.assertEqual(self.cmake_call(), want)
-                self.assertEqual("clamped to -j4" in run.stderr, noted, run.stderr)
+                self.assertEqual("clamped to -j3" in run.stderr, noted, run.stderr)
 
     def test_no_systemd_builds_uncapped_with_a_warning(self) -> None:
         run = self.run_tool(BUILD_LOCKED, "--preset", "debug", FAKE_SYSTEMCTL_RC="1")
         self.assertEqual(run.returncode, 0, run.stderr)
         self.assertIn("building uncapped", run.stderr)
-        self.assertEqual(self.cmake_call(), "cmake --build --preset debug -j 4")
+        self.assertEqual(self.cmake_call(), "cmake --build --preset debug -j 3")
 
     def test_exit_status_is_cmakes(self) -> None:
         cmake = self.dir / "bad-cmake" / "cmake"
@@ -753,20 +789,56 @@ class TwoSlotsTest(FakeTools):
             self.release(tag)
             self.finish(proc)
 
-    def test_two_builds_serialise(self) -> None:
+    def test_two_builds_run_at_once_and_a_third_waits(self) -> None:
         one = self.start_build("one")
-        _wait_for(lambda: self.build_started("one"), "the first build")
         two = self.start_build("two")
+        _wait_for(lambda: self.build_started("one") and self.build_started("two"),
+                  "both builds to run at once")
+        three = self.start_build("three")
         time.sleep(1.0)
-        self.assertFalse(self.build_started("two"))
-        (self.dir / "one.bgo").touch()
-        _, err = one.communicate(timeout=30)
-        self.assertEqual(one.returncode, 0, err)
-        _wait_for(lambda: self.build_started("two"), "the second build after the first")
+        self.assertFalse(self.build_started("three"))
         (self.dir / "two.bgo").touch()
         _, err = two.communicate(timeout=30)
         self.assertEqual(two.returncode, 0, err)
-        self.assertIn("waiting for the build that holds", err)
+        _wait_for(lambda: self.build_started("three"), "the third build after one finished")
+        self.assertIsNone(one.poll())  # the first is still running
+        (self.dir / "one.bgo").touch()
+        (self.dir / "three.bgo").touch()
+        _, err1 = one.communicate(timeout=30)
+        _, err3 = three.communicate(timeout=30)
+        self.assertEqual((one.returncode, three.returncode), (0, 0), err1 + err3)
+        self.assertIn("waiting for a free build slot", err3)
+
+    def test_the_two_builds_use_different_slices(self) -> None:
+        one = self.start_build("one")
+        two = self.start_build("two")
+        _wait_for(lambda: self.build_started("one") and self.build_started("two"), "both builds")
+        slices = []
+        for c in self.calls():
+            m = re.search(r"^systemd-run .*--slice=(\S+)", c)
+            if m:
+                slices.append(m.group(1))
+        self.assertEqual(sorted(slices), [f"{PREFIX}-build0.slice", f"{PREFIX}-build1.slice"])
+        for tag, proc in (("one", one), ("two", two)):
+            (self.dir / f"{tag}.bgo").touch()
+            proc.communicate(timeout=30)
+
+    def test_solo_waits_for_both_builds(self) -> None:
+        one = self.start_build("one")
+        two = self.start_build("two")
+        _wait_for(lambda: self.build_started("one") and self.build_started("two"), "both builds")
+        s = self.start("s", "--solo", ODIN3_HEAVY_WAIT="60")
+        time.sleep(1.0)
+        self.assertFalse(self.started("s"))
+        (self.dir / "one.bgo").touch()
+        one.communicate(timeout=30)
+        time.sleep(1.0)
+        self.assertFalse(self.started("s"))  # one build still runs
+        (self.dir / "two.bgo").touch()
+        two.communicate(timeout=30)
+        _wait_for(lambda: self.started("s"), "the solo job after both builds")
+        self.release("s")
+        self.finish(s)
 
     def test_solo_waits_for_a_running_build_and_blocks_builds(self) -> None:
         build = self.start_build("x")
