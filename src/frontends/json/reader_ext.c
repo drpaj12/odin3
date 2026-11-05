@@ -78,9 +78,20 @@ static odin3_status ext_prov(jr *rd, const odin3_json_node *value) {
     return ODIN3_OK;
 }
 
+/* odin3_nets: the Odin III net ID of each bit of a netname, written for tools that join other
+ * files by net ID. The reader numbers the nets itself, so the member is accepted and dropped. */
+static odin3_status ext_nets(jr *rd, const odin3_json_node *value) {
+    (void)rd;
+    (void)value;
+    return ODIN3_OK;
+}
+
 /* odin3_version is read by jr_check_version and, as before, counted with the skipped members. */
-static const odin3_json_ext_key odin3_json_ext_keys[] = {
-    {"odin3_level", ext_level}, {"odin3_prov", ext_prov}, {"odin3_edit", ext_edit}, {NULL, NULL}};
+static const odin3_json_ext_key odin3_json_ext_keys[] = {{"odin3_level", ext_level},
+                                                         {"odin3_prov", ext_prov},
+                                                         {"odin3_edit", ext_edit},
+                                                         {"odin3_nets", ext_nets},
+                                                         {NULL, NULL}};
 
 static const char EXT_PREFIX[] = "odin3_";
 

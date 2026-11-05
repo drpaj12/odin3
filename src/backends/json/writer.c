@@ -114,6 +114,39 @@ static void write_wire_shape(jw *out, jw_list *fields, odin3_wire_id wire) {
     }
 }
 
+/* The additive "odin3_nets" key: the Odin III net ID of each bit (0 for a constant), the same
+ * numbers the scoap output and the provenance records use; the "bits" codes are not net IDs. */
+static void write_net_ids(jw *out, jw_list *fields, const odin3_net_id *nets, uint32_t count) {
+    if (!out->net_ids || out->status != ODIN3_OK) {
+        return;
+    }
+    jw_key(out, fields, "odin3_nets");
+    jw_raw(out, "[ ");
+    for (uint32_t i = 0; i < count; i++) {
+        bool plain = odin3_net_valid(nets[i]) &&
+                     odin3_net_const_value(out->module, nets[i]) == ODIN3_CONST_NONE;
+        jw_fmt(out, "%s%u", i > 0 ? ", " : "", plain ? (unsigned)nets[i].v : 0U);
+    }
+    jw_raw(out, " ]");
+}
+
+static void write_wire_net_ids(jw *out, jw_list *fields, odin3_wire_id wire) {
+    const uint32_t width = odin3_wire_width(out->module, wire);
+    for (uint32_t i = 0; out->net_ids && i < width; i++) {
+        if (i == 0) {
+            jw_key(out, fields, "odin3_nets");
+            jw_raw(out, "[ ");
+        }
+        odin3_net_id net = odin3_wire_net(out->module, wire, i);
+        bool plain =
+            odin3_net_valid(net) && odin3_net_const_value(out->module, net) == ODIN3_CONST_NONE;
+        jw_fmt(out, "%s%u", i > 0 ? ", " : "", plain ? (unsigned)net.v : 0U);
+        if (i + 1 == width) {
+            jw_raw(out, " ]");
+        }
+    }
+}
+
 static void write_wire_bits(jw *out, odin3_wire_id wire) {
     const uint32_t width = odin3_wire_width(out->module, wire);
     jw_raw(out, "[ ");
@@ -247,6 +280,7 @@ static void write_wire_netname(jw *out, jw_list *names, odin3_wire_id wire) {
     jw_raw(out, hidden ? "1" : "0");
     jw_key(out, &fields, "bits");
     write_wire_bits(out, wire);
+    write_wire_net_ids(out, &fields, wire);
     write_wire_shape(out, &fields, wire);
     write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_WIRE, wire.v});
     jw_odin3_keys(out, &fields, (odin3_objref){ODIN3_OBJ_WIRE, wire.v},
@@ -289,6 +323,7 @@ static void write_net_netname(jw *out, jw_list *names, const net_entry *entry) {
     jw_raw(out, "[ ");
     jw_bit(out, jw_net_code(out, entry->net));
     jw_raw(out, " ]");
+    write_net_ids(out, &fields, &entry->net, 1);
     write_attrs(out, &fields, &bits, (odin3_objref){ODIN3_OBJ_NET, entry->net.v});
     jw_odin3_keys(out, &fields, (odin3_objref){ODIN3_OBJ_NET, entry->net.v},
                   odin3_net_prov(out->module, entry->net));
@@ -872,7 +907,8 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
                 .strtab = odin3_design_strtab(design),
                 .status = ODIN3_OK,
                 .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE,
-                .odin3_keys = opts != NULL && opts->odin3_keys};
+                .odin3_keys = opts != NULL && opts->odin3_keys,
+                .net_ids = opts != NULL && opts->net_ids};
     (void)odin3_strtab_find(state.strtab, odin3_bytes_cstr("odin3_level"), &state.level_key);
     odin3_strbuf_init(&state.key);
     odin3_strbuf_init(&state.src);
