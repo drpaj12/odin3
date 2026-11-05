@@ -737,13 +737,15 @@ static odin3_status lv_memory_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, od
                                      const odin3_elab2_wordref *ref) {
     const odin3_elab_mem *mem = odin3_elab2_mem_get(e2, ref->mem);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
-    bool variable = false;
     odin3_elab2_memsel word = {odin3_ast_child(e2->elab, sel, 0), ref->mem};
     odin3_status st = lv_memory_start(e2, lv, sel, word);
-    st = st != ODIN3_OK ? st : lv_index_variable(e2, lv, sel, &variable);
-    if (st != ODIN3_OK || variable) {
-        return st != ODIN3_OK ? st : lv_variable_index(e2, lv, sel, lv_name(e2, rec));
+    if (st != ODIN3_OK) {
+        return st;
     }
+    /* An index that is not constant by the AST may still be a constant here: a loop variable the
+     * generator holds as one (`for (i...) m[a][i*8+1] <= d`; Yosys unrolls the loop first). The
+     * index is generated; if it comes out constant the select is a constant one, else it is the
+     * error below (a variable bit of a memory word has no write port to give). */
     odin3_elab2_selobj obj = {rec->has_packed ? rec->packed.msb : 0,
                               rec->has_packed ? rec->packed.lsb : 0, mem->width, lv_name(e2, rec)};
     odin3_elab2_selrange range;
