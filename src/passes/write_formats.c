@@ -169,6 +169,10 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
         out->json.odin3_keys = true;
         return ODIN3_OK;
     }
+    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--net-ids")) {
+        out->json.net_ids = true;
+        return ODIN3_OK;
+    }
     if (names && odin3_pass_arg_is(word, "--prov-map")) {
         return parse_prov_map(pass, rest, out);
     }
@@ -230,7 +234,7 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
     write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL, ODIN3_PROV_MAP_NONE},
-                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, ODIN3_PROV_MAP_NONE},
+                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, false, ODIN3_PROV_MAP_NONE},
                          .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
@@ -290,12 +294,13 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",
-    "write_json <file> [--odin3] [--name-style short|provenance|hash [--name-map <file>]] "
+    "write_json <file> [--odin3] [--net-ids] [--name-style short|provenance|hash [--name-map "
+    "<file>]] "
     "[--prov-map [refs|constructs|full]]: write the design as Yosys-schema JSON (file - is "
     "stdout); hash names write the name map to <file>.names or --name-map; --prov-map (hash "
     "names only) writes the version 2 map with the records and the AST layer; --odin3 adds "
     "odin3_version, and per module, cell and netname odin3_prov and "
-    "odin3_level",
+    "odin3_level; --net-ids adds odin3_nets (the net ID of each bit) to every netname",
     write_json_run,
     NULL,
     false,

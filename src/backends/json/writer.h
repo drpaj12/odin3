@@ -63,6 +63,10 @@ typedef struct odin3_json_write_opts {
      * under `attributes`. false: the output is byte for byte that of odin3_json_write.
      */
     bool odin3_keys;
+    /* `write_json --net-ids`: each netname also has `odin3_nets`, the Odin III net ID of each bit
+     * (0 for a constant), the numbers the scoap output and the provenance records use. false: the
+     * output is unchanged. */
+    bool net_ids;
     odin3_prov_map_mode prov_map; /* HASH only: the name map is version 2 (V1.2.0 3.5) */
 } odin3_json_write_opts;
 

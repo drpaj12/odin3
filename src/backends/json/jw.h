@@ -58,6 +58,7 @@ typedef struct jw {
     odin3_wattr_seen seen;  /* keys written in the current attributes/parameters object */
     odin3_strtab *written;  /* cell and netname keys written in the current module */
     bool odin3_keys;        /* write_json --odin3: the Odin III keys (E-2) */
+    bool net_ids;           /* write_json --net-ids: odin3_nets on the netnames */
     uint32_t level_key;     /* strtab ID of "odin3_level", 0 when the design has none */
     jw_names_mode names;    /* how keys are formed */
     odin3_hash_rows rows;   /* COLLECT/APPLY: the objects named by provenance, all modules */

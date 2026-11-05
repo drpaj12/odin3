@@ -25,6 +25,8 @@ macro. `--top` picks the testbench module among the joined files; the other modu
 `` `timescale`` is read; `` `default_nettype``, `` `celldefine`` and similar are ignored. Messages
 give line numbers of the joined, preprocessed text of the first file's name.
 
+Tasks: `task name; input/output/inout ...; begin ... end endtask` (and the ANSI form `task name(input [7:0] a, output b);`) can be declared and called as statements, also with delays inside. Arguments are static variables of the testbench: inputs are copied in at the call and outputs copied back when the task ends; there is no recursion or `automatic` storage, and no `function`.
+
 Plusargs: `--plusarg name=value` (repeatable, up to 16; a leading `+` is dropped) is read by
 `$test$plusargs("name")` (1 when a plusarg starts with the text) and `$value$plusargs("name=%d", var)`
 (conversions `d`, `h`/`x`, `b`, `o`, `s`; the call is 1 and `var` is set when a plusarg starts with the text
