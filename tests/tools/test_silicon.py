@@ -193,6 +193,18 @@ endmodule
                          ["hdl:a.v:1.1-9.9", "hdl:a.v:3.1-3.4"])
 
 
+class OpenroadDriverTest(unittest.TestCase):
+    def test_probe_cells_are_dont_use(self) -> None:
+        """repair_design picked probe_p_8 as a repeater; global routing died on that net (sha3_low)."""
+        tcl = (REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl").read_text()
+        line = [x for x in tcl.splitlines() if x.startswith("set_dont_use")]
+        self.assertEqual(len(line), 1)
+        self.assertIn("sky130_fd_sc_hd__probe_p_8", line[0])
+        self.assertIn("sky130_fd_sc_hd__probec_p_8", line[0])
+        self.assertLess(tcl.index("link_design"), tcl.index("set_dont_use"))  # needs a network
+        self.assertLess(tcl.index("set_dont_use"), tcl.index("\nrepair_design\n"))
+
+
 class ToolTimeoutTest(unittest.TestCase):
     def test_default_tool_timeout_is_six_hours(self) -> None:
         """Magic needed more than the old 3600 s on des; the limit is now 6 h (env override)."""
