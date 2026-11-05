@@ -80,6 +80,13 @@ class ScoapTest(unittest.TestCase):
             },
         )
 
+    def test_net_entries_name_their_wire_and_bit(self) -> None:
+        text = blif(".names a b y\n11 1\n.names y c z\n11 1\n", "a b c", "z")
+        got = self.run_pass(text)
+        for port in ("a", "b", "c", "z"):  # a port net is bit 0 of the wire of its name
+            self.assertEqual(port, got[port]["wire"])
+            self.assertEqual(0, got[port]["bit"])
+
     def test_or_not_xor(self) -> None:
         text = blif(
             ".names a b o\n1- 1\n-1 1\n.names a n\n0 1\n.names a b x\n10 1\n01 1\n",

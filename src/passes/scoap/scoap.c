@@ -165,11 +165,26 @@ static const char *net_text(const sc_model *md, uint32_t id, char *fallback, siz
     return fallback;
 }
 
+/* The net's primary wire and bit (additive keys), so a net that has no name of its own can still
+ * be joined to the netlist by the wire it belongs to. */
+static odin3_status put_wire_bit(odin3_strbuf *out, const sc_model *md, uint32_t id) {
+    odin3_wirebit prim = odin3_net_primary(md->mod, (odin3_net_id){id});
+    if (!odin3_wire_valid(prim.wire)) {
+        return ODIN3_OK;
+    }
+    odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(", \"wire\": "));
+    const char *wname = odin3_strtab_get(odin3_design_strtab(odin3_module_design(md->mod)),
+                                         odin3_wire_name(md->mod, prim.wire));
+    st = st == ODIN3_OK ? gl_put_escaped(out, wname) : st;
+    return st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"bit\": %u", (unsigned)prim.bit) : st;
+}
+
 static odin3_status put_net(odin3_strbuf *out, const sc_model *md, uint32_t id,
                             const int32_t *ppm) {
     char fallback[NUM_BUF];
     odin3_status st = odin3_strbuf_appendf(out, "{\"id\": %u, \"name\": ", (unsigned)id);
     st = st == ODIN3_OK ? gl_put_escaped(out, net_text(md, id, fallback, sizeof fallback)) : st;
+    st = st == ODIN3_OK ? put_wire_bit(out, md, id) : st;
     st = st == ODIN3_OK ? odin3_strbuf_appendf(out, ", \"cc0\": %lld, \"cc1\": %lld, \"co\": %lld",
                                                (long long)md->cc[0][id], (long long)md->cc[1][id],
                                                (long long)md->co[id])

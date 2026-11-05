@@ -4,7 +4,7 @@
 |---|---|---|
 | BLIF | `write_blif [--vtr] [--lut-k K] [--name-style short\|provenance\|hash] <file>` | `--vtr` writes only the top module, in the dialect VPR reads |
 | Verilog | `write_verilog <file>` | Structural. With LPM cells after `lpmmap`; `read_verilog -icells` reads it back. Writes only the top module and the modules it reaches (all modules when no top is set, or when an instance names a module the design lacks; that case prints a WARNING) |
-| JSON | `write_json <file> [--odin3]` | Yosys schema; `--odin3` adds the version, and provenance and level per module, cell and net name |
+| JSON | `write_json <file> [--odin3] [--net-ids]` | Yosys schema; `--odin3` adds the version, and provenance and level per module, cell and net name; `--net-ids` adds `odin3_nets`, the net ID of each bit, to every net name |
 | Graphviz dot | `write_dot <file>` | See {doc}`analysis` |
 | Yosys RTLIL text | `write_rtlil` | Word-level, with processes |
 | Locations | `dump_locs [--types] [<file>]` | One `module\|kind\|name\|file:line.col-line.col` line per object |
