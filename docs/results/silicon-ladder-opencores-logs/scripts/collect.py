@@ -2,7 +2,7 @@
 """collect.py NAME CLOCK: one JSON row per design from the run directory."""
 import json, re, sys
 from pathlib import Path
-OUT = Path("/home/jamiespa/odin3-ws/work/silicon-ladder-out")
+OUT = Path("~/odin3-ws/work/silicon-ladder-out").expanduser()
 n, clk = sys.argv[1], sys.argv[2]
 d = OUT / n
 def rd(p):
