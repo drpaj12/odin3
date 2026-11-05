@@ -3058,6 +3058,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_scoap
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(scoap_unit PROPERTIES LABELS tools TIMEOUT 600)
+    # Per-LUT lineage on a micro with a case and an FSM: each LUT traces to its own source lines.
+    add_test(NAME lineage
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_lineage
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(lineage PROPERTIES LABELS tools)
     # write_blif writes the top and what it reaches, not modules nothing instantiates.
     add_test(NAME write_blif_reach
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

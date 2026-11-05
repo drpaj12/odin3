@@ -616,8 +616,8 @@ static bool ref_after(odin3_bytes elem, const char *prefix, char letter) {
 
 /* True for a flag the writers of this version define (3.2) or compute again at write time, with
  * its value well formed: join, join=instance, chain=span, capped, bulk, lossy=bulk|cap, n=<n>,
- * hier=<text>, call=c<n>, cell=<type>, ctx=<n>, stale=t<n>. A known prefix with a bad value is
- * not known: it is a located problem. */
+ * hier=<text>, call=c<n>, cell=<type>, ctx=<n>, stale=t<n>, uid=<n>. A known prefix with a bad
+ * value is not known: it is a located problem. */
 static bool known_flag(odin3_bytes elem) {
     static const char *const WORDS[] = {"join",      "join=instance", "chain=span", "lossy=bulk",
                                         "lossy=cap", "capped",        "bulk"};
@@ -627,14 +627,15 @@ static bool known_flag(odin3_bytes elem) {
         }
     }
     return number_after(elem, "n=", NULL) || number_after(elem, "ctx=", NULL) ||
-           ref_after(elem, "call=", 'c') || ref_after(elem, "stale=", 't') ||
-           (bytes_has_prefix(elem, "hier=")) ||
+           number_after(elem, "uid=", NULL) || ref_after(elem, "call=", 'c') ||
+           ref_after(elem, "stale=", 't') || (bytes_has_prefix(elem, "hier=")) ||
            (bytes_has_prefix(elem, "cell=") && elem.len > CELL_PREFIX);
 }
 
 /* True when the element has the form of a flag this version defines but its value is bad. */
 static bool broken_flag(odin3_bytes elem) {
-    static const char *const PREFIXES[] = {"lossy=", "n=", "call=", "cell=", "ctx=", "stale="};
+    static const char *const PREFIXES[] = {
+        "lossy=", "n=", "call=", "cell=", "ctx=", "stale=", "uid="};
     for (size_t k = 0; k < sizeof PREFIXES / sizeof PREFIXES[0]; k++) {
         if (bytes_has_prefix(elem, PREFIXES[k])) {
             return true;
