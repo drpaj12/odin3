@@ -49,8 +49,10 @@
 #     takes the normal path.
 # - Writer preference: its PID goes to $DIR/odin3-heavy.queued.<pid> while it waits for a lock,
 #   so tools/build-locked starts no new build meanwhile. The flag is removed once the slot is
-#   held, and on any exit. Builds take the legacy lock and BOTH slot locks shared, so a build
-#   waits for every heavy job and a heavy job for every build, as with the single lock.
+#   held, and on any exit. Builds take the legacy lock and BOTH slot locks shared, all-or-nothing
+#   (try-lock the set; if one is busy, release the rest and block on that one alone), so a build
+#   waits for every heavy job and a heavy job for every build, as with the single lock, but a
+#   waiting build never holds one slot and so never blocks a heavy job queued for it.
 # - Each wait runs in the background (`flock -x -w N` on the descriptor), so a signal ends it at
 #   once and a timeout is told apart from the job's own exit status. With both slots busy two
 #   waiters race; the first to get its lock wins, the other is killed and its descriptor closed.

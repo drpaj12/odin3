@@ -45,7 +45,7 @@ exit "${{FAKE_SYSTEMCTL_RC:-0}}"
 # flock: heavy-run calls `flock -s -w N 9` (legacy lock), then `flock -x -n 8` / `-x -n 7` (slots)
 # or
 # `-x -w N 8` / `-x -w N 7` on the slot descriptors; build-locked probes with `flock -s -n FILE
-# true` per lock file, then `flock -s 9`, `-s 8`, `-s 7`. FAKE_FLOCK_RC is the status, only for
+# true` per lock file, then `flock -s -n 9`, `-n 8`, `-n 7`. FAKE_FLOCK_RC is the status, only for
 # calls whose argv contains FAKE_FLOCK_ONLY when that is set.
 FAKE_FLOCK = """#!{bash}
 flag=no
@@ -555,9 +555,9 @@ class BuildLockedTest(FakeTools):
             f"flock -s -n {self.lock} true | flag=no fd9=none",
             f"flock -s -n {self.slot0} true | flag=no fd9=none",
             f"flock -s -n {self.slot1} true | flag=no fd9=none",
-            f"flock -s 9 | flag=no fd9={self.lock}",
-            f"flock -s 8 | flag=no fd9={self.lock}",
-            f"flock -s 7 | flag=no fd9={self.lock}",
+            f"flock -s -n 9 | flag=no fd9={self.lock}",
+            f"flock -s -n 8 | flag=no fd9={self.lock}",
+            f"flock -s -n 7 | flag=no fd9={self.lock}",
             "cmake --build --preset debug"])
 
 
@@ -746,6 +746,44 @@ class TwoSlotsTest(FakeTools):
         _wait_for(lambda: self.started("a"), "the job to start after the old holder")
         self.release("a")
         self.finish(a)
+
+    def test_a_waiting_build_does_not_starve_the_free_slot(self) -> None:
+        """Slot 1 held by a long job, a build waiting: a second job must still get slot 0, and
+        the build runs only after both jobs end (2026-11-05 starvation)."""
+        cmake = self.dir / "fast-cmake" / "cmake"
+        cmake.parent.mkdir()
+        _write_exec(cmake, f"#!{{bash}}\ntouch {self.dir}/build.started\n")
+        # Make job a land on slot 1: hold slot 0 with a throwaway lock while it starts.
+        self.heavy.mkdir(exist_ok=True)
+        pre = os.open(self.slot0, os.O_WRONLY | os.O_CREAT | os.O_APPEND)
+        fcntl.flock(pre, fcntl.LOCK_EX)
+        try:
+            a = self.start("a")
+            _wait_for(lambda: self.started("a"), "job a to start")
+            self.assertEqual(self.slot_of("a"), "1")
+        finally:
+            os.close(pre)
+        build = subprocess.Popen(
+            [BASH, str(BUILD_LOCKED), "--preset", "debug"], text=True,
+            env={**self.env, "PATH": f"{cmake.parent}:{self.env['PATH']}"},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.procs.append(build)
+        time.sleep(1.0)  # the build is now blocked on slot 1
+        self.assertIsNone(build.poll())
+        b = self.start("b", ODIN3_HEAVY_WAIT="60")
+        _wait_for(lambda: self.started("b"), "job b to take the free slot 0")
+        self.assertEqual(self.slot_of("b"), "0")
+        self.assertFalse((self.dir / "build.started").exists())
+        self.release("a")
+        time.sleep(1.0)
+        self.assertFalse((self.dir / "build.started").exists())  # b still holds slot 0
+        self.release("b")
+        self.finish(a)
+        self.finish(b)
+        _, err = build.communicate(timeout=30)
+        self.assertEqual(build.returncode, 0, err)
+        self.assertTrue((self.dir / "build.started").exists())
+
 
 
 class SweepTestFunctionTest(unittest.TestCase):

@@ -13,11 +13,14 @@
 #   heavy job. A flag whose PID is dead, or is now another program (a reused PID after a
 #   heavy-run was SIGKILLed), is stale: it is removed and ignored.
 # - Then it takes the legacy lock $DIR/odin3-heavy.lock and both slot locks $DIR/odin3-heavy.lock.0
-#   and .1 shared, in that order (heavy-run takes one slot, or slot 0 then 1, exclusive, and the
-#   legacy lock shared): builds share them with each other and exclude every heavy run, and a
-#   heavy run excludes builds, as with the single lock before the two slots. It says so before
-#   waiting when a heavy run holds one, then holds all three on fds 9, 8 and 7 (inherited by
-#   every build child) and runs `exec cmake --build <args>`; exits with cmake's status.
+#   and .1 shared (heavy-run takes one slot, or slot 0 then 1, exclusive, and the legacy lock
+#   shared): builds share them with each other and exclude every heavy run, and a heavy run
+#   excludes builds. It says so before waiting when a heavy run holds one. Acquisition is
+#   all-or-nothing: try-lock (`flock -s -n`) fds 9, 8, 7; if one is busy, unlock the ones taken,
+#   block (shared) on the busy file alone, then retry the set. A build therefore never holds one
+#   slot while waiting for the other, which would block heavy jobs queued for the held slot.
+#   Once all three are held (inherited by every build child) it runs `exec cmake --build <args>`;
+#   exits with cmake's status.
 #
 # DIR is /tmp/claude-1000 (ODIN3_HEAVY_DIR overrides it, for the tests only); the flags are polled
 # every ODIN3_HEAVY_POLL seconds (default 5).
@@ -93,5 +96,20 @@ if [[ $busy -eq 1 ]]; then
     echo "build-locked: waiting for the heavy run that holds $lock" >&2
 fi
 exec 9>>"$lock" 8>>"$lock.0" 7>>"$lock.1" || exit 2
-flock -s 9 && flock -s 8 && flock -s 7 || exit 2
+# Never hold part of the set while waiting for the rest: a shared hold on slot 0 while blocked on
+# slot 1 starved heavy jobs queued for slot 0 (seen 2026-11-05). Try all three without waiting;
+# if one is busy, release those taken and block on that one file alone (holding nothing else,
+# released at once), then try the whole set again. No polling.
+while :; do
+    busy=""
+    for fd in 9 8 7; do
+        if ! flock -s -n "$fd"; then
+            case $fd in 9) busy=$lock ;; 8) busy=$lock.0 ;; *) busy=$lock.1 ;; esac
+            break
+        fi
+    done
+    [[ -z $busy ]] && break
+    for fd in 9 8 7; do flock -u "$fd" || exit 2; done
+    flock -s "$busy" true || exit 2
+done
 exec cmake --build "$@"
