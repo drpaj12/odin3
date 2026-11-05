@@ -189,6 +189,17 @@ odin3_status odin3_fsm_detect_run(odin3_design *design, const odin3_fsm_opts *op
  */
 odin3_status odin3_fsm_run(odin3_pass_ctx *pass, odin3_design *design, const odin3_fsm_opts *opts);
 
+/*
+ * The read-only export used by write_graph stg: detect, extract and both opt stages as the `fsm`
+ * driver runs them (no recode, no map), then visit(user, module context, FSM) for each extracted
+ * FSM in module creation order. The IR changes only by the detect attributes. The context and the
+ * instance are valid during the call only. A non-OK status from visit stops the walk and is
+ * returned. The design must have no processes (the caller checks).
+ */
+typedef odin3_status (*odin3_fsm_visit)(void *user, const odin3_fsm_mod *fm,
+                                        const odin3_fsm_inst *inst);
+odin3_status odin3_fsm_visit_design(odin3_design *design, odin3_fsm_visit visit, void *user);
+
 /* --- detect (fsm_detect.cc) --------------------------------------------------------------- */
 
 /*

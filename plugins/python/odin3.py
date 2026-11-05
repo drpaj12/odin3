@@ -655,6 +655,19 @@ class Design:
             result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
             return result
 
+    def write_graph(self, kind: str) -> dict[str, Any]:
+        """Run `write_graph <kind>` (stg, cfg or ddg) and return its JSON (schema odin3-graph,
+        version 1): per module a list of graphs, each with `nodes` and `edges`, stable string ids,
+        `prov` record ids and HDL `src` spans. See docs/user/graph-views.md."""
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "graph.json"
+            self.run_pass("write_graph", f"{kind} {_quote(out)}")
+            result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+            return result
+
     def scoap(
         self,
         *,

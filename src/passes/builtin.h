@@ -39,6 +39,8 @@ extern const odin3_pass_def odin3_pass_dump_locs;
 extern const odin3_pass_def odin3_pass_levelize;
 extern const odin3_pass_def odin3_pass_graphlets;
 extern const odin3_pass_def odin3_pass_scoap;
+/* src/passes/graphviews/gv_pass.c: write_graph. */
+extern const odin3_pass_def odin3_pass_write_graph;
 /* src/passes/submod/register.c (Phase 7, 7.4a): submod. */
 extern const odin3_pass_def odin3_pass_submod;
 extern const odin3_pass_def odin3_pass_cone_check;

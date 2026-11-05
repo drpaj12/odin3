@@ -56,6 +56,7 @@ analysis
 graphlets
 edit
 scoap
+graph-views
 timing-attribution
 testbench
 python-api

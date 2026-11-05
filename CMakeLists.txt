@@ -128,6 +128,9 @@ add_library(odin3_core OBJECT
     src/passes/graphlets/gl_net.c
     src/passes/graphlets/gl_group.c
     src/passes/graphlets/gl_cal.c
+    src/passes/graphviews/gv_pass.c
+    src/passes/graphviews/gv_common.c
+    src/passes/graphviews/gv_stg.c
     src/passes/scoap/scoap.c
     src/passes/scoap/sc_fn.c
     src/passes/scoap/sc_model.c
@@ -3038,6 +3041,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_graphlets_construction
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(graphlets_construction PROPERTIES LABELS tools TIMEOUT 600)
+
+    # write_graph: state transition, control flow and data dependency graphs on small designs.
+    add_test(NAME graph_views
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_graph_views
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(graph_views PROPERTIES LABELS tools TIMEOUT 600)
 
     # scoap: hand-computed circuits, the signal probability, and the pass equal to the independent
     # reference (tools/scoap) on small designs in both modes.
