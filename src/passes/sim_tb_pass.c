@@ -1,5 +1,6 @@
 /* sim_tb_pass.c — the `sim_tb` pass: runs a Verilog testbench (subset, spec
  * docs/specs/2026-10-31-testbench-design.md) against the design's modules. */
+#include "frontends/verilog/preproc.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
@@ -15,10 +16,25 @@
 #include <stdlib.h>
 #include <string.h>
 
-enum { PATH_MAX_LEN = 1024, DECIMAL = 10, DEFAULT_MAX_TIME = 10000000, NUM_BUF = 32 };
+enum {
+    PATH_MAX_LEN = 1024,
+    DECIMAL = 10,
+    DEFAULT_MAX_TIME = 10000000,
+    NUM_BUF = 32,
+    MAX_TB_FILES = 32, /* testbench files, include directories and -D defines of one run */
+    MAX_INCDIRS = 16,
+    MAX_DEFINES = 32,
+    DEFINE_LEN = 256
+};
 
 typedef struct tb_args {
-    char file[PATH_MAX_LEN];
+    char file[MAX_TB_FILES][PATH_MAX_LEN];
+    uint32_t n_files;
+    char incdir[MAX_INCDIRS][PATH_MAX_LEN];
+    const char *incdir_ptr[MAX_INCDIRS];
+    uint32_t n_incdirs;
+    char define[MAX_DEFINES][DEFINE_LEN]; /* "name" or "name=value" */
+    uint32_t n_defines;
     char top[TB_NAME];
     char out[PATH_MAX_LEN];
     char vcd[PATH_MAX_LEN];
@@ -70,10 +86,46 @@ static bool take_plusarg(odin3_bytes *args, tb_args *out) {
     return true;
 }
 
+/* Takes the next word as an include directory (-I). */
+static bool take_incdir(odin3_bytes *args, tb_args *out) {
+    if (out->n_incdirs >= MAX_INCDIRS) {
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: at most %d -I directories are allowed", MAX_INCDIRS);
+        return false;
+    }
+    return take(args, out->incdir[out->n_incdirs++], PATH_MAX_LEN);
+}
+
+/* Takes the next word as a define (-D name or name=value). */
+static bool take_define(odin3_bytes *args, tb_args *out) {
+    if (out->n_defines >= MAX_DEFINES) {
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: at most %d -D defines are allowed", MAX_DEFINES);
+        return false;
+    }
+    return take(args, out->define[out->n_defines++], DEFINE_LEN);
+}
+
 static odin3_status usage(void) {
     odin3_log(ODIN3_LOG_ERROR, "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
-                               "<file>] [--vcd <file>] [--plusarg <text>]... <tb.v>");
+                               "<file>] [--vcd <file>] [--plusarg <text>]... [-I <dir>]... "
+                               "[-D <name[=value]>]... <tb.v>...");
     return ODIN3_ERR_INVALID_ARG;
+}
+
+/* -I and -D with their value, or a testbench file name. */
+static bool take_other(odin3_bytes word, odin3_bytes *args, tb_args *out) {
+    if (word_is(word, "-I")) {
+        return take_incdir(args, out);
+    }
+    if (word_is(word, "-D")) {
+        return take_define(args, out);
+    }
+    if (out->n_files >= MAX_TB_FILES || word.len >= PATH_MAX_LEN) {
+        return false;
+    }
+    memcpy(out->file[out->n_files], word.ptr, word.len);
+    out->file[out->n_files][word.len] = '\0';
+    out->n_files++;
+    return true;
 }
 
 static odin3_status parse_args(odin3_bytes args, tb_args *out) {
@@ -93,66 +145,101 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
             ok = take(&args, out->vcd, sizeof out->vcd);
         } else if (word_is(word, "--plusarg")) {
             ok = take_plusarg(&args, out);
-        } else if (out->file[0] == '\0' && word.len < sizeof out->file) {
-            memcpy(out->file, word.ptr, word.len);
-            out->file[word.len] = '\0';
         } else {
-            ok = false;
+            ok = take_other(word, &args, out);
         }
         if (!ok) {
             return usage();
         }
     }
-    return out->file[0] == '\0' ? usage() : ODIN3_OK;
+    return out->n_files == 0 ? usage() : ODIN3_OK;
 }
 
-static char *read_text(const char *path) {
-    FILE *fp = fopen(path, "rb");
-    if (fp == NULL) {
-        return NULL;
+/* Splits "name=value" (value may be empty or absent) into a preprocessor define. */
+static odin3_pp_define make_define(const char *text) {
+    const char *eq = strchr(text, '=');
+    if (eq == NULL) {
+        return (odin3_pp_define){odin3_bytes_cstr(text), {NULL, 0}, false};
     }
-    (void)fseek(fp, 0, SEEK_END);
-    long size = ftell(fp);
-    (void)fseek(fp, 0, SEEK_SET);
-    char *buf = size < 0 ? NULL : malloc((size_t)size + 1U);
-    if (buf != NULL) {
-        size_t got = fread(buf, 1, (size_t)size, fp);
-        buf[got] = '\0';
+    return (odin3_pp_define){{text, (size_t)(eq - text)}, odin3_bytes_cstr(eq + 1), true};
+}
+
+static odin3_status intern_path(const odin3_design *design, const char *path, uint32_t *id) {
+    return odin3_strtab_intern(odin3_design_strtab(design), odin3_bytes_cstr(path), id);
+}
+
+/* Runs every testbench file through the Verilog preprocessor (macros, `ifdef, `include with the
+ * -I directories, `timescale kept for the lexer), one preprocessor for all files so a `define
+ * reaches the files after it, and joins the streams into *text (malloc'd, NUL-terminated). */
+static odin3_status preprocess_files(odin3_design *design, tb_args *args, char **text) {
+    odin3_pp_define defs[MAX_DEFINES];
+    for (uint32_t i = 0; i < args->n_defines; i++) {
+        defs[i] = make_define(args->define[i]);
     }
-    (void)fclose(fp);
-    return buf;
+    for (uint32_t i = 0; i < args->n_incdirs; i++) {
+        args->incdir_ptr[i] = args->incdir[i];
+    }
+    odin3_pp_config config = {defs, args->n_defines, args->incdir_ptr, args->n_incdirs};
+    odin3_pp *pp = NULL;
+    odin3_status st = odin3_pp_create(design, &config, &pp);
+    odin3_strbuf all;
+    odin3_strbuf_init(&all);
+    for (uint32_t i = 0; st == ODIN3_OK && i < args->n_files; i++) {
+        odin3_pp_source src = {0};
+        st = intern_path(design, args->file[i], &src.resolved);
+        src.given = src.resolved;
+        odin3_pp_stream stream;
+        st = st != ODIN3_OK ? st : odin3_pp_run(pp, &src, &stream);
+        st = st != ODIN3_OK ? st : odin3_strbuf_append(&all, stream.text);
+        st = st != ODIN3_OK ? st : odin3_strbuf_append(&all, odin3_bytes_cstr("\n"));
+    }
+    odin3_pp_destroy(pp);
+    if (st == ODIN3_OK) {
+        *text = malloc(all.len + 1U);
+        if (*text == NULL) {
+            st = ODIN3_ERR_NO_MEMORY;
+        } else {
+            memcpy(*text, all.data, all.len);
+            (*text)[all.len] = '\0';
+        }
+    }
+    odin3_strbuf_free(&all);
+    return st;
 }
 
 static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                void *user) {
     (void)ctx;
     (void)user;
-    tb_args parsed = {{0}, {0}, {0}, {0}, 0, 0, {{0}}, {NULL}, 0};
-    odin3_status st = parse_args(args, &parsed);
-    if (st != ODIN3_OK) {
-        return st;
+    tb_args *parsed = calloc(1, sizeof *parsed);
+    if (parsed == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
     }
-    char *text = read_text(parsed.file);
-    if (text == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "sim_tb: cannot read `%s`", parsed.file);
-        return ODIN3_ERR_IO;
+    odin3_status st = parse_args(args, parsed);
+    char *text = NULL;
+    st = st != ODIN3_OK ? st : preprocess_files(design, parsed, &text);
+    if (st != ODIN3_OK) {
+        free(parsed);
+        return st;
     }
     tb_module *tb = NULL;
-    tb_source src = {parsed.file, text, design};
-    st = tb_parse(&src, parsed.top[0] != '\0' ? parsed.top : NULL, &tb);
+    tb_source src = {parsed->file[0], text, design};
+    st = tb_parse(&src, parsed->top[0] != '\0' ? parsed->top : NULL, &tb);
     free(text);
     if (st != ODIN3_OK) {
+        free(parsed);
         return st;
     }
-    FILE *out = parsed.out[0] != '\0' ? fopen(parsed.out, "w") : stdout;
+    FILE *out = parsed->out[0] != '\0' ? fopen(parsed->out, "w") : stdout;
     if (out == NULL) {
-        odin3_log(ODIN3_LOG_ERROR, "sim_tb: cannot write `%s`", parsed.out);
+        odin3_log(ODIN3_LOG_ERROR, "sim_tb: cannot write `%s`", parsed->out);
         tb_module_free(tb);
+        free(parsed);
         return ODIN3_ERR_IO;
     }
     tb_options opts = {
-        parsed.max_time,    parsed.seed,     out, parsed.vcd[0] != '\0' ? parsed.vcd : NULL,
-        parsed.plusarg_ptr, parsed.n_plusarg};
+        parsed->max_time,    parsed->seed,     out, parsed->vcd[0] != '\0' ? parsed->vcd : NULL,
+        parsed->plusarg_ptr, parsed->n_plusarg};
     uint64_t end_time = 0;
     st = tb_run(design, tb, &opts, &end_time);
     (void)fflush(out);
@@ -160,6 +247,7 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         (void)fclose(out);
     }
     tb_module_free(tb);
+    free(parsed);
     if (st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "sim_tb: finished at time %llu", (unsigned long long)end_time);
     }
@@ -169,12 +257,14 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
     "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] [--plusarg "
-    "<text>]... <tb.v>: run a "
+    "<text>]... [-I <dir>]... [-D <name[=value]>]... <tb.v>...: run a "
     "Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
     "design's modules; $display text goes to stdout or --out, "
     "--vcd writes a waveform of the testbench signals and the DUT ports; --plusarg (up to 16) "
-    "is a run-time argument that $test$plusargs and $value$plusargs read, as name=value",
+    "is a run-time argument that $test$plusargs and $value$plusargs read, as name=value; the "
+    "files go through the Verilog preprocessor (`define, `ifdef, `include searched in the -I "
+    "directories, -D defines) and are joined; --top picks the testbench module among them",
     sim_tb_run,
     NULL,
     false,
