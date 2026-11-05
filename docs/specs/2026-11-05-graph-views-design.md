@@ -145,7 +145,10 @@ one node; edges are signal level (no bit ranges). Constant nets are not nodes an
 Edges: a -> b when signal a is read to compute signal b. Fields: `kind` `data` or `control`, `via`
 (node ID of the cell or process that computes b), `op` (cell type name, `$proc` for a process),
 `seq` true when the cell is a flip-flop or latch (the edge crosses a clock cycle), `src`, `prov` of
-`via` (for a `$proc`, of the action or switch the read comes from).
+`via` (for a `$proc`, of the action the read belongs to, which for a control edge is the guarded
+action). Inside a `$proc` the targets are the process's own output nets, which are unnamed
+temporaries until the sync actions copy them to the declared wire, so before `proc` the graph
+shows `temp` nodes between the process and its wires; after `proc` they are cell-to-cell edges.
 
 Rules, per live cell (port nodes excluded, constants excluded):
 - Normal cell: for every input pin net and every output pin net of the cell, an edge input signal
