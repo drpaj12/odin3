@@ -1,0 +1,2 @@
+iverilog rc=3
+VERDICT fail-or-not-run (bad=)

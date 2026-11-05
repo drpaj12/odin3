@@ -66,6 +66,38 @@ if {$need_side > $die_side} {
   initialize_floorplan -die_area "0 0 $need_side $need_side" \
     -core_area "6 6 [expr {$need_side - 6}] [expr {$need_side - 6}]" -site unithd
 }
+# Die edge on the track grid (des, DRT-0255): the router gives a pin on the die edge an access
+# point on the last track inside the die, and the via enclosure there sticks out of the die when
+# that track is closer than about 0.15 um to the edge (a die side of 732.615 um left 0.065 um to
+# the last met2 track and 0.085 um to the last met1 track; every output pin on the right edge
+# then failed with DRT-0255 "Maze Route cannot find path"). The die (not the core, so the
+# placement is unchanged) grows to the next edge with at least 0.17 um (the margin on the
+# left and bottom edges) to the last track of met1 to met4, in x and in y.
+proc edge_ok {d} {
+  foreach {off pitch} {0.17 0.34 0.23 0.46 0.34 0.68 0.46 0.92} {
+    set k [expr {floor(($d - $off) / $pitch + 1e-9)}]
+    if {$d - ($off + $k * $pitch) < 0.17} { return 0 }
+  }
+  return 1
+}
+proc snap_edge {d} {
+  set d [expr {round($d * 1000) / 1000.0}]
+  while {![edge_ok $d]} { set d [expr {round(($d + 0.005) * 1000) / 1000.0}] }
+  return $d
+}
+set blk_ [ord::get_db_block]
+set dbu_ [expr {double([$blk_ getDbUnitsPerMicron])}]
+set die_ [$blk_ getDieArea]
+set core_ [$blk_ getCoreArea]
+set dx_ [expr {[$die_ xMax] / $dbu_}]
+set dy_ [expr {[$die_ yMax] / $dbu_}]
+set sx_ [snap_edge $dx_]
+set sy_ [snap_edge $dy_]
+if {$sx_ != $dx_ || $sy_ != $dy_} {
+  puts "WARNING precheck: die edge [format %.3f $dx_] x [format %.3f $dy_] um is within 0.17 um of a routing track: die enlarged to [format %.3f $sx_] x [format %.3f $sy_] um (core unchanged)"
+  initialize_floorplan -die_area "0 0 $sx_ $sy_" \
+    -core_area "[expr {[$core_ xMin] / $dbu_}] [expr {[$core_ yMin] / $dbu_}] [expr {[$core_ xMax] / $dbu_}] [expr {[$core_ yMax] / $dbu_}]" -site unithd
+}
 proc tracks {} {
   make_tracks li1 -x_offset 0.23 -x_pitch 0.46 -y_offset 0.17 -y_pitch 0.34
   make_tracks met1 -x_offset 0.17 -x_pitch 0.34 -y_offset 0.17 -y_pitch 0.34

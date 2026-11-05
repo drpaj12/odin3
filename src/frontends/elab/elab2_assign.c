@@ -957,9 +957,35 @@ static odin3_status asg_rhs(asg_run *ar) {
     return st != ODIN3_OK ? st : odin3_elab2_lvalue_connect(ar->e2, &conn);
 }
 
+/* True for a number, a concatenation of numbers, or a replication `{N{...}}` of such a
+ * concatenation: nothing that elaborating it could build a cell for. */
+static bool asg_literal_only(const odin3_elab2 *e2, odin3_ast_id node) {
+    odin3_ast_kind kind = odin3_ast_kind_of(e2->elab, node);
+    if (kind == ODIN3_AST_REPLICATE) {
+        node = odin3_ast_child(e2->elab, node, 1);
+        kind = odin3_ast_kind_of(e2->elab, node);
+        if (kind != ODIN3_AST_CONCAT) {
+            return false;
+        }
+    }
+    if (kind == ODIN3_AST_NUMBER) {
+        return true;
+    }
+    if (kind != ODIN3_AST_CONCAT) {
+        return false;
+    }
+    odin3_ast_span kids = odin3_ast_children(e2->elab, node);
+    for (uint32_t i = 0; i < kids.n; i++) {
+        if (odin3_ast_kind_of(e2->elab, kids.ids[i]) != ODIN3_AST_NUMBER) {
+            return false;
+        }
+    }
+    return true;
+}
+
 /* Whether branch is the constant z (every bit, at the width of the context). */
 static bool asg_is_z(odin3_elab2 *e2, odin3_ast_id branch, uint32_t width) {
-    if (odin3_ast_kind_of(e2->elab, branch) != ODIN3_AST_NUMBER) {
+    if (!asg_literal_only(e2, branch)) {
         return false;
     }
     odin3_sig sig;

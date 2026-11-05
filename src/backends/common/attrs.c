@@ -94,3 +94,13 @@ odin3_status odin3_wattr_claim(odin3_wattr_seen *seen, odin3_wattr_claim_req req
     *fresh = true;
     return ODIN3_OK;
 }
+
+bool odin3_port_is_split_shell(const odin3_design *design, const odin3_module *module,
+                               odin3_node_id node) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(ODIN3_ATTR_TRISTATE_SPLIT),
+                           &key)) {
+        return false;
+    }
+    return odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key) != NULL;
+}

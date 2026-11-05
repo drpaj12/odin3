@@ -1,0 +1,16 @@
+{
+ "design": "verilog_cordic_core",
+ "clock_port": "clk",
+ "steps_ok": [],
+ "steps_reached": 0,
+ "stop": "map: process killed (SIGKILL, signal 9) at the 6 GiB heavy-run memory cap, peak RSS 6140.7 MB; Python gates_objects (silicon_flow.py:583) during the map step provenance build",
+ "peak_rss_mb": 6140.7,
+ "wall_s": 26.77,
+ "flow_rc": 137,
+ "odin_cells": 7534,
+ "lvs": "not run",
+ "drc_violations": "not run",
+ "equiv": "not run",
+ "sim_rtl": "pass (PASS tb_cordic)",
+ "sim_gate": "not run (no final.v)"
+}
