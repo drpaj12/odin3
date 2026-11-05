@@ -95,8 +95,8 @@ static odin3_sigbit wild_bit(uint8_t wild, odin3_sigbit bit) {
 }
 
 /* An item bit that stays x or z after the wildcard rule: the switch is left to `proc`, which
- * reads it as a wildcard (RTLIL: an undefined case bit matches anything; Yosys, hence Parmys, and so
- * Odin III do the same), but a simulator compares four-state and the item matches nothing (IEEE
+ * reads it as a wildcard (RTLIL: an undefined case bit matches anything; Yosys, hence Parmys, and
+ * so Odin III do the same), but a simulator compares four-state and the item matches nothing (IEEE
  * 1364-2005 9.5). A design that writes `3'bxxx` as "don't care" in a plain `case` therefore
  * simulates one way and synthesises another (mips_16: the ALU result becomes x for every command),
  * so the item is warned. */
