@@ -195,7 +195,7 @@ endmodule
 
 class OpenroadDriverTest(unittest.TestCase):
     def test_probe_cells_are_dont_use(self) -> None:
-        """repair_design picked probe_p_8 as a repeater; global routing died on that net (sha3_low)."""
+        """repair_design picked probe_p_8 as a repeater; global routing died on it (sha3_low)."""
         tcl = (REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl").read_text()
         line = [x for x in tcl.splitlines() if x.startswith("set_dont_use")]
         self.assertEqual(len(line), 1)
