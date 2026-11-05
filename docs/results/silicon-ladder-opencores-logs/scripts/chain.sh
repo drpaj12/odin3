@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-OUT=/home/jamiespa/odin3-ws/work/silicon-ladder-out
-H=/home/jamiespa/odin3-ws/work/odin3-silicon-ladder/tools/heavy-run
+OUT=$HOME/odin3-ws/work/silicon-ladder-out
+H=$HOME/odin3-ws/work/odin3-silicon-ladder/tools/heavy-run
 export ODIN3_HEAVY_OK=1
 while read n c; do
   echo "$(date +%T) start $n" >> $OUT/chain.log

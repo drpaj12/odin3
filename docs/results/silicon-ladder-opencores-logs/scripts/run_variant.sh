@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # run_variant.sh NAME CLOCK TAG STEPS : rerun the flow with a step subset in OUT/NAME_TAG (diagnosis; flow+measure only)
 set -uo pipefail
-W=/home/jamiespa/odin3-ws/work; OUT=$W/silicon-ladder-out; S=$W/odin3-silicon-ladder
-ODIN=/home/jamiespa/odin3-ws/odin3/build/rel-main2/odin3; T=$W/tools
+W=$HOME/odin3-ws/work; OUT=$W/silicon-ladder-out; S=$W/odin3-silicon-ladder
+ODIN=$HOME/odin3-ws/odin3/build/rel-main2/odin3; T=$W/tools
 N=$1; CLK=$2; TAG=$3; ST=$4; D=$OUT/${N}_$TAG
 . $W/opencores-runs/cfg/$N.env
 rm -rf $D; mkdir -p $D; cp $OUT/$N/design.v $D/; cp $OUT/$N/*.vh $D/ 2>/dev/null; cd $D
