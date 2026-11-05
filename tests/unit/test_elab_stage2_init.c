@@ -353,6 +353,20 @@ static void test_variable_bit_of_a_word(void) {
     pt_expect_error((at_loc){4, 23}, "non-constant index into 'm' is not supported here");
 }
 
+/* A bit of a word selected by a loop variable is a constant bit once the loop is unrolled (amber's
+ * generic_sram_byte_en): one write port per bit, no error. */
+static void test_loop_variable_bit_of_a_word(void) {
+    pt_read_src("module t(input c, we, input [2:0] wa, ra, input [3:0] d4, output [3:0] q);\n"
+                "  reg [3:0] m [0:7];\n"
+                "  integer i;\n"
+                "  always @(posedge c) if (we) for (i = 0; i < 4; i = i + 1) m[wa][i] <= d4[i];\n"
+                "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_diag_errors());
+    TEST_ASSERT_EQUAL_UINT32(16, port_width(the_mem(), "WR_EN"));
+    pt_expect_ir_ok();
+}
+
 /* A read that succeeds (warnings allowed) with no error and a valid IR. */
 static void read_ok(const char *text) {
     pt_read_src(text);
@@ -1122,6 +1136,7 @@ int main(void) {
     RUN_TEST(test_constant_index_and_value);
     RUN_TEST(test_other_bases);
     RUN_TEST(test_partial_write);
+    RUN_TEST(test_loop_variable_bit_of_a_word);
     RUN_TEST(test_two_writes_in_source_order);
     RUN_TEST(test_two_blocks_two_ports);
     RUN_TEST(test_unconditional_blocking_write);

@@ -701,6 +701,18 @@ static odin3_status lv_memory_start(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odi
     return ODIN3_OK;
 }
 
+/* Every bit of the word as the target (the memory start was made): the scan's view of a select
+ * whose index only the unrolled loop knows. */
+static odin3_status lv_memory_all(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel,
+                                  uint32_t width) {
+    (void)e2;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t pos = 0; st == ODIN3_OK && pos < width; pos++) {
+        st = lv_push(lv, (odin3_net_id){pos + 1U}, (odin3_elab2_lvbit){{{0}, 0}, sel, true});
+    }
+    return st;
+}
+
 static odin3_status lv_memory_word(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin3_ast_id sel,
                                    const odin3_elab2_wordref *ref) {
     odin3_status st = lv_memory_start(e2, lv, sel, (odin3_elab2_memsel){sel, ref->mem});
@@ -746,11 +758,19 @@ static odin3_status lv_memory_select(odin3_elab2 *e2, odin3_elab2_lvalue *lv, od
      * generator holds as one (`for (i...) m[a][i*8+1] <= d`; Yosys unrolls the loop first). The
      * index is generated; if it comes out constant the select is a constant one, else it is the
      * error below (a variable bit of a memory word has no write port to give). */
+    bool variable = false;
+    st = lv_index_variable(e2, lv, sel, &variable);
+    if (st == ODIN3_OK && variable && lv->scan_calls) {
+        /* The scan of a block runs before its loops: it only needs to know that the word is
+         * written, and must not generate the index (that would read the loop variable). The
+         * write itself is made, with the index constant, where the loop runs. */
+        return lv_memory_all(e2, lv, sel, mem->width);
+    }
     odin3_elab2_selobj obj = {rec->has_packed ? rec->packed.msb : 0,
                               rec->has_packed ? rec->packed.lsb : 0, mem->width, lv_name(e2, rec)};
     odin3_elab2_selrange range;
     lv_sel ls = {sel, {0}, &obj, &range};
-    st = lv_range_of(e2, lv, &ls, &range);
+    st = st != ODIN3_OK ? st : lv_range_of(e2, lv, &ls, &range);
     if (st == ODIN3_OK && (!range.constant || !range.known)) {
         return lv_variable_index(e2, lv, sel, lv_name(e2, rec));
     }
