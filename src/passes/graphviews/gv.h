@@ -51,5 +51,6 @@ void gv_w_prov(gv_w *wr, odin3_prov_id prov);
 /* The kinds (each fills run->mods). */
 odin3_status gv_write_stg(gv_run *run);
 odin3_status gv_write_cfg(gv_run *run);
+odin3_status gv_write_ddg(gv_run *run);
 
 #endif

@@ -170,5 +170,79 @@ class CfgTest(GraphTestBase):
             self.assertEqual([e["to"] for e in graph["edges"]], [graph["id"] + "/exit"])
 
 
+DDG = """module t(input clk, input a, input b, input [1:0] s, output reg q, output reg y);
+  wire w = a & b;
+  always @(posedge clk) q <= w;
+  always @* begin
+    y = 0;
+    case (s)
+      2'd0: y = a;
+      default: if (b) y = w;
+    endcase
+  end
+endmodule
+"""
+
+
+def named_edges(graph: dict[str, Any]) -> set[tuple[str, str, str, str, bool]]:
+    label = {n["id"]: n["label"] for n in graph["nodes"]}
+    return {
+        (label[e["from"]], label[e["to"]], e["kind"], e["op"], e["seq"]) for e in graph["edges"]
+    }
+
+
+def reaches(graph: dict[str, Any], src: str, dst: str) -> bool:
+    label = {n["id"]: n["label"] for n in graph["nodes"]}
+    succ: dict[str, set[str]] = {}
+    for e in graph["edges"]:
+        succ.setdefault(label[e["from"]], set()).add(label[e["to"]])
+    seen, todo = {src}, [src]
+    while todo:
+        for nxt in succ.get(todo.pop(), ()):
+            if nxt not in seen:
+                seen.add(nxt)
+                todo.append(nxt)
+    return dst in seen
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest graph_views)")
+class DdgTest(GraphTestBase):
+    def test_after_proc(self) -> None:
+        graph = self.graphs(DDG, "ddg")[0]
+        edges = named_edges(graph)
+        for want in [
+            ("a", "w", "data", "$and", False),
+            ("b", "w", "data", "$and", False),
+            ("clk", "q", "control", "$dff", True),
+            ("w", "q", "data", "$dff", True),
+        ]:
+            self.assertIn(want, edges)
+        self.assertTrue(reaches(graph, "s", "y"))
+        self.assertTrue(reaches(graph, "b", "y"))
+        self.assertFalse(reaches(graph, "y", "q"))
+        sig = {n["label"]: n for n in graph["nodes"] if n["kind"] == "signal"}
+        self.assertEqual(sig["s"]["width"], 2)
+        self.assertEqual((sig["s"]["port"], sig["q"]["port"], sig["w"]["port"]), ("in", "out", ""))
+        andw = [e for e in graph["edges"] if e["op"] == "$and"]
+        self.assertTrue(andw and andw[0]["src"], "the HDL line of the edge")
+
+    def test_before_proc(self) -> None:
+        graph = self.graphs(DDG, "ddg", pre="")[0]
+        edges = named_edges(graph)
+        self.assertIn(("a", "w", "data", "$and", False), edges)
+        self.assertTrue(any(e[3] == "$proc" and e[2] == "control" for e in edges))
+        self.assertTrue(reaches(graph, "s", "y"))
+        self.assertTrue(reaches(graph, "w", "q"))
+        self.assertTrue(reaches(graph, "clk", "q"))
+        self.assertFalse(reaches(graph, "q", "y"))
+
+    def test_two_always_share(self) -> None:
+        graph = self.graphs(TWO, "ddg")[0]
+        self.assertTrue(reaches(graph, "a", "p"))
+        self.assertTrue(reaches(graph, "p", "q"))
+        self.assertTrue(reaches(graph, "a", "q"))
+        self.assertFalse(reaches(graph, "q", "p"))
+
+
 if __name__ == "__main__":
     unittest.main()

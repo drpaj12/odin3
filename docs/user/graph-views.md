@@ -33,6 +33,16 @@ clock/level conditions and their update assignments. Each switch and case carrie
 the process, the `$mux`, `$pmux` and `$eq` cells made for it are DERIVED from these records, so look the
 record up in the lowered design (for example `odin3_prov_index_by_record`) to find them.
 
+## ddg
+
+One graph per module, id `ddg`, over the IR as it is. Run it before `proc` for the process-level view and after
+`proc` for the lowered one. Nodes: `signal` (a wire, bus whole, with `width` and `port` `in|out|inout|""`) and
+`temp` (a net outside every wire). Edge a to b: a is read to compute b; `kind` `data` (an operand) or `control` (a
+select, clock, enable, reset or a switch selector), `via` (the cell or process node ID), `op` (its cell type),
+`seq` (true across a flip-flop or latch), `src` (the HDL of the cell or action). Edges are signal level; bit ranges
+are not given. Before `proc`, the outputs of a `$proc` are unnamed temporaries copied to the wires by the sync
+actions, so `temp` nodes appear between the process and its wires.
+
 ## Python
 
 `Design.write_graph("stg")` returns the parsed dict.
