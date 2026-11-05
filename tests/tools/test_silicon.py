@@ -136,6 +136,19 @@ endmodule
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "1"], ["/r/a.v:2.5-2.9"])
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "0"], [""])
 
+    def test_signed_stripped_from_declarations(self) -> None:
+        gv_text = ("module m (a, y);\n  input signed [3:0] a;\n  output signed y;\n"
+                   "  wire signed [31:0] o3_pos ;\n  reg signed q;\n"
+                   "  sky130_fd_sc_hd__buf_1 u (.A(a), .X(y));\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            gv, clean = Path(tmp) / "g.v", Path(tmp) / "clean.v"
+            gv.write_text(gv_text)
+            sf.clean_netlist(gv, clean, {})
+            text = clean.read_text()
+            self.assertNotIn("signed", text)
+            self.assertIn("wire [31:0] o3_pos ;", text)
+            self.assertIn("input [3:0] a;", text)
+
     def test_tie_origin_labels(self) -> None:
         rows = [{"inst": "o3_tie_0", "odin_name": "", "master": sf.CONB, "src_chain": "",
                  "tie": "0"},
