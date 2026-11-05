@@ -6,9 +6,11 @@
  * (digits 0-9 a-f x z ? and `_`; fewer digits than the width are zero-extended, or x/z-extended
  * when the leading digit is x/z; more are truncated), written at the address, which then steps
  * from `start` toward `finish` (default: the lowest and highest index), the file ending when the
- * address passes the last. The path of a relative file is the source file's directory (point
- * (y)), never the working directory (Yosys tries it first: spec 17). The words go into the state
- * of the initial run (pg_init.c) and become the memory's INIT with its other initial values.
+ * address passes the last. The path of a relative file is looked for beside the source file (point
+ * (y)), then in the working directory, then in the include directories, a WARNING for each
+ * fallback (Yosys tries the working directory first, so --vtr-compat does too: spec 17). The words
+ * go into the state of the initial run (pg_init.c) and become the memory's INIT with its other
+ * initial values.
  */
 #include "frontends/elab/pg_init.h"
 
@@ -20,6 +22,7 @@
 #include "frontends/elab/cval.h"
 #include "frontends/elab/elab2_mem.h"
 #include "frontends/elab/elab_internal.h"
+#include "frontends/project/project.h"
 #include "ir/design.h"
 #include "odin3/odin3.h"
 #include "util/arena.h"
@@ -218,27 +221,94 @@ static odin3_status rm_source_dir(const rm_run *rm, odin3_strbuf *path) {
     return st;
 }
 
-/* The path of the file: absolute as given. A relative one is beside the source file holding the
- * call; under --vtr-compat the working directory is tried first, as Yosys (and so Parmys) does.
- * Without it a file of that name in the working directory is not read: one WARNING says so. */
+/* The candidate path dir + file (dir may be empty or end in a slash) into path. */
+static odin3_status rm_join(odin3_strbuf *path, odin3_bytes dir, const char *file) {
+    odin3_strbuf_clear(path);
+    odin3_status st = dir.len > 0 ? odin3_strbuf_append(path, dir) : ODIN3_OK;
+    if (st == ODIN3_OK && dir.len > 0 && ((const char *)dir.ptr)[dir.len - 1U] != '/') {
+        st = odin3_strbuf_append(path, odin3_bytes_cstr("/"));
+    }
+    return st != ODIN3_OK ? st : odin3_strbuf_append(path, odin3_bytes_cstr(file));
+}
+
+/* The first include directory of the project holding the file, into path; *found says so. */
+static odin3_status rm_incdir_path(const rm_run *rm, odin3_strbuf *path, bool *found) {
+    const odin3_elab2 *e2 = rm->init->e2;
+    const odin3_project *proj = odin3_design_project(e2->design);
+    odin3_status st = ODIN3_OK;
+    *found = false;
+    for (size_t i = 0; proj != NULL && i < proj->incdirs.len && st == ODIN3_OK && !*found; i++) {
+        const odin3_proj_path *dir = odin3_vec_cat(&proj->incdirs, i);
+        const char *text = odin3_strtab_get(odin3_design_strtab(e2->design), dir->resolved);
+        st = rm_join(path, odin3_bytes_cstr(text), rm->file);
+        *found = st == ODIN3_OK && rm_is_file(path->data != NULL ? path->data : "");
+    }
+    return st;
+}
+
+/* The candidate beside the source file into src; *found says it is a file. */
+static odin3_status rm_source_path(const rm_run *rm, odin3_strbuf *src, bool *found) {
+    odin3_status st = rm_source_dir(rm, src);
+    st = st != ODIN3_OK ? st : odin3_strbuf_append(src, odin3_bytes_cstr(rm->file));
+    *found = st == ODIN3_OK && rm_is_file(src->data != NULL ? src->data : "");
+    return st;
+}
+
+/* The fallbacks after the source directory had no file: the working directory, then the include
+ * directories, each with its WARNING; with neither, the path is the source candidate (the error
+ * names the file, not the path). */
+static odin3_status rm_fallback(const rm_run *rm, bool in_cwd, const odin3_strbuf *src,
+                                odin3_strbuf *path) {
+    odin3_elab2 *e2 = rm->init->e2;
+    odin3_loc loc = odin3_ast_loc(e2->elab, rm->call);
+    if (in_cwd) {
+        odin3_elab2_warn(e2, loc,
+                         "%s found '%s' in the working directory, not beside the source "
+                         "file",
+                         rm->task, rm->file);
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    bool in_inc = false;
+    odin3_status st = rm_incdir_path(rm, path, &in_inc);
+    if (st == ODIN3_OK && in_inc) {
+        odin3_elab2_warn(e2, loc,
+                         "%s found '%s' in an include directory (%s), not beside the "
+                         "source file or in the working directory",
+                         rm->task, rm->file, path->data);
+        return st;
+    }
+    odin3_strbuf_clear(path);
+    return st != ODIN3_OK ? st : odin3_strbuf_append(path, (odin3_bytes){src->data, src->len});
+}
+
+/* The path of the file: absolute as given. A relative one is looked for in this order: beside
+ * the source file holding the call, the working directory, the include directories; under
+ * --vtr-compat the working directory comes first, as Yosys (and so Parmys) does. A file found by
+ * a rule other than the first of the order gets one WARNING saying which rule found it. */
 static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
     odin3_elab2 *e2 = rm->init->e2;
     odin3_strbuf_clear(path);
-    if (rm->file[0] == '/') {
+    bool in_cwd = rm->file[0] != '/' && rm->file[0] != '\0' && rm_is_file(rm->file);
+    if (rm->file[0] == '/' || rm->file[0] == '\0' || (in_cwd && e2->mod_vtr_compat)) {
         return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
     }
-    bool in_cwd = rm->file[0] != '\0' && rm_is_file(rm->file);
-    if (in_cwd && e2->mod_vtr_compat) {
-        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    odin3_strbuf src;
+    odin3_strbuf_init(&src);
+    bool in_src = false;
+    odin3_status st = rm_source_path(rm, &src, &in_src);
+    if (st == ODIN3_OK && in_src) {
+        if (in_cwd && strcmp(src.data, rm->file) != 0) {
+            odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, rm->call),
+                             "%s reads '%s' beside the source file, not the one in the working "
+                             "directory (Yosys and --vtr-compat read the working directory first)",
+                             rm->task, rm->file);
+        }
+        st = odin3_strbuf_append(path, (odin3_bytes){src.data, src.len});
+    } else if (st == ODIN3_OK) {
+        st = rm_fallback(rm, in_cwd, &src, path);
     }
-    odin3_status st = rm_source_dir(rm, path);
-    if (st == ODIN3_OK && in_cwd && path->len > 0) {
-        odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, rm->call),
-                         "%s reads '%s' beside the source file, not the one in the working "
-                         "directory (Yosys and --vtr-compat read the working directory first)",
-                         rm->task, rm->file);
-    }
-    return st != ODIN3_OK ? st : odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    odin3_strbuf_free(&src);
+    return st;
 }
 
 /* Reads the file: the located errors for a file that cannot be opened and one over the cap. */

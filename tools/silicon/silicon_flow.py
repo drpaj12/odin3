@@ -53,8 +53,14 @@ class Tools:
     versions: dict[str, str] = field(default_factory=dict)
 
 
+# Seconds one external tool run may take (OpenROAD, Magic, Netgen, KLayout). The flat Magic
+# extraction of des (79,679 cells with taps and fill) needs more than an hour, so the limit is
+# 6 hours; ODIN3_SILICON_TOOL_TIMEOUT overrides it.
+TOOL_TIMEOUT = int(os.environ.get("ODIN3_SILICON_TOOL_TIMEOUT", "21600"))
+
+
 def _run(argv: Sequence[str | Path], cwd: Path | None = None, env: Mapping[str, str] | None = None,
-         timeout: int = 3600) -> subprocess.CompletedProcess[str]:
+         timeout: int = TOOL_TIMEOUT) -> subprocess.CompletedProcess[str]:
     return subprocess.run([str(a) for a in argv], capture_output=True, text=True, cwd=cwd,
                           env=dict(os.environ, **env) if env else None, timeout=timeout,
                           stdin=subprocess.DEVNULL, check=False)

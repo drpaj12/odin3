@@ -614,6 +614,37 @@ static void test_readmem_vtr_compat_falls_back_to_the_source_directory(void) {
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "beside the source"));
 }
 
+/* No file beside the source: the working directory's is read (a WARNING says so), also by default.
+ */
+static void test_readmem_falls_back_to_the_working_directory_and_warns(void) {
+    const et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                       "  reg [7:0] m [0:3];\n"
+                                       "  initial $readmemh(\"init.hex\", m);\n"
+                                       "  assign q = m[ra];\nendmodule\n"},
+                           {"init.hex", "@2\n56 78\n"}};
+    pt_read_files(srcs, 2, "sub/t.v");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 56 78", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "in the working directory"));
+}
+
+/* Neither beside the source nor in the working directory: the project's include directories. */
+static void test_readmem_falls_back_to_the_include_directories_and_warns(void) {
+    et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                 "  reg [7:0] m [0:3];\n"
+                                 "  initial $readmemh(\"init.hex\", m);\n"
+                                 "  assign q = m[ra];\nendmodule\n"},
+                     {"inc/init.hex", "@2\n9a bc\n"}};
+    et_src proj = {"p.o3proj", "file verilog sub/t.v\ntop t\nincdir inc\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_setup(&req, &pt_rs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(pt_rs.design, ODIN3_KEEP_AST_NONE));
+    pt_rs.status = odin3_pass_run(pt_rs.design, "read_verilog", odin3_bytes_cstr(""));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 9a bc", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "in an include directory"));
+}
+
 static void test_readmemh_string_parameter(void) {
     read_with_file("sub/init.hex", "module t #(parameter FILE = \"init.hex\") (input [1:0] ra,\n"
                                    "  output [7:0] q);\n"
@@ -1128,6 +1159,8 @@ static void run_readmem_dir_tests(void) {
     RUN_TEST(test_readmem_default_reads_the_source_directory_and_warns);
     RUN_TEST(test_readmem_vtr_compat_reads_the_working_directory_first);
     RUN_TEST(test_readmem_vtr_compat_falls_back_to_the_source_directory);
+    RUN_TEST(test_readmem_falls_back_to_the_working_directory_and_warns);
+    RUN_TEST(test_readmem_falls_back_to_the_include_directories_and_warns);
 }
 
 int main(void) {
