@@ -175,10 +175,13 @@ def _rel(path: Path, base: Path) -> str:
         return path.name
 
 
-def odin_script(lib: Path, design: Path, top: str, out: Path, upto: str) -> str:
-    """The Odin III script of the ``elab`` (word level) or ``map`` (gates) run."""
+def odin_script(lib: Path, design: Path, top: str, out: Path, upto: str,
+                strict_tristate: bool = False) -> str:
+    """The Odin III script of the ``elab`` (word level) or ``map`` (gates) run. ``tristate`` runs
+    after ``flatten`` (a WARNING per conversion; ``strict_tristate``: a conversion is an error)."""
+    tri = "tristate --strict" if strict_tristate else "tristate"
     head = f"read_techlib {lib}; read_verilog --nolatches {design}; hierarchy --top {top}; " \
-           f"proc; flatten; opt; lower --neg-edge keep"
+           f"proc; flatten; {tri}; opt; lower --neg-edge keep"
     if upto == "elab":
         return f"{head}; dump_locs --types {out}/elab_locs.txt"
     return (f"{head}; write_blif --gates-as-names {out}/rtl.blif; abc --gates {LIB_NAME}; "
@@ -646,6 +649,7 @@ class Run:
     root: Path = field(default_factory=Path)
     log: list[str] = field(default_factory=list)
     seconds: dict[str, float] = field(default_factory=dict)  # wall clock per step (not in log)
+    strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
 
 
 def _tool_entry(t: Tools, name: str) -> dict[str, str]:
@@ -709,7 +713,7 @@ def _out_of_scope(r: Run, w: prov_steps.StepWriter, step: str, reason: str,
 
 
 def _odin(r: Run, upto: str) -> None:
-    script = odin_script(r.lib, r.design, r.top, r.out, upto)
+    script = odin_script(r.lib, r.design, r.top, r.out, upto, r.strict_tristate)
     res = _run([r.tools.odin3, "-p", script], cwd=r.design.parent)
     (r.out / f"odin_{upto}.log").write_text(res.stdout + res.stderr)
     if res.returncode != 0:
