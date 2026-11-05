@@ -21,6 +21,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- The version 2 name map writes `uid=<store ID>` on `R` lines when `ODIN3_PROV_UID=1` is set. The `r<n>` numbers count the
+  records of one file, so two maps from one run disagree on them; the store ID is the same in both, so a record can be
+  followed from the proc dump to the final one. Off by default (a restored design numbers its store again). New CTest
+  `lineage` (`tests/lineage/case_fsm.v`): the LUTs of a case, of an independent statement and of a state machine trace to
+  their own source lines.
 - `abc --prov-edges N|unlimited` sets the parent-edge budget of the precise per-LUT provenance records; the default budget
   is now at least 4,194,304 edges (16 MiB of parent IDs; peak memory on sha unchanged at 57 MB), where 16 x (cells + objects)
   made sha (725,231 edges) share one record for all its LUTs. The WARNING names the option.
