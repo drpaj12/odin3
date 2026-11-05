@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # run.sh NAME CLOCK : full silicon flow + measure + RTL/gate sims for one design. Call under tools/heavy-run.
 set -uo pipefail
-W=/home/jamiespa/odin3-ws/work; OUT=$W/silicon-ladder-out; S=$W/odin3-silicon-ladder
-ODIN=/home/jamiespa/odin3-ws/odin3/build/rel-main2/odin3
+W=$HOME/odin3-ws/work; OUT=$W/silicon-ladder-out; S=$W/odin3-silicon-ladder
+ODIN=$HOME/odin3-ws/odin3/build/rel-main2/odin3
 T=$W/tools; N=$1; CLK=$2; D=$OUT/$N
 . $W/opencores-runs/cfg/$N.env
 rm -rf $D/flow; mkdir -p $D
