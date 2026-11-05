@@ -94,6 +94,26 @@ static odin3_sigbit wild_bit(uint8_t wild, odin3_sigbit bit) {
     return (wild != PG_WILD_NONE && is_z) || (wild == PG_WILD_X && is_x) ? ODIN3_SB_ANY : bit;
 }
 
+/* An item bit that stays x or z after the wildcard rule: the switch is left to `proc`, which
+ * reads it as a wildcard (RTLIL: an undefined case bit matches anything; Yosys, hence Parmys, and
+ * so Odin III do the same), but a simulator compares four-state and the item matches nothing (IEEE
+ * 1364-2005 9.5). A design that writes `3'bxxx` as "don't care" in a plain `case` therefore
+ * simulates one way and synthesises another (mips_16: the ALU result becomes x for every command),
+ * so the item is warned. */
+static odin3_status warn_xz_item(odin3_pg *pg, odin3_ast_id expr, const odin3_sig *cmp) {
+    for (uint32_t i = 0; i < cmp->width; i++) {
+        odin3_sigbit bit = cmp->bits[i];
+        if (odin3_sb_is_const(bit) && odin3_sb_bit(bit) > ODIN3_BIT_1) {
+            odin3_elab2_warn(pg->e2, odin3_ast_loc(pg->e2->elab, expr),
+                             "case item has x or z bits, which match any value in the synthesised "
+                             "netlist (as Yosys and Parmys) but nothing in simulation; use casex "
+                             "or casez if a wildcard is meant");
+            break;
+        }
+    }
+    return ODIN3_OK;
+}
+
 /* The compare of one item expression: generated at the case type, the wildcards applied (on a
  * copy: the generated bits may be shared). */
 static odin3_status gen_compare(odin3_pg *pg, odin3_ast_id expr, const pg_swctx *ctx,
@@ -103,16 +123,19 @@ static odin3_status gen_compare(odin3_pg *pg, odin3_ast_id expr, const pg_swctx 
      */
     const uint8_t wild = ctx->wild;
     odin3_status st = gen_at(pg, expr, (odin3_etype){ctx->width, ctx->is_signed, false}, &sig);
-    if (st != ODIN3_OK || wild == PG_WILD_NONE) {
-        *out = sig;
+    if (st != ODIN3_OK) {
         return st;
     }
-    st = odin3_elab2_sig_new(pg->e2, sig.width, out);
-    for (uint32_t i = 0; st == ODIN3_OK && i < sig.width; i++) {
-        out->bits[i] = wild_bit(wild, sig.bits[i]);
+    if (wild == PG_WILD_NONE) {
+        *out = sig;
+    } else {
+        st = odin3_elab2_sig_new(pg->e2, sig.width, out);
+        for (uint32_t i = 0; st == ODIN3_OK && i < sig.width; i++) {
+            out->bits[i] = wild_bit(wild, sig.bits[i]);
+        }
+        out->is_signed = sig.is_signed;
     }
-    out->is_signed = sig.is_signed;
-    return st;
+    return st == ODIN3_OK ? warn_xz_item(pg, expr, out) : st;
 }
 
 /* --- folding --------------------------------------------------------------------------------- */
