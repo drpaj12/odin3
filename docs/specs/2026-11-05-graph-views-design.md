@@ -177,7 +177,7 @@ Check (2026-11-05, read from `src/passes/scoap/scoap.c`): the `scoap` JSON (sche
 version 3) already has, per module, `nets: [{id, name, cc0, cc1, co, [sc0, sc1, so], [p1_ppm]}]`.
 `id` is the module net ID (stable key to `odin3_net_prov`); SCOAP is defined per net, and a "node"
 value is its driver's output net. What is missing is the join data: the driver node ID and the HDL
-spans, so a viewer need not walk provenance itself. Added, additive and opt-in (default output
+spans, so a viewer need not walk provenance itself. Built as `scoap --prov` (and `Design.scoap(prov=True)`). Added, additive and opt-in (default output
 byte-identical, version stays 3): option `--prov`, which adds per net `"driver"` (node ID of the
 first driver pin, 0 for none), `"wire"` (primary wire ID, 0 for none), `"prov"` (the net's record
 ID) and `"src"` (the span strings of section 2). With `write_graph ddg`, a viewer joins by net ->

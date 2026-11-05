@@ -43,6 +43,12 @@ select, clock, enable, reset or a switch selector), `via` (the cell or process n
 are not given. Before `proc`, the outputs of a `$proc` are unnamed temporaries copied to the wires by the sync
 actions, so `temp` nodes appear between the process and its wires.
 
+## SCOAP join
+
+`scoap --prov --out FILE` (or `Design.scoap(prov=True)`) adds `driver`, `wire`, `prov` and `src` to every net of the
+SCOAP file. `wire` is the ID of the `ddg` signal node `w<wire>`, and `driver` equals the `via` of the `ddg` edge
+that computes the signal, so a viewer can colour the graph by CC0, CC1 and CO without walking provenance.
+
 ## Python
 
 `Design.write_graph("stg")` returns the parsed dict.
