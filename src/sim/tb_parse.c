@@ -136,7 +136,7 @@ static int find_exact(const parser *pr, const char *name) {
 /* A name inside a task is that task's own first, then the module's. */
 static int find_var(const parser *pr, const char *name) {
     if (pr->scope[0] != '\0') {
-        char scoped[TB_NAME];
+        char scoped[(2 * TB_NAME) + 2];
         (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
         int found = find_exact(pr, scoped);
         if (found >= 0) {
@@ -154,10 +154,14 @@ typedef struct var_shape {
 
 static int add_var(parser *pr, const char *name, var_shape shape) {
     tb_module *tb = pr->tb;
-    char scoped[TB_NAME];
+    char scoped[(2 * TB_NAME) + 2];
     if (pr->scope[0] != '\0') {
         (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
         name = scoped;
+        if (strlen(scoped) >= TB_NAME) {
+            fail(pr, "task variable name too long");
+            return -1;
+        }
     }
     if (find_exact(pr, name) >= 0) {
         fail(pr, "redeclared name");
@@ -1308,6 +1312,24 @@ static bool at_task_call(const parser *pr) {
            find_var(pr, tok->text) < 0;
 }
 
+/* ( expr {, expr} ) of a task call, when there is an argument list. */
+static bool call_args(parser *pr, tb_stmt *stmt) {
+    if (!accept_op(pr, "(")) {
+        return true;
+    }
+    do {
+        if (stmt->n == TB_MAX_ARGS) {
+            return fail(pr, "task call with more than 16 arguments");
+        }
+        tb_expr *arg = parse_expr(pr);
+        if (arg == NULL) {
+            return false;
+        }
+        stmt->args[stmt->n++] = arg;
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ")");
+}
+
 /* name [ ( expr {, expr} ) ] ; : the task is found when the module is complete. */
 static tb_stmt *parse_call(parser *pr) {
     tb_stmt *stmt = new_stmt(pr, S_CALL);
@@ -1315,29 +1337,13 @@ static tb_stmt *parse_call(parser *pr) {
         return NULL;
     }
     stmt->callee = pnew(pr, TB_NAME);
-    stmt->args = pnew_ptrs(pr, TB_MAX_ARGS);
+    stmt->args = (tb_expr **)pnew_ptrs(pr, TB_MAX_ARGS);
     if (stmt->callee == NULL || stmt->args == NULL) {
         return NULL;
     }
     (void)snprintf(stmt->callee, TB_NAME, "%s", cur(pr)->text);
     pr->pos++;
-    if (accept_op(pr, "(")) {
-        do {
-            if (stmt->n == TB_MAX_ARGS) {
-                fail(pr, "task call with more than 16 arguments");
-                return NULL;
-            }
-            tb_expr *arg = parse_expr(pr);
-            if (arg == NULL) {
-                return NULL;
-            }
-            stmt->args[stmt->n++] = arg;
-        } while (accept_op(pr, ","));
-        if (!expect_op(pr, ")")) {
-            return NULL;
-        }
-    }
-    tb_stmt **slot = odin3_vec_push(&pr->calls);
+    tb_stmt **slot = call_args(pr, stmt) ? (tb_stmt **)odin3_vec_push(&pr->calls) : NULL;
     if (slot == NULL || !expect_op(pr, ";")) {
         return NULL;
     }
@@ -1622,13 +1628,19 @@ static tb_task *add_task(parser *pr, const char *name) {
     return task->vars != NULL && task->dir != NULL ? task : NULL;
 }
 
-/* One formal argument of a task: records variable `var` as its next argument. */
-static bool task_arg(parser *pr, tb_task *task, int var, uint8_t dir) {
+/* One formal argument of a task: variable index and direction. */
+typedef struct task_formal {
+    int var;
+    uint8_t dir;
+} task_formal;
+
+/* Records the formal as the next argument of the task. */
+static bool task_arg(parser *pr, tb_task *task, task_formal formal) {
     if (task->nargs == TB_MAX_ARGS) {
         return fail(pr, "task with more than 16 arguments");
     }
-    task->vars[task->nargs] = var;
-    task->dir[task->nargs++] = dir;
+    task->vars[task->nargs] = formal.var;
+    task->dir[task->nargs++] = formal.dir;
     return true;
 }
 
@@ -1655,7 +1667,7 @@ static bool task_port_decl(parser *pr, tb_task *task, uint8_t dir, bool ansi) {
         }
         int var = add_var(pr, cur(pr)->text, shape);
         pr->pos++;
-        if (var < 0 || !task_arg(pr, task, var, dir)) {
+        if (var < 0 || !task_arg(pr, task, (task_formal){var, dir})) {
             return false;
         }
     } while (accept_op(pr, ",") &&
@@ -1677,6 +1689,51 @@ static bool task_ansi_ports(parser *pr, tb_task *task) {
     return expect_op(pr, ")");
 }
 
+/* Appends child to the block's statement list (parse memory). */
+static bool block_append(parser *pr, tb_stmt *block, tb_stmt *child) {
+    tb_stmt **grown = (tb_stmt **)pdup_ptrs(pr, (const void *)block->list, block->n);
+    if (grown == NULL) {
+        return false;
+    }
+    grown[block->n++] = child;
+    block->list = grown;
+    return true;
+}
+
+/* The statements of a task up to `endtask`, as one block. */
+static tb_stmt *task_body(parser *pr) {
+    tb_stmt *body = new_stmt(pr, S_BLOCK);
+    while (body != NULL && !pr->failed && !accept_kw(pr, "endtask")) {
+        if (cur(pr)->kind == TK_EOF) {
+            fail(pr, "missing endtask");
+            return NULL;
+        }
+        tb_stmt *stmt = parse_stmt(pr);
+        if (stmt == NULL || !block_append(pr, body, stmt)) {
+            return NULL;
+        }
+    }
+    return body;
+}
+
+/* [( ansi ports )] ; {input/output/inout declarations} */
+static bool task_header(parser *pr, tb_task *task) {
+    if (accept_op(pr, "(") && !task_ansi_ports(pr, task)) {
+        return false;
+    }
+    if (!expect_op(pr, ";")) {
+        return false;
+    }
+    while (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout")) {
+        uint8_t dir = dir_of(pr);
+        pr->pos++;
+        if (!task_port_decl(pr, task, dir, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool parse_task(parser *pr) {
     pr->pos++; /* task */
     (void)accept_kw(pr, "automatic");
@@ -1689,65 +1746,43 @@ static bool parse_task(parser *pr) {
     }
     pr->pos++;
     (void)snprintf(pr->scope, sizeof pr->scope, "%s", task->name);
-    bool ok = true;
-    if (accept_op(pr, "(")) {
-        ok = task_ansi_ports(pr, task);
-    }
-    ok = ok && expect_op(pr, ";");
-    while (ok && (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout"))) {
-        uint8_t dir = dir_of(pr);
-        pr->pos++;
-        ok = task_port_decl(pr, task, dir, false);
-    }
-    tb_stmt *body = ok ? new_stmt(pr, S_BLOCK) : NULL;
-    while (body != NULL && !pr->failed && !accept_kw(pr, "endtask")) {
-        if (cur(pr)->kind == TK_EOF) {
-            fail(pr, "missing endtask");
-            break;
-        }
-        tb_stmt *stmt = parse_stmt(pr);
-        tb_stmt **grown = stmt != NULL ? pnew_ptrs(pr, (size_t)body->n + 1U) : NULL;
-        if (grown == NULL) {
-            body = NULL;
-            break;
-        }
-        if (body->n > 0) {
-            memcpy(grown, body->list, (size_t)body->n * sizeof *grown);
-        }
-        grown[body->n++] = stmt;
-        body->list = grown;
-    }
+    task->body = task_header(pr, task) ? task_body(pr) : NULL;
     pr->scope[0] = '\0';
-    task->body = body;
-    return body != NULL && !pr->failed;
+    return task->body != NULL && !pr->failed;
 }
 
-/* Gives every task call its task, checking the number of arguments and that every output
+/* Gives one task call its task, checking the number of arguments and that every output
  * argument is something that can be written. */
+static bool link_one(const parser *pr, tb_stmt *call) {
+    const tb_module *tb = pr->tb;
+    call->task = -1;
+    for (uint32_t idx = 0; idx < tb->ntasks; idx++) {
+        if (strcmp(tb->tasks[idx].name, call->callee) == 0) {
+            call->task = (int)idx;
+        }
+    }
+    if (call->task < 0) {
+        tb_error(pr->file, call->line, "call of a task that is not defined in the testbench");
+        return false;
+    }
+    const tb_task *task = &tb->tasks[call->task];
+    if (call->n != task->nargs) {
+        tb_error(pr->file, call->line, "task call with the wrong number of arguments");
+        return false;
+    }
+    for (uint32_t arg = 0; arg < call->n; arg++) {
+        if ((task->dir[arg] & TB_ARG_OUT) != 0 && !valid_lvalue(pr, call->args[arg])) {
+            tb_error(pr->file, call->line, "task output argument that is not a reg or select");
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool link_calls(parser *pr) {
-    tb_module *tb = pr->tb;
     for (size_t i = 0; i < pr->calls.len; i++) {
-        tb_stmt *call = *(tb_stmt **)odin3_vec_at(&pr->calls, i);
-        call->task = -1;
-        for (uint32_t t = 0; t < tb->ntasks; t++) {
-            if (strcmp(tb->tasks[t].name, call->callee) == 0) {
-                call->task = (int)t;
-            }
-        }
-        if (call->task < 0) {
-            tb_error(pr->file, call->line, "call of a task that is not defined in the testbench");
+        if (!link_one(pr, *(tb_stmt **)odin3_vec_at(&pr->calls, i))) {
             return false;
-        }
-        const tb_task *task = &tb->tasks[call->task];
-        if (call->n != task->nargs) {
-            tb_error(pr->file, call->line, "task call with the wrong number of arguments");
-            return false;
-        }
-        for (uint32_t a = 0; a < call->n; a++) {
-            if ((task->dir[a] & TB_ARG_OUT) != 0 && !valid_lvalue(pr, call->args[a])) {
-                tb_error(pr->file, call->line, "task output argument that is not a reg or select");
-                return false;
-            }
         }
     }
     return true;
