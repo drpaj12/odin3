@@ -86,6 +86,21 @@ instance dump per OpenROAD sub-step, `route.def`, `final.v`, `final.odb`), `NAME
 (KLayout stores the DEF instance names as GDS properties; this variant keeps them, to measure name
 survival), `ext_hier.spice`, `ext_flat.spice`, `lvs.log`, `census.csv`, `census.json`, `join.json`.
 
+## Gate-level simulation of `final.v`
+
+`tools/silicon/gate_sim.py FINAL.V --pdk-verilog <PDK>/libs.ref/sky130_fd_sc_hd/verilog --tb-top TOP --tb FILE... --pass TEXT`
+runs the testbench on `final.v` with the sky130 Verilog models (iverilog, `-DFUNCTIONAL`) three times: with every
+flip-flop and latch starting at X (as the models ship), at 0 and at 1 (a copy of `primitives.v` with an `initial`
+state; the PDK files are not changed). Verdict `pass` (the X run passes), `x-pessimism` (the X run fails, the 0 and 1
+runs pass; a WARNING says so) or `fail` (a 0 or 1 run fails: a functional difference). Exit 1 only for `fail`.
+
+Why: the netlist keeps registers the RTL never resets (they are loaded before use). The mapped logic can be equal for 0
+and for 1 on such a register, yet a gate simulator computes X from it and keeps it (for example a 4-bit counter
+cleared by a write strobe: `next = f(q, strobe)` with the `q` terms cancelling when the strobe is 1). The RTL
+simulation takes the `if` branch and never sees the X. The mmuart ladder run failed 42 of 61 checks from the X
+start and passes all 61 from a 0 start and from a 1 start. A UDP shows its initial state on its output at its first
+input event, so a flip-flop whose input never changes before its first clock edge stays X in all three runs.
+
 ## What physical design changes
 
 Peter's question: is there obfuscation in this path? Two answers.
