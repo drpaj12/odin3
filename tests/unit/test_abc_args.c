@@ -100,7 +100,27 @@ static void test_argument_errors(void) {
                    "abc: --lut must be an integer from 2 to 16, not 'x'");
     expect_refused("--prov fast", ODIN3_ERR_INVALID_ARG,
                    "abc: --prov must be fine or cone, not 'fast'");
+    expect_refused("--prov-edges 0", ODIN3_ERR_INVALID_ARG,
+                   "abc: --prov-edges must be a positive integer or unlimited, not '0'");
+    expect_refused("--prov-edges many", ODIN3_ERR_INVALID_ARG,
+                   "abc: --prov-edges must be a positive integer or unlimited, not 'many'");
     TEST_ASSERT_EQUAL_UINT32(0, odin3_abc_fake_open_count());
+}
+
+static void test_prov_edges_parse(void) {
+    odin3_arena *scratch = odin3_arena_create(0);
+    odin3_abc_opts opts;
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_abc_parse_args(odin3_bytes_cstr("--prov-edges 5000"), scratch, &opts));
+    TEST_ASSERT_EQUAL_UINT64(5000, opts.prov_edges);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        odin3_abc_parse_args(odin3_bytes_cstr("--lut 6 --prov-edges unlimited"), scratch, &opts));
+    TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, opts.prov_edges);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_abc_parse_args(odin3_bytes_cstr("--lut 6"), scratch, &opts));
+    TEST_ASSERT_EQUAL_UINT64(0, opts.prov_edges);
+    odin3_arena_destroy(scratch);
 }
 
 static void test_via_blif_bytes(void) {
@@ -334,7 +354,8 @@ static void test_pass_table_entry(void) {
     TEST_ASSERT_EQUAL_UINT8(ODIN3_PASS_PROCESSES_REFUSE, def->processes);
     TEST_ASSERT_EQUAL_STRING(
         "abc [--script FILE] [--lut K] [--gates LIB] [--via-blif DIR] [--log FILE] [--prov "
-        "fine|cone]: map each module's soft logic to K-input LUTs (--lut) or to library LIB's "
+        "fine|cone] [--prov-edges N|unlimited]: map each module's soft logic to K-input LUTs "
+        "(--lut) or to library LIB's "
         "gates (--gates) with linked ABC (one run per clock domain)",
         def->help);
 }
@@ -560,6 +581,7 @@ static void test_gates_genlib_loaded(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_argument_errors);
+    RUN_TEST(test_prov_edges_parse);
     RUN_TEST(test_via_blif_bytes);
     RUN_TEST(test_io_errors);
     RUN_TEST(test_precedence);
