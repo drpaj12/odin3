@@ -9,6 +9,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
+#include "util/attr.h"
 #include "util/str.h"
 
 #include <stdbool.h>
@@ -35,7 +36,20 @@ odin3_status gv_sep(odin3_strbuf *out, bool *first);
 /* The text of strtab ID str; "" for 0. */
 const char *gv_str(const gv_run *run, uint32_t str);
 
+/* A JSON writer that remembers the first failure: after one, every call does nothing. */
+typedef struct gv_w {
+    gv_run *run;
+    odin3_strbuf *out;
+    odin3_status st;
+} gv_w;
+
+void gv_w_raw(gv_w *wr, const char *text);
+void gv_w_fmt(gv_w *wr, const char *fmt, ...) ODIN3_PRINTF(2, 3);
+void gv_w_str(gv_w *wr, const char *text);
+void gv_w_prov(gv_w *wr, odin3_prov_id prov);
+
 /* The kinds (each fills run->mods). */
 odin3_status gv_write_stg(gv_run *run);
+odin3_status gv_write_cfg(gv_run *run);
 
 #endif
