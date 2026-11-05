@@ -84,6 +84,7 @@ static char *write_text(const char *name, const odin3_json_write_opts *opts) {
 
 static const odin3_json_write_opts k_odin3 = {.odin3_keys = true};
 static const odin3_json_write_opts k_plain = {.odin3_keys = false};
+static const odin3_json_write_opts k_nets = {.odin3_keys = false, .net_ids = true};
 
 static void assert_has(const char *text, const char *needle) {
     if (strstr(text, needle) == NULL) {
@@ -363,8 +364,21 @@ static void test_levels_survive_levelize_write_read(void) {
     TEST_ASSERT_EQUAL_INT64(3, after[n_after - 1]);
 }
 
+/* --net-ids: odin3_nets lists the net ID of each bit; without it the bytes are the default's. In
+ * the fixture the net n1 is net 4, its code in "bits" is 5. */
+static void test_net_ids(void) {
+    build_design();
+    char *plain = write_text("n0.json", &k_plain);
+    char *with = write_text("n1.json", &k_nets);
+    assert_lacks(plain, "odin3_nets");
+    assert_has(with, "\"bits\": [ 5 ],\n          \"odin3_nets\": [ 4 ],\n");
+    odin3_util_free(plain);
+    odin3_util_free(with);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_net_ids);
     RUN_TEST(test_default_is_byte_identical);
     RUN_TEST(test_keys_and_order);
     RUN_TEST(test_round_trip_abc);
