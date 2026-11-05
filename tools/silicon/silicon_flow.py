@@ -189,6 +189,45 @@ def odin_script(lib: Path, design: Path, top: str, out: Path, upto: str,
             f"dump_locs --types {out}/locs.txt; write_verilog {out}/g.v")
 
 
+def set_param(text: str, top: str, name: str, value: str) -> str:
+    """``text`` with the default of parameter ``name`` of module ``top`` set to ``value``.
+
+    Odin III has no parameter override on the command line and the netlist has no parameters, so a
+    testbench that instantiates ``top #(.NAME(v))`` needs the netlist built with that value. Only
+    the first ``parameter NAME = ...`` in the module body or header is rewritten (the text up to the
+    next ``,``, ``;`` or ``)``)."""
+    mod = re.search(rf"\bmodule\s+{re.escape(top)}\b.*?\bendmodule\b", text, re.S)
+    if mod is None:
+        raise ValueError(f"--param: module {top} not found")
+    decl = re.compile(rf"(\bparameter\s+(?:signed\s+)?(?:\[[^\]]*\]\s*)?{re.escape(name)}\s*=\s*)"
+                      r"[^,;)]+")
+    body, n = decl.subn(lambda m: m.group(1) + value, mod.group(0), count=1)
+    if n == 0:
+        raise ValueError(f"--param: module {top} has no 'parameter {name} = ...'")
+    return text[:mod.start()] + body + text[mod.end():]
+
+
+def parametrised_design(design: Path, top: str, params: Sequence[str], out: Path) -> Path:
+    """A copy of ``design`` with the ``NAME=VALUE`` defaults set, in ``out/param_src`` beside
+    symlinks to the other files of the design's directory (includes keep resolving). The copy
+    has the original's file name, so provenance spans name the same file."""
+    src = out / "param_src"
+    src.mkdir(parents=True, exist_ok=True)
+    for other in design.parent.iterdir():
+        link = src / other.name
+        if other.name != design.name and other.is_file() and not link.exists():
+            link.symlink_to(other)
+    text = design.read_text()
+    for item in params:
+        name, eq, value = item.partition("=")
+        if not eq or not value:
+            raise ValueError(f"--param {item!r}: expected NAME=VALUE")
+        text = set_param(text, top, name, value)
+    dst = src / design.name
+    dst.write_text(text)
+    return dst
+
+
 def read_locs(path: Path) -> dict[str, tuple[str, list[str]]]:
     """dump_locs --types: node name to (cell type, source spans)."""
     nodes: dict[str, tuple[str, list[str]]] = {}
@@ -908,7 +947,8 @@ def default_lib() -> Path:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI: silicon_flow.py DESIGN.v --top T --out DIR [--tools DIR] [--pdk DIR] [--odin3 PATH]
-    [--steps a,b] [--clock PORT]. Exit 0 ok, 1 a step failed, 2 usage or missing tools."""
+    [--steps a,b] [--clock PORT] [--param NAME=VALUE]. Exit 0 ok, 1 a step failed, 2 usage or
+    missing tools."""
     import argparse
 
     ap = argparse.ArgumentParser(prog="silicon_flow", description=(__doc__ or "").split("\n")[0])
@@ -921,6 +961,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     ap.add_argument("--steps", default=",".join(TOP_STEPS), help="comma list of steps")
     ap.add_argument("--clock", default="", help="clock port (enables CTS)")
     ap.add_argument("--lib", type=Path, default=None)
+    ap.add_argument("--param", action="append", default=[], metavar="NAME=VALUE",
+                    help="set the default of a parameter of the top module (a testbench that "
+                         "overrides it needs the netlist built with its value); repeatable")
     ns = ap.parse_args(list(sys.argv[1:] if argv is None else argv))
     steps = tuple(x for x in ns.steps.split(",") if x)
     bad = [x for x in steps if x not in TOP_STEPS]
@@ -938,7 +981,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("silicon_flow: missing tools for the requested steps:\n  " + "\n  ".join(gone),
               file=sys.stderr)
         return SKIP_EXIT if os.environ.get("ODIN3_SILICON_SKIP") else 2
-    run_ = Run(ns.design.resolve(), ns.top, ns.out.resolve(), (ns.lib or default_lib()).resolve(),
+    design = ns.design.resolve()
+    if ns.param:
+        try:
+            design = parametrised_design(design, ns.top, ns.param, ns.out.resolve())
+        except ValueError as exc:
+            print(f"silicon_flow: {exc}", file=sys.stderr)
+            return 2
+    run_ = Run(design, ns.top, ns.out.resolve(), (ns.lib or default_lib()).resolve(),
                t, ns.clock, steps)
     code = run(run_)
     for line in run_.log:

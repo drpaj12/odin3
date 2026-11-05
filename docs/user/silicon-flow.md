@@ -55,7 +55,11 @@ python3 tools/silicon/silicon_flow.py design.v --top TOP --out OUT --tools $TOOL
 
 Options: `--steps a,b` runs a subset (`read,elab,map,equiv,netlist` needs no external tool), `--clock` names
 the clock port (it switches clock-tree synthesis on), `--pdk` names the `sky130A` directory. Missing
-tools stop the run with exit 2 and a list of what to install. A worked example is
+tools stop the run with exit 2 and a list of what to install. `--param NAME=VALUE` (repeatable) sets the default of a
+parameter of the top module in a copy of the design (`OUT/param_src/`, same file name, the other files of the directory
+linked beside it): the netlist has no parameters, so a testbench that instantiates `top #(.NAME(v))` needs the netlist
+built with `v` (the i2c ladder design: `--param ARST_LVL=1'b0`), and `gate_sim.py --param NAME=VALUE` drops that override
+from the testbench copy. The sha256 of the copy, not of the original, is recorded as the design input. A worked example is
 `tests/silicon/comparator/` (the design, the stored provenance directory, the census and the join).
 
 | Step | Stage | Tool | What it does |

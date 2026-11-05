@@ -177,6 +177,42 @@ endmodule
                          ["hdl:a.v:1.1-9.9", "hdl:a.v:3.1-3.4"])
 
 
+class ParamTest(unittest.TestCase):
+    SRC = """module sub (input a);
+  parameter ARST_LVL = 1'b1;
+endmodule
+module top (input a, output y);
+  parameter ARST_LVL = 1'b1; // reset level
+  parameter [3:0] W = 4'd2;
+  sub s (a);
+endmodule
+"""
+
+    def test_set_param_changes_only_the_top_module_default(self) -> None:
+        out = sf.set_param(self.SRC, "top", "ARST_LVL", "1'b0")
+        self.assertEqual(out.count("ARST_LVL = 1'b1"), 1)  # the sub module's is untouched
+        self.assertIn("parameter ARST_LVL = 1'b0; // reset level", out)
+        self.assertIn("parameter [3:0] W = 4'd9;", sf.set_param(self.SRC, "top", "W", "4'd9"))
+
+    def test_set_param_errors(self) -> None:
+        with self.assertRaises(ValueError):
+            sf.set_param(self.SRC, "nope", "W", "1")
+        with self.assertRaises(ValueError):
+            sf.set_param(self.SRC, "top", "MISSING", "1")
+
+    def test_parametrised_design_keeps_name_and_siblings(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp)
+            (d / "src").mkdir()
+            (d / "src" / "design.v").write_text(self.SRC)
+            (d / "src" / "defs.v").write_text("`define X 1\n")
+            got = sf.parametrised_design(d / "src" / "design.v", "top", ["ARST_LVL=1'b0"], d / "o")
+            self.assertEqual(got, d / "o" / "param_src" / "design.v")
+            self.assertIn("ARST_LVL = 1'b0", got.read_text())
+            self.assertEqual((got.parent / "defs.v").read_text(), "`define X 1\n")
+            self.assertIn("ARST_LVL = 1'b1", (d / "src" / "design.v").read_text())
+
+
 @unittest.skipUnless(shutil.which("tclsh"), "needs tclsh")
 class DieEdgeSnapTest(unittest.TestCase):
     """The Tcl driver keeps the die edge 0.17 um or more from the last met1 to met4 track
