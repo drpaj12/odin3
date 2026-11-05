@@ -386,6 +386,7 @@ odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_
 typedef struct rv_args {
     bool parse_only;
     bool lib; /* --lib: keep the modules as library units for later reads (2D-7b) */
+    bool vendor_prims; /* --vendor-prims: vendor primitives from the behavioural models */
     odin3_elab_opts elab;
     odin3_vec files;
     odin3_bytes name_map; /* -name-map's file (H-6), ptr NULL when not given */
@@ -399,6 +400,8 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         out->parse_only = true;
     } else if (odin3_pass_arg_is(word, "--lib")) {
         out->lib = true;
+    } else if (odin3_pass_arg_is(word, "--vendor-prims")) {
+        out->vendor_prims = true;
     } else if (odin3_pass_arg_is(word, "--nolatches")) {
         out->elab.nolatches = true;
     } else if (odin3_pass_arg_is(word, "--nomem2reg")) {
@@ -436,6 +439,12 @@ static odin3_status check_lib_args(const rv_args *args) {
                   "read_verilog: -netlist cannot be combined with %s (it is an option of the "
                   "design read)",
                   args->lib ? "--lib" : "--parse-only");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (args->lib && args->vendor_prims) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: --lib cannot be combined with --vendor-prims (it is an option of "
+                  "the design read)");
         return ODIN3_ERR_INVALID_ARG;
     }
     if (args->lib && args->elab.auto_blackbox) {
@@ -728,7 +737,8 @@ static bool soft_read(const rv_args *args) {
 }
 
 static uint32_t soft_blocks_of(const odin3_design *design, const rv_args *args) {
-    return soft_read(args) ? odin3_soft_blocks_missing(design) : 0U;
+    uint32_t mask = soft_read(args) ? odin3_soft_blocks_missing(design) : 0U;
+    return args->vendor_prims && !args->lib && !args->parse_only ? mask | SOFT_VENDOR_BIT : mask;
 }
 
 /* -name-map: loads the map into names and points the elaboration options at it. */
@@ -917,7 +927,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
 const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--prov-ast refs|constructs|full|off] [--nolatches] "
-    "[--nomem2reg] [--auto-blackbox] "
+    "[--nomem2reg] [--auto-blackbox] [--vendor-prims] "
     "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
@@ -925,7 +935,9 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "registered SystemVerilog reader, the slang adapter); --parse-only keeps it (write_verilog_ast "
     "prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
-    "memories unless forced, --auto-blackbox makes an undefined module a black box, --vtr-compat "
+    "memories unless forced, --auto-blackbox makes an undefined module a black box, --vendor-prims builds an undefined "
+    "IBUF, IBUFG, OBUF, OBUFT, IOBUF, BUFG, ODDR2 or IDDR2 from Odin III's behavioural model (a "
+    "warning each), --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
     "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
     "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "

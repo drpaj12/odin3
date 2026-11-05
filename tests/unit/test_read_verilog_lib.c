@@ -441,6 +441,51 @@ static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     TEST_ASSERT_NULL(module_like("sub_narrow"));
 }
 
+/* --vendor-prims: an undefined module named like a vendor primitive is built from Odin III's
+ * behavioural model, with one WARNING per primitive; without the flag it stays the error. */
+static const char k_vendor_top[] =
+    "module top (input clk, input d, input t, output y, output q);\n"
+    "  wire w;\n"
+    "  IBUF #(.IOSTANDARD(\"LVCMOS33\")) ib (.I(d), .O(w));\n"
+    "  OBUF ob (.I(w), .O(y));\n"
+    "  ODDR2 #(.DDR_ALIGNMENT(\"NONE\"), .INIT(1'b0), .SRTYPE(\"SYNC\")) dd (.Q(q), .C0(clk),\n"
+    "    .C1(~clk), .CE(1'b1), .R(1'b0), .S(1'b0), .D0(1'b0), .D1(w));\n"
+    "endmodule\n";
+
+static void test_vendor_prims_are_built_from_the_models(void) {
+    et_src srcs[] = {{"t.v", k_vendor_top}};
+    setup_files(srcs, 1, "");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--vendor-prims t.v"), et_log(&rs));
+    TEST_ASSERT_NOT_NULL(module_like("IBUF"));
+    TEST_ASSERT_NOT_NULL(module_like("OBUF"));
+    TEST_ASSERT_NOT_NULL(module_like("ODDR2"));
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "'IBUF' is a vendor primitive"));
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "'ODDR2' is a vendor primitive"));
+}
+
+static void test_vendor_prims_off_keeps_the_error(void) {
+    et_src srcs[] = {{"t.v", k_vendor_top}};
+    setup_files(srcs, 1, "");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("read_verilog", "t.v"));
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_WARN, "vendor primitive"));
+}
+
+/* A module the design defines is never replaced by the model. */
+static void test_vendor_prims_never_replace_a_definition(void) {
+    et_src srcs[] = {{"t.v", "module IBUF (input I, output O);\n  assign O = ~I;\nendmodule\n"
+                             "module top (input d, output y);\n"
+                             "  IBUF ib (.I(d), .O(y));\nendmodule\n"}};
+    setup_files(srcs, 1, "");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "--vendor-prims t.v"), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&rs, ODIN3_LOG_WARN, "vendor primitive"));
+}
+
+static void test_vendor_prims_refused_with_lib(void) {
+    et_src srcs[] = {{"t.v", k_sub}};
+    setup_files(srcs, 1, "");
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("read_verilog", "--lib --vendor-prims t.v"));
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
     X(test_lib_unit_elaborated_where_used)                                                         \
@@ -464,7 +509,11 @@ static void test_lib_unit_sees_macro_of_unitless_lib_file(void) {
     X(test_vtr_compat_keeps_hard_cell_without_overflow)                                            \
     X(test_vtr_compat_mixed_fit_and_overflow)                                                      \
     X(test_lib_unit_keeps_its_own_macros)                                                          \
-    X(test_lib_unit_sees_macro_of_unitless_lib_file)
+    X(test_lib_unit_sees_macro_of_unitless_lib_file)                                               \
+    X(test_vendor_prims_are_built_from_the_models)                                                 \
+    X(test_vendor_prims_off_keeps_the_error)                                                       \
+    X(test_vendor_prims_never_replace_a_definition)                                                \
+    X(test_vendor_prims_refused_with_lib)
 
 #define RUN_ONE(name) RUN_TEST(name);
 

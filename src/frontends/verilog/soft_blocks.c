@@ -16,6 +16,18 @@ const char *odin3_soft_block_name(uint32_t index) {
     return index < SOFT_BLOCK_COUNT ? k_names[index] : "";
 }
 
+static const char *const k_vendor[] = {"IBUF", "IBUFG", "OBUF", "OBUFT", "IOBUF",
+                                       "BUFG", "ODDR2", "IDDR2"};
+
+bool odin3_vendor_prim_known(const char *name) {
+    for (size_t i = 0; i < sizeof k_vendor / sizeof k_vendor[0]; i++) {
+        if (strcmp(name, k_vendor[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 uint32_t odin3_soft_blocks_missing(const odin3_design *design) {
     const odin3_arch *arch = odin3_design_arch(design);
     uint32_t mask = 0;
