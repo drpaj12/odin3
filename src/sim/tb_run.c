@@ -398,12 +398,40 @@ static bool step_loop_kind(run *rt, proc *pr, frame *frm) {
     return push(rt, pr, stmt->a);
 }
 
+/* A task call: the first visit copies the input arguments in and runs the body, the second
+ * copies the output arguments back to the caller. */
+static bool step_call(run *rt, proc *pr, frame *frm) {
+    const tb_stmt *stmt = frm->stmt;
+    const tb_task *task = &rt->tb->tasks[stmt->task];
+    if (frm->pc == 0) {
+        for (uint32_t i = 0; i < task->nargs; i++) {
+            tb_var *var = &rt->tb->vars[task->vars[i]];
+            if ((task->dir[i] & TB_ARG_IN) != 0) {
+                var->val = tb_eval_assign(&rt->ev, stmt->args[i], var->width);
+            }
+        }
+        post_write(rt);
+        frm->pc = 1;
+        return push(rt, pr, task->body);
+    }
+    for (uint32_t i = 0; i < task->nargs; i++) {
+        if ((task->dir[i] & TB_ARG_OUT) != 0) {
+            tb_write(&rt->ev, stmt->args[i], rt->tb->vars[task->vars[i]].val);
+        }
+    }
+    post_write(rt);
+    pr->sp--;
+    return true;
+}
+
 /* One step of the top frame; returns false when the process blocked or finished. */
 static bool step_loop(run *rt, proc *pr, frame *frm) {
     const tb_stmt *stmt = frm->stmt;
     switch (stmt->kind) {
     case S_BLOCK:
         return step_block(rt, pr, frm);
+    case S_CALL:
+        return step_call(rt, pr, frm);
     case S_DELAY:
     case S_EVENT:
     case S_WAIT:
