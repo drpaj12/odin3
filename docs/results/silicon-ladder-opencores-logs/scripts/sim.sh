@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # sim.sh NAME rtl|gate : iverilog the design's testbench against design.v (rtl) or flow/or/final.v + sky130 models (gate).
 set -uo pipefail
-W=/home/jamiespa/odin3-ws/work; OUT=$W/silicon-ladder-out; N=$1; M=$2
+W=$HOME/odin3-ws/work; OUT=$W/silicon-ladder-out; N=$1; M=$2
 PDKV=$W/tools/pdk/sky130A/libs.ref/sky130_fd_sc_hd/verilog
 D=$OUT/$N; T=$OUT/tb/$N; S=$D/sim_$M; rm -rf $S; mkdir -p $S; cp $T/* $S/ 2>/dev/null
 case $N in
