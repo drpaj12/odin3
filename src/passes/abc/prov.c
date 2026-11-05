@@ -439,13 +439,16 @@ static odin3_status all_old_cells(const odin3_abc_run *run, odin3_vec *cells) {
 }
 
 static uint64_t edge_budget(const odin3_abc_run *run, const odin3_abc_result *res) {
-    uint64_t fixed = odin3_abc_run_limits_get()->prov_edges;
+    uint64_t fixed =
+        run->opts.prov_edges != 0 ? run->opts.prov_edges : odin3_abc_run_limits_get()->prov_edges;
     if (fixed != 0) {
         return fixed;
     }
     uint64_t old_cells = run->region->soft.len + run->region->regs.len;
     uint64_t new_objs = (uint64_t)res->n_luts + res->n_regs_out;
-    return ODIN3_ABC_PROV_EDGES_PER_OBJ * (old_cells + new_objs) + ODIN3_ABC_PROV_EDGES_BASE;
+    uint64_t formula =
+        ODIN3_ABC_PROV_EDGES_PER_OBJ * (old_cells + new_objs) + ODIN3_ABC_PROV_EDGES_BASE;
+    return formula > ODIN3_ABC_PROV_EDGES_FLOOR ? formula : ODIN3_ABC_PROV_EDGES_FLOOR;
 }
 
 odin3_status odin3_abc_coarse_record(odin3_abc_run *run, odin3_prov_id *out) {
@@ -468,7 +471,7 @@ static odin3_status coarse_records(odin3_abc_run *run, const odin3_abc_result *r
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
     odin3_log(ODIN3_LOG_WARN,
               "abc: module '%s', %s: provenance needs %" PRIu64 " parent edges (budget %" PRIu64
-              "); the run's LUTs share one record",
+              "); the run's LUTs share one record (--prov-edges N or unlimited raises the budget)",
               module_text(run), domain, edges, edge_budget(run, res));
     odin3_prov_id rec = {0};
     odin3_status st = odin3_abc_coarse_record(run, &rec);

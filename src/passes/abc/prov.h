@@ -58,10 +58,12 @@ odin3_status odin3_abc_anchors(odin3_abc_run *run, const odin3_abc_result *res, 
  * parents, in node-ID order; a new LUT in one new region carries that record, one in several
  * carries the record of one more operation whose parents are those regions' records in anchor
  * order. Walks are iterative with per-anchor visit stamps. The parent edges are summed first:
- * over the budget (run limits prov_edges, else 16 x (old cells + new objects) + 65,536) the run
- * makes one record whose parents are all its old cells in node-ID order, every new object carries
- * it, and it warns `abc: module '<m>', <domain>: provenance needs N parent edges (budget M); the
- * run's LUTs share one record`. NO_MEMORY, with records made so far kept (records are immutable).
+ * over the budget (the --prov-edges option, else the run limits' prov_edges, else the larger of 16
+ * x (old cells + new objects) + 65,536 and 4,194,304) the run makes one record whose parents are
+ * all its old cells in node-ID order, every new object carries it, and it warns `abc: module '<m>',
+ * <domain>: provenance needs N parent edges (budget M); the run's LUTs share one record
+ * (--prov-edges N or unlimited raises the budget)`. NO_MEMORY, with records made so far kept
+ * (records are immutable).
  */
 odin3_status odin3_abc_records(odin3_abc_run *run, const odin3_abc_result *res,
                                const odin3_vec *anchors, odin3_vec *obj_prov);

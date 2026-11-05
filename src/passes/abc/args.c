@@ -24,6 +24,7 @@ enum {
     LUT_DIGITS_MAX = 3, /* "16" and a little slack for leading zeros */
     HEX_BASE = 16,
     HEX_PER_BYTE = 2,
+    PROV_EDGES_DIGITS = 15, /* fits uint64_t with room */
     CWD_BYTES = 4096
 };
 
@@ -42,11 +43,12 @@ typedef enum abc_option {
     OPT_LOG,
     OPT_PROV,
     OPT_GATES,
+    OPT_PROV_EDGES,
     OPT_COUNT
 } abc_option;
 
-static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut",  "--via-blif",
-                                                      "--log",    "--prov", "--gates"};
+static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut",   "--via-blif",  "--log",
+                                                      "--prov",   "--gates", "--prov-edges"};
 
 static int option_of(odin3_bytes word) {
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -73,6 +75,26 @@ static bool parse_lut(const char *text, uint32_t *lut_k) {
     return value >= ODIN3_ABC_LUT_MIN && value <= ODIN3_LUT_MAX_WIDTH;
 }
 
+/* `--prov-edges`'s value: `unlimited`, or a positive decimal integer. */
+static bool parse_prov_edges(const char *text, uint64_t *edges) {
+    if (strcmp(text, "unlimited") == 0) {
+        *edges = UINT64_MAX;
+        return true;
+    }
+    uint64_t value = 0;
+    if (text[0] == '\0' || strlen(text) > PROV_EDGES_DIGITS) {
+        return false;
+    }
+    for (const char *cur = text; *cur != '\0'; cur++) {
+        if (*cur < '0' || *cur > '9') {
+            return false;
+        }
+        value = value * LUT_DECIMAL_BASE + (uint64_t)(*cur - '0');
+    }
+    *edges = value;
+    return value > 0;
+}
+
 /* One option's value (already copied): the field it sets, or a logged INVALID_ARG. */
 static odin3_status set_option(abc_option which, const char *value, odin3_abc_opts *out) {
     switch (which) {
@@ -92,6 +114,13 @@ static odin3_status set_option(abc_option which, const char *value, odin3_abc_op
         if (!parse_lut(value, &out->lut_k)) {
             odin3_log(ODIN3_LOG_ERROR, "abc: --lut must be an integer from 2 to 16, not '%s'",
                       value);
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        return ODIN3_OK;
+    case OPT_PROV_EDGES:
+        if (!parse_prov_edges(value, &out->prov_edges)) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "abc: --prov-edges must be a positive integer or unlimited, not '%s'", value);
             return ODIN3_ERR_INVALID_ARG;
         }
         return ODIN3_OK;
