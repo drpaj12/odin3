@@ -3690,6 +3690,17 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
     set_tests_properties(proc_rows PROPERTIES
         LABELS proc SKIP_RETURN_CODE 77 TIMEOUT 300)
 
+    # The tristate pass (brief odin3-tristate-pass): internal tri-states to logic, top inouts split,
+    # simulated against iverilog on the RTL. Needs only iverilog, so it sits outside the Yosys 0.55
+    # block and CI runs it in the Debug leg, where the IR check runs after every pass. Exit 77 (skip)
+    # without iverilog.
+    if(ODIN3_IVERILOG)
+        add_test(NAME tristate_micro
+            COMMAND ${PROJECT_SOURCE_DIR}/tests/tristate/check.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/tristate)
+        set_tests_properties(tristate_micro PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
+
     # Yosys 0.55 as VTR pins it (2D plan point (p)): the oracle of every 2D-2F comparison. Found
     # only in the VTR build (never PATH, which may hold another Yosys) and accepted only when
     # `yosys -V` says 0.55; otherwise no 0.55 test is registered (CI has none: they run locally
@@ -3954,12 +3965,6 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${PROJECT_SOURCE_DIR}/tests/elab/accept)
         set_tests_properties(elab_tribuf_default_equiv PROPERTIES
             LABELS differential SKIP_RETURN_CODE 77)
-        # The tristate pass (brief odin3-tristate-pass): internal tri-states to logic, top inouts split,
-        # simulated against iverilog on the RTL. Exit 77 (skip) without iverilog.
-        add_test(NAME tristate_micro
-            COMMAND ${PROJECT_SOURCE_DIR}/tests/tristate/check.sh $<TARGET_FILE:odin3>
-                    ${PROJECT_SOURCE_DIR}/tests/tristate)
-        set_tests_properties(tristate_micro PROPERTIES SKIP_RETURN_CODE 77)
         # PHASE2 decision 28: a lone tri-state driver of a top-level output loses its enable
         # under --vtr-compat as in Parmys: the WARNING, and the sp-splice netlist identical to the
         # Parmys golden (tests/golden/vtr_tristate). Exit 77 (skip) as above.
