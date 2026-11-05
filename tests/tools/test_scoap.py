@@ -92,7 +92,8 @@ class ScoapTest(unittest.TestCase):
             f'read_techlib {LIB}; read_verilog "{src}"; proc; opt; lower; abc --lut 6; '
             f"scoap --prov --out {out}"
         )
-        done = subprocess.run([str(ODIN3), "--top", "t", "-p", script], capture_output=True, text=True)
+        argv = [str(ODIN3), "--top", "t", "-p", script]
+        done = subprocess.run(argv, capture_output=True, text=True)
         self.assertEqual(done.returncode, 0, done.stderr)
         rows = json.loads(out.read_text())["modules"][0]["nets"]
         self.assertGreaterEqual(len(rows), 5)  # clk a b y q (and a constant or helper net)

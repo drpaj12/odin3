@@ -35,14 +35,16 @@ typedef struct parser {
     uint32_t pos;
     const char *file;
     bool failed;
-    size_t efloor;      /* expression engine: context stack height at entry */
-    bool primary_only;  /* expression engine: stop after one primary */
-    odin3_vec ents;     /* xent: open expression contexts */
-    odin3_vec vals;     /* tb_expr *: finished operands */
-    odin3_vec frames;   /* sframe: open compound statements */
-    bool lenient;       /* first pass: a hierarchical name is a placeholder, nothing is resolved */
-    bool saw_hier;      /* a hierarchical name was met */
-    uint32_t next_inst; /* the instance slot the next instance item fills (second pass) */
+    size_t efloor;       /* expression engine: context stack height at entry */
+    bool primary_only;   /* expression engine: stop after one primary */
+    odin3_vec ents;      /* xent: open expression contexts */
+    odin3_vec vals;      /* tb_expr *: finished operands */
+    odin3_vec frames;    /* sframe: open compound statements */
+    bool lenient;        /* first pass: a hierarchical name is a placeholder, nothing is resolved */
+    bool saw_hier;       /* a hierarchical name was met */
+    uint32_t next_inst;  /* the instance slot the next instance item fills (second pass) */
+    char scope[TB_NAME]; /* the task being parsed: its names are stored as "task.name" */
+    odin3_vec calls;     /* tb_stmt *: task calls, linked to their task at the end of the module */
 } parser;
 
 static const tb_tok *cur(const parser *pr) {
@@ -122,13 +124,26 @@ static tb_expr *new_expr(parser *pr, tb_ekind kind) {
 }
 
 /* --- variables --- */
-static int find_var(const parser *pr, const char *name) {
+static int find_exact(const parser *pr, const char *name) {
     for (uint32_t i = 0; i < pr->tb->nvars; i++) {
         if (strcmp(pr->tb->vars[i].name, name) == 0) {
             return (int)i;
         }
     }
     return -1;
+}
+
+/* A name inside a task is that task's own first, then the module's. */
+static int find_var(const parser *pr, const char *name) {
+    if (pr->scope[0] != '\0') {
+        char scoped[(2 * TB_NAME) + 2];
+        (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
+        int found = find_exact(pr, scoped);
+        if (found >= 0) {
+            return found;
+        }
+    }
+    return find_exact(pr, name);
 }
 
 typedef struct var_shape {
@@ -139,7 +154,17 @@ typedef struct var_shape {
 
 static int add_var(parser *pr, const char *name, var_shape shape) {
     tb_module *tb = pr->tb;
-    if (find_var(pr, name) >= 0) {
+    char scoped[(2 * TB_NAME) + 2];
+    if (pr->scope[0] != '\0') {
+        (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
+        name = scoped;
+    }
+    size_t name_len = strlen(name);
+    if (name_len >= TB_NAME) {
+        fail(pr, "task variable name too long");
+        return -1;
+    }
+    if (find_exact(pr, name) >= 0) {
         fail(pr, "redeclared name");
         return -1;
     }
@@ -157,7 +182,7 @@ static int add_var(parser *pr, const char *name, var_shape shape) {
     }
     tb_var *var = &tb->vars[tb->nvars];
     memset(var, 0, sizeof *var);
-    (void)snprintf(var->name, sizeof var->name, "%s", name);
+    memcpy(var->name, name, name_len);
     var->width = shape.width;
     var->sgn = shape.sgn;
     var->is_wire = shape.is_wire;
@@ -1235,16 +1260,15 @@ static stmt_kw keyword_of(const parser *pr) {
     static const struct {
         const char *text;
         stmt_kw kw;
-    } TABLE[] = {{"begin", KW_BEGIN},      {"if", KW_IF},
-                 {"case", KW_CASE},        {"casez", KW_CASE},
-                 {"casex", KW_CASE},       {"for", KW_FOR},
-                 {"while", KW_WHILE},      {"repeat", KW_REPEAT},
-                 {"wait", KW_WAIT},        {"forever", KW_FOREVER},
-                 {"reg", KW_DECL},         {"integer", KW_DECL},
-                 {"disable", KW_REJECTED}, {"fork", KW_REJECTED},
-                 {"task", KW_REJECTED},    {"deassign", KW_REJECTED},
-                 {"force", KW_REJECTED},   {"release", KW_REJECTED},
-                 {NULL, KW_NONE}};
+    } TABLE[] = {{"begin", KW_BEGIN},       {"if", KW_IF},
+                 {"case", KW_CASE},         {"casez", KW_CASE},
+                 {"casex", KW_CASE},        {"for", KW_FOR},
+                 {"while", KW_WHILE},       {"repeat", KW_REPEAT},
+                 {"wait", KW_WAIT},         {"forever", KW_FOREVER},
+                 {"reg", KW_DECL},          {"integer", KW_DECL},
+                 {"disable", KW_REJECTED},  {"fork", KW_REJECTED},
+                 {"deassign", KW_REJECTED}, {"force", KW_REJECTED},
+                 {"release", KW_REJECTED},  {NULL, KW_NONE}};
     for (size_t i = 0; TABLE[i].text != NULL; i++) {
         if (is_kw(pr, TABLE[i].text)) {
             return TABLE[i].kw;
@@ -1280,6 +1304,54 @@ static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
     }
 }
 
+/* True when the cursor is at `name (` or `name ;` of a name that is not a variable: a task call. */
+static bool at_task_call(const parser *pr) {
+    const tb_tok *tok = cur(pr);
+    const tb_tok *next = tok + 1;
+    return tok->kind == TK_ID && next->kind == TK_OP &&
+           (strcmp(next->text, ";") == 0 || strcmp(next->text, "(") == 0) &&
+           find_var(pr, tok->text) < 0;
+}
+
+/* ( expr {, expr} ) of a task call, when there is an argument list. */
+static bool call_args(parser *pr, tb_stmt *stmt) {
+    if (!accept_op(pr, "(")) {
+        return true;
+    }
+    do {
+        if (stmt->n == TB_MAX_ARGS) {
+            return fail(pr, "task call with more than 16 arguments");
+        }
+        tb_expr *arg = parse_expr(pr);
+        if (arg == NULL) {
+            return false;
+        }
+        stmt->args[stmt->n++] = arg;
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ")");
+}
+
+/* name [ ( expr {, expr} ) ] ; : the task is found when the module is complete. */
+static tb_stmt *parse_call(parser *pr) {
+    tb_stmt *stmt = new_stmt(pr, S_CALL);
+    if (stmt == NULL) {
+        return NULL;
+    }
+    stmt->callee = pnew(pr, TB_NAME);
+    stmt->args = (tb_expr **)pnew_ptrs(pr, TB_MAX_ARGS);
+    if (stmt->callee == NULL || stmt->args == NULL) {
+        return NULL;
+    }
+    (void)snprintf(stmt->callee, TB_NAME, "%s", cur(pr)->text);
+    pr->pos++;
+    tb_stmt **slot = call_args(pr, stmt) ? (tb_stmt **)odin3_vec_push(&pr->calls) : NULL;
+    if (slot == NULL || !expect_op(pr, ";")) {
+        return NULL;
+    }
+    *slot = stmt;
+    return stmt;
+}
+
 /* Starts the statement at the cursor. */
 static sstart start_stmt(parser *pr, tb_stmt **out) {
     const tb_tok *tok = cur(pr);
@@ -1296,6 +1368,8 @@ static sstart start_stmt(parser *pr, tb_stmt **out) {
     }
     if (tok->kind == TK_SYS) {
         *out = parse_systask(pr);
+    } else if (at_task_call(pr) && keyword_of(pr) == KW_NONE) {
+        *out = parse_call(pr);
     } else if (tok->kind == TK_ID && keyword_of(pr) != KW_NONE) {
         return start_keyword(pr, keyword_of(pr), out);
     } else {
@@ -1528,6 +1602,193 @@ static bool parse_decl(parser *pr) {
     return expect_op(pr, ";");
 }
 
+/* --- tasks --- */
+
+static tb_task *add_task(parser *pr, const char *name) {
+    tb_module *tb = pr->tb;
+    for (uint32_t i = 0; i < tb->ntasks; i++) {
+        if (strcmp(tb->tasks[i].name, name) == 0) {
+            fail(pr, "task declared twice");
+            return NULL;
+        }
+    }
+    tb_task *grown = pnew(pr, ((size_t)tb->ntasks + 1U) * sizeof *grown);
+    if (grown == NULL) {
+        return NULL;
+    }
+    if (tb->ntasks > 0) {
+        memcpy(grown, tb->tasks, (size_t)tb->ntasks * sizeof *grown);
+    }
+    tb->tasks = grown;
+    tb_task *task = &tb->tasks[tb->ntasks++];
+    memset(task, 0, sizeof *task);
+    (void)snprintf(task->name, sizeof task->name, "%s", name);
+    task->line = cur(pr)->line;
+    task->vars = pnew(pr, TB_MAX_ARGS * sizeof *task->vars);
+    task->dir = pnew(pr, TB_MAX_ARGS);
+    return task->vars != NULL && task->dir != NULL ? task : NULL;
+}
+
+/* One formal argument of a task: variable index and direction. */
+typedef struct task_formal {
+    int var;
+    uint8_t dir;
+} task_formal;
+
+/* Records the formal as the next argument of the task. */
+static bool task_arg(parser *pr, tb_task *task, task_formal formal) {
+    if (task->nargs == TB_MAX_ARGS) {
+        return fail(pr, "task with more than 16 arguments");
+    }
+    task->vars[task->nargs] = formal.var;
+    task->dir[task->nargs++] = formal.dir;
+    return true;
+}
+
+static uint8_t dir_of(const parser *pr) {
+    if (is_kw(pr, "input")) {
+        return TB_ARG_IN;
+    }
+    return is_kw(pr, "output") ? (uint8_t)TB_ARG_OUT : (uint8_t)(TB_ARG_IN | TB_ARG_OUT);
+}
+
+/* [reg|integer] [signed] [range] name {, name} after the direction keyword. In the ANSI form
+ * (ansi) the list ends before a direction keyword or `)`, in the old form at `;`. */
+static bool task_port_decl(parser *pr, tb_task *task, uint8_t dir, bool ansi) {
+    bool is_int = accept_kw(pr, "integer");
+    (void)accept_kw(pr, "reg");
+    bool is_signed = accept_kw(pr, "signed");
+    var_shape shape = {is_int ? (uint32_t)TB_INT_BITS : 1U, is_int || is_signed, false};
+    if (is_op(pr, "[") && !parse_range(pr, &shape.width)) {
+        return false;
+    }
+    do {
+        if (cur(pr)->kind != TK_ID) {
+            return fail(pr, "task argument declaration");
+        }
+        int var = add_var(pr, cur(pr)->text, shape);
+        pr->pos++;
+        if (var < 0 || !task_arg(pr, task, (task_formal){var, dir})) {
+            return false;
+        }
+    } while (accept_op(pr, ",") &&
+             !(ansi && (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout"))));
+    return ansi || expect_op(pr, ";");
+}
+
+static bool task_ansi_ports(parser *pr, tb_task *task) {
+    while (!is_op(pr, ")")) {
+        if (!(is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout"))) {
+            return fail(pr, "task argument list (input, output or inout expected)");
+        }
+        uint8_t dir = dir_of(pr);
+        pr->pos++;
+        if (!task_port_decl(pr, task, dir, true)) {
+            return false;
+        }
+    }
+    return expect_op(pr, ")");
+}
+
+/* Appends child to the block's statement list (parse memory). */
+static bool block_append(parser *pr, tb_stmt *block, tb_stmt *child) {
+    tb_stmt **grown = (tb_stmt **)pdup_ptrs(pr, (const void *)block->list, block->n);
+    if (grown == NULL) {
+        return false;
+    }
+    grown[block->n++] = child;
+    block->list = grown;
+    return true;
+}
+
+/* The statements of a task up to `endtask`, as one block. */
+static tb_stmt *task_body(parser *pr) {
+    tb_stmt *body = new_stmt(pr, S_BLOCK);
+    while (body != NULL && !pr->failed && !accept_kw(pr, "endtask")) {
+        if (cur(pr)->kind == TK_EOF) {
+            fail(pr, "missing endtask");
+            return NULL;
+        }
+        tb_stmt *stmt = parse_stmt(pr);
+        if (stmt == NULL || !block_append(pr, body, stmt)) {
+            return NULL;
+        }
+    }
+    return body;
+}
+
+/* [( ansi ports )] ; {input/output/inout declarations} */
+static bool task_header(parser *pr, tb_task *task) {
+    if (accept_op(pr, "(") && !task_ansi_ports(pr, task)) {
+        return false;
+    }
+    if (!expect_op(pr, ";")) {
+        return false;
+    }
+    while (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout")) {
+        uint8_t dir = dir_of(pr);
+        pr->pos++;
+        if (!task_port_decl(pr, task, dir, false)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool parse_task(parser *pr) {
+    pr->pos++; /* task */
+    (void)accept_kw(pr, "automatic");
+    if (cur(pr)->kind != TK_ID) {
+        return fail(pr, "task name");
+    }
+    tb_task *task = add_task(pr, cur(pr)->text);
+    if (task == NULL) {
+        return false;
+    }
+    pr->pos++;
+    (void)snprintf(pr->scope, sizeof pr->scope, "%s", task->name);
+    task->body = task_header(pr, task) ? task_body(pr) : NULL;
+    pr->scope[0] = '\0';
+    return task->body != NULL && !pr->failed;
+}
+
+/* Gives one task call its task, checking the number of arguments and that every output
+ * argument is something that can be written. */
+static bool link_one(const parser *pr, tb_stmt *call) {
+    const tb_module *tb = pr->tb;
+    call->task = -1;
+    for (uint32_t idx = 0; idx < tb->ntasks; idx++) {
+        if (strcmp(tb->tasks[idx].name, call->callee) == 0) {
+            call->task = (int)idx;
+        }
+    }
+    if (call->task < 0) {
+        tb_error(pr->file, call->line, "call of a task that is not defined in the testbench");
+        return false;
+    }
+    const tb_task *task = &tb->tasks[call->task];
+    if (call->n != task->nargs) {
+        tb_error(pr->file, call->line, "task call with the wrong number of arguments");
+        return false;
+    }
+    for (uint32_t arg = 0; arg < call->n; arg++) {
+        if ((task->dir[arg] & TB_ARG_OUT) != 0 && !valid_lvalue(pr, call->args[arg])) {
+            tb_error(pr->file, call->line, "task output argument that is not a reg or select");
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool link_calls(parser *pr) {
+    for (size_t i = 0; i < pr->calls.len; i++) {
+        if (!link_one(pr, *(tb_stmt **)odin3_vec_at(&pr->calls, i))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool add_proc(parser *pr, tb_stmt *body, bool always) {
     tb_module *tb = pr->tb;
     tb_proc_def *grown = pnew(pr, ((size_t)tb->nprocs + 1U) * sizeof *grown);
@@ -1679,13 +1940,16 @@ static bool parse_item(parser *pr) {
     if (is_kw(pr, "always")) {
         return parse_always(pr);
     }
+    if (is_kw(pr, "task")) {
+        return parse_task(pr);
+    }
     if (is_kw(pr, "assign")) {
         return parse_assign_item(pr);
     }
-    static const char *const REJECT[] = {
-        "genvar", "generate", "task",    "function", "real",   "time",  "string",
-        "event",  "defparam", "specify", "input",    "output", "inout", "and",
-        "or",     "nand",     "nor",     "xor",      "not",    "buf",   NULL};
+    static const char *const REJECT[] = {"genvar", "generate", "function", "real",    "time",
+                                         "string", "event",    "defparam", "specify", "input",
+                                         "output", "inout",    "and",      "or",      "nand",
+                                         "nor",    "xor",      "not",      "buf",     NULL};
     for (size_t i = 0; REJECT[i] != NULL; i++) {
         if (is_kw(pr, REJECT[i])) {
             return fail(pr, tok->text);
@@ -1757,6 +2021,7 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_init(&pr.ents, sizeof(xent));
     odin3_vec_init(&pr.vals, sizeof(tb_expr *));
     odin3_vec_init(&pr.frames, sizeof(sframe));
+    odin3_vec_init(&pr.calls, sizeof(tb_stmt *));
     if (pre != NULL && pre->ninsts > 0) {
         tb->insts = pnew(&pr, (size_t)pre->ninsts * sizeof *tb->insts);
         for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
@@ -1773,6 +2038,10 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_free(&pr.ents);
     odin3_vec_free(&pr.vals);
     odin3_vec_free(&pr.frames);
+    if (!pr.failed && !link_calls(&pr)) {
+        pr.failed = true;
+    }
+    odin3_vec_free(&pr.calls);
     if (pr.failed) {
         tb_module_free(tb);
         return ODIN3_ERR_INVALID_ARG;
