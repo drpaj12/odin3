@@ -323,7 +323,8 @@ static void test_coarse_mode(void) {
     TEST_ASSERT_EQUAL_UINT32(1, opx_count(design, "abc", &ABC_BULK, true));
     TEST_ASSERT_TRUE(afx_has(ODIN3_LOG_WARN,
                              "abc: module 'm', no flip-flops: provenance needs 6 parent edges "
-                             "(budget 1); the run's LUTs share one record"));
+                             "(budget 1); the run's LUTs share one record "
+                             "(--prov-edges N or unlimited raises the budget)"));
     odin3_node_id l1 = driver_of(port_net_of("y1"));
     odin3_node_id l2 = driver_of(port_net_of("y2"));
     odin3_node_id shared = lut_feeder(l1);

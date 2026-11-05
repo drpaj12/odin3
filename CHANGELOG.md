@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `abc --prov-edges N|unlimited` sets the parent-edge budget of the precise per-LUT provenance records; the default budget
+  is now at least 4,194,304 edges (16 MiB of parent IDs; peak memory on sha unchanged at 57 MB), where 16 x (cells + objects)
+  made sha (725,231 edges) share one record for all its LUTs. The WARNING names the option.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
   top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
   instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.
