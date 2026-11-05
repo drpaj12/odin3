@@ -460,7 +460,8 @@ static void test_vendor_prims_are_built_from_the_models(void) {
     TEST_ASSERT_NOT_NULL(module_like("OBUF"));
     TEST_ASSERT_NOT_NULL(module_like("ODDR2"));
     TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "'IBUF' is a vendor primitive"));
-    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&rs, ODIN3_LOG_WARN, "'ODDR2' is a vendor primitive"));
+    TEST_ASSERT_EQUAL_UINT32(1,
+                             et_count_with(&rs, ODIN3_LOG_WARN, "'ODDR2' is a vendor primitive"));
 }
 
 static void test_vendor_prims_off_keeps_the_error(void) {

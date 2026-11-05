@@ -16,8 +16,8 @@ const char *odin3_soft_block_name(uint32_t index) {
     return index < SOFT_BLOCK_COUNT ? k_names[index] : "";
 }
 
-static const char *const k_vendor[] = {"IBUF", "IBUFG", "OBUF", "OBUFT", "IOBUF",
-                                       "BUFG", "ODDR2", "IDDR2"};
+static const char *const k_vendor[] = {"IBUF",  "IBUFG", "OBUF",  "OBUFT",
+                                       "IOBUF", "BUFG",  "ODDR2", "IDDR2"};
 
 bool odin3_vendor_prim_known(const char *name) {
     for (size_t i = 0; i < sizeof k_vendor / sizeof k_vendor[0]; i++) {

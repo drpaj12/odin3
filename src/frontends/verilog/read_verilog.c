@@ -385,7 +385,7 @@ odin3_status odin3_read_verilog_files_soft(odin3_design *design, const odin3_rv_
  * for odin3_elab_run's step 1) and the files (odin3_bytes views into the script). */
 typedef struct rv_args {
     bool parse_only;
-    bool lib; /* --lib: keep the modules as library units for later reads (2D-7b) */
+    bool lib;          /* --lib: keep the modules as library units for later reads (2D-7b) */
     bool vendor_prims; /* --vendor-prims: vendor primitives from the behavioural models */
     odin3_elab_opts elab;
     odin3_vec files;
@@ -420,6 +420,26 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
     return true;
 }
 
+/* The options of the design read that --lib refuses (see check_lib_args). */
+static odin3_status check_lib_options(const rv_args *args) {
+    if (!args->lib) {
+        return ODIN3_OK;
+    }
+    if (args->vendor_prims) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: --lib cannot be combined with --vendor-prims (it is an option of "
+                  "the design read)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (args->elab.auto_blackbox) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: --lib cannot be combined with --auto-blackbox (it is an option of "
+                  "the design read)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 /* --lib reads and keeps; it elaborates nothing, so --auto-blackbox (a design read's option) has
  * nothing to act on and is refused rather than silently dropped. */
 static odin3_status check_lib_args(const rv_args *args) {
@@ -441,19 +461,7 @@ static odin3_status check_lib_args(const rv_args *args) {
                   args->lib ? "--lib" : "--parse-only");
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (args->lib && args->vendor_prims) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "read_verilog: --lib cannot be combined with --vendor-prims (it is an option of "
-                  "the design read)");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    if (args->lib && args->elab.auto_blackbox) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "read_verilog: --lib cannot be combined with --auto-blackbox (it is an option of "
-                  "the design read)");
-        return ODIN3_ERR_INVALID_ARG;
-    }
-    return ODIN3_OK;
+    return check_lib_options(args);
 }
 
 /* -name-map <file> (H-6): the one map of a -netlist read. */
@@ -935,7 +943,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "registered SystemVerilog reader, the slang adapter); --parse-only keeps it (write_verilog_ast "
     "prints it), otherwise elaboration (2D) "
     "follows: --nolatches makes unassigned paths of combinational blocks x, --nomem2reg keeps "
-    "memories unless forced, --auto-blackbox makes an undefined module a black box, --vendor-prims builds an undefined "
+    "memories unless forced, --auto-blackbox makes an undefined module a black box, --vendor-prims "
+    "builds an undefined "
     "IBUF, IBUFG, OBUF, OBUFT, IOBUF, BUFG, ODDR2 or IDDR2 from Odin III's behavioural model (a "
     "warning each), --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
