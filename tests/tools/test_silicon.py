@@ -146,8 +146,19 @@ endmodule
         self.assertEqual(got["o3_tie_0"]["origin"], "physical:tie")
         self.assertEqual(got["o3_tie_0"]["links"], [])
         self.assertEqual(got["o3_tie_1"]["origin"], "hdl")
-        self.assertEqual(got["o3_tie_1"]["links"][0]["to"], "ir:$k")
+        self.assertEqual(got["o3_tie_1"]["links"][0]["to"], "hdl:a.v:2.5-2.9")
         self.assertEqual(got["o3_tie_1"]["links"][0]["kind"], "cone")
+
+    def test_gate_links_are_linear_in_cells(self) -> None:
+        """Many IR cells share a span: one link per span of the gate chain, not per IR cell."""
+        ir = {f"$c{i}": ("$_AND_", ["a.v:1.1-9.9"]) for i in range(2000)}
+        ir["$one"] = ("$_NOT_", ["a.v:3.1-3.4"])
+        rows = [{"inst": f"g{i}", "odin_name": "", "master": "m",
+                 "src_chain": "a.v:1.1-9.9|a.v:3.1-3.4|a.v:7.1-7.2", "tie": ""} for i in range(50)]
+        got = sf.gates_objects(rows, ir, Path("."))
+        self.assertEqual(sum(len(o["links"]) for o in got), 50 * 2)  # a.v:7.1-7.2 is not in the IR
+        self.assertEqual([lk["to"] for lk in got[0]["links"]],
+                         ["hdl:a.v:1.1-9.9", "hdl:a.v:3.1-3.4"])
 
 
 class ParamTest(unittest.TestCase):
@@ -420,7 +431,7 @@ class OdinOnlyStepsTest(unittest.TestCase):
             rows = [json.loads(x) for x in gates]
             self.assertEqual(len(rows), 17)
             self.assertTrue(all(r["origin"] == "hdl" and r["links"] for r in rows))
-            self.assertTrue(all(r["links"][0]["to"].startswith("ir:") for r in rows))
+            self.assertTrue(all(r["links"][0]["to"].startswith("hdl:") for r in rows))
             equiv = json.loads((out / "prov" / index["steps"][3]["file"]).read_text())
             self.assertEqual(equiv["check"]["result"], "equivalent")
             self.assertNotIn("/home" + "/", (out / "prov" / "index.json").read_text())

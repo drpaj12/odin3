@@ -614,16 +614,21 @@ def ir_objects(ir: Mapping[str, tuple[str, list[str]]], hdl: Mapping[str, str], 
 
 def gates_objects(prov: Sequence[Mapping[str, str]], ir: Mapping[str, tuple[str, list[str]]],
                   root: Path) -> list[dict[str, Any]]:
-    by_span: dict[str, list[str]] = {}
-    for name, (_, spans) in ir.items():
+    """Gate rows. A gate's ``cone`` links go to the HDL statement objects of its source chain
+    (those that some IR cell also carries), one link per span. The IR cells that share a span
+    are the other end of their ``fine`` links to the same object, so the IR set of a gate is
+    recoverable and the number of links is linear in gates (all-pairs gate/IR links took more than
+    6 GiB on a 17,565-gate design)."""
+    known: set[str] = set()
+    for _, spans in ir.values():
         for s in spans:
             sp = split_span(s, root)
-            by_span.setdefault(f"{sp['file']}:{sp['span']}", []).append(name)
+            known.add(f"{sp['file']}:{sp['span']}")
     rows = []
     for r in prov:
         chain = [x for x in r["src_chain"].split("|") if x]
-        targets = sorted({n for c in chain for n in by_span.get(c, [])})
-        links = [prov_steps.link(f"ir:{n}", "cone", "medium") for n in targets]
+        targets = sorted({c for c in chain if c in known})
+        links = [prov_steps.link(f"hdl:{c}", "cone", "medium") for c in targets]
         origin = "hdl" if links else ("physical:tie" if r["tie"] else "unknown")
         rows.append(prov_steps.obj("gates", r["inst"], "cell", r["inst"], origin, links,
                                    type=r["master"], src=_spans(chain),
@@ -783,7 +788,7 @@ def _do_step(r: Run, w: prov_steps.StepWriter, step: str, st: dict[str, Any], ro
         write_prov_csv(out / "prov.csv", st["prov"])
         w.add_step("map", "gates", odin, gates_objects(st["prov"], st.get("ir", {}), root),
                    needs=needs, outputs=_outs(out, ["gates.blif", "g.v"]),
-                   links=[{"from_step": "elab", "kind": "cone", "key": "src", "scope": None,
+                   links=[{"from_step": "read", "kind": "cone", "key": "src", "scope": None,
                            "confidence": "medium"}])
     elif step == "equiv":
         checker = HERE.parent / "equiv-check" / "equiv_check.py"
