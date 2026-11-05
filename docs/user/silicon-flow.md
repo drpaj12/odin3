@@ -90,6 +90,10 @@ and so the placement stay the same). The last one is for pins on the die edge: t
 the last track inside the die, and a track 0.065 um from the edge made every right-edge output pin of the 18,686-gate
 `des` fail detailed routing with `DRT-0255 Maze Route cannot find path` (die 732.615 um, now 733.185 um).
 
+The cells `probe_p_8` and `probec_p_8` are dont-use for OpenROAD (as in OpenROAD-flow-scripts): repair_design had
+chosen `probe_p_8` as a repeater on a high-fanout net of `sha3_low`, and global routing stopped on that net
+(`net net23 initial #node != #rpin`).
+
 ## Outputs
 
 In `OUT`: `prov/` (the provenance files), `g.v` (Odin III netlist), `clean.v`, `prov.csv`, `or/` (one
