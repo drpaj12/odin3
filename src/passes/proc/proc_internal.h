@@ -360,6 +360,11 @@ bool odin3_proc_snips_touches(const odin3_proc_snips *snips, uint32_t sw, uint32
 bool odin3_proc_snips_assigned(const odin3_proc_snips *snips, uint32_t case_index, uint32_t snip,
                                odin3_pw_sig *rhs);
 
+/* The record of the last action of case case_index that assigns snippet snip (0: none, or the
+ * action has no record). */
+odin3_prov_id odin3_proc_snips_assign_prov(const odin3_proc_snips *snips, uint32_t case_index,
+                                           uint32_t snip);
+
 /* Frees the snippets; NULL is a no-op. */
 void odin3_proc_snips_free(odin3_proc_snips *snips);
 

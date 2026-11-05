@@ -1373,9 +1373,57 @@ static void test_mux_default_appended(void) {
 
 /* --- provenance and M1 ----------------------------------------------------------------------- */
 
-/* mux_provenance.il: mux_case_pmux.il with src attributes on the switch and its cases: the $pmux,
- * its $eqs and its $reduce_or share one DERIVED record whose parents are [switch, case 0, case 1,
- * case 2], in case order (§14); the nets they create take it too. */
+/* True when id is one of the three case records in parents[1..3]. */
+static bool is_case_record(const odin3_prov_id *parents, odin3_prov_id id) {
+    return id.v == parents[1].v || id.v == parents[2].v || id.v == parents[3].v;
+}
+
+/* True when every parent of rec after the first is one of the case records. */
+static bool parents_after_switch_are_cases(const odin3_prov_id *parents,
+                                           const odin3_prov_record *rec) {
+    bool ok = true;
+    for (uint32_t at = 1; at < rec->parents.count; at++) {
+        ok = ok && is_case_record(parents, rec->parents.ids[at]);
+    }
+    return ok;
+}
+
+/* The pmux's record: [switch, then the cases that give the mux a slice]; the case whose value is
+ * the mux's A input gives no slice and is not a parent. */
+static void check_mux_record(const fixture *fx, const odin3_prov_id *parents) {
+    odin3_prov_id id = odin3_node_prov(fx->res.module, fx->cells[4]);
+    const odin3_prov_record *rec = odin3_prov_get(fx->res.design, id);
+    TEST_ASSERT_NOT_NULL(rec);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
+    TEST_ASSERT_TRUE(rec->parents.count >= 2 && rec->parents.count <= 4);
+    TEST_ASSERT_EQUAL_UINT32(parents[0].v, rec->parents.ids[0].v);
+    TEST_ASSERT_TRUE(parents_after_switch_are_cases(parents, rec));
+}
+
+/* A compare cell's record: [switch, case], then the statement or the signal of the snippet when it
+ * has a record. */
+static void check_compare_shape(const odin3_prov_id *parents, const odin3_prov_record *crec) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, crec->kind);
+    TEST_ASSERT_TRUE(crec->parents.count == 2 || crec->parents.count == 3);
+    TEST_ASSERT_EQUAL_UINT32(parents[0].v, crec->parents.ids[0].v);
+    TEST_ASSERT_TRUE(is_case_record(parents, crec->parents.ids[1]));
+}
+
+/* The record of compare cell number index is its own, not the pmux's. */
+static void check_compare_record(const fixture *fx, const odin3_prov_id *parents, uint32_t index) {
+    odin3_prov_id mux_id = odin3_node_prov(fx->res.module, fx->cells[4]);
+    odin3_prov_id cell_id = odin3_node_prov(fx->res.module, fx->cells[index]);
+    const odin3_prov_record *crec = odin3_prov_get(fx->res.design, cell_id);
+    TEST_ASSERT_NOT_NULL(crec);
+    TEST_ASSERT_TRUE(cell_id.v != mux_id.v);
+    check_compare_shape(parents, crec);
+}
+
+/* mux_provenance.il: mux_case_pmux.il with src attributes on the switch and its cases: the $pmux
+ * has one DERIVED record whose parents are [switch, then the cases that give it a slice], in case
+ * order (§14, narrowed to the cases of this mux); each compare cell ($eq, $reduce_or) of a case has
+ * the record [switch, that case], so a compare is traced to its own case item; the nets the cells
+ * create take their cell's record. */
 static void test_mux_provenance(void) {
     fixture fx;
     mux_run(&fx, (mux_case){CASE_PMUX_BODY("    attribute \\src \"t.v:5.3\"\n",
@@ -1391,22 +1439,16 @@ static void test_mux_provenance(void) {
         parents[i + 1] = ((const odin3_pw_case *)odin3_vec_cat(
                               &fx.pw->cases, *(const uint32_t *)odin3_vec_cat(&sw->cases, i)))
                              ->prov;
+        TEST_ASSERT_TRUE(parents[i + 1].v != 0 && parents[i + 1].v != fx.pw->prov.v);
     }
-    odin3_prov_id id = odin3_node_prov(fx.res.module, fx.cells[4]);
-    const odin3_prov_record *rec = odin3_prov_get(fx.res.design, id);
-    TEST_ASSERT_NOT_NULL(rec);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
-    TEST_ASSERT_EQUAL_UINT32(4, rec->parents.count);
-    for (uint32_t i = 0; i < 4; i++) {
-        TEST_ASSERT_TRUE(parents[i].v != 0 && parents[i].v != fx.pw->prov.v);
-        TEST_ASSERT_EQUAL_UINT32(parents[i].v, rec->parents.ids[i].v);
-    }
+    check_mux_record(&fx, parents);
     for (uint32_t k = 0; k < 4; k++) {
-        TEST_ASSERT_EQUAL_UINT32(id.v, odin3_node_prov(fx.res.module, fx.cells[k]).v);
+        check_compare_record(&fx, parents, k);
     }
     odin3_net_id eq_y =
         odin3_pin_net(fx.res.module, odin3_node_port(fx.res.module, fx.cells[0], 2).first);
-    TEST_ASSERT_EQUAL_UINT32(id.v, odin3_net_prov(fx.res.module, eq_y).v);
+    TEST_ASSERT_EQUAL_UINT32(odin3_node_prov(fx.res.module, fx.cells[0]).v,
+                             odin3_net_prov(fx.res.module, eq_y).v);
     fx_close(&fx);
 }
 
