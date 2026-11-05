@@ -600,7 +600,8 @@ static void test_readmem_vtr_compat_falls_back_to_the_source_directory(void) {
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "beside the source"));
 }
 
-/* No file beside the source: the working directory's is read (a WARNING says so), also by default. */
+/* No file beside the source: the working directory's is read (a WARNING says so), also by default.
+ */
 static void test_readmem_falls_back_to_the_working_directory_and_warns(void) {
     const et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
                                        "  reg [7:0] m [0:3];\n"

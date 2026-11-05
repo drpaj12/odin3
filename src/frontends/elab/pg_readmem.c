@@ -8,8 +8,9 @@
  * from `start` toward `finish` (default: the lowest and highest index), the file ending when the
  * address passes the last. The path of a relative file is looked for beside the source file (point
  * (y)), then in the working directory, then in the include directories, a WARNING for each
- * fallback (Yosys tries the working directory first, so --vtr-compat does too: spec 17). The words go into the state
- * of the initial run (pg_init.c) and become the memory's INIT with its other initial values.
+ * fallback (Yosys tries the working directory first, so --vtr-compat does too: spec 17). The words
+ * go into the state of the initial run (pg_init.c) and become the memory's INIT with its other
+ * initial values.
  */
 #include "frontends/elab/pg_init.h"
 
@@ -224,7 +225,7 @@ static odin3_status rm_source_dir(const rm_run *rm, odin3_strbuf *path) {
 static odin3_status rm_join(odin3_strbuf *path, odin3_bytes dir, const char *file) {
     odin3_strbuf_clear(path);
     odin3_status st = dir.len > 0 ? odin3_strbuf_append(path, dir) : ODIN3_OK;
-    if (st == ODIN3_OK && dir.len > 0 && dir.data[dir.len - 1U] != '/') {
+    if (st == ODIN3_OK && dir.len > 0 && ((const char *)dir.ptr)[dir.len - 1U] != '/') {
         st = odin3_strbuf_append(path, odin3_bytes_cstr("/"));
     }
     return st != ODIN3_OK ? st : odin3_strbuf_append(path, odin3_bytes_cstr(file));
@@ -245,53 +246,66 @@ static odin3_status rm_incdir_path(const rm_run *rm, odin3_strbuf *path, bool *f
     return st;
 }
 
+/* The candidate beside the source file into src; *found says it is a file. */
+static odin3_status rm_source_path(const rm_run *rm, odin3_strbuf *src, bool *found) {
+    odin3_status st = rm_source_dir(rm, src);
+    st = st != ODIN3_OK ? st : odin3_strbuf_append(src, odin3_bytes_cstr(rm->file));
+    *found = st == ODIN3_OK && rm_is_file(src->data != NULL ? src->data : "");
+    return st;
+}
+
+/* The fallbacks after the source directory had no file: the working directory, then the include
+ * directories, each with its WARNING; with neither, the path is the source candidate (the error
+ * names the file, not the path). */
+static odin3_status rm_fallback(const rm_run *rm, bool in_cwd, const odin3_strbuf *src,
+                                odin3_strbuf *path) {
+    odin3_elab2 *e2 = rm->init->e2;
+    odin3_loc loc = odin3_ast_loc(e2->elab, rm->call);
+    if (in_cwd) {
+        odin3_elab2_warn(e2, loc,
+                         "%s found '%s' in the working directory, not beside the source "
+                         "file",
+                         rm->task, rm->file);
+        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
+    }
+    bool in_inc = false;
+    odin3_status st = rm_incdir_path(rm, path, &in_inc);
+    if (st == ODIN3_OK && in_inc) {
+        odin3_elab2_warn(e2, loc,
+                         "%s found '%s' in an include directory (%s), not beside the "
+                         "source file or in the working directory",
+                         rm->task, rm->file, path->data);
+        return st;
+    }
+    odin3_strbuf_clear(path);
+    return st != ODIN3_OK ? st : odin3_strbuf_append(path, (odin3_bytes){src->data, src->len});
+}
+
 /* The path of the file: absolute as given. A relative one is looked for in this order: beside
  * the source file holding the call, the working directory, the include directories; under
  * --vtr-compat the working directory comes first, as Yosys (and so Parmys) does. A file found by
- * a rule other than the first of the order gets one WARNING saying which rule found it. Without
- * a file anywhere the path is the first candidate (the error names the file, not the path). */
+ * a rule other than the first of the order gets one WARNING saying which rule found it. */
 static odin3_status rm_path(const rm_run *rm, odin3_strbuf *path) {
     odin3_elab2 *e2 = rm->init->e2;
     odin3_strbuf_clear(path);
-    if (rm->file[0] == '/' || rm->file[0] == '\0') {
-        return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
-    }
-    bool in_cwd = rm_is_file(rm->file);
-    if (in_cwd && e2->mod_vtr_compat) {
+    bool in_cwd = rm->file[0] != '/' && rm->file[0] != '\0' && rm_is_file(rm->file);
+    if (rm->file[0] == '/' || rm->file[0] == '\0' || (in_cwd && e2->mod_vtr_compat)) {
         return odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
     }
     odin3_strbuf src;
     odin3_strbuf_init(&src);
-    odin3_status st = rm_source_dir(rm, &src);
     bool in_src = false;
-    if (st == ODIN3_OK) {
-        st = odin3_strbuf_append(&src, odin3_bytes_cstr(rm->file));
-        in_src = st == ODIN3_OK && rm_is_file(src.data != NULL ? src.data : "");
-    }
-    odin3_loc loc = odin3_ast_loc(e2->elab, rm->call);
+    odin3_status st = rm_source_path(rm, &src, &in_src);
     if (st == ODIN3_OK && in_src) {
         if (in_cwd && strcmp(src.data, rm->file) != 0) {
-            odin3_elab2_warn(e2, loc,
+            odin3_elab2_warn(e2, odin3_ast_loc(e2->elab, rm->call),
                              "%s reads '%s' beside the source file, not the one in the working "
                              "directory (Yosys and --vtr-compat read the working directory first)",
                              rm->task, rm->file);
         }
         st = odin3_strbuf_append(path, (odin3_bytes){src.data, src.len});
-    } else if (st == ODIN3_OK && in_cwd) {
-        odin3_elab2_warn(e2, loc, "%s found '%s' in the working directory, not beside the source "
-                                  "file", rm->task, rm->file);
-        st = odin3_strbuf_append(path, odin3_bytes_cstr(rm->file));
     } else if (st == ODIN3_OK) {
-        bool in_inc = false;
-        st = rm_incdir_path(rm, path, &in_inc);
-        if (st == ODIN3_OK && in_inc) {
-            odin3_elab2_warn(e2, loc, "%s found '%s' in an include directory (%s), not beside "
-                                      "the source file or in the working directory",
-                             rm->task, rm->file, path->data);
-        } else if (st == ODIN3_OK) {
-            odin3_strbuf_clear(path);
-            st = odin3_strbuf_append(path, (odin3_bytes){src.data, src.len});
-        }
+        st = rm_fallback(rm, in_cwd, &src, path);
     }
     odin3_strbuf_free(&src);
     return st;
