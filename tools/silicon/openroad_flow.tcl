@@ -27,6 +27,10 @@ read_lef $ref/lef/sky130_fd_sc_hd.lef
 read_liberty $ref/lib/sky130_fd_sc_hd__tt_025C_1v80.lib
 read_verilog $out/clean.v
 link_design $top
+# repair_design chose probe_p_8 (a test-probe cell) as a repeater on a high-fanout net of sha3_low, and
+# global routing then stopped with "net net23 initial #node != #rpin / pin not found in pin2RPins".
+# OpenROAD-flow-scripts lists both probe cells as dont-use for sky130hd.
+set_dont_use {sky130_fd_sc_hd__probe_p_8 sky130_fd_sc_hd__probec_p_8}
 if {$clk ne ""} { create_clock -name clk -period 10 [get_ports $clk] }
 snap s00_link
 proc cell_area_um2 {} {

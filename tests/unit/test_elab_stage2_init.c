@@ -353,6 +353,20 @@ static void test_variable_bit_of_a_word(void) {
     pt_expect_error((at_loc){4, 23}, "non-constant index into 'm' is not supported here");
 }
 
+/* A bit of a word selected by a loop variable is a constant bit once the loop is unrolled (amber's
+ * generic_sram_byte_en): one write port per bit, no error. */
+static void test_loop_variable_bit_of_a_word(void) {
+    pt_read_src("module t(input c, we, input [2:0] wa, ra, input [3:0] d4, output [3:0] q);\n"
+                "  reg [3:0] m [0:7];\n"
+                "  integer i;\n"
+                "  always @(posedge c) if (we) for (i = 0; i < 4; i = i + 1) m[wa][i] <= d4[i];\n"
+                "  assign q = m[ra];\nendmodule\n");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_UINT32(0, pt_diag_errors());
+    TEST_ASSERT_EQUAL_UINT32(16, port_width(the_mem(), "WR_EN"));
+    pt_expect_ir_ok();
+}
+
 /* A read that succeeds (warnings allowed) with no error and a valid IR. */
 static void read_ok(const char *text) {
     pt_read_src(text);
@@ -598,6 +612,37 @@ static void test_readmem_vtr_compat_falls_back_to_the_source_directory(void) {
     read_cwd_and_source("--vtr-compat sub/t.v", false);
     TEST_ASSERT_EQUAL_STRING("xx xx 12 34", words_of_init());
     TEST_ASSERT_EQUAL_UINT32(0, et_count_with(&pt_rs, ODIN3_LOG_WARN, "beside the source"));
+}
+
+/* No file beside the source: the working directory's is read (a WARNING says so), also by default.
+ */
+static void test_readmem_falls_back_to_the_working_directory_and_warns(void) {
+    const et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                       "  reg [7:0] m [0:3];\n"
+                                       "  initial $readmemh(\"init.hex\", m);\n"
+                                       "  assign q = m[ra];\nendmodule\n"},
+                           {"init.hex", "@2\n56 78\n"}};
+    pt_read_files(srcs, 2, "sub/t.v");
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 56 78", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "in the working directory"));
+}
+
+/* Neither beside the source nor in the working directory: the project's include directories. */
+static void test_readmem_falls_back_to_the_include_directories_and_warns(void) {
+    et_src srcs[] = {{"sub/t.v", "module t(input [1:0] ra, output [7:0] q);\n"
+                                 "  reg [7:0] m [0:3];\n"
+                                 "  initial $readmemh(\"init.hex\", m);\n"
+                                 "  assign q = m[ra];\nendmodule\n"},
+                     {"inc/init.hex", "@2\n9a bc\n"}};
+    et_src proj = {"p.o3proj", "file verilog sub/t.v\ntop t\nincdir inc\n"};
+    et_req req = {srcs, 2, "read_project p.o3proj", &proj, NULL};
+    et_setup(&req, &pt_rs);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_set_keep_ast(pt_rs.design, ODIN3_KEEP_AST_NONE));
+    pt_rs.status = odin3_pass_run(pt_rs.design, "read_verilog", odin3_bytes_cstr(""));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, pt_rs.status, et_log(&pt_rs));
+    TEST_ASSERT_EQUAL_STRING("xx xx 9a bc", words_of_init());
+    TEST_ASSERT_EQUAL_UINT32(1, et_count_with(&pt_rs, ODIN3_LOG_WARN, "in an include directory"));
 }
 
 static void test_readmemh_string_parameter(void) {
@@ -1114,6 +1159,8 @@ static void run_readmem_dir_tests(void) {
     RUN_TEST(test_readmem_default_reads_the_source_directory_and_warns);
     RUN_TEST(test_readmem_vtr_compat_reads_the_working_directory_first);
     RUN_TEST(test_readmem_vtr_compat_falls_back_to_the_source_directory);
+    RUN_TEST(test_readmem_falls_back_to_the_working_directory_and_warns);
+    RUN_TEST(test_readmem_falls_back_to_the_include_directories_and_warns);
 }
 
 int main(void) {
@@ -1122,6 +1169,7 @@ int main(void) {
     RUN_TEST(test_constant_index_and_value);
     RUN_TEST(test_other_bases);
     RUN_TEST(test_partial_write);
+    RUN_TEST(test_loop_variable_bit_of_a_word);
     RUN_TEST(test_two_writes_in_source_order);
     RUN_TEST(test_two_blocks_two_ports);
     RUN_TEST(test_unconditional_blocking_write);

@@ -193,3 +193,31 @@ odin3_status odin3_fsm_run(odin3_pass_ctx *pass, odin3_design *design, const odi
     run_free(&run);
     return st;
 }
+
+/* --- read-only export (write_graph stg; docs/specs/2026-11-05-graph-views-design.md section 3)
+ * ---- */
+
+static odin3_status visit_all(const fsm_run *run, odin3_fsm_visit visit, void *user) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t i = 0; st == ODIN3_OK && i < run->n_mods; i++) {
+        const odin3_fsm_inst *insts = run->mods[i].insts.data;
+        for (size_t k = 0; st == ODIN3_OK && k < run->mods[i].insts.len; k++) {
+            st = visit(user, &run->mods[i].fm, &insts[k]);
+        }
+    }
+    return st;
+}
+
+odin3_status odin3_fsm_visit_design(odin3_design *design, odin3_fsm_visit visit, void *user) {
+    odin3_fsm_opts opts;
+    memset(&opts, 0, sizeof opts);
+    fsm_run run;
+    odin3_status st = run_open(&run, design, &opts);
+    st = st == ODIN3_OK ? stage_detect(&run) : st;
+    st = st == ODIN3_OK ? stage_extract(&run) : st;
+    st = st == ODIN3_OK ? stage_opt(&run, false) : st;
+    st = st == ODIN3_OK ? stage_opt(&run, true) : st;
+    st = st == ODIN3_OK ? visit_all(&run, visit, user) : st;
+    run_free(&run);
+    return st;
+}

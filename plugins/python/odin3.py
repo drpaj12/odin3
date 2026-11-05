@@ -655,6 +655,19 @@ class Design:
             result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
             return result
 
+    def write_graph(self, kind: str) -> dict[str, Any]:
+        """Run `write_graph <kind>` (stg, cfg or ddg) and return its JSON (schema odin3-graph,
+        version 1): per module a list of graphs, each with `nodes` and `edges`, stable string ids,
+        `prov` record ids and HDL `src` spans. See docs/user/graph-views.md."""
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "graph.json"
+            self.run_pass("write_graph", f"{kind} {_quote(out)}")
+            result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+            return result
+
     def scoap(
         self,
         *,
@@ -664,6 +677,7 @@ class Design:
         sigprob: int = 0,
         seed: int = 1,
         threshold: float = 0.01,
+        prov: bool = False,
     ) -> dict[str, Any]:
         """Run the scoap pass and return its JSON (schema odin3-scoap, version 3).
 
@@ -675,7 +689,8 @@ class Design:
         simulator refuses the netlist (combinational loop, multiple drivers) the run is skipped
         with a WARNING, "sigprob_ran" is False, "sigprob_vectors" is 0, p1_ppm is -1 on every net
         and the top module's "rare" is None. Module summaries are also stored as module
-        attributes odin3:scoap_*. See docs/user/scoap.md.
+        attributes odin3:scoap_*. With prov=True every net also has driver (node id, 0 none), wire
+        (primary wire id, 0 none), prov (record id) and src (HDL spans). See docs/user/scoap.md.
         """
         import json
         import tempfile
@@ -683,6 +698,7 @@ class Design:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "scoap.json"
             words = ["--out", _quote(out), "--top", str(top)] + ["--sequential"] * sequential
+            words += ["--prov"] * prov
             if sigprob > 0:
                 words += ["--sigprob", str(sigprob), "--seed", str(seed)]
                 words += ["--threshold", repr(threshold)]
