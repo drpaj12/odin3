@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `fsm` provenance: the new register and decoders, the logic into each state (the case items that set it) and each control
+  output carry their own records instead of one derived from every folded cell, so a LUT below traces to the part of the
+  machine it implements.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
   top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
   instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.
