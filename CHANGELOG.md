@@ -26,6 +26,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   followed from the proc dump to the final one. Off by default (a restored design numbers its store again). New CTest
   `lineage` (`tests/lineage/case_fsm.v`): the LUTs of a case, of an independent statement and of a state machine trace to
   their own source lines.
+- `abc --prov-edges N|unlimited` sets the parent-edge budget of the precise per-LUT provenance records; the default budget
+  is now at least 4,194,304 edges (16 MiB of parent IDs; peak memory on sha unchanged at 57 MB), where 16 x (cells + objects)
+  made sha (725,231 edges) share one record for all its LUTs. The WARNING names the option.
 - `write_json --net-ids` adds `odin3_nets`, the Odin III net ID of each bit, to every netname (the "bits" codes are not net
   IDs); `read_json` accepts it. Additive.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
