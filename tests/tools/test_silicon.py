@@ -8,6 +8,8 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -23,6 +25,7 @@ ODIN3 = os.environ.get("ODIN3_CLI", "")
 TOOLS = os.environ.get("ODIN3_SILICON_TOOLS", "")
 MICRO = REPO_ROOT / "tests" / "micro" / "verilog" / "micro"
 LIB = REPO_ROOT / "lib" / "sky130hd.o3lib"
+HERE_TCL = REPO_ROOT / "tools" / "silicon" / "openroad_flow.tcl"
 SCHEMAS = REPO_ROOT / "docs" / "schemas"
 
 LIBERTY = """library (x) {
@@ -136,6 +139,19 @@ endmodule
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "1"], ["/r/a.v:2.5-2.9"])
             self.assertEqual([r["src_chain"] for r in ties if r["tie"] == "0"], [""])
 
+    def test_signed_stripped_from_declarations(self) -> None:
+        gv_text = ("module m (a, y);\n  input signed [3:0] a;\n  output signed y;\n"
+                   "  wire signed [31:0] o3_pos ;\n  reg signed q;\n"
+                   "  sky130_fd_sc_hd__buf_1 u (.A(a), .X(y));\nendmodule\n")
+        with tempfile.TemporaryDirectory() as tmp:
+            gv, clean = Path(tmp) / "g.v", Path(tmp) / "clean.v"
+            gv.write_text(gv_text)
+            sf.clean_netlist(gv, clean, {})
+            text = clean.read_text()
+            self.assertNotIn("signed", text)
+            self.assertIn("wire [31:0] o3_pos ;", text)
+            self.assertIn("input [3:0] a;", text)
+
     def test_tie_origin_labels(self) -> None:
         rows = [{"inst": "o3_tie_0", "odin_name": "", "master": sf.CONB, "src_chain": "",
                  "tie": "0"},
@@ -195,6 +211,29 @@ endmodule
             self.assertIn("ARST_LVL = 1'b0", got.read_text())
             self.assertEqual((got.parent / "defs.v").read_text(), "`define X 1\n")
             self.assertIn("ARST_LVL = 1'b1", (d / "src" / "design.v").read_text())
+
+
+@unittest.skipUnless(shutil.which("tclsh"), "needs tclsh")
+class DieEdgeSnapTest(unittest.TestCase):
+    """The Tcl driver keeps the die edge 0.17 um or more from the last met1 to met4 track
+    (DRT-0255 on des: a 732.615 um die left 0.065 um to the last met2 track)."""
+
+    def snap(self, die: float) -> float:
+        tcl = (HERE_TCL).read_text()
+        procs = re.search(r"proc edge_ok .*?\nproc snap_edge .*?\n}\n", tcl, re.S)
+        self.assertIsNotNone(procs)
+        script = (procs.group(0) if procs else "") + f"\nputs [snap_edge {die}]\n"
+        out = subprocess.run(["tclsh"], input=script, capture_output=True, text=True, check=True)
+        return float(out.stdout.strip())
+
+    def test_des_die_is_enlarged(self) -> None:
+        self.assertEqual(self.snap(732.615), 733.185)
+
+    def test_small_fixed_die_is_enlarged_a_little(self) -> None:
+        self.assertEqual(self.snap(42.0), 42.26)
+
+    def test_a_good_edge_is_unchanged(self) -> None:
+        self.assertEqual(self.snap(733.185), 733.185)
 
 
 class LabelAndRedactTest(unittest.TestCase):

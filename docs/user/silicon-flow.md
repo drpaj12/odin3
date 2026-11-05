@@ -83,6 +83,13 @@ G-1). Constants use `conb_1` tie cells, added by the `netlist` step: a tie cell 
 `hdl` object with a link to the constant when Odin III's dump has one with a location, and `physical:tie`
 otherwise.
 
+The floorplan is 25% utilisation with 6 um core space. Three prechecks adapt it and print `WARNING precheck`: a
+core below 16 um a side or one logic cell gets a fixed core; a die too small for the pins (0.8 pin per um of side) is
+enlarged; and a die whose edge is closer than 0.17 um to the last met1 to met4 routing track is enlarged (the core
+and so the placement stay the same). The last one is for pins on the die edge: the router puts their access point on
+the last track inside the die, and a track 0.065 um from the edge made every right-edge output pin of the 18,686-gate
+`des` fail detailed routing with `DRT-0255 Maze Route cannot find path` (die 732.615 um, now 733.185 um).
+
 ## Outputs
 
 In `OUT`: `prov/` (the provenance files), `g.v` (Odin III netlist), `clean.v`, `prov.csv`, `or/` (one

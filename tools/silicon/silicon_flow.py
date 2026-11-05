@@ -251,10 +251,12 @@ def _legal(name: str) -> str:
 
 def clean_netlist(gv: Path, clean: Path, locs: Mapping[str, tuple[str, list[str]]]
                   ) -> list[dict[str, str]]:
-    """Strip attributes and comments, legalise names, give every constant a ``conb_1`` tie cell.
+    """Strip attributes, comments and ``signed``, legalise names, tie every constant to ``conb_1``.
     Returns the prov rows: inst, odin_name, master, src_chain, tie (value or "")."""
     text = re.sub(r"\(\*.*?\*\)", "", gv.read_text(), flags=re.S)
     text = re.sub(r"//[^\n]*", "", text)
+    # OpenROAD's STA Verilog reader (STA-0164) rejects "signed"; the net is a bit vector either way.
+    text = re.sub(r"\b(input|output|inout|wire|reg)\s+signed\b", r"\1", text)
     names: dict[str, str] = {}
 
     def esc(m: re.Match[str]) -> str:
