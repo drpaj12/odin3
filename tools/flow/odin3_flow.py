@@ -79,6 +79,7 @@ class FlowArgs:
     incdirs: tuple[str, ...] = ()  # -I / +incdir+: include directories (absolute)
     defines: tuple[str, ...] = ()  # -D / +define+: NAME or NAME=VALUE
     read_opts: tuple[str, ...] = ()  # --read-opt: extra read_verilog options
+    strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
 
 
 @dataclass(frozen=True)
@@ -326,6 +327,14 @@ def with_read_options(args: FlowArgs, script: str, step_dir: Path) -> str:
         proj.write_text(project_text(args))
         script = f"read_project {quote(proj)}; {script}"
     return script
+
+
+def tristate_script(script: str, strict: bool) -> str:
+    """``script`` with the ``tristate`` pass after its ``flatten``: internal tri-states become logic
+    and a top inout port is split, one WARNING each (``strict``: any conversion is an error,
+    the behaviour before the pass). A script without ``flatten`` is returned as it is."""
+    name = "tristate --strict" if strict else "tristate"
+    return script.replace("flatten; ", f"flatten; {name}; ", 1)
 
 
 def odin3_command(args: FlowArgs, top: str, script: str) -> list[str]:
@@ -634,6 +643,7 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     if args.prov:
         script = prov_script(script, k)
     script = with_read_options(args, script, step_dir)
+    script = tristate_script(script, args.strict_tristate)
     adir = args.out / "analysis"
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
@@ -702,7 +712,8 @@ def silicon_run(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
                          + "\n  ".join(gone) + "\n(see docs/user/silicon-flow.md; "
                          "--steps read,elab,map,equiv,netlist needs none)")
     run = silicon_flow.Run(args.designs[0], top, args.out, silicon_flow.default_lib(), tools,
-                           args.clock, steps, design_root(args.designs))
+                           args.clock, steps, design_root(args.designs),
+                           strict_tristate=args.strict_tristate)
     start = time.monotonic()
     code = silicon_flow.run(run)
     log = args.out / "silicon.log"
@@ -842,6 +853,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--steps", default="", help="--target silicon: comma list of steps (read,"
                     "elab,map,equiv,netlist,place,route,gds,extract,lvs,recover; default all)")
     ap.add_argument("--clock", default="", help="--target silicon: the clock port (enables CTS)")
+    ap.add_argument("--strict-tristate", action="store_true",
+                    help="make a tri-state conversion an error (default: the tristate pass runs "
+                         "after flatten and warns once per conversion)")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -875,7 +889,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     attr, paths, prov, ns.timing_legacy, ns.keep_results,
                     ns.tools.resolve() if ns.tools else None,
                     ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
-                    tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt))
+                    tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
+                    ns.strict_tristate)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -15,6 +15,7 @@ odin3-flow design.v [more.v ...] [-f LIST] [-I DIR] [-D NAME[=VAL]] [--read-opt=
 | `designs` | Verilog files (or give `-f`) |
 | `-I DIR`, `-D NAME[=VALUE]` | include directory (also searched for `$readmemh/b` files, after the source file's directory and the working directory) and preprocessor define; repeatable. Carried to `read_verilog` by a generated `odin3/flow.o3proj`. `vtr` and `lpm` targets |
 | `-f LIST` | a Verilog file list: files, `+incdir+a+b`, `+define+X=1`, `-I`, `-D`, `-f` (paths relative to the working directory), `-F` (relative to the list); `//` and `#` comments; `$VAR` expanded; any other option is refused. Repeatable; its files follow the files on the command line |
+| `--strict-tristate` | the `tristate` pass runs after `flatten` in the `vtr` flow and the silicon flow: an internal tri-state becomes logic and a top-level `inout` is split into `p_i`/`p_o`/`p_oe`, one WARNING per conversion in the `odin3` log. This flag makes any conversion an error (the behaviour before the pass). A design with no tri-state is unchanged |
 | `--read-opt=OPT` | an extra `read_verilog` option such as `--read-opt=--auto-blackbox` or `--read-opt=--nomem2reg`; repeatable. The equals sign is needed |
 | `--top TOP` | top module; default is the one uninstantiated module. If the files hold more than one candidate the script stops with exit code 2 and names them |
 | `--target` | `vtr` (BLIF for VPR, default) or `lpm` (Verilog with LPM cells plus a read-back lint) |
