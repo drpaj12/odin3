@@ -148,6 +148,14 @@ limit (such as an unsupported clock form) is printed as `WARNING equiv: not prov
 `equiv` step file records `equiv: not proven: <reason>` and the flow goes on to place, route and LVS.
 A register on the inverted clock counts as a register on the opposite edge of that clock.
 
+Known case: wb_lcd (OpenCores, 1049 LUTs) ends `ABC dsec ended UNDECIDED`. `rtl.blif` has 660 registers and `gates.blif` 636
+(the mapping removes 24) and no register name survives from one to the other, so the two cannot be matched by name for a
+combinational check. Tried on the saved pair (ABC from the repository, one core each, 3.5 to 4 GB cap): `dsec` with
+default settings (153 s), `-r` (no initial retiming, 164 s), `-F 1` (111 s), `-F 8` (145 s), `-m` (139 s), `-rm` (99 s), `-a`
+(phase abstraction, 203 s); `miter; strash; dprove` (180 s), `miter; strash; scorr -F 2; dretime; scorr; dprove`
+(132 s); `miter; strash; scorr; pdr` (still running at the 900 s limit, frame 222). Every `dsec` and `dprove` run stops with
+`UNDECIDED` on a 60 s per-frame limit. No engine or bound proved it within 15 minutes, so the not-proven WARNING stays.
+
 Output ports that the design joins with `assign` (`assign out[6] = out[0];`) are one net in the layout
 and keep one port label there. LVS gives the reference netlist the label the layout kept and lists the
 joined names in the step detail as a WARNING.
