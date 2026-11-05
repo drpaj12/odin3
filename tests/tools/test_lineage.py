@@ -111,5 +111,35 @@ class Lineage(unittest.TestCase):
             self.assertTrue(ls and ls <= MACHINE, ls)
 
 
+    def test_graph_and_scoap_prov_ids_are_the_map_uids(self) -> None:
+        """The `prov` of a graph node and of a scoap net is the store ID, the `uid=` of the map."""
+        with tempfile.TemporaryDirectory() as tmp:
+            w = Path(tmp)
+            script = (
+                f"read_techlib {ROOT}/lib/vtr.o3lib; "
+                f'read_verilog --nolatches --vtr-compat --prov-ast refs "{MICRO}"; proc; '
+                f"write_graph ddg {w}/ddg.json; write_graph stg {w}/stg.json; "
+                f"write_json --name-style hash --prov-map {w}/h.json; "
+                f"scoap --prov --out {w}/scoap.json"
+            )
+            env = dict(os.environ, ODIN3_PROV_UID="1")
+            done = subprocess.run(
+                [str(ODIN3), "--top", "lin", "-p", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                cwd=ROOT,
+            )
+            self.assertEqual(0, done.returncode, done.stderr)
+            uids = set(re.findall(r"uid=(\d+)", (w / "h.json.names").read_text()))
+            self.assertTrue(uids)
+            for name in ("ddg.json", "stg.json", "scoap.json"):
+                provs = set(re.findall(r'"prov": ([1-9]\d*)', (w / name).read_text()))
+                self.assertTrue(provs, name)
+                if name == "scoap.json":  # the map lists the records of the objects it names
+                    self.assertTrue(provs & uids, name)
+                else:
+                    self.assertLessEqual(provs, uids, name)
+
 if __name__ == "__main__":
     unittest.main()
