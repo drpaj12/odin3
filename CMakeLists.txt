@@ -131,6 +131,7 @@ add_library(odin3_core OBJECT
     src/passes/graphviews/gv_pass.c
     src/passes/graphviews/gv_common.c
     src/passes/graphviews/gv_stg.c
+    src/passes/graphviews/gv_cfg.c
     src/passes/scoap/scoap.c
     src/passes/scoap/sc_fn.c
     src/passes/scoap/sc_model.c
