@@ -217,6 +217,34 @@ static odin3_status read_soft_block(odin3_rv *rv, const odin3_rv_want *want) {
     return ODIN3_OK;
 }
 
+/* `--vendor-prims` (soft_blocks.h): an instance of an undefined module with the name of a vendor
+ * primitive is built from lib/soft_primitives/<name>.v, with one WARNING at the first instance. */
+static odin3_status read_vendor_prim(odin3_rv *rv, const odin3_rv_want *want) {
+    const char *name = text_of(rv, want->name);
+    if ((rv->soft_mask & SOFT_VENDOR_BIT) == 0 || !odin3_vendor_prim_known(name)) {
+        return ODIN3_OK;
+    }
+    char dir[SOFT_DIR_CAP];
+    char tried[SOFT_DIR_CAP];
+    if (!odin3_soft_blocks_dir(dir, tried)) {
+        odin3_vl_report(&rv->vl, ODIN3_LOG_ERROR, want->at,
+                        "--vendor-prims needs the model of '%s' but no soft_primitives directory "
+                        "was found; tried %s (set ODIN3_SOFT_PRIMITIVES_DIR)",
+                        name, tried);
+        return ODIN3_OK; /* counted as an error by the run: the read fails */
+    }
+    odin3_pp_source src;
+    odin3_status st = soft_source(rv, name, dir, want->at, &src);
+    if (st == ODIN3_OK) {
+        odin3_vl_report(&rv->vl, ODIN3_LOG_WARN, want->at,
+                        "'%s' is a vendor primitive: --vendor-prims builds this instance from Odin "
+                        "III's behavioural model (soft logic), not from the vendor's cell",
+                        name);
+        st = read_soft_body(rv, &src, true);
+    }
+    return st;
+}
+
 /* Every Verilog -v file of the record, in order (all its modules become available at once). */
 static odin3_status read_libfiles(odin3_rv *rv) {
     rv->libfiles_read = true;
@@ -351,7 +379,8 @@ static odin3_status resolve_want(odin3_rv *rv, const odin3_rv_want *want) {
         return st;
     }
     st = search_dirs(rv, want);
-    return st != ODIN3_OK || is_defined(rv, want->name) ? st : read_soft_block(rv, want);
+    st = st != ODIN3_OK || is_defined(rv, want->name) ? st : read_soft_block(rv, want);
+    return st != ODIN3_OK || is_defined(rv, want->name) ? st : read_vendor_prim(rv, want);
 }
 
 odin3_status odin3_rv_resolve_libraries(odin3_rv *rv) {
