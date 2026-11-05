@@ -55,7 +55,11 @@ python3 tools/silicon/silicon_flow.py design.v --top TOP --out OUT --tools $TOOL
 
 Options: `--steps a,b` runs a subset (`read,elab,map,equiv,netlist` needs no external tool), `--clock` names
 the clock port (it switches clock-tree synthesis on), `--pdk` names the `sky130A` directory. Missing
-tools stop the run with exit 2 and a list of what to install. A worked example is
+tools stop the run with exit 2 and a list of what to install. `--param NAME=VALUE` (repeatable) sets the default of a
+parameter of the top module in a copy of the design (`OUT/param_src/`, same file name, the other files of the directory
+linked beside it): the netlist has no parameters, so a testbench that instantiates `top #(.NAME(v))` needs the netlist
+built with `v` (the i2c ladder design: `--param ARST_LVL=1'b0`), and `gate_sim.py --param NAME=VALUE` drops that override
+from the testbench copy. The sha256 of the copy, not of the original, is recorded as the design input. A worked example is
 `tests/silicon/comparator/` (the design, the stored provenance directory, the census and the join).
 
 | Step | Stage | Tool | What it does |
@@ -79,12 +83,34 @@ G-1). Constants use `conb_1` tie cells, added by the `netlist` step: a tie cell 
 `hdl` object with a link to the constant when Odin III's dump has one with a location, and `physical:tie`
 otherwise.
 
+The floorplan is 25% utilisation with 6 um core space. Three prechecks adapt it and print `WARNING precheck`: a
+core below 16 um a side or one logic cell gets a fixed core; a die too small for the pins (0.8 pin per um of side) is
+enlarged; and a die whose edge is closer than 0.17 um to the last met1 to met4 routing track is enlarged (the core
+and so the placement stay the same). The last one is for pins on the die edge: the router puts their access point on
+the last track inside the die, and a track 0.065 um from the edge made every right-edge output pin of the 18,686-gate
+`des` fail detailed routing with `DRT-0255 Maze Route cannot find path` (die 732.615 um, now 733.185 um).
+
 ## Outputs
 
 In `OUT`: `prov/` (the provenance files), `g.v` (Odin III netlist), `clean.v`, `prov.csv`, `or/` (one
 instance dump per OpenROAD sub-step, `route.def`, `final.v`, `final.odb`), `NAME.gds`, `NAME.named.gds`
 (KLayout stores the DEF instance names as GDS properties; this variant keeps them, to measure name
 survival), `ext_hier.spice`, `ext_flat.spice`, `lvs.log`, `census.csv`, `census.json`, `join.json`.
+
+## Gate-level simulation of `final.v`
+
+`tools/silicon/gate_sim.py FINAL.V --pdk-verilog <PDK>/libs.ref/sky130_fd_sc_hd/verilog --tb-top TOP --tb FILE... --pass TEXT`
+runs the testbench on `final.v` with the sky130 Verilog models (iverilog, `-DFUNCTIONAL`) three times: with every
+flip-flop and latch starting at X (as the models ship), at 0 and at 1 (a copy of `primitives.v` with an `initial`
+state; the PDK files are not changed). Verdict `pass` (the X run passes), `x-pessimism` (the X run fails, the 0 and 1
+runs pass; a WARNING says so) or `fail` (a 0 or 1 run fails: a functional difference). Exit 1 only for `fail`.
+
+Why: the netlist keeps registers the RTL never resets (they are loaded before use). The mapped logic can be equal for 0
+and for 1 on such a register, yet a gate simulator computes X from it and keeps it (for example a 4-bit counter
+cleared by a write strobe: `next = f(q, strobe)` with the `q` terms cancelling when the strobe is 1). The RTL
+simulation takes the `if` branch and never sees the X. The mmuart ladder run failed 42 of 61 checks from the X
+start and passes all 61 from a 0 start and from a 1 start. A UDP shows its initial state on its output at its first
+input event, so a flip-flop whose input never changes before its first clock edge stays X in all three runs.
 
 ## What physical design changes
 
@@ -147,6 +173,14 @@ output the design declares but never drives is tied to 0 (`--allow-undriven`), a
 limit (such as an unsupported clock form) is printed as `WARNING equiv: not proven: <reason>`; the
 `equiv` step file records `equiv: not proven: <reason>` and the flow goes on to place, route and LVS.
 A register on the inverted clock counts as a register on the opposite edge of that clock.
+
+Known case: wb_lcd (OpenCores, 1049 LUTs) ends `ABC dsec ended UNDECIDED`. `rtl.blif` has 660 registers and `gates.blif` 636
+(the mapping removes 24) and no register name survives from one to the other, so the two cannot be matched by name for a
+combinational check. Tried on the saved pair (ABC from the repository, one core each, 3.5 to 4 GB cap): `dsec` with
+default settings (153 s), `-r` (no initial retiming, 164 s), `-F 1` (111 s), `-F 8` (145 s), `-m` (139 s), `-rm` (99 s), `-a`
+(phase abstraction, 203 s); `miter; strash; dprove` (180 s), `miter; strash; scorr -F 2; dretime; scorr; dprove`
+(132 s); `miter; strash; scorr; pdr` (still running at the 900 s limit, frame 222). Every `dsec` and `dprove` run stops with
+`UNDECIDED` on a 60 s per-frame limit. No engine or bound proved it within 15 minutes, so the not-proven WARNING stays.
 
 Output ports that the design joins with `assign` (`assign out[6] = out[0];`) are one net in the layout
 and keep one port label there. LVS gives the reference netlist the label the layout kept and lists the

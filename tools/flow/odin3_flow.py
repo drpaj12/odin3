@@ -76,6 +76,10 @@ class FlowArgs:
     pdk: Path | None = None  # --pdk: the sky130A directory
     steps: str = ""  # --steps: comma list of silicon steps (default all)
     clock: str = ""  # --clock: clock port of the silicon design (enables CTS)
+    incdirs: tuple[str, ...] = ()  # -I / +incdir+: include directories (absolute)
+    defines: tuple[str, ...] = ()  # -D / +define+: NAME or NAME=VALUE
+    read_opts: tuple[str, ...] = ()  # --read-opt: extra read_verilog options
+    strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
 
 
 @dataclass(frozen=True)
@@ -250,6 +254,87 @@ def lut_k(args: FlowArgs, vtr_root: Path | None, log: Path) -> int:
 def vtr_root_from_env() -> Path | None:
     value = os.environ.get("VTR_ROOT")
     return Path(value) if value else None
+
+
+def expand_filelist(path: Path, seen: tuple[Path, ...] = ()) \
+        -> tuple[list[Path], list[str], list[str]]:
+    """The designs, include directories and defines of a Verilog file list: one item per line or
+    blank-separated; ``//`` and ``#`` start a comment; ``+incdir+a+b``, ``-I dir``,
+    ``+define+X=1``, ``-D X=1``, ``-f other`` (paths relative to the working directory),
+    ``-F other`` (paths relative to that list); an environment variable ``$VAR`` or ``${VAR}``
+    is expanded. Any other option is a UsageError (it would be dropped silently)."""
+    path = path.resolve()
+    if path in seen:
+        raise UsageError(f"{path}: file list includes itself")
+    if not path.is_file():
+        raise UsageError(f"no such file list: {path}")
+    files: list[Path] = []
+    incdirs: list[str] = []
+    defines: list[str] = []
+    tokens: list[str] = []
+    for line in path.read_text().splitlines():
+        line = re.sub(r"//.*|#.*", "", line)
+        tokens += os.path.expandvars(line).split()
+    base = Path.cwd()
+    it = iter(tokens)
+    for tok in it:
+        if tok.startswith("+incdir+"):
+            incdirs += [str((base / d).resolve()) for d in tok[8:].split("+") if d]
+        elif tok.startswith("+define+"):
+            defines += [d for d in tok[8:].split("+") if d]
+        elif tok in ("-I", "-D", "-f", "-F"):
+            arg = next(it, None)
+            if arg is None:
+                raise UsageError(f"{path}: {tok} needs an argument")
+            if tok == "-I":
+                incdirs.append(str((base / arg).resolve()))
+            elif tok == "-D":
+                defines.append(arg)
+            else:
+                sub = (path.parent if tok == "-F" else base) / arg
+                f, i, d = expand_filelist(sub, seen + (path,))
+                files, incdirs, defines = files + f, incdirs + i, defines + d
+        elif tok.startswith("-I") and len(tok) > 2:
+            incdirs.append(str((base / tok[2:]).resolve()))
+        elif tok.startswith("-D") and len(tok) > 2:
+            defines.append(tok[2:])
+        elif tok.startswith(("-", "+")):
+            raise UsageError(f"{path}: unsupported file list option '{tok}' "
+                             f"(supported: +incdir+ +define+ -I -D -f -F)")
+        else:
+            files.append((base / tok).resolve())
+    return files, incdirs, defines
+
+
+def project_text(args: FlowArgs) -> str:
+    """The .o3proj that carries the include directories and defines to ``read_verilog``."""
+    lines = [f"incdir {quote(d)}" for d in args.incdirs]
+    lines += [f"define {quote(d)}" for d in args.defines]
+    return "\n".join(lines) + "\n"
+
+
+def with_read_options(args: FlowArgs, script: str, step_dir: Path) -> str:
+    """``script`` with ``read_project <flow.o3proj>;`` first when there are include directories or
+    defines, and the ``--read-opt`` options after its first ``read_verilog``."""
+    if args.read_opts:
+        if "read_verilog " not in script:
+            raise UsageError("internal: the odin3 script has no read_verilog")
+        opts = " ".join(args.read_opts)
+        script = script.replace("read_verilog ", f"read_verilog {opts} ", 1)
+    if args.incdirs or args.defines:
+        step_dir.mkdir(parents=True, exist_ok=True)
+        proj = step_dir / "flow.o3proj"
+        proj.write_text(project_text(args))
+        script = f"read_project {quote(proj)}; {script}"
+    return script
+
+
+def tristate_script(script: str, strict: bool) -> str:
+    """``script`` with the ``tristate`` pass after its ``flatten``: internal tri-states become logic
+    and a top inout port is split, one WARNING each (``strict``: any conversion is an error,
+    the behaviour before the pass). A script without ``flatten`` is returned as it is."""
+    name = "tristate --strict" if strict else "tristate"
+    return script.replace("flatten; ", f"flatten; {name}; ", 1)
 
 
 def odin3_command(args: FlowArgs, top: str, script: str) -> list[str]:
@@ -557,6 +642,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     if args.prov:
         script = prov_script(script, k)
+    script = with_read_options(args, script, step_dir)
+    script = tristate_script(script, args.strict_tristate)
     adir = args.out / "analysis"
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
@@ -597,6 +684,7 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     step_dir = args.out / "odin3"
     written = step_dir / f"{top}.v"
     script = lpm_script(relative_designs(args.designs), written, args.family)
+    script = with_read_options(args, script, step_dir)
     step = run_step("odin3", odin3_command(args, top, script), step_dir,
                     cwd=design_root(args.designs), note=name_root_note(args.designs))
     result.steps.append(step)
@@ -624,7 +712,8 @@ def silicon_run(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
                          + "\n  ".join(gone) + "\n(see docs/user/silicon-flow.md; "
                          "--steps read,elab,map,equiv,netlist needs none)")
     run = silicon_flow.Run(args.designs[0], top, args.out, silicon_flow.default_lib(), tools,
-                           args.clock, steps, design_root(args.designs))
+                           args.clock, steps, design_root(args.designs),
+                           strict_tristate=args.strict_tristate)
     start = time.monotonic()
     code = silicon_flow.run(run)
     log = args.out / "silicon.log"
@@ -643,6 +732,8 @@ def run_flow(args: FlowArgs) -> FlowResult:
     for design in args.designs:
         if not design.is_file():
             raise UsageError(f"no such design file: {design}")
+    if args.target == "silicon" and (args.incdirs or args.defines or args.read_opts):
+        raise UsageError("-I, -D, -f and --read-opt are not supported with --target silicon yet")
     if args.target == "silicon" and len(args.designs) != 1:
         raise UsageError("--target silicon takes exactly one design file")
     if args.analysis and args.target != "vtr":
@@ -714,7 +805,18 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
         prog="odin3_flow", description=__doc__.split("\n")[0],
         epilog="Targets: vtr (BLIF for VPR, the default) and lpm (Verilog with LPM cells). "
                "Exit codes: 0 ok, 1 a step failed, 2 usage error.")
-    ap.add_argument("designs", nargs="+", type=Path, help="Verilog design file(s)")
+    ap.add_argument("designs", nargs="*", type=Path,
+                    help="Verilog design file(s) (or give -f)")
+    ap.add_argument("-I", "--incdir", action="append", default=[], metavar="DIR",
+                    help="include directory for `include and $readmemh/b (repeatable)")
+    ap.add_argument("-D", "--define", action="append", default=[], metavar="NAME[=VALUE]",
+                    help="preprocessor define (repeatable)")
+    ap.add_argument("-f", "--file-list", action="append", default=[], type=Path, metavar="LIST",
+                    help="Verilog file list: files, +incdir+, +define+, -I, -D, -f, -F "
+                         "(repeatable; its files follow the designs given)")
+    ap.add_argument("--read-opt", action="append", default=[], metavar="OPT",
+                    help="an extra read_verilog option, written with an equals sign, e.g. "
+                         "--read-opt=--auto-blackbox or --read-opt=--nomem2reg (repeatable)")
     ap.add_argument("--top", help="top module (default: the one uninstantiated module)")
     ap.add_argument("--target", default="vtr", choices=TARGETS,
                     help="vtr: BLIF (and VPR); lpm: LPM-cell Verilog plus a read-back lint "
@@ -751,10 +853,24 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--steps", default="", help="--target silicon: comma list of steps (read,"
                     "elab,map,equiv,netlist,place,route,gds,extract,lvs,recover; default all)")
     ap.add_argument("--clock", default="", help="--target silicon: the clock port (enables CTS)")
+    ap.add_argument("--strict-tristate", action="store_true",
+                    help="make a tri-state conversion an error (default: the tristate pass runs "
+                         "after flatten and warns once per conversion)")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
     ns = ap.parse_args(argv)
+    designs = list(ns.designs)
+    incdirs = [str(Path(d).resolve()) for d in ns.incdir]
+    defines = list(ns.define)
+    for lst in ns.file_list:
+        files, inc, dfn = expand_filelist(lst)
+        designs += files
+        incdirs += inc
+        defines += dfn
+    if not designs:
+        ap.error("no design files: give files or -f LIST")
+    ns.designs = designs
     out = ns.out
     if out is None:
         for design in ns.designs:
@@ -772,7 +888,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
                     attr, paths, prov, ns.timing_legacy, ns.keep_results,
                     ns.tools.resolve() if ns.tools else None,
-                    ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock)
+                    ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
+                    tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
+                    ns.strict_tristate)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

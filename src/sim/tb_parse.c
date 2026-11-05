@@ -35,14 +35,14 @@ typedef struct parser {
     uint32_t pos;
     const char *file;
     bool failed;
-    size_t efloor;      /* expression engine: context stack height at entry */
-    bool primary_only;  /* expression engine: stop after one primary */
-    odin3_vec ents;     /* xent: open expression contexts */
-    odin3_vec vals;     /* tb_expr *: finished operands */
-    odin3_vec frames;   /* sframe: open compound statements */
-    bool lenient;       /* first pass: a hierarchical name is a placeholder, nothing is resolved */
-    bool saw_hier;      /* a hierarchical name was met */
-    uint32_t next_inst; /* the instance slot the next instance item fills (second pass) */
+    size_t efloor;       /* expression engine: context stack height at entry */
+    bool primary_only;   /* expression engine: stop after one primary */
+    odin3_vec ents;      /* xent: open expression contexts */
+    odin3_vec vals;      /* tb_expr *: finished operands */
+    odin3_vec frames;    /* sframe: open compound statements */
+    bool lenient;        /* first pass: a hierarchical name is a placeholder, nothing is resolved */
+    bool saw_hier;       /* a hierarchical name was met */
+    uint32_t next_inst;  /* the instance slot the next instance item fills (second pass) */
     char scope[TB_NAME]; /* the task being parsed: its names are stored as "task.name" */
     odin3_vec calls;     /* tb_stmt *: task calls, linked to their task at the end of the module */
 } parser;
@@ -1255,16 +1255,15 @@ static stmt_kw keyword_of(const parser *pr) {
     static const struct {
         const char *text;
         stmt_kw kw;
-    } TABLE[] = {{"begin", KW_BEGIN},      {"if", KW_IF},
-                 {"case", KW_CASE},        {"casez", KW_CASE},
-                 {"casex", KW_CASE},       {"for", KW_FOR},
-                 {"while", KW_WHILE},      {"repeat", KW_REPEAT},
-                 {"wait", KW_WAIT},        {"forever", KW_FOREVER},
-                 {"reg", KW_DECL},         {"integer", KW_DECL},
-                 {"disable", KW_REJECTED}, {"fork", KW_REJECTED},
-                 {"deassign", KW_REJECTED},
-                 {"force", KW_REJECTED},   {"release", KW_REJECTED},
-                 {NULL, KW_NONE}};
+    } TABLE[] = {{"begin", KW_BEGIN},       {"if", KW_IF},
+                 {"case", KW_CASE},         {"casez", KW_CASE},
+                 {"casex", KW_CASE},        {"for", KW_FOR},
+                 {"while", KW_WHILE},       {"repeat", KW_REPEAT},
+                 {"wait", KW_WAIT},         {"forever", KW_FOREVER},
+                 {"reg", KW_DECL},          {"integer", KW_DECL},
+                 {"disable", KW_REJECTED},  {"fork", KW_REJECTED},
+                 {"deassign", KW_REJECTED}, {"force", KW_REJECTED},
+                 {"release", KW_REJECTED},  {NULL, KW_NONE}};
     for (size_t i = 0; TABLE[i].text != NULL; i++) {
         if (is_kw(pr, TABLE[i].text)) {
             return TABLE[i].kw;
@@ -1911,10 +1910,10 @@ static bool parse_item(parser *pr) {
     if (is_kw(pr, "assign")) {
         return parse_assign_item(pr);
     }
-    static const char *const REJECT[] = {
-        "genvar", "generate", "function", "real",   "time",  "string",
-        "event",  "defparam", "specify", "input",    "output", "inout", "and",
-        "or",     "nand",     "nor",     "xor",      "not",    "buf",   NULL};
+    static const char *const REJECT[] = {"genvar", "generate", "function", "real",    "time",
+                                         "string", "event",    "defparam", "specify", "input",
+                                         "output", "inout",    "and",      "or",      "nand",
+                                         "nor",    "xor",      "not",      "buf",     NULL};
     for (size_t i = 0; REJECT[i] != NULL; i++) {
         if (is_kw(pr, REJECT[i])) {
             return fail(pr, tok->text);
@@ -1947,8 +1946,7 @@ static bool parse_header(parser *pr, const char *top) {
     (void)snprintf(pr->tb->name, sizeof pr->tb->name, "%s", cur(pr)->text);
     pr->pos++;
     if (top != NULL && strcmp(top, pr->tb->name) != 0) {
-        return fail(pr,
-                    "--top names a module that is not in the testbench files");
+        return fail(pr, "--top names a module that is not in the testbench files");
     }
     if (accept_op(pr, "(") && !expect_op(pr, ")")) {
         return false;

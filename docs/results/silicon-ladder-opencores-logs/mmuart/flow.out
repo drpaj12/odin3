@@ -1,0 +1,11 @@
+read: ok
+elab: ok
+map: ok
+equiv: ok
+netlist: ok
+place: ok
+route: ok
+gds: ok
+extract: ok
+lvs: ok
+recover: ok

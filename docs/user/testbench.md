@@ -18,6 +18,13 @@ Options: `--top <module>` (the testbench module, default the first), `--max-time
 default stdout), `--vcd <file>` (a waveform, below). Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
+Several files and directives: `sim_tb a.v b.v ...` joins the files (after the Verilog preprocessor,
+run once over all of them, so a `` `define`` reaches the files after it). `` `include`` is searched
+in the directories given by `-I <dir>` (repeatable), and `-D name[=value]` (repeatable) predefines a
+macro. `--top` picks the testbench module among the joined files; the other modules are skipped.
+`` `timescale`` is read; `` `default_nettype``, `` `celldefine`` and similar are ignored. Messages
+give line numbers of the joined, preprocessed text of the first file's name.
+
 Plusargs: `--plusarg name=value` (repeatable, up to 16; a leading `+` is dropped) is read by
 `$test$plusargs("name")` (1 when a plusarg starts with the text) and `$value$plusargs("name=%d", var)`
 (conversions `d`, `h`/`x`, `b`, `o`, `s`; the call is 1 and `var` is set when a plusarg starts with the text

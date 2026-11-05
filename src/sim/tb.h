@@ -112,7 +112,7 @@ struct tb_stmt {
     uint32_t n;
     tb_event_term *terms;
     uint32_t nterms;
-    tb_expr *sys; /* S_SYS: the call */
+    tb_expr *sys;   /* S_SYS: the call */
     tb_expr **args; /* S_CALL: actual arguments, n of them */
     char *callee;   /* S_CALL: the task name until the parse links it */
     int task;
@@ -164,7 +164,7 @@ enum { TB_ARG_IN = 1, TB_ARG_OUT = 2 };
 typedef struct tb_task {
     char name[TB_NAME];
     tb_stmt *body;
-    int *vars; /* variable index of each formal argument */
+    int *vars;    /* variable index of each formal argument */
     uint8_t *dir; /* TB_ARG_IN | TB_ARG_OUT per argument */
     uint32_t nargs;
     uint32_t line;

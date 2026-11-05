@@ -1,0 +1,23 @@
+{
+ "design": "wb_lcd",
+ "clock_port": "wb_clk_i",
+ "steps_ok": [
+  "read",
+  "elab",
+  "map",
+  "equiv",
+  "netlist"
+ ],
+ "steps_reached": 5,
+ "stop": "place: OUT OF SCOPE [ERROR STA-0164] <path> line 36, syntax error",
+ "peak_rss_mb": 4598.2,
+ "wall_s": 206.28,
+ "flow_rc": 3,
+ "odin_cells": 3020,
+ "lvs": "not run",
+ "drc_violations": "not run",
+ "equiv": "not-proven",
+ "equiv_detail": "equiv: not proven: The unsolved reduced miter is written into file \"sm01.aig\".",
+ "sim_rtl": "pass (PASS tb_wb_lcd)",
+ "sim_gate": "not run (no final.v)"
+}
