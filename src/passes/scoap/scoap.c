@@ -260,7 +260,9 @@ static odin3_status put_nets_body(odin3_strbuf *out, const sc_view *vw);
 
 /* Fills the per-net port wire and bit: the nets of a port wire are held by its port node's pins,
  * not by the nets' own wire fields. */
-static void fill_port_wires(const odin3_module *mod, uint32_t *wire, uint32_t *bit) {
+static void fill_port_wires(const odin3_module *mod, uint32_t *table) {
+    uint32_t *wire = table;
+    uint32_t *bit = table + odin3_module_net_end(mod) + 1U;
     uint32_t ports = odin3_module_port_count(mod);
     for (uint32_t i = 0; i < ports; i++) {
         odin3_pinslice pins = odin3_node_pins(mod, odin3_module_port(mod, i));
@@ -284,7 +286,7 @@ static odin3_status put_nets(odin3_strbuf *out, const sc_view *vw0) {
         if (pw == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
-        fill_port_wires(vw0->md->mod, pw, pw + vw0->md->n_nets + 1U);
+        fill_port_wires(vw0->md->mod, pw);
         local.port_wire = pw;
         local.port_bit = pw + vw0->md->n_nets + 1U;
     }
