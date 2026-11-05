@@ -165,19 +165,15 @@ static odin3_status bit_drive(ts_ctx *tc, const sp_port *sp, uint32_t bit, odin3
     return st;
 }
 
-/* The new input p_i takes over the port's net j: the shell's pin moves to a net of its own, the net
- * of p_i merges into it, so every reader (and every wire name) now sees p_i. */
+/* The new input p_i takes over the port's net j: the net of p_i merges into it, so every reader
+ * (and every wire name) now sees p_i. The shell's pin stays on the net, because IR rule 9 ties a
+ * port's pin k to the net of its wire bit k and a port wire cannot be rebound
+ * (odin3_wire_add_alias). An inout pin may share a net with a driver (rule 4), and the shell is
+ * skipped by the writers. */
 static odin3_status take_over(const ts_ctx *tc, const sp_port *sp, uint32_t bit,
                               odin3_net_id from) {
     odin3_net_id net = ((const odin3_net_id *)sp->nets.data)[bit];
-    odin3_pinslice pins = odin3_node_port(tc->module, sp->node, 0);
-    odin3_pin_id pin = {pins.first.v + bit};
-    odin3_net_id lone = {0};
-    odin3_status st = odin3_pin_disconnect(tc->module, pin);
-    st =
-        st == ODIN3_OK ? odin3_net_create(tc->module, 0, odin3_module_prov(tc->module), &lone) : st;
-    st = st == ODIN3_OK ? odin3_pin_connect(tc->module, pin, lone) : st;
-    return st == ODIN3_OK ? odin3_net_merge(tc->module, (odin3_net_pair){net, from}) : st;
+    return net.v == from.v ? ODIN3_OK : odin3_net_merge(tc->module, (odin3_net_pair){net, from});
 }
 
 /* The nets that drive the new ports, per bit: data and enable. */
