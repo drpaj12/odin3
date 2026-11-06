@@ -1,0 +1,11 @@
+{
+ "extracted_cells": 74336,
+ "join_matched": 18159,
+ "join_rate": 1.0,
+ "logic_cells": 18159,
+ "logic_with_hdl_chain": 17566,
+ "names_in_extracted_spice": 0,
+ "names_in_gds": 0,
+ "names_in_gds_with_klayout_properties": 17566,
+ "odin_instances": 17566
+}
