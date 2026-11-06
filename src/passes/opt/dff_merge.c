@@ -376,8 +376,8 @@ static odin3_status group_rtl_mark(const merge_job *job, const group *grp, odin3
     for (uint32_t k = 0; k < grp->count; k++) {
         const odin3_dff_bitplan *bp = plan_bit(job->plan, bits[k]);
         bad = bad || bp->rtl_bad;
-        for (uint32_t w = 0; w < bp->node_len; w++) {
-            uint32_t node = (uint32_t)((const uint64_t *)job->plan->nodes.data)[bp->node_off + w];
+        for (uint32_t wi = 0; wi < bp->node_len; wi++) {
+            uint32_t node = (uint32_t)((const uint64_t *)job->plan->nodes.data)[bp->node_off + wi];
             any = any || odin3_kit_rtl_sel(ds->oc, (odin3_node_id){node}) != 0;
         }
     }

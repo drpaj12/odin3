@@ -86,9 +86,8 @@ static void mux_gate4(const odin3_sim_cell *cell) {
     uint8_t lhs = in4(cell, PORT_A);
     uint8_t rhs = in4(cell, PORT_B);
     if (unknown(sel)) {
-        bool take_b = (cell->flags & ODIN3_SIM_CELL_RTL_SEL_B) != 0;
-        out4(cell,
-             (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0 ? (take_b ? rhs : lhs) : merge4(lhs, rhs));
+        uint8_t pick = (cell->flags & ODIN3_SIM_CELL_RTL_SEL_B) != 0 ? rhs : lhs;
+        out4(cell, (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0 ? pick : merge4(lhs, rhs));
         return;
     }
     out4(cell, sel == 1 ? rhs : lhs);
