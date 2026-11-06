@@ -343,6 +343,7 @@ static odin3_status make_next_state(odin3_fsm_mapper *mp, const reg_nets *rn) {
     const odin3_net_id *dbits = rn->d.data;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < mp->n_states; i++) {
+        mp->prov = (odin3_prov_id){((const uint32_t *)mp->prov_next.data)[i]};
         if (rn->one_hot) {
             nso[i] = dbits[one_hot_bit(data, i)];
         } else {
@@ -351,6 +352,7 @@ static odin3_status make_next_state(odin3_fsm_mapper *mp, const reg_nets *rn) {
         odin3_fsm_target target = {ODIN3_FSM_TARGET_NEXT_STATE, i, nso[i], 0};
         st = st == ODIN3_OK ? odin3_fsm_map_target(mp, &target) : st;
     }
+    mp->prov = mp->prov_all;
     st = st == ODIN3_OK && !rn->one_hot ? make_pmux(mp, rn, nso) : st;
     odin3_util_free(nso);
     return st;
@@ -365,6 +367,7 @@ static odin3_status make_outputs(odin3_fsm_mapper *mp) {
             continue;
         }
         odin3_fsm_target target = {ODIN3_FSM_TARGET_CTRL_OUT, i, {0}, out[i]};
+        mp->prov = (odin3_prov_id){((const uint32_t *)mp->prov_out.data)[i]};
         odin3_status st = odin3_fsm_map_target(mp, &target);
         if (st != ODIN3_OK) {
             return st;
@@ -538,47 +541,121 @@ static odin3_status make_state_wire(odin3_fsm_mapper *mp, const reg_nets *rn) {
 /* --- one FSM -------------------------------------------------------------------------------------
  */
 
-/* The DERIVED record of P-1/P-2: the old register, the tree cells, the old output drivers. */
+/* True when node is already in the first len entries of vec. */
+static bool has_node(const odin3_vec *vec, uint32_t node) {
+    const uint32_t *have = vec->data;
+    for (size_t k = 0; k < vec->len; k++) {
+        if (have[k] == node) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Appends node to parents unless it is there. */
+static odin3_status add_parent(odin3_vec *parents, uint32_t node) {
+    return has_node(parents, node) ? ODIN3_OK : odin3_kit_push_u32(parents, node);
+}
+
+/* One DERIVED record (coarsen) with these old nodes as parents, in the open operation. */
+static odin3_status record_of(odin3_fsm_mapper *mp, const odin3_vec *parents, odin3_prov_id *out) {
+    return odin3_kit_prov(&mp->oc, parents->data, (uint32_t)parents->len, &odin3_kit_class_coarsen,
+                          out);
+}
+
+/* The records of the logic into each state: the muxes that have the state's code as an input
+ * (the case items that set it); the old register when the tree names none. */
+static odin3_status make_next_records(odin3_fsm_mapper *mp) {
+    const odin3_fsm_inst *inst = mp->inst;
+    const uint32_t *pairs = inst->tgt_mux.data;
+    odin3_status st = ODIN3_OK;
+    for (uint32_t state = 0; st == ODIN3_OK && state < mp->n_states; state++) {
+        odin3_vec parents;
+        odin3_vec_init(&parents, sizeof(uint32_t));
+        for (size_t k = 0; st == ODIN3_OK && k + 1 < inst->tgt_mux.len; k += 2) {
+            st = pairs[k] == state ? add_parent(&parents, pairs[k + 1]) : st;
+        }
+        st = st == ODIN3_OK && parents.len == 0 ? odin3_kit_push_u32(&parents, inst->dff_node) : st;
+        odin3_prov_id rec = {0};
+        st = st == ODIN3_OK ? record_of(mp, &parents, &rec) : st;
+        st = st == ODIN3_OK ? odin3_kit_push_u32(&mp->prov_next, rec.v) : st;
+        odin3_vec_free(&parents);
+    }
+    return st;
+}
+
+/* The records of each control output: the old cells that drove it; the register when none. */
+static odin3_status make_out_records(odin3_fsm_mapper *mp) {
+    const odin3_fsm_inst *inst = mp->inst;
+    const uint32_t *pairs = inst->out_drv.data;
+    const odin3_fsm_sig *outs = inst->ctrl_out.data;
+    odin3_status st = ODIN3_OK;
+    for (size_t j = 0; st == ODIN3_OK && j < inst->ctrl_out.len; j++) {
+        odin3_vec parents;
+        odin3_vec_init(&parents, sizeof(uint32_t));
+        for (size_t k = 0; st == ODIN3_OK && k + 1 < inst->out_drv.len; k += 2) {
+            st = pairs[k] == outs[j] ? add_parent(&parents, pairs[k + 1]) : st;
+        }
+        st = st == ODIN3_OK && parents.len == 0 ? odin3_kit_push_u32(&parents, inst->dff_node) : st;
+        odin3_prov_id rec = {0};
+        st = st == ODIN3_OK ? record_of(mp, &parents, &rec) : st;
+        st = st == ODIN3_OK ? odin3_kit_push_u32(&mp->prov_out, rec.v) : st;
+        odin3_vec_free(&parents);
+    }
+    return st;
+}
+
+/* The DERIVED records of P-1/P-2. prov_all: the old register, the tree cells, the old output
+ * drivers (for what belongs to the whole machine). The finer ones, so a LUT below carries only the
+ * source of its own logic: prov_dff (the old register: the state bits, the decoders), one per
+ * state (the muxes that set it) and one per control output (the cells that drove it). */
 static odin3_status make_prov(odin3_fsm_mapper *mp) {
     const odin3_fsm_inst *inst = mp->inst;
     odin3_vec parents;
     odin3_vec_init(&parents, sizeof(odin3_node_id));
     odin3_status st = odin3_kit_push_u32(&parents, inst->dff_node);
-    const uint32_t *lists[2] = {inst->mux_cells.data, inst->out_drivers.data};
-    const size_t sizes[2] = {inst->mux_cells.len, inst->out_drivers.len};
+    const odin3_vec *lists[2] = {&inst->mux_cells, &inst->out_drivers};
     for (size_t which = 0; st == ODIN3_OK && which < 2; which++) {
-        for (size_t i = 0; st == ODIN3_OK && i < sizes[which]; i++) {
-            const uint32_t *have = parents.data;
-            bool seen = false;
-            for (size_t k = 0; k < parents.len && !seen; k++) {
-                seen = have[k] == lists[which][i];
-            }
-            st = seen ? ODIN3_OK : odin3_kit_push_u32(&parents, lists[which][i]);
+        const uint32_t *nodes = lists[which]->data;
+        for (size_t i = 0; st == ODIN3_OK && i < lists[which]->len; i++) {
+            st = add_parent(&parents, nodes[i]);
         }
     }
     odin3_kit_begin_rewrite(&mp->oc);
-    st = st == ODIN3_OK ? odin3_kit_prov(&mp->oc, parents.data, (uint32_t)parents.len,
-                                         &odin3_kit_class_coarsen, &mp->prov)
-                        : st;
+    st = st == ODIN3_OK ? record_of(mp, &parents, &mp->prov_all) : st;
     odin3_vec_free(&parents);
+    odin3_vec dff;
+    odin3_vec_init(&dff, sizeof(uint32_t));
+    st = st == ODIN3_OK ? odin3_kit_push_u32(&dff, inst->dff_node) : st;
+    st = st == ODIN3_OK ? record_of(mp, &dff, &mp->prov_dff) : st;
+    odin3_vec_free(&dff);
+    st = st == ODIN3_OK ? make_next_records(mp) : st;
+    st = st == ODIN3_OK ? make_out_records(mp) : st;
+    mp->prov = mp->prov_all;
     return st;
 }
 
 /* Builds every new object; on failure the build is undone by the caller. */
 static odin3_status build(odin3_fsm_mapper *mp, reg_nets *rn, odin3_node_id *dff) {
     const odin3_fsm_data *data = &mp->inst->data;
+    mp->prov = mp->prov_dff;
     odin3_status st = push_fresh(mp, &rn->q, data->state_bits);
     st = st == ODIN3_OK ? make_d_nets(mp, rn) : st;
     st = st == ODIN3_OK ? make_register(mp, rn, dff) : st;
     st = st == ODIN3_OK ? make_decoders(mp, rn) : st;
+    mp->prov = mp->prov_all;
     st = st == ODIN3_OK ? make_next_state(mp, rn) : st;
-    return st == ODIN3_OK ? make_outputs(mp) : st;
+    st = st == ODIN3_OK ? make_outputs(mp) : st;
+    mp->prov = mp->prov_all;
+    return st;
 }
 
 static void mapper_free(odin3_fsm_mapper *mp, reg_nets *rn) {
     odin3_vec_free(&mp->nodes);
     odin3_vec_free(&mp->nets);
     odin3_vec_free(&mp->pending);
+    odin3_vec_free(&mp->prov_next);
+    odin3_vec_free(&mp->prov_out);
     odin3_vec_free(&rn->q);
     odin3_vec_free(&rn->d);
     odin3_util_free(mp->state_sig);
@@ -596,6 +673,8 @@ odin3_status odin3_fsm_map(const odin3_fsm_mod *fm, odin3_pass_ctx *pass,
     odin3_vec_init(&mp.nodes, sizeof(uint32_t));
     odin3_vec_init(&mp.nets, sizeof(uint32_t));
     odin3_vec_init(&mp.pending, sizeof(uint32_t));
+    odin3_vec_init(&mp.prov_next, sizeof(uint32_t));
+    odin3_vec_init(&mp.prov_out, sizeof(uint32_t));
     mp.fm = fm;
     mp.inst = inst;
     mp.n_states = (uint32_t)inst->data.states.len;

@@ -25,7 +25,11 @@ typedef struct odin3_fsm_mapper {
     const odin3_fsm_inst *inst;
     odin3_opt_opts opts;
     odin3_opt_ctx oc;
-    odin3_prov_id prov;
+    odin3_prov_id prov;      /* the record of everything the FSM replaces; the one in force */
+    odin3_prov_id prov_all;  /* old register, tree cells, output drivers */
+    odin3_prov_id prov_dff;  /* the state register and its decoders: the old register */
+    odin3_vec prov_next;     /* uint32_t record per state: the logic into that state */
+    odin3_vec prov_out;      /* uint32_t record per control output */
     odin3_vec nodes;         /* odin3_node_id created */
     odin3_vec nets;          /* odin3_net_id created */
     odin3_vec pending;       /* uint32_t pairs: output pin of a new cell, ctrl_out net to drive */

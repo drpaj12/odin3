@@ -21,6 +21,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ### Added
 
+- `fsm` provenance: the new register and decoders, the logic into each state (the case items that set it) and each control
+  output carry their own records instead of one derived from every folded cell, so a LUT below traces to the part of the
+  machine it implements.
 - `scoap --prov`: every net row that has a wire names it (`wire`) with the bit (`bit`), also when the wire is only an alias
   of the net or the net is a bit of a port wire (output ports and registers after mapping); on ch_intrinsics the viewer found
   a wire on 107 of 319 rows.
@@ -34,6 +37,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   made sha (725,231 edges) share one record for all its LUTs. The WARNING names the option.
 - `write_json --net-ids` adds `odin3_nets`, the Odin III net ID of each bit, to every netname (the "bits" codes are not net
   IDs); `read_json` accepts it. Additive.
+- `proc` provenance: the compare cells of a case item ($eq, $reduce_or) carry the record [switch, case item, and the statement
+  or signal of the snippet], and a $mux/$pmux the cases that give it a slice, instead of one record derived from every case
+  of the switch. A mux traces only to the items that assign its signal.
 - `tristate` pass (post-1.4; `docs/PASSES.md`): tri-state nets that reach no port become logic and the inout ports of the
   top split into `p_i`/`p_o`/`p_oe`, a WARNING for each; elaboration keeps a `$tribuf` on a port of a module below the top
   instead of the D3 error, for the pass to resolve after `flatten`. `write_blif` leaves out the shell of a split port.

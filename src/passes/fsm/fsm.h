@@ -87,6 +87,9 @@ typedef struct odin3_fsm_inst {
     odin3_vec ctrl_out;      /* odin3_fsm_sig, sorted; opt removes bits */
     odin3_vec mux_cells;     /* uint32_t node IDs of the selection tree, ascending */
     odin3_vec out_drivers;   /* uint32_t node IDs that drove ctrl_out, ascending */
+    odin3_vec tgt_mux;       /* uint32_t pairs (state index, mux node): the mux that has the
+                                state's code as an input; the provenance of the logic into it */
+    odin3_vec out_drv;       /* uint32_t pairs (ctrl_out signal, driver node), per output */
     odin3_fsm_sig clk, arst; /* arst is a constant 0 when the register has no async reset */
     bool clk_pol, arst_pol;
     char encoding[ODIN3_FSM_ENC_MAX];       /* the wire's fsm_encoding when extracted */

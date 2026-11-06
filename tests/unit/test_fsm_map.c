@@ -237,38 +237,46 @@ static void test_the_output_port_has_one_driver_the_new_logic(void) {
 /* --- provenance --------------------------------------------------------------------------------
  */
 
-static void test_derived_record_has_the_parents_of_the_old_logic(void) {
+static void test_register_record_is_the_old_register(void) {
     read_micro("moore_arst");
     odin3_module *module = ft_module("moore_arst");
-    odin3_node_id old = {0};
     odin3_node_id found[CAP];
     TEST_ASSERT_EQUAL_UINT32(1, nodes_of(module, "$adff", found, CAP));
-    old = found[0];
-    odin3_prov_id old_prov = odin3_node_prov(module, old);
+    odin3_prov_id old_prov = odin3_node_prov(module, found[0]);
     run_fsm("");
     module = ft_module("moore_arst");
-    odin3_node_id reg = register_of(module, "$adff");
-    odin3_prov_id prov = odin3_node_prov(module, reg);
+    odin3_prov_id prov = odin3_node_prov(module, register_of(module, "$adff"));
     const odin3_prov_record *rec = odin3_prov_get(ft.design, prov);
     TEST_ASSERT_NOT_NULL(rec);
     TEST_ASSERT_EQUAL_INT(ODIN3_PROV_DERIVED, rec->kind);
-    TEST_ASSERT_TRUE(rec->parents.count >= 2);
-    TEST_ASSERT_EQUAL_UINT32(old_prov.v, rec->parents.ids[0].v); /* the old register first */
+    TEST_ASSERT_EQUAL_UINT32(1, rec->parents.count); /* only the old register, no tree cells */
+    TEST_ASSERT_EQUAL_UINT32(old_prov.v, rec->parents.ids[0].v);
 }
 
-static void test_everything_new_shares_one_record(void) {
+/* The output logic ($reduce_or) has its own record, with fewer parents than `all`. */
+static void check_output_records(odin3_module *module, odin3_prov_id all, odin3_prov_id reg,
+                                 uint32_t all_count) {
+    odin3_node_id found[CAP];
+    TEST_ASSERT_TRUE(nodes_of(module, "$reduce_or", found, CAP) >= 1);
+    odin3_prov_id out = odin3_node_prov(module, found[0]);
+    TEST_ASSERT_TRUE(out.v != 0 && out.v != all.v && out.v != reg.v);
+    odin3_prov_list parents = odin3_prov_parents(ft.design, out);
+    TEST_ASSERT_TRUE(parents.count >= 1 && parents.count < all_count);
+}
+
+/* The whole machine's record (the state wire) keeps every parent; the output logic carries its
+ * own, finer one: the old driver of that output and not the register. */
+static void test_machine_record_and_finer_records(void) {
     read_micro("moore_arst");
     run_fsm("");
     odin3_module *module = ft_module("moore_arst");
-    odin3_prov_id prov = odin3_node_prov(module, register_of(module, "$adff"));
-    odin3_node_id found[CAP];
-    uint32_t count = nodes_of(module, "$reduce_or", found, CAP);
-    TEST_ASSERT_TRUE(count >= 1);
-    for (uint32_t i = 0; i < count; i++) {
-        TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_node_prov(module, found[i]).v);
-    }
     odin3_wire_id wire = odin3_module_find_wire(module, ft_intern("st"));
-    TEST_ASSERT_EQUAL_UINT32(prov.v, odin3_wire_prov(module, wire).v);
+    odin3_prov_id all = odin3_wire_prov(module, wire);
+    odin3_prov_id reg = odin3_node_prov(module, register_of(module, "$adff"));
+    TEST_ASSERT_TRUE(all.v != 0 && all.v != reg.v);
+    odin3_prov_list all_parents = odin3_prov_parents(ft.design, all);
+    TEST_ASSERT_TRUE(all_parents.count >= 3); /* register, tree cells, output driver */
+    check_output_records(module, all, reg, all_parents.count);
 }
 
 static void test_the_new_register_reaches_the_source(void) {
@@ -431,8 +439,8 @@ int main(void) {
     RUN_TEST(test_a_rejected_register_gets_no_attributes);
     RUN_TEST(test_nomap_leaves_the_ir_unchanged);
     RUN_TEST(test_the_output_port_has_one_driver_the_new_logic);
-    RUN_TEST(test_derived_record_has_the_parents_of_the_old_logic);
-    RUN_TEST(test_everything_new_shares_one_record);
+    RUN_TEST(test_register_record_is_the_old_register);
+    RUN_TEST(test_machine_record_and_finer_records);
     RUN_TEST(test_the_new_register_reaches_the_source);
     RUN_TEST(test_the_old_register_goes_with_opt_clean);
     RUN_TEST(test_a_keep_register_survives_opt_clean);

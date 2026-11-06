@@ -2,7 +2,7 @@
 provenance records (cells made by `proc`, then every pass, then abc). Run through CTest `lineage`
 (ODIN3_BIN set); skipped without it.
 
-The micro tests/lineage/case_fsm.v has a case that drives y (lines 7-11), an independent statement
+The micro tests/lineage/case_fsm.v has a case that drives y (lines 7-10), an independent statement
 for o (line 14) and a 3-state machine (lines 15-20) with the outputs p and q (lines 22-23).
 Hand-checked: the LUTs of y trace to the case and its items only, the LUT of o to its
 statement only, and the LUTs of the machine to the machine's lines only. The join uses `uid=`,
@@ -25,7 +25,7 @@ ODIN3 = os.environ.get("ODIN3_BIN")
 ROOT = Path(__file__).resolve().parents[2]
 MICRO = ROOT / "tests" / "lineage" / "case_fsm.v"
 
-CASE = {7, 8, 9, 10, 11}  # the case, its three items and its default
+CASE = {7, 8, 9, 10}  # the case and its three items: the default gives the mux no slice
 OWN = {14}
 MACHINE = {15, 17, 18, 19, 20, 22, 23}
 
@@ -109,6 +109,9 @@ class Lineage(unittest.TestCase):
         self.assertEqual(5, len(machine), luts)
         for ls in machine:
             self.assertTrue(ls and ls <= MACHINE, ls)
+        # finer than one record for the whole machine: not every LUT traces to every machine line
+        self.assertTrue(any(ls < MACHINE for ls in machine), machine)
+        self.assertTrue(any(ls == {15} for ls in machine), machine)
 
 
     def test_graph_and_scoap_prov_ids_are_the_map_uids(self) -> None:
