@@ -95,11 +95,11 @@ static void pow_negative(const tb_powop *op) {
     tbv *base = op->base;
     uint32_t width = op->width;
     tbv one;
-    tbv_set_u64(&one, width, 1);
+    tbv_set_u64(1, &one, width);
     tbv ones;
-    tbv_fill(&ones, width, ODIN3_W4_1);
+    tbv_fill(ODIN3_W4_1, &ones, width);
     if (odin3_word_is_zero(base->v, width)) {
-        tbv_fill(base, width, ODIN3_W4_X);
+        tbv_fill(ODIN3_W4_X, base, width);
     } else if (tbv_same(base, &one, width)) {
         return;
     } else if (op->base_sgn && tbv_same(base, &ones, width)) {
@@ -114,7 +114,7 @@ static void pow_negative(const tb_powop *op) {
 void tb_op_pow(const tb_powop *op) {
     uint32_t width = op->width;
     if (!tbv_known(op->base, width) || !tbv_known(op->exp, op->exp_width)) {
-        tbv_fill(op->base, width, ODIN3_W4_X);
+        tbv_fill(ODIN3_W4_X, op->base, width);
         return;
     }
     if (op->exp_sgn && negative(op->exp->v, op->exp_width)) {
@@ -150,7 +150,7 @@ static void arith(const char *op, const tb_binop *bo) {
     bool div = op_is(op, "/") || op_is(op, "%");
     if (!tbv_known(bo->lhs, width) || !tbv_known(bo->rhs, width) ||
         (div && odin3_word_is_zero(bo->rhs->v, width))) {
-        tbv_fill(bo->lhs, width, ODIN3_W4_X);
+        tbv_fill(ODIN3_W4_X, bo->lhs, width);
         return;
     }
     odin3_word_bin word = {bo->lhs->v, bo->lhs->v, bo->rhs->v, width};
@@ -238,7 +238,7 @@ static void arith_right(const tb_shiftop *so) {
     uint32_t width = so->width;
     uint64_t amount = 0;
     if (!tbv_u64(so->amount, so->amount_width, &amount)) {
-        tbv_fill(so->lhs, width, ODIN3_W4_X);
+        tbv_fill(ODIN3_W4_X, so->lhs, width);
         return;
     }
     uint32_t sign = width > 0 ? tbv_code(so->lhs, width - 1U) : 0U;
@@ -251,7 +251,7 @@ static void arith_right(const tb_shiftop *so) {
         return;
     }
     tbv ones;
-    tbv_fill(&ones, fill, sign);
+    tbv_fill(sign, &ones, fill);
     tb_field_put((tb_planes){so->lhs->v, so->lhs->u, width}, (tb_field){width - fill, fill},
                  &ones);
 }

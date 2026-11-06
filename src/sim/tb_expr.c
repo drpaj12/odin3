@@ -80,9 +80,9 @@ static void write_leaf(tb_ev *ev, const tb_expr *lv, const tbv *val, uint64_t id
 }
 
 /* A known number written to a leaf, at the leaf's width. */
-static void write_number(tb_ev *ev, const tb_expr *lv, uint64_t num, uint64_t idx) {
+static void write_number(tb_ev *ev, uint64_t num, const tb_expr *lv, uint64_t idx) {
     tbv val;
-    tbv_set_u64(&val, lv->width, num);
+    tbv_set_u64(num, &val, lv->width);
     write_leaf(ev, lv, &val, idx);
 }
 
@@ -350,11 +350,11 @@ static void finish_random(tb_ev *ev, ev_frame *fr) {
     if (expr->n > 0) {
         const tb_expr *index = lv_index(expr->list[0]);
         uint64_t idx = index != NULL ? index_of(&fr->val[1], index->width) : 0;
-        write_number(ev, expr->list[0], (uint64_t)(uint32_t)seed, idx);
+        write_number(ev, (uint64_t)(uint32_t)seed, expr->list[0], idx);
     } else {
         ev->seed = seed;
     }
-    tbv_set_u64(&fr->val[0], TB_INT_BITS, (uint64_t)(uint32_t)val);
+    tbv_set_u64((uint64_t)(uint32_t)val, &fr->val[0], TB_INT_BITS);
     extend(&fr->val[0], TB_INT_BITS, fr->width, fr->sgn);
 }
 
@@ -476,7 +476,7 @@ static uint64_t finish_value_plusargs(tb_ev *ev, const ev_frame *fr) {
     }
     const tb_expr *index = lv_index(expr->list[1]);
     uint64_t idx = index != NULL ? index_of(&fr->val[0], index->width) : 0;
-    write_number(ev, expr->list[1], val, idx);
+    write_number(ev, val, expr->list[1], idx);
     return 1;
 }
 
@@ -507,7 +507,7 @@ static uint64_t clog2_of(const tbv *val, uint32_t width) {
 
 /* A known number result, extended to the frame's width. */
 static void set_number(ev_frame *fr, uint64_t num) {
-    tbv_set_u64(&fr->val[0], fr->width, num);
+    tbv_set_u64(num, &fr->val[0], fr->width);
 }
 
 static void finish_sys(tb_ev *ev, ev_frame *fr) {
@@ -533,7 +533,7 @@ static void finish_sys(tb_ev *ev, ev_frame *fr) {
         if (tbv_known(&fr->val[0], expr->list[0]->width)) {
             set_number(fr, clog2_of(&fr->val[0], expr->list[0]->width));
         } else {
-            tbv_fill(&fr->val[0], fr->width, ODIN3_W4_X);
+            tbv_fill(ODIN3_W4_X, &fr->val[0], fr->width);
         }
         break;
     default: /* $signed / $unsigned */
@@ -559,12 +559,12 @@ static void finish_bin(ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     switch (fr->cls) {
     case C_LOGIC:
-        tbv_set_code(&fr->val[0], fr->width, logic_code(fr));
+        tbv_set_code(logic_code(fr), &fr->val[0], fr->width);
         break;
     case C_CMP: {
         tb_binop bo = {&fr->val[0], &fr->val[1], max_u32(expr->a->width, expr->b->width),
                        expr->a->sgn && expr->b->sgn};
-        tbv_set_code(&fr->val[0], fr->width, tb_op_compare(expr->op, &bo));
+        tbv_set_code(tb_op_compare(expr->op, &bo), &fr->val[0], fr->width);
         break;
     }
     case C_SHIFT: {
@@ -613,7 +613,7 @@ static void finish_un(ev_frame *fr) {
         tb_op_unary(fr->expr->op, &fr->val[0], fr->width);
         return;
     }
-    tbv_set_code(&fr->val[0], fr->width, reduce_code(fr));
+    tbv_set_code(reduce_code(fr), &fr->val[0], fr->width);
 }
 
 /* base[index] (one bit) or base[msb:lsb]: an unknown or out-of-range bit index reads x. */
@@ -629,7 +629,7 @@ static void finish_select(ev_frame *fr) {
     }
     uint64_t idx = index_of(&fr->val[1], expr->b->width);
     uint32_t code = idx < base ? tbv_code(&fr->val[0], (uint32_t)idx) : (uint32_t)ODIN3_W4_X;
-    tbv_set_code(&fr->val[0], fr->width, code);
+    tbv_set_code(code, &fr->val[0], fr->width);
 }
 
 /* An array word: an unknown or out-of-range address reads x. */
@@ -640,7 +640,7 @@ static void finish_mem(const tb_ev *ev, ev_frame *fr) {
     if (idx < var->depth) {
         tb_var_load(&fr->val[0], var, (uint32_t)idx);
     } else {
-        tbv_fill(&fr->val[0], expr->width, ODIN3_W4_X);
+        tbv_fill(ODIN3_W4_X, &fr->val[0], expr->width);
     }
     extend(&fr->val[0], expr->width, fr->width, fr->sgn && expr->sgn);
 }
@@ -841,7 +841,7 @@ bool tb_drive(tb_ev *ev, uint32_t drv, const tbv *val) {
     const tb_var *var = &tb->vars[slot->var];
     tbv_copy(&slot->val, val, var->width);
     tbv res;
-    tbv_fill(&res, var->width, ODIN3_W4_Z);
+    tbv_fill(ODIN3_W4_Z, &res, var->width);
     for (uint32_t i = 0; i < tb->ndrvs; i++) {
         if (tb->drvs[i].var == slot->var) {
             const tbv *one = &tb->drvs[i].val;

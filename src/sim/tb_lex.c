@@ -98,7 +98,8 @@ static unsigned base_of(char ch) {
 }
 
 /* True when ch may stand in the digits of a number in base: a digit of the base, x, z, ? or _. */
-static bool digit_char(char ch, unsigned base) {
+static bool digit_char(const char *at, unsigned base) {
+    char ch = *at;
     if (ch == '\0') {
         return false;
     }
@@ -128,7 +129,7 @@ static bool plain_number(tb_module *tb, tb_tok *tok, uint64_t num) {
     tbv val;
     tok->width = 0;
     tok->is_signed = true;
-    tbv_set_u64(&val, TB_INT_BITS, num);
+    tbv_set_u64(num, &val, TB_INT_BITS);
     if (!keep_planes(tb, tok, &val, TB_INT_BITS)) {
         return false;
     }
@@ -140,7 +141,7 @@ static bool plain_number(tb_module *tb, tb_tok *tok, uint64_t num) {
  * the size, or padded with 0, or with x or z when the leftmost digit is x or z. */
 static bool based_value(const char **scan, tb_tok *tok, unsigned base, tb_module *tb) {
     const char *first = *scan;
-    while (digit_char(**scan, base)) {
+    while (digit_char(*scan, base)) {
         (*scan)++;
     }
     tb_digits digits = {first, (size_t)(*scan - first), base};

@@ -334,7 +334,7 @@ static void exec_leaf(run *rt, const tb_stmt *stmt) {
 
 /* A case item matches when the expression and the label are equal on all four states (case),
  * with z and ? bits of either side ignored (casez), or with x and z bits ignored (casex). */
-static bool case_match(const tbv *expr, const tbv *label, uint32_t width, uint8_t kind) {
+static bool case_match(uint8_t kind, const tbv *expr, const tbv *label, uint32_t width) {
     for (uint32_t i = 0; i < odin3_word_limbs(width); i++) {
         uint64_t care = UINT64_MAX;
         if (kind == TB_CASEZ) {
@@ -363,7 +363,7 @@ static const tb_stmt *case_pick(run *rt, const tb_stmt *stmt) {
             tbv label;
             tb_eval(&rt->ev, stmt->rhs, width, false, &sel);
             tb_eval(&rt->ev, lab, width, false, &label);
-            if (case_match(&sel, &label, width, stmt->case_kind)) {
+            if (case_match(stmt->case_kind, &sel, &label, width)) {
                 return stmt->list[i];
             }
         }
@@ -657,20 +657,33 @@ static bool next_time(run *rt, uint64_t *next) {
     return found && !rt->hit_limit;
 }
 
-/* The output connections of the DUTs that drive a whole variable: counted in count[var] when next
- * is NULL, else given driver slots from *next on when their variable has several drivers. */
-static void count_conn_drivers(tb_module *tb, uint32_t *count, uint32_t *next) {
+/* The output connections of the DUTs that drive a whole variable (the drivers they add). */
+static tb_conn *var_output(tb_module *tb, uint32_t inst, uint32_t index) {
+    tb_conn *conn = &tb->insts[inst].conns[index];
+    bool drives = conn->is_out && conn->expr != NULL && conn->expr->kind == E_VAR;
+    return drives ? conn : NULL;
+}
+
+static void count_conn_drivers(tb_module *tb, uint32_t *count) {
     for (uint32_t i = 0; i < tb->ninsts; i++) {
         for (uint32_t k = 0; k < tb->insts[i].nconns; k++) {
-            tb_conn *conn = &tb->insts[i].conns[k];
-            if (!conn->is_out || conn->expr == NULL || conn->expr->kind != E_VAR) {
+            const tb_conn *conn = var_output(tb, i, k);
+            count[conn != NULL ? conn->expr->var : 0] += conn != NULL ? 1U : 0U;
+        }
+    }
+}
+
+/* Gives the output connections to variables with several drivers their slots, from *next on. */
+static void number_conn_drivers(tb_module *tb, const uint32_t *count, uint32_t *next) {
+    for (uint32_t i = 0; i < tb->ninsts; i++) {
+        for (uint32_t k = 0; k < tb->insts[i].nconns; k++) {
+            tb_conn *conn = var_output(tb, i, k);
+            if (conn == NULL) {
                 continue;
             }
-            uint32_t var = (uint32_t)conn->expr->var;
-            if (next == NULL) {
-                count[var]++;
-            } else if (count[var] > 1) {
-                tb->drvs[*next].var = (int)var;
+            conn->drv = 0;
+            if (count[conn->expr->var] > 1) {
+                tb->drvs[*next].var = conn->expr->var;
                 conn->drv = ++*next;
             }
         }
@@ -687,7 +700,7 @@ static odin3_status setup_drivers(tb_module *tb) {
     for (uint32_t i = 0; i < tb->nassigns; i++) {
         count[tb->assigns[i].var]++;
     }
-    count_conn_drivers(tb, count, NULL);
+    count_conn_drivers(tb, count);
     uint32_t total = 0;
     for (uint32_t i = 0; i < tb->nvars; i++) {
         total += count[i] > 1 ? count[i] : 0U;
@@ -707,9 +720,9 @@ static odin3_status setup_drivers(tb_module *tb) {
             asg->drv = ++next;
         }
     }
-    count_conn_drivers(tb, count, &next);
+    number_conn_drivers(tb, count, &next);
     for (uint32_t i = 0; i < next; i++) {
-        tbv_fill(&tb->drvs[i].val, tb->vars[tb->drvs[i].var].width, ODIN3_W4_Z);
+        tbv_fill(ODIN3_W4_Z, &tb->drvs[i].val, tb->vars[tb->drvs[i].var].width);
     }
     tb->ndrvs = next;
     free(count);

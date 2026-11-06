@@ -955,6 +955,11 @@ static bool assignable_var(const parser *pr, const tb_expr *name) {
     return !var->is_param && var->depth == 0;
 }
 
+/* A whole variable that may be assigned or an array word. */
+static bool valid_leaf(const parser *pr, const tb_expr *leaf) {
+    return leaf->kind == E_MEM || (leaf->kind == E_VAR && assignable_var(pr, leaf));
+}
+
 /* A target is a reg or integer, a select of one, an array word, or a concatenation of those, with
  * at most TB_WR_MAX leaves (so the worklist is bounded). */
 static bool valid_lvalue(const parser *pr, const tb_expr *lvalue) {
@@ -968,15 +973,16 @@ static bool valid_lvalue(const parser *pr, const tb_expr *lvalue) {
         if ((cur_lv->kind == E_CONCAT && top + cur_lv->n > WORK_MAX) || leaves > TB_WR_MAX) {
             return false;
         }
-        leaves += cur_lv->kind == E_CONCAT ? 0U : 1U;
         if (cur_lv->kind == E_CONCAT) {
             for (uint32_t i = 0; i < cur_lv->n; i++) {
                 work[top++] = cur_lv->list[i];
             }
-        } else if (cur_lv->kind == E_BITSEL || cur_lv->kind == E_PART) {
+            continue;
+        }
+        leaves++;
+        if (cur_lv->kind == E_BITSEL || cur_lv->kind == E_PART) {
             work[top++] = cur_lv->a;
-        } else if (cur_lv->kind != E_MEM &&
-                   !(cur_lv->kind == E_VAR && assignable_var(pr, cur_lv))) {
+        } else if (!valid_leaf(pr, cur_lv)) {
             return false;
         }
     }
@@ -1543,9 +1549,31 @@ static bool string_param(parser *pr, int var, const tb_expr *init) {
     tbv_zero(&val, dst->width);
     for (size_t i = 0; i < len; i++) {
         tbv byte;
-        tbv_set_u64(&byte, CHAR_BITS, (uint8_t)init->str[i]);
+        tbv_set_u64((uint8_t)init->str[i], &byte, CHAR_BITS);
         tb_field_put((tb_planes){val.v, val.u, dst->width},
                      (tb_field){(uint32_t)((len - 1U - i) * CHAR_BITS), CHAR_BITS}, &byte);
+    }
+    tb_var_store(dst, 0, &val);
+    return true;
+}
+
+/* The value of a reg, integer or parameter declaration's initialiser. A parameter without a range
+ * (untyped, not NULL) takes the width and signedness of its value (Verilog-2005 4.10.1). */
+static bool var_init(parser *pr, int var, const tb_expr *init, const var_shape *untyped) {
+    tb_var *dst = &pr->tb->vars[var];
+    if (untyped != NULL) {
+        if (init->kind == E_STR) {
+            return string_param(pr, var, init);
+        }
+        dst->width = init->width;
+        dst->sgn = untyped->sgn ? true : init->sgn;
+        if (!var_storage(pr, var)) {
+            return false;
+        }
+    }
+    tbv val;
+    if (!tb_const_val(pr->tb, init, dst->width, &val)) {
+        return fail(pr, "non-constant initialiser");
     }
     tb_var_store(dst, 0, &val);
     return true;
@@ -1578,25 +1606,7 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     if (shape.is_wire) {
         return add_assign(pr, var, init);
     }
-    tb_var *dst = &pr->tb->vars[var];
-    if (is_param && shape.width == 0U) {
-        /* No range: the parameter takes the width and signedness of its value
-         * (Verilog-2005 4.10.1). */
-        if (init->kind == E_STR) {
-            return string_param(pr, var, init);
-        }
-        dst->width = init->width;
-        dst->sgn = shape.sgn ? true : init->sgn;
-        if (!var_storage(pr, var)) {
-            return false;
-        }
-    }
-    tbv val;
-    if (!tb_const_val(pr->tb, init, dst->width, &val)) {
-        return fail(pr, "non-constant initialiser");
-    }
-    tb_var_store(dst, 0, &val);
-    return true;
+    return var_init(pr, var, init, is_param && shape.width == 0U ? &shape : NULL);
 }
 
 static bool parse_decl(parser *pr) {

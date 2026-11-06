@@ -30,11 +30,11 @@ typedef struct tb_ev {
  * limbs of each plane only, and keep the bits at width and above in the top limb 0 --- */
 void tbv_zero(tbv *val, uint32_t width);
 /* Every bit gets code (0, 1, 2 = x, 3 = z). */
-void tbv_fill(tbv *val, uint32_t width, uint32_t code);
+void tbv_fill(uint32_t code, tbv *val, uint32_t width);
 /* A known value: num truncated to width (zero above 64 bits). */
-void tbv_set_u64(tbv *val, uint32_t width, uint64_t num);
+void tbv_set_u64(uint64_t num, tbv *val, uint32_t width);
 /* Bit 0 gets code, the others 0 (a 1-bit result in a wider context). */
-void tbv_set_code(tbv *val, uint32_t width, uint32_t code);
+void tbv_set_code(uint32_t code, tbv *val, uint32_t width);
 void tbv_copy(tbv *dst, const tbv *src, uint32_t width);
 bool tbv_known(const tbv *val, uint32_t width);
 /* lhs === rhs over width bits. */

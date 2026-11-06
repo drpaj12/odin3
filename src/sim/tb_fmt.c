@@ -161,7 +161,7 @@ static size_t dec_field(uint32_t width, bool sgn) {
         tbv_zero(&big, width);
         odin3_word_set_bit(big.v, width - 1U);
     } else {
-        tbv_fill(&big, width, 1);
+        tbv_fill(1, &big, width);
     }
     dec_text(big.v, width, text);
     return strlen(text) + (sgn ? 1U : 0U);
@@ -172,8 +172,8 @@ static size_t dec_field(uint32_t width, bool sgn) {
 static char unknown_char(const tbv *val, uint32_t width) {
     tbv all_x;
     tbv all_z;
-    tbv_fill(&all_x, width, ODIN3_W4_X);
-    tbv_fill(&all_z, width, ODIN3_W4_Z);
+    tbv_fill(ODIN3_W4_X, &all_x, width);
+    tbv_fill(ODIN3_W4_Z, &all_z, width);
     if (tbv_same(val, &all_x, width)) {
         return 'x';
     }
@@ -227,7 +227,8 @@ static void put_time(tb_ev *ev, sbuf *out, const tbv *val, uint32_t width, spec 
         ev->why = "%t: the time in the timescale precision does not fit in 64 bits";
         return;
     } else {
-        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)(num * ev->tb->time_scale));
+        uint64_t scaled = num * ev->tb->time_scale;
+        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)scaled);
     }
     pad_to(out, text, pad);
 }

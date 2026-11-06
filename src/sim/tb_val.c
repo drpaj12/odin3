@@ -50,7 +50,7 @@ void tbv_zero(tbv *val, uint32_t width) {
     }
 }
 
-void tbv_fill(tbv *val, uint32_t width, uint32_t code) {
+void tbv_fill(uint32_t code, tbv *val, uint32_t width) {
     uint64_t fill_v = (code & CODE_V) != 0 ? UINT64_MAX : 0;
     uint64_t fill_u = (code & CODE_U) != 0 ? UINT64_MAX : 0;
     uint32_t count = limbs_of(width);
@@ -61,13 +61,13 @@ void tbv_fill(tbv *val, uint32_t width, uint32_t code) {
     mask_top(val, width);
 }
 
-void tbv_set_u64(tbv *val, uint32_t width, uint64_t num) {
+void tbv_set_u64(uint64_t num, tbv *val, uint32_t width) {
     tbv_zero(val, width);
     val->v[0] = num;
     mask_top(val, width);
 }
 
-void tbv_set_code(tbv *val, uint32_t width, uint32_t code) {
+void tbv_set_code(uint32_t code, tbv *val, uint32_t width) {
     tbv_zero(val, width);
     val->v[0] = code & CODE_V;
     val->u[0] = (code & CODE_U) >> 1U;
@@ -219,7 +219,7 @@ void tb_var_store(const tb_var *var, uint32_t index, const tbv *src) {
 void tb_var_fill(const tb_var *var, uint32_t code) {
     uint32_t words = var->depth > 0 ? var->depth : 1U;
     tbv fill;
-    tbv_fill(&fill, var->width, code);
+    tbv_fill(code, &fill, var->width);
     for (uint32_t i = 0; i < words; i++) {
         tb_var_store(var, i, &fill);
     }
@@ -326,7 +326,7 @@ static bool decimal_digits(const tb_digits *digits, tbv *out, uint32_t *bits) {
         count++;
     }
     if (xz != 0) {
-        tbv_fill(out, TB_MAX_WIDTH, xz);
+        tbv_fill(xz, out, TB_MAX_WIDTH);
     }
     return count > 0 && (xz == 0 || count == 1);
 }
