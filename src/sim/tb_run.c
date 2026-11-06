@@ -22,6 +22,8 @@ typedef struct frame {
     uint64_t cnt;
 } frame;
 
+enum { RACE_SITES = 64 };
+
 typedef enum { P_RUN, P_TIME, P_EVENT, P_COND, P_DONE } pstate;
 
 typedef struct proc {
@@ -30,6 +32,9 @@ typedef struct proc {
     int sp;
     pstate state;
     uint64_t wake;
+    bool woke;            /* scratch of wake_at */
+    const tb_stmt *slept; /* the delay statement it sleeps on */
+    uint64_t seq;         /* when it went to sleep on a delay: the order of wake-ups at one time */
     uint64_t prev[TB_MAX_ARGS];
     const tb_stmt *waiting;
 } proc;
@@ -39,6 +44,11 @@ typedef struct run {
     tb_ev ev;
     proc *procs;
     uint32_t np;
+    uint32_t *order;                  /* the order the processes run in the active region */
+    uint64_t seq;                     /* delay sleeps so far */
+    const tb_stmt *raced[RACE_SITES]; /* delay statements already warned about */
+    uint32_t n_raced;
+    uint32_t n_woken; /* processes woken by the last wake_at */
     tb_dut **duts;
     uint32_t nd;
     tb_wr *nbas; /* pending nonblocking writes, indices already evaluated */
@@ -327,6 +337,8 @@ static bool step_wait(run *rt, proc *pr, frame *frm) {
     if (stmt->kind == S_DELAY) {
         pr->wake = rt->ev.time + tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false);
         pr->state = P_TIME;
+        pr->seq = rt->seq++;
+        pr->slept = stmt;
     } else if (stmt->kind == S_EVENT) {
         arm(rt, pr, stmt);
         pr->state = P_EVENT;
@@ -486,7 +498,7 @@ static bool any_runnable(const run *rt) {
 static void active_region(run *rt) {
     for (uint32_t guard = 0; guard < DEFAULT_DELTA_LIMIT && !rt->finished && run_ok(rt); guard++) {
         for (uint32_t i = 0; i < rt->np; i++) {
-            run_proc(rt, &rt->procs[i]);
+            run_proc(rt, &rt->procs[rt->order[i]]);
         }
         bool changed = false;
         for (uint32_t dev_no = 0; dev_no < rt->nd; dev_no++) {
@@ -584,6 +596,13 @@ static odin3_status setup(run *rt, odin3_design *design) {
         return ODIN3_ERR_NO_MEMORY;
     }
     rt->np = rt->tb->nprocs;
+    rt->order = calloc((size_t)rt->np + 1U, sizeof *rt->order);
+    if (rt->order == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < rt->np; i++) {
+        rt->order[i] = i;
+    }
     for (uint32_t i = 0; i < rt->np; i++) {
         rt->procs[i].def = &rt->tb->procs[i];
         rt->procs[i].st[0] = (frame){rt->tb->procs[i].body, 0, 0};
@@ -607,15 +626,65 @@ static void teardown(run *rt) {
         }
     }
     free(rt->procs);
+    free(rt->order);
     free((void *)rt->duts);
     free(rt->nbas);
     free((void *)rt->strobes);
 }
 
+/* One `tb race:` WARNING per delay statement: it wakes at the same time as a process that comes
+ * earlier in the source but runs after it, because it went to sleep first. Source order says
+ * the other way; iverilog's event queue (and now this run) orders by sleep time, so a bench that
+ * relies on either order is racy. */
+static void warn_races(run *rt, uint64_t when) {
+    uint32_t count = rt->n_woken;
+    for (uint32_t k = 0; k < count; k++) {
+        const proc *pr = &rt->procs[rt->order[k]];
+        bool moved = false;
+        for (uint32_t j = k + 1U; j < count && !moved; j++) {
+            moved = rt->order[j] < rt->order[k];
+        }
+        bool seen = false;
+        for (uint32_t i = 0; moved && i < rt->n_raced && !seen; i++) {
+            seen = rt->raced[i] == pr->slept;
+        }
+        if (!moved || seen || rt->n_raced >= RACE_SITES) {
+            continue;
+        }
+        rt->raced[rt->n_raced++] = pr->slept;
+        odin3_log(
+            ODIN3_LOG_WARN,
+            "tb race: the delay at line %u wakes at time %llu together with a process that "
+            "is earlier in the source; they run in the order they went to sleep, as in iverilog",
+            pr->slept != NULL ? pr->slept->line : 0U, (unsigned long long)when);
+    }
+}
+
+/* Wakes the processes sleeping until `when`. They run first, in the order they went to sleep
+ * (a delay scheduled earlier fires earlier, as in event-queue simulators), then the others in
+ * source order: a process that waits for an edge at the moment a clock toggles, because its own
+ * delay ended then too, sees that edge only when it went to sleep before the clock process did. */
 static void wake_at(run *rt, uint64_t when) {
+    uint32_t count = 0;
     for (uint32_t i = 0; i < rt->np; i++) {
-        if (rt->procs[i].state == P_TIME && rt->procs[i].wake == when) {
-            rt->procs[i].state = P_RUN;
+        proc *pr = &rt->procs[i];
+        pr->woke = pr->state == P_TIME && pr->wake == when;
+        if (!pr->woke) {
+            continue;
+        }
+        pr->state = P_RUN;
+        uint32_t at = count++;
+        while (at > 0 && rt->procs[rt->order[at - 1U]].seq > pr->seq) {
+            rt->order[at] = rt->order[at - 1U];
+            at--;
+        }
+        rt->order[at] = i;
+    }
+    rt->n_woken = count;
+    warn_races(rt, when);
+    for (uint32_t i = 0; i < rt->np; i++) {
+        if (!rt->procs[i].woke) {
+            rt->order[count++] = i;
         }
     }
 }
