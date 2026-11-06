@@ -149,6 +149,9 @@ static odin3_status put_attr(void *user, uint32_t key_str, const odin3_value *va
     attr_ctx *ctx = user;
     rtl_writer *rw = ctx->rw;
     const char *key = odin3_strtab_get(odin3_design_strtab(rw->design), key_str);
+    if (strcmp(key, ODIN3_ATTR_RTL_SEL) == 0) {
+        return rw->st; /* the simulator's mark: not design content */
+    }
     if (strcmp(key, ODIN3_ATTR_FLATTENED_AWAY) == 0) {
         return rw->st; /* flatten's bookkeeping mark: not design content */
     }

@@ -336,8 +336,8 @@ static void harness_init(harness *hns, uint32_t width) {
     hns->spans[ODIN3_LUT_PORT_Y] = (odin3_sim_span){&hns->idx[width], 1};
     hns->params[ODIN3_LUT_P_WIDTH] = odin3_value_int(width);
     hns->params[ODIN3_LUT_P_LUT] = bits_value(table, 1U << width);
-    hns->cell = (odin3_sim_cell){hns->values, hns->spans,     2,    hns->params, NULL,
-                                 0,           ODIN3_SIM_COMB, NULL, NULL,        0};
+    hns->cell = (odin3_sim_cell){hns->values,    hns->spans, 2,    hns->params, NULL, 0,
+                                 ODIN3_SIM_COMB, NULL,       NULL, 0,           0,    NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_cell_lut.verify(hns->params));
 }
 

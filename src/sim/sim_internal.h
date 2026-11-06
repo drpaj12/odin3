@@ -30,6 +30,7 @@ enum { ODIN3_SIM_SLOT_ZERO = 0, ODIN3_SIM_SLOT_DISCARD = 1, ODIN3_SIM_SLOT_FIRST
  */
 typedef struct odin3_sim_flat {
     odin3_sim_cell view;
+    void (*sim4)(const odin3_sim_cell *); /* the 4-state hook (four_state mode), else NULL */
     const odin3_celltype_def *def;
     odin3_module_id module;
     odin3_node_id node;
@@ -83,6 +84,7 @@ enum { ODIN3_SIM_LABEL_MAX = 160 };
  */
 struct odin3_sim {
     odin3_design *design;
+    bool four_state; /* values are the codes 0, 1, x = 2, z = 3 (sim/word4.h) */
     uint8_t *values;
     uint32_t n_values;
     odin3_sim_flat *cells;

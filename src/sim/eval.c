@@ -17,7 +17,11 @@ enum { SETTLE_PREFETCH = 8 }; /* cells ahead whose view is prefetched */
 
 static void send(odin3_sim *sim, odin3_sim_flat *flat, odin3_sim_event event) {
     flat->view.event = event;
-    flat->def->simulate(&flat->view);
+    if (sim->four_state) {
+        flat->sim4(&flat->view);
+    } else {
+        flat->def->simulate(&flat->view);
+    }
     sim->n_hook_calls++;
 }
 
@@ -47,16 +51,39 @@ static void send_direct(odin3_sim *sim, odin3_sim_event event) {
     }
 }
 
+/* The level of a derived clock slot: 0, 1, or 2 for x/z (in 2-state mode a byte is 0 or 1). */
+static uint8_t clock_level(const odin3_sim *sim, uint32_t slot) {
+    uint8_t code = sim->values[slot];
+    return sim->four_state ? (code >= 2U ? (uint8_t)2 : code) : (uint8_t)(code != 0 ? 1 : 0);
+}
+
+/* The edge a clock level change from `last` to `now` is, as Verilog takes it: a change toward 1
+ * (0 to 1, x to 1, 0 to x) is positive, toward 0 (1 to 0, x to 0, 1 to x) negative; false when
+ * none. */
+static bool level_edge(uint8_t last, uint8_t now, odin3_sim_event *event) {
+    if ((last == 0 && now != 0) || (last == 2 && now == 1)) {
+        *event = ODIN3_SIM_POSEDGE;
+        return true;
+    }
+    if ((last == 1 && now != 1) || (last == 2 && now == 0)) {
+        *event = ODIN3_SIM_NEGEDGE;
+        return true;
+    }
+    return false;
+}
+
 /* Sends the edge to each derived-clock cell whose clock changed since it was last looked at;
  * the number of cells sent to. They copy their inputs as they stand and write no output, so the
  * order does not matter. */
 static uint32_t send_derived(odin3_sim *sim) {
     uint32_t sent = 0;
     for (uint32_t k = 0; k < sim->n_dclk; k++) {
-        uint8_t now = sim->values[sim->dclk_slot[k]] != 0 ? 1U : 0U;
+        uint8_t now = clock_level(sim, sim->dclk_slot[k]);
+        odin3_sim_event event = ODIN3_SIM_COMB;
         if (now != sim->dclk_last[k]) {
-            send(sim, &sim->cells[sim->dclk_cell[k]],
-                 now != 0 ? ODIN3_SIM_POSEDGE : ODIN3_SIM_NEGEDGE);
+            if (level_edge(sim->dclk_last[k], now, &event)) {
+                send(sim, &sim->cells[sim->dclk_cell[k]], event);
+            }
             sim->dclk_last[k] = now;
             sent++;
         }
@@ -129,7 +156,21 @@ odin3_status odin3_sim_clock_edge(odin3_sim *sim, odin3_sim_event event) {
     return ODIN3_OK;
 }
 
+/* 4-state start: every net bit unknown (x), unconnected input pins z, clock inputs low. */
+static void fill_unknown(odin3_sim *sim) {
+    memset(sim->values, 2, sim->n_values);
+    sim->values[ODIN3_SIM_SLOT_ZERO] = 3;
+    for (uint32_t k = 0; k < sim->n_in_bits; k++) {
+        if (sim->in_clock[k] != 0) {
+            sim->values[sim->in_bits[k]] = 0;
+        }
+    }
+}
+
 void odin3_sim_start(odin3_sim *sim) {
+    if (sim->four_state) {
+        fill_unknown(sim);
+    }
     sim->n_edge = 0;
     while (sim->n_edge < sim->n_cells &&
            odin3_sim_is_edge(sim->cells[sim->order[sim->n_edge]].def)) {
@@ -142,7 +183,7 @@ void odin3_sim_start(odin3_sim *sim) {
     }
     odin3_sim_settle(sim);
     for (uint32_t k = 0; k < sim->n_dclk; k++) {
-        sim->dclk_last[k] = sim->values[sim->dclk_slot[k]] != 0 ? 1U : 0U;
+        sim->dclk_last[k] = clock_level(sim, sim->dclk_slot[k]);
     }
 }
 
@@ -291,7 +332,7 @@ odin3_status odin3_sim_get_input(const odin3_sim *sim, odin3_sim_bit at, bool *v
     if (!bit_index(sim->in_ports, sim->n_in_ports, at, &index)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    *value = sim->values[sim->in_bits[index]] != 0;
+    *value = sim->values[sim->in_bits[index]] == 1;
     return ODIN3_OK;
 }
 
@@ -300,7 +341,39 @@ odin3_status odin3_sim_get_output(const odin3_sim *sim, odin3_sim_bit at, bool *
     if (!bit_index(sim->out_ports, sim->n_out_ports, at, &index)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    *value = sim->values[sim->out_bits[index]] != 0;
+    *value = sim->values[sim->out_bits[index]] == 1;
+    return ODIN3_OK;
+}
+
+bool odin3_sim_is_four_state(const odin3_sim *sim) {
+    return sim->four_state;
+}
+
+odin3_status odin3_sim_set_input4(odin3_sim *sim, odin3_sim_bit at, uint8_t code) {
+    uint32_t index = 0;
+    if (!bit_index(sim->in_ports, sim->n_in_ports, at, &index) || sim->in_clock[index] != 0 ||
+        code > (sim->four_state ? 3U : 1U)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    sim->values[sim->in_bits[index]] = code;
+    return ODIN3_OK;
+}
+
+odin3_status odin3_sim_get_input4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code) {
+    uint32_t index = 0;
+    if (!bit_index(sim->in_ports, sim->n_in_ports, at, &index)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *code = sim->values[sim->in_bits[index]];
+    return ODIN3_OK;
+}
+
+odin3_status odin3_sim_get_output4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code) {
+    uint32_t index = 0;
+    if (!bit_index(sim->out_ports, sim->n_out_ports, at, &index)) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    *code = sim->values[sim->out_bits[index]];
     return ODIN3_OK;
 }
 

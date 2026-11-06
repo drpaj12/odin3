@@ -52,6 +52,7 @@ typedef struct odin3_sim_builder {
     uint64_t max_units; /* cells + frames (odin3_sim_options.max_cells) */
     uint64_t max_bits;  /* net-map entries + slots + pin bits (8 x max_cells) */
     bool soft_refusals; /* odin3_sim_options.soft_refusals */
+    bool four_state;    /* odin3_sim_options.four_state */
     odin3_sim_refusal refusal;
 } odin3_sim_builder;
 
@@ -70,6 +71,9 @@ uint32_t odin3_sim_child_module(const odin3_sim_builder *bld, const odin3_module
 
 /* "cannot simulate `<type>`" for node of frame. */
 void odin3_sim_err_unsupported(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node);
+
+/* "cannot simulate `<type>` with x/z": a stateful type without a 4-state model. */
+void odin3_sim_err_no_four_state(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node);
 
 /* "cannot simulate `<type>`" for node of frame, whose sim_scratch_bytes hook refused its size. */
 void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node);

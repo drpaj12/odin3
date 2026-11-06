@@ -67,6 +67,7 @@ typedef enum odin3_sim_refusal {
  * not ERROR (the caller goes on without a simulator); every other refusal stays an error. */
 typedef struct odin3_sim_options {
     uint32_t max_cells;
+    bool four_state; /* 4-state values (0, 1, x, z); see odin3_sim_is_four_state */
     bool soft_refusals;
     odin3_sim_refusal *refusal;
 } odin3_sim_options;
@@ -74,6 +75,17 @@ typedef struct odin3_sim_options {
 /* odin3_sim_build with options (NULL: the defaults); the budget errors are described above. */
 odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
                                   const odin3_sim_options *opts, odin3_sim **out);
+
+/*
+ * 4-state mode (options.four_state; design note docs/specs/2026-11-05-sim-4state-design.md): each
+ * net bit is a code 0, 1, x = 2, z = 3 (the byte in the value array, odin3_bit). After the build
+ * and after odin3_sim_reset every non-clock input, flip-flop and latch output without a 0 or 1
+ * INIT, and every unconnected input pin starts unknown (x or z), as in a Verilog simulator; clock
+ * inputs start low. A cell type with no 4-state model is refused at build ("cannot simulate
+ * `<type>` with x/z") when it keeps state, and otherwise makes every output x when any input pin is
+ * unknown. The 2-state accessors below read an unknown bit as 0 and set only 0 or 1.
+ */
+bool odin3_sim_is_four_state(const odin3_sim *sim);
 
 /* Frees a simulator; NULL is a no-op. */
 void odin3_sim_destroy(odin3_sim *sim);
@@ -188,6 +200,13 @@ odin3_status odin3_sim_clock_edges(odin3_sim *sim, const odin3_sim_clock_event *
  * low) and state bit 0, the INIT event to every sequential cell, one settle. Allocates nothing.
  */
 void odin3_sim_reset(odin3_sim *sim);
+
+/* The 4-state forms: *code gets the bit's code (0, 1, 2 = x, 3 = z; 0 or 1 in 2-state mode);
+ * set_input4 takes any code 0..3 (a 2-state simulator accepts only 0 and 1). INVALID_ARG, not
+ * logged, as the 2-state forms. */
+odin3_status odin3_sim_set_input4(odin3_sim *sim, odin3_sim_bit at, uint8_t code);
+odin3_status odin3_sim_get_input4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code);
+odin3_status odin3_sim_get_output4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code);
 
 /* *value gets output bit `at` as of the last settle; ODIN3_ERR_INVALID_ARG (not logged, *value
  * untouched) out of range. */

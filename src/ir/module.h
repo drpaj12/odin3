@@ -376,6 +376,15 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);
  */
 #define ODIN3_ATTR_FLATTENED_AWAY "odin3 flattened away"
 
+/*
+ * Node attribute (integer 1) that proc sets on the cells it builds from an if or case ($mux,
+ * $pmux, and the $eq/$reduce_or/$logic_not of the case selects). The 4-state simulator gives such
+ * a cell the RTL meaning of an unknown selector (else/default branch, === compare); see
+ * docs/specs/2026-11-05-sim-4state-design.md addendum 1. Bookkeeping, not design content: the
+ * RTLIL, JSON and Verilog writers do not print it.
+ */
+#define ODIN3_ATTR_RTL_SEL "odin3 rtl_sel"
+
 /* An object of a module: kind and ID (for ODIN3_OBJ_MODULE, the module's own ID). */
 typedef struct odin3_objref {
     odin3_objkind kind;
