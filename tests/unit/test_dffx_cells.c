@@ -106,8 +106,9 @@ static void setup(harness *hns, const odin3_celltype_def *def, int64_t init) {
         hns->spans[i] = (odin3_sim_span){&hns->idx[i], 1};
     }
     hns->params[0] = odin3_value_int(init);
-    hns->cell = (odin3_sim_cell){hns->values, hns->spans,     def->n_ports, hns->params, hns->state,
-                                 1,           ODIN3_SIM_COMB, NULL,         NULL,        0};
+    hns->cell =
+        (odin3_sim_cell){hns->values,    hns->spans, def->n_ports, hns->params, hns->state, 1,
+                         ODIN3_SIM_COMB, NULL,       NULL,         0,           0,          NULL};
 }
 
 static void fire(harness *hns, odin3_sim_event event) {

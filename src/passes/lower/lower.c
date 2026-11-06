@@ -152,6 +152,26 @@ static const lw_rule *rule_of(const lw_ctx *lw, const lw_rules *rules, odin3_nod
     return *is_word && type.v <= rules->n_types ? rules->by_type[type.v].rule : NULL;
 }
 
+/* True for a cell --keep-sel leaves alone: a word cell of an if or case (attribute rtl_sel) whose
+ * type the 4-state simulator models at word level (sim/sim4.c). */
+static bool kept_by_sel(const lw_ctx *lw, odin3_node_id node, const odin3_celltype_def *def) {
+    static const char *const k_types[] = {"$mux",       "$pmux",        "$eq",       "$ne",
+                                          "$reduce_or", "$reduce_bool", "$logic_not"};
+    uint32_t key = 0;
+    if (!lw->opts->keep_sel || def == NULL ||
+        !odin3_strtab_find(odin3_design_strtab(lw->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
+        return false;
+    }
+    bool modelled = false;
+    for (size_t i = 0; i < sizeof k_types / sizeof k_types[0]; i++) {
+        modelled = modelled || strcmp(def->name, k_types[i]) == 0;
+    }
+    const odin3_value *val =
+        modelled ? odin3_attr_get(lw->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key) : NULL;
+    return val != NULL && val->kind == ODIN3_VAL_INT && val->i != 0;
+}
+
 /* The netlist view of IR-9, as a post-condition (spec §12.3): no live word cell is left. */
 static odin3_status postcondition(const lw_ctx *lw) {
     uint32_t end = odin3_module_node_end(lw->module);
@@ -162,7 +182,7 @@ static odin3_status postcondition(const lw_ctx *lw) {
         }
         const odin3_celltype_def *def =
             odin3_celltype_get(lw->design, odin3_node_type(lw->module, node));
-        if (lowerable(def)) {
+        if (lowerable(def) && !kept_by_sel(lw, node, def)) {
             char label[LW_LABEL_LEN];
             lw_node_label(lw, node, label, sizeof label);
             odin3_log(ODIN3_LOG_ERROR,
@@ -188,7 +208,8 @@ static odin3_status lower_module(lw_ctx *lw, const lw_rules *rules, odin3_module
         }
         bool is_word = false;
         const lw_rule *rule = rule_of(lw, rules, node, &is_word);
-        if (!is_word) {
+        if (!is_word ||
+            kept_by_sel(lw, node, odin3_celltype_get(lw->design, odin3_node_type(module, node)))) {
             continue;
         }
         if (rule == NULL) {
@@ -313,7 +334,7 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
         odin3_log(ODIN3_LOG_ERROR, "lower: no pass context or design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, ""};
+    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, false, ""};
     lw_ctx lw;
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);

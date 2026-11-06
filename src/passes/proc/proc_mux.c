@@ -439,7 +439,7 @@ static odin3_status mx_cell1(mx_walk *walk, uint32_t sw, uint32_t case_index, od
                              odin3_pw_bit *ybit) {
     odin3_status st = mx_case_prov(walk, sw, case_index, &cell.prov);
     cell.pw = walk->pw;
-    cell.switch_flags = switch_cat(walk->pw, sw)->flags;
+    cell.switch_flags = switch_cat(walk->pw, sw)->flags | ODIN3_PROC_CELL_RTL_SEL;
     odin3_pw_sig out = {0, 0};
     st = st == ODIN3_OK ? odin3_proc_add_cell(walk->mctx, &cell, &out) : st;
     if (st == ODIN3_OK) {
@@ -660,16 +660,17 @@ static odin3_status mx_emit(mx_walk *walk, const mx_frame *frame) {
     }
     st = st == ODIN3_OK ? buf_run(walk, &inputs[2]) : st;
     odin3_value params[PMUX_PARAMS] = {odin3_value_int(width), odin3_value_int(count)};
-    odin3_proc_cell cell = {odin3_proc_type(walk->mctx, count == 1 ? "$mux" : "$pmux"),
-                            params,
-                            count == 1 ? 1 : PMUX_PARAMS,
-                            walk->pw,
-                            inputs,
-                            MUX_INPUTS,
-                            &frame->mux_y,
-                            NULL,
-                            switch_cat(walk->pw, frame->index)->flags,
-                            {0}};
+    odin3_proc_cell cell = {
+        odin3_proc_type(walk->mctx, count == 1 ? "$mux" : "$pmux"),
+        params,
+        count == 1 ? 1 : PMUX_PARAMS,
+        walk->pw,
+        inputs,
+        MUX_INPUTS,
+        &frame->mux_y,
+        NULL,
+        (uint16_t)(switch_cat(walk->pw, frame->index)->flags | ODIN3_PROC_CELL_RTL_SEL),
+        {0}};
     st = st == ODIN3_OK ? mx_mux_prov(walk, frame, count, &cell.prov) : st;
     odin3_pw_sig out = {0, 0};
     return st == ODIN3_OK ? odin3_proc_add_cell(walk->mctx, &cell, &out) : st;

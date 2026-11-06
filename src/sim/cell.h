@@ -35,6 +35,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* odin3_sim_cell.flags */
+enum {
+    ODIN3_SIM_CELL_RTL_SEL = 1
+}; /* the node has the `rtl_sel` attribute (design note, addendum 1) */
+
 typedef enum odin3_sim_event {
     ODIN3_SIM_COMB,
     ODIN3_SIM_POSEDGE,
@@ -75,6 +80,9 @@ typedef struct odin3_sim_cell {
     const void *type_data; /* NULL for built-in types */
     uint8_t *scratch;
     uint32_t n_scratch;
+    /* 4-state mode only (sim/sim4.h): the cell's flags and the data of its 4-state hook */
+    uint32_t flags;
+    const void *type4;
 } odin3_sim_cell;
 
 /*

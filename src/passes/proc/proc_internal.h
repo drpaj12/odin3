@@ -149,6 +149,11 @@ odin3_status odin3_proc_apply_merges(odin3_proc_mctx *mctx);
  * working form whose attrs the cell copies (registers and latches, §14), or NULL. switch_flags:
  * ODIN3_SWITCH_FULL_CASE / _PARALLEL_CASE set the attributes full_case / parallel_case (INT 1).
  */
+/* Bit of odin3_proc_cell.switch_flags (outside the IR's switch flags): the cell comes from an if or
+ * case, so it gets the attribute rtl_sel (INT 1; the simulator's x semantics, design note
+ * 2026-11-05-sim-4state-design.md addendum 1). */
+enum { ODIN3_PROC_CELL_RTL_SEL = 0x8000 };
+
 typedef struct odin3_proc_cell {
     odin3_celltype_id type;
     const odin3_value *params;

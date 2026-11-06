@@ -5,6 +5,7 @@
 #include "ir/lut.h"
 #include "ir/module.h"
 #include "sim/sim.h"
+#include "sim/sim4.h"
 #include "sim/sim_internal.h"
 #include "util/alloc.h"
 #include "util/log.h"
@@ -223,20 +224,56 @@ static odin3_status add_pins(odin3_sim_builder *bld, const odin3_sim_flat *flat,
  * parameters and the type data). A cell too large to simulate is reported.
  */
 static odin3_status size_scratch(odin3_sim_builder *bld, const odin3_sim_flat *flat) {
-    if (flat->def->sim_scratch_bytes == NULL) {
-        return ODIN3_OK;
-    }
     odin3_sim_cell sizing = flat->view;
     sizing.ports = (const odin3_sim_span *)bld->spans.data + flat->span_first;
     uint32_t bytes = 0;
-    odin3_status st = flat->def->sim_scratch_bytes(&sizing, &bytes);
+    odin3_status st = ODIN3_OK;
+    if (flat->def->sim_scratch_bytes != NULL) {
+        st = flat->def->sim_scratch_bytes(&sizing, &bytes);
+    }
     if (st == ODIN3_ERR_INVALID_ARG) {
         odin3_sim_err_too_large(bld, flat->frame, flat->node);
+    }
+    if (st == ODIN3_OK && flat->sim4 != NULL && flat->sim4 != odin3_sim4_generic) {
+        uint32_t more = odin3_sim4_scratch_bytes(flat->def, &sizing);
+        if (more == UINT32_MAX) {
+            odin3_sim_err_too_large(bld, flat->frame, flat->node);
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        bytes = more > bytes ? more : bytes;
     }
     if (st == ODIN3_OK && bytes > bld->n_scratch) {
         bld->n_scratch = bytes;
     }
     return st;
+}
+
+/* The `rtl_sel` attribute of a node (design note addendum 1), as the cell flag. */
+static uint32_t cell_flags(const odin3_sim_builder *bld, const odin3_sim_flat *flat) {
+    uint32_t key = 0;
+    const odin3_module *mod = frame_module(bld, flat->frame);
+    if (!odin3_strtab_find(odin3_design_strtab(bld->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
+        return 0;
+    }
+    const odin3_value *val = odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_NODE, flat->node.v}, key);
+    return val != NULL && val->kind == ODIN3_VAL_INT && val->i != 0 ? ODIN3_SIM_CELL_RTL_SEL : 0;
+}
+
+/* Four-state mode: the cell's hook, or the generic model; stateful types without a model are
+ * refused. */
+static odin3_status setup_four_state(const odin3_sim_builder *bld, odin3_sim_flat *flat) {
+    flat->sim4 = odin3_sim4_lookup(flat->def, &flat->view.type4);
+    if (flat->sim4 == NULL) {
+        if (odin3_sim_is_seq(flat->def)) {
+            odin3_sim_err_no_four_state(bld, flat->frame, flat->node);
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        flat->sim4 = odin3_sim4_generic;
+        flat->view.type4 = flat->def;
+    }
+    flat->view.flags = cell_flags(bld, flat);
+    return ODIN3_OK;
 }
 
 /* A black box is simulated like any other type when it has a simulate hook. */
@@ -268,6 +305,9 @@ static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_
     flat->view.n_ports = def->n_ports;
     flat->view.params = odin3_node_param(mod, node, 0);
     flat->view.type_data = odin3_celltype_lib(bld->design, odin3_node_type(mod, node));
+    if (bld->four_state && setup_four_state(bld, flat) != ODIN3_OK) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
     uint32_t n_state = 0;
     if (add_pins(bld, flat, &n_state) != ODIN3_OK || UINT32_MAX - bld->n_state < n_state) {
         return ODIN3_ERR_NO_MEMORY;
@@ -738,7 +778,11 @@ odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
     bld.max_units = max_cells;
     bld.max_bits = (uint64_t)max_cells * ODIN3_SIM_BITS_PER_CELL;
     bld.soft_refusals = opts != NULL && opts->soft_refusals;
+    bld.four_state = opts != NULL && opts->four_state;
     odin3_sim *sim = odin3_util_calloc(sizeof *sim);
+    if (sim != NULL) {
+        sim->four_state = bld.four_state;
+    }
     odin3_status st = sim == NULL ? ODIN3_ERR_NO_MEMORY : run(&bld, top, sim);
     if (opts != NULL && opts->refusal != NULL) {
         *opts->refusal = bld.refusal;
@@ -749,6 +793,7 @@ odin3_status odin3_sim_build_opts(odin3_design *design, odin3_module_id top,
         return st;
     }
     sim->design = design;
+    sim->four_state = bld.four_state;
     *out = sim;
     return ODIN3_OK;
 }
