@@ -503,6 +503,17 @@ odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odi
     return ODIN3_OK;
 }
 
+odin3_status odin3_pp_scratch(odin3_pp *pp, odin3_loc at, uint32_t len, odin3_loc *loc) {
+    odin3_pp_bufspec spec = {.kind = ODIN3_SRCBUF_SCRATCH,
+                             .expansion = {ODIN3_SRCBUF_SCRATCH, 0, at.v, 0, 0, len, {0, 0}}};
+    odin3_srcbuf_id buf = {0};
+    odin3_status st = odin3_pp_add_buffer(pp, &spec, at, &buf);
+    if (st == ODIN3_OK) {
+        *loc = odin3_srcman_loc(pp->sm, buf, 0);
+    }
+    return st;
+}
+
 /* --- file cache ---------------------------------------------------------------------------- */
 
 bool odin3_pp_file_bytes(const odin3_pp *pp, odin3_srcbuf_id buf, odin3_bytes *out) {
@@ -686,10 +697,11 @@ odin3_bytes odin3_pp_ident_ahead(const odin3_pp *pp, uint32_t ahead) {
 }
 
 odin3_status odin3_pp_sv_operator(odin3_pp *pp, odin3_loc at, const char *op) {
-    return odin3_pp_error(pp, at,
-                          "syntax: '%s' is a SystemVerilog macro operator; not Verilog-2005 "
-                          "(Phase 5)",
-                          op);
+    return odin3_pp_error(
+        pp, at,
+        "syntax: '%s' is a SystemVerilog macro operator; it only means something in a "
+        "macro body",
+        op);
 }
 
 static bool is_digit(int ch) {
@@ -765,6 +777,43 @@ static odin3_status consumed_directive(odin3_pp *pp, const odin3_pp_dir *dir, od
     }
 }
 
+/* A string literal holding file, with " and \ escaped. */
+static odin3_status append_quoted(odin3_strbuf *text, const char *file) {
+    odin3_status st = odin3_strbuf_appendf(text, "\"");
+    for (const char *ch = file; st == ODIN3_OK && *ch != '\0'; ch++) {
+        bool escape = *ch == '"' || *ch == '\\';
+        st = odin3_strbuf_appendf(text, "%s%c", escape ? "\\" : "", *ch);
+    }
+    return st != ODIN3_OK ? st : odin3_strbuf_appendf(text, "\"");
+}
+
+/* `__FILE__ (a string literal with the file's name as given) and `__LINE__ (a decimal line
+ * number): the file and line of the outermost macro use, or of the directive itself outside a
+ * macro (1800-2017 22.5.1; iverilog does the same). Generated text, spelled nowhere: a SCRATCH
+ * buffer under the directive. */
+static odin3_status builtin_macro(odin3_pp *pp, odin3_loc at, odin3_bytes name) {
+    bool is_file = name.len == strlen("__FILE__") && memcmp(name.ptr, "__FILE__", name.len) == 0;
+    odin3_srcloc where;
+    odin3_srcman_srcloc(pp->sm, (odin3_range){at, at}, &where);
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st =
+        is_file
+            ? append_quoted(&text, where.file != 0 ? odin3_strtab_get(pp->strtab, where.file) : "")
+            : odin3_strbuf_appendf(&text, "%u", where.line);
+    odin3_pp_advance(pp, (uint32_t)name.len + 1);
+    odin3_loc made = {0};
+    st = st != ODIN3_OK
+             ? st
+             : odin3_pp_scratch(pp, at.v != 0 ? at : pp->last_loc, (uint32_t)text.len, &made);
+    if (st == ODIN3_OK) {
+        st = odin3_pp_emit(pp,
+                           (odin3_pp_text){(const uint8_t *)text.data, (uint32_t)text.len, made});
+    }
+    odin3_strbuf_free(&text);
+    return st;
+}
+
 /* `NAME outside skipped regions: a directive, a pass-through directive or a macro use. */
 static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
     odin3_bytes name = odin3_pp_ident_ahead(pp, 1);
@@ -774,11 +823,7 @@ static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
         return odin3_pp_emit_next(pp, (uint32_t)name.len + 1);
     }
     if (kind == ODIN3_PP_DIR_SV) {
-        return odin3_pp_sv_operator(pp, at,
-                                    name.len == strlen("__FILE__") &&
-                                            memcmp(name.ptr, "__FILE__", name.len) == 0
-                                        ? "`__FILE__"
-                                        : "`__LINE__");
+        return builtin_macro(pp, at, name);
     }
     odin3_pp_advance(pp, (uint32_t)name.len + 1);
     if (kind == ODIN3_PP_DIR_LINE) {

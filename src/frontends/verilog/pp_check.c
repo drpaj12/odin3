@@ -139,6 +139,13 @@ static odin3_status check_segment(const odin3_pp *pp, const stream_view *sv, uin
     if (!odin3_srcman_decode(pp->sm, (odin3_loc){seg->loc}, &pos)) {
         return violation("segment %u has loc %u, which does not decode", index, seg->loc);
     }
+    const odin3_srcbuf_rec *own = odin3_srcman_rec_of(pp->sm, (odin3_loc){seg->loc});
+    if (own != NULL && own->kind == ODIN3_SRCBUF_SCRATCH) {
+        /* generated text (`__FILE__, `" ...): it spells nowhere, only its extent is checked */
+        return (uint64_t)(seg->loc - own->start) + len <= own->len
+                   ? ODIN3_OK
+                   : violation("segment %u runs past its SCRATCH buffer", index);
+    }
     const uint8_t *bytes = NULL;
     if (!spelled(pp, (odin3_loc){seg->loc}, len, &bytes)) {
         return violation("segment %u runs past its buffer or reaches no file", index);

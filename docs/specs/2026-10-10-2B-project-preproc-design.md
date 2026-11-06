@@ -633,12 +633,14 @@ done; 2C lexes the directive and its argument on that line and builds the `DIREC
 keeps them, measured). Inside a macro body they pass through likewise. `` `line `` is the one
 directive with no node: consumed (§7.3).
 
-**PP-9 SystemVerilog macro operators are errors in 2B.** ``` `` ``` (paste), `` `" `` and
-`` `\`" `` (strings with substitution) in a macro body, and `` `__FILE__ ``/`` `__LINE__ ``
-anywhere, are `syntax` naming the operator and saying "SystemVerilog macro operator; not
-Verilog-2005 (Phase 5)". The `SCRATCH` buffer kind exists for Phase 5 and 2B never creates one
-(AST-2). Measured: no VTR benchmark or micro uses them outside comments (the four grep hits are
-`` ``AS IS'' `` in licence headers). Formals inside a plain `"…"` string of a body are **not**
+**PP-9 SystemVerilog macro operators (1800-2017 22.5.1; supported since 2026-11-05).** In a macro
+body ``` `` ``` removes itself and joins the tokens around it (formals on either side are
+substituted first), `` `" `` is a `"` that does not start a string (formals inside are substituted)
+and `` `\`" `` is `\"`. `` `__FILE__ `` is a string literal with the given name of the file of the
+outermost macro use (or of the directive itself outside a macro) and `` `__LINE__ `` its line, as
+Icarus does. Generated text has no spelling, so it is emitted from a `SCRATCH` buffer whose parent
+is the use (pp_check checks only its extent). `` `` ``, `` `" `` and `` `\`" `` outside a macro
+body stay errors ("only means something in a macro body"). Formals inside a plain `"…"` string of a body are **not**
 substituted (1800 §22.5.1's reason for `` `" ``; Yosys treats the string as one token; Icarus
 differs and substitutes — the differential tool reports, not fails, where the oracles disagree).
 

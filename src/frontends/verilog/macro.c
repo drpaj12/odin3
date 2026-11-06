@@ -20,10 +20,6 @@ enum { CAP_WHAT = 160, CRLF_CONT = 3, LF_CONT = 2 };
 
 /* --- the table ----------------------------------------------------------------------------- */
 
-static bool bytes_eq(odin3_bytes bytes, const char *str) {
-    return strlen(str) == bytes.len && memcmp(str, bytes.ptr, bytes.len) == 0;
-}
-
 /* Every name in the scanner's directive table, `__FILE__`/`__LINE__` included (PP-9 at every
  * use, so never a usable macro name). */
 bool odin3_pp_is_directive_name(odin3_bytes name) {
@@ -144,26 +140,19 @@ static odin3_status scan_block(def_state *ds) {
     return odin3_pp_error(ds->pp, loc_of(txt, start), "syntax: unterminated comment in macro text");
 }
 
-/* PP-9: ``, `", `\`" and `__FILE__/`__LINE__ in a body are errors; any other backtick is text. */
+/* PP-9 (1800-2017 22.5.1): ``, `" and `\`" in a body are operators, consumed as a unit so that the
+ * quote of `" is not taken for the start of a string; they act when the macro is used (expand.c).
+ * Any other backtick, `__FILE__ and `__LINE__ included, is text. */
 static odin3_status scan_backtick(def_state *ds) {
     odin3_pp_deftext *txt = ds->txt;
-    odin3_loc at = loc_of(txt, txt->pos);
     int next = byte_at(txt, txt->pos + 1);
-    if (next == '`') {
-        return odin3_pp_sv_operator(ds->pp, at, "``");
-    }
-    if (next == '"') {
-        return odin3_pp_sv_operator(ds->pp, at, "`\"");
-    }
-    if (next == '\\' && byte_at(txt, txt->pos + 2) == '`' && byte_at(txt, txt->pos + 3) == '"') {
-        return odin3_pp_sv_operator(ds->pp, at, "`\\`\"");
-    }
-    txt->pos++;
-    odin3_pp_deftext peek = *txt;
-    odin3_bytes word = read_ident(&peek);
-    if (bytes_eq(word, "__FILE__") || bytes_eq(word, "__LINE__")) {
-        return odin3_pp_sv_operator(ds->pp, at,
-                                    bytes_eq(word, "__FILE__") ? "`__FILE__" : "`__LINE__");
+    if (next == '`' || next == '"') {
+        txt->pos += 2;
+    } else if (next == '\\' && byte_at(txt, txt->pos + 2) == '`' &&
+               byte_at(txt, txt->pos + 3) == '"') {
+        txt->pos += 4;
+    } else {
+        txt->pos++;
     }
     return ODIN3_OK;
 }
