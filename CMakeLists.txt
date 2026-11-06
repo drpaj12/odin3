@@ -476,6 +476,7 @@ add_library(odin3_core OBJECT
     src/sim/vectors.c
     src/sim/vectors_in.c
     src/sim/word.c
+    src/sim/word4.c
     src/sim/tb_lex.c
     src/sim/tb_parse.c
     src/sim/tb_expr.c
@@ -1927,6 +1928,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_sim_vectors_in PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_word)
+    odin3_add_unit_test(test_sim_word4)
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
     odin3_add_unit_test(test_sim_signals)
     target_compile_definitions(test_sim_signals PRIVATE

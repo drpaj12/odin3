@@ -204,3 +204,37 @@ x, and a one-time WARNING names the type ("x-pessimistic: <type>").
 4. Tri-state: resolution cell for multi-driver nets, no strengths or pulls in this lane.
 5. Speed budget for the 4-state mode: at most 1.3x the 2-state time on x-free runs.
 6. ABI: new hooks in `reserved[0]`, new `_open4/_get4` functions; no existing signature changes.
+
+## 10. Addendum 1 (2026-11-05, phase 2 start): carrying the RTL meaning of `if`/`case` through proc and opt
+
+Risk check result (micro `ifx.v`, `read_verilog; proc; opt; lower`, checked against iverilog with
+selectors forced to x): iverilog gives `if (x)` the else branch, `case (x)` the default branch and
+`c ? a : b` the bitwise merge. After `proc`, `if` and `?:` are both a `$mux` (told apart only by their
+`src` range), and `case` is `$eq` plus `$pmux`. After `lower` all of them are `$_MUX_`/AND/OR/XOR
+gates. A mark therefore does not survive on its own; this addendum fixes where it is made and kept.
+
+Mark: node attribute `rtl_sel` (INT 1), set by `proc` (proc_mux, the cell builder `cb_attrs`, the
+place that already sets `full_case`/`parallel_case`) on every cell the mux phase builds from a
+switch: `$mux`, `$pmux`, and the `$eq`, `$reduce_or` and `$logic_not` that build the case selects.
+`?:` muxes come from the front end, not from `proc`, and carry no mark: they keep the merge rule.
+The mark adds an attribute only; no cell type, parameter or pin changes, and `write_json` golden
+comparisons that ignore attributes are unaffected (checked in the PR with the golden tests).
+
+Meaning in the 4-state simulator (cell flag `ODIN3_SIM_CELL_RTL_SEL` in the cell view, read from the
+attribute once at build):
+- `$mux` marked: select unknown takes the A side (the else/default side, as in Yosys's `if`
+  lowering); unmarked: merge.
+- `$eq`, `$ne` marked: compare with `===` (x equals x, z equals z), result always known. Together
+  with the `casez`/`casex` masks proc already builds, a `case` select is then always 0 or 1, and
+  `$pmux` (and `$reduce_or`, `$logic_not` over known inputs) behave as plain 2-state cells.
+- `$pmux` marked: the first set select wins as in the RTL, none set gives the A (default) side.
+
+Through opt: opt passes that rebuild or replace a cell must copy `rtl_sel` (checked by a unit test
+per pass: `opt_expr`, `opt_merge`, `opt_muxtree`, `opt_clean`; a pass that merges a marked and an
+unmarked cell drops the mark, i.e. keeps the conservative merge rule). Through lower: a marked
+`$mux` copies the mark to its `$_MUX_` bits (same place `keep` is copied); lowered `$eq`/`$pmux`
+become plain gates and cannot carry `===`, so `lower` prints one WARNING per module with marked
+cells it flattened ("rtl_sel lost: x selectors propagate x here, iverilog takes the default").
+Consequence stated for the parity sweep: `sim_tb` of an x-bearing bench is run on the netlist before
+`lower` (`read_verilog; proc; opt; sim_tb`); the word cells all have simulate hooks, so nothing needs
+lowering for the simulator.
