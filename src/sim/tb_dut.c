@@ -14,11 +14,11 @@ enum {
     MAX_CLOCKS = 16 /* clock inputs of one DUT instance */
 };
 
-/* One clock input of the DUT: the connection that drives it, and its value at the last
- * observation (starts at 0). */
+/* One clock input of the DUT: the connection that drives it, and the code of its bit 0 at the last
+ * observation (starts x in 4-state mode, as the testbench reg; 0 in 2-state mode). */
 typedef struct dut_clock {
     int conn; /* index in inst->conns */
-    uint64_t last;
+    uint32_t last;
 } dut_clock;
 
 /* One recorded edge: which clock (index in clocks), and whether it rose. */
@@ -30,6 +30,9 @@ typedef struct dut_edge {
 struct tb_dut {
     odin3_sim *sim;
     tb_inst *inst;
+    bool four_state;
+    tbv *last;  /* per connection: the value last applied (input) or published (output) */
+    bool *seen; /* per connection: last holds a value */
     dut_clock clocks[MAX_CLOCKS];
     uint32_t nclocks;
     dut_edge edges[EDGE_CAP]; /* recorded edges in order */
@@ -94,7 +97,8 @@ static bool bind_clock(tb_dut *dut, tb_conn *conn, uint32_t line) {
                 line, mod, MAX_CLOCKS, conn->port);
             return false;
         }
-        dut->clocks[dut->nclocks++] = (dut_clock){(int)(conn - dut->inst->conns), 0};
+        uint32_t start = dut->four_state ? (uint32_t)ODIN3_W4_X : (uint32_t)ODIN3_W4_0;
+        dut->clocks[dut->nclocks++] = (dut_clock){(int)(conn - dut->inst->conns), start};
     }
     return true;
 }
@@ -111,7 +115,7 @@ static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
         return false;
     }
     if (conn->width > TB_MAX_WIDTH) {
-        tb_error("testbench", line, "DUT port wider than 64 bits");
+        tb_error("testbench", line, "DUT port wider than 1024 bits");
         return false;
     }
     if (conn->is_out && conn->expr != NULL && conn->expr->kind != E_VAR) {
@@ -142,14 +146,20 @@ static bool check_global_clock(const tb_dut *dut) {
 }
 
 odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_dut **out) {
-    (void)tb;
     *out = NULL;
     tb_dut *dut = calloc(1, sizeof *dut);
     if (dut == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     dut->inst = inst;
-    odin3_status st = tb_inst_sim(design, inst);
+    dut->four_state = tb->four_state;
+    dut->last = calloc((size_t)inst->nconns + 1U, sizeof *dut->last);
+    dut->seen = calloc((size_t)inst->nconns + 1U, sizeof *dut->seen);
+    if (dut->last == NULL || dut->seen == NULL) {
+        tb_dut_close(dut);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = tb_inst_sim(design, inst, tb->four_state);
     dut->sim = inst->sim;
     if (st == ODIN3_OK) {
         odin3_sim_reset(dut->sim); /* built at parse time, or kept from an earlier run */
@@ -167,10 +177,14 @@ odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_
 }
 
 void tb_dut_close(tb_dut *dut) {
+    if (dut != NULL) {
+        free(dut->last);
+        free(dut->seen);
+    }
     free(dut);
 }
 
-odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst) {
+odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst, bool four_state) {
     if (inst->sim != NULL) {
         return ODIN3_OK;
     }
@@ -181,12 +195,14 @@ odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst) {
                   inst->module);
         return ODIN3_ERR_INVALID_ARG;
     }
-    return odin3_sim_build(design, id, &inst->sim);
+    odin3_sim_options opts = {0};
+    opts.four_state = four_state;
+    return odin3_sim_build_opts(design, id, &opts, &inst->sim);
 }
 
-odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *path, tb_src_loc loc,
+odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_src_loc loc,
                             tb_hier_sig *out) {
-    odin3_status st = tb_inst_sim(design, inst);
+    odin3_status st = tb_inst_sim(tb->design, inst, tb->four_state);
     if (st == ODIN3_OK && inst->sigs == NULL) {
         st = odin3_sim_signals_create(inst->sim, &inst->sigs);
     }
@@ -208,25 +224,25 @@ odin3_status tb_inst_signal(odin3_design *design, tb_inst *inst, const char *pat
         return st == ODIN3_OK ? ODIN3_ERR_INVALID_ARG : st;
     }
     if (sig->width > TB_MAX_WIDTH) {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: signal `%s` of DUT `%s` is wider than 64 bits", loc.file,
-                  loc.line, path, inst->name);
+        odin3_log(ODIN3_LOG_ERROR, "%s:%u: signal `%s` of DUT `%s` is wider than 1024 bits",
+                  loc.file, loc.line, path, inst->name);
         return ODIN3_ERR_INVALID_ARG;
     }
     *out = (tb_hier_sig){id, sig->width};
     return ODIN3_OK;
 }
 
-uint64_t tb_inst_peek(const tb_inst *inst, uint32_t id) {
+void tb_inst_peek(const tb_inst *inst, uint32_t id, tbv *out) {
     const odin3_sim_signal *sig = odin3_sim_signals_at(inst->sigs, id);
     uint8_t bits[TB_MAX_WIDTH] = {0};
-    uint64_t val = 0;
+    uint32_t width = sig != NULL ? sig->width : 1U;
+    tbv_zero(out, width);
     if (sig == NULL || odin3_sim_signals_read(inst->sigs, id, bits, sig->width) != ODIN3_OK) {
-        return 0;
+        return;
     }
-    for (uint32_t k = 0; k < sig->width; k++) {
-        val |= (uint64_t)(bits[k] & 1U) << k;
+    for (uint32_t k = 0; k < width; k++) {
+        odin3_w4_set_bit((odin3_w4){out->v, out->u}, (odin3_w4_bit_at){k, bits[k] & 3U});
     }
-    return val;
 }
 
 void tb_inst_release(tb_inst *inst) {
@@ -252,16 +268,19 @@ static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
         if (conn->is_out || is_clock_conn(dut, i) || conn->expr == NULL) {
             continue;
         }
-        uint64_t val = tb_eval_assign(ev, conn->expr, conn->width);
-        if (conn->seen && val == conn->last) {
+        tbv val;
+        tb_eval_assign(ev, conn->expr, conn->width, &val);
+        if (dut->seen[i] && tbv_same(&val, &dut->last[i], conn->width)) {
             continue;
         }
         for (uint32_t bit_no = 0; bit_no < conn->width; bit_no++) {
             odin3_sim_bit bit = {conn->sim_port, bit_no};
-            (void)odin3_sim_set_input(dut->sim, bit, ((val >> bit_no) & 1U) != 0);
+            uint32_t code = tbv_code(&val, bit_no);
+            /* 2-state: an x or z bit reads 0, as the testbench's old 2-state values did */
+            (void)odin3_sim_set_input4(dut->sim, bit, (uint8_t)(dut->four_state ? code : code == 1U));
         }
-        conn->last = val;
-        conn->seen = true;
+        tbv_copy(&dut->last[i], &val, conn->width);
+        dut->seen[i] = true;
         changed = true;
     }
     return changed;
@@ -273,17 +292,30 @@ static void observe_clock(tb_ev *ev, tb_dut *dut, uint32_t which) {
     if (clk == NULL) {
         return;
     }
-    uint64_t val = tb_eval(ev, clk, clk->width, false) & 1U;
-    if (val == clock->last) {
+    tbv val;
+    tb_eval(ev, clk, clk->width, false, &val);
+    uint32_t code = tbv_code(&val, 0);
+    if (!dut->four_state) {
+        code = code == ODIN3_W4_1 ? (uint32_t)ODIN3_W4_1 : (uint32_t)ODIN3_W4_0;
+    }
+    uint32_t before = clock->last;
+    if (code == before) {
         return;
     }
-    clock->last = val;
+    clock->last = code;
+    /* the 4-state edge rule: toward 1 is a posedge (0 to x, x to 1, ...), toward 0 a negedge; x to
+     * z and z to x are neither */
+    bool rise = before == ODIN3_W4_0 || code == ODIN3_W4_1;
+    bool fall = before == ODIN3_W4_1 || code == ODIN3_W4_0;
+    if (!rise && !fall) {
+        return;
+    }
     if (dut->nedges == EDGE_CAP) {
         ev->failed = true;
         ev->why = "more than 64 clock edges between two NBA regions";
         return;
     }
-    dut->edges[dut->nedges++] = (dut_edge){(uint8_t)which, val != 0};
+    dut->edges[dut->nedges++] = (dut_edge){(uint8_t)which, rise};
 }
 
 void tb_dut_observe(tb_ev *ev, tb_dut *dut) {
@@ -299,18 +331,26 @@ static bool publish(tb_ev *ev, tb_dut *dut) {
         if (!conn->is_out || conn->expr == NULL) {
             continue;
         }
-        uint64_t val = 0;
+        tbv val;
+        tbv_zero(&val, conn->width);
         for (uint32_t bit_no = 0; bit_no < conn->width; bit_no++) {
-            bool bit = false;
+            uint8_t code = 0;
             odin3_sim_bit at = {conn->sim_port, bit_no};
-            (void)odin3_sim_get_output(dut->sim, at, &bit);
-            val |= bit ? (uint64_t)1 << bit_no : 0;
+            (void)odin3_sim_get_output4(dut->sim, at, &code);
+            odin3_w4_set_bit((odin3_w4){val.v, val.u}, (odin3_w4_bit_at){bit_no, code});
         }
-        if (!conn->seen || val != conn->last) {
-            tb_write(ev, conn->expr, val);
-            conn->last = val;
-            conn->seen = true;
-            changed = true;
+        if (dut->seen[i] && tbv_same(&val, &dut->last[i], conn->width)) {
+            continue;
+        }
+        tbv_copy(&dut->last[i], &val, conn->width);
+        dut->seen[i] = true;
+        changed = true;
+        if (conn->drv != 0) {
+            (void)tb_drive(ev, conn->drv, &val);
+        } else {
+            tb_resize rs = {conn->width, conn->expr->width, false, false};
+            tbv_extend(&val, &rs);
+            tb_write(ev, conn->expr, &val);
         }
     }
     return changed;

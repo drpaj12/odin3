@@ -5,8 +5,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const uint64_t HALF_MASK = 0xFFFFFFFFU;
+
 enum {
-    DEC_BUF = 32,
+    DEC_BUF = 320, /* decimal digits of a TB_MAX_WIDTH-bit value, with room to spare */
+    HALF_BITS = 32,
     BASE_BIN = 2,
     BASE_OCT = 8,
     BASE_DEC = 10,
@@ -14,19 +17,9 @@ enum {
     BITS_PER_BYTE = 8,
     BITS_PER_OCT = 3,
     BITS_PER_HEX = 4,
-    BYTE_MASK = 0xFF,
     MISS_CHARS = 4,
     TIME_WIDTH = 20 /* default minimum field width of %t */
 };
-
-static unsigned digits_of(uint64_t val, unsigned base) {
-    unsigned count = 1;
-    while (val >= base) {
-        val /= base;
-        count++;
-    }
-    return count;
-}
 
 typedef struct sbuf {
     char *buf; /* always NUL-terminated once the first byte is stored; NULL after an allocation
@@ -68,25 +61,53 @@ static void put(sbuf *out, const char *text, size_t count) {
     out->buf[out->len] = '\0';
 }
 
+/* The character of one digit (count bits, their v and u bits) of %b, %o or %h: the digit when
+ * known; x or z when every bit is x or every bit is z; else X when a bit is x, else Z (iverilog). */
+typedef struct digit_bits {
+    uint32_t v;
+    uint32_t u;
+    uint32_t all; /* the mask of the digit's bits */
+} digit_bits;
+
+static char digit_char(digit_bits dig) {
+    if (dig.u == 0) {
+        return "0123456789abcdef"[dig.v];
+    }
+    if (dig.u == dig.all && dig.v == 0) {
+        return 'x';
+    }
+    if (dig.u == dig.all && dig.v == dig.all) {
+        return 'z';
+    }
+    return (dig.u & ~dig.v) != 0 ? 'X' : 'Z';
+}
+
+/* How a value is printed in a power-of-two base: bits per digit, and whether the digits are
+ * padded to the full width (else leading 0 digits are dropped). */
 typedef struct radix {
-    unsigned base; /* 2, 8 or 16 */
-    unsigned min_digits;
+    uint32_t bits_per;
+    bool pad;
 } radix;
 
-/* val printed in rd.base with at least rd.min_digits digits, zero padded. */
-static void put_radix(sbuf *out, uint64_t val, radix rd) {
+static void put_radix(sbuf *out, const tbv *val, uint32_t width, radix rd) {
     char buf[TB_MAX_WIDTH + 1];
-    unsigned count = 0;
-    do {
-        buf[count++] = "0123456789abcdef"[val % rd.base];
-        val /= rd.base;
-    } while (val != 0);
-    while (count < rd.min_digits) {
-        buf[count++] = '0';
+    uint32_t ndig = (width + rd.bits_per - 1U) / rd.bits_per;
+    uint32_t count = 0;
+    for (uint32_t dig = ndig; dig-- > 0;) {
+        digit_bits bits = {0, 0, 0};
+        for (uint32_t k = 0; k < rd.bits_per && (dig * rd.bits_per) + k < width; k++) {
+            uint32_t code = tbv_code(val, (dig * rd.bits_per) + k);
+            bits.v |= (code & 1U) << k;
+            bits.u |= ((code >> 1U) & 1U) << k;
+            bits.all |= 1U << k;
+        }
+        buf[count++] = digit_char(bits);
     }
-    while (count > 0) {
-        put(out, &buf[--count], 1);
+    uint32_t first = 0;
+    while (!rd.pad && first + 1U < count && buf[first] == '0') {
+        first++;
     }
+    put(out, &buf[first], count - first);
 }
 
 typedef struct padding {
@@ -108,25 +129,81 @@ typedef struct spec {
     bool zero; /* leading 0 flag with a width */
 } spec;
 
-static int64_t signed_value(const tb_expr *arg, uint64_t val) {
-    if (arg->width >= TB_MAX_WIDTH) {
-        return (int64_t)val;
+/* The decimal digits of a known unsigned number of width bits into text (NUL-terminated). */
+static void dec_text(const uint64_t *plane, uint32_t width, char *text) {
+    uint64_t rest[TB_LIMBS];
+    uint32_t limbs = odin3_word_limbs(width);
+    char rev[DEC_BUF];
+    uint32_t count = 0;
+    memcpy(rest, plane, (size_t)limbs * sizeof *rest);
+    do {
+        uint64_t rem = 0;
+        for (uint32_t i = limbs; i-- > 0;) {
+            uint64_t high = (rem << HALF_BITS) | (rest[i] >> HALF_BITS);
+            uint64_t low = ((high % BASE_DEC) << HALF_BITS) | (rest[i] & HALF_MASK);
+            rest[i] = ((high / BASE_DEC) << HALF_BITS) | (low / BASE_DEC);
+            rem = low % BASE_DEC;
+        }
+        rev[count++] = (char)('0' + rem);
+    } while (!odin3_word_is_zero(rest, width));
+    for (uint32_t i = 0; i < count; i++) {
+        text[i] = rev[count - 1U - i];
     }
-    uint64_t sign = (uint64_t)1 << (arg->width - 1U);
-    return (int64_t)((val ^ sign) - sign);
+    text[count] = '\0';
 }
 
-static void put_dec(sbuf *out, const tb_expr *arg, uint64_t val, spec sp) {
+/* The default field width of %d for a value of width bits: the digits of its largest magnitude,
+ * plus one for the sign of a signed value. */
+static size_t dec_field(uint32_t width, bool sgn) {
+    tbv big;
     char text[DEC_BUF];
-    unsigned digits = 0;
-    if (arg->sgn) {
-        (void)snprintf(text, sizeof text, "%lld", (long long)signed_value(arg, val));
-        digits = digits_of((uint64_t)1 << (arg->width - 1U), BASE_DEC) + 1U;
+    if (sgn) {
+        tbv_zero(&big, width);
+        odin3_word_set_bit(big.v, width - 1U);
     } else {
-        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)val);
-        digits = digits_of(tb_mask(arg->width), BASE_DEC);
+        tbv_fill(&big, width, 1);
     }
-    padding pad = {sp.width < 0 ? digits : (size_t)sp.width, ' '};
+    dec_text(big.v, width, text);
+    return strlen(text) + (sgn ? 1U : 0U);
+}
+
+/* The one character %d prints for a value with x or z bits: x or z when every bit is, else X when
+ * a bit is x, else Z. */
+static char unknown_char(const tbv *val, uint32_t width) {
+    tbv all_x;
+    tbv all_z;
+    tbv_fill(&all_x, width, ODIN3_W4_X);
+    tbv_fill(&all_z, width, ODIN3_W4_Z);
+    if (tbv_same(val, &all_x, width)) {
+        return 'x';
+    }
+    if (tbv_same(val, &all_z, width)) {
+        return 'z';
+    }
+    for (uint32_t i = 0; i < odin3_word_limbs(width); i++) {
+        if ((val->u[i] & ~val->v[i]) != 0) {
+            return 'X';
+        }
+    }
+    return 'Z';
+}
+
+static void put_dec(sbuf *out, const tb_expr *arg, const tbv *val, spec sp) {
+    char text[DEC_BUF + 1];
+    uint32_t width = arg->width;
+    if (!tbv_known(val, width)) {
+        text[0] = unknown_char(val, width);
+        text[1] = '\0';
+    } else if (arg->sgn && odin3_word_bit(val->v, width - 1U)) {
+        tbv mag;
+        odin3_word_bin neg = {mag.v, val->v, NULL, width};
+        odin3_word_neg(&neg);
+        text[0] = '-';
+        dec_text(mag.v, width, text + 1);
+    } else {
+        dec_text(val->v, width, text);
+    }
+    padding pad = {sp.width < 0 ? dec_field(width, arg->sgn) : (size_t)sp.width, ' '};
     if (sp.zero) {
         pad.fill = '0';
     }
@@ -137,21 +214,38 @@ static void put_dec(sbuf *out, const tb_expr *arg, uint64_t val, spec sp) {
  * units = precision, no decimals, no suffix), right aligned in 20 columns; %0t is minimal. The
  * units come from the testbench's own `timescale; the LRM default precision (no `timescale) is the
  * smallest precision in the design, which sim_tb does not see, so a testbench without a `timescale
- * prints in its time unit (1 ns). */
-static void put_time(sbuf *out, uint64_t val, spec sp) {
+ * prints in its time unit (1 ns). A time with x or z bits prints as %d does. */
+static void put_time(tb_ev *ev, sbuf *out, const tbv *val, uint32_t width, spec sp) {
     char text[DEC_BUF];
-    (void)snprintf(text, sizeof text, "%llu", (unsigned long long)val);
+    uint64_t num = 0;
     padding pad = {sp.width < 0 ? (size_t)TIME_WIDTH : (size_t)sp.width, sp.zero ? '0' : ' '};
+    if (!tbv_known(val, width)) {
+        text[0] = unknown_char(val, width);
+        text[1] = '\0';
+    } else if (!tbv_u64(val, width, &num) || num > UINT64_MAX / ev->tb->time_scale) {
+        ev->failed = true;
+        ev->why = "%t: the time in the timescale precision does not fit in 64 bits";
+        return;
+    } else {
+        (void)snprintf(text, sizeof text, "%llu", (unsigned long long)(num * ev->tb->time_scale));
+    }
     pad_to(out, text, pad);
 }
 
-static void put_string_value(sbuf *out, const tb_expr *arg, uint64_t val) {
+/* %c and %s use the known bits (x and z as 0, as iverilog): bytes from the top, %s without
+ * leading NULs. */
+static void put_string_value(sbuf *out, const tbv *val, uint32_t width) {
     bool started = false;
-    for (uint32_t shift = (arg->width + BITS_PER_BYTE - 1U) / BITS_PER_BYTE; shift > 0; shift--) {
-        char ch = (char)((val >> ((shift - 1U) * BITS_PER_BYTE)) & BYTE_MASK);
-        started = started || ch != '\0';
+    for (uint32_t byte = (width + BITS_PER_BYTE - 1U) / BITS_PER_BYTE; byte > 0; byte--) {
+        uint32_t ch = 0;
+        for (uint32_t k = 0; k < BITS_PER_BYTE; k++) {
+            uint32_t pos = ((byte - 1U) * BITS_PER_BYTE) + k;
+            ch |= pos < width && tbv_code(val, pos) == 1U ? 1U << k : 0U;
+        }
+        started = started || ch != 0;
         if (started) {
-            put(out, &ch, 1);
+            char text = (char)ch;
+            put(out, &text, 1);
         }
     }
 }
@@ -161,37 +255,33 @@ static void put_arg(tb_ev *ev, sbuf *out, const tb_expr *arg, spec sp) {
         put(out, arg->str, strlen(arg->str));
         return;
     }
-    uint64_t val = tb_eval(ev, arg, arg->width, arg->sgn) & tb_mask(arg->width);
-    unsigned bits = arg->width;
+    tbv val;
+    tb_eval(ev, arg, arg->width, arg->sgn, &val);
+    uint32_t bits = arg->width;
     bool pad = sp.width != 0;
-    char ch = (char)val;
+    char ch = (char)(val.v[0] & ~val.u[0]);
     switch (sp.conv) {
     case 'b':
-        put_radix(out, val, (radix){BASE_BIN, pad ? bits : 0});
+        put_radix(out, &val, bits, (radix){1, pad});
         break;
     case 'h':
     case 'x':
-        put_radix(out, val, (radix){BASE_HEX, pad ? (bits + BITS_PER_HEX - 1U) / BITS_PER_HEX : 0});
+        put_radix(out, &val, bits, (radix){BITS_PER_HEX, pad});
         break;
     case 'o':
-        put_radix(out, val, (radix){BASE_OCT, pad ? (bits + BITS_PER_OCT - 1U) / BITS_PER_OCT : 0});
+        put_radix(out, &val, bits, (radix){BITS_PER_OCT, pad});
         break;
     case 't':
-        if (val > UINT64_MAX / ev->tb->time_scale) {
-            ev->failed = true;
-            ev->why = "%t: the time in the timescale precision does not fit in 64 bits";
-        } else {
-            put_time(out, val * ev->tb->time_scale, sp);
-        }
+        put_time(ev, out, &val, bits, sp);
         break;
     case 'c':
         put(out, &ch, 1);
         break;
     case 's':
-        put_string_value(out, arg, val);
+        put_string_value(out, &val, bits);
         break;
     default:
-        put_dec(out, arg, val, sp);
+        put_dec(out, arg, &val, sp);
         break;
     }
 }
@@ -324,36 +414,31 @@ static void strip_comments(char *text) {
     }
 }
 
-static void drop_underscores(char *tok) {
-    char *dst = tok;
-    for (const char *src = tok; *src != '\0'; src++) {
-        if (*src != '_') {
-            *dst++ = *src;
-        }
-    }
-    *dst = '\0';
-}
-
 typedef struct readmem_state {
     int64_t addr;
     int64_t last;
 } readmem_state;
 
-/* Stores one word token; 1 to continue, 0 to stop (past the end), -1 on a bad word. */
+/* Stores one word token; 1 to continue, 0 to stop (past the end), -1 on a bad word. A word has
+ * hex or binary digits, x, z and ? among them; it is zero-padded to the memory's width (iverilog).
+ */
 static int readmem_word(const tb_readmem_req *req, readmem_state *st, char *tok) {
     char *end = NULL;
     if (tok[0] == '@') {
         st->addr = (int64_t)strtoull(tok + 1, &end, BASE_HEX);
         return 1;
     }
-    drop_underscores(tok);
-    uint64_t val = strtoull(tok, &end, req->hex ? BASE_HEX : BASE_BIN);
-    if (*end != '\0') {
-        (void)snprintf(req->err, req->errcap, "$readmem: bad word `%s` (x/z not supported)", tok);
+    tbv val;
+    uint32_t bits = 0;
+    tb_digits digits = {tok, strlen(tok), req->hex ? (unsigned)BASE_HEX : (unsigned)BASE_BIN};
+    if (!tb_parse_digits(&digits, &val, &bits)) {
+        (void)snprintf(req->err, req->errcap, "$readmem: bad word `%s`", tok);
         return -1;
     }
     if (st->addr >= 0 && st->addr <= st->last && (uint64_t)st->addr < req->mem->depth) {
-        req->mem->mem[st->addr++] = val & tb_mask(req->mem->width);
+        tb_resize rs = {bits, req->mem->width, false, false};
+        tbv_extend(&val, &rs);
+        tb_var_store(req->mem, (uint32_t)st->addr++, &val);
         return 1;
     }
     return 0;

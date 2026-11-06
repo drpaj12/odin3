@@ -485,6 +485,8 @@ add_library(odin3_core OBJECT
     src/sim/tb_dut.c
     src/sim/tb_run.c
     src/sim/tb_vcd.c
+    src/sim/tb_val.c
+    src/sim/tb_ops.c
     src/sim/signals.c
     src/sim/vcd.c
     src/sim/gate_truth.c

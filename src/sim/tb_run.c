@@ -35,7 +35,7 @@ typedef struct proc {
     bool woke;            /* scratch of wake_at */
     const tb_stmt *slept; /* the delay statement it sleeps on */
     uint64_t seq;         /* when it went to sleep on a delay: the order of wake-ups at one time */
-    uint64_t prev[TB_MAX_ARGS];
+    tbv prev[TB_MAX_ARGS];
     const tb_stmt *waiting;
 } proc;
 
@@ -55,7 +55,7 @@ typedef struct run {
     uint32_t nnba, cap_nba;
     const tb_stmt *monitor;
     bool mon_on;
-    uint64_t mon_prev[TB_MAX_ARGS]; /* last values of the $monitor arguments except $time */
+    tbv mon_prev[TB_MAX_ARGS]; /* last values of the $monitor arguments except $time */
     bool mon_pending;
     const tb_stmt **strobes;
     uint32_t nstrobe, cap_strobe;
@@ -72,24 +72,29 @@ static void rfail(run *rt, const tb_stmt *stmt, const char *msg) {
 }
 
 /* --- events --- */
-static uint64_t term_value(run *rt, const tb_event_term *term) {
-    return tb_eval(&rt->ev, term->sig, term->sig->width, false) & tb_mask(term->sig->width);
-}
-
 static void arm(run *rt, proc *pr, const tb_stmt *stmt) {
     pr->waiting = stmt;
     for (uint32_t i = 0; i < stmt->nterms; i++) {
-        pr->prev[i] = term_value(rt, &stmt->terms[i]);
+        tb_eval(&rt->ev, stmt->terms[i].sig, stmt->terms[i].sig->width, false, &pr->prev[i]);
     }
 }
 
-static bool triggered(const tb_event_term *term, uint64_t old, uint64_t now) {
+/* A change of the term's signal from old to now: any change, or the 4-state edge rule of the least
+ * significant bit (posedge: 0 to 1, x or z; x or z to 1; negedge the mirror; IEEE 1364-2005 9.7.2).
+ */
+static bool triggered(const tb_event_term *term, const tbv *old, const tbv *now) {
     if (term->edge == 0) {
-        return old != now;
+        return !tbv_same(old, now, term->sig->width);
     }
-    bool before = (old & 1U) != 0;
-    bool after = (now & 1U) != 0;
-    return term->edge == 1 ? (!before && after) : (before && !after);
+    uint32_t before = tbv_code(old, 0);
+    uint32_t after = tbv_code(now, 0);
+    if (before == after) {
+        return false;
+    }
+    if (term->edge == 1) {
+        return before == ODIN3_W4_0 || after == ODIN3_W4_1;
+    }
+    return before == ODIN3_W4_1 || after == ODIN3_W4_0;
 }
 
 static void check_waiters(run *rt) {
@@ -97,27 +102,43 @@ static void check_waiters(run *rt) {
         proc *pr = &rt->procs[i];
         if (pr->state == P_EVENT) {
             for (uint32_t k = 0; k < pr->waiting->nterms; k++) {
-                uint64_t now = term_value(rt, &pr->waiting->terms[k]);
-                if (triggered(&pr->waiting->terms[k], pr->prev[k], now)) {
+                const tb_event_term *term = &pr->waiting->terms[k];
+                tbv now;
+                tb_eval(&rt->ev, term->sig, term->sig->width, false, &now);
+                if (triggered(term, &pr->prev[k], &now)) {
                     pr->state = P_RUN;
                 }
-                pr->prev[k] = now;
+                tbv_copy(&pr->prev[k], &now, term->sig->width);
             }
-        } else if (pr->state == P_COND &&
-                   tb_eval(&rt->ev, pr->waiting->rhs, pr->waiting->rhs->width, false) != 0) {
+        } else if (pr->state == P_COND && tb_eval_truth(&rt->ev, pr->waiting->rhs) == ODIN3_W4_1) {
             pr->state = P_RUN;
         }
     }
+}
+
+/* One continuous assignment: its wire, or its driver slot of a wire with several drivers, takes the
+ * value; true when the wire changed. */
+static bool settle_one(run *rt, const tb_assign *asg) {
+    const tb_var *var = &rt->tb->vars[asg->var];
+    tbv val;
+    tb_eval_assign(&rt->ev, asg->rhs, var->width, &val);
+    if (asg->drv != 0) {
+        return tb_drive(&rt->ev, asg->drv, &val);
+    }
+    tbv old;
+    tb_var_load(&old, var, 0);
+    if (tbv_same(&old, &val, var->width)) {
+        return false;
+    }
+    tb_var_store(var, 0, &val);
+    return true;
 }
 
 static void settle_assigns(run *rt) {
     for (uint32_t round = 0; round <= rt->tb->nassigns; round++) {
         bool changed = false;
         for (uint32_t i = 0; i < rt->tb->nassigns; i++) {
-            tb_var *var = &rt->tb->vars[rt->tb->assigns[i].var];
-            uint64_t val = tb_eval_assign(&rt->ev, rt->tb->assigns[i].rhs, var->width);
-            changed = changed || val != var->val;
-            var->val = val;
+            changed = settle_one(rt, &rt->tb->assigns[i]) || changed;
         }
         if (!changed) {
             break;
@@ -131,6 +152,12 @@ static void post_write(run *rt) {
         tb_dut_observe(&rt->ev, rt->duts[i]);
     }
     check_waiters(rt);
+}
+
+/* val (from bits, unsigned) truncated or zero-extended to `to` bits. */
+static void extend_to(tbv *val, uint32_t from, uint32_t to) {
+    tb_resize rs = {from, to, false, false};
+    tbv_extend(val, &rs);
 }
 
 /* Fails the run when an evaluation reported an error; false when the run has failed. */
@@ -209,7 +236,10 @@ static void push_strobe(run *rt, const tb_stmt *stmt) {
 }
 
 static void do_close(run *rt, const tb_expr *call) {
-    uint64_t fd = call->n > 0 ? tb_eval(&rt->ev, call->list[0], TB_INT_BITS, false) : 0;
+    uint64_t fd = 0;
+    if (call->n > 0) {
+        (void)tb_eval_u64(&rt->ev, call->list[0], &fd);
+    }
     if (fd >= 3 && fd - 3 < TB_MAX_FILES && rt->tb->files[fd - 3] != NULL) {
         (void)fclose(rt->tb->files[fd - 3]);
         rt->tb->files[fd - 3] = NULL;
@@ -231,8 +261,8 @@ static void do_systask(run *rt, const tb_stmt *stmt) {
     const char *name = call->str;
     if (strstr(name, "display") != NULL || strstr(name, "write") != NULL) {
         uint64_t fd = 1;
-        if (name[1] == 'f') {
-            fd = call->n > 0 ? tb_eval(&rt->ev, call->list[0], TB_INT_BITS, false) : 0;
+        if (name[1] == 'f' && (call->n == 0 || !tb_eval_u64(&rt->ev, call->list[0], &fd))) {
+            fd = 0;
         }
         print_to(rt, fd_stream(rt, fd), call, name[1] == 'f' ? 1U : 0U,
                  strstr(name, "display") != NULL);
@@ -252,8 +282,9 @@ static void do_systask(run *rt, const tb_stmt *stmt) {
 /* --- process stepping --- */
 static void push_nba(run *rt, const tb_stmt *stmt) {
     tb_wr wrs[TB_WR_MAX];
-    uint64_t val = tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width);
-    uint32_t count = tb_wr_resolve(&rt->ev, stmt->lhs, val, wrs);
+    tbv val;
+    tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width, &val);
+    uint32_t count = tb_wr_resolve(&rt->ev, stmt->lhs, &val, wrs);
     if (rt->nnba + count > rt->cap_nba) {
         uint32_t cap = rt->cap_nba == 0 ? (uint32_t)NBA_CAP0 : rt->cap_nba;
         while (cap < rt->nnba + count) {
@@ -283,10 +314,13 @@ static bool push(run *rt, proc *pr, const tb_stmt *stmt) {
 
 static void exec_leaf(run *rt, const tb_stmt *stmt) {
     switch (stmt->kind) {
-    case S_ASSIGN:
-        tb_write(&rt->ev, stmt->lhs, tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width));
+    case S_ASSIGN: {
+        tbv val;
+        tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width, &val);
+        tb_write(&rt->ev, stmt->lhs, &val);
         post_write(rt);
         break;
+    }
     case S_NBA:
         push_nba(rt, stmt);
         break;
@@ -296,6 +330,23 @@ static void exec_leaf(run *rt, const tb_stmt *stmt) {
     default:
         break;
     }
+}
+
+/* A case item matches when the expression and the label are equal on all four states (case),
+ * with z and ? bits of either side ignored (casez), or with x and z bits ignored (casex). */
+static bool case_match(const tbv *expr, const tbv *label, uint32_t width, uint8_t kind) {
+    for (uint32_t i = 0; i < odin3_word_limbs(width); i++) {
+        uint64_t care = UINT64_MAX;
+        if (kind == TB_CASEZ) {
+            care = ~((expr->v[i] & expr->u[i]) | (label->v[i] & label->u[i]));
+        } else if (kind == TB_CASEX) {
+            care = ~(expr->u[i] | label->u[i]);
+        }
+        if (((expr->v[i] ^ label->v[i]) & care) != 0 || ((expr->u[i] ^ label->u[i]) & care) != 0) {
+            return false;
+        }
+    }
+    return true;
 }
 
 static const tb_stmt *case_pick(run *rt, const tb_stmt *stmt) {
@@ -308,7 +359,11 @@ static const tb_stmt *case_pick(run *rt, const tb_stmt *stmt) {
         for (uint32_t k = 0; k < stmt->nlab[i]; k++) {
             const tb_expr *lab = stmt->labels[i * TB_MAX_ARGS + k];
             uint32_t width = cw > lab->width ? cw : lab->width;
-            if (tb_eval(&rt->ev, stmt->rhs, width, false) == tb_eval(&rt->ev, lab, width, false)) {
+            tbv sel;
+            tbv label;
+            tb_eval(&rt->ev, stmt->rhs, width, false, &sel);
+            tb_eval(&rt->ev, lab, width, false, &label);
+            if (case_match(&sel, &label, width, stmt->case_kind)) {
                 return stmt->list[i];
             }
         }
@@ -335,14 +390,18 @@ static bool step_wait(run *rt, proc *pr, frame *frm) {
     }
     frm->pc = 1;
     if (stmt->kind == S_DELAY) {
-        pr->wake = rt->ev.time + tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false);
+        uint64_t delay = 0;
+        if (!tb_eval_u64(&rt->ev, stmt->rhs, &delay)) {
+            delay = 0; /* a delay with x or z bits is 0 */
+        }
+        pr->wake = rt->ev.time + delay;
         pr->state = P_TIME;
         pr->seq = rt->seq++;
         pr->slept = stmt;
     } else if (stmt->kind == S_EVENT) {
         arm(rt, pr, stmt);
         pr->state = P_EVENT;
-    } else if (tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false) == 0) {
+    } else if (tb_eval_truth(&rt->ev, stmt->rhs) != ODIN3_W4_1) {
         pr->waiting = stmt;
         pr->state = P_COND;
     }
@@ -352,7 +411,7 @@ static bool step_wait(run *rt, proc *pr, frame *frm) {
 static bool step_branch(run *rt, proc *pr, const tb_stmt *stmt) {
     const tb_stmt *next = NULL;
     if (stmt->kind == S_IF) {
-        next = tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false) != 0 ? stmt->a : stmt->b;
+        next = tb_eval_truth(&rt->ev, stmt->rhs) == ODIN3_W4_1 ? stmt->a : stmt->b;
     } else {
         next = case_pick(rt, stmt);
     }
@@ -372,7 +431,7 @@ static bool step_for(run *rt, proc *pr, frame *frm) {
         exec_leaf(rt, stmt->step);
         return true;
     }
-    if (tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false) == 0) {
+    if (tb_eval_truth(&rt->ev, stmt->rhs) != ODIN3_W4_1) {
         pr->sp--;
         return true;
     }
@@ -380,17 +439,20 @@ static bool step_for(run *rt, proc *pr, frame *frm) {
     return push(rt, pr, stmt->a);
 }
 
-/* The repeat count; a signed negative count is 0 (IEEE 1364-2005 9.6). */
+/* The repeat count; a signed negative count, or one with x or z bits, is 0 (IEEE 1364-2005
+ * 9.6). */
 static uint64_t repeat_count(run *rt, const tb_expr *expr) {
-    uint64_t cnt = tb_eval(&rt->ev, expr, expr->width, expr->sgn) & tb_mask(expr->width);
-    bool negative = expr->sgn && expr->width > 0 && ((cnt >> (expr->width - 1U)) & 1U) != 0;
-    return negative ? 0 : cnt;
+    tbv val;
+    uint64_t cnt = 0;
+    tb_eval(&rt->ev, expr, expr->width, expr->sgn, &val);
+    bool negative = expr->sgn && expr->width > 0 && tbv_code(&val, expr->width - 1U) == 1U;
+    return !negative && tbv_u64(&val, expr->width, &cnt) ? cnt : 0;
 }
 
 static bool step_loop_kind(run *rt, proc *pr, frame *frm) {
     const tb_stmt *stmt = frm->stmt;
     if (stmt->kind == S_WHILE) {
-        if (tb_eval(&rt->ev, stmt->rhs, stmt->rhs->width, false) == 0) {
+        if (tb_eval_truth(&rt->ev, stmt->rhs) != ODIN3_W4_1) {
             pr->sp--;
             return true;
         }
@@ -417,9 +479,11 @@ static bool step_call(run *rt, proc *pr, frame *frm) {
     const tb_task *task = &rt->tb->tasks[stmt->task];
     if (frm->pc == 0) {
         for (uint32_t i = 0; i < task->nargs; i++) {
-            tb_var *var = &rt->tb->vars[task->vars[i]];
+            const tb_var *var = &rt->tb->vars[task->vars[i]];
             if ((task->dir[i] & TB_ARG_IN) != 0) {
-                var->val = tb_eval_assign(&rt->ev, stmt->args[i], var->width);
+                tbv val;
+                tb_eval_assign(&rt->ev, stmt->args[i], var->width, &val);
+                tb_var_store(var, 0, &val);
             }
         }
         post_write(rt);
@@ -428,7 +492,11 @@ static bool step_call(run *rt, proc *pr, frame *frm) {
     }
     for (uint32_t i = 0; i < task->nargs; i++) {
         if ((task->dir[i] & TB_ARG_OUT) != 0) {
-            tb_write(&rt->ev, stmt->args[i], rt->tb->vars[task->vars[i]].val);
+            const tb_var *var = &rt->tb->vars[task->vars[i]];
+            tbv val;
+            tb_var_load(&val, var, 0);
+            extend_to(&val, var->width, stmt->args[i]->width);
+            tb_write(&rt->ev, stmt->args[i], &val);
         }
     }
     post_write(rt);
@@ -545,9 +613,10 @@ static bool mon_changed(run *rt) {
         if (arg->kind == E_STR || mon_arg_is_time(arg)) {
             continue;
         }
-        uint64_t val = tb_eval(&rt->ev, arg, arg->width, arg->sgn) & tb_mask(arg->width);
-        changed = changed || val != rt->mon_prev[i];
-        rt->mon_prev[i] = val;
+        tbv val;
+        tb_eval(&rt->ev, arg, arg->width, arg->sgn, &val);
+        changed = changed || !tbv_same(&val, &rt->mon_prev[i], arg->width);
+        tbv_copy(&rt->mon_prev[i], &val, arg->width);
     }
     return changed;
 }
@@ -588,6 +657,65 @@ static bool next_time(run *rt, uint64_t *next) {
     return found && !rt->hit_limit;
 }
 
+/* The output connections of the DUTs that drive a whole variable: counted in count[var] when next
+ * is NULL, else given driver slots from *next on when their variable has several drivers. */
+static void count_conn_drivers(tb_module *tb, uint32_t *count, uint32_t *next) {
+    for (uint32_t i = 0; i < tb->ninsts; i++) {
+        for (uint32_t k = 0; k < tb->insts[i].nconns; k++) {
+            tb_conn *conn = &tb->insts[i].conns[k];
+            if (!conn->is_out || conn->expr == NULL || conn->expr->kind != E_VAR) {
+                continue;
+            }
+            uint32_t var = (uint32_t)conn->expr->var;
+            if (next == NULL) {
+                count[var]++;
+            } else if (count[var] > 1) {
+                tb->drvs[*next].var = (int)var;
+                conn->drv = ++*next;
+            }
+        }
+    }
+}
+
+/* A wire with several drivers (continuous assignments and DUT outputs) gets one driver slot per
+ * driver (design note section 6); the slots start z. */
+static odin3_status setup_drivers(tb_module *tb) {
+    uint32_t *count = calloc((size_t)tb->nvars + 1U, sizeof *count);
+    if (count == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < tb->nassigns; i++) {
+        count[tb->assigns[i].var]++;
+    }
+    count_conn_drivers(tb, count, NULL);
+    uint32_t total = 0;
+    for (uint32_t i = 0; i < tb->nvars; i++) {
+        total += count[i] > 1 ? count[i] : 0U;
+    }
+    tb->ndrvs = 0;
+    tb->drvs = total > 0 ? tb_alloc(tb, (size_t)total * sizeof *tb->drvs) : NULL;
+    if (total > 0 && tb->drvs == NULL) {
+        free(count);
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    uint32_t next = 0;
+    for (uint32_t i = 0; i < tb->nassigns; i++) {
+        tb_assign *asg = &tb->assigns[i];
+        asg->drv = 0;
+        if (count[asg->var] > 1) {
+            tb->drvs[next].var = asg->var;
+            asg->drv = ++next;
+        }
+    }
+    count_conn_drivers(tb, count, &next);
+    for (uint32_t i = 0; i < next; i++) {
+        tbv_fill(&tb->drvs[i].val, tb->vars[tb->drvs[i].var].width, ODIN3_W4_Z);
+    }
+    tb->ndrvs = next;
+    free(count);
+    return ODIN3_OK;
+}
+
 static odin3_status setup(run *rt, odin3_design *design) {
     odin3_status st = ODIN3_OK;
     rt->procs = calloc(rt->tb->nprocs + 1U, sizeof *rt->procs);
@@ -612,7 +740,7 @@ static odin3_status setup(run *rt, odin3_design *design) {
         st = tb_dut_open(design, rt->tb, &rt->tb->insts[i], &rt->duts[rt->nd]);
         rt->nd += st == ODIN3_OK ? 1U : 0U;
     }
-    return st;
+    return st == ODIN3_OK ? setup_drivers(rt->tb) : st;
 }
 
 static void teardown(run *rt) {

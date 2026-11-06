@@ -1,4 +1,4 @@
-/* tb_vcd.c — the `sim_tb --vcd` writer: an IEEE 1364 VCD (2-state) of the testbench's scalar regs
+/* tb_vcd.c — the `sim_tb --vcd` writer: an IEEE 1364 VCD (0, 1, x, z) of the testbench's scalar regs
  * and wires and of every DUT instance port that is connected to an expression. A change is written
  * once per time step, with the value the signal has when the step ends (a glitch inside a step is
  * not shown). Arrays and parameters are not dumped. */
@@ -14,7 +14,7 @@ typedef struct vcd_sig {
     const tb_var *var;   /* a testbench variable, or */
     const tb_conn *conn; /* a DUT port connection */
     uint32_t width;
-    uint64_t last;
+    tbv last;
 } vcd_sig;
 
 struct tb_vcd {
@@ -29,14 +29,15 @@ static bool dumpable(const tb_var *var) {
     return !var->is_param && var->depth == 0 && var->width >= 1 && var->width <= TB_MAX_WIDTH;
 }
 
-static void write_value(tb_vcd *vcd, const vcd_sig *sig, uint64_t val) {
+static void write_value(tb_vcd *vcd, const vcd_sig *sig, const tbv *val) {
+    static const char CODES[] = "01xz";
     if (sig->width == 1) {
-        (void)fprintf(vcd->fp, "%c%s\n", (val & 1U) != 0 ? '1' : '0', sig->code);
+        (void)fprintf(vcd->fp, "%c%s\n", CODES[tbv_code(val, 0)], sig->code);
         return;
     }
     (void)fputc('b', vcd->fp);
     for (uint32_t bit = sig->width; bit > 0; bit--) {
-        (void)fputc(((val >> (bit - 1U)) & 1U) != 0 ? '1' : '0', vcd->fp);
+        (void)fputc(CODES[tbv_code(val, bit - 1U)], vcd->fp);
     }
     (void)fprintf(vcd->fp, " %s\n", sig->code);
 }
@@ -109,23 +110,27 @@ tb_vcd *tb_vcd_open(const char *path, const tb_module *tb) {
     return vcd;
 }
 
-static uint64_t current(tb_ev *ev, const vcd_sig *sig) {
+static void current(tb_ev *ev, const vcd_sig *sig, tbv *val) {
     if (sig->var != NULL) {
-        return sig->var->val & tb_mask(sig->width);
+        tb_var_load(val, sig->var, 0);
+        return;
     }
     /* Sampling must not change the run: a `$random` in the connection would advance the seed. */
     int32_t seed = ev->seed;
-    uint64_t val = tb_eval(ev, sig->conn->expr, sig->width, false) & tb_mask(sig->width);
+    tb_eval(ev, sig->conn->expr, sig->width, false, val);
     ev->seed = seed;
-    return val;
+    tb_resize rs = {sig->width > sig->conn->expr->width ? sig->width : sig->conn->expr->width,
+                    sig->width, false, false};
+    tbv_extend(val, &rs);
 }
 
 void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time) {
     bool header = false;
     for (uint32_t i = 0; i < vcd->nsigs; i++) {
         vcd_sig *sig = &vcd->sigs[i];
-        uint64_t val = current(ev, sig);
-        if (!vcd->first && val == sig->last) {
+        tbv val;
+        current(ev, sig, &val);
+        if (!vcd->first && tbv_same(&val, &sig->last, sig->width)) {
             continue;
         }
         if (!header) {
@@ -134,8 +139,8 @@ void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time) {
             vcd->last_time = time;
             header = true;
         }
-        write_value(vcd, sig, val);
-        sig->last = val;
+        write_value(vcd, sig, &val);
+        tbv_copy(&sig->last, &val, sig->width);
     }
     if (header && vcd->first) {
         (void)fputs("$end\n", vcd->fp);

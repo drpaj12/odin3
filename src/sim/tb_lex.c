@@ -57,7 +57,7 @@ static int digit_value(char ch) {
     return -1;
 }
 
-/* Digits of `base` from *cursor (underscores skipped); false on x/z/? digits. */
+/* Decimal digits from *cursor (underscores skipped); *xz when an x, z or ? digit was among them. */
 static bool based_digits(const char **cursor, unsigned base, uint64_t *val, bool *xz) {
     *val = 0;
     *xz = false;
@@ -97,8 +97,67 @@ static unsigned base_of(char ch) {
     }
 }
 
+/* True when ch may stand in the digits of a number in base: a digit of the base, x, z, ? or _. */
+static bool digit_char(char ch, unsigned base) {
+    if (ch == '\0') {
+        return false;
+    }
+    if (ch == '_' || strchr("xXzZ?", ch) != NULL) {
+        return true;
+    }
+    int dv = digit_value(ch);
+    return dv >= 0 && (unsigned)dv < base;
+}
+
+/* Stores the literal's planes (width bits) in the token. */
+static bool keep_planes(tb_module *tb, tb_tok *tok, const tbv *val, uint32_t width) {
+    size_t bytes = (size_t)odin3_word_limbs(width) * sizeof(uint64_t);
+    tok->nv = tb_alloc(tb, bytes);
+    tok->nu = tb_alloc(tb, bytes);
+    if (tok->nv == NULL || tok->nu == NULL) {
+        return false;
+    }
+    memcpy(tok->nv, val->v, bytes);
+    memcpy(tok->nu, val->u, bytes);
+    tok->num = val->v[0];
+    return true;
+}
+
+/* A plain decimal number: unsized (32 bits), signed. */
+static bool plain_number(tb_module *tb, tb_tok *tok, uint64_t num) {
+    tbv val;
+    tok->width = 0;
+    tok->is_signed = true;
+    tbv_set_u64(&val, TB_INT_BITS, num);
+    if (!keep_planes(tb, tok, &val, TB_INT_BITS)) {
+        return false;
+    }
+    tok->num = num;
+    return true;
+}
+
+/* The digits of a based number after its base letter, sized (IEEE 1364-2005 3.5.1): truncated to
+ * the size, or padded with 0, or with x or z when the leftmost digit is x or z. */
+static bool based_value(const char **scan, tb_tok *tok, unsigned base, tb_module *tb) {
+    const char *first = *scan;
+    while (digit_char(**scan, base)) {
+        (*scan)++;
+    }
+    tb_digits digits = {first, (size_t)(*scan - first), base};
+    tbv val;
+    uint32_t bits = 0;
+    if (base == 0 || !tb_parse_digits(&digits, &val, &bits)) {
+        return false;
+    }
+    uint32_t width = tok->sized ? tok->width : (uint32_t)TB_INT_BITS;
+    tb_resize rs = {bits, width, false, true};
+    tbv_extend(&val, &rs);
+    tok->xfill = !tok->sized && (tbv_code(&val, width - 1U) & ODIN3_W4_X) != 0;
+    return keep_planes(tb, tok, &val, width);
+}
+
 /* A number at *cursor: [size]'[s]base digits, or plain decimal. Returns false on error. */
-static bool lex_number(const char **cursor, tb_tok *tok, const char *file) {
+static bool lex_number(const char **cursor, tb_tok *tok, const char *file, tb_module *tb) {
     uint64_t first = 0;
     bool xz = false;
     const char *scan = *cursor;
@@ -113,23 +172,24 @@ static bool lex_number(const char **cursor, tb_tok *tok, const char *file) {
         return false;
     }
     if (*scan != '\'') {
-        tok->num = first;
-        tok->width = 0;
-        tok->is_signed = true;
         *cursor = scan;
-        return true;
+        return plain_number(tb, tok, first);
+    }
+    if (have_size && (first == 0 || first > TB_MAX_WIDTH)) {
+        tb_error(file, tok->line, "literal size (1 to 1024 bits)");
+        return false;
     }
     scan++;
     tok->is_signed = tolower((unsigned char)*scan) == 's';
     scan += tok->is_signed ? 1 : 0;
     unsigned base = base_of(*scan);
     scan++;
-    if (base == 0 || !based_digits(&scan, base, &tok->num, &xz) || xz) {
-        tb_error(file, tok->line, xz ? "x/z literal (the simulator is 2-state)" : "number literal");
-        return false;
-    }
     tok->sized = have_size;
     tok->width = have_size ? (uint32_t)first : 0;
+    if (!based_value(&scan, tok, base, tb)) {
+        tb_error(file, tok->line, "number literal");
+        return false;
+    }
     *cursor = scan;
     return true;
 }
@@ -346,7 +406,7 @@ static bool lex_token(const char **cursor, tb_tok *tok, const tb_source *src, tb
     } else if (**cursor == '$') {
         lex_word(cursor, tok, TK_SYS);
     } else if (isdigit((unsigned char)**cursor) || **cursor == '\'') {
-        return lex_number(cursor, tok, src->file);
+        return lex_number(cursor, tok, src->file, tb);
     } else if (**cursor == '"') {
         return lex_string(cursor, tok, tb);
     } else {

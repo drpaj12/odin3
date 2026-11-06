@@ -19,6 +19,7 @@ enum {
     PREC_EQUALITY = 6,
     PREC_RELATION = 7,
     PREC_SHIFT = 8,
+    PREC_POWER = 11, /* ** binds tightest and to the right */
     CASE_MAX_ITEMS = 64,
     BLOCK_CAP0 = 8,
     INST_CONNS_FIRST = 16, /* port connections allocated for a DUT instance at first */
@@ -146,6 +147,24 @@ static int find_var(const parser *pr, const char *name) {
     return find_exact(pr, name);
 }
 
+/* (Re)allocates the planes of variable index for its width and depth and gives them their power-on
+ * value: in 4-state mode x for a reg, integer or memory and z for a wire (an undriven wire is z,
+ * IEEE 1364-2005 4.5), else 0. */
+static bool var_storage(parser *pr, int index) {
+    tb_var *var = &pr->tb->vars[index];
+    size_t words = var->depth > 0 ? var->depth : 1U;
+    size_t bytes = words * odin3_word_limbs(var->width) * sizeof(uint64_t);
+    var->v = pnew(pr, bytes);
+    var->u = pnew(pr, bytes);
+    if (var->v == NULL || var->u == NULL) {
+        return false;
+    }
+    if (pr->tb->four_state) {
+        tb_var_fill(var, var->is_wire ? (uint32_t)ODIN3_W4_Z : (uint32_t)ODIN3_W4_X);
+    }
+    return true;
+}
+
 typedef struct var_shape {
     uint32_t width;
     bool sgn;
@@ -186,7 +205,8 @@ static int add_var(parser *pr, const char *name, var_shape shape) {
     var->width = shape.width;
     var->sgn = shape.sgn;
     var->is_wire = shape.is_wire;
-    return (int)tb->nvars++;
+    int index = (int)tb->nvars++;
+    return var_storage(pr, index) ? index : -1;
 }
 
 /* --- expressions: leaf helpers --- */
@@ -215,7 +235,7 @@ static bool parse_range(parser *pr, uint32_t *width) {
         return fail(pr, "range other than [h:0]");
     }
     if (high >= TB_MAX_WIDTH) {
-        return fail(pr, "signal wider than 64 bits");
+        return fail(pr, "signal wider than 1024 bits");
     }
     *width = (uint32_t)high + 1U;
     return true;
@@ -278,7 +298,7 @@ static bool sys_finish(parser *pr, tb_expr *call) {
     if (!plusargs_ok(pr, call)) {
         return false;
     }
-    call->width = strcmp(call->str, "$time") == 0 ? (uint32_t)TB_MAX_WIDTH : (uint32_t)TB_INT_BITS;
+    call->width = strcmp(call->str, "$time") == 0 ? (uint32_t)TB_TIME_BITS : (uint32_t)TB_INT_BITS;
     call->sgn = strcmp(call->str, "$random") == 0 || strcmp(call->str, "$signed") == 0 ||
                 strcmp(call->str, "$clog2") == 0;
     if (is_cast) {
@@ -294,13 +314,11 @@ static tb_expr *parse_number(parser *pr) {
     }
     const tb_tok *tok = cur(pr);
     expr->num = tok->num;
+    expr->nv = tok->nv;
+    expr->nu = tok->nu;
+    expr->xfill = tok->xfill;
     expr->width = tok->width == 0 ? (uint32_t)TB_INT_BITS : tok->width;
     expr->sgn = tok->is_signed;
-    if (expr->width > TB_MAX_WIDTH) {
-        fail(pr, "literal wider than 64 bits");
-        return NULL;
-    }
-    expr->num &= tb_mask(expr->width);
     pr->pos++;
     return expr;
 }
@@ -334,7 +352,7 @@ static int bin_prec(const char *op) {
     } TABLE[] = {{"||", 1}, {"&&", 2}, {"|", 3},   {"^", 4},   {"~^", 4},  {"^~", 4}, {"&", 5},
                  {"==", 6}, {"!=", 6}, {"===", 6}, {"!==", 6}, {"<", 7},   {"<=", 7}, {">", 7},
                  {">=", 7}, {"<<", 8}, {">>", 8},  {"<<<", 8}, {">>>", 8}, {"+", 9},  {"-", 9},
-                 {"*", 10}, {"/", 10}, {"%", 10},  {NULL, 0}};
+                 {"*", 10}, {"/", 10}, {"%", 10},  {"**", 11}, {NULL, 0}};
     for (size_t i = 0; TABLE[i].op != NULL; i++) {
         if (strcmp(TABLE[i].op, op) == 0) {
             return TABLE[i].prec;
@@ -346,7 +364,7 @@ static int bin_prec(const char *op) {
 static void set_bin_shape(tb_expr *expr) {
     int prec = bin_prec(expr->op);
     expr->sgn = false;
-    if (prec == PREC_SHIFT) {
+    if (prec == PREC_SHIFT || prec == PREC_POWER) {
         expr->width = expr->a->width;
         expr->sgn = expr->a->sgn;
     } else if (prec == PREC_EQUALITY || prec == PREC_RELATION || prec <= PREC_LOGIC_AND) {
@@ -558,8 +576,7 @@ static bool begin_hier(parser *pr, bool *want) {
         return false;
     }
     tb_src_loc loc = {pr->file, pr->toks[first].line};
-    if (!pr->lenient &&
-        tb_inst_signal(pr->tb->design, &pr->tb->insts[inst], path, loc, &sig) != ODIN3_OK) {
+    if (!pr->lenient && tb_inst_signal(pr->tb, &pr->tb->insts[inst], path, loc, &sig) != ODIN3_OK) {
         pr->failed = true;
         return false;
     }
@@ -720,7 +737,7 @@ static bool close_concat(parser *pr, xent *top) {
         return false;
     }
     if (width > TB_MAX_WIDTH) {
-        return fail(pr, "concatenation wider than 64 bits");
+        return fail(pr, "concatenation wider than 1024 bits");
     }
     node->width = (uint32_t)width;
     return push_val(pr, node);
@@ -861,7 +878,7 @@ static xres step_close(parser *pr, bool *want) {
 
 /* The binary operator at the cursor (precedence prec): reduce tighter ones, push this one. */
 static bool push_binary(parser *pr, int prec) {
-    if (!reduce_binary(pr, prec)) {
+    if (!reduce_binary(pr, prec == PREC_POWER ? prec + 1 : prec)) {
         return false;
     }
     tb_expr *node = new_expr(pr, E_BIN);
@@ -884,10 +901,6 @@ static xres step_after(parser *pr, bool *want) {
         return XR_FAIL;
     }
     int prec = cur(pr)->kind == TK_OP ? bin_prec(cur(pr)->text) : 0;
-    if (cur(pr)->kind == TK_OP && strcmp(cur(pr)->text, "**") == 0) {
-        fail(pr, "operator **");
-        return XR_FAIL;
-    }
     if (prec > 0) {
         *want = true;
         return push_binary(pr, prec) ? XR_CONT : XR_FAIL;
@@ -942,19 +955,20 @@ static bool assignable_var(const parser *pr, const tb_expr *name) {
     return !var->is_param && var->depth == 0;
 }
 
-/* A target is a reg or integer, a select of one, an array word, or a concatenation of those. A
- * concatenation holds at most TB_MAX_WIDTH leaves (each is one bit or more), so the worklist is
- * bounded. */
+/* A target is a reg or integer, a select of one, an array word, or a concatenation of those, with
+ * at most TB_WR_MAX leaves (so the worklist is bounded). */
 static bool valid_lvalue(const parser *pr, const tb_expr *lvalue) {
-    enum { WORK_MAX = 2 * TB_MAX_WIDTH };
+    enum { WORK_MAX = 2 * TB_WR_MAX };
     const tb_expr *work[WORK_MAX];
     uint32_t top = 0;
+    uint32_t leaves = 0;
     work[top++] = lvalue;
     while (top > 0) {
         const tb_expr *cur_lv = work[--top];
-        if (cur_lv->kind == E_CONCAT && top + cur_lv->n > WORK_MAX) {
+        if ((cur_lv->kind == E_CONCAT && top + cur_lv->n > WORK_MAX) || leaves > TB_WR_MAX) {
             return false;
         }
+        leaves += cur_lv->kind == E_CONCAT ? 0U : 1U;
         if (cur_lv->kind == E_CONCAT) {
             for (uint32_t i = 0; i < cur_lv->n; i++) {
                 work[top++] = cur_lv->list[i];
@@ -1224,9 +1238,10 @@ static sstart start_case(parser *pr) {
     if (stmt == NULL) {
         return ST_FAIL;
     }
-    if (strcmp(cur(pr)->text, "case") != 0) {
-        fail(pr, "casez/casex (no x/z in a 2-state simulator)");
-        return ST_FAIL;
+    if (strcmp(cur(pr)->text, "casez") == 0) {
+        stmt->case_kind = TB_CASEZ;
+    } else if (strcmp(cur(pr)->text, "casex") == 0) {
+        stmt->case_kind = TB_CASEX;
     }
     pr->pos++;
     stmt->list = (tb_stmt **)pnew_ptrs(pr, CASE_MAX_ITEMS);
@@ -1494,10 +1509,8 @@ static bool parse_array_range(parser *pr, int var_index) {
         !expect_op(pr, "]") || low != 0 || high < 0 || high > (1 << ARRAY_MAX_LOG2)) {
         return fail(pr, "array range (use [0:N])");
     }
-    tb_var *var = &pr->tb->vars[var_index];
-    var->depth = (uint32_t)high + 1U;
-    var->mem = pnew(pr, (size_t)var->depth * sizeof *var->mem);
-    return var->mem != NULL;
+    pr->tb->vars[var_index].depth = (uint32_t)high + 1U;
+    return var_storage(pr, var_index);
 }
 
 static bool add_assign(parser *pr, int var, tb_expr *rhs) {
@@ -1508,25 +1521,33 @@ static bool add_assign(parser *pr, int var, tb_expr *rhs) {
     if (pr->tb->nassigns > 0) {
         memcpy(grown, pr->tb->assigns, (size_t)pr->tb->nassigns * sizeof *grown);
     }
-    grown[pr->tb->nassigns] = (tb_assign){var, rhs};
+    grown[pr->tb->nassigns] = (tb_assign){var, rhs, 0};
     pr->tb->assigns = grown;
     pr->tb->nassigns++;
     return true;
 }
 
 /* A string-valued parameter is 8 bits per character, first character in the high byte. */
-static bool string_param(parser *pr, tb_var *dst, const tb_expr *init) {
+static bool string_param(parser *pr, int var, const tb_expr *init) {
+    tb_var *dst = &pr->tb->vars[var];
     size_t len = strlen(init->str);
     if (len > TB_MAX_WIDTH / CHAR_BITS) {
-        return fail(pr, "string parameter longer than 8 characters");
+        return fail(pr, "string parameter longer than 128 characters");
     }
     dst->width = len == 0 ? (uint32_t)CHAR_BITS : (uint32_t)(len * CHAR_BITS);
     dst->sgn = false;
-    uint64_t val = 0;
-    for (size_t i = 0; i < len; i++) {
-        val = (val << CHAR_BITS) | (uint8_t)init->str[i];
+    if (!var_storage(pr, var)) {
+        return false;
     }
-    dst->val = val;
+    tbv val;
+    tbv_zero(&val, dst->width);
+    for (size_t i = 0; i < len; i++) {
+        tbv byte;
+        tbv_set_u64(&byte, CHAR_BITS, (uint8_t)init->str[i]);
+        tb_field_put((tb_planes){val.v, val.u, dst->width},
+                     (tb_field){(uint32_t)((len - 1U - i) * CHAR_BITS), CHAR_BITS}, &byte);
+    }
+    tb_var_store(dst, 0, &val);
     return true;
 }
 
@@ -1551,7 +1572,6 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
         return !is_param || fail(pr, "parameter without a value");
     }
     tb_expr *init = parse_expr(pr);
-    int64_t val = 0;
     if (init == NULL) {
         return false;
     }
@@ -1563,15 +1583,19 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
         /* No range: the parameter takes the width and signedness of its value
          * (Verilog-2005 4.10.1). */
         if (init->kind == E_STR) {
-            return string_param(pr, dst, init);
+            return string_param(pr, var, init);
         }
         dst->width = init->width;
         dst->sgn = shape.sgn ? true : init->sgn;
+        if (!var_storage(pr, var)) {
+            return false;
+        }
     }
-    if (!tb_const(pr->tb, init, &val)) {
+    tbv val;
+    if (!tb_const_val(pr->tb, init, dst->width, &val)) {
         return fail(pr, "non-constant initialiser");
     }
-    dst->val = (uint64_t)val & tb_mask(dst->width);
+    tb_var_store(dst, 0, &val);
     return true;
 }
 
@@ -2017,6 +2041,7 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
         return ODIN3_ERR_INVALID_ARG;
     }
     tb->design = src->design;
+    tb->four_state = src->four_state;
     parser pr = {.tb = tb, .toks = lexed.toks, .file = src->file, .lenient = lenient};
     odin3_vec_init(&pr.ents, sizeof(xent));
     odin3_vec_init(&pr.vals, sizeof(tb_expr *));

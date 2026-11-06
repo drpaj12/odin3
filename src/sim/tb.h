@@ -10,6 +10,7 @@
 #include "odin3/odin3.h"
 #include "sim/signals.h"
 #include "sim/sim.h"
+#include "sim/word4.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -17,7 +18,9 @@
 
 enum {
     TB_NAME = 64,
-    TB_MAX_WIDTH = 64,
+    TB_MAX_WIDTH = 1024, /* widest value (signal, literal, concatenation) */
+    TB_LIMBS = TB_MAX_WIDTH / ODIN3_WORD_LIMB_BITS,
+    TB_TIME_BITS = 64, /* $time */
     TB_MAX_STACK = 48,
     TB_MAX_ARGS = 16,
     TB_MAX_FILES = 8,
@@ -30,6 +33,18 @@ enum {
     TB_OP_CHARS = 4           /* operator text, with its terminator */
 };
 
+/*
+ * A 4-state value of up to TB_MAX_WIDTH bits (design note docs/specs/2026-11-05-sim-4state-design.md
+ * section 2): planes v and u of odin3_word_limbs(width) limbs each, bit k the code (u_k v_k) = 0, 1,
+ * x = 2, z = 3 (word4.h). Only the first odin3_word_limbs(width) limbs of a value of width bits are
+ * meaningful; every operation reads and writes only those, so a value of 64 bits or fewer costs one
+ * limb per plane.
+ */
+typedef struct tbv {
+    uint64_t v[TB_LIMBS];
+    uint64_t u[TB_LIMBS];
+} tbv;
+
 /* --- tokens --- */
 typedef enum { TK_EOF, TK_ID, TK_NUM, TK_STR, TK_SYS, TK_OP } tb_tok_kind;
 
@@ -37,10 +52,13 @@ typedef struct tb_tok {
     tb_tok_kind kind;
     char text[TB_NAME]; /* identifier, operator or system-task name; strings in str */
     char *str;          /* TK_STR: owned by the lexer's list */
-    uint64_t num;
+    uint64_t num;   /* TK_NUM: the low 64 bits of the v plane */
+    uint64_t *nv;   /* TK_NUM: the value planes, odin3_word_limbs of the literal's width */
+    uint64_t *nu;
     uint32_t width; /* TK_NUM: 0 when unsized */
     bool sized;
     bool is_signed;
+    bool xfill; /* TK_NUM: unsized with a leading x or z digit (extends with it, section 5) */
     uint32_t line;
 } tb_tok;
 
@@ -66,8 +84,10 @@ typedef struct tb_expr {
     char op[TB_OP_CHARS];
     uint32_t width; /* self-determined */
     bool sgn;
-    uint64_t num; /* E_NUM; E_PART: msb in num, lsb in aux; E_REPL: count */
+    uint64_t num; /* E_PART: msb in num, lsb in aux; E_REPL: count */
     uint32_t aux;
+    const uint64_t *nv, *nu; /* E_NUM: the value planes (width bits) */
+    bool xfill;              /* E_NUM: extends past its width with its top bit's x or z */
     int var; /* variable index */
     struct tb_expr *a, *b, *c;
     struct tb_expr **list; /* E_CONCAT items, E_SYS args */
@@ -116,17 +136,22 @@ struct tb_stmt {
     tb_expr **args; /* S_CALL: actual arguments, n of them */
     char *callee;   /* S_CALL: the task name until the parse links it */
     int task;
+    uint8_t case_kind; /* S_CASE: TB_CASE, TB_CASEZ or TB_CASEX */
     uint32_t line;
 };
+
+enum { TB_CASE = 0, TB_CASEZ = 1, TB_CASEX = 2 };
 
 /* --- module --- */
 typedef struct tb_var {
     char name[TB_NAME];
     uint32_t width;
     bool sgn, is_wire, is_param;
-    uint64_t val;
     uint32_t depth; /* array length, 0 for a scalar */
-    uint64_t *mem;
+    /* The value planes: max(depth, 1) words of odin3_word_limbs(width) limbs each (word i of an
+     * array at limb i * limbs). */
+    uint64_t *v;
+    uint64_t *u;
 } tb_var;
 
 typedef struct tb_conn {
@@ -135,8 +160,7 @@ typedef struct tb_conn {
     uint32_t sim_port;
     bool is_out;
     uint32_t width;
-    uint64_t last; /* last value applied (input) or published (output) */
-    bool seen;
+    uint32_t drv; /* output to a wire with several drivers: its driver slot + 1; else 0 */
 } tb_conn;
 
 typedef struct tb_inst {
@@ -151,7 +175,15 @@ typedef struct tb_inst {
 typedef struct tb_assign {
     int var;
     tb_expr *rhs;
+    uint32_t drv; /* the wire has several drivers: this one's slot + 1; else 0 */
 } tb_assign;
+
+/* One driver of a wire with several (assigns and DUT outputs): its value; the wire is the
+ * resolution of all of them (odin3_w4_resolve, design note section 6). */
+typedef struct tb_drv {
+    int var;
+    tbv val;
+} tb_drv;
 
 typedef struct tb_proc_def {
     tb_stmt *body;
@@ -192,6 +224,9 @@ typedef struct tb_module {
     FILE *files[TB_MAX_FILES];   /* $fopen descriptors 3.. */
     const char *const *plusargs; /* $test$plusargs and $value$plusargs read these (tb_options) */
     uint32_t n_plusargs;
+    bool four_state; /* x/z values: regs start x, wires z, the DUTs are 4-state simulators */
+    tb_drv *drvs;    /* driver slots of the wires with several drivers (set up by the run) */
+    uint32_t ndrvs;
 } tb_module;
 
 /* Source text and the file name used in messages. */
@@ -199,6 +234,7 @@ typedef struct tb_source {
     const char *file;
     const char *text;
     odin3_design *design; /* the DUTs' design, for hierarchical reads; may be NULL */
+    bool four_state;      /* see tb_module.four_state; false: the 2-state interpreter */
 } tb_source;
 
 /* Parses src and picks the top: name, or the first module when NULL.

@@ -102,16 +102,17 @@ class PlusargsTest(unittest.TestCase):
     def test_values_and_tests(self) -> None:
         lines = run_tb(["N=42", "+H=beef", "S=abc"])
         self.assertEqual(
-            lines, ["n 1 42", "h 1 beef", "s 1 616263", "x 0 0", "t 1 0"]
+            lines, ["n 1 42", "h 1 beef", "s 1 616263", "x 0 x", "t 1 0"]
         )
 
     def test_no_plusargs_finds_nothing(self) -> None:
         lines = run_tb([])
-        self.assertEqual(lines, ["n 0 0", "h 0 0", "s 0 0", "x 0 0", "t 0 0"])
+        # a variable that no plusarg sets keeps its power-on x (4-state, as iverilog)
+        self.assertEqual(lines, ["n 0 x", "h 0 xxxx", "s 0 xxxxxxxxxxxxxxxx", "x 0 x", "t 0 0"])
 
     def test_bad_value_is_not_found(self) -> None:
         lines = run_tb(["N=4x2"])
-        self.assertEqual(lines[0], "n 0 0")
+        self.assertEqual(lines[0], "n 0 x")
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest sim_tb_plusargs)")

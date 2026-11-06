@@ -212,12 +212,12 @@ class MultiClockTest(unittest.TestCase):
         done = sim_tb({"dut.v": TWO_CLOCKS, "tb.v": TWO_CLOCKS_TB}, "tb.v")
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
         self.assertEqual(done.stdout.split("\n")[:3],
-                         ["a only: 3 0", "then b: 3 4", "a again: 9 4"])
+                         ["a only: 3 x", "then b: 3 4", "a again: 9 4"])
 
     def test_clocks_edging_together_sample_the_old_values(self) -> None:
         done = sim_tb({"dut.v": CROSS, "tb.v": CROSS_TB}, "tb.v")
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-        self.assertEqual(done.stdout.split("\n")[:2], ["step1: 5 0", "step2: 9 5"])
+        self.assertEqual(done.stdout.split("\n")[:2], ["step1: 5 x", "step2: 9 5"])
 
     def test_free_running_clocks_of_different_periods(self) -> None:
         # clka rises at 5, 15, ... 95 (10 edges); clkb at 7, 21, ... 91 (7 edges) before t = 100.
@@ -288,7 +288,7 @@ endmodule
               "  end\nendmodule\n")
         done = sim_tb({"dut.v": dut, "tb.v": tb}, "tb.v")
         self.assertEqual(done.returncode, 0, done.stderr[-2000:])
-        self.assertEqual(done.stdout.split("\n")[0], "o=1")
+        self.assertEqual(done.stdout.split("\n")[0], "o=x")  # 15 registers never clocked: x
 
     def test_more_clocks_than_the_cap_name_the_extra_one(self) -> None:
         n = 17
