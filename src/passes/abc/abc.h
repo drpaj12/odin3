@@ -40,7 +40,8 @@ enum {
     ODIN3_ABC_GATE_MAX_INPUTS = 6,        /* wider gate types are cut cells */
     ODIN3_ABC_BYTES_PER_AIG_OBJ = 512,    /* until bench_abc calibrates it (it only goes up) */
     ODIN3_ABC_PROV_EDGES_PER_OBJ = 16,    /* provenance edges per old cell and new object */
-    ODIN3_ABC_PROV_EDGES_BASE = 65536     /* ... plus this, per run */
+    ODIN3_ABC_PROV_EDGES_BASE = 65536,    /* ... plus this, per run */
+    ODIN3_ABC_PROV_EDGES_FLOOR = 4194304  /* the budget is at least this (16 MiB of parent IDs) */
 };
 
 /*
@@ -114,17 +115,19 @@ typedef struct odin3_abc_opts {
     uint32_t lut_k;
     const char *via_blif;
     const char *log;
-    uint8_t prov;      /* an odin3_abc_prov_mode */
-    const char *gates; /* --gates: the library name (gatemap spec G-4), NULL without */
-    bool prov_given;   /* --prov was given (its value is in prov) */
+    uint8_t prov;        /* an odin3_abc_prov_mode */
+    const char *gates;   /* --gates: the library name (gatemap spec G-4), NULL without */
+    bool prov_given;     /* --prov was given (its value is in prov) */
+    uint64_t prov_edges; /* --prov-edges N, or UINT64_MAX for `unlimited`; 0: not given */
 } odin3_abc_opts;
 
 /*
  * Splits args with odin3_pass_arg_next (§7.1, AB-19; --gates, gatemap spec G-4); each option may
  * appear once. Returns ODIN3_ERR_INVALID_ARG after logging exactly one error: `abc: unknown
  * argument '<arg>'`, `abc: <option> given twice`, `abc: <option> needs a value`, `abc: --lut must
- * be an integer from 2 to 16, not '<v>'` or `abc: --prov must be fine or cone, not '<v>'`.
- * ODIN3_ERR_NO_MEMORY (not logged). *out is zeroed first and filled as far as the parse got.
+ * be an integer from 2 to 16, not '<v>'` `abc: --prov must be fine or cone, not '<v>'` or `abc:
+ * --prov-edges must be a positive integer or unlimited, not '<v>'`. ODIN3_ERR_NO_MEMORY (not
+ * logged). *out is zeroed first and filled as far as the parse got.
  */
 odin3_status odin3_abc_parse_args(odin3_bytes args, odin3_arena *arena, odin3_abc_opts *out);
 

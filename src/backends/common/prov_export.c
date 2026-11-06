@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 enum { KEY_SHIFT = 32 };
@@ -1614,21 +1615,24 @@ static odin3_status flags_origin(const pm_rec *pr, const odin3_prov_record *rec,
     return status;
 }
 
-/* The flags of one record, in the order of 3.2: join, join=instance, lossy=bulk, lossy=cap,
- * n=<total>, chain=span, capped, hier=<text>, call=c<n>, ctx=<n>, bulk. (`cell=<type>` is not
- * written: a record does not know the type of the hard cell it made; agent default.) */
-static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, const pm *st,
-                                odin3_strbuf *out) {
-    odin3_status status = flags_join(pr, out);
-    status = status == ODIN3_OK ? flags_origin(pr, rec, st, out) : status;
-    status = status == ODIN3_OK && pr->call != 0 ? add_flag_num(out, "call=c%u", pr->call) : status;
-    status = status == ODIN3_OK && pr->n_context != 0 ? add_flag_num(out, "ctx=%u", pr->n_context)
-                                                      : status;
-    status = status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0
-                 ? add_flag(out, "bulk")
-                 : status;
+/* uid=<n>, only when the environment variable ODIN3_PROV_UID is set to 1: the record's ID in the
+ * design's store. Unlike the r<n> numbers, which count the records of one file, it is the same in
+ * every file one run writes, so a record seen in two dumps can be joined. It is off by default
+ * because a restored design numbers its store again, so a map written from it would differ (the
+ * restore round trip compares maps). A reader that does not know the flag keeps it. */
+static odin3_status flag_uid(const pm_rec *pr, odin3_strbuf *out) {
+    const char *env = getenv("ODIN3_PROV_UID");
+    if (env == NULL || strcmp(env, "1") != 0) {
+        return ODIN3_OK;
+    }
+    return add_flag_num(out, "uid=%u", pr->id);
+}
+
+/* The flags that follow the computed ones: a foreign flag the file had, then stale=. */
+static odin3_status flags_tail(const pm_rec *pr, const pm *st, odin3_strbuf *out) {
+    odin3_status status = ODIN3_OK;
     uint64_t foreign = 0;
-    if (status == ODIN3_OK && odin3_u64map_get(st->foreign, pr->id, &foreign)) {
+    if (odin3_u64map_get(st->foreign, pr->id, &foreign)) {
         const odin3_bytes *text = odin3_vec_cat(&st->foreign_text, (size_t)foreign - 1U);
         status = out->len > 0 ? odin3_strbuf_append(out, odin3_bytes_cstr(",")) : status;
         status = status == ODIN3_OK ? odin3_strbuf_append(out, *text) : status;
@@ -1639,6 +1643,24 @@ static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, 
             add_flag_num(out, "stale=t%u", (uint32_t)run); /* a post-Odin record of a stale line */
     }
     return status;
+}
+
+/* The flags of one record, in the order of 3.2: join, join=instance, lossy=bulk, lossy=cap,
+ * n=<total>, chain=span, capped, hier=<text>, call=c<n>, ctx=<n>, bulk, uid=<store ID>.
+ * (`cell=<type>` is not written: a record does not know the type of the hard cell it made; agent
+ * default.) */
+static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, const pm *st,
+                                odin3_strbuf *out) {
+    odin3_status status = flags_join(pr, out);
+    status = status == ODIN3_OK ? flags_origin(pr, rec, st, out) : status;
+    status = status == ODIN3_OK && pr->call != 0 ? add_flag_num(out, "call=c%u", pr->call) : status;
+    status = status == ODIN3_OK && pr->n_context != 0 ? add_flag_num(out, "ctx=%u", pr->n_context)
+                                                      : status;
+    status = status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0
+                 ? add_flag(out, "bulk")
+                 : status;
+    status = status == ODIN3_OK ? flag_uid(pr, out) : status;
+    return status == ODIN3_OK ? flags_tail(pr, st, out) : status;
 }
 
 static const char *kind_letter(unsigned kind) {

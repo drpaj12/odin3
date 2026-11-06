@@ -263,7 +263,7 @@ class ScoapProvTest(GraphTestBase):
             self.assertNotIn("driver", net)
         self.assertEqual(
             [
-                {k: v for k, v in n.items() if k not in ("driver", "wire", "prov", "src")}
+                {k: v for k, v in n.items() if k not in ("driver", "wire", "bit", "prov", "src")}
                 for n in withp["modules"][0]["nets"]
             ],
             plain["modules"][0]["nets"],

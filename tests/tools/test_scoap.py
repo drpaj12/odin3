@@ -80,6 +80,29 @@ class ScoapTest(unittest.TestCase):
             },
         )
 
+    def test_prov_rows_of_ports_and_registers_have_a_wire(self) -> None:
+        """After mapping, an output port net (y) and a register net (q) still name their wire."""
+        src = self.dir / "t.v"
+        src.write_text(
+            "module t(input clk, input a, input b, output y, output reg q);\n"
+            "  always @(posedge clk) q <= a ^ b;\n  assign y = a & b;\nendmodule\n"
+        )
+        out = self.dir / "s.json"
+        script = (
+            f'read_techlib {LIB}; read_verilog "{src}"; proc; opt; lower; abc --lut 6; '
+            f"scoap --prov --out {out}"
+        )
+        argv = [str(ODIN3), "--top", "t", "-p", script]
+        done = subprocess.run(argv, capture_output=True, text=True)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        rows = json.loads(out.read_text())["modules"][0]["nets"]
+        self.assertGreaterEqual(len(rows), 5)  # clk a b y q (and a constant or helper net)
+        with_wire = [row for row in rows if row["wire"] > 0]
+        self.assertGreaterEqual(len(with_wire), 5)  # clk a b y q: only the xor LUT's net has none
+        self.assertLessEqual(len(rows) - len(with_wire), 1)
+        self.assertTrue(all(row["bit"] == 0 for row in with_wire))
+        self.assertGreaterEqual(len({row["wire"] for row in with_wire}), 5)
+
     def test_or_not_xor(self) -> None:
         text = blif(
             ".names a b o\n1- 1\n-1 1\n.names a n\n0 1\n.names a b x\n10 1\n01 1\n",
