@@ -1591,7 +1591,8 @@ static void test_dff_en_then_srst(void) {
     expect_pin(first_ff(), "D", wnet("d", 0));
 }
 
-/* --- the attribute rtl_sel: an if folded into an enable or reset keeps its x meaning ------------- */
+/* --- the attribute rtl_sel: an if folded into an enable or reset keeps its x meaning -------------
+ */
 
 /* Gives every $mux the attribute rtl_sel with value `side` (1: an unknown select takes A, 2: B). */
 static void mark_muxes(int64_t side) {
@@ -1629,7 +1630,8 @@ static void test_dff_rtl_sel_en(void) {
 }
 
 static void test_dff_rtl_sel_srst(void) {
-    /* the reset constant on B, data on A: an unknown select takes A = data, the reset is inactive */
+    /* the reset constant on B, data on A: an unknown select takes A = data, the reset is inactive
+     */
     build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1") FF_ON("\\m1")));
     mark_muxes(1);
     run_dff();

@@ -601,12 +601,11 @@ static void test_an_x_reset_value_lowers_to_an_x_constant(void) {
  * swapped for an active-low one; without the attribute the muxes get none. */
 static int64_t mux_rtl_sel_or_zero(const ffd *dd, odin3_node_id node) {
     uint32_t key = 0;
-    if (!odin3_strtab_find(odin3_design_strtab(dd->fix.design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
-                           &key)) {
+    if (!odin3_strtab_find(odin3_design_strtab(dd->fix.design),
+                           odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key)) {
         return 0;
     }
-    const odin3_value *val =
-        odin3_attr_get(dd->mod, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    const odin3_value *val = odin3_attr_get(dd->mod, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
     return val != NULL ? val->i : 0;
 }
 
@@ -618,9 +617,9 @@ static void check_mux_marks(bool marked, bool en_high, int64_t want) {
     if (marked) {
         uint32_t key = 0;
         odin3_value one = odin3_value_int(1);
-        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(dd.fix.design,
-                                                            odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
-                                                            &key));
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK,
+            odin3_design_intern(dd.fix.design, odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key));
         TEST_ASSERT_EQUAL_INT(
             ODIN3_OK, odin3_attr_set(dd.mod, (odin3_objref){ODIN3_OBJ_NODE, dd.node.v}, key, &one));
     }
@@ -628,7 +627,8 @@ static void check_mux_marks(bool marked, bool en_high, int64_t want) {
     uint32_t muxes = 0;
     for (uint32_t id = 1; id < odin3_module_node_end(dd.mod); id++) {
         odin3_node_id node = {id};
-        const odin3_celltype_def *def = odin3_celltype_get(dd.fix.design, odin3_node_type(dd.mod, node));
+        const odin3_celltype_def *def =
+            odin3_celltype_get(dd.fix.design, odin3_node_type(dd.mod, node));
         if (odin3_node_live(dd.mod, node) && def != NULL && strcmp(def->name, "$_MUX_") == 0) {
             TEST_ASSERT_EQUAL_INT64(want, mux_rtl_sel_or_zero(&dd, node));
             muxes++;

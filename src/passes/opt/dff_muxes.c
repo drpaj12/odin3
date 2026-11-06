@@ -212,9 +212,10 @@ static odin3_status push_all_marks(odin3_dff_plan *plan, const bit_acc *acc) {
 static odin3_status plan_add(odin3_dff_plan *plan, bit_acc *acc) {
     odin3_kit_sort_unify(&acc->ctrls, 0);
     odin3_kit_sort_unify(&acc->nodes, 0);
-    odin3_dff_bitplan bp = {
-        acc->dnet,  (uint32_t)plan->keys.len, 0, (uint32_t)plan->nodes.len, 0, acc->reset,
-        acc->merged, acc->rtl_bad};
+    odin3_dff_bitplan bp = {acc->dnet,   (uint32_t)plan->keys.len,
+                            0,           (uint32_t)plan->nodes.len,
+                            0,           acc->reset,
+                            acc->merged, acc->rtl_bad};
     odin3_status st = odin3_vec_reserve(&plan->bits, plan->bits.len + 1U);
     if (acc->merged) {
         st = st == ODIN3_OK ? odin3_kit_push_u64(&plan->keys, acc->ctrls.len) : st;

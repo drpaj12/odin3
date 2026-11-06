@@ -300,9 +300,9 @@ odin3_status odin3_kit_topo(const odin3_opt_ctx *oc, odin3_vec *order, bool *sor
 bool odin3_kit_keep(const odin3_opt_ctx *oc, odin3_objref obj);
 
 /*
- * The value of the attribute rtl_sel (ODIN3_ATTR_RTL_SEL, set by proc on the cells of an if or case)
- * of `node`, 0 when it has none. On a $mux / $pmux: 1 an unknown select takes input A (the else
- * side), 2 it takes input B. On a flip-flop (opt_dff sets it when it folds such a mux into an
+ * The value of the attribute rtl_sel (ODIN3_ATTR_RTL_SEL, set by proc on the cells of an if or
+ * case) of `node`, 0 when it has none. On a $mux / $pmux: 1 an unknown select takes input A (the
+ * else side), 2 it takes input B. On a flip-flop (opt_dff sets it when it folds such a mux into an
  * enable or a synchronous reset): 1, an unknown enable or sync reset counts as inactive.
  */
 int64_t odin3_kit_rtl_sel(const odin3_opt_ctx *oc, odin3_node_id node);

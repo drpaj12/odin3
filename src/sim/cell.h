@@ -37,7 +37,7 @@
 
 /* odin3_sim_cell.flags */
 enum {
-    ODIN3_SIM_CELL_RTL_SEL = 1,   /* the node has the `rtl_sel` attribute (design note, addendum 1) */
+    ODIN3_SIM_CELL_RTL_SEL = 1, /* the node has the `rtl_sel` attribute (design note, addendum 1) */
     ODIN3_SIM_CELL_RTL_SEL_B = 2, /* its value is 2: an unknown select of a $mux takes input B */
 };
 

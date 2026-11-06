@@ -1395,7 +1395,8 @@ int64_t odin3_kit_rtl_sel(const odin3_opt_ctx *oc, odin3_node_id node) {
                            &key)) {
         return 0;
     }
-    const odin3_value *val = odin3_attr_get(oc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    const odin3_value *val =
+        odin3_attr_get(oc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
     return val != NULL && val->kind == ODIN3_VAL_INT ? val->i : 0;
 }
 

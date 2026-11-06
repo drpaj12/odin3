@@ -1768,8 +1768,8 @@ static void test_invert_muxsel(void) {
 
 /* The attribute rtl_sel (1: an unknown select takes A, 2: B) follows the swap of A and B. */
 static int64_t mux_rtl_sel(odin3_node_id mux) {
-    const odin3_value *val = odin3_attr_get(
-        fx.res.module, (odin3_objref){ODIN3_OBJ_NODE, mux.v}, intern(ODIN3_ATTR_RTL_SEL));
+    const odin3_value *val = odin3_attr_get(fx.res.module, (odin3_objref){ODIN3_OBJ_NODE, mux.v},
+                                            intern(ODIN3_ATTR_RTL_SEL));
     return val != NULL ? val->i : 0;
 }
 
