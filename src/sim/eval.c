@@ -54,7 +54,10 @@ static void send_direct(odin3_sim *sim, odin3_sim_event event) {
 /* The level of a derived clock slot: 0, 1, or 2 for x/z (in 2-state mode a byte is 0 or 1). */
 static uint8_t clock_level(const odin3_sim *sim, uint32_t slot) {
     uint8_t code = sim->values[slot];
-    return sim->four_state ? (code >= 2U ? (uint8_t)2 : code) : (uint8_t)(code != 0 ? 1 : 0);
+    if (!sim->four_state) {
+        return code != 0 ? (uint8_t)1 : (uint8_t)0;
+    }
+    return code >= 2U ? (uint8_t)2 : code;
 }
 
 /* The edge a clock level change from `last` to `now` is, as Verilog takes it: a change toward 1

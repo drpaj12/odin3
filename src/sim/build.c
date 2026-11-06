@@ -252,7 +252,8 @@ static odin3_status size_scratch(odin3_sim_builder *bld, const odin3_sim_flat *f
 static uint32_t cell_flags(const odin3_sim_builder *bld, const odin3_sim_flat *flat) {
     uint32_t key = 0;
     const odin3_module *mod = frame_module(bld, flat->frame);
-    if (!odin3_strtab_find(odin3_design_strtab(bld->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key)) {
+    if (!odin3_strtab_find(odin3_design_strtab(bld->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
         return 0;
     }
     const odin3_value *val = odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_NODE, flat->node.v}, key);

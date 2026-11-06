@@ -48,11 +48,17 @@ static inline uint32_t odin3_w4_bit(odin3_w4c word, uint32_t pos) {
     return (uint32_t)odin3_word_bit(word.v, pos) | ((uint32_t)odin3_word_bit(word.u, pos) << 1);
 }
 
-/* Sets bit `pos` to code (0..3); the bit must be 0 in both planes before (a fresh word). */
-void odin3_w4_set_bit(odin3_w4 word, uint32_t pos, uint32_t code);
+/* A bit position and the code (0..3) to give it. */
+typedef struct odin3_w4_bit_at {
+    uint32_t pos;
+    uint32_t code;
+} odin3_w4_bit_at;
+
+/* Sets the bit to its code; the bit must be 0 in both planes before (a fresh word). */
+void odin3_w4_set_bit(odin3_w4 word, odin3_w4_bit_at at);
 
 /* True when no bit of the width-bit word is x or z. */
-bool odin3_w4_known(const uint64_t *u, uint32_t width);
+bool odin3_w4_known(const uint64_t *unk, uint32_t width);
 
 /* All bits 0 / all bits x / all bits z. */
 void odin3_w4_zero(odin3_w4 word, uint32_t width);
@@ -125,11 +131,5 @@ void odin3_w4_merge(const odin3_w4_bin *op);
 /* Net resolution of two drivers, per bit: z yields the other driver, equal values stay, anything
  * else is x. */
 void odin3_w4_resolve(const odin3_w4_bin *op);
-
-/* A binary-operation result code (0, 1, x) as a 1-bit word value in planes of one limb. */
-static inline void odin3_w4_from_code(odin3_w4 dst, uint32_t code) {
-    dst.v[0] = code & 1U;
-    dst.u[0] = (code >> 1) & 1U;
-}
 
 #endif

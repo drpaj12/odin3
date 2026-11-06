@@ -189,7 +189,10 @@ static uint8_t level_of(bool positive) {
 static uint8_t next_for(const dx_spec *spec, bool r_on, bool e_on, uint8_t data, uint8_t state) {
     uint8_t rst = spec->rst_val ? CODE_1 : CODE_0;
     if (spec->kind == DX_SCE) {
-        return !e_on ? state : (r_on ? rst : data);
+        if (!e_on) {
+            return state;
+        }
+        return r_on ? rst : data;
     }
     if (r_on) {
         return rst;
@@ -197,27 +200,58 @@ static uint8_t next_for(const dx_spec *spec, bool r_on, bool e_on, uint8_t data,
     return e_on ? data : state;
 }
 
+/* A control pin's code and the code that makes it active. */
+typedef struct ctl_pin {
+    uint8_t code;
+    uint8_t active;
+} ctl_pin;
+
+/* Whether the assumption `on` about a pin agrees with its code (an unknown pin agrees with both).
+ */
+static bool assume_ok(ctl_pin pin, bool on) {
+    if (unknown(pin.code)) {
+        return true;
+    }
+    return (pin.code == pin.active) == on;
+}
+
+static ctl_pin reset_pin(const odin3_sim_cell *cell, const dx_spec *spec) {
+    uint8_t active = level_of(spec->rst_pos);
+    if (!has_reset(spec)) {
+        return (ctl_pin){level_of(!spec->rst_pos), active};
+    }
+    return (ctl_pin){in4(cell, 1), active};
+}
+
+static ctl_pin enable_pin(const odin3_sim_cell *cell, const dx_spec *spec) {
+    uint8_t active = level_of(spec->en_pos);
+    if (!has_enable(spec)) {
+        return (ctl_pin){active, active};
+    }
+    return (ctl_pin){in4(cell, has_reset(spec) ? 2 : 1), active};
+}
+
+static bool reset_ok(const dx_spec *spec, ctl_pin pin, bool on) {
+    return has_reset(spec) ? assume_ok(pin, on) : !on;
+}
+
+static bool enable_ok(const dx_spec *spec, ctl_pin pin, bool on) {
+    return has_enable(spec) ? assume_ok(pin, on) : on;
+}
+
 /* The merge of next_for over every assumption the unknown control pins allow. */
 static uint8_t next4(const odin3_sim_cell *cell, const dx_spec *spec) {
     uint8_t data = data4(cell);
     uint8_t state = cell->state[0];
-    uint8_t r_pin = has_reset(spec) ? in4(cell, 1) : level_of(!spec->rst_pos);
-    uint8_t e_pin = has_enable(spec) ? in4(cell, has_reset(spec) ? 2 : 1) : level_of(spec->en_pos);
-    bool r_known = !unknown(r_pin);
-    bool e_known = !unknown(e_pin);
+    ctl_pin r_pin = reset_pin(cell, spec);
+    ctl_pin e_pin = enable_pin(cell, spec);
     uint8_t out = 0;
     bool first = true;
     for (uint32_t r_case = 0; r_case < 2; r_case++) {
         for (uint32_t e_case = 0; e_case < 2; e_case++) {
             bool r_on = r_case != 0;
             bool e_on = e_case != 0;
-            bool r_ok = !has_reset(spec)
-                            ? !r_on
-                            : (r_known ? (r_pin == level_of(spec->rst_pos)) == r_on : true);
-            bool e_ok = !has_enable(spec)
-                            ? e_on
-                            : (e_known ? (e_pin == level_of(spec->en_pos)) == e_on : true);
-            if (!r_ok || !e_ok) {
+            if (!reset_ok(spec, r_pin, r_on) || !enable_ok(spec, e_pin, e_on)) {
                 continue;
             }
             uint8_t cand = next_for(spec, r_on, e_on, data, state);
@@ -240,27 +274,40 @@ static void async_reset4(const odin3_sim_cell *cell, const dx_spec *spec) {
     }
 }
 
-/* The spec rides in the view's type4 pointer as a small integer (no allocation, no shared state):
- * bits 0-2 the kind, 3 clk_pos, 4 rst_pos, 5 rst_val, 6 en_pos, plus 1 so it is never NULL. */
-static const void *dx_pack(const dx_spec *spec) {
-    uintptr_t bits = (uintptr_t)spec->kind | ((uintptr_t)spec->clk_pos << 3) |
-                     ((uintptr_t)spec->rst_pos << 4) | ((uintptr_t)spec->rst_val << 5) |
-                     ((uintptr_t)spec->en_pos << 6);
-    return (const void *)(bits + 1U);
-}
+/* The 96 specs (kind x clk_pos x rst_pos x rst_val x en_pos) as const data; a cell's type4 points
+ * at its element, found by dx_index. */
+enum {
+    DX_F_CLK = 1,
+    DX_F_RST_POS = 2,
+    DX_F_RST_VAL = 4,
+    DX_F_EN_POS = 8,
+    DX_COMBOS = 16,
+    DX_N_KINDS = 6
+};
 
-static dx_spec dx_unpack(const void *data) {
-    uintptr_t bits = (uintptr_t)data - 1U;
-    return (dx_spec){.kind = (dx_kind)(bits & 7U),
-                     .clk_pos = ((bits >> 3) & 1U) != 0,
-                     .rst_pos = ((bits >> 4) & 1U) != 0,
-                     .rst_val = ((bits >> 5) & 1U) != 0,
-                     .en_pos = ((bits >> 6) & 1U) != 0};
+#define DXE(kd, clk, rp, rv, ep)                                                                   \
+    [(kd) * DX_COMBOS + (clk) * DX_F_CLK + (rp) * DX_F_RST_POS + (rv) * DX_F_RST_VAL + (ep) *      \
+        DX_F_EN_POS] = {(kd), (clk) != 0, (rp) != 0, (rv) != 0, (ep) != 0}
+#define DX_EP(kd, clk, rp, rv) DXE(kd, clk, rp, rv, 0), DXE(kd, clk, rp, rv, 1)
+#define DX_RV(kd, clk, rp) DX_EP(kd, clk, rp, 0), DX_EP(kd, clk, rp, 1)
+#define DX_RP(kd, clk) DX_RV(kd, clk, 0), DX_RV(kd, clk, 1)
+#define DX_KIND(kd) DX_RP(kd, 0), DX_RP(kd, 1)
+
+static const dx_spec k_dx_specs[DX_N_KINDS * DX_COMBOS] = {
+    DX_KIND(DX_E), DX_KIND(DX_A), DX_KIND(DX_AE), DX_KIND(DX_S), DX_KIND(DX_SE), DX_KIND(DX_SCE),
+};
+
+static const dx_spec *dx_lookup(const dx_spec *spec) {
+    size_t idx = (size_t)spec->kind * DX_COMBOS;
+    idx += spec->clk_pos ? DX_F_CLK : 0;
+    idx += spec->rst_pos ? DX_F_RST_POS : 0;
+    idx += spec->rst_val ? DX_F_RST_VAL : 0;
+    idx += spec->en_pos ? DX_F_EN_POS : 0;
+    return &k_dx_specs[idx];
 }
 
 static void dffx4(const odin3_sim_cell *cell) {
-    const dx_spec unpacked = dx_unpack(cell->type4);
-    const dx_spec *spec = &unpacked;
+    const dx_spec *spec = cell->type4;
     if (cell->event == ODIN3_SIM_INIT) {
         cell->state[0] = init_code(&cell->params[SEQ_INIT]);
         return;
@@ -276,49 +323,62 @@ static void dffx4(const odin3_sim_cell *cell) {
     }
 }
 
+/* Letters (clock, then reset, reset value, enable) after the prefix of each name, and the kind. */
+enum { DX_LEN_E = 2, DX_LEN_RST = 3, DX_LEN_RST_EN = 4 };
+
+static const struct {
+    const char *prefix;
+    dx_kind kind;
+    size_t len; /* letters before the closing underscore */
+} k_forms[] = {
+    {"$_DFFE_", DX_AE, DX_LEN_RST_EN},    {"$_DFF_", DX_A, DX_LEN_RST},
+    {"$_SDFF_", DX_S, DX_LEN_RST},        {"$_SDFFE_", DX_SE, DX_LEN_RST_EN},
+    {"$_SDFFCE_", DX_SCE, DX_LEN_RST_EN},
+};
+
+/* The kind of form `form` with `count` letters; false when that length does not exist. */
+static bool dx_kind_for(size_t form, size_t count, dx_kind *kind) {
+    if (form == 0 && count == DX_LEN_E) {
+        *kind = DX_E;
+        return true;
+    }
+    if (count != k_forms[form].len) {
+        return false;
+    }
+    *kind = k_forms[form].kind;
+    return true;
+}
+
+static dx_spec dx_fill(const char *letters, dx_kind kind) {
+    dx_spec spec = {.kind = kind, .clk_pos = letters[0] == 'P'};
+    if (kind == DX_E) {
+        spec.en_pos = letters[1] == 'P';
+        return spec;
+    }
+    spec.rst_pos = letters[1] == 'P';
+    spec.rst_val = letters[2] == '1';
+    spec.en_pos = letters[3] == 'P';
+    return spec;
+}
+
 /* Parses the name of an enable/reset flip-flop; false for any other name. */
 static bool dx_parse(const char *name, dx_spec *spec) {
-    static const struct {
-        const char *prefix;
-        dx_kind
-            kind2; /* kind when two letters follow the prefix (enable only), else the 3/4 form */
-        dx_kind kind3;
-        dx_kind kind4;
-    } k_forms[] = {
-        {"$_DFFE_", DX_E, DX_A, DX_AE},        {"$_DFF_", DX_A, DX_A, DX_A},
-        {"$_SDFF_", DX_S, DX_S, DX_S},         {"$_SDFFE_", DX_SE, DX_SE, DX_SE},
-        {"$_SDFFCE_", DX_SCE, DX_SCE, DX_SCE},
-    };
-    for (size_t i = 0; i < sizeof k_forms / sizeof k_forms[0]; i++) {
-        size_t plen = strlen(k_forms[i].prefix);
-        if (strncmp(name, k_forms[i].prefix, plen) != 0) {
+    for (size_t form = 0; form < sizeof k_forms / sizeof k_forms[0]; form++) {
+        size_t plen = strlen(k_forms[form].prefix);
+        if (strncmp(name, k_forms[form].prefix, plen) != 0) {
             continue;
         }
         const char *letters = name + plen;
-        size_t n = strlen(letters);
-        if (n < 2 || letters[n - 1] != '_') {
+        size_t count = strlen(letters);
+        if (count < 2 || letters[count - 1] != '_') {
             return false;
         }
-        n--; /* letters before the closing underscore */
-        *spec = (dx_spec){0};
-        spec->clk_pos = letters[0] == 'P';
-        if (i == 0 && n == 2) {
-            spec->kind = DX_E;
-            spec->en_pos = letters[1] == 'P';
-            return true;
-        }
-        if (i == 0 && n == 4) {
-            spec->kind = DX_AE;
-        } else if (i == 1 && n == 3) {
-            spec->kind = DX_A;
-        } else if ((i == 2 && n == 3) || (i >= 3 && n == 4)) {
-            spec->kind = k_forms[i].kind3;
-        } else {
+        count--; /* letters before the closing underscore */
+        dx_kind kind = DX_E;
+        if (!dx_kind_for(form, count, &kind)) {
             return false;
         }
-        spec->rst_pos = letters[1] == 'P';
-        spec->rst_val = letters[2] == '1';
-        spec->en_pos = n == 4 && letters[3] == 'P';
+        *spec = dx_fill(letters, kind);
         return true;
     }
     return false;
@@ -378,7 +438,7 @@ static uint32_t eq_code(const odin3_sim_cell *cell, bool case_eq) {
     uint32_t a_width = cell->ports[0].width;
     uint32_t b_width = cell->ports[1].width;
     uint32_t width = a_width > b_width ? a_width : b_width;
-    uint32_t stride = odin3_word_limbs(width);
+    size_t stride = odin3_word_limbs(width);
     uint64_t *planes = (uint64_t *)cell->scratch;
     bool is_signed = param_set(cell, P_A_SIGNED) && param_set(cell, P_B_SIGNED);
     odin3_w4 lhs = {planes, planes + stride};
@@ -435,29 +495,60 @@ static void mux4(const odin3_sim_cell *cell) {
     }
 }
 
+/* The B slice of select bit `sel` for output bit `bit`. */
+typedef struct pmux_at {
+    uint32_t sel;
+    uint32_t bit;
+} pmux_at;
+
+static uint8_t pmux_slice(const odin3_sim_cell *cell, pmux_at at) {
+    size_t pos = (size_t)at.sel * cell->ports[3].width + at.bit;
+    return cell->values[cell->ports[PORT_B].idx[pos]];
+}
+
+/* The OR of the slices whose select bit is 1 (any: there was one). */
+typedef struct pmux_pick {
+    uint8_t value;
+    bool any;
+} pmux_pick;
+
+static pmux_pick pmux_select(const odin3_sim_cell *cell, uint32_t bit) {
+    const odin3_sim_span *s_span = &cell->ports[2];
+    pmux_pick pick = {0, false};
+    for (uint32_t i = 0; i < s_span->width; i++) {
+        if (cell->values[s_span->idx[i]] == 1) {
+            uint8_t slice = pmux_slice(cell, (pmux_at){i, bit});
+            pick.value = pick.any ? or4(pick.value, slice) : slice;
+            pick.any = true;
+        }
+    }
+    return pick;
+}
+
+/* Merges `out` with the result had each unknown select bit been 1. */
+static uint8_t pmux_merge_unknown(const odin3_sim_cell *cell, uint32_t bit, pmux_pick pick,
+                                  uint8_t out) {
+    const odin3_sim_span *s_span = &cell->ports[2];
+    for (uint32_t i = 0; i < s_span->width; i++) {
+        if (unknown(cell->values[s_span->idx[i]])) {
+            uint8_t slice = pmux_slice(cell, (pmux_at){i, bit});
+            uint8_t alt = pick.any ? or4(pick.value, slice) : slice;
+            out = merge4(out, alt);
+        }
+    }
+    return out;
+}
+
 /* $pmux: Y = A when no select bit is 1, else the OR of the selected B slices; an unknown select
  * bit merges the results with and without it (an RTL case ignores it: its selects are known). */
 static void pmux4(const odin3_sim_cell *cell) {
-    const odin3_sim_span *s_span = &cell->ports[2];
     const odin3_sim_span *y_span = &cell->ports[3];
-    const odin3_sim_span *b_span = &cell->ports[PORT_B];
     bool rtl = (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0;
     for (uint32_t k = 0; k < y_span->width; k++) {
-        bool any = false;
-        uint8_t value = 0;
-        for (uint32_t i = 0; i < s_span->width; i++) {
-            if (cell->values[s_span->idx[i]] == 1) {
-                uint8_t slice = cell->values[b_span->idx[i * y_span->width + k]];
-                value = any ? or4(value, slice) : slice;
-                any = true;
-            }
-        }
-        uint8_t out = any ? value : cell->values[cell->ports[PORT_A].idx[k]];
-        for (uint32_t i = 0; i < s_span->width && !rtl; i++) {
-            if (unknown(cell->values[s_span->idx[i]])) {
-                uint8_t slice = cell->values[b_span->idx[i * y_span->width + k]];
-                out = merge4(out, any ? or4(value, slice) : slice);
-            }
+        pmux_pick pick = pmux_select(cell, k);
+        uint8_t out = pick.any ? pick.value : cell->values[cell->ports[PORT_A].idx[k]];
+        if (!rtl) {
+            out = pmux_merge_unknown(cell, k, pick, out);
         }
         cell->values[y_span->idx[k]] = out;
     }
@@ -509,7 +600,7 @@ odin3_sim4_fn odin3_sim4_lookup(const odin3_celltype_def *def, const void **data
     }
     dx_spec spec;
     if (dx_parse(def->name, &spec)) {
-        *data = dx_pack(&spec);
+        *data = dx_lookup(&spec);
         return dffx4;
     }
     return NULL;

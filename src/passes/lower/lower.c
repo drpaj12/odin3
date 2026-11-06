@@ -159,7 +159,8 @@ static bool kept_by_sel(const lw_ctx *lw, odin3_node_id node, const odin3_cellty
                                           "$reduce_or", "$reduce_bool", "$logic_not"};
     uint32_t key = 0;
     if (!lw->opts->keep_sel || def == NULL ||
-        !odin3_strtab_find(odin3_design_strtab(lw->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key)) {
+        !odin3_strtab_find(odin3_design_strtab(lw->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
         return false;
     }
     bool modelled = false;

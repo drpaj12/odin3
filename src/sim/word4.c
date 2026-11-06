@@ -9,17 +9,17 @@ static uint32_t limbs_of(uint32_t width) {
     return odin3_word_limbs(width);
 }
 
-void odin3_w4_set_bit(odin3_w4 word, uint32_t pos, uint32_t code) {
-    if ((code & 1U) != 0) {
-        odin3_word_set_bit(word.v, pos);
+void odin3_w4_set_bit(odin3_w4 word, odin3_w4_bit_at at) {
+    if ((at.code & 1U) != 0) {
+        odin3_word_set_bit(word.v, at.pos);
     }
-    if ((code & 2U) != 0) {
-        odin3_word_set_bit(word.u, pos);
+    if ((at.code & 2U) != 0) {
+        odin3_word_set_bit(word.u, at.pos);
     }
 }
 
-bool odin3_w4_known(const uint64_t *u, uint32_t width) {
-    return odin3_word_is_zero(u, width);
+bool odin3_w4_known(const uint64_t *unk, uint32_t width) {
+    return odin3_word_is_zero(unk, width);
 }
 
 void odin3_w4_zero(odin3_w4 word, uint32_t width) {
@@ -56,7 +56,7 @@ void odin3_w4_load(odin3_w4 word, uint32_t width, const odin3_word_port *port) {
     odin3_w4_zero(word, width);
     uint32_t have = port->span.width < width ? port->span.width : width;
     for (uint32_t k = 0; k < have; k++) {
-        odin3_w4_set_bit(word, k, port->values[port->span.idx[k]] & 3U);
+        odin3_w4_set_bit(word, (odin3_w4_bit_at){k, port->values[port->span.idx[k]] & 3U});
     }
     odin3_w4_extend(word, &(odin3_word_resize){port->span.width, width, port->is_signed});
 }
@@ -319,11 +319,11 @@ void odin3_w4_resolve(const odin3_w4_bin *op) {
         uint64_t pick_b = z_a & ~z_b; /* a is z: b's code */
         uint64_t pick_a = z_b & ~z_a;
         uint64_t both_z = z_a & z_b;
-        uint64_t v = (op->lhs.v[i] & ~clash & both_val) | (op->rhs.v[i] & pick_b) |
-                     (op->lhs.v[i] & pick_a) | both_z;
-        uint64_t u = unk_x | (op->rhs.u[i] & pick_b) | (op->lhs.u[i] & pick_a) | both_z;
-        op->dst.v[i] = v;
-        op->dst.u[i] = u;
+        uint64_t val = (op->lhs.v[i] & ~clash & both_val) | (op->rhs.v[i] & pick_b) |
+                       (op->lhs.v[i] & pick_a) | both_z;
+        uint64_t unk = unk_x | (op->rhs.u[i] & pick_b) | (op->lhs.u[i] & pick_a) | both_z;
+        op->dst.v[i] = val;
+        op->dst.u[i] = unk;
     }
     odin3_word_mask(op->dst.v, op->width);
     odin3_word_mask(op->dst.u, op->width);

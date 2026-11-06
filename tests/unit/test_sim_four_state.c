@@ -61,6 +61,25 @@ static uint32_t input_named(const odin3_sim *sim, const char *name) {
     return 0;
 }
 
+static void drive_inputs_low(odin3_sim *sim, uint32_t rst) {
+    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
+        if (port != rst && !odin3_sim_input_is_clock(sim, (odin3_sim_bit){port, 0})) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_set_input4(sim, (odin3_sim_bit){port, 0}, 0));
+        }
+    }
+}
+
+static void check_outputs_known(odin3_sim *sim) {
+    uint8_t code = 0;
+    for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
+        for (uint32_t bit = 0; bit < odin3_sim_output_width(sim, port); bit++) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                                  odin3_sim_get_output4(sim, (odin3_sim_bit){port, bit}, &code));
+            TEST_ASSERT_TRUE_MESSAGE(code <= 1U, "output still unknown after reset");
+        }
+    }
+}
+
 static void test_starts_unknown_and_reset_makes_it_known(void) {
     load_traffic();
     odin3_sim *sim = build(true);
@@ -69,22 +88,12 @@ static void test_starts_unknown_and_reset_makes_it_known(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_get_output4(sim, (odin3_sim_bit){0, 0}, &code));
     TEST_ASSERT_EQUAL_UINT8(CODE_X, code);
     uint32_t rst = input_named(sim, "rst");
-    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
-        if (port != rst && !odin3_sim_input_is_clock(sim, (odin3_sim_bit){port, 0})) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_set_input4(sim, (odin3_sim_bit){port, 0}, 0));
-        }
-    }
+    drive_inputs_low(sim, rst);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_set_input4(sim, (odin3_sim_bit){rst, 0}, 1));
     for (uint32_t i = 0; i < RESET_CYCLES; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_cycle(sim));
     }
-    for (uint32_t port = 0; port < odin3_sim_output_count(sim); port++) {
-        for (uint32_t bit = 0; bit < odin3_sim_output_width(sim, port); bit++) {
-            TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                                  odin3_sim_get_output4(sim, (odin3_sim_bit){port, bit}, &code));
-            TEST_ASSERT_TRUE_MESSAGE(code <= 1U, "output still unknown after reset");
-        }
-    }
+    check_outputs_known(sim);
     odin3_sim_destroy(sim);
 }
 
