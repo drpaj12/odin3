@@ -1,0 +1,2 @@
+WARNING equiv: not proven: equiv-check: unproven: ABC dsec ended UNDECIDED (its own time or depth limit, not --timeout)
+WARNING precheck: die edge 329.025 x 329.025 um is within 0.17 um of a routing track: die enlarged to 329.125 x 329.125 um (core unchanged)
