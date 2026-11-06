@@ -803,6 +803,30 @@ static bool oom_try(long fail_after, const char *path) {
     return oom_check(st);
 }
 
+/* --- SystemVerilog macro operators (1800-2017 22.5.1) -------------------------------------- */
+
+static void test_paste_joins_tokens(void) {
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, run("`define CAT(a,b) a``b\n`define W(n) w``n``_x\nwire `CAT(x,y), `W(3);\n"));
+    assert_out("\n\nwire xy, w3_x;\n");
+}
+
+static void test_stringify_substitutes_inside_the_quotes(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          run("`define S(v) `\"v is `\\`\"q`\\`\"`\"\n$display(`S(a+b));\n"));
+    assert_out("\n$display(\"a+b is \\\"q\\\"\");\n");
+    /* a plain string in a body is not substituted */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define P(v) \"v\"\n`P(z)\n"));
+    assert_out("\n\"v\"\n");
+}
+
+static void test_file_and_line(void) {
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK,
+        run("a `__FILE__ `__LINE__\n\n`define M `__LINE__\n`define N `M\nb `N `__LINE__\n"));
+    assert_out("a \"f.v\" 1\n\n\n\nb 5 5\n");
+}
+
 static void test_out_of_memory(void) {
     char path[PATH_BUF];
     put("t.v", odin3_bytes_cstr(k_oom_text), path);
@@ -897,6 +921,9 @@ static void run_more_tests(void) {
     RUN_TEST(test_live_runs_count_actuals_while_substituting);
     RUN_TEST(test_comment_across_runs_is_linear);
     RUN_TEST(test_escaped_identifier_across_runs_is_linear);
+    RUN_TEST(test_paste_joins_tokens);
+    RUN_TEST(test_stringify_substitutes_inside_the_quotes);
+    RUN_TEST(test_file_and_line);
     RUN_TEST(test_out_of_memory);
 }
 

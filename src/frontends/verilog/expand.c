@@ -14,6 +14,8 @@
 enum { CRLF_CONT = 3, LF_CONT = 2 };
 
 static const uint8_t k_space = ' ';
+static const uint8_t k_quote[] = "\"";
+static const uint8_t k_esc_quote[] = "\\\"";
 
 /* --- frames -------------------------------------------------------------------------------- */
 
@@ -564,35 +566,85 @@ static odin3_status body_comment(subst *sub, uint32_t *pos) {
     return st;
 }
 
+/* A SystemVerilog macro operator at body byte i (1800-2017 22.5.1): `` joins its neighbours
+ * (the two backticks vanish, so the tokens around them touch), `" is a double quote that does not
+ * start a string (formals inside are substituted), `\`" is \". Returns true with *pos moved past
+ * it. */
+static bool body_operator(subst *sub, uint32_t *pos, odin3_status *st) {
+    const uint8_t *body = sub->mac->body;
+    uint32_t len = sub->mac->len;
+    uint32_t i = *pos;
+    if (body[i] != '`' || i + 1 >= len) {
+        return false;
+    }
+    odin3_pp_textrun ins = {NULL, 0, {0}};
+    uint32_t size = 0;
+    if (body[i + 1] == '`') {
+        size = 2;
+    } else if (body[i + 1] == '"') {
+        size = 2;
+        ins = (odin3_pp_textrun){k_quote, 1, {0}};
+    } else if (body[i + 1] == '\\' && i + 3 < len && body[i + 2] == '`' && body[i + 3] == '"') {
+        size = 4;
+        ins = (odin3_pp_textrun){k_esc_quote, 2, {0}};
+    } else {
+        return false;
+    }
+    *st = flush(sub, i);
+    if (*st == ODIN3_OK && ins.len > 0) {
+        *st = room(sub);
+        *st = *st != ODIN3_OK ? *st : odin3_pp_scratch(sub->pp, sub->use->at, ins.len, &ins.loc);
+        *st = *st != ODIN3_OK ? *st : push_run(sub, ins);
+    }
+    sub->from = i + size;
+    *pos = i + size;
+    return true;
+}
+
+/* A formal's token at body byte i, if the token there names one: flushes the text before it and
+ * substitutes the actual. Any other token is skipped as text. */
+static odin3_status body_token(subst *sub, uint32_t *pos) {
+    uint32_t i = *pos;
+    uint32_t formal = 0;
+    uint32_t end = token_end(sub, i, &formal);
+    *pos = end;
+    if (formal == 0) {
+        return ODIN3_OK;
+    }
+    odin3_status st = flush(sub, i);
+    sub->from = end;
+    odin3_range range = {odin3_pp_loc_add(sub->base, i), odin3_pp_loc_add(sub->base, end)};
+    return st != ODIN3_OK ? st : substitute(sub, formal - 1, range);
+}
+
+/* One byte of a plain "…" string of the body: no substitution inside. */
+static void body_string_byte(const subst *sub, uint32_t *pos, bool *in_string) {
+    const uint8_t *body = sub->mac->body;
+    uint32_t i = *pos;
+    bool escape = *in_string && body[i] == '\\' && i + 1 < sub->mac->len;
+    *in_string = body[i] == '"' ? !*in_string : *in_string;
+    *pos = i + (escape ? 2U : 1U);
+}
+
 /* One step over the body at *pos. */
 static odin3_status body_step(subst *sub, uint32_t *pos, bool *in_string) {
     const uint8_t *body = sub->mac->body;
     uint32_t i = *pos;
+    odin3_status st = ODIN3_OK;
     if (continuation(sub, i) != 0) {
-        odin3_status st = flush(sub, i);
+        st = flush(sub, i);
         sub->from = i + 1; /* only the backslash is dropped (I2) */
         *pos = i + 1;
+    } else if (!*in_string && body_operator(sub, pos, &st)) {
         return st;
+    } else if (*in_string || body[i] == '"') {
+        body_string_byte(sub, pos, in_string);
+    } else if (!sub->file_body || body[i] != '/' || i + 1 >= sub->mac->len || body[i + 1] != '*') {
+        st = body_token(sub, pos);
+    } else {
+        st = body_comment(sub, pos);
     }
-    if (*in_string || body[i] == '"') {
-        bool escape = *in_string && body[i] == '\\' && i + 1 < sub->mac->len;
-        *in_string = body[i] == '"' ? !*in_string : *in_string;
-        *pos = i + (escape ? 2 : 1);
-        return ODIN3_OK;
-    }
-    if (!sub->file_body || body[i] != '/' || i + 1 >= sub->mac->len || body[i + 1] != '*') {
-        uint32_t formal = 0;
-        uint32_t end = token_end(sub, i, &formal);
-        *pos = end;
-        if (formal == 0) {
-            return ODIN3_OK;
-        }
-        odin3_status st = flush(sub, i);
-        sub->from = end;
-        odin3_range range = {odin3_pp_loc_add(sub->base, i), odin3_pp_loc_add(sub->base, end)};
-        return st != ODIN3_OK ? st : substitute(sub, formal - 1, range);
-    }
-    return body_comment(sub, pos);
+    return st;
 }
 
 /* Builds the expansion's run list in pp->scratch. */
