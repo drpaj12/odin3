@@ -2827,6 +2827,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME tb_micros
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+        # The same micros (all but the 4-state x*_tb.v) with the old 2-state interpreter.
+        add_test(NAME tb_micros_2state
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros_2state PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL "
+                                              ENVIRONMENT "SIM_TB_FLAGS=--2state" LABELS tools)
         add_test(NAME tb_vcd
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
                     ${Python3_EXECUTABLE})
