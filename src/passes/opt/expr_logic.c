@@ -457,7 +457,13 @@ odin3_status odin3_expr_rule_invert_muxsel(odin3_expr_ctx *ec) {
         spec.n_params = 1;
         spec.params[ODIN3_EXPR_P_MUX_WIDTH] = odin3_expr_param(ec, ODIN3_EXPR_P_MUX_WIDTH);
     }
-    return odin3_expr_rebuild(ec, ODIN3_OPT_RULE_INVERT_MUXSEL, &spec);
+    int64_t sel_side = odin3_kit_rtl_sel(ec->oc, ec->node);
+    st = odin3_expr_rebuild(ec, ODIN3_OPT_RULE_INVERT_MUXSEL, &spec);
+    /* the inputs swapped sides: an unknown select now takes the other input for the same RTL meaning */
+    if (st == ODIN3_OK && (sel_side == 1 || sel_side == 2)) {
+        st = odin3_kit_set_rtl_sel(ec->oc, ec->made, 3 - sel_side);
+    }
+    return st;
 }
 
 /* --- the bit-gate tables (opt_expr.cc 1100-1190) ---------------------------------------------- */

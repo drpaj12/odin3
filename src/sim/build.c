@@ -257,7 +257,10 @@ static uint32_t cell_flags(const odin3_sim_builder *bld, const odin3_sim_flat *f
         return 0;
     }
     const odin3_value *val = odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_NODE, flat->node.v}, key);
-    return val != NULL && val->kind == ODIN3_VAL_INT && val->i != 0 ? ODIN3_SIM_CELL_RTL_SEL : 0;
+    if (val == NULL || val->kind != ODIN3_VAL_INT || val->i == 0) {
+        return 0;
+    }
+    return val->i == 2 ? ODIN3_SIM_CELL_RTL_SEL | ODIN3_SIM_CELL_RTL_SEL_B : ODIN3_SIM_CELL_RTL_SEL;
 }
 
 /* Four-state mode: the cell's hook, or the generic model; stateful types without a model are

@@ -8,7 +8,9 @@
  * 1 and on random sequences at larger widths. The enable-first variant (hidden option) has its own
  * reference.
  */
+#include "ir/celltype.h"
 #include "ir/check.h"
+#include "ir/design.h"
 #include "ir/module.h"
 #include "lower_ffref.h"
 #include "lower_fixture.h"
@@ -594,6 +596,54 @@ static void test_an_x_reset_value_lowers_to_an_x_constant(void) {
     }
 }
 
+/* A word FF with the attribute rtl_sel (opt_dff folded an if into its enable): the enable mux gets
+ * rtl_sel 1 (an unknown enable takes A, the hold arm) for an active-high enable, 2 when the arms
+ * swapped for an active-low one; without the attribute the muxes get none. */
+static int64_t mux_rtl_sel_or_zero(const ffd *dd, odin3_node_id node) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(dd->fix.design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
+        return 0;
+    }
+    const odin3_value *val =
+        odin3_attr_get(dd->mod, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return val != NULL ? val->i : 0;
+}
+
+static void check_mux_marks(bool marked, bool en_high, int64_t want) {
+    ffc cs = MAKE_CASE(FFREF_DFFE, 2);
+    cs.cfg.en_high = en_high;
+    ffd dd;
+    ffd_make(&dd, &cs);
+    if (marked) {
+        uint32_t key = 0;
+        odin3_value one = odin3_value_int(1);
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_intern(dd.fix.design,
+                                                            odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                                                            &key));
+        TEST_ASSERT_EQUAL_INT(
+            ODIN3_OK, odin3_attr_set(dd.mod, (odin3_objref){ODIN3_OBJ_NODE, dd.node.v}, key, &one));
+    }
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, ffd_lower(&dd, ""));
+    uint32_t muxes = 0;
+    for (uint32_t id = 1; id < odin3_module_node_end(dd.mod); id++) {
+        odin3_node_id node = {id};
+        const odin3_celltype_def *def = odin3_celltype_get(dd.fix.design, odin3_node_type(dd.mod, node));
+        if (odin3_node_live(dd.mod, node) && def != NULL && strcmp(def->name, "$_MUX_") == 0) {
+            TEST_ASSERT_EQUAL_INT64(want, mux_rtl_sel_or_zero(&dd, node));
+            muxes++;
+        }
+    }
+    TEST_ASSERT_EQUAL_UINT32(2, muxes);
+    lf_end(&dd.fix);
+}
+
+static void test_rtl_sel_marks_the_enable_muxes(void) {
+    check_mux_marks(true, true, 1);
+    check_mux_marks(true, false, 2);
+    check_mux_marks(false, true, 0);
+}
+
 static void test_neg_edge_invert_shares_one_not_and_warns_per_cell(void) {
     ffc cs = MAKE_CASE(FFREF_DFFE, 3);
     cs.clk_high = false;
@@ -891,6 +941,7 @@ int main(void) {
     RUN_TEST(test_the_size_estimate_bounds_the_gates);
     RUN_TEST(test_an_x_reset_value_lowers_to_an_x_constant);
     RUN_TEST(test_init_values_come_from_the_init_attribute);
+    RUN_TEST(test_rtl_sel_marks_the_enable_muxes);
     RUN_TEST(test_neg_edge_invert_shares_one_not_and_warns_per_cell);
     RUN_TEST(test_async_error_names_the_cell_and_changes_nothing);
     RUN_TEST(test_the_async_warning_is_once_per_design_with_exact_counts);

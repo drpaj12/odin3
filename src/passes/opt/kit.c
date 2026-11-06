@@ -1389,6 +1389,25 @@ odin3_status odin3_kit_topo(const odin3_opt_ctx *oc, odin3_vec *order, bool *sor
 
 /* --- keep and readers ----------------------------------------------------------------------- */
 
+int64_t odin3_kit_rtl_sel(const odin3_opt_ctx *oc, odin3_node_id node) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(odin3_design_strtab(oc->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                           &key)) {
+        return 0;
+    }
+    const odin3_value *val = odin3_attr_get(oc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return val != NULL && val->kind == ODIN3_VAL_INT ? val->i : 0;
+}
+
+odin3_status odin3_kit_set_rtl_sel(const odin3_opt_ctx *oc, odin3_node_id node, int64_t value) {
+    uint32_t key = 0;
+    odin3_value val = odin3_value_int(value);
+    odin3_status st = odin3_design_intern(oc->design, odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key);
+    return st == ODIN3_OK
+               ? odin3_attr_set(oc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &val)
+               : st;
+}
+
 bool odin3_kit_keep(const odin3_opt_ctx *oc, odin3_objref obj) {
     const odin3_strtab *strtab = odin3_design_strtab(oc->design);
     uint32_t key = 0;

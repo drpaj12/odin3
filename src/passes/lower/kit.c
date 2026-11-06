@@ -118,6 +118,10 @@ odin3_status lw_ctx_init(lw_ctx *lw, odin3_pass_ctx *pass, odin3_design *design,
     uint32_t key = 0;
     lw->keep_key =
         odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr("keep"), &key) ? key : 0;
+    lw->rtl_key = odin3_strtab_find(odin3_design_strtab(design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
+                                    &key)
+                      ? key
+                      : 0;
     lw->cap_cell = odin3_lower_limits_now().max_cell_nodes;
     lw->next_budget = ODIN3_LOWER_BUDGET_NODES;
     return ODIN3_OK;
@@ -423,8 +427,16 @@ odin3_status lw_mux(lw_ctx *lw, odin3_net_id lhs, odin3_net_id rhs, odin3_net_id
 
 odin3_status lw_pick(lw_ctx *lw, lw_sel sel, odin3_net_id then_net, odin3_net_id else_net,
                      odin3_net_id *out_net) {
-    return sel.high ? lw_mux(lw, else_net, then_net, sel.net, out_net)
-                    : lw_mux(lw, then_net, else_net, sel.net, out_net);
+    odin3_status st = sel.high ? lw_mux(lw, else_net, then_net, sel.net, out_net)
+                               : lw_mux(lw, then_net, else_net, sel.net, out_net);
+    if (st != ODIN3_OK || lw->rtl_value == NULL || lw->created.len == 0) {
+        return st;
+    }
+    /* The word cell has `rtl_sel` (opt_dff folded an if into this FF's enable or reset): an unknown
+     * control means inactive, the else arm: A for an active-high control, B when the arms swapped. */
+    odin3_node_id mux = *(const odin3_node_id *)odin3_vec_cat(&lw->created, lw->created.len - 1U);
+    odin3_value side = odin3_value_int(sel.high ? 1 : 2);
+    return odin3_attr_set(lw->module, (odin3_objref){ODIN3_OBJ_NODE, mux.v}, lw->rtl_key, &side);
 }
 
 static uint32_t port_index(const odin3_celltype_def *def, const char *name) {

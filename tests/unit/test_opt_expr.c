@@ -18,6 +18,7 @@
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "ir/prov.h"
+#include "ir/value.h"
 #include "odin3/odin3.h"
 #include "passes/opt/expr.h"
 #include "passes/opt/fold.h"
@@ -1763,6 +1764,33 @@ static void test_invert_muxsel(void) {
     expect_same(pnet(mux, "S", 0), wnet("s", 0), "S is s");
     expect_same(pnet(mux, "Y", 0), wnet("y", 0), "Y is y");
     TEST_ASSERT_EQUAL_UINT32(1, rule(ODIN3_OPT_RULE_INVERT_MUXSEL));
+}
+
+/* The attribute rtl_sel (1: an unknown select takes A, 2: B) follows the swap of A and B. */
+static int64_t mux_rtl_sel(odin3_node_id mux) {
+    const odin3_value *val = odin3_attr_get(
+        fx.res.module, (odin3_objref){ODIN3_OBJ_NODE, mux.v}, intern(ODIN3_ATTR_RTL_SEL));
+    return val != NULL ? val->i : 0;
+}
+
+static void set_mux_rtl_sel(int64_t side) {
+    odin3_value val = odin3_value_int(side);
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_attr_set(fx.res.module, (odin3_objref){ODIN3_OBJ_NODE, need_type("$mux").v},
+                                 intern(ODIN3_ATTR_RTL_SEL), &val));
+}
+
+static void test_invert_muxsel_rtl_sel(void) {
+    for (int64_t side = 0; side <= 2; side++) {
+        build(K_INVERT_MUXSEL);
+        if (side != 0) {
+            set_mux_rtl_sel(side);
+        }
+        run_expr();
+        odin3_node_id mux = need_type("$mux");
+        expect_same(pnet(mux, "A", 0), wnet("q", 0), "A is q");
+        TEST_ASSERT_EQUAL_INT64(side == 0 ? 0 : 3 - side, mux_rtl_sel(mux));
+    }
 }
 
 /* yosys -p "read_rtlil tribuf_en1.il; opt_expr" and tribuf_en0.il */
@@ -4588,6 +4616,7 @@ static void run_logic_tests(void) {
     RUN_TEST(test_keepdc_keeps_x);
     RUN_TEST(test_invert_double);
     RUN_TEST(test_invert_muxsel);
+    RUN_TEST(test_invert_muxsel_rtl_sel);
     RUN_TEST(test_tribuf);
     RUN_TEST(test_gate_tables);
     RUN_TEST(test_gate_and_x);
