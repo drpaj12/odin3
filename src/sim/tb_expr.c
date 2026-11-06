@@ -453,7 +453,6 @@ static bool plusarg_parse(char conv, const char *text, uint64_t *val) {
     return true;
 }
 
-
 /* $value$plusargs("name=%d", var): 1 and var set when a plusarg starts with the text before the
  * '%' and its rest parses in that conversion, else 0 and var unchanged. */
 static uint64_t finish_value_plusargs(tb_ev *ev, const ev_frame *fr) {

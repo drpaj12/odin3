@@ -34,11 +34,11 @@ enum {
 };
 
 /*
- * A 4-state value of up to TB_MAX_WIDTH bits (design note docs/specs/2026-11-05-sim-4state-design.md
- * section 2): planes v and u of odin3_word_limbs(width) limbs each, bit k the code (u_k v_k) = 0, 1,
- * x = 2, z = 3 (word4.h). Only the first odin3_word_limbs(width) limbs of a value of width bits are
- * meaningful; every operation reads and writes only those, so a value of 64 bits or fewer costs one
- * limb per plane.
+ * A 4-state value of up to TB_MAX_WIDTH bits (design note
+ * docs/specs/2026-11-05-sim-4state-design.md section 2): planes v and u of odin3_word_limbs(width)
+ * limbs each, bit k the code (u_k v_k) = 0, 1, x = 2, z = 3 (word4.h). Only the first
+ * odin3_word_limbs(width) limbs of a value of width bits are meaningful; every operation reads and
+ * writes only those, so a value of 64 bits or fewer costs one limb per plane.
  */
 typedef struct tbv {
     uint64_t v[TB_LIMBS];
@@ -52,8 +52,8 @@ typedef struct tb_tok {
     tb_tok_kind kind;
     char text[TB_NAME]; /* identifier, operator or system-task name; strings in str */
     char *str;          /* TK_STR: owned by the lexer's list */
-    uint64_t num;   /* TK_NUM: the low 64 bits of the v plane */
-    uint64_t *nv;   /* TK_NUM: the value planes, odin3_word_limbs of the literal's width */
+    uint64_t num;       /* TK_NUM: the low 64 bits of the v plane */
+    uint64_t *nv;       /* TK_NUM: the value planes, odin3_word_limbs of the literal's width */
     uint64_t *nu;
     uint32_t width; /* TK_NUM: 0 when unsized */
     bool sized;
@@ -88,7 +88,7 @@ typedef struct tb_expr {
     uint32_t aux;
     const uint64_t *nv, *nu; /* E_NUM: the value planes (width bits) */
     bool xfill;              /* E_NUM: extends past its width with its top bit's x or z */
-    int var; /* variable index */
+    int var;                 /* variable index */
     struct tb_expr *a, *b, *c;
     struct tb_expr **list; /* E_CONCAT items, E_SYS args */
     uint32_t n;

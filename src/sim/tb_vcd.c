@@ -1,7 +1,7 @@
-/* tb_vcd.c — the `sim_tb --vcd` writer: an IEEE 1364 VCD (0, 1, x, z) of the testbench's scalar regs
- * and wires and of every DUT instance port that is connected to an expression. A change is written
- * once per time step, with the value the signal has when the step ends (a glitch inside a step is
- * not shown). Arrays and parameters are not dumped. */
+/* tb_vcd.c — the `sim_tb --vcd` writer: an IEEE 1364 VCD (0, 1, x, z) of the testbench's scalar
+ * regs and wires and of every DUT instance port that is connected to an expression. A change is
+ * written once per time step, with the value the signal has when the step ends (a glitch inside a
+ * step is not shown). Arrays and parameters are not dumped. */
 #include "sim/tb_internal.h"
 #include "sim/vcd.h"
 #include "util/log.h"

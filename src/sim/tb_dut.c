@@ -145,7 +145,7 @@ static bool check_global_clock(const tb_dut *dut) {
     return false;
 }
 
-odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_dut **out) {
+odin3_status tb_dut_open(odin3_design *design, const tb_module *tb, tb_inst *inst, tb_dut **out) {
     *out = NULL;
     tb_dut *dut = calloc(1, sizeof *dut);
     if (dut == NULL) {
@@ -264,7 +264,7 @@ static bool is_clock_conn(const tb_dut *dut, uint32_t conn) {
 static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
     bool changed = false;
     for (uint32_t i = 0; i < dut->inst->nconns; i++) {
-        tb_conn *conn = &dut->inst->conns[i];
+        const tb_conn *conn = &dut->inst->conns[i];
         if (conn->is_out || is_clock_conn(dut, i) || conn->expr == NULL) {
             continue;
         }
@@ -277,7 +277,8 @@ static bool apply_inputs(tb_ev *ev, tb_dut *dut) {
             odin3_sim_bit bit = {conn->sim_port, bit_no};
             uint32_t code = tbv_code(&val, bit_no);
             /* 2-state: an x or z bit reads 0, as the testbench's old 2-state values did */
-            (void)odin3_sim_set_input4(dut->sim, bit, (uint8_t)(dut->four_state ? code : code == 1U));
+            (void)odin3_sim_set_input4(dut->sim, bit,
+                                       (uint8_t)(dut->four_state ? code : code == 1U));
         }
         tbv_copy(&dut->last[i], &val, conn->width);
         dut->seen[i] = true;
@@ -327,7 +328,7 @@ void tb_dut_observe(tb_ev *ev, tb_dut *dut) {
 static bool publish(tb_ev *ev, tb_dut *dut) {
     bool changed = false;
     for (uint32_t i = 0; i < dut->inst->nconns; i++) {
-        tb_conn *conn = &dut->inst->conns[i];
+        const tb_conn *conn = &dut->inst->conns[i];
         if (!conn->is_out || conn->expr == NULL) {
             continue;
         }

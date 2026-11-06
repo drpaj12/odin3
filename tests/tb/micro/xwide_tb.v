@@ -52,6 +52,7 @@ module xwide_tb;
     $display("r %h", r);
     clk = 1;
     #1 $display("r %h", r);
+    $display("hier %h %b", dut.r, dut.r == r);
     f = 512'bx;
     #1 $display("s %h", s);
     for (i = 0; i < 3; i = i + 1) begin

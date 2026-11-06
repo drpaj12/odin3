@@ -121,9 +121,9 @@ void tb_op_pow(const tb_powop *op) {
         pow_negative(op);
         return;
     }
-    uint64_t acc[TB_LIMBS];
-    uint64_t sq[TB_LIMBS];
-    uint64_t tmp[TB_LIMBS];
+    uint64_t acc[TB_LIMBS] = {0};
+    uint64_t sq[TB_LIMBS] = {0};
+    uint64_t tmp[TB_LIMBS] = {0};
     size_t bytes = (size_t)odin3_word_limbs(width) * sizeof *acc;
     odin3_word_zero(acc, width);
     acc[0] = 1;
@@ -159,7 +159,7 @@ static void arith(const char *op, const tb_binop *bo) {
     } else if (op_is(op, "-")) {
         odin3_word_sub(&word);
     } else if (op_is(op, "*")) {
-        uint64_t prod[TB_LIMBS];
+        uint64_t prod[TB_LIMBS] = {0};
         word.dst = prod;
         odin3_word_mul(&word);
         memcpy(bo->lhs->v, prod, (size_t)odin3_word_limbs(width) * sizeof *prod);
@@ -252,8 +252,7 @@ static void arith_right(const tb_shiftop *so) {
     }
     tbv ones;
     tbv_fill(sign, &ones, fill);
-    tb_field_put((tb_planes){so->lhs->v, so->lhs->u, width}, (tb_field){width - fill, fill},
-                 &ones);
+    tb_field_put((tb_planes){so->lhs->v, so->lhs->u, width}, (tb_field){width - fill, fill}, &ones);
 }
 
 void tb_op_shift(const char *op, const tb_shiftop *so) {

@@ -62,7 +62,8 @@ static void put(sbuf *out, const char *text, size_t count) {
 }
 
 /* The character of one digit (count bits, their v and u bits) of %b, %o or %h: the digit when
- * known; x or z when every bit is x or every bit is z; else X when a bit is x, else Z (iverilog). */
+ * known; x or z when every bit is x or every bit is z; else X when a bit is x, else Z (iverilog).
+ */
 typedef struct digit_bits {
     uint32_t v;
     uint32_t u;

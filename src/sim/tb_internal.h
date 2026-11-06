@@ -185,7 +185,7 @@ bool tb_readmem(const tb_readmem_req *req);
  * starts x, so `initial clk = 1;` is a posedge at time 0); in 2-state mode the clock starts at 0.
  * The DUT's own clock input stays 2-state: a posedge sets it to 1, a negedge to 0. */
 typedef struct tb_dut tb_dut;
-odin3_status tb_dut_open(odin3_design *design, tb_module *tb, tb_inst *inst, tb_dut **out);
+odin3_status tb_dut_open(odin3_design *design, const tb_module *tb, tb_inst *inst, tb_dut **out);
 /* Applies changed inputs, settles, publishes changed outputs; true when any output changed. */
 bool tb_dut_comb(tb_ev *ev, tb_dut *dut);
 /* Records the clock edge, if any, since the last call. */

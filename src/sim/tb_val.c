@@ -189,8 +189,10 @@ void tb_field_put(tb_planes dst, tb_field field, const tbv *src) {
         uint64_t mask = low_mask(count);
         uint64_t *word_v = &dst.v[pos / LIMB_BITS];
         uint64_t *word_u = &dst.u[pos / LIMB_BITS];
-        *word_v = (*word_v & ~(mask << shift)) | ((chunk(src->v, field.width, off) & mask) << shift);
-        *word_u = (*word_u & ~(mask << shift)) | ((chunk(src->u, field.width, off) & mask) << shift);
+        *word_v =
+            (*word_v & ~(mask << shift)) | ((chunk(src->v, field.width, off) & mask) << shift);
+        *word_u =
+            (*word_u & ~(mask << shift)) | ((chunk(src->u, field.width, off) & mask) << shift);
         off += count;
     }
 }
@@ -285,8 +287,8 @@ static bool power_digits(const tb_digits *digits, tbv *out, uint32_t *bits) {
         if (xz == 0 && (value < 0 || (unsigned)value >= digits->base)) {
             return false;
         }
-        put_digit(out, (digit_at){count * bits_per, bits_per, (uint32_t)(value < 0 ? 0 : value),
-                                  xz});
+        put_digit(out,
+                  (digit_at){count * bits_per, bits_per, (uint32_t)(value < 0 ? 0 : value), xz});
         count++;
     }
     uint64_t total = (uint64_t)count * bits_per;
