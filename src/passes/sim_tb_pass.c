@@ -43,6 +43,7 @@ typedef struct tb_args {
     char plusarg[TB_MAX_PLUSARGS][TB_PLUSARG_LEN];
     const char *plusarg_ptr[TB_MAX_PLUSARGS];
     uint32_t n_plusarg;
+    bool four_state; /* --4state: x/z values, 4-state DUTs (default: the 2-state interpreter) */
 } tb_args;
 
 static bool word_is(odin3_bytes word, const char *text) {
@@ -106,8 +107,8 @@ static bool take_define(odin3_bytes *args, tb_args *out) {
 
 static odin3_status usage(void) {
     odin3_log(ODIN3_LOG_ERROR, "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
-                               "<file>] [--vcd <file>] [--plusarg <text>]... [-I <dir>]... "
-                               "[-D <name[=value]>]... <tb.v>...");
+                               "<file>] [--vcd <file>] [--plusarg <text>]... [--4state] [-I "
+                               "<dir>]... [-D <name[=value]>]... <tb.v>...");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -145,6 +146,10 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
             ok = take(&args, out->vcd, sizeof out->vcd);
         } else if (word_is(word, "--plusarg")) {
             ok = take_plusarg(&args, out);
+        } else if (word_is(word, "--4state")) {
+            out->four_state = true;
+        } else if (word_is(word, "--2state")) {
+            out->four_state = false; /* the default; accepted for scripts written for either */
         } else {
             ok = take_other(word, &args, out);
         }
@@ -223,7 +228,7 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         return st;
     }
     tb_module *tb = NULL;
-    tb_source src = {parsed->file[0], text, design};
+    tb_source src = {parsed->file[0], text, design, parsed->four_state};
     st = tb_parse(&src, parsed->top[0] != '\0' ? parsed->top : NULL, &tb);
     free(text);
     if (st != ODIN3_OK) {
@@ -257,10 +262,12 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
     "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] [--plusarg "
-    "<text>]... [-I <dir>]... [-D <name[=value]>]... <tb.v>...: run a "
+    "<text>]... [--4state] [-I <dir>]... [-D <name[=value]>]... <tb.v>...: run a "
     "Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
-    "design's modules; $display text goes to stdout or --out, "
+    "design's modules; values are 2-state (all 0 at power-on) unless --4state: then 0, 1, x, z "
+    "(regs start x, as iverilog), best with `lower --keep-sel`; $display text goes to stdout or "
+    "--out, "
     "--vcd writes a waveform of the testbench signals and the DUT ports; --plusarg (up to 16) "
     "is a run-time argument that $test$plusargs and $value$plusargs read, as name=value; the "
     "files go through the Verilog preprocessor (`define, `ifdef, `include searched in the -I "

@@ -485,6 +485,8 @@ add_library(odin3_core OBJECT
     src/sim/tb_dut.c
     src/sim/tb_run.c
     src/sim/tb_vcd.c
+    src/sim/tb_val.c
+    src/sim/tb_ops.c
     src/sim/signals.c
     src/sim/vcd.c
     src/sim/gate_truth.c
@@ -1930,6 +1932,7 @@ if(BUILD_TESTING)
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_word)
     odin3_add_unit_test(test_sim_word4)
+    odin3_add_unit_test(test_tb_values)
     odin3_add_unit_test(test_sim_four_state)
     target_compile_definitions(test_sim_four_state PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
@@ -2827,6 +2830,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME tb_micros
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+        # The same micros (all but the 4-state x*_tb.v) with the old 2-state interpreter.
+        add_test(NAME tb_micros_2state
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros_2state PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL "
+                                              ENVIRONMENT "SIM_TB_FLAGS=--2state" LABELS tools)
         add_test(NAME tb_vcd
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
                     ${Python3_EXECUTABLE})
