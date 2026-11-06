@@ -39,7 +39,11 @@ for tb in *_tb.v; do
         || ! vvp "$work/$n.vvp" >"$work/$n.ref" 2>&1; then
         echo "SKIP $n (iverilog rejects)"; skip=$((skip + 1)); continue
     fi
-    script="read_verilog $n.v; proc; opt; lower; sim_tb --out $work/$n.out --vcd $work/$n.vcd $work/$n.tb.v"
+    lf=""
+    [ -f "$n.flags" ] && lf=$(cat "$n.flags")
+    xf=""
+    case "$n" in x*) xf="--4state" ;; esac
+    script="read_verilog $n.v; proc; opt; lower $lf; sim_tb $xf --out $work/$n.out --vcd $work/$n.vcd $work/$n.tb.v"
     if ! "$odin3" -p "$script" >"$work/$n.log" 2>&1; then
         echo "FAIL $n (odin3 error)"; tail -3 "$work/$n.log"; fail=1; continue
     fi

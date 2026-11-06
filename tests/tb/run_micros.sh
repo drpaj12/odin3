@@ -3,7 +3,7 @@
 # $display output of `odin3 sim_tb` must equal iverilog + vvp line for line (spec section 7a).
 # An optional <n>.flags file holds extra arguments of `lower` for the DUT (e.g. --keep-sel, the
 # flow for x-bearing benches: if/case selects keep their RTL meaning). SIM_TB_FLAGS (environment)
-# is added to every sim_tb command; with --2state in it the 4-state micros (x*_tb.v) are skipped,
+# is added to every sim_tb command; with --2state in it the 4-state micros (x*_tb.v) are skipped; the x micros get --4state,
 # since 2-state mode cannot print x like iverilog.
 set -u
 odin3=$1
@@ -15,6 +15,8 @@ cd "$here/micro" || exit 2
 for tb in *_tb.v; do
     n=${tb%_tb.v}
     case "$flags" in *--2state*) case "$n" in x*) continue ;; esac ;; esac
+    mflags=""
+    case "$n" in x*) mflags="--4state" ;; esac
     lflags=""
     [ -f "$n.flags" ] && lflags=$(cat "$n.flags")
     dut=""
@@ -27,9 +29,9 @@ for tb in *_tb.v; do
         echo "SKIP $n (iverilog rejects)"; continue
     fi
     if [ -n "$dut" ]; then
-        script="read_verilog $dut; proc; opt; lower $lflags; sim_tb $flags -I . --out $work/$n.out $tb $extra"
+        script="read_verilog $dut; proc; opt; lower $lflags; sim_tb $flags $mflags -I . --out $work/$n.out $tb $extra"
     else
-        script="sim_tb $flags -I . --out $work/$n.out $tb $extra"
+        script="sim_tb $flags $mflags -I . --out $work/$n.out $tb $extra"
     fi
     if ! "$odin3" -p "$script" >"$work/$n.log" 2>&1; then
         echo "FAIL $n (odin3 error)"; tail -3 "$work/$n.log"; fail=1; continue

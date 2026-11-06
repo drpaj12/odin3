@@ -38,8 +38,8 @@ DUT instances: `dut_mod [#(...)] inst (.p(expr), ...);` or ordered. Parameter ov
 rejected (the DUT is already elaborated). Input port connection: any expression (re-evaluated
 at every sync). Output port connection: an identifier of a wire or reg of the testbench (width
 is truncated or zero-extended). Ports wider than 1024 bits and inout ports: rejected. A DUT with
-more than one clock bit is rejected (one clock: section 4). Unconnected inputs are x (4-state; 0
-with `--2state`).
+more than one clock bit is rejected (one clock: section 4). Unconnected inputs are x with `--4state` (0
+by default).
 
 Procedural: `initial stmt`, `always stmt` (an `always` must wait: begin with `#`, `@` or `wait`,
 else rejected as a zero-delay loop). Statements: `begin..end` (names allowed), `=`, `<=`
@@ -48,7 +48,8 @@ else rejected as a zero-delay loop). Statements: `begin..end` (names allowed), `
 `for`, `while`, `repeat`, `forever`, `disable` (rejected), system tasks. LHS: identifier, bit
 select, part select (constant), `mem[i]`, concatenation of those.
 
-Expressions (4-state since 2026-11-06, design note `docs/specs/2026-11-05-sim-4state-design.md`
+Expressions (4-state with `--4state` since 2026-11-06; the default stays 2-state until every
+design that passes 2-state also passes 4-state, design note `docs/specs/2026-11-05-sim-4state-design.md`
 section 5; widths and signedness follow IEEE 1364-2005 5.4/5.5 for the operators below):
 sized/unsized numbers in b/o/d/h with `x`, `z` and `?` digits (a leading x or z digit pads with x
 or z; an unsized `'bx` fills its context), string literals (only as `$display` arguments),
@@ -63,8 +64,8 @@ unknown or out-of-range index reads x and a write through one is dropped, an `if
 loops), `case` compares with `===`, `casez` ignores z and `?` bits, `casex` x and z bits. Values
 are at most 1024 bits (`TB_MAX_WIDTH`). A reg, integer or memory starts x, a wire z (an undriven
 wire); a wire with several drivers (assigns, DUT outputs) is their resolution (z yields, a 0/1
-clash is x). `--2state` keeps the 2-state behaviour of before: everything starts 0 and the DUT is a
-2-state simulator (x/z literals still evaluate 4-state).
+clash is x). Without `--4state` (the default) everything starts 0 and the DUT is a
+2-state simulator (x/z literals still evaluate 4-state); `--2state` is accepted and changes nothing.
 
 System tasks: `$display $write $strobe $monitor $monitoroff/on $fdisplay $fwrite $fopen $fclose
 $finish $stop $readmemh $readmemb $dumpfile $dumpvars` (the last two are accepted and ignored: use
@@ -101,13 +102,13 @@ expressions are evaluated; changed non-clock inputs are applied and the DUT is s
 published at the end of the active region. The clock must be a primary input of the DUT (a derived
 clock is rejected by the simulator, S1 rule). Not modelled: gate or `#` delays inside the DUT
 (`#` in DUT RTL are not seen: the DUT is the elaborated design), strengths, `timescale` inside the
-DUT, multiple clock domains with independent phases, asynchronous glitches. Since 2026-11-06 the
+DUT, multiple clock domains with independent phases, asynchronous glitches. With `--4state` (2026-11-06) the
 DUT is a 4-state simulator (`odin3_sim_options.four_state`): its registers are x before the first
 reset or edge, as in iverilog; the clock edge follows the 4-state rule of `@(posedge)` (0 to x and x
 to 1 are posedges; the DUT's own clock input stays 0/1). For x-bearing benches read the DUT with
 `proc; opt; lower --keep-sel`, so `if`/`case` selects keep their RTL meaning (an x select takes the
-else/default side) where plain `lower` makes them gates that propagate x. `--2state` gives the old
-2-state DUT (all state 0 at power-on).
+else/default side) where plain `lower` makes them gates that propagate x. Without `--4state` the DUT is the
+2-state simulator (all state 0 at power-on).
 
 ## 5. `testbench_gen`
 
@@ -205,7 +206,8 @@ Deviations from the text above, as built (2026-10-31):
    `@(s)` on any 4-state change. A tri-state buffer inside the DUT is lowered to a plain driver by `lower`
    (Parmys behaviour, warned), and `sim_tb` before `lower` refuses `$tribuf` (no simulator model yet), so
    a DUT output cannot be z unless it passes a z input through. Micros (all equal to iverilog):
-   `tests/tb/micro/x*_tb.v`; the other micros also run with `--2state` (ctest `tb_micros_2state`).
+   `tests/tb/micro/x*_tb.v`; the x micros run with `--4state`, the others in the default 2-state mode (ctest `tb_micros`,
+   `tb_micros_2state`).
 
 Gate results (2026-10-31, debug build, iverilog 12.0; tests in `tests/tb/`):
 (a) micros: comb, counter, fsm, mem (with `$readmemh`), misc (format, `$monitor`, `$strobe`,
