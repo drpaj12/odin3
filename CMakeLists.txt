@@ -1932,6 +1932,7 @@ if(BUILD_TESTING)
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_word)
     odin3_add_unit_test(test_sim_word4)
+    odin3_add_unit_test(test_tb_values)
     odin3_add_unit_test(test_sim_four_state)
     target_compile_definitions(test_sim_four_state PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
