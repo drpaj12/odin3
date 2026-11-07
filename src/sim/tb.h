@@ -123,6 +123,7 @@ typedef struct tb_event_term {
 typedef struct tb_stmt tb_stmt;
 struct tb_stmt {
     tb_skind kind;
+    tb_expr *delay;     /* S_NBA: the intra-assignment delay of `a <= #d b`, else NULL */
     tb_expr *lhs, *rhs; /* assign; cond for if/while/wait; count for repeat; delay amount */
     tb_stmt *a, *b;     /* body / else; for: init in a2 */
     tb_stmt *init, *step;

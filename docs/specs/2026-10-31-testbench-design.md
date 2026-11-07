@@ -43,7 +43,7 @@ by default).
 
 Procedural: `initial stmt`, `always stmt` (an `always` must wait: begin with `#`, `@` or `wait`,
 else rejected as a zero-delay loop). Statements: `begin..end` (names allowed), `=`, `<=`
-(nonblocking; no intra-assignment delay), `#N stmt;`, `#N;`, `@(posedge|negedge|any a [or b ...])`,
+(nonblocking; `a <= #d b` takes an intra-assignment delay: b is read now, the write lands in the NBA region of time + d; a blocking `a = #d b` and event controls are rejected), `#N stmt;`, `#N;`, `@(posedge|negedge|any a [or b ...])`,
 `@(a, b)`, `@*` (rejected), `wait(expr)`, `if/else`, `case`, `casez`, `casex`,
 `for`, `while`, `repeat`, `forever`, `disable` (rejected), system tasks. LHS: identifier, bit
 select, part select (constant), `mem[i]`, concatenation of those.
