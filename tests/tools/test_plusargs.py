@@ -45,7 +45,8 @@ def run_script(plusargs: list[str], tb_text: str = TB) -> subprocess.CompletedPr
         dut.write_text(DUT)
         tbf.write_text(tb_text)
         args = " ".join(f"--plusarg {p}" for p in plusargs)
-        script = f'read_verilog "{dut}"; proc; opt; lower; sim_tb {args} --out "{out}" "{tbf}"'
+        script = (f'read_verilog "{dut}"; proc; opt; lower; '
+                  f'sim_tb --2state {args} --out "{out}" "{tbf}"')
         done = subprocess.run(
             [str(ODIN3), "-p", script], capture_output=True, text=True, check=False
         )

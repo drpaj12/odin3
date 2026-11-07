@@ -280,3 +280,10 @@ negative `repeat` count is 0; evaluation errors fail the run. Regression tests: 
 (`nba_idx`, `nba_dut`, `ord_a`, `ord_b`, `pulse`, `seed`, `mon`, `longline`, `repeat`, `redxnor`),
 `tests/tb/errors` (`delta`, `fopen`, ctest `tb_errors`), `tests/tools/test_testbench_gen.py`,
 `tests/tools/test_tb_compare.py`.
+
+7d. Default flip (2026-11-07). `sim_tb` is 4-state by default; `--2state` selects the old 2-state
+   interpreter and `--4state` is accepted and changes nothing. Condition met: every Mimir opencores-tb
+   design that passed 2-state also passes 4-state with the same output text and no more than 1.5x the
+   wall time (mmuart, verilog_cordic_core, wb_lcd, gng, dblclockfft; numbers in HANDOVER-sim.md). The
+   project runner (`run_testbenches`) stays 2-state. `tb_micros` now runs every micro 4-state;
+   `tb_micros_2state` runs the non-x micros with `--2state`.

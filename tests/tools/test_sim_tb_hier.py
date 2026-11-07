@@ -108,7 +108,7 @@ def sim_tb(files: dict[str, str], tb_name: str, prefix: str = "proc; opt; lower;
         dut = paths["dut.blif" if blif else "dut.v"]
         out = Path(tmp) / "o.txt"
         reader = "read_blif" if blif else "read_verilog"
-        script = (f"{reader} {dut}; {extra}{prefix}sim_tb --out {out} {paths[tb_name]}")
+        script = (f"{reader} {dut}; {extra}{prefix}sim_tb --2state --out {out} {paths[tb_name]}")
         done = subprocess.run([ODIN3, "-p", script], capture_output=True, text=True)
         done.stdout = out.read_text() if out.exists() else ""
         return done
