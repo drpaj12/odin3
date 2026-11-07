@@ -68,7 +68,7 @@ clash is x). Without `--4state` (the default) everything starts 0 and the DUT is
 2-state simulator (x/z literals still evaluate 4-state); `--2state` is accepted and changes nothing.
 
 System tasks: `$display $write $strobe $monitor $monitoroff/on $fdisplay $fwrite $fopen $fclose
-$finish $stop $readmemh $readmemb $dumpfile $dumpvars` (the last two are accepted and ignored: use
+$finish $stop $readmemh $readmemb $dumpfile $dumpvars` (the last two are accepted and ignored, `$dumpvars` with any arguments, e.g. a module name: use
 `--vcd`). Format specifiers: `%d %0d %Nd %b %0b %Nb %h %x %o %c %s %m %t %%` with an optional width or
 `0`; `%e %f %g %v` are rejected. `%t` prints the value in the precision of the `` `timescale ``
 (`unit / precision`, default `1 ns` with a factor of 1), right aligned in 20 columns (`%0t` minimal),
@@ -82,7 +82,7 @@ error. `$finish` ends the run; without it the run ends when no event is left or 
 `tb.v:LINE: unsupported: <construct>`. With several testbench files, or `` `include `` in them, `sim_tb`
 joins the preprocessed streams; every error, warning and run-time message names the line of the
 file the text came from (the preprocessor's segment map: an included file by its own name and
-line, a macro use by the place of the use), not a line of the joined text. The preprocessor (DUT and testbench readers alike) drops `` `protect `` and `` `endprotect `` and keeps the text between them (the unencrypted form that vendor models such as the IS42VM16400K SDRAM model use).
+line, a macro use by the place of the use), not a line of the joined text. The preprocessor (DUT and testbench readers alike) drops `` `protect `` and `` `endprotect `` and keeps the text between them (the unencrypted form that vendor models such as the IS42VM16400K SDRAM model use). `pullup(w);` and `pulldown(w);` (a declared testbench wire, no strength or delay) make the z bits of the wire read 1 or 0 whenever it is stored (4-state; a z-free 2-state run is unaffected). The gate is a weak driver: any other driver that is not z wins, as in IEEE 1364 7.
 
 ## 3. Time and scheduling
 

@@ -75,6 +75,44 @@ class DiagTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("y=1", done.stdout)
 
+    def test_pullup_and_pulldown(self) -> None:
+        work = helpers.scratch(self, "test-tb-diag-")
+        (work / "t.v").write_text("""module t;
+  reg en;
+  wire up, down, plain;
+  wire [1:0] bus;
+  assign up = en ? 1'b0 : 1'bz;
+  assign down = en ? 1'b1 : 1'bz;
+  assign plain = en ? 1'b1 : 1'bz;
+  assign bus = en ? 2'b01 : 2'bzz;
+  pullup(up);
+  pulldown (down);
+  pullup(bus);
+  initial begin
+    en = 0;
+    #1 $display("off up=%b down=%b plain=%b bus=%b", up, down, plain, bus);
+    en = 1;
+    #1 $display("on  up=%b down=%b plain=%b bus=%b", up, down, plain, bus);
+    $finish;
+  end
+endmodule
+""")
+        done = subprocess.run([ODIN3, "-p", "sim_tb t.v"], capture_output=True, text=True,
+                              cwd=work, check=False, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split("\n")[:2],
+                         ["off up=1 down=0 plain=z bus=11", "on  up=0 down=1 plain=1 bus=01"])
+
+    def test_dumpvars_arguments_are_ignored(self) -> None:
+        work = helpers.scratch(self, "test-tb-diag-")
+        (work / "t.v").write_text("module t;\n  initial begin\n    $dumpfile(\"w.vcd\");\n"
+                                  "    $dumpvars(0, t);\n    $dumpvars;\n    $display(\"ok\");\n"
+                                  "    $finish;\n  end\nendmodule\n")
+        done = subprocess.run([ODIN3, "-p", "sim_tb t.v"], capture_output=True, text=True,
+                              cwd=work, check=False, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stdout.split("\n")[0], "ok")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1015,6 +1015,23 @@ static const char *const SYS_TASKS[] = {
     "$fdisplay", "$fwrite",   "$fclose",   "$finish",  "$stop",       "$readmemh",
     "$readmemb", "$dumpfile", "$dumpvars", "$fopen",   NULL};
 
+/* Skips an optional parenthesised token group, nested parentheses included. */
+static bool skip_parens(parser *pr) {
+    if (!accept_op(pr, "(")) {
+        return true;
+    }
+    uint32_t depth = 1;
+    while (depth > 0) {
+        if (cur(pr)->kind == TK_EOF) {
+            return fail(pr, "missing )");
+        }
+        depth += is_op(pr, "(") ? 1U : 0U;
+        depth -= is_op(pr, ")") ? 1U : 0U;
+        pr->pos++;
+    }
+    return true;
+}
+
 static tb_expr *parse_sys_task_expr(parser *pr) {
     tb_expr *call = new_expr(pr, E_SYS);
     if (call == NULL) {
@@ -1026,6 +1043,9 @@ static tb_expr *parse_sys_task_expr(parser *pr) {
     }
     (void)snprintf(call->str, TB_NAME, "%s", cur(pr)->text);
     pr->pos++;
+    if (strcmp(call->str, "$dumpvars") == 0) { /* ignored: its scope arguments may name modules */
+        return skip_parens(pr) ? call : NULL;
+    }
     return parse_args(pr, call) ? call : NULL;
 }
 
@@ -1958,6 +1978,36 @@ static bool parse_instance(parser *pr) {
     return parse_inst_conns(pr, inst) && expect_op(pr, ";");
 }
 
+/* A module item keyword outside the subset. */
+static bool is_rejected_item(const parser *pr) {
+    static const char *const REJECT[] = {"genvar", "generate", "function", "real",    "time",
+                                         "string", "event",    "defparam", "specify", "input",
+                                         "output", "inout",    "and",      "or",      "nand",
+                                         "nor",    "xor",      "not",      "buf",     NULL};
+    for (size_t i = 0; REJECT[i] != NULL; i++) {
+        if (is_kw(pr, REJECT[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* `pullup(w);` or `pulldown(w);`: a wire whose z bits read 1 or 0 (a weak driver: any other driver
+ * wins; strengths and delays on the gate are not parsed). */
+static bool parse_pull(parser *pr, uint8_t pull) {
+    pr->pos++;
+    if (!expect_op(pr, "(") || cur(pr)->kind != TK_ID) {
+        return fail(pr, "pullup/pulldown syntax (pullup(wire);)");
+    }
+    int var = find_var(pr, cur(pr)->text);
+    if (var < 0 || !pr->tb->vars[var].is_wire) {
+        return fail(pr, "pullup/pulldown of anything but a declared wire");
+    }
+    pr->tb->vars[var].pull = pull;
+    pr->pos++;
+    return expect_op(pr, ")") && expect_op(pr, ";");
+}
+
 static bool parse_item(parser *pr) {
     const tb_tok *tok = cur(pr);
     if (tok->kind != TK_ID) {
@@ -1980,14 +2030,11 @@ static bool parse_item(parser *pr) {
     if (is_kw(pr, "assign")) {
         return parse_assign_item(pr);
     }
-    static const char *const REJECT[] = {"genvar", "generate", "function", "real",    "time",
-                                         "string", "event",    "defparam", "specify", "input",
-                                         "output", "inout",    "and",      "or",      "nand",
-                                         "nor",    "xor",      "not",      "buf",     NULL};
-    for (size_t i = 0; REJECT[i] != NULL; i++) {
-        if (is_kw(pr, REJECT[i])) {
-            return fail(pr, tok->text);
-        }
+    if (is_kw(pr, "pullup") || is_kw(pr, "pulldown")) {
+        return parse_pull(pr, is_kw(pr, "pullup") ? TB_PULL_UP : TB_PULL_DOWN);
+    }
+    if (is_rejected_item(pr)) {
+        return fail(pr, tok->text);
     }
     return parse_instance(pr);
 }
