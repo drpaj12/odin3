@@ -1883,7 +1883,11 @@ static odin3_status call_invariant(void *arg) {
 /* odin3_abc_test_invariant inside a guarded call: OK while it holds; then {ASSERT, 0, "adapter:
  * adapters/abc/guard.c:<line>: o3test invariant"}, a clean return, and DISABLED afterwards. */
 static void child_invariant(void) {
-    static const char prefix[] = "adapter: adapters/abc/";
+    /* The path after "adapter: " is repository-relative ("adapters/abc/guard.c"), or, when ccache's
+     * base_dir turns the source path relative to the build directory before -fmacro-prefix-map
+     * can strip it, "../../adapters/abc/guard.c": both name the file. */
+    static const char prefix[] = "adapter: ";
+    static const char file[] = "adapters/abc/guard.c:";
     static const char suffix[] = ": o3test invariant";
     odin3_abc_fail fail;
     bool holds = true;
@@ -1896,6 +1900,7 @@ static void child_invariant(void) {
     size_t len = strlen(fail.text);
     bool framed = len > sizeof prefix + sizeof suffix &&
                   strncmp(fail.text, prefix, sizeof prefix - 1) == 0 &&
+                  strstr(fail.text, file) != NULL &&
                   strcmp(fail.text + len - (sizeof suffix - 1), suffix) == 0;
     child_check(framed, fail.text);
     printf("o3test: adapter assertion text: %s\n", fail.text);
