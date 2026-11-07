@@ -79,7 +79,10 @@ up to 4096 port connections. `%d` pads to the digit count of the width unless `%
 array (no `@addr` lines beyond the first form; `//` comments and `_` allowed); a missing file is an
 error. `$finish` ends the run; without it the run ends when no event is left or at `--max-time`
 (default 10,000,000 units). Any unsupported construct stops the pass with a located error
-`tb.v:LINE: unsupported: <construct>`.
+`tb.v:LINE: unsupported: <construct>`. With several testbench files, or `` `include `` in them, `sim_tb`
+joins the preprocessed streams; every error, warning and run-time message names the line of the
+file the text came from (the preprocessor's segment map: an included file by its own name and
+line, a macro use by the place of the use), not a line of the joined text.
 
 ## 3. Time and scheduling
 

@@ -77,24 +77,25 @@ static bool port_lookup(const odin3_sim *sim, const char *name, tb_conn *conn) {
  * port wider than one bit (the other bits would never be driven), and for too many clocks. */
 static bool bind_clock(tb_dut *dut, tb_conn *conn, uint32_t line) {
     const char *mod = dut->inst->module;
+    char where[TB_WHERE_MAX];
     for (uint32_t bit_no = 0; conn->width > 1 && bit_no < conn->width; bit_no++) {
         odin3_sim_bit high = {conn->sim_port, bit_no};
         if (odin3_sim_input_is_clock(dut->sim, high)) {
-            odin3_log(
-                ODIN3_LOG_ERROR,
-                "testbench:%u: module `%s` port `%s` is %u bits wide and bit %u is a clock; a "
-                "clock must be a one-bit port (split the port)",
-                line, mod, conn->port, conn->width, bit_no);
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s: module `%s` port `%s` is %u bits wide and bit %u is a clock; a "
+                      "clock must be a one-bit port (split the port)",
+                      tb_where("testbench", line, where, sizeof where), mod, conn->port,
+                      conn->width, bit_no);
             return false;
         }
     }
     odin3_sim_bit bit = {conn->sim_port, 0};
     if (odin3_sim_input_is_clock(dut->sim, bit)) {
         if (dut->nclocks == MAX_CLOCKS) {
-            odin3_log(
-                ODIN3_LOG_ERROR,
-                "testbench:%u: module `%s` has more than %d clock inputs; `%s` is one too many",
-                line, mod, MAX_CLOCKS, conn->port);
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s: module `%s` has more than %d clock inputs; `%s` is one too many",
+                      tb_where("testbench", line, where, sizeof where), mod, MAX_CLOCKS,
+                      conn->port);
             return false;
         }
         uint32_t start = dut->four_state ? (uint32_t)ODIN3_W4_X : (uint32_t)ODIN3_W4_0;
@@ -105,13 +106,14 @@ static bool bind_clock(tb_dut *dut, tb_conn *conn, uint32_t line) {
 
 static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
     const char *mod = dut->inst->module;
+    char where[TB_WHERE_MAX];
     if (conn->port[0] == '\0') {
         tb_error("testbench", line, "ordered port connections (use .port(expr))");
         return false;
     }
     if (!port_lookup(dut->sim, conn->port, conn)) {
-        odin3_log(ODIN3_LOG_ERROR, "testbench:%u: module `%s` has no input or output port `%s`",
-                  line, mod, conn->port);
+        odin3_log(ODIN3_LOG_ERROR, "%s: module `%s` has no input or output port `%s`",
+                  tb_where("testbench", line, where, sizeof where), mod, conn->port);
         return false;
     }
     if (conn->width > TB_MAX_WIDTH) {
@@ -131,17 +133,19 @@ static bool bind_conn(tb_dut *dut, tb_conn *conn, uint32_t line) {
 /* With several clock inputs a cell that has no clock pin (a global-clock `$_FF_`) belongs to none
  * of them, so no edge would ever reach it: refused, naming the DUT and the cell. */
 static bool check_global_clock(const tb_dut *dut) {
+    char where[TB_WHERE_MAX];
     const char *first = "";
     uint32_t count = odin3_sim_global_clock_cells(dut->sim, &first);
     if (dut->nclocks < 2 || count == 0) {
         return true;
     }
     odin3_log(ODIN3_LOG_ERROR,
-              "testbench:%u: DUT `%s` (module `%s`) has %u clock inputs and %u cell(s) with no "
+              "%s: DUT `%s` (module `%s`) has %u clock inputs and %u cell(s) with no "
               "clock pin (first: %s, a global clock, e.g. a BLIF `.latch` with no control); it "
               "would never be clocked. Give the latch a control (`.latch in out re clk 0`) or "
               "use one clock input",
-              dut->inst->line, dut->inst->name, dut->inst->module, dut->nclocks, count, first);
+              tb_where("testbench", dut->inst->line, where, sizeof where), dut->inst->name,
+              dut->inst->module, dut->nclocks, count, first);
     return false;
 }
 
@@ -188,11 +192,11 @@ odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst, bool four_state) {
     if (inst->sim != NULL) {
         return ODIN3_OK;
     }
+    char where[TB_WHERE_MAX];
     odin3_module_id id = {0};
     if (design == NULL || !find_module(design, inst->module, &id)) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "testbench:%u: no module `%s` in the design (read the DUT first)", inst->line,
-                  inst->module);
+        odin3_log(ODIN3_LOG_ERROR, "%s: no module `%s` in the design (read the DUT first)",
+                  tb_where("testbench", inst->line, where, sizeof where), inst->module);
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_sim_options opts = {0};
@@ -202,6 +206,7 @@ odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst, bool four_state) {
 
 odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_src_loc loc,
                             tb_hier_sig *out) {
+    char where[TB_WHERE_MAX];
     odin3_status st = tb_inst_sim(tb->design, inst, tb->four_state);
     if (st == ODIN3_OK && inst->sigs == NULL) {
         st = odin3_sim_signals_create(inst->sim, &inst->sigs);
@@ -216,16 +221,17 @@ odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_s
     if (sig == NULL) {
         if (st == ODIN3_OK) {
             odin3_log(ODIN3_LOG_ERROR,
-                      "%s:%u: DUT `%s` (module `%s`) has no signal `%s` (a memory word is not "
+                      "%s: DUT `%s` (module `%s`) has no signal `%s` (a memory word is not "
                       "readable by hierarchical path after lower; lowering turns it into a "
                       "register bank)",
-                      loc.file, loc.line, inst->name, inst->module, path);
+                      tb_where(loc.file, loc.line, where, sizeof where), inst->name, inst->module,
+                      path);
         }
         return st == ODIN3_OK ? ODIN3_ERR_INVALID_ARG : st;
     }
     if (sig->width > TB_MAX_WIDTH) {
-        odin3_log(ODIN3_LOG_ERROR, "%s:%u: signal `%s` of DUT `%s` is wider than 1024 bits",
-                  loc.file, loc.line, path, inst->name);
+        odin3_log(ODIN3_LOG_ERROR, "%s: signal `%s` of DUT `%s` is wider than 1024 bits",
+                  tb_where(loc.file, loc.line, where, sizeof where), path, inst->name);
         return ODIN3_ERR_INVALID_ARG;
     }
     *out = (tb_hier_sig){id, sig->width};

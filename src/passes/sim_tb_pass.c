@@ -1,7 +1,9 @@
 /* sim_tb_pass.c — the `sim_tb` pass: runs a Verilog testbench (subset, spec
  * docs/specs/2026-10-31-testbench-design.md) against the design's modules. */
+#include "ast/srcman.h"
 #include "frontends/verilog/preproc.h"
 #include "ir/design.h"
+#include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
@@ -213,10 +215,116 @@ static odin3_status intern_path(const odin3_design *design, const char *path, ui
     return odin3_strtab_intern(odin3_design_strtab(design), odin3_bytes_cstr(path), id);
 }
 
+/* One preprocessed file inside the joined text: its stream and the offset where it starts. */
+typedef struct join_part {
+    odin3_srcbuf_id stream;
+    size_t base;
+} join_part;
+
+/* The preprocessed streams, joined; map says, per joined line, the source file and line. */
+typedef struct tb_join {
+    char *text;
+    join_part parts[MAX_TB_FILES];
+    uint32_t n_parts;
+    tb_locmap map;
+    const char **files;
+    uint32_t *lines;
+} tb_join;
+
+static void tb_join_free(tb_join *join) {
+    free(join->text);
+    free((void *)join->files);
+    free(join->lines);
+}
+
+/* The segment-map cursors of the parts, to look locations up. */
+typedef struct locmap_ctx {
+    const odin3_srcman *sm;
+    const odin3_strtab *strtab;
+    odin3_srcman_cursor cursors[MAX_TB_FILES];
+} locmap_ctx;
+
+/* A byte of the joined text and the map entry of its line. */
+typedef struct line_pos {
+    size_t at;
+    uint32_t index;
+} line_pos;
+
+/* Sets entry `index` to the source file and line of the byte at joined offset `at`, if it has
+ * one. */
+static void set_origin(locmap_ctx *ctx, tb_join *join, line_pos pos) {
+    size_t at = pos.at;
+    uint32_t index = pos.index;
+    uint32_t part = 0;
+    while (part + 1U < join->n_parts && join->parts[part + 1U].base <= at) {
+        part++;
+    }
+    odin3_loc loc =
+        odin3_srcman_cursor_loc(&ctx->cursors[part], (uint32_t)(at - join->parts[part].base));
+    odin3_srcloc where = {0};
+    odin3_srcman_srcloc(ctx->sm, (odin3_range){loc, loc}, &where);
+    if (loc.v != 0 && where.file != 0) {
+        join->files[index] = odin3_strtab_get(ctx->strtab, where.file);
+        join->lines[index] = where.line;
+    }
+}
+
+static uint32_t count_lines(const char *text) {
+    uint32_t count = 1;
+    for (const char *ch = text; *ch != '\0'; ch++) {
+        count += *ch == '\n' ? 1U : 0U;
+    }
+    return count;
+}
+
+/* An entry with no location takes the one before it, one line on. */
+static void inherit_origin(tb_join *join, uint32_t row) {
+    if (join->files[row] == NULL && row > 0 && join->files[row - 1U] != NULL) {
+        join->files[row] = join->files[row - 1U];
+        join->lines[row] = join->lines[row - 1U] + 1U;
+    }
+}
+
+/* Fills join->map: one entry per line of the joined text. A line with no location of its own (a
+ * blank line the preprocessor made) takes the one before it, one line on. */
+static odin3_status build_locmap(odin3_design *design, tb_join *join) {
+    locmap_ctx ctx;
+    odin3_srcman *sm = NULL;
+    odin3_status st = odin3_design_get_srcman(design, &sm);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    ctx.sm = sm;
+    ctx.strtab = odin3_design_strtab(design);
+    uint32_t nlines = count_lines(join->text);
+    join->files = (const char **)calloc(nlines, sizeof *join->files);
+    join->lines = calloc(nlines, sizeof *join->lines);
+    if (join->files == NULL || join->lines == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t i = 0; i < join->n_parts; i++) {
+        odin3_srcman_cursor_init(&ctx.cursors[i], ctx.sm, join->parts[i].stream.v);
+    }
+    size_t from = 0;
+    for (uint32_t row = 0; row < nlines; row++) {
+        size_t at = from;
+        while (join->text[at] == ' ' || join->text[at] == '\t') {
+            at++;
+        }
+        set_origin(&ctx, join, (line_pos){at, row});
+        inherit_origin(join, row);
+        const char *eol = strchr(join->text + from, '\n');
+        from = eol != NULL ? (size_t)(eol - join->text) + 1U : strlen(join->text);
+    }
+    join->map = (tb_locmap){nlines, join->files, join->lines};
+    return ODIN3_OK;
+}
+
 /* Runs every testbench file through the Verilog preprocessor (macros, `ifdef, `include with the
  * -I directories, `timescale kept for the lexer), one preprocessor for all files so a `define
- * reaches the files after it, and joins the streams into *text (malloc'd, NUL-terminated). */
-static odin3_status preprocess_files(odin3_design *design, tb_args *args, char **text) {
+ * reaches the files after it, and joins the streams into join->text (malloc'd, NUL-terminated),
+ * with the map from joined lines back to file and line. */
+static odin3_status preprocess_files(odin3_design *design, tb_args *args, tb_join *join) {
     odin3_pp_define defs[MAX_DEFINES];
     for (uint32_t i = 0; i < args->n_defines; i++) {
         defs[i] = make_define(args->define[i]);
@@ -235,51 +343,29 @@ static odin3_status preprocess_files(odin3_design *design, tb_args *args, char *
         src.given = src.resolved;
         odin3_pp_stream stream;
         st = st != ODIN3_OK ? st : odin3_pp_run(pp, &src, &stream);
+        join->parts[join->n_parts++] = (join_part){stream.stream, all.len};
         st = st != ODIN3_OK ? st : odin3_strbuf_append(&all, stream.text);
         st = st != ODIN3_OK ? st : odin3_strbuf_append(&all, odin3_bytes_cstr("\n"));
     }
     odin3_pp_destroy(pp);
     if (st == ODIN3_OK) {
-        *text = malloc(all.len + 1U);
-        if (*text == NULL) {
+        join->text = malloc(all.len + 1U);
+        if (join->text == NULL) {
             st = ODIN3_ERR_NO_MEMORY;
         } else {
-            memcpy(*text, all.data, all.len);
-            (*text)[all.len] = '\0';
+            memcpy(join->text, all.data, all.len);
+            join->text[all.len] = '\0';
         }
     }
     odin3_strbuf_free(&all);
-    return st;
+    return st != ODIN3_OK ? st : build_locmap(design, join);
 }
 
-static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
-                               void *user) {
-    (void)ctx;
-    (void)user;
-    tb_args *parsed = calloc(1, sizeof *parsed);
-    if (parsed == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    odin3_status st = parse_args(args, parsed);
-    char *text = NULL;
-    st = st != ODIN3_OK ? st : preprocess_files(design, parsed, &text);
-    if (st != ODIN3_OK) {
-        free(parsed);
-        return st;
-    }
-    tb_module *tb = NULL;
-    tb_source src = {parsed->file[0], text, design, !parsed->two_state};
-    st = tb_parse(&src, parsed->top[0] != '\0' ? parsed->top : NULL, &tb);
-    free(text);
-    if (st != ODIN3_OK) {
-        free(parsed);
-        return st;
-    }
+/* Runs the parsed testbench and writes its output (stdout or --out). */
+static odin3_status run_parsed(odin3_design *design, const tb_args *parsed, tb_module *tb) {
     FILE *out = parsed->out[0] != '\0' ? fopen(parsed->out, "w") : stdout;
     if (out == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "sim_tb: cannot write `%s`", parsed->out);
-        tb_module_free(tb);
-        free(parsed);
         return ODIN3_ERR_IO;
     }
     tb_options opts = {parsed->max_time,
@@ -299,17 +385,40 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         opts.namer_ctx = &names;
     }
     uint64_t end_time = 0;
-    st = tb_run(design, tb, &opts, &end_time);
+    odin3_status st = tb_run(design, tb, &opts, &end_time);
     odin3_sim_netnames_free(&names);
     (void)fflush(out);
     if (out != stdout) {
         (void)fclose(out);
     }
-    tb_module_free(tb);
-    free(parsed);
     if (st == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO, "sim_tb: finished at time %llu", (unsigned long long)end_time);
     }
+    return st;
+}
+
+static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
+                               void *user) {
+    (void)ctx;
+    (void)user;
+    tb_args *parsed = calloc(1, sizeof *parsed);
+    if (parsed == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = parse_args(args, parsed);
+    tb_join join = {0};
+    st = st != ODIN3_OK ? st : preprocess_files(design, parsed, &join);
+    tb_module *tb = NULL;
+    if (st == ODIN3_OK) {
+        tb_source src = {parsed->file[0], join.text, design, !parsed->two_state};
+        tb_set_locmap(&join.map);
+        st = tb_parse(&src, parsed->top[0] != '\0' ? parsed->top : NULL, &tb);
+    }
+    st = st != ODIN3_OK ? st : run_parsed(design, parsed, tb);
+    tb_module_free(tb);
+    tb_set_locmap(NULL);
+    tb_join_free(&join);
+    free(parsed);
     return st;
 }
 

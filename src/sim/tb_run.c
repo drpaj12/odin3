@@ -66,7 +66,9 @@ typedef struct run {
 
 static void rfail(run *rt, const tb_stmt *stmt, const char *msg) {
     if (!rt->failed) {
-        odin3_log(ODIN3_LOG_ERROR, "testbench:%u: %s", stmt != NULL ? stmt->line : 0U, msg);
+        char where[TB_WHERE_MAX];
+        odin3_log(ODIN3_LOG_ERROR, "%s: %s",
+                  tb_where("testbench", stmt != NULL ? stmt->line : 0U, where, sizeof where), msg);
     }
     rt->failed = true;
 }
@@ -793,11 +795,13 @@ static void warn_races(run *rt, uint64_t when) {
             continue;
         }
         rt->raced[rt->n_raced++] = pr->slept;
+        char where[TB_WHERE_MAX];
         odin3_log(
             ODIN3_LOG_WARN,
-            "tb race: the delay at line %u wakes at time %llu together with a process that "
+            "tb race: the delay at %s wakes at time %llu together with a process that "
             "is earlier in the source; they run in the order they went to sleep, as in iverilog",
-            pr->slept != NULL ? pr->slept->line : 0U, (unsigned long long)when);
+            tb_where("testbench", pr->slept != NULL ? pr->slept->line : 0U, where, sizeof where),
+            (unsigned long long)when);
     }
 }
 

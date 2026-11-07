@@ -237,6 +237,21 @@ typedef struct tb_source {
     bool four_state;      /* see tb_module.four_state; false: the 2-state interpreter */
 } tb_source;
 
+/* Maps a line of the joined, preprocessed testbench text to its source file and line (sim_tb joins
+ * several files and expands `include, so the joined line is not the file's line). file[k], line[k]
+ * belong to joined line k + 1; a NULL file means unknown. Borrowed by tb_set_locmap until it is
+ * called again with NULL. Used by error and warning texts only. */
+typedef struct tb_locmap {
+    uint32_t nlines;
+    const char **file;
+    const uint32_t *line;
+} tb_locmap;
+enum { TB_WHERE_MAX = 600 };
+void tb_set_locmap(const tb_locmap *map);
+/* "file:line" for a joined line, written to buf (size bytes) and returned. With no map: the
+ * fallback name and the line as given. */
+const char *tb_where(const char *fallback, uint32_t line, char *buf, size_t size);
+
 /* Parses src and picks the top: name, or the first module when NULL.
  * ODIN3_ERR_INVALID_ARG (logged "file:line: unsupported: ...") for a parse failure. */
 odin3_status tb_parse(const tb_source *src, const char *top, tb_module **out);
