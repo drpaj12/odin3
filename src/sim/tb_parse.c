@@ -2006,10 +2006,16 @@ static bool parse_pull(parser *pr, uint8_t pull) {
         return fail(pr, "pullup/pulldown syntax (pullup(wire);)");
     }
     int var = find_var(pr, cur(pr)->text);
+    if (var < 0) { /* an undeclared name is an implicit one-bit wire (IEEE 1364 4.5) */
+        var = add_var(pr, cur(pr)->text, (var_shape){1, false, true});
+    }
     if (var < 0 || !pr->tb->vars[var].is_wire) {
-        return fail(pr, "pullup/pulldown of anything but a declared wire");
+        return fail(pr, "pullup/pulldown of anything but a wire");
     }
     pr->tb->vars[var].pull = pull;
+    if (pr->tb->four_state) { /* the wire starts z: it now reads as pulled */
+        tb_var_fill(&pr->tb->vars[var], (uint32_t)ODIN3_W4_Z);
+    }
     pr->pos++;
     return expect_op(pr, ")") && expect_op(pr, ";");
 }
