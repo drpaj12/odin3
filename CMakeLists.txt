@@ -3689,6 +3689,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_tb_default
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(sim_tb_default PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # sim_tb refusals name the source file and line of a joined, `include-expanded testbench.
+    add_test(NAME sim_tb_diag
+        COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_tb_diag
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_tb_diag PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # Phase 7 Task 9 (spec 3.5): plugins/python/re_round.py, one round of the RE loop, through
     # the CLI and equiv-check (needs the linked ABC for cone_check and equiv-check).
     if(ODIN3_WITH_ABC)

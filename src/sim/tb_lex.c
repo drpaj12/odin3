@@ -3,6 +3,7 @@
 #include "util/log.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -40,8 +41,28 @@ void *tb_alloc(tb_module *tb, size_t size) {
     return ptr;
 }
 
+static const tb_locmap *g_locmap; /* borrowed from sim_tb_pass for one run; NULL: none */
+
+void tb_set_locmap(const tb_locmap *map) {
+    g_locmap = map;
+}
+
+/* "file:line" of a line of the joined, preprocessed text: the source file and line the map holds,
+ * else `fallback` and the line itself. */
+const char *tb_where(const char *fallback, uint32_t line, char *buf, size_t size) {
+    if (g_locmap != NULL && line >= 1U && line <= g_locmap->nlines &&
+        g_locmap->file[line - 1U] != NULL) {
+        (void)snprintf(buf, size, "%s:%u", g_locmap->file[line - 1U], g_locmap->line[line - 1U]);
+    } else {
+        (void)snprintf(buf, size, "%s:%u", fallback, line);
+    }
+    return buf;
+}
+
 void tb_error(const char *file, uint32_t line, const char *what) {
-    odin3_log(ODIN3_LOG_ERROR, "%s:%u: unsupported: %s", file, line, what);
+    char where[TB_WHERE_MAX];
+    odin3_log(ODIN3_LOG_ERROR, "%s: unsupported: %s", tb_where(file, line, where, sizeof where),
+              what);
 }
 
 static int digit_value(char ch) {
