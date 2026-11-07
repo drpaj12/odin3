@@ -13,9 +13,17 @@ odin3 -p "read_verilog dut.v; proc; opt; lower; sim_tb --out run.txt tb.v"
 ```
 
 For a netlist DUT use `read_blif dut.blif` (or `read_json`) instead of the first four commands.
+Values have four states (0, 1, x, z) as in iverilog: regs, integers and memories start x, wires z,
+and the DUT's registers are x until reset. When a testbench prints the DUT before or around reset,
+read it with `lower --keep-sel` (`read_verilog dut.v; proc; opt; lower --keep-sel; sim_tb ...`):
+an `if` or `case` with an x select then takes its else or default branch as in the RTL, where plain
+`lower` turns the select into gates that propagate x.
 Options: `--top <module>` (the testbench module, default the first), `--max-time N` (default
 10,000,000 time units), `--seed N` (the seed of `$random`), `--out <file>` (the `$display` text;
-default stdout), `--vcd <file>` (a waveform, below). Python: `design.run("sim_tb --out run.txt tb.v")`
+default stdout), `--vcd <file>` (a waveform, below), `--4state` (x and z values: regs
+start x, the DUT is a 4-state simulator, as iverilog; best with `lower --keep-sel`; the default is
+2-state: every value starts 0 and the DUT is simulated with 0 and 1 only; `--2state` is accepted and
+changes nothing). Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
 Several files and directives: `sim_tb a.v b.v ...` joins the files (after the Verilog preprocessor,
@@ -25,11 +33,13 @@ macro. `--top` picks the testbench module among the joined files; the other modu
 `` `timescale`` is read; `` `default_nettype``, `` `celldefine`` and similar are ignored. Messages
 give line numbers of the joined, preprocessed text of the first file's name.
 
+Tasks: `task name; input/output/inout ...; begin ... end endtask` (and the ANSI form `task name(input [7:0] a, output b);`) can be declared and called as statements, also with delays inside. Arguments are static variables of the testbench: inputs are copied in at the call and outputs copied back when the task ends; there is no recursion or `automatic` storage, and no `function`.
+
 Plusargs: `--plusarg name=value` (repeatable, up to 16; a leading `+` is dropped) is read by
 `$test$plusargs("name")` (1 when a plusarg starts with the text) and `$value$plusargs("name=%d", var)`
 (conversions `d`, `h`/`x`, `b`, `o`, `s`; the call is 1 and `var` is set when a plusarg starts with the text
 before the `%` and its rest parses in that conversion, else 0 and `var` is unchanged). A `%s` value keeps its
-first 8 bytes (the testbench subset has no vector wider than 64 bits). `run_testbenches` takes `--plusarg`
+first 8 bytes. `run_testbenches` takes `--plusarg`
 too. A file name from a variable (`$readmemh(firmware_file, ...)`) is not supported.
 
 ## Waveform (`--vcd`)
@@ -37,7 +47,7 @@ too. A file name from a variable (`$readmemh(firmware_file, ...)`) is not suppor
 `sim_tb --vcd wave.vcd tb.v` writes an IEEE 1364 VCD of the run. It holds every scalar `reg`,
 `wire` and `integer` of the testbench (arrays and parameters are left out) under `$scope module
 <testbench>`, and the ports of each DUT instance that the testbench connects, under a nested
-`$scope module <instance>`. Values are 2-state (0 and 1). The `$timescale` is the testbench's
+`$scope module <instance>`. Values are 0, 1, x and z, vectors of any width. The `$timescale` is the testbench's
 `` `timescale `` unit (`1ns` when it has none), and the time stamps are the testbench time units.
 The file starts with a `#0` `$dumpvars` block, then one `#<time>` block for each time step in
 which a dumped signal changed; a signal is written with the value it has when the step ends, so a
@@ -49,24 +59,31 @@ iverilog (`$dumpvars(0, tb)` on the same testbench) with `tools/vcd-compare/vcd-
 One testbench module without ports per file, with `reg`/`wire`/`integer`/array declarations,
 `parameter`, `assign`, `initial`, `always` (starting with `#`, `@` or `wait`), blocking and
 nonblocking assignments, `#N`, `@(posedge|negedge|change ...)`, `wait`, `if`, `case`, `for`,
-`while`, `repeat`, `forever`, DUT instances with named port connections (up to 4096), `%t` in `$display`/`$write` (the time in
+`while`, `repeat`, `forever`, `casez`, `casex`, x and z digits in numbers (`4'b1x0z`, `'bx`,
+`?` in `casez` labels), `===` and `!==`, `**`, DUT instances with named port connections (up to 4096), `%t` in `$display`/`$write` (the time in
 the `` `timescale `` precision, 20 columns), `$display`, `$write`,
 `$strobe`, `$monitor`, `$fopen`, `$fdisplay`, `$fwrite`, `$fclose`, `$readmemh`, `$readmemb`,
 `$finish`, `$stop`, `$time`, `$random`, `$signed`, `$unsigned`, `$clog2`. A DUT instance may have up to 16
 independent clock inputs, and an expression may read a DUT signal by hierarchical path (`dut.u_regs.r`,
 `dut.u.v[3]`, literal indices; read only; not a memory word, which has no name after `lower`; no part-selects; a multi-bit DUT port may not carry a clock; with several clocks every register needs a clock pin, so a BLIF `.latch` needs a control). Values are at
-most 64 bits wide. Anything else stops the run with `tb.v:LINE: unsupported: <construct>`: x/z literals,
-real numbers, tasks and functions, generate, parameter overrides on the DUT
+most 1024 bits wide (signals, literals, concatenations, DUT ports, hierarchical reads). A wire
+with several drivers (two `assign`s, an `assign` and a DUT output) takes the resolution of them: z
+gives way, equal values stay, a 0 against a 1 or an x gives x. Anything else stops the run with
+`tb.v:LINE: unsupported: <construct>`: real numbers, tasks and functions, generate, parameter overrides on the DUT
 instance, ordered port connections, several modules in the testbench file, compiler directives
 other than `` `timescale ``.
 
 ## What is not modelled
 
-The simulator is 2-state and cycle-based. The DUT powers on with all state 0 (iverilog starts at
-x), so reset the DUT before printing its outputs. Gate or `#` delays in the DUT are not seen. The
+The DUT simulator is cycle-based. Gate or `#` delays in the DUT are not seen. A tri-state buffer
+inside the DUT (`assign y = oe ? d : 'bz;`) is lowered to a plain driver of `d` by `lower` (as
+Parmys does, with a warning), so its output is not z while `oe` is low; the testbench side of a
+tri-state bus (several `assign`s) is resolved exactly. An x in the DUT after `opt` or `lower` may be
+more pessimistic than iverilog's RTL (a `?:` or a lowered `if` merges both sides). The
 DUT must have at most one clock input, a primary input of the DUT; its registers may be clocked by
 nets derived from it (divided, gated or muxed clocks: `tests/tb/micro/dclk.v`, equal to iverilog), which
-the simulator evaluates after each input change and each edge. Divide by zero gives 0.
+the simulator evaluates after each input change and each edge. Divide by zero gives x, as
+in iverilog (it gave 0 before 2026-11-06).
 
 Asynchronous resets: `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
 VTR architecture's flip-flop (`.latch`) has no set or reset pin. `sim_tb` runs the lowered netlist, so

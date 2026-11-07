@@ -161,7 +161,8 @@ static void test_line_errors(void) {
 /* --- SystemVerilog operators (PP-9) and stray backticks ------------------------------------ */
 
 static void test_sv_operators_in_text(void) {
-    static const char tail[] = " is a SystemVerilog macro operator; not Verilog-2005 (Phase 5)";
+    static const char tail[] =
+        " is a SystemVerilog macro operator; it only means something in a macro body";
     static const struct {
         const char *text;
         const char *op;
@@ -170,8 +171,6 @@ static void test_sv_operators_in_text(void) {
         {"wire a``b;\n", "``", 7},
         {"x = `\"s`\";\n", "`\"", 5},
         {"x = `\\`\"s`\\`\";\n", "`\\`\"", 5},
-        {"x = `__FILE__;\n", "`__FILE__", 5},
-        {"x = `__LINE__;\n", "`__LINE__", 5},
     };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         char want[MSG_MAX];

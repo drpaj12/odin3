@@ -255,6 +255,11 @@ uint32_t odin3_pp_plain_length(const odin3_pp *pp, bool brackets);
 odin3_status odin3_pp_add_buffer(odin3_pp *pp, const odin3_pp_bufspec *spec, odin3_loc at,
                                  odin3_srcbuf_id *out);
 
+/* Makes a SCRATCH buffer of len bytes whose parent is at (the macro use or directive that made
+ * the text) and stores the loc of its offset 0 in *loc. The bytes are generated: they spell
+ * nowhere, so pp_check does not compare them with a file. */
+odin3_status odin3_pp_scratch(odin3_pp *pp, odin3_loc at, uint32_t len, odin3_loc *loc);
+
 /* The chain length of the buffer holding loc (0 for a FILE or a buffer of an earlier run). */
 uint32_t odin3_pp_chain_of(const odin3_pp *pp, odin3_loc loc);
 

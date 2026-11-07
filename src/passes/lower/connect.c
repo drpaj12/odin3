@@ -30,6 +30,7 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     lw->prefix_set = false;
     lw->prov = (odin3_prov_id){0};
     lw->keep_value = NULL;
+    lw->rtl_value = NULL;
     odin3_prov_begin_op_class(lw->pass, &lower_class);
     odin3_prov_id parent = odin3_node_prov(lw->module, node);
     if (odin3_prov_valid(parent)) {
@@ -42,6 +43,10 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     if (lw->keep_key != 0) {
         lw->keep_value =
             odin3_attr_get(lw->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, lw->keep_key);
+    }
+    if (lw->rtl_key != 0) {
+        lw->rtl_value =
+            odin3_attr_get(lw->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, lw->rtl_key);
     }
     return ODIN3_OK;
 }

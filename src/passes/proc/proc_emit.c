@@ -476,6 +476,12 @@ static odin3_status cb_attrs(const cell_build *cb, odin3_node_id node) {
         const odin3_pw_attr *attr = odin3_vec_cat(&from->attrs, i);
         st = odin3_attr_set(cb->mctx->module, ref, attr->key, attr->value);
     }
+    if (st == ODIN3_OK && (cb->cell->switch_flags & ODIN3_PROC_CELL_RTL_SEL) != 0) {
+        uint32_t key = 0;
+        odin3_value on = odin3_value_int(1);
+        st = odin3_design_intern(cb->mctx->design, odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL), &key);
+        st = st == ODIN3_OK ? odin3_attr_set(cb->mctx->module, ref, key, &on) : st;
+    }
     static const char *const k_flag_names[] = {"full_case", "parallel_case"};
     static const uint16_t k_flags[] = {ODIN3_SWITCH_FULL_CASE, ODIN3_SWITCH_PARALLEL_CASE};
     odin3_value one = odin3_value_int(1);

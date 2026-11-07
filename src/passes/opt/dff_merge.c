@@ -362,6 +362,32 @@ static odin3_status group_control(merge_job *job, const group *grp, ctrl *contro
                         : patterns_logic(job->ds, key, control);
 }
 
+/*
+ * The attribute rtl_sel of a group FF (design note addendum 1): set (1) when the muxes it absorbed
+ * or the old FF carry it and no absorbed mux would take an unknown select to the active side;
+ * cleared when one would (the FF then merges an x control like a ?: does). The simulator reads it
+ * as: an unknown enable or synchronous reset is inactive (if/else with an x condition).
+ */
+static odin3_status group_rtl_mark(const merge_job *job, const group *grp, odin3_node_id out) {
+    const odin3_dff_state *ds = job->ds;
+    const uint32_t *bits = (const uint32_t *)job->gr.members.data + grp->start;
+    bool bad = false;
+    bool any = odin3_kit_rtl_sel(ds->oc, ds->cell) != 0;
+    for (uint32_t k = 0; k < grp->count; k++) {
+        const odin3_dff_bitplan *bp = plan_bit(job->plan, bits[k]);
+        bad = bad || bp->rtl_bad;
+        for (uint32_t wi = 0; wi < bp->node_len; wi++) {
+            uint32_t node = (uint32_t)((const uint64_t *)job->plan->nodes.data)[bp->node_off + wi];
+            any = any || odin3_kit_rtl_sel(ds->oc, (odin3_node_id){node}) != 0;
+        }
+    }
+    bool mark = any && !bad;
+    if (mark || odin3_kit_rtl_sel(ds->oc, out) != 0) {
+        return odin3_kit_set_rtl_sel(ds->oc, out, mark ? 1 : 0);
+    }
+    return ODIN3_OK;
+}
+
 /* Makes group gidx: its gates, then its FF (a second driver on the Q nets). */
 static odin3_status group_emit(merge_job *job, uint32_t gidx) {
     odin3_dff_state *ds = job->ds;
@@ -379,6 +405,7 @@ static odin3_status group_emit(merge_job *job, uint32_t gidx) {
     }
     /* the old node's attributes (keep included) go on every group FF, before the old node goes */
     st = st == ODIN3_OK ? odin3_kit_copy_attrs(ds->oc->module, ds->cell, out) : st;
+    st = st == ODIN3_OK ? group_rtl_mark(job, grp, out) : st;
     odin3_ffdata_free(&nf);
     ds->prov_ready = false;
     return st;

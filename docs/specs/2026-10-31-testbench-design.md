@@ -37,23 +37,35 @@ Continuous: `assign w = expr;` for a wire (re-evaluated whenever any TB signal c
 DUT instances: `dut_mod [#(...)] inst (.p(expr), ...);` or ordered. Parameter overrides are
 rejected (the DUT is already elaborated). Input port connection: any expression (re-evaluated
 at every sync). Output port connection: an identifier of a wire or reg of the testbench (width
-is truncated or zero-extended). Ports wider than 64 bits and inout ports: rejected. A DUT with
-more than one clock bit is rejected (one clock: section 4). Unconnected inputs are 0.
+is truncated or zero-extended). Ports wider than 1024 bits and inout ports: rejected. A DUT with
+more than one clock bit is rejected (one clock: section 4). Unconnected inputs are x with `--4state` (0
+by default).
 
 Procedural: `initial stmt`, `always stmt` (an `always` must wait: begin with `#`, `@` or `wait`,
 else rejected as a zero-delay loop). Statements: `begin..end` (names allowed), `=`, `<=`
 (nonblocking; no intra-assignment delay), `#N stmt;`, `#N;`, `@(posedge|negedge|any a [or b ...])`,
-`@(a, b)`, `@*` (rejected), `wait(expr)`, `if/else`, `case` (`casez`/`casex` rejected: no x),
+`@(a, b)`, `@*` (rejected), `wait(expr)`, `if/else`, `case`, `casez`, `casex`,
 `for`, `while`, `repeat`, `forever`, `disable` (rejected), system tasks. LHS: identifier, bit
 select, part select (constant), `mem[i]`, concatenation of those.
 
-Expressions (2-state; widths and signedness follow IEEE 1364-2005 5.4/5.5 for the operators
-below): sized/unsized numbers in b/o/d/h (`x`/`z` digits rejected), string literals (only as
-`$display` arguments), identifiers, `a[i]`, `a[h:l]`, `m[i]`, `{a,b}`, `{n{a}}`, unary
-`+ - ~ ! & | ^ ~& ~| ~^`, binary `+ - * / % & | ^ ~^ << >> <<< >>> < <= > >= == != === !== && ||`,
-`?:`, `$time`, `$random`, `$random(seed_var)`, `$urandom` (same stream as `$random`), `$signed`,
-`$unsigned`, `$clog2`. Real numbers and `**` are rejected. `/` or `%` by 0 gives 0 (iverilog
-gives x; documented difference D-2). Values are at most 64 bits.
+Expressions (4-state with `--4state` since 2026-11-06; the default stays 2-state until every
+design that passes 2-state also passes 4-state, design note `docs/specs/2026-11-05-sim-4state-design.md`
+section 5; widths and signedness follow IEEE 1364-2005 5.4/5.5 for the operators below):
+sized/unsized numbers in b/o/d/h with `x`, `z` and `?` digits (a leading x or z digit pads with x
+or z; an unsized `'bx` fills its context), string literals (only as `$display` arguments),
+identifiers, `a[i]`, `a[h:l]`, `m[i]`, `{a,b}`, `{n{a}}`, unary `+ - ~ ! & | ^ ~& ~| ~^`, binary
+`+ - * / % ** & | ^ ~^ << >> <<< >>> < <= > >= == != === !== && ||`, `?:`, `$time`, `$random`,
+`$random(seed_var)`, `$urandom` (same stream as `$random`), `$signed`, `$unsigned`, `$clog2`. Real
+numbers are rejected. x and z follow the table of the design note: any unknown operand bit of an
+arithmetic operator gives all x, `/` or `%` by 0 gives x, `==` gives x unless a known bit differs,
+`===` compares the four states, `?:` with an unknown condition merges both sides, a select with an
+unknown or out-of-range index reads x and a write through one is dropped, an `if`/`while`/`for`/
+`wait` condition that is x is false, `repeat` of an unknown count runs 0 times (IEEE; iverilog
+loops), `case` compares with `===`, `casez` ignores z and `?` bits, `casex` x and z bits. Values
+are at most 1024 bits (`TB_MAX_WIDTH`). A reg, integer or memory starts x, a wire z (an undriven
+wire); a wire with several drivers (assigns, DUT outputs) is their resolution (z yields, a 0/1
+clash is x). Without `--4state` (the default) everything starts 0 and the DUT is a
+2-state simulator (x/z literals still evaluate 4-state); `--2state` is accepted and changes nothing.
 
 System tasks: `$display $write $strobe $monitor $monitoroff/on $fdisplay $fwrite $fopen $fclose
 $finish $stop $readmemh $readmemb $dumpfile $dumpvars` (the last two are accepted and ignored: use
@@ -89,10 +101,14 @@ expressions are evaluated; changed non-clock inputs are applied and the DUT is s
 (sampling the inputs as settled just before), 1 to 0 the NEGEDGE. The outputs after the settle are
 published at the end of the active region. The clock must be a primary input of the DUT (a derived
 clock is rejected by the simulator, S1 rule). Not modelled: gate or `#` delays inside the DUT
-(`#` in DUT RTL are not seen: the DUT is the elaborated design), x and z (2-state: the DUT powers
-on with all state 0, where iverilog has x before the first reset, so a testbench must reset before
-it prints; the generator does), strengths, `timescale` inside the DUT, multiple clock domains
-with independent phases, asynchronous glitches.
+(`#` in DUT RTL are not seen: the DUT is the elaborated design), strengths, `timescale` inside the
+DUT, multiple clock domains with independent phases, asynchronous glitches. With `--4state` (2026-11-06) the
+DUT is a 4-state simulator (`odin3_sim_options.four_state`): its registers are x before the first
+reset or edge, as in iverilog; the clock edge follows the 4-state rule of `@(posedge)` (0 to x and x
+to 1 are posedges; the DUT's own clock input stays 0/1). For x-bearing benches read the DUT with
+`proc; opt; lower --keep-sel`, so `if`/`case` selects keep their RTL meaning (an x select takes the
+else/default side) where plain `lower` makes them gates that propagate x. Without `--4state` the DUT is the
+2-state simulator (all state 0 at power-on).
 
 ## 5. `testbench_gen`
 
@@ -110,7 +126,7 @@ order (so the vector file is a plain stimulus file and also feeds other tools), 
 `$readmemh` into per-input arrays. Each cycle: apply the vector at the falling edge, sample the
 outputs just before the next rising edge and `$display("%0d %h %h ...", cycle, outs...)`, so the
 capture is one line per cycle with the cycle number first. Ports wider than 64 bits are an error
-(D-4; next step: wide values). Random vectors come from the C `odin3_prng` in the generator, not
+of the generator (D-4; `sim_tb` itself takes ports up to 1024 bits since 2026-11-06). Random vectors come from the C `odin3_prng` in the generator, not
 from `$random`, so the stimulus is identical for every simulator.
 
 ## 6. `tools/tb-compare`
@@ -135,13 +151,16 @@ Results are in the PR description and `docs/user/testbench.md`.
 ## 8. Agent defaults, deviations from sections 1 to 7 as built, next step
 
 Agent defaults: D-1 pass named `sim_tb`, generator `testbench_gen`, compare is a Python tool (not a
-pass). D-2 divide by zero is 0. D-3 detection heuristics as in section 5. D-4 64-bit value limit
-(testbench values, DUT ports, generator ports). D-5 the testbench file holds exactly one module.
+pass). D-2 divide by zero is 0 (until 2026-11-06; now x, as iverilog). D-3 detection heuristics as
+in section 5. D-4 64-bit value limit (testbench values, DUT ports, generator ports; since 2026-11-06
+1024 bits for testbench values and DUT ports, the generator keeps 64). D-5 the testbench file holds
+exactly one module.
 
 Deviations from the text above, as built (2026-10-31):
 1. `--dut-netlist` is not a flag: read the netlist first (`read_blif f.blif; sim_tb tb.v`).
 2. `--vcd <file>` (added 2026-10-31, `src/sim/tb_vcd.c`): dumps the testbench's scalar regs, wires and
-   integers and the connected ports of each DUT instance (scope per instance), 2-state, with the
+   integers and the connected ports of each DUT instance (scope per instance), with x and z and any
+   width since 2026-11-06, with the
    end-of-time-step value of each change; `$timescale` from the testbench (`1ns` when absent).
    Gate `tb_vcd` against iverilog's `$dumpvars` VCD (`tools/vcd-compare`).
 3. Ranges must be `[h:0]` (and arrays `[0:N]`); ordered port connections are rejected (named only).
@@ -154,7 +173,7 @@ Deviations from the text above, as built (2026-10-31):
    arguments after a format string are appended in default decimal, a missing argument prints
    `<%d>`, `%0Nd` zero pads, `$finish` runs the postponed region (`$monitor`, `$strobe`) of its
    time step. `$finish` itself prints nothing here (vvp's "$finish called" line is not compared).
-7. A DUT port wider than 64 bits is rejected, as listed in section 2. Since 2026-11-02 a DUT may have
+7. A DUT port wider than 1024 bits is rejected, as listed in section 2. Since 2026-11-02 a DUT may have
    up to 16 clock inputs and a hierarchical name may be read (see 7a, 7b).
 7a. Several clocks (`src/sim/tb_dut.c`, `odin3_sim_clock_edges` in `src/sim/eval.c`): each clock port
    of a DUT instance is observed on its own; its edges, recorded in order, are replayed in the NBA region
@@ -169,12 +188,26 @@ Deviations from the text above, as built (2026-10-31):
    where `inst` is a DUT instance of the testbench (declared before or after the use: the parser makes a
    first pass for the instance items and resolves the names in a second). The path is looked up in the
    DUT's signal table (`odin3_sim_signals_find`, the S1 rules of `docs/specs/2026-10-21-s1-sim-api-design.md`
-   SA-5), at parse time because the width is needed; the value is the last settled one (2-state). Refused,
-   with a located error: a write or `$readmemh` to such a name, a variable index, a first part that is not
-   a DUT instance, a signal the netlist does not have, a signal wider than 64 bits. After `lower`, the words
+   SA-5), at parse time because the width is needed; the value is the last settled one (with x and z).
+   Refused, with a located error: a write or `$readmemh` to such a name, a variable index, a first part
+   that is not a DUT instance, a signal the netlist does not have, a signal wider than 1024 bits. After
+   `lower`, the words
    of a memory have no names in the netlist (`u.mem[2]` is not a signal), so a memory word cannot be read (the
    error says so). Part-selects of a hierarchical read (`u.r[3:0]`) are not supported; read the whole signal
    or a literal bit. Errors carry the testbench file name and the line of the offending read.
+
+7c. 4-state values (2026-11-06, design note `docs/specs/2026-11-05-sim-4state-design.md` sections 2,
+   5, 6): values are two limb planes (`tbv` in `src/sim/tb.h`, operators in `src/sim/tb_ops.c`, fills,
+   fields and digits in `src/sim/tb_val.c`) of up to 1024 bits, one limb for 64 bits or fewer.
+   `$display`: `%b` prints x/z per bit; `%h`/`%o` a digit whose bits are all x prints `x`, all z `z`, a
+   mix with an x `X`, else `Z`; `%d` (and `%t`) prints `x`, `z`, `X` or `Z` in the field width of a
+   known value; `%c`/`%s` use the known bits (x and z as 0), all as iverilog 12. `$readmemh/b` take x/z
+   digits (a short word is zero-padded). `@(posedge s)` fires on 0 to 1, 0 to x/z, x/z to 1 of bit 0 and
+   `@(s)` on any 4-state change. A tri-state buffer inside the DUT is lowered to a plain driver by `lower`
+   (Parmys behaviour, warned), and `sim_tb` before `lower` refuses `$tribuf` (no simulator model yet), so
+   a DUT output cannot be z unless it passes a z input through. Micros (all equal to iverilog):
+   `tests/tb/micro/x*_tb.v`; the x micros run with `--4state`, the others in the default 2-state mode (ctest `tb_micros`,
+   `tb_micros_2state`).
 
 Gate results (2026-10-31, debug build, iverilog 12.0; tests in `tests/tb/`):
 (a) micros: comb, counter, fsm, mem (with `$readmemh`), misc (format, `$monitor`, `$strobe`,

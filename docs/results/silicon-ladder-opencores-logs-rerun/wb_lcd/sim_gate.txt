@@ -1,0 +1,4 @@
+gate_sim rc=0
+WARNING gate_sim: the run from an X start state fails; starting every flip-flop at 0 and at 1 both pass: X pessimism of the gate simulation, not a functional difference
+gate_sim: x-pessimism
+VERDICT x-pessimism: X start fails; 0 start and 1 start pass

@@ -167,11 +167,13 @@ class RestoreExtra(unittest.TestCase):
             "bm_stmt_compare_padding", "json", first, steps="proc; flatten; hardmap; lower; "
         )
         self.assertFalse([x for x in lines(names_of(first)) if x.startswith("Q\t")])
+        # the record of the first object: it stays reachable (and keeps its number) in the rewrite
+        rec = next(x.split("\t")[8] for x in lines(names_of(first)) if x.startswith("O\t"))
         basis = "why=r,objective=i,gain=r,pcrit=r,rho=r,slack=r,near=r,npaths=r"
         enriched = [
-            f"Q\tr3\tSC:0.500,FL:0.500\tnorns-pack\tseed:1.000\t0.900\t1.000\t-1.000\t5:1,10:1\t"
+            f"Q\t{rec}\tSC:0.500,FL:0.500\tnorns-pack\tseed:1.000\t0.900\t1.000\t-1.000\t5:1,10:1\t"
             f"5:2,10:3\t2\t{basis}\t-",
-            "K\tr3\tm\t0.900\t1.000\t-1.000\tpcrit=r,rho=r,slack=r\t-",
+            f"K\t{rec}\tm\t0.900\t1.000\t-1.000\tpcrit=r,rho=r,slack=r\t-",
         ]
         with names_of(first).open("a") as handle:
             handle.write("\n".join(enriched) + "\n")
@@ -187,8 +189,13 @@ class RestoreExtra(unittest.TestCase):
             if x.startswith("T\t") and x.split("\t")[2] == "opt"
         )
         stale = [x for x in out if last_field(x) == opt_row]
-        self.assertEqual([x.rsplit("\t", 1)[0] for x in stale],
-                         [x.rsplit("\t", 1)[0] for x in enriched])
+        # the record's number may change with the rewrite (opt adds records before it): compare
+        # the lines without it
+        def bare(line: str) -> list[str]:
+            fields = line.rsplit("\t", 1)[0].split("\t")
+            return [fields[0], *fields[2:]]
+
+        self.assertEqual([bare(x) for x in stale], [bare(x) for x in enriched])
         fresh = [x for x in out if x.startswith("Q\t") and last_field(x) == "-"]
         self.assertTrue(fresh, "opt made joins")
         for line in fresh:
@@ -196,7 +203,7 @@ class RestoreExtra(unittest.TestCase):
             self.assertEqual(fields[3], "opt")
             self.assertTrue(all(f == "" for f in [fields[2], *fields[4:11]]))
             self.assertIn("objective=r", fields[11])
-            self.assertNotEqual(fields[1], "r3")
+            self.assertNotEqual(fields[1], rec)
 
     def test_record_numbers_do_not_depend_on_the_directory_name(self) -> None:
         """The same design read by a relative path from two directories with different names gives

@@ -67,26 +67,28 @@ typedef struct mx_frame {
 typedef struct mx_entry {
     odin3_pw_sig value;
     odin3_pw_bit select;
+    uint32_t case_index; /* the case the slice comes from */
 } mx_entry;
 
 typedef struct mx_walk {
     odin3_proc_mctx *mctx;
     odin3_pw *pw;
     odin3_proc_snips *snips;
-    uint32_t snip;      /* the snippet whose tree is walked */
-    odin3_pw_sig xval;  /* x, the snippet's width */
-    odin3_vec stack;    /* mx_frame */
-    odin3_vec entries;  /* mx_entry of the open muxes, the innermost last */
-    odin3_vec switches; /* mx_switch per pw->switches */
-    odin3_vec groups;   /* uint32_t: the group of each case, per pw->cases */
-    odin3_vec buf;      /* odin3_pw_bit: a run being assembled */
-    odin3_vec selects;  /* odin3_pw_bit: the compare bits of one select */
-    odin3_vec parents;  /* odin3_prov_id: a switch's record's parents */
-    odin3_vec fstack;   /* uint32_t triples: the full_case walk */
-    odin3_u64map *full; /* switch << 32 | snippet -> MX_FULL_NO / MX_FULL_YES */
-    odin3_u64map *sels; /* case index + 1 -> the select bit its first snippet made
-                           (--share-selects), else how many snippets made the select again */
-    bool hinted;        /* the --share-selects hint was logged */
+    uint32_t snip;           /* the snippet whose tree is walked */
+    odin3_pw_sig xval;       /* x, the snippet's width */
+    odin3_vec stack;         /* mx_frame */
+    odin3_vec entries;       /* mx_entry of the open muxes, the innermost last */
+    odin3_vec switches;      /* mx_switch per pw->switches */
+    odin3_vec groups;        /* uint32_t: the group of each case, per pw->cases */
+    odin3_vec buf;           /* odin3_pw_bit: a run being assembled */
+    odin3_vec selects;       /* odin3_pw_bit: the compare bits of one select */
+    odin3_vec parents;       /* odin3_prov_id: a switch's record's parents */
+    odin3_vec fstack;        /* uint32_t triples: the full_case walk */
+    odin3_u64map *full;      /* switch << 32 | snippet -> MX_FULL_NO / MX_FULL_YES */
+    odin3_u64map *sels;      /* case index + 1 -> the select bit its first snippet made
+                                (--share-selects), else how many snippets made the select again */
+    bool hinted;             /* the --share-selects hint was logged */
+    odin3_u64map *case_prov; /* case index + 1 -> the record of that case's compare cells */
 } mx_walk;
 
 static uint64_t pair_key(uint32_t hi, uint32_t lo) {
@@ -162,6 +164,37 @@ static odin3_status mx_prov(mx_walk *walk, uint32_t sw, odin3_prov_id *out) {
     }
     *out = state->prov;
     return ODIN3_OK;
+}
+
+/* The record of the compare cells of one case for one snippet (one signal of the process): [the
+ * switch's, the case's, and the statement that assigns the snippet in the case, else the record of
+ * the snippet's signal], derived once per case and snippet, so a compare is traced to its own case
+ * item and signal, not to every item of the switch nor to the same compare made for the other
+ * signals. */
+static odin3_status mx_case_prov(mx_walk *walk, uint32_t sw, uint32_t case_index,
+                                 odin3_prov_id *out) {
+    uint64_t known = 0;
+    const uint64_t key = pair_key(case_index, walk->snip) + 1U;
+    if (odin3_u64map_get(walk->case_prov, key, &known)) {
+        *out = (odin3_prov_id){(uint32_t)known};
+        return ODIN3_OK;
+    }
+    odin3_prov_id parents[3] = {switch_cat(walk->pw, sw)->prov,
+                                case_cat(walk->pw, case_index)->prov};
+    odin3_prov_id assign = odin3_proc_snips_assign_prov(walk->snips, case_index, walk->snip);
+    uint32_t count = 2;
+    if (assign.v ==
+        0) { /* a nested switch assigns it: the declaration of the signal tells it apart */
+        odin3_pw_sig snip = odin3_proc_snip(walk->snips, walk->snip);
+        const odin3_pw_bit *bits = odin3_pw_sig_bits(walk->pw, snip);
+        assign = snip.len > 0 ? odin3_net_prov(walk->mctx->module, (odin3_net_id){bits[0]})
+                              : (odin3_prov_id){0};
+    }
+    if (assign.v != 0) {
+        parents[count++] = assign; /* the statement or the signal of this snippet */
+    }
+    odin3_status st = odin3_proc_prov(walk->mctx, walk->pw, parents, count, out);
+    return st == ODIN3_OK ? odin3_u64map_put(walk->case_prov, (odin3_kv){key, out->v}) : st;
 }
 
 /* Every compare of the switch is fully defined and none repeats (Yosys's simple parallel case). */
@@ -402,10 +435,11 @@ static void mx_keep(mx_walk *walk, odin3_pw_sig sig, odin3_pw_sig pat) {
 }
 
 /* A cell of switch sw (its record, its flags) on fresh nets; *ybit gets its one output bit. */
-static odin3_status mx_cell1(mx_walk *walk, uint32_t sw, odin3_proc_cell cell, odin3_pw_bit *ybit) {
-    odin3_status st = mx_prov(walk, sw, &cell.prov);
+static odin3_status mx_cell1(mx_walk *walk, uint32_t sw, uint32_t case_index, odin3_proc_cell cell,
+                             odin3_pw_bit *ybit) {
+    odin3_status st = mx_case_prov(walk, sw, case_index, &cell.prov);
     cell.pw = walk->pw;
-    cell.switch_flags = switch_cat(walk->pw, sw)->flags;
+    cell.switch_flags = switch_cat(walk->pw, sw)->flags | ODIN3_PROC_CELL_RTL_SEL;
     odin3_pw_sig out = {0, 0};
     st = st == ODIN3_OK ? odin3_proc_add_cell(walk->mctx, &cell, &out) : st;
     if (st == ODIN3_OK) {
@@ -414,10 +448,20 @@ static odin3_status mx_cell1(mx_walk *walk, uint32_t sw, odin3_proc_cell cell, o
     return st;
 }
 
+/* One compare to build: the switch, the case, the pattern and its kept bits. */
+typedef struct mx_cmp {
+    uint32_t sw, case_index;
+    odin3_pw_sig pat;
+    uint32_t kept;
+} mx_cmp;
+
 /* The bit of one compare (pat, with its '-' bits kept, count kept): the signal bit itself for a
  * 1-bit compare against 1, else a $eq of the kept signal bits and compare bits. */
-static odin3_status mx_compare(mx_walk *walk, uint32_t sw, odin3_pw_sig pat, uint32_t kept,
-                               odin3_pw_bit *bit) {
+static odin3_status mx_compare(mx_walk *walk, mx_cmp cmp, odin3_pw_bit *bit) {
+    const uint32_t sw = cmp.sw;
+    const uint32_t case_index = cmp.case_index;
+    const odin3_pw_sig pat = cmp.pat;
+    const uint32_t kept = cmp.kept;
     odin3_pw_sig signal = switch_cat(walk->pw, sw)->signal;
     odin3_pw_sig ports[2] = {{0, 0}, {0, 0}};
     odin3_status st = buf_reset(walk, kept);
@@ -440,7 +484,7 @@ static odin3_status mx_compare(mx_walk *walk, uint32_t sw, odin3_pw_sig pat, uin
                                      odin3_value_int(kept), odin3_value_int(1)};
     odin3_proc_cell cell = {
         odin3_proc_type(walk->mctx, "$eq"), params, EQ_PARAMS, NULL, ports, 2, NULL, NULL, 0, {0}};
-    return st == ODIN3_OK ? mx_cell1(walk, sw, cell, bit) : st;
+    return st == ODIN3_OK ? mx_cell1(walk, sw, case_index, cell, bit) : st;
 }
 
 /* The number of bits of pat that are not '-'. */
@@ -454,7 +498,7 @@ static uint32_t mx_kept(const mx_walk *walk, odin3_pw_sig pat) {
 }
 
 /* The $reduce_or of the select's compare bits (§6: several compares). */
-static odin3_status mx_any(mx_walk *walk, uint32_t sw, odin3_pw_bit *sel) {
+static odin3_status mx_any(mx_walk *walk, uint32_t sw, uint32_t case_index, odin3_pw_bit *sel) {
     uint32_t count = (uint32_t)walk->selects.len;
     odin3_pw_sig in = {0, 0};
     odin3_status st = odin3_pw_sig_new(walk->pw, walk->selects.data, count, &in);
@@ -470,7 +514,7 @@ static odin3_status mx_any(mx_walk *walk, uint32_t sw, odin3_pw_bit *sel) {
                             NULL,
                             0,
                             {0}};
-    return st == ODIN3_OK ? mx_cell1(walk, sw, cell, sel) : st;
+    return st == ODIN3_OK ? mx_cell1(walk, sw, case_index, cell, sel) : st;
 }
 
 /*
@@ -501,7 +545,7 @@ static odin3_status mx_select_make(mx_walk *walk, const mx_frame *frame, uint32_
             *empty = true;
             return ODIN3_OK;
         }
-        odin3_status st = mx_compare(walk, sw, pat, kept, &bit);
+        odin3_status st = mx_compare(walk, (mx_cmp){sw, case_index, pat, kept}, &bit);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -511,7 +555,7 @@ static odin3_status mx_select_make(mx_walk *walk, const mx_frame *frame, uint32_
         *sel = walk->selects.len == 1 ? *(const odin3_pw_bit *)walk->selects.data : ODIN3_PW_S0;
         return ODIN3_OK;
     }
-    return mx_any(walk, sw, sel);
+    return mx_any(walk, sw, case_index, sel);
 }
 
 /* Snippets that make the same case's select again before proc suggests --share-selects. */
@@ -564,6 +608,37 @@ static odin3_status mx_select(mx_walk *walk, const mx_frame *frame, uint32_t cas
 
 /* --- muxes (gen_mux, append_pmux) ------------------------------------------------------------ */
 
+enum { MX_PREC_MAX = 256 }; /* more slices than this keep the switch-wide record */
+
+/* The record of the open mux of frame: [the switch's, then the case of each of its slices, once,
+ * in slice order] (§14 narrowed to the cases that give this mux a value, so the mux of one signal
+ * is traced to the case items that assign it, not to every item of the switch). */
+static odin3_status mx_mux_prov(mx_walk *walk, const mx_frame *frame, uint32_t count,
+                                odin3_prov_id *out) {
+    if (count > MX_PREC_MAX) {
+        return mx_prov(walk, frame->index, out);
+    }
+    odin3_vec_clear(&walk->parents);
+    if (odin3_vec_reserve(&walk->parents, count + 1U) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *(odin3_prov_id *)odin3_vec_push(&walk->parents) = switch_cat(walk->pw, frame->index)->prov;
+    for (uint32_t i = 0; i < count; i++) {
+        const mx_entry *entry = odin3_vec_cat(&walk->entries, frame->base + i);
+        odin3_prov_id id = case_cat(walk->pw, entry->case_index)->prov;
+        bool seen = false;
+        const odin3_prov_id *have = walk->parents.data;
+        for (size_t k = 0; k < walk->parents.len && !seen; k++) {
+            seen = have[k].v == id.v;
+        }
+        if (!seen) {
+            *(odin3_prov_id *)odin3_vec_push(&walk->parents) = id; /* reserved */
+        }
+    }
+    return odin3_proc_prov(walk->mctx, walk->pw, walk->parents.data, (uint32_t)walk->parents.len,
+                           out);
+}
+
 /* Builds the open mux of switch frame f as one node: $mux for one entry, else $pmux with B slices
  * and S bits in append order; its Y is the nets made when it opened. */
 static odin3_status mx_emit(mx_walk *walk, const mx_frame *frame) {
@@ -585,17 +660,18 @@ static odin3_status mx_emit(mx_walk *walk, const mx_frame *frame) {
     }
     st = st == ODIN3_OK ? buf_run(walk, &inputs[2]) : st;
     odin3_value params[PMUX_PARAMS] = {odin3_value_int(width), odin3_value_int(count)};
-    odin3_proc_cell cell = {odin3_proc_type(walk->mctx, count == 1 ? "$mux" : "$pmux"),
-                            params,
-                            count == 1 ? 1 : PMUX_PARAMS,
-                            walk->pw,
-                            inputs,
-                            MUX_INPUTS,
-                            &frame->mux_y,
-                            NULL,
-                            switch_cat(walk->pw, frame->index)->flags,
-                            {0}};
-    st = st == ODIN3_OK ? mx_prov(walk, frame->index, &cell.prov) : st;
+    odin3_proc_cell cell = {
+        odin3_proc_type(walk->mctx, count == 1 ? "$mux" : "$pmux"),
+        params,
+        count == 1 ? 1 : PMUX_PARAMS,
+        walk->pw,
+        inputs,
+        MUX_INPUTS,
+        &frame->mux_y,
+        NULL,
+        (uint16_t)(switch_cat(walk->pw, frame->index)->flags | ODIN3_PROC_CELL_RTL_SEL),
+        {0}};
+    st = st == ODIN3_OK ? mx_mux_prov(walk, frame, count, &cell.prov) : st;
     odin3_pw_sig out = {0, 0};
     return st == ODIN3_OK ? odin3_proc_add_cell(walk->mctx, &cell, &out) : st;
 }
@@ -648,7 +724,8 @@ static odin3_status mx_new_nets(mx_walk *walk, uint32_t width, odin3_prov_id pro
 
 /* Opens a mux of switch frame f: A = its result, B = value, S = sel, Y on new nets (the switch's
  * record), which become its result. */
-static odin3_status mx_open(mx_walk *walk, mx_frame *frame, odin3_pw_sig value, odin3_pw_bit sel) {
+static odin3_status mx_open(mx_walk *walk, mx_frame *frame, uint32_t case_index, odin3_pw_sig value,
+                            odin3_pw_bit sel) {
     odin3_prov_id prov = {0};
     odin3_status st = mx_prov(walk, frame->index, &prov);
     if (st == ODIN3_OK && odin3_vec_reserve(&walk->entries, walk->entries.len + 1) != ODIN3_OK) {
@@ -662,7 +739,7 @@ static odin3_status mx_open(mx_walk *walk, mx_frame *frame, odin3_pw_sig value, 
     frame->mux_a = frame->result;
     frame->mux_y = ynets;
     frame->base = (uint32_t)walk->entries.len;
-    *(mx_entry *)odin3_vec_push(&walk->entries) = (mx_entry){value, sel}; /* reserved */
+    *(mx_entry *)odin3_vec_push(&walk->entries) = (mx_entry){value, sel, case_index}; /* reserved */
     frame->open = true;
     frame->result = ynets;
     return ODIN3_OK;
@@ -692,7 +769,7 @@ static odin3_status mx_gen(mx_walk *walk, mx_frame *frame, uint32_t case_index,
         frame->result = st == ODIN3_OK ? value : frame->result;
         return st;
     }
-    return mx_open(walk, frame, value, sel);
+    return mx_open(walk, frame, case_index, value, sel);
 }
 
 /*
@@ -719,7 +796,7 @@ static odin3_status mx_append(mx_walk *walk, mx_frame *frame, uint32_t case_inde
         frame->result = value;
         return mx_close(walk, frame);
     }
-    *(mx_entry *)odin3_vec_push(&walk->entries) = (mx_entry){value, sel}; /* reserved */
+    *(mx_entry *)odin3_vec_push(&walk->entries) = (mx_entry){value, sel, case_index}; /* reserved */
     return ODIN3_OK;
 }
 
@@ -872,6 +949,7 @@ static void mx_free(mx_walk *walk) {
     odin3_proc_snips_free(walk->snips);
     odin3_u64map_destroy(walk->full);
     odin3_u64map_destroy(walk->sels);
+    odin3_u64map_destroy(walk->case_prov);
     odin3_vec_free(&walk->stack);
     odin3_vec_free(&walk->entries);
     odin3_vec_free(&walk->switches);
@@ -907,7 +985,10 @@ static odin3_status mx_init(mx_walk *walk, odin3_proc_mctx *mctx, odin3_pw *pw) 
     odin3_vec_init(&walk->fstack, sizeof(fm_frame));
     walk->full = odin3_u64map_create(0);
     walk->sels = odin3_u64map_create(0);
-    odin3_status st = walk->full != NULL && walk->sels != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    walk->case_prov = odin3_u64map_create(0);
+    odin3_status st = walk->full != NULL && walk->sels != NULL && walk->case_prov != NULL
+                          ? ODIN3_OK
+                          : ODIN3_ERR_NO_MEMORY;
     st = st == ODIN3_OK ? mx_zeroed(&walk->switches, pw->switches.len) : st;
     st = st == ODIN3_OK ? mx_zeroed(&walk->groups, pw->cases.len) : st;
     return st == ODIN3_OK ? odin3_proc_snips_build(mctx, pw, &walk->snips) : st;

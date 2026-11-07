@@ -22,6 +22,7 @@ odin3: info: scoap: 1 modules, 4 nets, 3 cells, mode comb, 4 sweeps, 0 unreachab
 | `--top N` | The N hardest-to-control (largest `max(CC0,CC1)`) and hardest-to-observe (largest `CO`) nets per module. |
 | `--focus F` | Report only the nets of a write_dot focus (`cone(NET)`, instance path); values are still computed on the whole module. |
 | `--sigprob V`, `--seed S` | Simulate V random vectors (default seed 1) on the top module and add `p1_ppm`, P(net = 1) in parts per million (-1: the simulator does not list the net). |
+| `--prov` | Add the join keys to every net: `driver` (node ID of its first driver, 0 none), `wire` (primary wire ID, 0 none; the `w<ID>` node of {doc}`graph-views` `ddg`), `prov` (provenance record ID) and `src` (HDL spans). Off by default; the file is otherwise unchanged. |
 | `--threshold P` | With `--sigprob`: nets with `min(P1, 1-P1)` below P (default 0.01) are listed in `rare`. |
 
 If the simulator refuses the netlist because of a combinational loop (for example through a transparent latch)

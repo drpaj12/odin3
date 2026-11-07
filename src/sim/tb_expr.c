@@ -1,34 +1,18 @@
 /* tb_expr.c — testbench expression evaluation and lvalue writes (spec section 2: widths and signs
- * follow IEEE 1364-2005 5.4/5.5 for the supported operators; values are at most 64 bits).
+ * follow IEEE 1364-2005 5.4/5.5 for the supported operators; values are 4-state and up to
+ * TB_MAX_WIDTH bits, design note docs/specs/2026-11-05-sim-4state-design.md section 5).
  *
  * The repository forbids recursion, so tb_eval walks the expression tree with an explicit frame
  * stack: a frame names its node, the width and signedness it is evaluated in, how many children
- * are done and their values; a finished frame hands its value to the frame below. */
+ * are done and their values; a finished frame leaves its value in its first slot and hands it to
+ * the frame below. */
 #include "sim/tb_internal.h"
-#include "util/alloc.h"
 
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-uint64_t tb_mask(uint32_t width) {
-    return width >= TB_MAX_WIDTH ? ~(uint64_t)0 : (((uint64_t)1 << width) - 1U);
-}
-
-static int64_t sx(uint64_t val, uint32_t width) {
-    val &= tb_mask(width);
-    if (width > 0 && width < TB_MAX_WIDTH && ((val >> (width - 1U)) & 1U) != 0) {
-        val |= ~tb_mask(width);
-    }
-    return (int64_t)val;
-}
-
-/* val of `from` bits extended to width bits (sign-extended when sgn). */
-static uint64_t ext(uint64_t val, uint32_t from, bool sgn, uint32_t width) {
-    return (sgn ? (uint64_t)sx(val, from) : (val & tb_mask(from))) & tb_mask(width);
-}
 
 static bool op_is(const tb_expr *expr, const char *text) {
     return strcmp(expr->op, text) == 0;
@@ -48,19 +32,13 @@ int32_t tb_random(int32_t *seed) {
     return *seed;
 }
 
-/* --- lvalue writes (no evaluation inside: indices arrive already evaluated) --- */
-typedef struct bitfield {
-    uint32_t lsb;
-    uint32_t width;
-} bitfield;
-
-static void write_bits(tb_var *var, bitfield field, uint64_t val) {
-    if (field.lsb >= TB_MAX_WIDTH) {
-        return;
-    }
-    uint64_t mask = tb_mask(field.width) << field.lsb;
-    var->val = ((var->val & ~mask) | ((val << field.lsb) & mask)) & tb_mask(var->width);
+/* val (from bits) extended in place to `to` bits: by its sign when sgn, else with 0. */
+static void extend(tbv *val, uint32_t from, uint32_t to, bool sgn) {
+    tb_resize rs = {from, to, sgn, false};
+    tbv_extend(val, &rs);
 }
+
+/* --- lvalue writes (no evaluation inside: indices arrive already evaluated) --- */
 
 /* The index expression of a select lvalue, or NULL. */
 static const tb_expr *lv_index(const tb_expr *lv) {
@@ -70,28 +48,42 @@ static const tb_expr *lv_index(const tb_expr *lv) {
     return lv->kind == E_MEM ? lv->a : NULL;
 }
 
-static void write_leaf(tb_ev *ev, const tb_expr *lv, uint64_t val, uint64_t idx) {
+/* Writes val (lv->width bits) to the leaf; an index out of range or unknown (UINT64_MAX) drops
+ * the write. */
+static void write_leaf(tb_ev *ev, const tb_expr *lv, const tbv *val, uint64_t idx) {
     switch (lv->kind) {
     case E_VAR:
-        ev->tb->vars[lv->var].val = val & tb_mask(lv->width);
+        tb_var_store(&ev->tb->vars[lv->var], 0, val);
         break;
     case E_MEM: {
-        tb_var *var = &ev->tb->vars[lv->var];
+        const tb_var *var = &ev->tb->vars[lv->var];
         if (idx < var->depth) {
-            var->mem[idx] = val & tb_mask(var->width);
+            tb_var_store(var, (uint32_t)idx, val);
         }
         break;
     }
-    case E_BITSEL:
-        write_bits(&ev->tb->vars[lv->a->var], (bitfield){(uint32_t)idx, 1}, val);
+    case E_BITSEL: {
+        const tb_var *var = &ev->tb->vars[lv->a->var];
+        if (idx < var->width) {
+            tb_field_put(tb_var_word(var, 0), (tb_field){(uint32_t)idx, 1}, val);
+        }
         break;
+    }
     case E_PART:
-        write_bits(&ev->tb->vars[lv->a->var], (bitfield){lv->aux, lv->width}, val);
+        tb_field_put(tb_var_word(&ev->tb->vars[lv->a->var], 0), (tb_field){lv->aux, lv->width},
+                     val);
         break;
     default:
         ev->failed = true;
         break;
     }
+}
+
+/* A known number written to a leaf, at the leaf's width. */
+static void write_number(tb_ev *ev, uint64_t num, const tb_expr *lv, uint64_t idx) {
+    tbv val;
+    tbv_set_u64(num, &val, lv->width);
+    write_leaf(ev, lv, &val, idx);
 }
 
 /* --- evaluation --- */
@@ -100,6 +92,7 @@ typedef enum {
     C_LOGIC,
     C_CMP,
     C_SHIFT,
+    C_POW,
     C_ARITH,
     C_UN_ARITH,
     C_UN_RED,
@@ -117,10 +110,11 @@ typedef struct ev_frame {
     uint32_t width; /* context width, at least the node's own */
     bool sgn;
     ev_class cls;
-    uint32_t stage; /* children delivered so far */
-    uint32_t reps;  /* concatenation: repeats per item */
-    uint64_t acc;   /* concatenation accumulator */
-    uint64_t val[2];
+    uint32_t stage;  /* children delivered so far */
+    uint32_t reps;   /* concatenation: repeats per item */
+    uint32_t placed; /* concatenation: bits placed so far, from the top */
+    uint32_t cond;   /* ?: the condition's truth */
+    tbv val[2];      /* the children's values; the result goes in val[0] */
 } ev_frame;
 
 enum { EV_LOCAL_FRAMES = 32 };
@@ -141,6 +135,9 @@ static ev_class class_of_bin(const tb_expr *expr) {
         if (op_is(expr, CMPS[i])) {
             return C_CMP;
         }
+    }
+    if (op_is(expr, "**")) {
+        return C_POW;
     }
     bool shift =
         (expr->op[0] == '<' && expr->op[1] == '<') || (expr->op[0] == '>' && expr->op[1] == '>');
@@ -180,27 +177,37 @@ static ev_class class_of(const tb_expr *expr) {
     return C_PLAIN;
 }
 
+static bool stack_grow(ev_stack *stk) {
+    uint32_t cap = stk->cap * 2U;
+    ev_frame *grown = malloc((size_t)cap * sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    memcpy(grown, stk->frames, (size_t)stk->top * sizeof *grown);
+    if (stk->frames != stk->local) {
+        free(stk->frames);
+    }
+    stk->frames = grown;
+    stk->cap = cap;
+    return true;
+}
+
 static bool stack_push(ev_stack *stk, const tb_expr *expr, uint32_t width, bool sgn) {
-    if (stk->top == stk->cap) {
-        uint32_t cap = stk->cap * 2U;
-        ev_frame *grown = malloc((size_t)cap * sizeof *grown);
-        if (grown == NULL) {
-            return false;
-        }
-        memcpy(grown, stk->frames, (size_t)stk->top * sizeof *grown);
-        if (stk->frames != stk->local) {
-            free(stk->frames);
-        }
-        stk->frames = grown;
-        stk->cap = cap;
+    if (stk->top == stk->cap && !stack_grow(stk)) {
+        return false;
     }
     ev_frame *fr = &stk->frames[stk->top++];
-    memset(fr, 0, sizeof *fr);
     fr->expr = expr;
     fr->width = max_u32(width, expr->width);
     fr->sgn = sgn;
     fr->cls = class_of(expr);
+    fr->stage = 0;
     fr->reps = expr->kind == E_REPL ? (uint32_t)expr->num : 1U;
+    fr->placed = 0;
+    fr->cond = 0;
+    if (expr->kind == E_CONCAT || expr->kind == E_REPL) {
+        tbv_zero(&fr->val[0], fr->width);
+    }
     return true;
 }
 
@@ -215,12 +222,15 @@ static bool child_bin(const ev_frame *fr, ev_child *out) {
     const tb_expr *expr = fr->expr;
     const tb_expr *side = fr->stage == 0 ? expr->a : expr->b;
     *out = (ev_child){side, side->width, false};
+    bool own_ctx = fr->cls == C_SHIFT || fr->cls == C_POW;
     if (fr->cls == C_CMP) {
         out->width = max_u32(expr->a->width, expr->b->width);
         out->sgn = expr->a->sgn && expr->b->sgn;
-    } else if (fr->cls == C_ARITH || (fr->cls == C_SHIFT && fr->stage == 0)) {
+    } else if (fr->cls == C_ARITH || (own_ctx && fr->stage == 0)) {
         out->width = fr->width;
         out->sgn = fr->sgn;
+    } else if (fr->cls == C_POW) {
+        out->sgn = side->sgn; /* the exponent is self-determined, with its own sign */
     }
     return fr->stage < 2;
 }
@@ -261,6 +271,18 @@ static bool child_select(const ev_frame *fr, ev_child *out) {
     return expr->kind == E_BITSEL ? fr->stage < 2 : fr->stage == 0;
 }
 
+/* ?: evaluates the condition, then the side it picks, or both sides when it is x or z. */
+static bool child_cond(const ev_frame *fr, ev_child *out) {
+    const tb_expr *expr = fr->expr;
+    if (fr->stage == 0) {
+        *out = (ev_child){expr->a, expr->a->width, false};
+        return true;
+    }
+    bool second = fr->stage == 2;
+    *out = (ev_child){fr->cond == ODIN3_W4_0 || second ? expr->c : expr->b, fr->width, fr->sgn};
+    return fr->stage == 1 || (second && fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1);
+}
+
 /* Sets *out to the next child of fr; false when all are done. */
 static bool next_child(const ev_frame *fr, ev_child *out) {
     const tb_expr *expr = fr->expr;
@@ -284,12 +306,7 @@ static bool next_child(const ev_frame *fr, ev_child *out) {
     case E_BIN:
         return child_bin(fr, out);
     case E_COND:
-        if (fr->stage == 0) {
-            *out = (ev_child){expr->a, expr->a->width, false};
-            return true;
-        }
-        *out = (ev_child){fr->val[0] != 0 ? expr->b : expr->c, fr->width, fr->sgn};
-        return fr->stage == 1;
+        return child_cond(fr, out);
     case E_SYS:
         return child_sys(fr, out);
     default:
@@ -297,31 +314,48 @@ static bool next_child(const ev_frame *fr, ev_child *out) {
     }
 }
 
-static void deliver(ev_frame *fr, uint64_t value) {
+/* A child's value (width bits) reaches its parent frame. */
+static void deliver(ev_frame *fr, const tbv *value, uint32_t width) {
     const tb_expr *expr = fr->expr;
     if (expr->kind == E_CONCAT || expr->kind == E_REPL) {
-        const tb_expr *item = expr->list[fr->stage / fr->reps];
-        fr->acc = (item->width >= TB_MAX_WIDTH ? 0 : fr->acc << item->width) | value;
+        uint32_t item = expr->list[fr->stage / fr->reps]->width;
+        fr->placed += item;
+        tb_field_put((tb_planes){fr->val[0].v, fr->val[0].u, fr->width},
+                     (tb_field){expr->width - fr->placed, item}, value);
+    } else if (expr->kind == E_COND && fr->stage == 0) {
+        fr->cond = odin3_w4_truth((odin3_w4c){value->v, value->u}, width);
+    } else if (expr->kind == E_COND) {
+        tbv_copy(&fr->val[fr->stage - 1U], value, width);
     } else {
-        fr->val[fr->stage & 1U] = value;
+        tbv_copy(&fr->val[fr->stage & 1U], value, width);
     }
     fr->stage++;
 }
 
-/* --- finishing a node whose children are done --- */
-static uint64_t finish_random(tb_ev *ev, const ev_frame *fr) {
+/* --- finishing a node whose children are done: the result goes to fr->val[0] --- */
+
+/* An index value as a number: UINT64_MAX when it has x or z bits (reads x, writes are dropped). */
+static uint64_t index_of(const tbv *val, uint32_t width) {
+    uint64_t idx = 0;
+    return tbv_u64(val, width, &idx) ? idx : UINT64_MAX;
+}
+
+static void finish_random(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     int32_t seed = ev->seed;
     if (expr->n > 0) {
-        seed = (int32_t)fr->val[0];
+        seed = (int32_t)(uint32_t)fr->val[0].v[0];
     }
     int32_t val = tb_random(&seed);
     if (expr->n > 0) {
-        write_leaf(ev, expr->list[0], (uint64_t)(uint32_t)seed, fr->val[1]);
+        const tb_expr *index = lv_index(expr->list[0]);
+        uint64_t idx = index != NULL ? index_of(&fr->val[1], index->width) : 0;
+        write_number(ev, (uint64_t)(uint32_t)seed, expr->list[0], idx);
     } else {
         ev->seed = seed;
     }
-    return ext((uint64_t)(uint32_t)val, TB_INT_BITS, fr->sgn, fr->width);
+    tbv_set_u64((uint64_t)(uint32_t)val, &fr->val[0], TB_INT_BITS);
+    extend(&fr->val[0], TB_INT_BITS, fr->width, fr->sgn);
 }
 
 static uint64_t finish_fopen(tb_ev *ev, const tb_expr *expr) {
@@ -439,7 +473,9 @@ static uint64_t finish_value_plusargs(tb_ev *ev, const ev_frame *fr) {
     if (arg == NULL || !plusarg_parse(*conv, arg + (pct - fmt), &val)) {
         return 0;
     }
-    write_leaf(ev, expr->list[1], val, fr->val[0]);
+    const tb_expr *index = lv_index(expr->list[1]);
+    uint64_t idx = index != NULL ? index_of(&fr->val[0], index->width) : 0;
+    write_number(ev, val, expr->list[1], idx);
     return 1;
 }
 
@@ -452,239 +488,238 @@ static uint64_t finish_test_plusargs(tb_ev *ev, const tb_expr *expr) {
     return plusarg_find(ev, expr->list[0]->str, strlen(expr->list[0]->str)) != NULL ? 1U : 0U;
 }
 
-static uint64_t finish_sys(tb_ev *ev, const ev_frame *fr) {
+/* $clog2 of a known value: the bits needed to count up to it (0 for 0 and 1). */
+static uint64_t clog2_of(const tbv *val, uint32_t width) {
+    uint32_t high = 0;
+    uint32_t ones = 0;
+    for (uint32_t bit = 0; bit < width; bit++) {
+        if (odin3_word_bit(val->v, bit)) {
+            high = bit;
+            ones++;
+        }
+    }
+    if (ones == 0) {
+        return 0;
+    }
+    return ones == 1 ? high : high + 1U;
+}
+
+/* A known number result, extended to the frame's width. */
+static void set_number(ev_frame *fr, uint64_t num) {
+    tbv_set_u64(num, &fr->val[0], fr->width);
+}
+
+static void finish_sys(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     switch (fr->cls) {
     case C_TIME:
         ev->failed = ev->failed || ev->const_only;
-        return ev->time & tb_mask(fr->width);
+        set_number(fr, ev->time);
+        break;
     case C_RANDOM:
-        return finish_random(ev, fr);
+        finish_random(ev, fr);
+        break;
     case C_FOPEN:
-        return finish_fopen(ev, expr);
+        set_number(fr, finish_fopen(ev, expr));
+        break;
     case C_TEST_PLUSARGS:
-        return finish_test_plusargs(ev, expr);
+        set_number(fr, finish_test_plusargs(ev, expr));
+        break;
     case C_VALUE_PLUSARGS:
-        return finish_value_plusargs(ev, fr);
-    case C_CLOG2: {
-        uint64_t res = 0;
-        while (res < TB_MAX_WIDTH && ((uint64_t)1 << res) < fr->val[0]) {
-            res++;
+        set_number(fr, finish_value_plusargs(ev, fr));
+        break;
+    case C_CLOG2:
+        if (tbv_known(&fr->val[0], expr->list[0]->width)) {
+            set_number(fr, clog2_of(&fr->val[0], expr->list[0]->width));
+        } else {
+            tbv_fill(ODIN3_W4_X, &fr->val[0], fr->width);
         }
-        return res & tb_mask(fr->width);
-    }
+        break;
     default: /* $signed / $unsigned */
-        return ext(fr->val[0], expr->list[0]->width, fr->sgn && expr->sgn, fr->width);
+        extend(&fr->val[0], expr->list[0]->width, fr->width, fr->sgn && expr->sgn);
+        break;
     }
 }
 
-static uint64_t cmp_values(const tb_expr *expr, const ev_frame *fr) {
-    uint32_t cw = max_u32(expr->a->width, expr->b->width);
-    bool csg = expr->a->sgn && expr->b->sgn;
-    uint64_t lhs = fr->val[0];
-    uint64_t rhs = fr->val[1];
-    bool less = csg ? sx(lhs, cw) < sx(rhs, cw) : lhs < rhs;
-    bool equal = lhs == rhs;
-    if (op_is(expr, "==") || op_is(expr, "===")) {
-        return equal;
+/* && and || on the operands' truth: 0 && anything is 0, 1 || anything is 1, else x when either is
+ * unknown. */
+static uint32_t logic_code(const ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    uint32_t lhs = odin3_w4_truth((odin3_w4c){fr->val[0].v, fr->val[0].u}, expr->a->width);
+    uint32_t rhs = odin3_w4_truth((odin3_w4c){fr->val[1].v, fr->val[1].u}, expr->b->width);
+    uint32_t wins = op_is(expr, "&&") ? (uint32_t)ODIN3_W4_0 : (uint32_t)ODIN3_W4_1;
+    if (lhs == wins || rhs == wins) {
+        return wins;
     }
-    if (op_is(expr, "!=") || op_is(expr, "!==")) {
-        return !equal;
-    }
-    if (op_is(expr, "<")) {
-        return less;
-    }
-    if (op_is(expr, "<=")) {
-        return less || equal;
-    }
-    if (op_is(expr, ">")) {
-        return !less && !equal;
-    }
-    return !less;
+    return lhs == rhs ? lhs : (uint32_t)ODIN3_W4_X;
 }
 
-static uint64_t shift_values(const tb_expr *expr, const ev_frame *fr) {
-    uint64_t lhs = fr->val[0];
-    uint64_t amt = fr->val[1];
-    if (op_is(expr, "<<") || op_is(expr, "<<<")) {
-        return amt >= TB_MAX_WIDTH ? 0 : (lhs << amt) & tb_mask(fr->width);
-    }
-    if (op_is(expr, ">>>") && fr->sgn) {
-        int64_t sval = sx(lhs, fr->width);
-        if (amt >= TB_MAX_WIDTH - 1U) {
-            return sval < 0 ? tb_mask(fr->width) : 0;
-        }
-        return (uint64_t)(sval >> amt) & tb_mask(fr->width);
-    }
-    return amt >= TB_MAX_WIDTH ? 0 : lhs >> amt;
-}
-
-static uint64_t divmod(const ev_frame *fr, bool is_div) {
-    uint64_t lhs = fr->val[0];
-    uint64_t rhs = fr->val[1];
-    if (rhs == 0) {
-        return 0;
-    }
-    if (fr->sgn) {
-        int64_t sl = sx(lhs, fr->width);
-        int64_t sr = sx(rhs, fr->width);
-        if (sr == -1) {
-            return is_div ? (uint64_t)(-sl) & tb_mask(fr->width) : 0;
-        }
-        return (uint64_t)(is_div ? sl / sr : sl % sr) & tb_mask(fr->width);
-    }
-    return is_div ? lhs / rhs : lhs % rhs;
-}
-
-static uint64_t arith_values(const tb_expr *expr, const ev_frame *fr) {
-    uint64_t lhs = fr->val[0];
-    uint64_t rhs = fr->val[1];
-    uint64_t res = 0;
-    if (op_is(expr, "+")) {
-        res = lhs + rhs;
-    } else if (op_is(expr, "-")) {
-        res = lhs - rhs;
-    } else if (op_is(expr, "*")) {
-        res = lhs * rhs;
-    } else if (op_is(expr, "/") || op_is(expr, "%")) {
-        res = divmod(fr, op_is(expr, "/"));
-    } else if (op_is(expr, "&")) {
-        res = lhs & rhs;
-    } else if (op_is(expr, "|")) {
-        res = lhs | rhs;
-    } else if (op_is(expr, "^")) {
-        res = lhs ^ rhs;
-    } else {
-        res = ~(lhs ^ rhs);
-    }
-    return res & tb_mask(fr->width);
-}
-
-static uint64_t finish_bin(const ev_frame *fr) {
+static void finish_bin(ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     switch (fr->cls) {
-    case C_LOGIC: {
-        bool lhs = fr->val[0] != 0;
-        bool rhs = fr->val[1] != 0;
-        return op_is(expr, "&&") ? (lhs && rhs) : (lhs || rhs);
+    case C_LOGIC:
+        tbv_set_code(logic_code(fr), &fr->val[0], fr->width);
+        break;
+    case C_CMP: {
+        tb_binop bo = {&fr->val[0], &fr->val[1], max_u32(expr->a->width, expr->b->width),
+                       expr->a->sgn && expr->b->sgn};
+        tbv_set_code(tb_op_compare(expr->op, &bo), &fr->val[0], fr->width);
+        break;
     }
-    case C_CMP:
-        return cmp_values(expr, fr);
-    case C_SHIFT:
-        return shift_values(expr, fr);
-    default:
-        return arith_values(expr, fr);
+    case C_SHIFT: {
+        tb_shiftop so = {&fr->val[0], &fr->val[1], fr->width, expr->b->width, fr->sgn};
+        tb_op_shift(expr->op, &so);
+        break;
+    }
+    case C_POW: {
+        tb_powop po = {&fr->val[0], &fr->val[1], fr->width, expr->b->width, fr->sgn, expr->b->sgn};
+        tb_op_pow(&po);
+        break;
+    }
+    default: {
+        tb_binop bo = {&fr->val[0], &fr->val[1], fr->width, fr->sgn};
+        tb_op_arith(expr->op, &bo);
+        break;
+    }
     }
 }
 
-static uint64_t finish_un(const ev_frame *fr) {
+/* A reduction or ! of the operand (its own width): one bit, 0 1 or x. */
+static uint32_t reduce_code(const ev_frame *fr) {
     const tb_expr *expr = fr->expr;
-    uint64_t operand = fr->val[0];
-    if (fr->cls == C_UN_ARITH) {
-        uint64_t res = operand;
-        if (op_is(expr, "-")) {
-            res = (uint64_t)0 - operand;
-        } else if (op_is(expr, "~")) {
-            res = ~operand;
-        }
-        return res & tb_mask(fr->width);
-    }
-    uint64_t masked = operand & tb_mask(expr->a->width);
-    unsigned ones = 0;
-    for (uint64_t rest = masked; rest != 0; rest &= rest - 1U) {
-        ones++;
-    }
-    bool res = false;
+    odin3_w4c operand = {fr->val[0].v, fr->val[0].u};
+    uint32_t width = expr->a->width;
+    uint32_t code = 0;
     switch (expr->op[0] == '~' ? expr->op[1] : expr->op[0]) {
     case '!':
-        res = masked == 0;
+        code = tb_code_not(odin3_w4_truth(operand, width));
         break;
     case '&':
-        res = masked == tb_mask(expr->a->width);
+        code = odin3_w4_reduce_and(operand, width);
         break;
     case '|':
-        res = masked != 0;
+        code = odin3_w4_reduce_or(operand, width);
         break;
     default:
-        res = (ones & 1U) != 0;
+        code = odin3_w4_reduce_xor(operand, width);
         break;
     }
-    if (expr->op[0] == '~') {
-        res = !res;
-    }
-    return res ? 1U : 0U;
+    return expr->op[0] == '~' ? tb_code_not(code) : code;
 }
 
-static uint64_t finish_select(const ev_frame *fr) {
+static void finish_un(ev_frame *fr) {
+    if (fr->cls == C_UN_ARITH) {
+        tb_op_unary(fr->expr->op, &fr->val[0], fr->width);
+        return;
+    }
+    tbv_set_code(reduce_code(fr), &fr->val[0], fr->width);
+}
+
+/* base[index] (one bit) or base[msb:lsb]: an unknown or out-of-range bit index reads x. */
+static void finish_select(ev_frame *fr) {
     const tb_expr *expr = fr->expr;
-    uint64_t sel = 0;
+    uint32_t base = expr->a->width;
     if (expr->kind == E_PART) {
-        sel = (fr->val[0] >> expr->aux) & tb_mask(expr->width);
-    } else if (expr->kind == E_BITSEL) {
-        sel = fr->val[1] < TB_MAX_WIDTH ? (fr->val[0] >> fr->val[1]) & 1U : 0U;
+        tb_cplanes src = {fr->val[0].v, fr->val[0].u, base};
+        tb_field_get(&fr->val[1], src, (tb_field){expr->aux, expr->width});
+        tbv_copy(&fr->val[0], &fr->val[1], expr->width);
+        extend(&fr->val[0], expr->width, fr->width, false);
+        return;
     }
-    return sel;
+    uint64_t idx = index_of(&fr->val[1], expr->b->width);
+    uint32_t code = idx < base ? tbv_code(&fr->val[0], (uint32_t)idx) : (uint32_t)ODIN3_W4_X;
+    tbv_set_code(code, &fr->val[0], fr->width);
 }
 
-static uint64_t finish_mem(const tb_ev *ev, const ev_frame *fr) {
+/* An array word: an unknown or out-of-range address reads x. */
+static void finish_mem(const tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     const tb_var *var = &ev->tb->vars[expr->var];
-    uint64_t sel = fr->val[0] < var->depth ? var->mem[fr->val[0]] : 0;
-    return ext(sel, expr->width, fr->sgn && expr->sgn, fr->width);
+    uint64_t idx = index_of(&fr->val[0], expr->a->width);
+    if (idx < var->depth) {
+        tb_var_load(&fr->val[0], var, (uint32_t)idx);
+    } else {
+        tbv_fill(ODIN3_W4_X, &fr->val[0], expr->width);
+    }
+    extend(&fr->val[0], expr->width, fr->width, fr->sgn && expr->sgn);
 }
 
 /* A hierarchical read: the DUT signal as of its last settle. Not a constant expression. */
-static uint64_t finish_hier(tb_ev *ev, const ev_frame *fr) {
+static void finish_hier(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     if (ev->const_only) {
         ev->failed = true;
-        return 0;
+        tbv_zero(&fr->val[0], fr->width);
+        return;
     }
-    uint64_t val = tb_inst_peek(&ev->tb->insts[expr->var], (uint32_t)expr->num);
-    return ext(val, expr->width, false, fr->width);
+    tb_inst_peek(&ev->tb->insts[expr->var], (uint32_t)expr->num, &fr->val[0]);
+    extend(&fr->val[0], expr->width, fr->width, false);
 }
 
-static uint64_t finish(tb_ev *ev, const ev_frame *fr) {
+static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
-    switch (expr->kind) {
+    if (expr->kind == E_NUM) {
+        size_t bytes = (size_t)odin3_word_limbs(expr->width) * sizeof(uint64_t);
+        memcpy(fr->val[0].v, expr->nv, bytes);
+        memcpy(fr->val[0].u, expr->nu, bytes);
+        tb_resize rs = {expr->width, fr->width, fr->sgn, expr->xfill};
+        tbv_extend(&fr->val[0], &rs);
+    } else {
+        tb_var_load(&fr->val[0], &ev->tb->vars[expr->var], 0);
+        extend(&fr->val[0], expr->width, fr->width, fr->sgn);
+    }
+}
+
+static void finish(tb_ev *ev, ev_frame *fr) {
+    switch (fr->expr->kind) {
     case E_NUM:
-        return ext(expr->num, expr->width, fr->sgn, fr->width);
     case E_VAR:
-        return ext(ev->tb->vars[expr->var].val, expr->width, fr->sgn, fr->width);
+        finish_leaf(ev, fr);
+        break;
     case E_MEM:
-        return finish_mem(ev, fr);
+        finish_mem(ev, fr);
+        break;
     case E_HIER:
-        return finish_hier(ev, fr);
+        finish_hier(ev, fr);
+        break;
     case E_BITSEL:
     case E_PART:
-        return ext(finish_select(fr), expr->width, fr->sgn && expr->sgn, fr->width);
+        finish_select(fr);
+        break;
     case E_CONCAT:
     case E_REPL:
-        return fr->acc & tb_mask(fr->width);
+        break; /* built in val[0] by deliver */
     case E_UN:
-        return finish_un(fr);
+        finish_un(fr);
+        break;
     case E_BIN:
-        return finish_bin(fr);
+        finish_bin(fr);
+        break;
     case E_COND:
-        return fr->val[1];
+        if (fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1) {
+            tb_op_merge(&fr->val[0], &fr->val[1], fr->width);
+        }
+        break;
     case E_SYS:
-        return finish_sys(ev, fr);
+        finish_sys(ev, fr);
+        break;
     default:
         ev->failed = true;
-        return 0;
+        tbv_zero(&fr->val[0], fr->width);
+        break;
     }
 }
 
-uint64_t tb_eval(tb_ev *ev, const tb_expr *expr, uint32_t width, bool sgn) {
+void tb_eval(tb_ev *ev, const tb_expr *expr, uint32_t width, bool sgn, tbv *out) {
     ev_stack stk = {.cap = EV_LOCAL_FRAMES};
-    uint64_t result = 0;
     stk.frames = stk.local;
+    tbv_zero(out, max_u32(width, expr->width));
     if (!stack_push(&stk, expr, width, sgn)) {
         ev->failed = true;
-        return 0;
+        return;
     }
     while (stk.top > 0) {
-        const ev_frame *fr = &stk.frames[stk.top - 1U];
+        ev_frame *fr = &stk.frames[stk.top - 1U];
         ev_child child;
         if (next_child(fr, &child)) {
             if (!stack_push(&stk, child.expr, child.width, child.sgn)) {
@@ -693,36 +728,54 @@ uint64_t tb_eval(tb_ev *ev, const tb_expr *expr, uint32_t width, bool sgn) {
             }
             continue;
         }
-        uint64_t value = finish(ev, fr);
+        finish(ev, fr);
         stk.top--;
         if (stk.top == 0) {
-            result = value;
+            tbv_copy(out, &fr->val[0], fr->width);
         } else {
-            deliver(&stk.frames[stk.top - 1U], value);
+            deliver(&stk.frames[stk.top - 1U], &fr->val[0], fr->width);
         }
     }
     if (stk.frames != stk.local) {
         free(stk.frames);
     }
-    return result;
 }
 
-uint64_t tb_eval_assign(tb_ev *ev, const tb_expr *expr, uint32_t width) {
+void tb_eval_assign(tb_ev *ev, const tb_expr *expr, uint32_t width, tbv *out) {
     uint32_t ctx = max_u32(width, expr->width);
-    return tb_eval(ev, expr, ctx, expr->sgn) & tb_mask(width);
+    tb_eval(ev, expr, ctx, expr->sgn, out);
+    extend(out, ctx, width, false);
+}
+
+uint32_t tb_eval_truth(tb_ev *ev, const tb_expr *expr) {
+    tbv val;
+    tb_eval(ev, expr, expr->width, false, &val);
+    return odin3_w4_truth((odin3_w4c){val.v, val.u}, expr->width);
+}
+
+bool tb_eval_u64(tb_ev *ev, const tb_expr *expr, uint64_t *out) {
+    tbv val;
+    tb_eval(ev, expr, expr->width, false, &val);
+    *out = 0;
+    return tbv_u64(&val, expr->width, out);
 }
 
 static uint64_t index_value(tb_ev *ev, const tb_expr *lv) {
     const tb_expr *index = lv_index(lv);
-    return index != NULL ? tb_eval(ev, index, index->width, false) : 0;
+    uint64_t idx = 0;
+    if (index == NULL) {
+        return 0;
+    }
+    return tb_eval_u64(ev, index, &idx) ? idx : UINT64_MAX;
 }
 
-uint32_t tb_wr_resolve(tb_ev *ev, const tb_expr *lv, uint64_t val, tb_wr *out) {
+uint32_t tb_wr_resolve(tb_ev *ev, const tb_expr *lv, const tbv *val, tb_wr *out) {
     /* A concatenation takes its parts from the right; nested ones flatten in place, so the leaves
      * are taken last to first from a worklist (each leaf is at least one bit). */
-    const tb_expr *work[TB_WR_MAX];
+    const tb_expr *work[2 * TB_WR_MAX];
     uint32_t top = 0;
     uint32_t count = 0;
+    uint32_t off = 0;
     work[top++] = lv;
     while (top > 0) {
         const tb_expr *cur = work[--top];
@@ -731,11 +784,15 @@ uint32_t tb_wr_resolve(tb_ev *ev, const tb_expr *lv, uint64_t val, tb_wr *out) {
                 ev->failed = true;
                 return 0;
             }
-            out[count++] = (tb_wr){cur, val, index_value(ev, cur)};
-            val = cur->width >= TB_MAX_WIDTH ? 0 : val >> cur->width;
+            tb_wr *wr = &out[count++];
+            wr->leaf = cur;
+            tb_field_get(&wr->val, (tb_cplanes){val->v, val->u, lv->width},
+                         (tb_field){off, cur->width});
+            wr->idx = index_value(ev, cur);
+            off += cur->width;
             continue;
         }
-        if (top + cur->n > TB_WR_MAX) {
+        if (top + cur->n > 2 * TB_WR_MAX) {
             ev->failed = true;
             return 0;
         }
@@ -747,10 +804,14 @@ uint32_t tb_wr_resolve(tb_ev *ev, const tb_expr *lv, uint64_t val, tb_wr *out) {
 }
 
 void tb_wr_apply(tb_ev *ev, const tb_wr *wr) {
-    write_leaf(ev, wr->leaf, wr->val, wr->idx);
+    write_leaf(ev, wr->leaf, &wr->val, wr->idx);
 }
 
-void tb_write(tb_ev *ev, const tb_expr *lv, uint64_t val) {
+void tb_write(tb_ev *ev, const tb_expr *lv, const tbv *val) {
+    if (lv->kind != E_CONCAT) { /* one leaf: no split */
+        write_leaf(ev, lv, val, index_value(ev, lv));
+        return;
+    }
     tb_wr wrs[TB_WR_MAX];
     uint32_t count = tb_wr_resolve(ev, lv, val, wrs);
     for (uint32_t i = 0; i < count; i++) {
@@ -760,8 +821,38 @@ void tb_write(tb_ev *ev, const tb_expr *lv, uint64_t val) {
 
 bool tb_const(tb_module *tb, const tb_expr *expr, int64_t *out) {
     tb_ev ev = {tb, 0, 0, true, false, NULL};
-    uint64_t val = tb_eval(&ev, expr, TB_MAX_WIDTH, expr->sgn);
-    *out =
-        sx(val, max_u32(expr->width, 1U) < TB_MAX_WIDTH && !expr->sgn ? TB_MAX_WIDTH : expr->width);
+    tbv val;
+    uint32_t width = max_u32(expr->width, TB_TIME_BITS);
+    tb_eval(&ev, expr, width, expr->sgn, &val);
+    *out = (int64_t)val.v[0];
+    return !ev.failed && tbv_known(&val, width);
+}
+
+bool tb_const_val(tb_module *tb, const tb_expr *expr, uint32_t width, tbv *out) {
+    tb_ev ev = {tb, 0, 0, true, false, NULL};
+    tb_eval_assign(&ev, expr, width, out);
     return !ev.failed;
+}
+
+bool tb_drive(tb_ev *ev, uint32_t drv, const tbv *val) {
+    tb_module *tb = ev->tb;
+    tb_drv *slot = &tb->drvs[drv - 1U];
+    const tb_var *var = &tb->vars[slot->var];
+    tbv_copy(&slot->val, val, var->width);
+    tbv res;
+    tbv_fill(ODIN3_W4_Z, &res, var->width);
+    for (uint32_t i = 0; i < tb->ndrvs; i++) {
+        if (tb->drvs[i].var == slot->var) {
+            const tbv *one = &tb->drvs[i].val;
+            odin3_w4_bin bin = {{res.v, res.u}, {res.v, res.u}, {one->v, one->u}, var->width};
+            odin3_w4_resolve(&bin);
+        }
+    }
+    tbv old;
+    tb_var_load(&old, var, 0);
+    if (tbv_same(&old, &res, var->width)) {
+        return false;
+    }
+    tb_var_store(var, 0, &res);
+    return true;
 }

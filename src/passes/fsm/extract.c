@@ -31,6 +31,8 @@ void odin3_fsm_inst_free(odin3_fsm_inst *inst) {
     odin3_vec_free(&inst->ctrl_out);
     odin3_vec_free(&inst->mux_cells);
     odin3_vec_free(&inst->out_drivers);
+    odin3_vec_free(&inst->tgt_mux);
+    odin3_vec_free(&inst->out_drv);
     odin3_fsm_data_free(&inst->data);
     memset(inst, 0, sizeof *inst);
 }
@@ -42,6 +44,8 @@ static odin3_status inst_init(odin3_fsm_inst *inst) {
     odin3_vec_init(&inst->ctrl_out, sizeof(odin3_fsm_sig));
     odin3_vec_init(&inst->mux_cells, sizeof(uint32_t));
     odin3_vec_init(&inst->out_drivers, sizeof(uint32_t));
+    odin3_vec_init(&inst->tgt_mux, sizeof(uint32_t));
+    odin3_vec_init(&inst->out_drv, sizeof(uint32_t));
     return odin3_fsm_data_init(&inst->data);
 }
 
@@ -200,6 +204,9 @@ static void code_of(const odin3_fsm_sig *sig, uint32_t width, uint8_t *out) {
 typedef struct fs_state {
     odin3_fsm_xctx *xc;
     odin3_vec tasks;       /* odin3_fsm_sig: the signals to visit, `width` bits each */
+    odin3_vec owners;      /* uint32_t per task: the mux whose input it is (0: the root) */
+    uint32_t cur_owner;    /* the owner of the signal in hand */
+    uint32_t cur_mux;      /* the mux in hand */
     odin3_vec cur, aa, bb; /* the signal in hand, its A and B replacements */
     odin3_vec pat, a_sig, b_sig, s_sig, y_sig;
     uint8_t *reset_state; /* NULL after the root */
@@ -208,6 +215,7 @@ typedef struct fs_state {
 
 static void fs_free(fs_state *fs) {
     odin3_vec_free(&fs->tasks);
+    odin3_vec_free(&fs->owners);
     odin3_vec_free(&fs->cur);
     odin3_vec_free(&fs->aa);
     odin3_vec_free(&fs->bb);
@@ -228,6 +236,7 @@ static odin3_status fs_init(fs_state *fs, odin3_fsm_xctx *xc, uint8_t *reset_sta
     for (size_t i = 0; i < sizeof vecs / sizeof vecs[0]; i++) {
         odin3_vec_init(vecs[i], sizeof(odin3_fsm_sig));
     }
+    odin3_vec_init(&fs->owners, sizeof(uint32_t));
     fs->code = odin3_util_malloc(xc->dff_in.len + 1);
     return fs->code != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
 }
@@ -244,6 +253,11 @@ static odin3_status fs_pop_task(fs_state *fs) {
         }
     }
     odin3_kit_truncate(&fs->tasks, fs->tasks.len - width);
+    fs->cur_owner = 0;
+    if (fs->owners.len > 0) {
+        fs->cur_owner = ((const uint32_t *)fs->owners.data)[fs->owners.len - 1U];
+        odin3_vec_pop(&fs->owners);
+    }
     return ODIN3_OK;
 }
 
@@ -253,7 +267,18 @@ static odin3_status fs_constant(fs_state *fs) {
         return ODIN3_OK;
     }
     code_of(fs->cur.data, (uint32_t)fs->cur.len, fs->code);
-    return add_state(fs->xc, fs->code);
+    odin3_status st = add_state(fs->xc, fs->code);
+    if (st != ODIN3_OK || fs->cur_owner == 0) {
+        return st;
+    }
+    /* the mux that has this state code as an input: provenance of the logic into that state */
+    const odin3_fsm_state_ent *ent = odin3_fsm_xctx_find_state(fs->xc, fs->code);
+    odin3_fsm_leaf *leaf = ent != NULL ? odin3_vec_push(&fs->xc->leafs) : NULL;
+    if (leaf != NULL) {
+        leaf->mux = fs->cur_owner;
+        leaf->bits = ent->bits;
+    }
+    return ent != NULL && leaf == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
 }
 
 /* Loads A, B, S and Y of the mux in hand into the scratch vectors. */
@@ -355,8 +380,13 @@ static odin3_status fs_push_children(fs_state *fs) {
                 return st;
             }
         }
+        odin3_status st = odin3_kit_push_u32(&fs->owners, fs->cur_mux);
+        if (st != ODIN3_OK) {
+            return st;
+        }
     }
-    return append_vec(&fs->tasks, &fs->aa);
+    odin3_status st = odin3_kit_push_u32(&fs->owners, fs->cur_mux);
+    return st == ODIN3_OK ? append_vec(&fs->tasks, &fs->aa) : st;
 }
 
 /* One mux of the selection tree; false (with fs->why) when the tree is not closed. */
@@ -372,6 +402,7 @@ static odin3_status fs_visit_mux(fs_state *fs, bool root, bool *ok) {
         /* several drivers, none, or a cell that is no mux: the tree is not closed (:68-85) */
         const uint32_t *pair = odin3_fsm_pair_at(&pairs, 0, 0);
         *ok = is_mux(fm, pair[0]) && pair[1] == ODIN3_FSM_P_MUX_Y;
+        fs->cur_mux = pair[0];
         st = *ok ? fs_load_mux(fs, pair[0]) : ODIN3_OK;
         st = st == ODIN3_OK && *ok ? fs_note_mux(fs, pair[0]) : st;
     }
@@ -392,6 +423,7 @@ static odin3_status find_states(odin3_fsm_xctx *xc, uint8_t *reset_state, bool *
     *closed = true;
     if (st == ODIN3_OK) {
         st = append_vec(&fs.tasks, &xc->dff_in);
+        st = st == ODIN3_OK ? odin3_kit_push_u32(&fs.owners, 0) : st;
     }
     while (st == ODIN3_OK && *closed && fs.tasks.len > 0) {
         st = fs_pop_task(&fs);
@@ -644,6 +676,44 @@ static odin3_status find_out_drivers(odin3_fsm_xctx *xc) {
     return st;
 }
 
+/* The drivers of each control output on its own: pairs (signal, node) into inst->out_drv. */
+static odin3_status find_out_drv(odin3_fsm_xctx *xc) {
+    odin3_fsm_inst *inst = xc->inst;
+    const odin3_fsm_sig *outs = inst->ctrl_out.data;
+    odin3_status st = ODIN3_OK;
+    for (size_t j = 0; st == ODIN3_OK && j < inst->ctrl_out.len; j++) {
+        odin3_vec pairs;
+        odin3_vec_init(&pairs, sizeof(uint32_t));
+        uint32_t count = 0;
+        odin3_fsm_sig one = outs[j];
+        st = odin3_fsm_ix_pairs(&xc->fm->ix, (odin3_fsm_sigref){&one, 1U},
+                                ODIN3_FSM_REF_OUT | ODIN3_FSM_PAIRS_STRICT, &pairs, &count);
+        for (uint32_t i = 0; st == ODIN3_OK && i < count; i++) {
+            st = odin3_kit_push_u32(&inst->out_drv, outs[j]);
+            st = st == ODIN3_OK
+                     ? odin3_kit_push_u32(&inst->out_drv, odin3_fsm_pair_at(&pairs, 0, i)[0])
+                     : st;
+        }
+        odin3_vec_free(&pairs);
+    }
+    return st;
+}
+
+/* Turns the leaves of the tree walk into (state index, mux) pairs; needs the state numbers. */
+static odin3_status resolve_leafs(odin3_fsm_xctx *xc) {
+    const odin3_fsm_leaf *leafs = xc->leafs.data;
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < xc->leafs.len; i++) {
+        const odin3_fsm_state_ent *ent = odin3_fsm_xctx_find_state(xc, leafs[i].bits);
+        if (ent == NULL || ent->idx < 0) {
+            continue;
+        }
+        st = odin3_kit_push_u32(&xc->inst->tgt_mux, (uint32_t)ent->idx);
+        st = st == ODIN3_OK ? odin3_kit_push_u32(&xc->inst->tgt_mux, leafs[i].mux) : st;
+    }
+    return st;
+}
+
 static int cmp_node(const void *lhs, const void *rhs) {
     uint32_t lhs_v = *(const uint32_t *)lhs;
     uint32_t rhs_v = *(const uint32_t *)rhs;
@@ -713,7 +783,9 @@ static odin3_status extract_body(odin3_fsm_xctx *xc, uint8_t *reset_state, odin3
     }
     st = find_ctrl_out(xc);
     st = st == ODIN3_OK ? find_out_drivers(xc) : st;
+    st = st == ODIN3_OK ? find_out_drv(xc) : st;
     st = st == ODIN3_OK ? init_data(xc, reset_state) : st;
+    st = st == ODIN3_OK ? resolve_leafs(xc) : st;
     if (st == ODIN3_OK) {
         st = odin3_fsm_extract_transitions(xc, res);
     }
@@ -744,6 +816,7 @@ static odin3_status extract_setup(odin3_fsm_xctx *xc, odin3_wire_id wire, uint8_
     inst->wire = wire;
     odin3_vec_init(&xc->dff_in, sizeof(odin3_fsm_sig));
     odin3_vec_init(&xc->states, sizeof(odin3_fsm_state_ent));
+    odin3_vec_init(&xc->leafs, sizeof(odin3_fsm_leaf));
     odin3_status st = odin3_fsm_wire_sigs(xc->fm, wire, &inst->dff_out);
     for (size_t i = 0; st == ODIN3_OK && i < inst->dff_out.len; i++) {
         st = odin3_kit_push_u32(&xc->dff_in, odin3_fsm_sig_of_bit(ODIN3_FSM_BIT_MARK));
@@ -776,6 +849,7 @@ static odin3_status extract_into(odin3_fsm_xctx *xc, odin3_wire_id wire, odin3_f
     odin3_util_free(reset_state);
     odin3_vec_free(&xc->dff_in);
     odin3_vec_free(&xc->states);
+    odin3_vec_free(&xc->leafs);
     sort_nodes(&xc->inst->mux_cells);
     if (st == ODIN3_OK && xc->inst->data.states.len > 0) {
         report(fm, xc->inst, *res);

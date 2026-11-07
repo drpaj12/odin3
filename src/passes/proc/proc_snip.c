@@ -39,6 +39,7 @@ struct odin3_proc_snips {
     odin3_u64map *bit2snip; /* net -> snippet << 32 | offset in it */
     odin3_u64map *swcache;  /* switch << 32 | snippet -> 1: an action below the switch assigns it */
     odin3_u64map *assigns;  /* case << 32 | snippet -> first bit of the last action's rhs slice */
+    odin3_u64map *assign_prov; /* case << 32 | snippet -> the record of that last action */
     uint32_t count;
 };
 
@@ -289,6 +290,9 @@ static odin3_status sn_action(sn_walk *walk, uint32_t case_index, const odin3_pw
         uint32_t snip = (uint32_t)(found >> SNIP_SHIFT);
         st = odin3_u64map_put(walk->snips->assigns,
                               (odin3_kv){pair_key(case_index, snip), (uint64_t)act->rhs.first + j});
+        st = st == ODIN3_OK ? odin3_u64map_put(walk->snips->assign_prov,
+                                               (odin3_kv){pair_key(case_index, snip), act->prov.v})
+                            : st;
         st = st == ODIN3_OK ? sn_mark(walk, snip) : st;
         j += odin3_proc_snip(walk->snips, snip).len;
     }
@@ -314,6 +318,7 @@ void odin3_proc_snips_free(odin3_proc_snips *snips) {
     odin3_u64map_destroy(snips->bit2snip);
     odin3_u64map_destroy(snips->swcache);
     odin3_u64map_destroy(snips->assigns);
+    odin3_u64map_destroy(snips->assign_prov);
     odin3_util_free(snips);
 }
 
@@ -326,7 +331,9 @@ static odin3_proc_snips *sn_create(void) {
     snips->bit2snip = odin3_u64map_create(0);
     snips->swcache = odin3_u64map_create(0);
     snips->assigns = odin3_u64map_create(0);
-    if (snips->bit2snip == NULL || snips->swcache == NULL || snips->assigns == NULL) {
+    snips->assign_prov = odin3_u64map_create(0);
+    if (snips->bit2snip == NULL || snips->swcache == NULL || snips->assigns == NULL ||
+        snips->assign_prov == NULL) {
         odin3_proc_snips_free(snips);
         return NULL;
     }
@@ -369,6 +376,13 @@ odin3_pw_sig odin3_proc_snip(const odin3_proc_snips *snips, uint32_t index) {
 
 bool odin3_proc_snips_touches(const odin3_proc_snips *snips, uint32_t sw, uint32_t snip) {
     return odin3_u64map_get(snips->swcache, pair_key(sw, snip), NULL);
+}
+
+odin3_prov_id odin3_proc_snips_assign_prov(const odin3_proc_snips *snips, uint32_t case_index,
+                                           uint32_t snip) {
+    uint64_t id = 0;
+    (void)odin3_u64map_get(snips->assign_prov, pair_key(case_index, snip), &id);
+    return (odin3_prov_id){(uint32_t)id};
 }
 
 bool odin3_proc_snips_assigned(const odin3_proc_snips *snips, uint32_t case_index, uint32_t snip,

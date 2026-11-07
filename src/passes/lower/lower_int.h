@@ -159,6 +159,8 @@ typedef struct lw_ctx {
     odin3_vec merged;              /* odin3_net_pair: the merges of the open commit */
     const odin3_value *keep_value; /* the word cell's `keep` attribute, or NULL */
     uint32_t keep_key;             /* strtab ID of "keep", 0 when never interned */
+    const odin3_value *rtl_value;  /* the word cell's `rtl_sel` attribute, or NULL */
+    uint32_t rtl_key;              /* strtab ID of "rtl_sel", 0 when never interned */
     uint64_t gates;                /* gate nodes the open cell has created (constants excluded) */
     uint64_t cap_cell;             /* the per-cell cap in force */
     uint64_t total_created;        /* nodes created since the run began, for the budget cadence */

@@ -18,7 +18,8 @@ typedef struct gv_kind {
     odin3_status (*fn)(gv_run *run);
 } gv_kind;
 
-static const gv_kind k_kinds[] = {{"stg", gv_write_stg}};
+static const gv_kind k_kinds[] = {
+    {"stg", gv_write_stg}, {"cfg", gv_write_cfg}, {"ddg", gv_write_ddg}};
 
 static const char k_usage[] = "write_graph: usage: write_graph stg|cfg|ddg FILE";
 

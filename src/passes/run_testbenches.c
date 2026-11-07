@@ -174,7 +174,7 @@ static odin3_status parse_tb(const odin3_project *proj, const odin3_proj_testben
         odin3_log(ODIN3_LOG_ERROR, "run_testbenches: cannot read `%s`", file);
         return ODIN3_ERR_IO;
     }
-    tb_source src = {file, text, proj->design};
+    tb_source src = {file, text, proj->design, false}; /* the project runner stays 2-state */
     const char *top = tb->top != 0 ? text_of(proj->design, tb->top) : NULL;
     odin3_status st = tb_parse(&src, top, out);
     free(text);

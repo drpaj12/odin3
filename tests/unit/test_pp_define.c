@@ -354,23 +354,13 @@ static void test_define_errors(void) {
 }
 
 static void test_sv_operators_in_a_body(void) {
-    static const bad_case cases[] = {
-        {"`define P a``b\n", "t.v:1:12: error: syntax: '``' is a SystemVerilog macro operator; "
-                             "not Verilog-2005 (Phase 5)"},
-        {"`define Q(x) `\"x`\"\n", "t.v:1:14: error: syntax: '`\"' is a SystemVerilog macro "
-                                   "operator; not Verilog-2005 (Phase 5)"},
-        {"`define R(x) `\\`\"x\n", "t.v:1:14: error: syntax: '`\\`\"' is a SystemVerilog macro "
-                                   "operator; not Verilog-2005 (Phase 5)"},
-        {"`define L a + `__LINE__\n", "t.v:1:15: error: syntax: '`__LINE__' is a SystemVerilog "
-                                      "macro operator; not Verilog-2005 (Phase 5)"},
-        {"`define F `__FILE__\n", "t.v:1:11: error: syntax: '`__FILE__' is a SystemVerilog macro "
-                                  "operator; not Verilog-2005 (Phase 5)"},
-    };
-    for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
-        errors = 0;
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_ERR_PARSE, run(cases[i].text), cases[i].text);
-        TEST_ASSERT_EQUAL_STRING_MESSAGE(cases[i].want, captured, cases[i].text);
-    }
+    /* 1800-2017 22.5.1: the operators are part of the body text; they act when it is used */
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define P a``b\n"));
+    assert_body(macro("P"), "a``b");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define Q(x) `\"x is `\\`\"q`\\`\"`\"\n"));
+    assert_body(macro("Q"), "`\"x is `\\`\"q`\\`\"`\"");
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define L a + `__LINE__ `__FILE__\n"));
+    assert_body(macro("L"), "a + `__LINE__ `__FILE__");
     /* inside a string they are plain bytes */
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define OK \"a``b `\\\" `__FILE__\"\n"));
     assert_body(macro("OK"), "\"a``b `\\\" `__FILE__\"");
@@ -551,9 +541,6 @@ static void test_command_line_errors(void) {
         {"L", "x\ny",
          "<command line>:3:12: error: syntax: newline in the text of project "
          "define 'L'"},
-        {"P", "a``b",
-         "<command line>:3:12: error: syntax: '``' is a SystemVerilog macro "
-         "operator; not Verilog-2005 (Phase 5)"},
     };
     for (size_t i = 0; i < sizeof cases / sizeof cases[0]; i++) {
         odin3_pp_define defines[] = {

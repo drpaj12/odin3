@@ -70,7 +70,9 @@ static void setup(harness *hns, const char *name, const odin3_value *params, uin
                                  ODIN3_SIM_COMB,
                                  NULL,
                                  NULL,
-                                 0};
+                                 0,
+                                 0,
+                                 NULL};
 }
 
 /* Sets the input bits from bit k of combo (all bits before the single output bit). */

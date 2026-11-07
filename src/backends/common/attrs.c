@@ -51,7 +51,9 @@ odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
          memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) ||
         is_edit_events(tab, key, value) ||
         (key.len == strlen(ODIN3_ATTR_FLATTENED_AWAY) &&
-         memcmp(key.ptr, ODIN3_ATTR_FLATTENED_AWAY, key.len) == 0)) {
+         memcmp(key.ptr, ODIN3_ATTR_FLATTENED_AWAY, key.len) == 0) ||
+        (key.len == strlen(ODIN3_ATTR_RTL_SEL) &&
+         memcmp(key.ptr, ODIN3_ATTR_RTL_SEL, key.len) == 0)) {
         attr.role = ODIN3_WATTR_SKIP;
     } else if (strip_prefix(key, ODIN3_BLIF_ATTR_PREFIX, &attr.key)) {
         blif_value(&attr, tab, value);

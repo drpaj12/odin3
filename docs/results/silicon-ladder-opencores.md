@@ -2,12 +2,12 @@
 orphan: true
 ---
 
-# Silicon ladder on 7 OpenCores designs (2026-11-04)
+# Silicon ladder on 7 OpenCores designs (2026-11-04, rerun 2026-11-05)
 
 Purpose: run the Odin III to OpenROAD to GDS flow (no Yosys, `tools/silicon/silicon_flow.py`, see
 {doc}`../user/silicon-flow`) on real OpenCores designs that have testbenches, smallest first, and record how far
 each one gets. Research question: does provenance from the GDS back to the HDL survive on designs larger than the
-two micro designs of v1.4. This lane logs failures; it does not fix Odin III or the flow.
+two micro designs of v1.4. The first run (2026-11-04) logged the failures; the rerun (2026-11-05, section "Rerun after the fixes") follows the fixes of the brief odin3-silicon-fixes-3 and is the current result. The first-run text below is kept for the record where it is marked "first run".
 
 The numbers are in `silicon-ladder-opencores.tsv` (for Mimir). Raw step output, measure logs, sim logs and the scripts are in
 `silicon-ladder-opencores-logs/`.
@@ -31,7 +31,84 @@ The numbers are in `silicon-ladder-opencores.tsv` (for Mimir). Raw step output, 
 - Functional check: iverilog on the design's testbench, once on the RTL and once on `final.v` with the sky130 Verilog models
   (`-DFUNCTIONAL`).
 
-## Results
+## Rerun after the fixes (2026-11-05)
+
+Fixes merged on `main` (one PR each; PR, squash-merge commit):
+
+| # | Fix | PR | Merge |
+|---|---|---|---|
+| 1 | `netlist` strips `signed` from declarations (OpenROAD STA-0164, wb_lcd) | #351 | 53fa8df0 |
+| 2 | `gates_objects`: one `cone` link per chain span to the `hdl` object, not all-pairs gate/IR links (sha3_low: 278,589,437 links before, 131,469 after) | #353 | 5e663b93 |
+| 3 | die edge kept 0.17 um from the last met1 to met4 track (DRT-0255 on des) | #357 | 5cc81897 |
+| 4 | wb_lcd equivalence: no engine proves it; attempts recorded, WARNING stays | #355 (docs) | 57f4f999 |
+| 5 | `tools/silicon/gate_sim.py`: gate simulation from an X, a 0 and a 1 start state (mmuart) | #352 | c0f83088 |
+| 6 | `silicon_flow.py --param NAME=VALUE` (i2c) | #354 | 28b7e719 |
+| 0 | ladder logs without home paths (`python_tools` was red on main) | #356 | f2586ab9 |
+
+Found by the rerun and fixed (not in the brief):
+
+| # | Fix | PR | Merge |
+|---|---|---|---|
+| 7 | constant assigned to a bit select with a space (`assign n [0] = 1'b0;`) now gets a tie cell (DRT-0305 `one_`/`zero_` on cordic and sha3_low); the not-proven reason is the `equiv-check:` line, not ABC's trailing `hi` | #358 | 2dbc9405 |
+| 8 | external tool limit 6 h (Magic extraction of des took more than 3600 s) | #359 | ed751f18 |
+| 9 | `probe_p_8`, `probec_p_8` dont-use (repair_design put a probe cell on a net of sha3_low; global route: `net net23 initial #node != #rpin`) | #360 | 89e8ce62 |
+| 10 | name survival in one pass per file (the per-name search ran more than an hour on des) | #365 | e2ade2e4 |
+
+Binary: `odin3 1.4.0` release built with `tools/build-locked` from a tree whose `src`, `include`, `lib`, `adapters` and `CMakeLists.txt`
+are identical to `main` at 2dbc9405 (`commit 21bda392` in `--version`; the C sources last changed in a6c45390). Python flow and Tcl: `main` at the commit
+of the fix list above that was current when each design started (wb_lcd and cordic: 2dbc9405; des: ed751f18; sha3_low: 89e8ce62 for the flow, e2ade2e4 for
+extract onward; mmuart and i2c: 89e8ce62 or later); fixes 8 to 10 do not change any result of the designs that ran before them. Two heavy-run slots, so
+wall time and peak memory below include a second job on the machine. Scripts: `silicon-ladder-opencores-logs-rerun/scripts/`.
+
+### Results
+
+| Design (LUTs) | Gate cells (Odin III) | Steps reached | Core area um2 | Util | WNS / TNS ns | DRC | LVS | Equiv | Recover (join) | Sim RTL / final.v | Wall s | Peak MB |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| mmuart (126) | 488 | 11 of 11 | 14589 | 26.9% | +6.44 / 0 | 0 | match uniquely | equivalent | 497 of 497 joined; 488 with HDL chain | pass / x-pessimism, 61 of 61 from a 0 or 1 start | 271 | 538 |
+| simple_spi (189) | 687 | 11 of 11 (first run, unchanged) | 20365 | 27.3% | +7.12 / 0 | 0 | match uniquely | equivalent | 704 of 704; 687 | pass / pass | 244 | 549 |
+| i2c (316) | 984 | 11 of 11 | 30669 | 27.3% | +6.40 / 0 | 0 | match uniquely | equivalent | 1001 of 1001; 984 | pass / x-pessimism, passes from a 0 or 1 start (testbench copy, see below) | 427 | 557 |
+| wb_lcd (1049) | 3020 | 11 of 11 | 98995 | 28.3% | +4.90 / 0 | 0 | match uniquely | not proven (dsec UNDECIDED, WARNING) | 3141 of 3141; 3020 | pass / x-pessimism, passes from a 0 or 1 start | 1840 | 1459 |
+| cordic patched (1153) | 7536 | 11 of 11 | 188397 | 26.2% | +5.56 / 0 | 0 | match uniquely | equivalent | 7663 of 7663; 7536 | pass / pass | 4469 | 1083 |
+| des (1877) | 18686 | 11 of 11 | 516946 | 28.2% | +7.21 / 0 | 0 | match uniquely | equivalent | 19208 of 19208; 18686 | pass / pass | 19995 | 3136 |
+| sha3_low (5035) | 17565 | 11 of 11 (extract, lvs, recover in a second run on the same directory) | 537507 | 36.5% | +4.35 / 0 | 0 | match uniquely | equivalent | 18159 of 18159; 17566 | pass / pass | 44694 (21850 to the 6 h limit inside extract, then 22844 for extract, lvs, recover) | 4624 |
+
+The four designs that stopped in the first run now all run the whole flow. sha3_low passes `map`, the tie-cell step, place, route (DRC 0, WNS +4.35 ns, hold +0.42 ns), GDS and its `final.v` simulation (`Good!`); its flat Magic extraction is the slow step (see below): the first run reached the 6 h run-script limit inside `extract`, and `extract,lvs,recover` then ran again on the same directory (`run_tail.sh`, 12 h limit, 22844 s, peak 4624 MB): LVS `Circuits match uniquely`, join 18159 of 18159 cells (17566 with an HDL chain), 0 names in the GDS and in the extracted SPICE. Because that second run restarts the provenance steps, sha3_low's `prov/` index holds only extract, lvs and recover. No size limit was hit.
+Names in the GDS and the extracted SPICE: 0 on every completed design. No cell was removed or renamed. The numbers are in `silicon-ladder-opencores.tsv`
+(first-run rows for simple_spi; the other rows are the rerun). The first-run table is below.
+
+### What each fix changed
+
+1. wb_lcd: `place` now runs (`signed` stripped). Whole flow, LVS match, DRC 0.
+2. `map` memory on sha3_low: peak RSS of the whole flow 508 MB (first run: killed at 6,141 MB in under a minute); `gates_objects` alone 137 MB and 4.3 s.
+   cordic: 291 MB in the same step. The gate provenance links now point to the `hdl` span objects (kind `cone`); the IR cells of a span reach the same object by their `fine` links.
+3. des, cause: the die side was 732.615 um, 0.065 um beyond the last met2 track and 0.085 um beyond the last met1 track (left edge: 0.23 and 0.17). The router puts the
+   access point of a pin on the die edge at the last track and the via enclosure leaves the die. The four failing route boxes were the right-edge column that holds the
+   output pins; the net name in the message (`o3__n730`) is not on that edge (its guides are 300 um away). The die is now enlarged to the next edge with at least 0.17 um
+   (733.185 um; the core and the placement are unchanged). des routes with 0 DRC violations.
+4. wb_lcd equivalence: `dsec` with default settings, `-r`, `-F 1`, `-F 8`, `-m`, `-rm`, `-a`, `miter; strash; dprove`, `miter; strash; scorr; dretime; scorr; dprove`
+   and `miter; strash; scorr; pdr` (900 s) all end UNDECIDED or time out; the RTL BLIF has 660 registers, the gate BLIF 636, and no register name survives. The WARNING stays
+   (`equiv: not proven: equiv-check: unproven: ABC dsec ended UNDECIDED ...`).
+5. mmuart `final.v`: X pessimism, not a functional difference. `tx_bitcount[0]` has the next-state logic `nor(a21oi(.., bitcount0), nor(.., ~bitcount0))`: for a
+   write strobe of 1 it is 0 whatever the old value is (equivalence is proven), but a gate simulator computes X from an X old value and keeps it. The registers have no reset
+   in the RTL (they are loaded by `tx_wr`). With every flip-flop started at 0 or at 1, all 61 checks pass. `gate_sim.py` runs the three starts and reports `x-pessimism`
+   with a WARNING; it applies to mmuart, i2c and wb_lcd.
+6. i2c: the netlist is built with `--param ARST_LVL=1'b0` (the testbench's value) and the testbench copy loses its `#(.ARST_LVL(0))`. The gate simulation then runs. From an X start
+   it shows `Expected NACK, received ACK`; the cause is not the netlist but the testbench: its slave model has a 4-word memory and the testbench reads word 4, so the slave drives X on SDA; the RTL
+   takes X as false in an `if`, the gates propagate it. With the slave memory declared as 16 words initialised to 0 (a copy of the testbench, `tb/i2c/i2c_slave_model.v` in the rerun logs) the RTL and the
+   gate netlist (from a 0 or a 1 start) both pass; the RTL passes with the original testbench too.
+
+Not fixed: the single-file input (the designs are still concatenated by hand).
+
+### Rerun problems that were not flow bugs
+
+- The machine had two heavy-run slots and another lane held one for hours; queued jobs waited (wall times above start when the job started).
+- The first rerun of des stopped at `extract` (the 3600 s tool limit, fix 8); the first sha3_low rerun stopped at `place` (the probe cell, fix 9); the second ran `place` to `gds`, and
+  hit the 6 h flow limit of the run script inside the flat Magic extraction (about 3.5 h for a 74,336-instance layout, the `.ext` file is 0.8 GB). Its extract, lvs and recover steps were then run
+  by themselves on the same directory (`run_tail.sh`), so its `prov/` index holds only those steps.
+
+## First run (2026-11-04)
+
+### First-run results
 
 | Design (LUTs) | Gate cells (Odin III) | Steps reached | Core area um2 | Util | WNS / TNS ns | DRC | LVS | Equiv | Recover (join) | Sim RTL / final.v | Wall s | Peak MB |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -48,7 +125,7 @@ and was killed first); the two step files `01-read.json` and `02-elab.json` exis
 (184, 270, 396), clock buffers (9, 17, 17) and fill (1475, 2134, 3189); no cell was removed or renamed; `repair_design` resized 56, 136 and 144. Names in the GDS and in
 the extracted SPICE: 0 (as in v1.4). WNS is large and positive because the 10 ns clock is easy for these cores and the flow runs no timing optimisation target.
 
-## Where the ladder stopped, and why (exact messages)
+### First run: where the ladder stopped, and why (exact messages)
 
 1. **wb_lcd, step `place`.** Exit 3, recorded by the flow as out of scope: `[ERROR STA-0164] <path>/clean.v line 36, syntax error` (OpenROAD
    `openroad_flow.tcl:28`, `read_verilog clean.v`). Line 36 of `clean.v` is `wire signed [31:0] o3_lcd_pos ;`: the 2022 OpenROAD Verilog
@@ -70,7 +147,7 @@ the extracted SPICE: 0 (as in v1.4). WNS is large and positive because the 10 ns
 
 Nothing else hit a time limit; no step ran past the 6 h flow limit. The 9 GB `--xl` slot was not tried (it is for the controller only).
 
-## Functional check (final.v)
+### First run: functional check (final.v)
 
 - **mmuart: FAIL.** The RTL passes the 61 checks; `final.v` plus sky130 models fails 42 of 61 (`tx byte 0 got xX want 55`, no `tx_irq`, `rx byte 0 got 000000xx`), with
   unknown values on the transmitter and receiver paths; the CSR divisor checks pass. Equivalence was proven (`abc dsec`) and the flow ran to LVS. Not diagnosed: it may be X pessimism
@@ -80,12 +157,12 @@ Nothing else hit a time limit; no step ran past the 6 h flow limit. The 9 GB `--
   and the flow netlist has no parameters (it was built with the default `ARST_LVL=1`). The RTL passes.
 - wb_lcd, cordic, des, sha3_low: no `final.v` (the flow stopped earlier). The RTL passes for all seven.
 
-## Provenance
+### Provenance (first run)
 
 On the three designs that completed, every placed logic cell joined back by cell type and location (join rate 1.0); the share with an HDL chain was 488 of 497, 687 of 704 and 979 of 996: the
 rest are the clock-tree buffers (physical origin). The Odin III names were kept in the DEF through OpenROAD (no removals or renames). No new result on provenance exists for the four larger designs.
 
-## Routed to the controller (not fixed here)
+### First run: routed to the controller
 
 1. `netlist` step does not strip `signed` from wire declarations (OpenROAD 2022 parser rejects it): wb_lcd.
 2. `place`: OpenROAD errors are reported as "out of scope" (exit 3), which hides real flow failures (STA-0164, DRT-0255).

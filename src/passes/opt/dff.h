@@ -160,13 +160,16 @@ odin3_status odin3_dff_rule_adq(odin3_dff_state *ds);
  * of the plan's keys: the number of controls, the controls as (net << 1 | polarity), then the
  * patterns, each as its length and its (net << 1 | value) words); nodes: the muxes the bit
  * absorbed (words of the plan's nodes); reset: the reset value SRST collected; merged: the bit
- * gets a control (else it stays in the FF).
+ * gets a control (else it stays in the FF); rtl_bad: a mux it absorbed has the attribute rtl_sel
+ * and an unknown select of it would not act as the new control being inactive (the FF then does
+ * not get the attribute rtl_sel, see dff_merge.c group_rtl_mark).
  */
 typedef struct odin3_dff_bitplan {
     odin3_net_id d;
     uint32_t key_off, key_len, node_off, node_len;
     odin3_bit reset;
     bool merged;
+    bool rtl_bad;
 } odin3_dff_bitplan;
 
 /* A mux input pin that read Q and takes x (the feedback patterns); old is the net it read. */

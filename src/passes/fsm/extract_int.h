@@ -41,6 +41,13 @@ typedef struct odin3_fsm_state_ent {
     int32_t idx;
 } odin3_fsm_state_ent;
 
+/* A state code reached as the input of a mux of the selection tree (provenance of the next-state
+ * logic into that state). */
+typedef struct odin3_fsm_leaf {
+    uint32_t mux;        /* the mux node */
+    const uint8_t *bits; /* the state's code in the data's arena: the key of the state */
+} odin3_fsm_leaf;
+
 typedef struct odin3_fsm_xctx {
     odin3_fsm_mod *fm;
     const odin3_vec *excl;  /* sorted uint64_t: (bit << 32) | other, pmux selects that exclude */
@@ -49,6 +56,7 @@ typedef struct odin3_fsm_xctx {
     odin3_fsm_inst *inst;
     odin3_vec dff_in; /* odin3_fsm_sig: the next-state root */
     odin3_vec states; /* odin3_fsm_state_ent, sorted by the Const comparator */
+    odin3_vec leafs;  /* odin3_fsm_leaf, in the order the tree walk met them */
 } odin3_fsm_xctx;
 
 /* The state with code `bits` (state_bits long) in the sorted set; NULL when absent. */

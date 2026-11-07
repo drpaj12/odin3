@@ -145,7 +145,10 @@ one node; edges are signal level (no bit ranges). Constant nets are not nodes an
 Edges: a -> b when signal a is read to compute signal b. Fields: `kind` `data` or `control`, `via`
 (node ID of the cell or process that computes b), `op` (cell type name, `$proc` for a process),
 `seq` true when the cell is a flip-flop or latch (the edge crosses a clock cycle), `src`, `prov` of
-`via` (for a `$proc`, of the action or switch the read comes from).
+`via` (for a `$proc`, of the action the read belongs to, which for a control edge is the guarded
+action). Inside a `$proc` the targets are the process's own output nets, which are unnamed
+temporaries until the sync actions copy them to the declared wire, so before `proc` the graph
+shows `temp` nodes between the process and its wires; after `proc` they are cell-to-cell edges.
 
 Rules, per live cell (port nodes excluded, constants excluded):
 - Normal cell: for every input pin net and every output pin net of the cell, an edge input signal
@@ -174,7 +177,7 @@ Check (2026-11-05, read from `src/passes/scoap/scoap.c`): the `scoap` JSON (sche
 version 3) already has, per module, `nets: [{id, name, cc0, cc1, co, [sc0, sc1, so], [p1_ppm]}]`.
 `id` is the module net ID (stable key to `odin3_net_prov`); SCOAP is defined per net, and a "node"
 value is its driver's output net. What is missing is the join data: the driver node ID and the HDL
-spans, so a viewer need not walk provenance itself. Added, additive and opt-in (default output
+spans, so a viewer need not walk provenance itself. Built as `scoap --prov` (and `Design.scoap(prov=True)`). Added, additive and opt-in (default output
 byte-identical, version stays 3): option `--prov`, which adds per net `"driver"` (node ID of the
 first driver pin, 0 for none), `"wire"` (primary wire ID, 0 for none), `"prov"` (the net's record
 ID) and `"src"` (the span strings of section 2). With `write_graph ddg`, a viewer joins by net ->

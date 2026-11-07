@@ -1591,6 +1591,67 @@ static void test_dff_en_then_srst(void) {
     expect_pin(first_ff(), "D", wnet("d", 0));
 }
 
+/* --- the attribute rtl_sel: an if folded into an enable or reset keeps its x meaning -------------
+ */
+
+/* Gives every $mux the attribute rtl_sel with value `side` (1: an unknown select takes A, 2: B). */
+static void mark_muxes(int64_t side) {
+    for (uint32_t id = 1; id < odin3_module_node_end(fx.module); id++) {
+        odin3_node_id node = {id};
+        if (odin3_node_live(fx.module, node) && strcmp(type_name(node), "$mux") == 0) {
+            TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_kit_set_rtl_sel(&fx.oc, node, side));
+        }
+    }
+}
+
+static void test_dff_rtl_sel_en(void) {
+    /* Q on the A side: an unknown select (A) holds, the new enable is inactive: the FF is marked */
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1") FF_ON("\\m1")));
+    mark_muxes(1);
+    run_dff();
+    expect_ff("$dffe");
+    TEST_ASSERT_EQUAL_INT64(1, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+    /* Q on the B side: an unknown select takes A = D, the enable would be active: not marked */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "\\q", "\\e", "\\m1") FF_ON("\\m1")));
+    mark_muxes(1);
+    run_dff();
+    expect_ff("$dffe");
+    TEST_ASSERT_EQUAL_INT64(0, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+    /* the same mux with value 2 (opt_expr swapped its inputs): an unknown select takes B = Q */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "\\q", "\\e", "\\m1") FF_ON("\\m1")));
+    mark_muxes(2);
+    run_dff();
+    TEST_ASSERT_EQUAL_INT64(1, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+    /* a ?: mux (no attribute) leaves the FF unmarked: x merges */
+    build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1") FF_ON("\\m1")));
+    run_dff();
+    expect_ff("$dffe");
+    TEST_ASSERT_EQUAL_INT64(0, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+}
+
+static void test_dff_rtl_sel_srst(void) {
+    /* the reset constant on B, data on A: an unknown select takes A = data, the reset is inactive
+     */
+    build(MOD(W_STD W_MID MUX1("mx", "\\d", "1'0", "\\r", "\\m1") FF_ON("\\m1")));
+    mark_muxes(1);
+    run_dff();
+    expect_ff("$sdff");
+    TEST_ASSERT_EQUAL_INT64(1, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+    /* the constant on A: an unknown select would reset: not marked */
+    build(MOD(W_STD W_MID MUX1("mx", "1'0", "\\d", "\\r", "\\m1") FF_ON("\\m1")));
+    mark_muxes(1);
+    run_dff();
+    expect_ff("$sdff");
+    TEST_ASSERT_EQUAL_INT64(0, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+    /* reset over enable: both muxes agree, the $sdffe is marked */
+    build(MOD(W_STD W_MID MUX1("m_en", "\\q", "\\d", "\\e", "\\m1")
+                  MUX1("m_rs", "\\m1", "1'0", "\\r", "\\m2") FF_ON("\\m2")));
+    mark_muxes(1);
+    run_dff();
+    expect_ff("$sdffe");
+    TEST_ASSERT_EQUAL_INT64(1, odin3_kit_rtl_sel(&fx.oc, first_ff()));
+}
+
 static void test_dff_nodffe_nosdff(void) {
     build(MOD(W_STD W_MID MUX1("mx", "\\q", "\\d", "\\e", "\\m1") FF_ON("\\m1")));
     fx.opts.nodffe = true;
@@ -2554,6 +2615,8 @@ static void run_merge_tests(void) {
     RUN_TEST(test_dff_fine_no_merge);
     RUN_TEST(test_dff_pattern_depth);
     RUN_TEST(test_dff_srst_merge);
+    RUN_TEST(test_dff_rtl_sel_en);
+    RUN_TEST(test_dff_rtl_sel_srst);
     RUN_TEST(test_dff_srst_polarity);
     RUN_TEST(test_dff_srst_two_controls);
     RUN_TEST(test_dff_srst_value_conflict);
