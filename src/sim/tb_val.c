@@ -216,6 +216,15 @@ void tb_var_store(const tb_var *var, uint32_t index, const tbv *src) {
     memcpy(word.u, src->u, bytes);
     word.v[limbs_of(var->width) - 1U] &= top_mask(var->width);
     word.u[limbs_of(var->width) - 1U] &= top_mask(var->width);
+    if (var->pull != TB_PULL_NONE) { /* a pulled wire: its z bits (u and v set) read 1 or 0 */
+        for (uint32_t i = 0; i < limbs_of(var->width); i++) {
+            uint64_t zbits = word.v[i] & word.u[i];
+            word.u[i] &= ~zbits;
+            if (var->pull == TB_PULL_DOWN) {
+                word.v[i] &= ~zbits;
+            }
+        }
+    }
 }
 
 void tb_var_fill(const tb_var *var, uint32_t code) {

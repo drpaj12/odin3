@@ -143,10 +143,14 @@ struct tb_stmt {
 enum { TB_CASE = 0, TB_CASEZ = 1, TB_CASEX = 2 };
 
 /* --- module --- */
+enum { TB_PULL_NONE = 0, TB_PULL_UP = 1, TB_PULL_DOWN = 2 };
+
 typedef struct tb_var {
     char name[TB_NAME];
     uint32_t width;
     bool sgn, is_wire, is_param;
+    uint8_t
+        pull; /* wire: TB_PULL_UP / TB_PULL_DOWN from pullup(w) / pulldown(w): z bits read 1 / 0 */
     uint32_t depth; /* array length, 0 for a scalar */
     /* The value planes: max(depth, 1) words of odin3_word_limbs(width) limbs each (word i of an
      * array at limb i * limbs). */
