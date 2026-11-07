@@ -31,7 +31,7 @@ static void make_sig(glet_sig *sig, uint32_t n, const glet_edge *ed, size_t ne) 
     int64_t *counts = calloc((size_t)n * 73, sizeof *counts);
     TEST_ASSERT_NOT_NULL(counts);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&gr, n, ed, ne));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&gr, &(glet_spec){false, 5, 0}, counts, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&gr, &(glet_spec){false, 5, 0, NULL}, counts, NULL));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_sig_make(sig, &(glet_rows){counts, n, 73}, NULL));
     glet_graph_free(&gr);
     free(counts);
@@ -280,7 +280,7 @@ static void test_sig_make_alloc_failure_is_clean(void) {
     int64_t *counts = calloc((size_t)6 * 73, sizeof *counts);
     TEST_ASSERT_NOT_NULL(counts);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&gr, 6, ring, 6));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&gr, &(glet_spec){false, 5, 0}, counts, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&gr, &(glet_spec){false, 5, 0, NULL}, counts, NULL));
     for (long k = 4; k < 8; k++) {
         glet_sig sig;
         odin3_util_set_alloc_fail_after(k);

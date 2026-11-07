@@ -23,7 +23,9 @@ enum {
     GL_MAX_GROUPS_COMPARED = 32,
     GL_DEFAULT_FANOUT = 16,
     GL_DEFAULT_MAX_NODES = 200000,
-    GL_MAX_BINS = 32
+    GL_MAX_BINS = 32,
+    GL_DEFAULT_INST_MAX = 100000,
+    GL_LIMIT_INST_MAX = 10000000
 };
 
 #define GL_DEFAULT_MAX_WORK UINT64_C(20000000000)
@@ -38,6 +40,10 @@ typedef struct gl_opts {
     unsigned halo;
     size_t max_nodes;
     uint64_t max_work;
+    bool inst_on;           /* --instances G given */
+    uint32_t inst_graphlet; /* G */
+    uint64_t inst_max;      /* --max N, default GL_DEFAULT_INST_MAX */
+    odin3_strbuf inst_out;  /* --instances-out FILE */
     odin3_strbuf out;
     odin3_strbuf partition;
     odin3_strbuf edges_out;
@@ -92,6 +98,24 @@ typedef struct gl_groups {
 } gl_groups;
 odin3_status gl_groups_make(odin3_design *design, const gl_opts *opts, gl_groups *out);
 void gl_groups_free(gl_groups *groups);
+
+/* --- gl_inst.c: graphlet instances (spec 2026-11-06-odin3-graphlet-instances.md) ----------------
+ */
+
+/* What gl_inst_write needs to name the result. */
+typedef struct gl_inst_info {
+    const char *path;
+    const char *mode;    /* "undirected-5", ... */
+    const char *module;  /* module name */
+    const uint32_t *ids; /* dense index -> module-local node ID */
+    uint64_t max;
+} gl_inst_info;
+
+/* Allocates the buffer for up to opts->inst_max instances (inst->out). */
+odin3_status gl_inst_begin(glet_inst *inst, const gl_opts *opts, const glet_spec *mode);
+/* Maps the dense indices to node IDs (ascending within an instance) and writes the file. */
+odin3_status gl_inst_write(const glet_inst *inst, const gl_inst_info *info);
+void gl_inst_end(glet_inst *inst);
 
 /* --- gl_cal.c: signature files, calibration, posterior ---------------------------------------- */
 typedef struct gl_cal gl_cal;

@@ -1,0 +1,7 @@
+{"schema": "odin3-graphlet-instances", "version": 1, "mode": "undirected-5", "graphlet": 1, "nodes_per_instance": 3, "total": 6, "written": 6, "truncated": 0, "max": 100000, "module": "dff", "instances": [
+[1, 8, 9],
+[1, 2, 9],
+[2, 8, 9],
+[3, 8, 9],
+[3, 4, 8],
+[4, 8, 9]]}

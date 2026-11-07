@@ -366,7 +366,7 @@ static void compare_one(const cmp_case *cc, unsigned trial) {
     glet_graph graph;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, bf->nodes, arcs, count));
     uint64_t work = 0;
-    glet_spec spec = {cc->directed, cc->size, 0};
+    glet_spec spec = {cc->directed, cc->size, 0, NULL};
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &spec, got, &work));
     brute_all(bf, cc->maxk);
     TEST_ASSERT_EQUAL_INT64_ARRAY(bf->counts, got, (size_t)bf->nodes * bf->norb);
@@ -414,9 +414,9 @@ static void test_tables_build_failure_then_retry(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, 2, arcs, 1));
     odin3_util_set_alloc_fail_after(0);
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_NO_MEMORY,
-                          glet_count(&graph, &(glet_spec){false, 5, 0}, got, NULL));
+                          glet_count(&graph, &(glet_spec){false, 5, 0, NULL}, got, NULL));
     odin3_util_set_alloc_fail_after(-1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){false, 5, 0}, got, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){false, 5, 0, NULL}, got, NULL));
     TEST_ASSERT_EQUAL_INT64(1, got[0]); /* orbit 0: the degree */
     glet_graph_free(&graph);
 }
@@ -577,7 +577,7 @@ static void expect_single(const fam *fm, const expect *ex) {
     int64_t got[4 * ORBITS_D];
     memset(got, 0, sizeof got);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, fm->nodes, fm->arcs, fm->n_arcs));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){true, 4, 0}, got, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){true, 4, 0, NULL}, got, NULL));
     unsigned hit = 0;
     for (unsigned orbit = 0; orbit < ORBITS_D; orbit++) {
         glet_orbit_info info;
@@ -628,7 +628,7 @@ static void test_antiparallel_pair(void) {
     memset(got, 0, sizeof got);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, 2, arcs, 2));
     TEST_ASSERT_EQUAL_UINT64(1, graph.m);
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){true, 4, 0}, got, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_count(&graph, &(glet_spec){true, 4, 0, NULL}, got, NULL));
     int64_t sum0 = 0;
     for (unsigned orbit = 0; orbit < ORBITS_D; orbit++) {
         sum0 += got[orbit];
@@ -648,7 +648,7 @@ static void test_work_bound(void) {
     memset(got, 0, sizeof got);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, glet_graph_build(&graph, 5, arcs, 4));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          glet_count(&graph, &(glet_spec){false, 5, 3}, got, NULL));
+                          glet_count(&graph, &(glet_spec){false, 5, 3, NULL}, got, NULL));
     glet_graph_free(&graph);
 }
 

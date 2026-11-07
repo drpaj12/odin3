@@ -124,6 +124,7 @@ typedef struct esu {
     uint64_t max_work;
     unsigned level; /* nodes chosen before the one being added */
     uint32_t root;
+    glet_inst *inst; /* instances of one graphlet type, or NULL */
 } esu;
 
 static unsigned pair_ix(unsigned ii, unsigned jj) {
@@ -166,7 +167,38 @@ static unsigned extend_code(const esu *es, uint32_t wn) {
     return code;
 }
 
+/* Records the current node set (ascending ids) when its graphlet is the wanted type. */
+static void note_instance(esu *es, unsigned size, const uint8_t *row) {
+    glet_inst *in = es->inst;
+    unsigned orbit = row[0];
+    uint32_t type =
+        es->directed ? g_glet_tab.info_d[orbit].graphlet : g_glet_tab.info_u[orbit].graphlet;
+    if (type != in->graphlet) {
+        return;
+    }
+    in->total++;
+    if (in->written >= in->max) {
+        return;
+    }
+    uint32_t *dst = in->out + in->written * size;
+    for (unsigned ii = 0; ii < size; ii++) {
+        unsigned jj = ii;
+        while (jj > 0 && dst[jj - 1] > es->sub[ii]) {
+            dst[jj] = dst[jj - 1];
+            jj--;
+        }
+        dst[jj] = es->sub[ii];
+    }
+    in->written++;
+}
+
 static void add_orbits(esu *es, unsigned size, const uint8_t *row) {
+    if (es->inst != NULL) {
+        note_instance(es, size, row);
+    }
+    if (es->counts == NULL) {
+        return;
+    }
     for (unsigned ii = 0; ii < size; ii++) {
         es->counts[(size_t)es->sub[ii] * es->norb + row[ii]]++;
     }
@@ -300,17 +332,35 @@ static odin3_status esu_open(esu *es, const glet_graph *gr, bool directed, unsig
     return ODIN3_OK;
 }
 
+/* Resets the instance collector and checks its graphlet against the mode. */
+static odin3_status inst_open(glet_inst *inst, bool directed, unsigned size) {
+    inst->nodes = glet_graphlet_nodes(directed, size, inst->graphlet);
+    inst->total = 0;
+    inst->written = 0;
+    if (inst->nodes == 0 || (inst->max > 0 && inst->out == NULL)) {
+        odin3_log(ODIN3_LOG_ERROR, "graphlets: graphlet %u is not a graphlet of this mode",
+                  (unsigned)inst->graphlet);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return ODIN3_OK;
+}
+
 odin3_status glet_count(const glet_graph *gr, const glet_spec *spec, int64_t *counts,
                         uint64_t *work) {
     bool directed = spec->directed;
     unsigned size = directed ? (unsigned)GLET_MAX_DIR_SIZE : spec->size;
     uint64_t max_work = spec->max_work;
     uint32_t norb = glet_orbit_count(directed, size);
-    if (norb == 0 || counts == NULL) {
+    glet_inst *inst = spec->inst;
+    if (norb == 0 || (counts == NULL && inst == NULL)) {
         odin3_log(ODIN3_LOG_ERROR, "graphlets: unsupported size %u", size);
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_status st = glet_tables_init();
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = inst != NULL ? inst_open(inst, directed, size) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -322,6 +372,7 @@ odin3_status glet_count(const glet_graph *gr, const glet_spec *spec, int64_t *co
     }
     es.norb = norb;
     es.counts = counts;
+    es.inst = inst;
     es.max_work = max_work;
     bool within = true;
     for (uint32_t vn = 0; within && vn < gr->n; vn++) {

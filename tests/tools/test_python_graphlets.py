@@ -70,6 +70,51 @@ class PythonGraphletsTest(unittest.TestCase):
         self.assertIn("libodin3 too old", str(ctx.exception))
         self.assertIn("odin3_graphlets_count", str(ctx.exception))
 
+    def test_instances_hand_cases(self) -> None:
+        total, found = odin3.graphlet_instances(5, [(0, 1), (1, 2), (2, 3), (3, 4)], graphlet=1)
+        self.assertEqual(total, 3)
+        self.assertEqual(sorted(found), [(0, 1, 2), (1, 2, 3), (2, 3, 4)])
+        # a triangle with a pendant node: one triangle (G2), two 3-node paths (G1)
+        edges = [(0, 1), (1, 2), (2, 0), (2, 3)]
+        self.assertEqual(odin3.graphlet_instances(4, edges, graphlet=2), (1, [(0, 1, 2)]))
+        total, found = odin3.graphlet_instances(4, edges, graphlet=1)
+        self.assertEqual((total, sorted(found)), (2, [(0, 2, 3), (1, 2, 3)]))
+
+    def test_instances_max_truncates_total_exact(self) -> None:
+        total, found = odin3.graphlet_instances(5, [(0, 1), (1, 2), (2, 3), (3, 4)], 1, max=1)
+        self.assertEqual((total, len(found)), (3, 1))
+        self.assertEqual(odin3.graphlet_instances(2, [(0, 1)], 0, max=0), (1, []))
+
+    def test_instances_total_matches_orbit_totals(self) -> None:
+        rng = random.Random(11)
+        for _ in range(6):
+            n = rng.randint(5, 9)
+            pairs = [(a, b) for a in range(n) for b in range(a + 1, n)]
+            edges = [e for e in pairs if rng.random() < 0.4]
+            rows = odin3.graphlet_counts(n, edges, size=5)
+            # orbit 0 is the degree: sum / 2 = edges = instances of G0
+            self.assertEqual(odin3.graphlet_instances(n, edges, 0)[0], sum(r[0] for r in rows) // 2)
+
+    def test_instances_errors(self) -> None:
+        with self.assertRaises(odin3.Odin3Error):
+            odin3.graphlet_instances(2, [(0, 1)], graphlet=30)
+        with self.assertRaises(ValueError):
+            odin3.graphlet_instances(2, [(0, 1)], graphlet=0, size=3)
+
+    def test_similarity_full_precision(self) -> None:
+        rows = odin3.graphlet_counts(5, [(0, 1), (1, 2), (2, 3), (3, 4), (1, 3)], size=5)
+        same = odin3.graphlet_similarity(rows, rows, 73)
+        self.assertEqual(same, (1.0, 1.0))
+        gdd, cosine = odin3.graphlet_similarity(rows[:2], rows[2:], 73)
+        self.assertTrue(0.0 <= gdd < 1.0 and 0.0 <= cosine < 1.0)
+        # not a 6-decimal print: the value is the double the C metric computed
+        self.assertNotEqual(gdd, round(gdd, 6))
+        self.assertEqual(odin3.graphlet_similarity([], [], 73), (1.0, 1.0))
+        with self.assertRaises(odin3.Odin3Error):
+            odin3.graphlet_similarity([[1, 2, 3]], [[1, 2, 3]], 3)
+        with self.assertRaises(ValueError):
+            odin3.graphlet_similarity(rows, rows, 15)
+
     def test_bad_size(self) -> None:
         with self.assertRaises(ValueError):
             odin3.graphlet_counts(2, [(0, 1)], size=3)

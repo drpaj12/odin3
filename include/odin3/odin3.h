@@ -2341,6 +2341,62 @@ typedef struct odin3_graphlet_opts {
 odin3_status odin3_graphlets_count(const odin3_graphlet_graph *graph,
                                    const odin3_graphlet_opts *opts, int64_t *out, uint64_t out_len);
 
+/*
+ * Nodes per instance of graphlet type `graphlet` in the mode of opts (directed: G0..G39; undirected
+ * size 4: G0..G8, size 5: G0..G29; the numbering of `glet_count --catalogue`, spec
+ * docs/specs/2026-11-06-odin3-graphlet-instances.md). A graphlet out of range, or a bad size, is
+ * ODIN3_ERR_INVALID_ARG. Additive, ABI stays 7.
+ */
+odin3_status odin3_graphlet_nodes(const odin3_graphlet_opts *opts, uint32_t graphlet,
+                                  uint32_t *nodes);
+
+/* The result buffer of odin3_graphlets_instances. */
+typedef struct odin3_graphlet_instance_buf {
+    uint32_t *out;    /* in: receives the instances */
+    uint64_t out_len; /* in: capacity of out in ids */
+    uint64_t max;     /* in: write at most this many instances */
+    uint64_t total;   /* out: the exact number of instances */
+} odin3_graphlet_instance_buf;
+
+/*
+ * The instances of one graphlet type in a plain graph, by the same enumeration as
+ * odin3_graphlets_count (same graph rules, same opts incl. max_work). Writes up to buf->max
+ * instances into buf->out, each as odin3_graphlet_nodes consecutive node ids in ascending order, in
+ * the order the enumerator reaches them (deterministic); buf->out_len is the capacity of out in ids
+ * and must be at least max * nodes (else ODIN3_ERR_INVALID_ARG). buf->total receives the exact
+ * number of instances, also past max, so it equals the graphlet count derived from the orbit totals
+ * (orbit total divided by orbit size). The number written is min(total, max). A directed node set
+ * whose anti-parallel pairs resolve to the type in several ways is listed once per resolution.
+ * Status codes as odin3_graphlets_count. Additive, ABI stays 7.
+ */
+odin3_status odin3_graphlets_instances(const odin3_graphlet_graph *graph,
+                                       const odin3_graphlet_opts *opts, uint32_t graphlet,
+                                       odin3_graphlet_instance_buf *buf);
+
+/* Rows of graphlet orbit counts: n rows of n_orbits int64 values, row-major. */
+typedef struct odin3_graphlet_rows {
+    const int64_t *counts;
+    uint64_t n;
+} odin3_graphlet_rows;
+
+/* The two graphlet similarity metrics, both in [0, 1]. */
+typedef struct odin3_graphlet_similarity {
+    double gdd_agreement; /* Przulj 2007, arithmetic mean over orbits */
+    double cosine_log;    /* cosine of log(1 + orbit total) */
+} odin3_graphlet_similarity;
+
+/*
+ * The two similarity metrics of the graphlets pass (`graphlets --compare`, spec
+ * docs/specs/2026-10-30-graphlets-design.md sections 6 and 13) for two sets of node rows, at full
+ * double precision (the CLI prints 6 decimals). Each set is rows of n_orbits int64 orbit counts, as
+ * odin3_graphlets_count writes them (a subset of its rows, for example). The signature of a set is
+ * its orbit totals and graphlet degree distribution. n_orbits must be 15, 73 or 129 (the orbit
+ * counts of the modes); a set may be empty (n 0: all-zero signature). Additive, ABI stays 7.
+ */
+odin3_status odin3_graphlets_similarity(const odin3_graphlet_rows *rows_a,
+                                        const odin3_graphlet_rows *rows_b, uint32_t n_orbits,
+                                        odin3_graphlet_similarity *out);
+
 /* --- netlist editing (spec docs/specs/2026-10-31-netlist-edit-sim-design.md) --------------------
  *
  * Additive, ABI stays 7. Every call takes the design and refuses (ODIN3_ERR_INVALID_ARG, logged,
