@@ -5053,7 +5053,13 @@ if(BUILD_TESTING)
     string(SUBSTRING ${_bin_hash} 0 12 _bin_hash)
     set(_test_tmp /tmp/odin3-ctest-${_bin_hash})
     add_test(NAME test_tmp_setup COMMAND ${CMAKE_COMMAND} -E make_directory ${_test_tmp})
-    add_test(NAME test_tmp_cleanup COMMAND ${CMAKE_COMMAND} -E rm -rf ${_test_tmp})
+    # Cleanup must not delete the directory itself: a second ctest on the same build tree (the
+    # directory name is the hash of the build dir) shares it, and its running tests would lose their
+    # TMPDIR when the first run's fixture cleanup fired (lower_cells*, opt_rules*, sim_tb_hier_flow,
+    # sim_vcd_check and test_tmp_cleanup itself failed that way under two ctest runs). It removes
+    # only entries older than 30 minutes; nothing in a non-sweep run lives that long.
+    add_test(NAME test_tmp_cleanup
+             COMMAND sh -c "find '${_test_tmp}' -mindepth 1 -depth -mmin +30 -exec rm -rf {} + ; true")
     set_tests_properties(test_tmp_setup PROPERTIES FIXTURES_SETUP test_tmp)
     set_tests_properties(test_tmp_cleanup PROPERTIES FIXTURES_CLEANUP test_tmp)
     get_property(_all_tests DIRECTORY PROPERTY TESTS)
