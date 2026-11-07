@@ -118,6 +118,8 @@ class VcdAllTest(unittest.TestCase):
             for ins, out, cover in blif.names:
                 if ins and out in scope and all(i in scope or i in CONSTANTS for i in ins):
                     vals = [CONSTANTS.get(i) or state[scope[i]] for i in ins]
+                    if "x" in vals or state[scope[out]] == "x":
+                        continue  # 4-state: a flip-flop is x until reset
                     self.assertEqual(state[scope[out]], evaluate(cover, vals),
                                      f"{out} at {stamp}")
 

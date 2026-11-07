@@ -20,10 +20,10 @@ an `if` or `case` with an x select then takes its else or default branch as in t
 `lower` turns the select into gates that propagate x.
 Options: `--top <module>` (the testbench module, default the first), `--max-time N` (default
 10,000,000 time units), `--seed N` (the seed of `$random`), `--out <file>` (the `$display` text;
-default stdout), `--vcd <file>` (a waveform, below), `--4state` (x and z values: regs
-start x, the DUT is a 4-state simulator, as iverilog; best with `lower --keep-sel`; the default is
-2-state: every value starts 0 and the DUT is simulated with 0 and 1 only; `--2state` is accepted and
-changes nothing). Python: `design.run("sim_tb --out run.txt tb.v")`
+default stdout), `--vcd <file>` (a waveform, below), `--2state` (the old 2-state
+interpreter: every value starts 0 and the DUT is simulated with 0 and 1 only; the default, since
+2026-11-07, is 4-state: x and z values, regs start x, the DUT is a 4-state simulator, as iverilog,
+best with `lower --keep-sel`; `--4state` is accepted and changes nothing). Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
 Several files and directives: `sim_tb a.v b.v ...` joins the files (after the Verilog preprocessor,
