@@ -6,6 +6,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added (graphlet instances and metrics)
+
+- `graphlets --instances G [--max N] --instances-out FILE`: the instances of one graphlet type, from the same ESU run
+  as the counts (schema `odin3-graphlet-instances`). C ABI (additive, stays 7): `odin3_graphlets_instances`,
+  `odin3_graphlet_nodes`, `odin3_graphlets_similarity` (GDD agreement and cosine of log1p at full double precision for
+  two sets of orbit rows). Python: `graphlet_instances`, `graphlet_similarity`. Spec:
+  `docs/specs/2026-11-06-odin3-graphlet-instances.md`.
+
 ### Added (1.4.0, silicon flow and provenance step files)
 
 - Project files: `schema 2` and the statements `tool`, `flowdef`, `step`, `provlink`, `flow-var` describe named flows,

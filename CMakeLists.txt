@@ -127,6 +127,7 @@ add_library(odin3_core OBJECT
     src/passes/graphlets/graphlets.c
     src/passes/graphlets/gl_net.c
     src/passes/graphlets/gl_group.c
+    src/passes/graphlets/gl_inst.c
     src/passes/graphlets/gl_cal.c
     src/passes/graphviews/gv_pass.c
     src/passes/graphviews/gv_common.c
@@ -2047,6 +2048,7 @@ if(BUILD_TESTING)
     # graphlets: the counters.
     odin3_add_unit_test(test_graphlets_count)
     odin3_add_unit_test(test_graphlets_sig)
+    odin3_add_unit_test(test_graphlets_instances)
     odin3_add_unit_test(test_graphlets_threads)
     target_link_libraries(test_graphlets_threads PRIVATE pthread)
     target_compile_definitions(test_graphlets_sig PRIVATE ODIN3_GL_ROOT="${PROJECT_SOURCE_DIR}")

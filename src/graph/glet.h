@@ -65,17 +65,38 @@ typedef struct glet_orbit_info {
 } glet_orbit_info;
 bool glet_orbit_describe(bool directed, uint32_t orbit, glet_orbit_info *out);
 
+/* The instances of one graphlet type, collected by the same ESU run as the orbit counts (spec
+ * docs/specs/2026-11-06-odin3-graphlet-instances.md). graphlet and max are inputs, out has room
+ * for max * nodes ids (the caller owns it). nodes, total (every instance, also past max) and
+ * written (min(total, max)) are outputs. Each instance is its node ids, ascending. A directed
+ * node set whose anti-parallel pairs resolve to the type in several ways appears once per
+ * resolution. */
+typedef struct glet_inst {
+    uint32_t graphlet;
+    uint64_t max;
+    uint32_t *out;
+    uint32_t nodes;
+    uint64_t total;
+    uint64_t written;
+} glet_inst;
+
+/* Nodes of graphlet g of the mode (size as for glet_orbit_count); 0 when g is out of range. */
+uint32_t glet_graphlet_nodes(bool directed, unsigned size, uint32_t graphlet);
+
 /* What to count: directed or undirected, the largest graphlet (undirected 4 or 5; directed ignores
- * it and counts 2 to 4 nodes) and the work bound. */
+ * it and counts 2 to 4 nodes), the work bound, and optionally (NULL: none) the instances of one
+ * graphlet type. */
 typedef struct glet_spec {
     bool directed;
     unsigned size;
     uint64_t max_work;
+    glet_inst *inst;
 } glet_spec;
 
-/* Exact node orbit counts. counts is n * glet_orbit_count(...) int64, zeroed by the caller.
- * spec->max_work bounds the connected node sets visited (0: no bound); exceeding it is
- * ODIN3_ERR_INVALID_ARG (logged) with counts partial. *work receives the sets visited. */
+/* Exact node orbit counts. counts is n * glet_orbit_count(...) int64, zeroed by the caller (NULL
+ * is allowed when spec->inst is set: instances only). spec->max_work bounds the connected node
+ * sets visited (0: no bound); exceeding it is ODIN3_ERR_INVALID_ARG (logged) with counts partial.
+ * *work receives the sets visited. */
 odin3_status glet_count(const glet_graph *gr, const glet_spec *spec, int64_t *counts,
                         uint64_t *work);
 

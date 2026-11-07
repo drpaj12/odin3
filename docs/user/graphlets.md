@@ -37,6 +37,7 @@ odin3: info: graphlets: 1 groups, 5 nodes, 2 edges, mode undirected-5, 0 global 
 | `--per-node` | Write every node's orbit vector (id, name, type) into the file. |
 | `--out FILE`, `--edges-out FILE` | The JSON result (schema `odin3-graphlets`, version 1); the directed graph as `N M` plus `u v` lines. |
 | `--max-nodes N`, `--force`, `--max-work W` | Refuse a group above N nodes (default 200000) unless forced; stop after W counted subgraphs (default 2e10). |
+| `--instances G`, `--max N`, `--instances-out FILE` | Also write the instances of one graphlet type G (the `graphlet` column of the catalogue: undirected G0 to G29, or G0 to G8 with `--size 4`; directed G0 to G39) as lists of ascending module-local node IDs (schema `odin3-graphlet-instances`, version 1; `total` is exact, at most N are written, default 100000, and `truncated` says whether the list was cut). First group only; with `--halo 1` an instance may include halo nodes. Same enumerator as the counts, so `total` equals an orbit total of G divided by the orbit size. Spec: `docs/specs/2026-11-06-odin3-graphlet-instances.md`. |
 | `--compare "A#NAME" "B#NAME"`, `--calibration C` | Compare two signature files (below); `#NAME` picks a group by name (quote the word: an unquoted `#` starts a script comment). |
 
 Whole-module runs store module attributes `odin3:glet_mode`, `odin3:glet_nodes`,
@@ -76,6 +77,10 @@ with odin3.Design.read_blif("ff.blif") as design:
     result = design.graphlets(exclude_global=True, per_node=True)       # the JSON, as a dict
     print(design.top().attr("odin3:glet_orbit_totals"))
 print(odin3.graphlet_compare("a.json", "b.json#cone"))                  # similarity (+ posterior)
+total, found = odin3.graphlet_instances(5, [(0, 1), (1, 2), (2, 3), (3, 4)], graphlet=1)
+# total 3, found [(0, 1, 2), (1, 2, 3), (2, 3, 4)]: every 3-node path (G1), at most max=100000 listed
+rows = odin3.graphlet_counts(5, [(0, 1), (1, 2), (2, 3), (3, 4)])
+gdd, cosine = odin3.graphlet_similarity(rows[:2], rows[2:], 73)         # full-precision metrics
 ```
 
 ## How it was checked

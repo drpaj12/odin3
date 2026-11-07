@@ -3,9 +3,10 @@
  * adapter from the netlist to the generic counter in src/graph. `graphlets [--directed]
  * [--size 4|5] [--exclude-global] [--global-fanout F] [--focus F]... [--cells FILE]
  * [--partition KEY] [--halo 0|1] [--per-node] [--out FILE] [--edges-out FILE] [--max-nodes N]
- * [--force] [--max-work W]` and `graphlets --compare A[#NAME] B[#NAME] [--calibration C]
- * [--out FILE]`. Counts node orbits of each group's induced subgraph, writes module attributes
- * for whole-module groups and a versioned JSON file.
+ * [--force] [--max-work W] [--instances G [--max N] --instances-out FILE]` and
+ * `graphlets --compare A[#NAME] B[#NAME] [--calibration C] [--out FILE]`. Counts node orbits of
+ * each group's induced subgraph, writes module attributes for whole-module groups and a versioned
+ * JSON file.
  */
 #include "ir/celltype.h"
 #include "ir/value.h"
@@ -37,7 +38,8 @@ static const double k_us_per_ms = 1000.0;
 static const char k_usage[] =
     "graphlets: usage: graphlets [--directed] [--size 4|5] [--exclude-global] [--global-fanout F] "
     "[--focus F] [--cells FILE] [--partition KEY] [--halo 0|1] [--per-node] [--out FILE] "
-    "[--edges-out FILE] [--max-nodes N] [--force] [--max-work W] | --compare A B "
+    "[--edges-out FILE] [--max-nodes N] [--force] [--max-work W] [--instances G [--max N] "
+    "--instances-out FILE] | --compare A B "
     "[--calibration C] [--out FILE]";
 
 /* --- options --------------------------------------------------------------------------------- */
@@ -48,6 +50,8 @@ static void opts_init(gl_opts *ob) {
     ob->global_fanout = GL_DEFAULT_FANOUT;
     ob->max_nodes = GL_DEFAULT_MAX_NODES;
     ob->max_work = GL_DEFAULT_MAX_WORK;
+    ob->inst_max = GL_DEFAULT_INST_MAX;
+    odin3_strbuf_init(&ob->inst_out);
     odin3_strbuf_init(&ob->out);
     odin3_strbuf_init(&ob->partition);
     odin3_strbuf_init(&ob->edges_out);
@@ -61,6 +65,7 @@ static void opts_init(gl_opts *ob) {
 }
 
 static void opts_free(gl_opts *ob) {
+    odin3_strbuf_free(&ob->inst_out);
     odin3_strbuf_free(&ob->out);
     odin3_strbuf_free(&ob->partition);
     odin3_strbuf_free(&ob->edges_out);
@@ -111,6 +116,7 @@ static int text_option(odin3_bytes word, odin3_bytes *rest, gl_opts *ob, odin3_s
                        {"--cells", &ob->cells},
                        {"--partition", &ob->partition},
                        {"--edges-out", &ob->edges_out},
+                       {"--instances-out", &ob->inst_out},
                        {"--calibration", &ob->calibration}};
     for (size_t ii = 0; ii < sizeof table / sizeof table[0]; ii++) {
         if (odin3_pass_arg_is(word, table[ii].name)) {
@@ -147,9 +153,30 @@ static odin3_status small_option(odin3_bytes word, odin3_bytes *rest, gl_opts *o
     return ODIN3_OK;
 }
 
+/* --instances G and --max N. */
+static odin3_status inst_option(odin3_bytes word, odin3_bytes *rest, gl_opts *ob, bool *used) {
+    unsigned long long num = 0;
+    *used = true;
+    if (odin3_pass_arg_is(word, "--instances")) {
+        bool ok = next_number(rest, &num) && num <= UINT32_MAX;
+        ob->inst_on = ok;
+        ob->inst_graphlet = (uint32_t)num;
+        return ok ? ODIN3_OK
+                  : bad_option("--instances expects a graphlet id (G0, G1, ...: 0, 1, ...)");
+    }
+    if (odin3_pass_arg_is(word, "--max")) {
+        bool ok = next_number(rest, &num) && num > 0 && num <= GL_LIMIT_INST_MAX;
+        ob->inst_max = num;
+        return ok ? ODIN3_OK : bad_option("--max expects 1 to 10000000 instances");
+    }
+    *used = false;
+    return ODIN3_OK;
+}
+
 static odin3_status number_option(odin3_bytes word, odin3_bytes *rest, gl_opts *ob, bool *used) {
     unsigned long long num = 0;
     odin3_status st = small_option(word, rest, ob, used);
+    st = !*used && st == ODIN3_OK ? inst_option(word, rest, ob, used) : st;
     if (*used || st != ODIN3_OK) {
         return st;
     }
@@ -390,10 +417,33 @@ static odin3_status group_refuse(const gl_job *job) {
     return ODIN3_OK;
 }
 
+static odin3_status write_instances(const gl_job *job, const glet_inst *inst) {
+    char mode[MODE_LEN];
+    const odin3_strtab *tab = odin3_design_strtab(job->design);
+    gl_inst_info info = {job->opts->inst_out.data, mode_text(job->opts, mode, sizeof mode),
+                         odin3_strtab_get(tab, odin3_module_name(job->gm->mod)), job->ids,
+                         job->opts->inst_max};
+    return gl_inst_write(inst, &info);
+}
+
 typedef struct gl_counted {
     int64_t *counts;
     glet_graph gr;
 } gl_counted;
+
+/* The ESU run of one group; for the first group also the instances of --instances. */
+static odin3_status count_group(const gl_job *job, gl_result *res, gl_counted *cc, bool first) {
+    glet_spec spec = {job->opts->directed, job->opts->size, job->opts->max_work, NULL};
+    glet_inst inst;
+    bool want = first && job->opts->inst_on;
+    memset(&inst, 0, sizeof inst);
+    odin3_status st = want ? gl_inst_begin(&inst, job->opts, &spec) : ODIN3_OK;
+    spec.inst = want ? &inst : NULL;
+    st = st == ODIN3_OK ? glet_count(&cc->gr, &spec, cc->counts, &res->work) : st;
+    st = st == ODIN3_OK && want ? write_instances(job, &inst) : st;
+    gl_inst_end(&inst);
+    return st;
+}
 
 static odin3_status job_count(gl_job *job, gl_result *res, gl_counted *cc, odin3_strbuf *body,
                               bool first) {
@@ -407,8 +457,7 @@ static odin3_status job_count(gl_job *job, gl_result *res, gl_counted *cc, odin3
                      ? odin3_util_calloc(((size_t)job->n + 1) * job->norb * sizeof(int64_t))
                      : NULL;
     st = st == ODIN3_OK && cc->counts == NULL ? ODIN3_ERR_NO_MEMORY : st;
-    glet_spec spec = {job->opts->directed, job->opts->size, job->opts->max_work};
-    st = st == ODIN3_OK ? glet_count(&cc->gr, &spec, cc->counts, &res->work) : st;
+    st = st == ODIN3_OK ? count_group(job, res, cc, first) : st;
     if (st == ODIN3_OK && first && job->opts->edges_out.len > 0) {
         st = write_graph_file(&cc->gr, job->opts->edges_out.data);
     }
@@ -708,6 +757,9 @@ static odin3_status graphlets_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     gl_opts ob;
     opts_init(&ob);
     odin3_status st = parse_args(args, &ob);
+    if (st == ODIN3_OK && ob.inst_on && ob.inst_out.len == 0) {
+        st = bad_option("--instances needs --instances-out FILE");
+    }
     if (st == ODIN3_OK && ob.cmp_a.len > 0) {
         st = gl_run_compare(&ob);
         opts_free(&ob);
@@ -741,7 +793,8 @@ static odin3_status graphlets_run(odin3_pass_ctx *ctx, odin3_design *design, odi
 const odin3_pass_def odin3_pass_graphlets = {
     "graphlets",
     "graphlets [--directed] [--size 4|5] [--exclude-global] [--focus F] [--cells FILE] "
-    "[--partition KEY] [--halo 0|1] [--per-node] [--out FILE] | --compare A B: node graphlet "
+    "[--partition KEY] [--halo 0|1] [--per-node] [--out FILE] [--instances G [--max N] "
+    "--instances-out FILE] | --compare A B: node graphlet "
     "orbit counts (undirected 73 orbits, directed 129) of a module or a subgraph as module "
     "attributes odin3:glet_* and a JSON file",
     graphlets_run,

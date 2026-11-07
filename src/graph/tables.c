@@ -371,3 +371,17 @@ bool glet_orbit_describe(bool directed, uint32_t orbit, glet_orbit_info *out) {
     *out = directed ? g_glet_tab.info_d[orbit] : g_glet_tab.info_u[orbit];
     return true;
 }
+
+uint32_t glet_graphlet_nodes(bool directed, unsigned size, uint32_t graphlet) {
+    if (graphlet >= glet_graphlet_count(directed, size) || glet_tables_init() != ODIN3_OK) {
+        return 0;
+    }
+    uint32_t norb = directed ? GLET_ORBITS_D4 : GLET_ORBITS_U5;
+    for (uint32_t orb = 0; orb < norb; orb++) {
+        const glet_orbit_info *in = directed ? &g_glet_tab.info_d[orb] : &g_glet_tab.info_u[orb];
+        if (in->graphlet == graphlet) {
+            return in->nodes;
+        }
+    }
+    return 0;
+}

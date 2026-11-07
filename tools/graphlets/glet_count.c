@@ -67,7 +67,7 @@ int main(int argc, char **argv) {
     uint32_t norb = glet_orbit_count(directed, size);
     int64_t *counts = calloc(((size_t)g.n + 1) * (norb + 1), sizeof *counts);
     if (norb == 0 || counts == NULL ||
-        glet_count(&g, &(glet_spec){directed, size, 0}, counts, NULL) != ODIN3_OK) {
+        glet_count(&g, &(glet_spec){directed, size, 0, NULL}, counts, NULL) != ODIN3_OK) {
         return 1;
     }
     FILE *out = fopen(argv[base + 2], "w");

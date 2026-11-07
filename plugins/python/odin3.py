@@ -211,6 +211,70 @@ class Odin3:
         self.check("odin3_graphlets_count", status)
         return [list(out[row * n_orbits : (row + 1) * n_orbits]) for row in range(n)]
 
+    def graphlet_instances(
+        self,
+        n: int,
+        edges: Sequence[tuple[int, int]],
+        graphlet: int,
+        directed: bool = False,
+        size: int = 5,
+        max: int = 100000,
+        max_work: int = GRAPHLET_MAX_WORK,
+    ) -> tuple[int, list[tuple[int, ...]]]:
+        """The instances of one graphlet type of any graph (odin3_graphlets_instances).
+
+        Same graph rules and numbering as graphlet_counts; `graphlet` is G0..G29 (G0..G8 with
+        size 4) or, directed, G0..G39 (`glet_count --catalogue` lists them). Returns
+        (total, tuples): total is the exact number of instances, the tuples (at most `max`) are the
+        ascending node ids of the first instances the enumerator reaches. total equals the
+        graphlet count derived from the orbit totals.
+        """
+        for name in ("odin3_graphlets_instances", "odin3_graphlet_nodes"):
+            if not hasattr(self.lib, name):
+                raise Odin3Error(name, -1, f"libodin3 too old: needs {name}")
+        if not directed and size not in (4, 5):
+            raise ValueError("size must be 4 or 5")
+        src = self.ffi.new("uint32_t[]", [u for u, _ in edges] or [0])
+        dst = self.ffi.new("uint32_t[]", [v for _, v in edges] or [0])
+        graph = self.ffi.new(
+            "odin3_graphlet_graph *", {"n": n, "n_edges": len(edges), "from": src, "to": dst}
+        )
+        opts = self.ffi.new(
+            "odin3_graphlet_opts *", {"directed": int(directed), "size": size, "max_work": max_work}
+        )
+        nodes = self.get("odin3_graphlet_nodes", "uint32_t", opts, graphlet)
+        limit = max  # the parameter shadows the builtin
+        out = self.ffi.new("uint32_t[]", limit * nodes or 1)
+        buf = self.ffi.new(
+            "odin3_graphlet_instance_buf *",
+            {"out": out, "out_len": limit * nodes, "max": limit, "total": 0},
+        )
+        self.call("odin3_graphlets_instances", graph, opts, graphlet, buf)
+        total = int(buf.total)
+        written = limit if total > limit else total
+        tuples = [tuple(out[k * nodes : (k + 1) * nodes]) for k in range(written)]
+        return total, tuples
+
+    def graphlet_similarity(
+        self, rows_a: Sequence[Sequence[int]], rows_b: Sequence[Sequence[int]], n_orbits: int
+    ) -> tuple[float, float]:
+        """GDD agreement and cosine of log(1 + orbit total) of two sets of orbit-count rows, at
+        full double precision (odin3_graphlets_similarity; `graphlets --compare` prints 6
+        decimals). The rows are rows of graphlet_counts (n_orbits 15, 73 or 129)."""
+        if not hasattr(self.lib, "odin3_graphlets_similarity"):
+            name = "odin3_graphlets_similarity"
+            raise Odin3Error(name, -1, f"libodin3 too old: needs {name}")
+        flat_a = [v for row in rows_a for v in row]
+        flat_b = [v for row in rows_b for v in row]
+        if len(flat_a) != len(rows_a) * n_orbits or len(flat_b) != len(rows_b) * n_orbits:
+            raise ValueError("every row must have n_orbits values")
+        keep = [self.ffi.new("int64_t[]", flat_a or [0]), self.ffi.new("int64_t[]", flat_b or [0])]
+        ra = self.ffi.new("odin3_graphlet_rows *", {"counts": keep[0], "n": len(rows_a)})
+        rb = self.ffi.new("odin3_graphlet_rows *", {"counts": keep[1], "n": len(rows_b)})
+        out = self.ffi.new("odin3_graphlet_similarity *")
+        self.call("odin3_graphlets_similarity", ra, rb, n_orbits, out)
+        return float(out.gdd_agreement), float(out.cosine_log)
+
     def check(self, function: str, status: int) -> None:
         """Raise Odin3Error unless status is ODIN3_OK."""
         if status != self.lib.ODIN3_OK:
@@ -2105,6 +2169,27 @@ def graphlet_counts(
 ) -> list[list[int]]:
     """Graphlet orbit counts of a plain edge list (see Odin3.graphlet_counts)."""
     return default().graphlet_counts(n, edges, directed, size, max_work)
+
+
+def graphlet_instances(
+    n: int,
+    edges: Sequence[tuple[int, int]],
+    graphlet: int,
+    directed: bool = False,
+    size: int = 5,
+    max: int = 100000,
+    max_work: int = GRAPHLET_MAX_WORK,
+) -> tuple[int, list[tuple[int, ...]]]:
+    """(total, instances) of one graphlet type of a plain edge list (see
+    Odin3.graphlet_instances)."""
+    return default().graphlet_instances(n, edges, graphlet, directed, size, max, max_work)
+
+
+def graphlet_similarity(
+    rows_a: Sequence[Sequence[int]], rows_b: Sequence[Sequence[int]], n_orbits: int
+) -> tuple[float, float]:
+    """(gdd_agreement, cosine_log) of two sets of orbit rows (see Odin3.graphlet_similarity)."""
+    return default().graphlet_similarity(rows_a, rows_b, n_orbits)
 
 
 def graphlet_compare(

@@ -41,3 +41,35 @@ if run "graphlets --max-nodes 1 --out $out/$name.x.json"; then
     exit 1
 fi
 grep -q "more than --max-nodes" "$out/$name.log" || { echo "no refusal text" >&2; exit 1; }
+# --instances: the file, the exact total, truncation by --max (spec 2026-11-06-odin3-graphlet-instances.md).
+run "graphlets --instances 0 --instances-out $out/$name.i0.json"
+grep -q '"schema": "odin3-graphlet-instances"' "$out/$name.i0.json" || { echo "no instances schema" >&2; exit 1; }
+total=$(sed -n 's/.*"total": \([0-9]*\),.*/\1/p' "$out/$name.i0.json")
+written=$(sed -n 's/.*"written": \([0-9]*\),.*/\1/p' "$out/$name.i0.json")
+[[ "$total" == "$written" ]] || { echo "G0 written != total without truncation" >&2; exit 1; }
+grep -q '"truncated": 0' "$out/$name.i0.json" || { echo "G0 truncated flag" >&2; exit 1; }
+# G0 (the edge): total = half the sum of the degrees (orbit 0 of the node vectors)
+degsum=$(sed -n 's/.*"orbit_totals": \[\([0-9-]*\),.*/\1/p' "$out/$name.1.json" | head -1)
+[[ $((degsum / 2)) == "$total" ]] || { echo "G0 total $total != orbit-derived $((degsum / 2))" >&2; exit 1; }
+if [[ "$total" -gt 1 ]]; then
+    run "graphlets --instances 0 --max 1 --instances-out $out/$name.i1.json"
+    grep -q '"written": 1,' "$out/$name.i1.json" || { echo "--max 1 must write one" >&2; exit 1; }
+    grep -q '"truncated": 1' "$out/$name.i1.json" || { echo "--max 1 must say truncated" >&2; exit 1; }
+    grep -q "\"total\": $total," "$out/$name.i1.json" || { echo "--max changed total" >&2; exit 1; }
+fi
+run "graphlets --directed --instances 0 --instances-out $out/$name.id.json"
+grep -q '"mode": "directed-4"' "$out/$name.id.json" || { echo "directed instances mode" >&2; exit 1; }
+if run "graphlets --instances 99 --instances-out $out/$name.ix.json"; then
+    echo "--instances 99 must refuse" >&2
+    exit 1
+fi
+if run "graphlets --instances 0"; then
+    echo "--instances without --instances-out must refuse" >&2
+    exit 1
+fi
+# CLI golden: the instances of G1 (the 3-node path) are byte-identical to the committed file.
+gold=$here/../golden/graphlets/$name.g1.instances.json
+if [[ -f "$gold" ]]; then
+    run "graphlets --instances 1 --instances-out $out/$name.g1.json"
+    cmp -s "$gold" "$out/$name.g1.json" || { echo "G1 instances differ from the golden $gold" >&2; exit 1; }
+fi
