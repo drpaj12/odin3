@@ -858,7 +858,7 @@ odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *o
     tb->n_plusargs = opts->plusargs != NULL ? opts->n_plusargs : 0U;
     odin3_status st = setup(&rt, design);
     if (st == ODIN3_OK && opts->vcd != NULL) {
-        rt.vcd = tb_vcd_open(opts->vcd, tb);
+        rt.vcd = tb_vcd_open(opts->vcd, tb, opts);
         st = rt.vcd != NULL ? ODIN3_OK : ODIN3_ERR_IO;
     }
     if (st == ODIN3_OK) {

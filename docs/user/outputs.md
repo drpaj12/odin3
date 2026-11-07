@@ -153,3 +153,11 @@ inputs are driven at `10c+2`, the clock rises at `10c+5` and falls at `10c+10`, 
 edge. A time is written only when some signal changed. The values at `10c+10` are the outputs the
 vector file prints on line `c`. Open the file with GTKWave (`gtkwave wave.vcd`) or any other VCD
 viewer.
+
+`--vcd-all` (with `--vcd`) replaces the wires by the nets: one 1-bit variable per connected net of the
+current view, one scope per instance, each net named as `write_blif --vtr` names it (a port bit is
+`q[3]`; `--vcd-names hash` gives the names of `--name-style hash`). After `abc --lut 6` this puts every
+LUT, gate and flip-flop output of the written BLIF in the waveform under the BLIF name, with the same
+time convention as above, so the file is a switching-activity source for the mapped netlist. On the RTL
+view the nets keep the IR's names. `sim_tb --vcd ... --vcd-all` does the same for each DUT instance
+of a testbench run (docs/user/testbench.md).

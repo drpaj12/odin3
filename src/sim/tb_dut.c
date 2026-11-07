@@ -232,17 +232,21 @@ odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_s
     return ODIN3_OK;
 }
 
-void tb_inst_peek(const tb_inst *inst, uint32_t id, tbv *out) {
-    const odin3_sim_signal *sig = odin3_sim_signals_at(inst->sigs, id);
-    uint8_t bits[TB_MAX_WIDTH] = {0};
+void tb_sig_peek(const odin3_sim_signals *sigs, uint32_t id, tbv *out) {
+    const odin3_sim_signal *sig = odin3_sim_signals_at(sigs, id);
+    uint8_t bits[TB_MAX_WIDTH]; /* only the first width bytes are read, after the read fills them */
     uint32_t width = sig != NULL ? sig->width : 1U;
     tbv_zero(out, width);
-    if (sig == NULL || odin3_sim_signals_read(inst->sigs, id, bits, sig->width) != ODIN3_OK) {
+    if (sig == NULL || odin3_sim_signals_read(sigs, id, bits, sig->width) != ODIN3_OK) {
         return;
     }
     for (uint32_t k = 0; k < width; k++) {
         odin3_w4_set_bit((odin3_w4){out->v, out->u}, (odin3_w4_bit_at){k, bits[k] & 3U});
     }
+}
+
+void tb_inst_peek(const tb_inst *inst, uint32_t id, tbv *out) {
+    tb_sig_peek(inst->sigs, id, out);
 }
 
 void tb_inst_release(tb_inst *inst) {

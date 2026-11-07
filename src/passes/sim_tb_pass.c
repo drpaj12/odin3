@@ -5,6 +5,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/sim_netnames.h"
 #include "sim/tb.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -43,6 +44,8 @@ typedef struct tb_args {
     char plusarg[TB_MAX_PLUSARGS][TB_PLUSARG_LEN];
     const char *plusarg_ptr[TB_MAX_PLUSARGS];
     uint32_t n_plusarg;
+    bool vcd_all;                    /* --vcd-all: also every net of every DUT instance */
+    odin3_blif_name_style vcd_names; /* --vcd-names: the style of those net names */
     bool four_state; /* --4state: x/z values, 4-state DUTs (default: the 2-state interpreter) */
 } tb_args;
 
@@ -105,10 +108,18 @@ static bool take_define(odin3_bytes *args, tb_args *out) {
     return take(args, out->define[out->n_defines++], DEFINE_LEN);
 }
 
+/* The style after --vcd-names goes into style; an unknown style is false. */
+static bool take_style(odin3_bytes *args, odin3_blif_name_style *style) {
+    char text[NUM_BUF] = {0};
+    return take(args, text, sizeof text) && odin3_sim_netnames_style(text, style);
+}
+
 static odin3_status usage(void) {
-    odin3_log(ODIN3_LOG_ERROR, "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
-                               "<file>] [--vcd <file>] [--plusarg <text>]... [--4state] [-I "
-                               "<dir>]... [-D <name[=value]>]... <tb.v>...");
+    odin3_log(ODIN3_LOG_ERROR,
+              "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
+              "<file>] [--vcd <file> [--vcd-all] [--vcd-names short|provenance|hash]] [--plusarg "
+              "<text>]... [--4state] [-I "
+              "<dir>]... [-D <name[=value]>]... <tb.v>...");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -129,12 +140,40 @@ static bool take_other(odin3_bytes word, odin3_bytes *args, tb_args *out) {
     return true;
 }
 
+/* --vcd, --vcd-all and --vcd-names: true when word is one of them (*ok: its value was good). */
+static bool take_vcd_option(odin3_bytes word, odin3_bytes *args, tb_args *out, bool *ok) {
+    if (word_is(word, "--vcd")) {
+        *ok = take(args, out->vcd, sizeof out->vcd);
+    } else if (word_is(word, "--vcd-all")) {
+        *ok = !out->vcd_all;
+        out->vcd_all = true;
+    } else if (word_is(word, "--vcd-names")) {
+        *ok = take_style(args, &out->vcd_names);
+    } else {
+        return false;
+    }
+    return true;
+}
+
+/* --vcd-all needs --vcd, --vcd-names needs --vcd-all (logged when not). */
+static bool check_vcd_options(const tb_args *out) {
+    bool bad = (out->vcd_all && out->vcd[0] == '\0') ||
+               (out->vcd_names != ODIN3_BLIF_NAMES_SHORT && !out->vcd_all);
+    if (bad) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "sim_tb: --vcd-all needs --vcd <file>; --vcd-names needs --vcd-all");
+    }
+    return !bad;
+}
+
 static odin3_status parse_args(odin3_bytes args, tb_args *out) {
     out->max_time = DEFAULT_MAX_TIME;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         bool ok = true;
-        if (word_is(word, "--top")) {
+        if (take_vcd_option(word, &args, out, &ok)) {
+            /* handled */
+        } else if (word_is(word, "--top")) {
             ok = take(&args, out->top, sizeof out->top);
         } else if (word_is(word, "--out")) {
             ok = take(&args, out->out, sizeof out->out);
@@ -142,8 +181,6 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
             ok = take_number(&args, &out->max_time);
         } else if (word_is(word, "--seed")) {
             ok = take_number(&args, &out->seed);
-        } else if (word_is(word, "--vcd")) {
-            ok = take(&args, out->vcd, sizeof out->vcd);
         } else if (word_is(word, "--plusarg")) {
             ok = take_plusarg(&args, out);
         } else if (word_is(word, "--4state")) {
@@ -156,6 +193,9 @@ static odin3_status parse_args(odin3_bytes args, tb_args *out) {
         if (!ok) {
             return usage();
         }
+    }
+    if (!check_vcd_options(out)) {
+        return ODIN3_ERR_INVALID_ARG;
     }
     return out->n_files == 0 ? usage() : ODIN3_OK;
 }
@@ -242,11 +282,25 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
         free(parsed);
         return ODIN3_ERR_IO;
     }
-    tb_options opts = {
-        parsed->max_time,    parsed->seed,     out, parsed->vcd[0] != '\0' ? parsed->vcd : NULL,
-        parsed->plusarg_ptr, parsed->n_plusarg};
+    tb_options opts = {parsed->max_time,
+                       parsed->seed,
+                       out,
+                       parsed->vcd[0] != '\0' ? parsed->vcd : NULL,
+                       parsed->plusarg_ptr,
+                       parsed->n_plusarg,
+                       false,
+                       NULL,
+                       NULL};
+    odin3_sim_netnames names;
+    odin3_sim_netnames_init(&names, design, "sim_tb", parsed->vcd_names);
+    if (parsed->vcd_all) {
+        opts.vcd_all = true;
+        opts.namer = odin3_sim_netnames_name;
+        opts.namer_ctx = &names;
+    }
     uint64_t end_time = 0;
     st = tb_run(design, tb, &opts, &end_time);
+    odin3_sim_netnames_free(&names);
     (void)fflush(out);
     if (out != stdout) {
         (void)fclose(out);
@@ -261,14 +315,16 @@ static odin3_status sim_tb_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_
 
 const odin3_pass_def odin3_pass_sim_tb = {
     "sim_tb",
-    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file>] [--plusarg "
-    "<text>]... [--4state] [-I <dir>]... [-D <name[=value]>]... <tb.v>...: run a "
+    "sim_tb [--top <module>] [--max-time N] [--seed N] [--out <file>] [--vcd <file> [--vcd-all] "
+    "[--vcd-names short|provenance|hash]] [--plusarg <text>]... [--4state] [-I <dir>]... [-D "
+    "<name[=value]>]... <tb.v>...: run a "
     "Verilog "
     "testbench (the supported subset, docs/specs/2026-10-31-testbench-design.md) against the "
     "design's modules; values are 2-state (all 0 at power-on) unless --4state: then 0, 1, x, z "
     "(regs start x, as iverilog), best with `lower --keep-sel`; $display text goes to stdout or "
     "--out, "
-    "--vcd writes a waveform of the testbench signals and the DUT ports; --plusarg (up to 16) "
+    "--vcd writes a waveform of the testbench signals and the DUT ports, --vcd-all adds every net "
+    "of every DUT instance, named as write_blif --vtr names it; --plusarg (up to 16) "
     "is a run-time argument that $test$plusargs and $value$plusargs read, as name=value; the "
     "files go through the Verilog preprocessor (`define, `ifdef, `include searched in the -I "
     "directories, -D defines) and are joined; --top picks the testbench module among them",

@@ -2499,6 +2499,19 @@ void odin3_blif_names_free(odin3_blif_names *names) {
     odin3_util_free(names);
 }
 
+odin3_bytes odin3_blif_names_net(const odin3_blif_names *names, const odin3_design *design,
+                                 const odin3_module *module, odin3_net_id net) {
+    uint64_t id = 0;
+    if (odin3_u64map_get(names->gen, net.v, &id)) {
+        return (odin3_bytes){odin3_strtab_get(names->gen_names, (uint32_t)id),
+                             odin3_strtab_len(names->gen_names, (uint32_t)id)};
+    }
+    uint32_t own = odin3_net_name(module, net);
+    const odin3_strtab *tab = odin3_design_strtab(design);
+    return own == 0 ? (odin3_bytes){"", 0}
+                    : (odin3_bytes){odin3_strtab_get(tab, own), odin3_strtab_len(tab, own)};
+}
+
 odin3_bytes odin3_blif_names_map(const odin3_blif_names *names) {
     return names != NULL && names->map_text.data != NULL
                ? (odin3_bytes){names->map_text.data, names->map_text.len}
@@ -3140,7 +3153,9 @@ odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif
     wr.log_names = req->log_names;
     wr.quiet_refusal = !req->log_refusal;
     if (st == ODIN3_OK) {
-        wr.module = odin3_module_get((odin3_design *)req->design, odin3_design_top(req->design));
+        odin3_module_id which =
+            odin3_module_valid(req->module) ? req->module : odin3_design_top(req->design);
+        wr.module = odin3_module_get((odin3_design *)req->design, which);
         wr.model = odin3_strtab_get(wr.tab, odin3_module_name(wr.module));
         st = wr_fail(&wr, name_module(&wr));
     }
