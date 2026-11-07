@@ -57,10 +57,13 @@ argv = sys.argv
 with open(os.environ["FAKE_LOG"] + ".equiv", "a", encoding="utf-8") as fh:
     fh.write(json.dumps({{"argv": argv}}) + "\\n")
 left, right = argv[-2], argv[-1]
-if "ierr" in left and left.endswith("before.blif"):
+# The markers are looked for below the --keep directory only: the random name of the temporary
+# directory above it can hold "unp" or "ierr" by chance and turn any test into unproven or error.
+tail = left.split("/keep/")[-1]
+if "ierr" in tail and left.endswith("before.blif"):
     sys.stderr.write("equiv-check: cannot read\\n")
     sys.exit(3)
-if "unp" in left and left.endswith("before.blif"):
+if "unp" in tail and left.endswith("before.blif"):
     sys.exit(4)
 text = open(left, encoding="utf-8").read() + open(right, encoding="utf-8").read()
 if "# aigside" in text:
