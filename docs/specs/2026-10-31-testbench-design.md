@@ -82,7 +82,7 @@ error. `$finish` ends the run; without it the run ends when no event is left or 
 `tb.v:LINE: unsupported: <construct>`. With several testbench files, or `` `include `` in them, `sim_tb`
 joins the preprocessed streams; every error, warning and run-time message names the line of the
 file the text came from (the preprocessor's segment map: an included file by its own name and
-line, a macro use by the place of the use), not a line of the joined text. The preprocessor (DUT and testbench readers alike) drops `` `protect `` and `` `endprotect `` and keeps the text between them (the unencrypted form that vendor models such as the IS42VM16400K SDRAM model use). `pullup(w);` and `pulldown(w);` (a declared testbench wire, no strength or delay) make the z bits of the wire read 1 or 0 whenever it is stored (4-state; a z-free 2-state run is unaffected). The gate is a weak driver: any other driver that is not z wins, as in IEEE 1364 7.
+line, a macro use by the place of the use), not a line of the joined text. The preprocessor (DUT and testbench readers alike) drops `` `protect `` and `` `endprotect `` and keeps the text between them (the unencrypted form that vendor models such as the IS42VM16400K SDRAM model use). `pullup(w);` and `pulldown(w);` (a declared testbench wire, or an undeclared name, which is an implicit one-bit wire; no strength or delay) make the z bits of the wire read 1 or 0 whenever it is stored (4-state; a z-free 2-state run is unaffected). The gate is a weak driver: any other driver that is not z wins, as in IEEE 1364 7.
 
 ## 3. Time and scheduling
 

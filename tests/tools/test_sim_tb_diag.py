@@ -88,9 +88,11 @@ class DiagTest(unittest.TestCase):
   pullup(up);
   pulldown (down);
   pullup(bus);
+  pulldown(implicit_net);
   initial begin
     en = 0;
-    #1 $display("off up=%b down=%b plain=%b bus=%b", up, down, plain, bus);
+    #1 $display("off up=%b down=%b plain=%b bus=%b implicit=%b", up, down, plain, bus,
+                implicit_net);
     en = 1;
     #1 $display("on  up=%b down=%b plain=%b bus=%b", up, down, plain, bus);
     $finish;
@@ -101,7 +103,8 @@ endmodule
                               cwd=work, check=False, timeout=120)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertEqual(done.stdout.split("\n")[:2],
-                         ["off up=1 down=0 plain=z bus=11", "on  up=0 down=1 plain=1 bus=01"])
+                         ["off up=1 down=0 plain=z bus=11 implicit=0",
+                          "on  up=0 down=1 plain=1 bus=01"])
 
     def test_dumpvars_arguments_are_ignored(self) -> None:
         work = helpers.scratch(self, "test-tb-diag-")
