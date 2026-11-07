@@ -667,8 +667,10 @@ if(ODIN3_WITH_ABC)
         unset(CMAKE_C_EXTENSIONS)
         # ABC is always optimised: unoptimised, it would stretch the large runs several-fold.
         # Debug keeps its assertions; Release drops them.
-        set(CMAKE_C_FLAGS_DEBUG "-g -O2")
-        set(CMAKE_CXX_FLAGS_DEBUG "-g -O2")
+        # -g1 (line tables, no variable info): each test that links libabc-pic statically carries
+        # its own copy of ABC's debug info, which at -g was 100+ MB per test binary.
+        set(CMAKE_C_FLAGS_DEBUG "-g1 -O2")
+        set(CMAKE_CXX_FLAGS_DEBUG "-g1 -O2")
         set(CMAKE_C_FLAGS_RELEASE "-O2 -DNDEBUG")
         set(CMAKE_CXX_FLAGS_RELEASE "-O2 -DNDEBUG")
         set(READLINE_FOUND FALSE)
@@ -792,7 +794,14 @@ if(ODIN3_WITH_SLANG)
         "${PROJECT_SOURCE_DIR}/third_party/slang/third_party/boost_regex" CACHE PATH "" FORCE)
     set(FETCHCONTENT_SOURCE_DIR_TOMLPLUSPLUS
         "${PROJECT_SOURCE_DIR}/third_party/slang/third_party/tomlplusplus" CACHE PATH "" FORCE)
-    add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
+    # -g1 for slang in Debug (as for ABC): full debug info for a vendored library only bloats
+    # libodin3_slang.so and the build tree. The function scope keeps it off the adapter.
+    function(odin3_add_slang)
+        set(CMAKE_CXX_FLAGS_DEBUG "-g1")
+        set(CMAKE_C_FLAGS_DEBUG "-g1")
+        add_subdirectory(third_party/slang EXCLUDE_FROM_ALL)
+    endfunction()
+    odin3_add_slang()
     set_target_properties(slang_slang PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     # The adapter's flags: C++ with the core's warning set where it applies; the sanitizers on
