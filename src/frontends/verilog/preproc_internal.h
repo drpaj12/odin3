@@ -343,6 +343,7 @@ typedef enum odin3_pp_dir_kind {
     ODIN3_PP_DIR_INCLUDE,
     ODIN3_PP_DIR_LINE,
     ODIN3_PP_DIR_PASS,
+    ODIN3_PP_DIR_DROP, /* consumed, nothing emitted: `protect, `endprotect (IEEE 1364 19.x) */
     ODIN3_PP_DIR_SV
 } odin3_pp_dir_kind;
 

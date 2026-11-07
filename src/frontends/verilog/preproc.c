@@ -662,6 +662,8 @@ static const odin3_pp_dir k_dirs[] = {
     {"unconnected_drive", ODIN3_PP_DIR_PASS, 0},
     {"nounconnected_drive", ODIN3_PP_DIR_PASS, 0},
     {"pragma", ODIN3_PP_DIR_PASS, 0},
+    {"protect", ODIN3_PP_DIR_DROP, 0},
+    {"endprotect", ODIN3_PP_DIR_DROP, 0},
     {"__FILE__", ODIN3_PP_DIR_SV, 0},
     {"__LINE__", ODIN3_PP_DIR_SV, 0},
 };
@@ -824,6 +826,10 @@ static odin3_status backtick_word(odin3_pp *pp, odin3_loc at) {
     }
     if (kind == ODIN3_PP_DIR_SV) {
         return builtin_macro(pp, at, name);
+    }
+    if (kind == ODIN3_PP_DIR_DROP) {
+        odin3_pp_advance(pp, (uint32_t)name.len + 1);
+        return ODIN3_OK;
     }
     odin3_pp_advance(pp, (uint32_t)name.len + 1);
     if (kind == ODIN3_PP_DIR_LINE) {

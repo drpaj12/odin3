@@ -82,7 +82,7 @@ error. `$finish` ends the run; without it the run ends when no event is left or 
 `tb.v:LINE: unsupported: <construct>`. With several testbench files, or `` `include `` in them, `sim_tb`
 joins the preprocessed streams; every error, warning and run-time message names the line of the
 file the text came from (the preprocessor's segment map: an included file by its own name and
-line, a macro use by the place of the use), not a line of the joined text.
+line, a macro use by the place of the use), not a line of the joined text. The preprocessor (DUT and testbench readers alike) drops `` `protect `` and `` `endprotect `` and keeps the text between them (the unencrypted form that vendor models such as the IS42VM16400K SDRAM model use).
 
 ## 3. Time and scheduling
 

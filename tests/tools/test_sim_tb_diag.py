@@ -63,6 +63,18 @@ class DiagTest(unittest.TestCase):
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("defs.h:3: unsupported: real", done.stderr)
 
+    def test_protect_regions_are_dropped(self) -> None:
+        work = helpers.scratch(self, "test-tb-diag-")
+        (work / "d.v").write_text("module d(input a, output y);\n`protect\n  assign y = ~a;\n"
+                                  "`endprotect\nendmodule\n")
+        (work / "t.v").write_text("module t;\n  reg a; wire y;\n  d u(.a(a), .y(y));\n`protect\n"
+                                  "  initial begin a = 0; #1 $display(\"y=%b\", y); $finish; end\n"
+                                  "`endprotect\nendmodule\n")
+        done = subprocess.run([ODIN3, "-p", "read_verilog d.v; proc; opt; lower; sim_tb t.v"],
+                              capture_output=True, text=True, cwd=work, check=False, timeout=120)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("y=1", done.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
