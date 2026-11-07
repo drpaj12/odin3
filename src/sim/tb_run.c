@@ -39,6 +39,12 @@ typedef struct proc {
     const tb_stmt *waiting;
 } proc;
 
+/* A nonblocking write with an intra-assignment delay: applied in the NBA region of time `when`. */
+typedef struct delayed_wr {
+    uint64_t when;
+    tb_wr wr;
+} delayed_wr;
+
 typedef struct run {
     tb_module *tb;
     tb_ev ev;
@@ -53,6 +59,8 @@ typedef struct run {
     uint32_t nd;
     tb_wr *nbas; /* pending nonblocking writes, indices already evaluated */
     uint32_t nnba, cap_nba;
+    delayed_wr *dnbas; /* `a <= #d b` writes waiting for their time */
+    uint32_t ndnba, cap_dnba;
     const tb_stmt *monitor;
     bool mon_on;
     tbv mon_prev[TB_MAX_ARGS]; /* last values of the $monitor arguments except $time */
@@ -282,23 +290,68 @@ static void do_systask(run *rt, const tb_stmt *stmt) {
 }
 
 /* --- process stepping --- */
+/* Room for `extra` more entries of an array of `size`-byte items in *items (doubling). */
+typedef struct grow_spec {
+    uint32_t used, extra;
+    size_t size;
+} grow_spec;
+
+static bool grow_items(void **items, uint32_t *cap, grow_spec spec) {
+    uint32_t used = spec.used;
+    uint32_t extra = spec.extra;
+    size_t size = spec.size;
+    if (used + extra <= *cap) {
+        return true;
+    }
+    uint32_t bigger = *cap == 0 ? (uint32_t)NBA_CAP0 : *cap;
+    while (bigger < used + extra) {
+        bigger *= 2U;
+    }
+    void *grown = realloc(*items, bigger * size);
+    if (grown == NULL) {
+        return false;
+    }
+    *items = grown;
+    *cap = bigger;
+    return true;
+}
+
+typedef struct delayed_req {
+    const tb_wr *wrs;
+    uint32_t count;
+    uint64_t delay;
+} delayed_req;
+
+/* Queues the writes of `a <= #delay b` for time + delay. */
+static void push_delayed(run *rt, const delayed_req *req) {
+    grow_spec spec = {rt->ndnba, req->count, sizeof *rt->dnbas};
+    if (!grow_items((void **)&rt->dnbas, &rt->cap_dnba, spec)) {
+        rt->failed = true;
+        return;
+    }
+    for (uint32_t i = 0; i < req->count; i++) {
+        rt->dnbas[rt->ndnba++] = (delayed_wr){rt->ev.time + req->delay, req->wrs[i]};
+    }
+}
+
 static void push_nba(run *rt, const tb_stmt *stmt) {
     tb_wr wrs[TB_WR_MAX];
     tbv val;
     tb_eval_assign(&rt->ev, stmt->rhs, stmt->lhs->width, &val);
     uint32_t count = tb_wr_resolve(&rt->ev, stmt->lhs, &val, wrs);
-    if (rt->nnba + count > rt->cap_nba) {
-        uint32_t cap = rt->cap_nba == 0 ? (uint32_t)NBA_CAP0 : rt->cap_nba;
-        while (cap < rt->nnba + count) {
-            cap *= 2U;
-        }
-        tb_wr *grown = realloc(rt->nbas, cap * sizeof *grown);
-        if (grown == NULL) {
-            rt->failed = true;
-            return;
-        }
-        rt->nbas = grown;
-        rt->cap_nba = cap;
+    uint64_t delay = 0;
+    if (stmt->delay != NULL && !tb_eval_u64(&rt->ev, stmt->delay, &delay)) {
+        delay = 0; /* a delay with x or z bits is 0, as for `#` */
+    }
+    if (delay > 0) {
+        delayed_req req = {wrs, count, delay};
+        push_delayed(rt, &req);
+        return;
+    }
+    grow_spec spec = {rt->nnba, count, sizeof *rt->nbas};
+    if (!grow_items((void **)&rt->nbas, &rt->cap_nba, spec)) {
+        rt->failed = true;
+        return;
     }
     for (uint32_t i = 0; i < count; i++) {
         rt->nbas[rt->nnba++] = wrs[i];
@@ -585,6 +638,22 @@ static void active_region(run *rt) {
     }
 }
 
+/* Applies the `a <= #d b` writes whose time has come; true when there were any. */
+static bool apply_delayed(run *rt) {
+    uint32_t kept = 0;
+    bool any = false;
+    for (uint32_t i = 0; i < rt->ndnba; i++) {
+        if (rt->dnbas[i].when == rt->ev.time) {
+            tb_wr_apply(&rt->ev, &rt->dnbas[i].wr);
+            any = true;
+        } else {
+            rt->dnbas[kept++] = rt->dnbas[i];
+        }
+    }
+    rt->ndnba = kept;
+    return any;
+}
+
 /* The NBA region: the DUTs' recorded clock edges first (they sample the inputs as the active
  * region left them, and their register outputs are published here), then the testbench's
  * nonblocking assignments. True when anything happened, so the active region must run again. */
@@ -598,6 +667,7 @@ static bool nba_region(run *rt) {
     }
     progress = progress || rt->nnba > 0;
     rt->nnba = 0;
+    progress = apply_delayed(rt) || progress;
     post_write(rt);
     return progress;
 }
@@ -652,6 +722,12 @@ static bool next_time(run *rt, uint64_t *next) {
     for (uint32_t i = 0; i < rt->np; i++) {
         if (rt->procs[i].state == P_TIME && (!found || rt->procs[i].wake < *next)) {
             *next = rt->procs[i].wake;
+            found = true;
+        }
+    }
+    for (uint32_t i = 0; i < rt->ndnba; i++) {
+        if (!found || rt->dnbas[i].when < *next) {
+            *next = rt->dnbas[i].when;
             found = true;
         }
     }
@@ -772,6 +848,7 @@ static void teardown(run *rt) {
     free(rt->order);
     free((void *)rt->duts);
     free(rt->nbas);
+    free(rt->dnbas);
     free((void *)rt->strobes);
 }
 

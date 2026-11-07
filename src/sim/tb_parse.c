@@ -1002,6 +1002,12 @@ static tb_stmt *parse_assign(parser *pr, bool semi) {
     } else if (!expect_op(pr, "=")) {
         return NULL;
     }
+    if (stmt->kind == S_NBA && accept_op(pr, "#")) { /* a <= #d b: the write happens d later */
+        stmt->delay = parse_primary(pr);
+        if (stmt->delay == NULL) {
+            return NULL;
+        }
+    }
     if (is_op(pr, "#") || is_kw(pr, "repeat") || is_op(pr, "@")) {
         fail(pr, "intra-assignment delay or event control");
         return NULL;
