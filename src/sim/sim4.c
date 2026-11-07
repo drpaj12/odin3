@@ -86,7 +86,8 @@ static void mux_gate4(const odin3_sim_cell *cell) {
     uint8_t lhs = in4(cell, PORT_A);
     uint8_t rhs = in4(cell, PORT_B);
     if (unknown(sel)) {
-        out4(cell, (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0 ? lhs : merge4(lhs, rhs));
+        uint8_t pick = (cell->flags & ODIN3_SIM_CELL_RTL_SEL_B) != 0 ? rhs : lhs;
+        out4(cell, (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0 ? pick : merge4(lhs, rhs));
         return;
     }
     out4(cell, sel == 1 ? rhs : lhs);
@@ -477,15 +478,17 @@ static void logic_not4(const odin3_sim_cell *cell) {
     flag4(cell, code >= 2U ? code : code ^ 1U);
 }
 
-/* $mux: Y = S ? B : A. An unknown S takes A when the mux comes from an RTL if/case, else merges. */
+/* $mux: Y = S ? B : A. An unknown S takes A (B when the mux has rtl_sel 2: opt_expr swapped its
+ * inputs) when the mux comes from an RTL if/case, else merges. */
 static void mux4(const odin3_sim_cell *cell) {
     const odin3_sim_span *y_span = &cell->ports[3];
     uint8_t sel = in4(cell, PORT_S);
     bool rtl = (cell->flags & ODIN3_SIM_CELL_RTL_SEL) != 0;
+    bool take_b = (cell->flags & ODIN3_SIM_CELL_RTL_SEL_B) != 0;
     for (uint32_t k = 0; k < y_span->width; k++) {
         uint8_t lhs = cell->values[cell->ports[PORT_A].idx[k]];
         uint8_t rhs = cell->values[cell->ports[PORT_B].idx[k]];
-        uint8_t out = lhs;
+        uint8_t out = take_b ? rhs : lhs;
         if (!unknown(sel)) {
             out = sel == 1 ? rhs : lhs;
         } else if (!rtl) {

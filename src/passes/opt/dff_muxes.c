@@ -129,6 +129,17 @@ static odin3_net_id data_net(const odin3_dff_state *ds, const mux_view *view, bo
                   : pin_at(ds, view->a, view->mb->bit);
 }
 
+/*
+ * True when an unknown select of the mux would not leave the control it becomes inactive: the mux
+ * has the attribute rtl_sel (1: an unknown select takes A, 2: B) and the side it takes is not the
+ * side that holds the flip-flop or keeps the data (inactive_b: that side is B). The folded FF then
+ * cannot keep the RTL meaning of an x condition (sim4.c dffx4 takes x controls as inactive).
+ */
+static bool x_conflict(const odin3_dff_state *ds, const mux_view *view, bool inactive_b) {
+    int64_t side = odin3_kit_rtl_sel(ds->oc, (odin3_node_id){view->mb->node});
+    return side != 0 && (side == 2) != inactive_b;
+}
+
 /* --- the plan --------------------------------------------------------------------------------- */
 
 void odin3_dff_plan_init(odin3_dff_plan *plan) {
@@ -153,6 +164,7 @@ typedef struct bit_acc {
     odin3_net_id dnet;
     odin3_bit reset;
     bool merged;
+    bool rtl_bad;
 } bit_acc;
 
 static void acc_init(bit_acc *acc, odin3_net_id dnet) {
@@ -200,9 +212,10 @@ static odin3_status push_all_marks(odin3_dff_plan *plan, const bit_acc *acc) {
 static odin3_status plan_add(odin3_dff_plan *plan, bit_acc *acc) {
     odin3_kit_sort_unify(&acc->ctrls, 0);
     odin3_kit_sort_unify(&acc->nodes, 0);
-    odin3_dff_bitplan bp = {
-        acc->dnet,  (uint32_t)plan->keys.len, 0, (uint32_t)plan->nodes.len, 0, acc->reset,
-        acc->merged};
+    odin3_dff_bitplan bp = {acc->dnet,   (uint32_t)plan->keys.len,
+                            0,           (uint32_t)plan->nodes.len,
+                            0,           acc->reset,
+                            acc->merged, acc->rtl_bad};
     odin3_status st = odin3_vec_reserve(&plan->bits, plan->bits.len + 1U);
     if (acc->merged) {
         st = st == ODIN3_OK ? odin3_kit_push_u64(&plan->keys, acc->ctrls.len) : st;
@@ -304,6 +317,7 @@ static odin3_status srst_walk(const odin3_dff_state *ds, uint32_t idx, bit_acc *
         }
         reset = move.reset;
         dnet = move.next;
+        acc->rtl_bad = acc->rtl_bad || x_conflict(ds, &step.view, move.kind == 2);
         st = odin3_kit_push_u64(&acc->ctrls, ctrl_word(step.s, move.kind == 1));
         st = st == ODIN3_OK ? odin3_kit_push_u64(&acc->nodes, step.view.mb->node) : st;
     }
@@ -335,6 +349,7 @@ odin3_status odin3_dff_plan_srst_bit(odin3_dff_state *ds, odin3_dff_plan *plan, 
 
 typedef struct frame {
     uint32_t net, off, len;
+    bool bad; /* an unknown select on the path would not take the hold side (x_conflict) */
 } frame;
 
 typedef struct search {
@@ -348,6 +363,7 @@ typedef struct search {
     odin3_vec seen;  /* uint64_t: the muxes the walk went through */
     uint32_t frames;
     bool aborted;
+    bool rtl_bad; /* a recorded pattern's path is bad */
 } search;
 
 static void search_init(search *sr, const odin3_dff_state *ds, odin3_net_id qnet) {
@@ -398,6 +414,7 @@ static bool path_find(const search *sr, frame fr, odin3_net_id net, bool *value)
 /* A new path: fr's with net set to value (replacing it); *out = it. */
 static odin3_status path_with(search *sr, frame fr, odin3_net_id net, bool value, frame *out) {
     out->net = fr.net;
+    out->bad = fr.bad;
     out->off = (uint32_t)sr->paths.len;
     odin3_status st = odin3_vec_reserve(&sr->paths, sr->paths.len + fr.len + 1U);
     bool placed = false;
@@ -437,6 +454,7 @@ static int cmp_pattern(const search *sr, uint32_t at, frame fr) {
 
 /* The path fr is a pattern (a set: a repeat adds nothing). */
 static odin3_status record_pattern(search *sr, frame fr) {
+    sr->rtl_bad = sr->rtl_bad || fr.bad;
     size_t lo = 0;
     size_t hi = sr->order.len;
     while (lo < hi) {
@@ -480,7 +498,7 @@ static odin3_status push_branch(search *sr, odin3_net_id net, frame path, odin3_
     if (slot == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *slot = (frame){net.v, path.off, path.len};
+    *slot = (frame){net.v, path.off, path.len, path.bad};
     return net.v == sr->qnet.v ? mark_q(sr, slice, at) : ODIN3_OK;
 }
 
@@ -499,6 +517,11 @@ static bool known_true(const search *sr, frame fr, const mux_view *view, uint32_
 /* No select is known: every select not on the path is tried true, and A under all of them false. */
 static odin3_status expand_open(search *sr, frame fr, const mux_view *view) {
     frame other = fr;
+    other.bad = fr.bad || x_conflict(sr->ds, view, false);
+    /* a hold through B conflicts unless an unknown select, taking A, holds too (A is Q: the case
+     * arm that keeps the register next to a default that keeps it) */
+    bool a_holds = data_net(sr->ds, view, false, 0).v == sr->qnet.v;
+    bool b_bad = fr.bad || (!a_holds && x_conflict(sr->ds, view, true));
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && !sr->aborted && i < view->s.count; i++) {
         odin3_net_id sel = pin_at(sr->ds, view->s, i);
@@ -508,6 +531,7 @@ static odin3_status expand_open(search *sr, frame fr, const mux_view *view) {
         }
         frame here = fr;
         st = path_with(sr, fr, sel, true, &here);
+        here.bad = b_bad;
         st = st == ODIN3_OK ? path_with(sr, other, sel, false, &other) : st;
         sr->aborted = here.len > ODIN3_DFF_MAX_PATH;
         st = st == ODIN3_OK && !sr->aborted
@@ -559,7 +583,7 @@ static odin3_status run_search(search *sr, odin3_net_id dnet) {
     if (root == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *root = (frame){dnet.v, 0, 0};
+    *root = (frame){dnet.v, 0, 0, false};
     odin3_status st = ODIN3_OK;
     while (st == ODIN3_OK && sr->stack.len > 0 && !sr->aborted) {
         frame fr = *(const frame *)odin3_vec_cat(&sr->stack, sr->stack.len - 1U);
@@ -592,6 +616,7 @@ static odin3_status search_keep(const search *sr, bit_acc *acc) {
         return ODIN3_OK;
     }
     odin3_status st = keep_patterns(sr, acc);
+    acc->rtl_bad = acc->rtl_bad || sr->rtl_bad;
     st = st == ODIN3_OK ? push_all(&acc->nodes, &sr->seen) : st;
     st = st == ODIN3_OK ? odin3_vec_reserve(&acc->marks, acc->marks.len + sr->marks.len) : st;
     for (size_t k = 0; st == ODIN3_OK && k < sr->marks.len; k++) {
@@ -619,6 +644,7 @@ static odin3_status en_walk(const odin3_dff_state *ds, odin3_net_id qnet, bit_ac
             break;
         }
         acc->dnet = hold_a ? step.b : step.a;
+        acc->rtl_bad = acc->rtl_bad || x_conflict(ds, &step.view, !hold_a);
         st = odin3_kit_push_u64(&acc->ctrls, ctrl_word(step.s, hold_a));
         st = st == ODIN3_OK ? odin3_kit_push_u64(&acc->nodes, step.view.mb->node) : st;
     }
