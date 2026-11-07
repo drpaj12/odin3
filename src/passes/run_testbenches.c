@@ -206,7 +206,10 @@ static odin3_status run_side(odin3_design *design, const odin3_project *proj,
                        out,
                        NULL,
                        args->plusarg_ptr,
-                       args->n_plusarg};
+                       args->n_plusarg,
+                       false,
+                       NULL,
+                       NULL};
     tb_end end = {0, false};
     st = tb_run_end(design, mod, &opts, &end);
     side->end_time = end.time;

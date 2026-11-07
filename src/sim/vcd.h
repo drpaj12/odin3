@@ -26,6 +26,7 @@ typedef struct odin3_sim_vcd {
     uint8_t *last; /* last written bit of every listed signal bit, in ID order; the second
                       n_last bytes are the scratch of the current values */
     uint32_t n_last;
+    uint32_t code_base; /* identifier index of signal ID 1 (0 for the writer of the sim pass) */
 } odin3_sim_vcd;
 
 /*
@@ -41,6 +42,15 @@ void odin3_sim_vcd_code(uint32_t index, char code[ODIN3_SIM_VCD_CODE_MAX]);
  * reports an error (vcd is freed and zeroed on failure).
  */
 odin3_status odin3_sim_vcd_begin(odin3_sim_vcd *vcd, const odin3_sim_signals *sig, FILE *out);
+
+/*
+ * Writes to out the scope tree of sig: `$scope module <leaf> $end` per instance, nested, with a
+ * `$var wire <width> <code> <name> $end` per listed signal, then the matching `$upscope`s; no
+ * header and no `$enddefinitions`. The identifier code of signal ID i is index code_base + i - 1
+ * (odin3_sim_vcd_code). For a caller that embeds the design's signals in a larger dump (sim_tb
+ * --vcd-all). ODIN3_ERR_NO_MEMORY, ODIN3_ERR_IO when the stream reports an error.
+ */
+odin3_status odin3_sim_vcd_declare(FILE *out, const odin3_sim_signals *sig, uint32_t code_base);
 
 /*
  * Writes `#<time>` and the signals whose value changed since the last write (SW-3 format) when any

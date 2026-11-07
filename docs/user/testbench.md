@@ -54,6 +54,21 @@ which a dumped signal changed; a signal is written with the value it has when th
 glitch inside one time step does not show. Open it with GTKWave. Odin III checks it against
 iverilog (`$dumpvars(0, tb)` on the same testbench) with `tools/vcd-compare/vcd-compare`.
 
+### Every net of the DUT (`--vcd-all`)
+
+`sim_tb --vcd wave.vcd --vcd-all tb.v` adds, inside each DUT instance's scope, a nested `$scope module
+<DUT module>` holding one 1-bit variable for every connected net of the design view the DUT was
+simulated from, and a nested scope per instance below it. Run it after `abc --lut 6` and the
+variables are the LUT, gate and flip-flop outputs of the netlist, each named as `write_blif --vtr`
+names the net (a port bit `q[3]`, a generated name, a legalised name); the BLIF and the waveform of
+one netlist then share names. On the RTL view (before `abc`) the variables are the nets of the IR with
+their own names (`$n<ID>` for an unnamed one). Values are 0, 1, x and z, written at the end of each time step
+as for the other variables. `--vcd-names short|provenance|hash` (only with `--vcd-all`; default
+`short`) picks the naming style, the same as `write_blif --name-style`: use `hash` with a BLIF
+written by `--name-style hash`. A module the writer cannot name (a refusal) logs a warning and keeps the IR's
+net names. A design with N nets writes N variables, so a large design makes a large file; the file
+grows with the number of nets that change, not with the run length alone.
+
 ## What is supported
 
 One testbench module without ports per file, with `reg`/`wire`/`integer`/array declarations,

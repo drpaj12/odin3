@@ -9,6 +9,7 @@
 #include "odin3/odin3.h"
 #include "sim/sim.h"
 #include "util/hash.h"
+#include "util/str.h"
 
 #include <stdint.h>
 
@@ -53,6 +54,24 @@ typedef struct odin3_sim_signals odin3_sim_signals; /* opaque, defined in signal
  * and nets of the expanded modules.
  */
 odin3_status odin3_sim_signals_create(odin3_sim *sim, odin3_sim_signals **out);
+
+/*
+ * Appends to out the name of net `net` of module `module` as a waveform should carry it (the BLIF
+ * name `write_blif --vtr` writes); true when it did, false to use the default name. ctx is the
+ * caller's. Called once per net, scope by scope.
+ */
+typedef bool (*odin3_sim_net_namer)(void *ctx, odin3_module_id module, odin3_net_id net,
+                                    odin3_strbuf *out);
+
+/*
+ * As odin3_sim_signals_create, but the listed signals are the live, connected NETS of every scope
+ * (one 1-bit signal each, in net ID order), not the wires: what `sim --vcd-all` and
+ * `sim_tb --vcd-all` dump. A net is named by namer (NULL: no namer), else by its own public name,
+ * else `$n<ID>`. Ports are nets too (a port bit has the net's name); no kind is INPUT, so the
+ * table cannot be written. odin3_sim_signals_find still resolves HDL names and appends.
+ */
+odin3_status odin3_sim_signals_create_nets(odin3_sim *sim, odin3_sim_net_namer namer, void *ctx,
+                                           odin3_sim_signals **out);
 
 /* Frees the table and every string it handed out; NULL is a no-op. */
 void odin3_sim_signals_destroy(odin3_sim_signals *sig);

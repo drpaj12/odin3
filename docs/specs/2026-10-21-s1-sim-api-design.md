@@ -477,3 +477,13 @@ Icarus Verilog 2026-10-21, inputs set before each step, outputs after it (`light
 4-state values, per-clock stepping, memories and other cells without a simulate hook (run
 `lower`), forcing internal nets, VCD or vector replay through the ABI, `$dumpvars` scoping
 options, timing.
+
+**SW-5 `--vcd-all` (2026-11-07, Bifrost B Q1.2 request).** With `--vcd-all` (and `--vcd`), the
+waveform lists the nets, not the wires: one 1-bit variable for every live net that has a pin, in net
+ID order, in the scope of its instance (scope tree as SW-2). The name is the one `write_blif --vtr`
+gives the net of the top (`odin3_blif_vtr_name_top`, style `--vcd-names short|provenance|hash`,
+default short); in another module, or when the writer refuses the module (one WARNING), the net's own
+public name, else `$n<ID>`. Times, values and `$dumpvars` as SW-3. `sim_tb --vcd-all` builds the same
+table per DUT instance and nests it under the instance's scope (a scope named for the DUT module,
+then one per sub-instance), with 0/1/x/z values. A net the writer emits as a constant generator
+(`gnd`, `vcc`) or as a buffer of one has the IR net's name, not the generator's.

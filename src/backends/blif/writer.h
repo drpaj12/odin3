@@ -241,8 +241,9 @@ typedef struct odin3_blif_names odin3_blif_names;
 typedef struct odin3_blif_names_req {
     const odin3_design *design;        /* its top must exist (E13 is the caller's) */
     const odin3_blif_write_opts *opts; /* the VTR dialect */
-    bool log_names;   /* log the port warnings and the info line (no refusal so far) */
-    bool log_refusal; /* log a refusal (the preflight's cap is not reached) */
+    bool log_names;         /* log the port warnings and the info line (no refusal so far) */
+    bool log_refusal;       /* log a refusal (the preflight's cap is not reached) */
+    odin3_module_id module; /* the module to name; zero: the design's top */
 } odin3_blif_names_req;
 
 /*
@@ -266,6 +267,15 @@ odin3_status odin3_blif_vtr_name_top(const odin3_blif_names_req *req, odin3_blif
 
 /* Frees names (NULL is a no-op). */
 void odin3_blif_names_free(odin3_blif_names *names);
+
+/*
+ * The name the writer gives net of the module that names was built for (odin3_blif_vtr_name_top):
+ * its generated, legalised or hash name, else the net's own name. Empty (len 0) for a net with
+ * neither. Valid until names is freed; names must be non-NULL. Used by the `sim` VCD of every net
+ * so a waveform variable carries the name the `write_blif --vtr` file has.
+ */
+odin3_bytes odin3_blif_names_net(const odin3_blif_names *names, const odin3_design *design,
+                                 const odin3_module *module, odin3_net_id net);
 
 /* The name map text (5.4f) the naming run built for ODIN3_BLIF_NAMES_HASH; empty for other
  * styles. Valid until names is freed. */

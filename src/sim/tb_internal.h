@@ -217,16 +217,19 @@ odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_s
                             tb_hier_sig *out);
 /* The value of signal `id` (its width) as of the last settle of the DUT. */
 void tb_inst_peek(const tb_inst *inst, uint32_t id, tbv *out);
+/* The value of signal `id` of any signal table (its width, 4-state codes) as of the last settle. */
+void tb_sig_peek(const odin3_sim_signals *sigs, uint32_t id, tbv *out);
 /* Frees the simulator and signal table of inst. */
 void tb_inst_release(tb_inst *inst);
 
 /* VCD output of a testbench run (tb_vcd.c): dumps every scalar reg and wire of the testbench and
  * the connected ports of every DUT instance (in a $scope per instance), with x and z, as the values
- * at the end of each time step that changed one. */
+ * at the end of each time step that changed one. With opts->vcd_all each instance scope also holds
+ * the scopes and nets of the DUT (odin3_sim_signals_create_nets, named by opts->namer). */
 typedef struct tb_vcd tb_vcd;
 /* Opens path and writes the header; NULL (logged) when the file cannot be written or on no memory.
  */
-tb_vcd *tb_vcd_open(const char *path, const tb_module *tb);
+tb_vcd *tb_vcd_open(const char *path, const tb_module *tb, const tb_options *opts);
 /* Writes the values that changed at time (the first call writes them all, as $dumpvars). */
 void tb_vcd_sample(tb_vcd *vcd, tb_ev *ev, uint64_t time);
 /* Writes the end time when later than the last sample, closes the file; false when a write

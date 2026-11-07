@@ -1142,8 +1142,8 @@ static odin3_status log_notes(vtr_walk *walk) {
 /* VB-10 last: its warnings and info only when nothing was refused, its refusal below the cap. */
 static odin3_status name_top(const odin3_blif_write_opts *opts, odin3_blif_vtr_plan *plan,
                              odin3_blif_vtr_report *report) {
-    odin3_blif_names_req req = {plan->design, opts, report->errors == 0,
-                                report->errors < ODIN3_BLIF_VTR_MAX_ERRORS};
+    odin3_blif_names_req req = {
+        plan->design, opts, report->errors == 0, report->errors < ODIN3_BLIF_VTR_MAX_ERRORS, {0}};
     odin3_status st = odin3_blif_vtr_name_top(&req, &plan->names, &report->renamed);
     if (st == ODIN3_ERR_INVALID_ARG) {
         report->errors++;

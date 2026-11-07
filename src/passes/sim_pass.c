@@ -1,10 +1,12 @@
 /* sim_pass.c — the `sim` pass: random-vector simulation of the design's top module (1E). */
+#include "backends/blif/writer.h"
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/sim_netnames.h"
 #include "sim/prng.h"
 #include "sim/signals.h"
 #include "sim/sim.h"
@@ -24,16 +26,19 @@
 enum { DECIMAL = 10, NUM_BUF = 32 };
 
 /*
- * sim's arguments: `[--vectors-in <file>] [--vcd <file>] <cycles> <seed> [<file>|-]`, or with
- * --vectors-in `[--vcd <file>] [<file>|-]` (SV-1).
+ * sim's arguments: `[--vectors-in <file>] [--vcd <file> [--vcd-all] [--vcd-names <style>]]
+ * <cycles> <seed> [<file>|-]`, or with --vectors-in `[--vcd <file> ...] [<file>|-]` (SV-1).
  */
 typedef struct sim_args {
     uint32_t cycles;
     uint64_t seed;
-    odin3_strbuf path;       /* empty: log a summary instead of writing vectors */
-    odin3_strbuf vectors_in; /* empty: random inputs */
-    odin3_strbuf vcd;        /* empty: no waveform */
-    const char *top;         /* the top module's name */
+    odin3_strbuf path;               /* empty: log a summary instead of writing vectors */
+    odin3_strbuf vectors_in;         /* empty: random inputs */
+    odin3_strbuf vcd;                /* empty: no waveform */
+    const char *top;                 /* the top module's name */
+    bool vcd_all;                    /* --vcd-all: one variable per net, with the BLIF name */
+    odin3_blif_name_style vcd_names; /* --vcd-names: the style of those names */
+    const odin3_design *design;      /* for the names of --vcd-all */
 } sim_args;
 
 /* A decimal number of at most max (digits only). */
@@ -61,7 +66,8 @@ enum { MAX_POSITIONALS = 3, MIN_RANDOM_POSITIONALS = 2 };
 static odin3_status usage_error(void) {
     odin3_log(ODIN3_LOG_ERROR,
               "sim: expects <cycles> <seed> [<file>|-], or --vectors-in <file> [<file>|-]; "
-              "option --vcd <file> (decimal numbers)");
+              "options --vcd <file> [--vcd-all] [--vcd-names short|provenance|hash] (decimal "
+              "numbers)");
     return ODIN3_ERR_INVALID_ARG;
 }
 
@@ -76,6 +82,17 @@ static bool take_option_file(odin3_bytes *args, odin3_strbuf *dst) {
            odin3_strbuf_append(dst, file) == ODIN3_OK;
 }
 
+/* The style after --vcd-names goes into style; an unknown style is false. */
+static bool take_style(odin3_bytes *args, odin3_blif_name_style *style) {
+    odin3_bytes word = odin3_pass_arg_next(args);
+    char text[NUM_BUF] = {0};
+    if (word.ptr == NULL || word.len == 0 || word.len >= sizeof text) {
+        return false;
+    }
+    memcpy(text, word.ptr, word.len);
+    return odin3_sim_netnames_style(text, style);
+}
+
 /* Splits the words into the options and up to MAX_POSITIONALS positional words. */
 static odin3_status split_args(odin3_bytes args, sim_args *out, odin3_bytes *pos, size_t *npos) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
@@ -85,6 +102,11 @@ static odin3_status split_args(odin3_bytes args, sim_args *out, odin3_bytes *pos
             ok = take_option_file(&args, &out->vectors_in);
         } else if (word_is(word, "--vcd")) {
             ok = take_option_file(&args, &out->vcd);
+        } else if (word_is(word, "--vcd-all")) {
+            ok = !out->vcd_all;
+            out->vcd_all = true;
+        } else if (word_is(word, "--vcd-names")) {
+            ok = take_style(&args, &out->vcd_names);
         } else if (*npos < MAX_POSITIONALS && word.len > 0) {
             pos[(*npos)++] = word;
         } else {
@@ -117,6 +139,12 @@ static odin3_status parse_sim_args(odin3_bytes args, sim_args *out) {
     }
     if (out->vcd.len == 1 && out->vcd.data[0] == '-') {
         odin3_log(ODIN3_LOG_ERROR, "sim: --vcd needs a file name, not `-`");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if ((out->vcd_all && out->vcd.len == 0) ||
+        (out->vcd_names != ODIN3_BLIF_NAMES_SHORT && !out->vcd_all)) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "sim: --vcd-all needs --vcd <file>; --vcd-names needs --vcd-all");
         return ODIN3_ERR_INVALID_ARG;
     }
     if (out->vectors_in.len == 0) {
@@ -235,12 +263,17 @@ static odin3_status run_vcd(odin3_sim *sim, const odin3_sim_vectors *run, input_
     odin3_sim_signals *sig = NULL;
     odin3_atomic_file file;
     odin3_sim_vcd vcd = {0};
-    odin3_status st = odin3_sim_signals_create(sim, &sig);
+    odin3_sim_netnames names;
+    odin3_sim_netnames_init(&names, args->design, "sim", args->vcd_names);
+    odin3_status st =
+        args->vcd_all ? odin3_sim_signals_create_nets(sim, odin3_sim_netnames_name, &names, &sig)
+                      : odin3_sim_signals_create(sim, &sig);
     if (st == ODIN3_OK) {
         st = odin3_atomic_file_open(&file, args->vcd.data);
     }
     if (st != ODIN3_OK) {
         odin3_sim_signals_destroy(sig);
+        odin3_sim_netnames_free(&names);
         return st;
     }
     st = odin3_sim_vcd_begin(&vcd, sig, file.fp);
@@ -251,6 +284,7 @@ static odin3_status run_vcd(odin3_sim *sim, const odin3_sim_vectors *run, input_
     }
     odin3_sim_vcd_free(&vcd);
     odin3_sim_signals_destroy(sig);
+    odin3_sim_netnames_free(&names);
     return odin3_atomic_file_close(&file, st);
 }
 
@@ -272,6 +306,7 @@ static odin3_status sim_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_byt
     (void)ctx;
     (void)user;
     sim_args parsed = {0};
+    parsed.design = design;
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.vectors_in);
     odin3_strbuf_init(&parsed.vcd);
@@ -305,9 +340,10 @@ static odin3_status sim_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_byt
 
 const odin3_pass_def odin3_pass_sim = {
     "sim",
-    "sim [--vectors-in <file>] [--vcd <file>] <cycles> <seed> [<file>|-]: simulate the top with "
-    "random inputs, or replay --vectors-in; write the vectors (odin3-sim-vectors format) or log a "
-    "summary; --vcd writes a waveform",
+    "sim [--vectors-in <file>] [--vcd <file> [--vcd-all] [--vcd-names short|provenance|hash]] "
+    "<cycles> <seed> [<file>|-]: simulate the top with random inputs, or replay --vectors-in; "
+    "write the vectors (odin3-sim-vectors format) or log a summary; --vcd writes a waveform "
+    "(--vcd-all: one variable per net, named as write_blif --vtr names it)",
     sim_run,
     NULL,
     false,

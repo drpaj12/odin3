@@ -94,7 +94,7 @@ static void put_scope_open(const odin3_sim_vcd *vcd, uint32_t scope) {
 static void put_var(const odin3_sim_vcd *vcd, uint32_t id) {
     const odin3_sim_signal *item = odin3_sim_signals_at(vcd->sig, id);
     char code[ODIN3_SIM_VCD_CODE_MAX];
-    odin3_sim_vcd_code(id - 1U, code);
+    odin3_sim_vcd_code(id - 1U + vcd->code_base, code);
     (void)fprintf(vcd->out, "$var wire %u %s ", item->width, code);
     put_name(vcd->out, odin3_sim_signals_text(vcd->sig, item->leaf));
     if (item->width > 1) {
@@ -130,18 +130,33 @@ static void write_scopes(const odin3_sim_vcd *vcd, tree *tr) {
     }
 }
 
-static odin3_status write_header(const odin3_sim_vcd *vcd) {
+/* The scopes and variables of vcd->sig, without the header. */
+static odin3_status write_tree(const odin3_sim_vcd *vcd) {
     tree tr = {0};
     if (!tree_alloc(&tr, vcd->sig)) {
         tree_free(&tr);
         return ODIN3_ERR_NO_MEMORY;
     }
     tree_link(&tr, vcd->sig);
-    (void)fputs("$version odin3 sim $end\n$timescale 1ns $end\n", vcd->out);
     write_scopes(vcd, &tr);
-    (void)fputs("$enddefinitions $end\n", vcd->out);
     tree_free(&tr);
     return ODIN3_OK;
+}
+
+odin3_status odin3_sim_vcd_declare(FILE *out, const odin3_sim_signals *sig, uint32_t code_base) {
+    odin3_sim_vcd vcd = {.sig = sig, .out = out, .code_base = code_base};
+    odin3_status st = write_tree(&vcd);
+    if (st == ODIN3_OK && ferror(out) != 0) {
+        st = ODIN3_ERR_IO;
+    }
+    return st;
+}
+
+static odin3_status write_header(const odin3_sim_vcd *vcd) {
+    (void)fputs("$version odin3 sim $end\n$timescale 1ns $end\n", vcd->out);
+    odin3_status st = write_tree(vcd);
+    (void)fputs("$enddefinitions $end\n", vcd->out);
+    return st;
 }
 
 /* --- values ----------------------------------------------------------------------------------- */
@@ -149,7 +164,7 @@ static odin3_status write_header(const odin3_sim_vcd *vcd) {
 /* The value line of signal id with the bits cur (bit 0 first). */
 static void put_value(const odin3_sim_vcd *vcd, uint32_t id, const uint8_t *cur, uint32_t width) {
     char code[ODIN3_SIM_VCD_CODE_MAX];
-    odin3_sim_vcd_code(id - 1U, code);
+    odin3_sim_vcd_code(id - 1U + vcd->code_base, code);
     if (width == 1) {
         (void)fprintf(vcd->out, "%c%s\n", cur[0] != 0 ? '1' : '0', code);
         return;

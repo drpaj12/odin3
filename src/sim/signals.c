@@ -232,6 +232,12 @@ static odin3_status net_spec(odin3_sim_signals *sig, uint32_t scope, odin3_net_i
     return intern_names(sig, scope, leaf, &spec->sig);
 }
 
+/* The caller's namer of odin3_sim_signals_create_nets. */
+typedef struct net_namer {
+    odin3_sim_net_namer fn;
+    void *ctx;
+} net_namer;
+
 /* --- scopes and the listing ------------------------------------------------------------------- */
 
 /* Interns the leaf of frame's scope: the instance name, "#<node ID>" when unnamed, the module's. */
@@ -325,6 +331,52 @@ static odin3_status list_scope(odin3_sim_signals *sig, uint32_t scope) {
     return st;
 }
 
+/* The name of a net listed by odin3_sim_signals_create_nets: the namer's, the net's own public
+ * name, else $n<ID>. */
+static odin3_status net_leaf(const odin3_sim_signals *sig, uint32_t scope, odin3_net_id net,
+                             const net_namer *nn, odin3_strbuf *leaf) {
+    const odin3_module *mod = scope_module(sig, scope);
+    odin3_strbuf_clear(leaf);
+    if (nn->fn != NULL && nn->fn(nn->ctx, odin3_module_id_of(mod), net, leaf) && leaf->len > 0) {
+        return ODIN3_OK;
+    }
+    odin3_strbuf_clear(leaf);
+    const char *own = design_text(sig, odin3_net_name(mod, net));
+    return public_name(own) ? odin3_strbuf_appendf(leaf, "%s", own)
+                            : odin3_strbuf_appendf(leaf, "$n%u", (unsigned)net.v);
+}
+
+static odin3_status list_scope_nets(odin3_sim_signals *sig, uint32_t scope, const net_namer *nn) {
+    const odin3_module *mod = scope_module(sig, scope);
+    odin3_strbuf leaf;
+    odin3_strbuf_init(&leaf);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t nid = 1; st == ODIN3_OK && nid < odin3_module_net_end(mod); nid++) {
+        odin3_net_id net = {nid};
+        if (!odin3_net_live(mod, net) || odin3_net_pins(mod, net).count == 0) {
+            continue;
+        }
+        sig_spec spec;
+        st = net_leaf(sig, scope, net, nn, &leaf);
+        st = st != ODIN3_OK ? st : net_spec(sig, scope, net, leaf.data, &spec);
+        st = st != ODIN3_OK ? st : add_signal(sig, &spec);
+    }
+    odin3_strbuf_free(&leaf);
+    return st;
+}
+
+static odin3_status fill_nets(odin3_sim_signals *sig, const net_namer *nn) {
+    odin3_status st = ODIN3_OK;
+    for (uint32_t fidx = 0; st == ODIN3_OK && fidx < sig->sim->n_frames; fidx++) {
+        st = add_scope(sig, fidx);
+    }
+    for (uint32_t fidx = 0; st == ODIN3_OK && fidx < sig->sim->n_frames; fidx++) {
+        st = list_scope_nets(sig, fidx, nn);
+    }
+    sig->listed = (uint32_t)sig->signals.len;
+    return st;
+}
+
 static odin3_status fill(odin3_sim_signals *sig) {
     odin3_status st = ODIN3_OK;
     for (uint32_t fidx = 0; st == ODIN3_OK && fidx < sig->sim->n_frames; fidx++) {
@@ -338,7 +390,7 @@ static odin3_status fill(odin3_sim_signals *sig) {
     return st;
 }
 
-odin3_status odin3_sim_signals_create(odin3_sim *sim, odin3_sim_signals **out) {
+static odin3_status create_table(odin3_sim *sim, const net_namer *nn, odin3_sim_signals **out) {
     *out = NULL;
     odin3_sim_signals *sig = odin3_util_calloc(sizeof *sig);
     if (sig == NULL) {
@@ -350,13 +402,26 @@ odin3_status odin3_sim_signals_create(odin3_sim *sim, odin3_sim_signals **out) {
     odin3_vec_init(&sig->scopes, sizeof(odin3_sim_scope));
     sig->names = odin3_strtab_create();
     sig->by_name = odin3_u64map_create(NAME_MAP_CAP);
-    odin3_status st = sig->names != NULL && sig->by_name != NULL ? fill(sig) : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = ODIN3_ERR_NO_MEMORY;
+    if (sig->names != NULL && sig->by_name != NULL) {
+        st = nn != NULL ? fill_nets(sig, nn) : fill(sig);
+    }
     if (st != ODIN3_OK) {
         odin3_sim_signals_destroy(sig);
         return st;
     }
     *out = sig;
     return ODIN3_OK;
+}
+
+odin3_status odin3_sim_signals_create(odin3_sim *sim, odin3_sim_signals **out) {
+    return create_table(sim, NULL, out);
+}
+
+odin3_status odin3_sim_signals_create_nets(odin3_sim *sim, odin3_sim_net_namer namer, void *ctx,
+                                           odin3_sim_signals **out) {
+    net_namer nn = {namer, ctx};
+    return create_table(sim, &nn, out);
 }
 
 void odin3_sim_signals_destroy(odin3_sim_signals *sig) {

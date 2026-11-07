@@ -252,6 +252,11 @@ typedef struct tb_options {
      * must outlive the run. */
     const char *const *plusargs;
     uint32_t n_plusargs;
+    /* vcd_all: the waveform also holds every net of every DUT instance, one scalar variable per
+     * net; namer (may be NULL) names them, ctx is namer_ctx (odin3_sim_signals_create_nets). */
+    bool vcd_all;
+    odin3_sim_net_namer namer;
+    void *namer_ctx;
 } tb_options;
 
 /* How a run ended: the last simulation time, and whether it stopped because the next event lay
