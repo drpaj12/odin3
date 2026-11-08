@@ -159,7 +159,9 @@ other than `` `timescale ``.
 
 ## What is not modelled
 
-The DUT simulator is cycle-based. Gate or `#` delays in the DUT are not seen. A tri-state buffer
+`$display` and other system tasks written inside the DUT's RTL do not run: `sim_tb` simulates the synthesized
+DUT, so a bench that prints them under iverilog (mips_16 prints `ERROR: Unknown Instruction` at time 0) has those lines
+only in the iverilog text. The DUT simulator is cycle-based. Gate or `#` delays in the DUT are not seen. A tri-state buffer
 inside the DUT (`assign y = oe ? d : 'bz;`) is lowered to a plain driver of `d` by `lower` (as
 Parmys does, with a warning), so its output is not z while `oe` is low; the testbench side of a
 tri-state bus (several `assign`s) is resolved exactly. An x in the DUT after `opt` or `lower` may be
