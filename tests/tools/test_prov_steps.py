@@ -10,6 +10,7 @@ from pathlib import Path
 
 import schema_check
 
+import name_map_v2
 import prov_steps as ps
 
 from .helpers import REPO_ROOT
@@ -129,6 +130,52 @@ class AbsolutePathMapTest(unittest.TestCase):
             run = self.copy_run(Path(tmp))
             with mock.patch.object(ps, "fpga_steps", side_effect=ps.PrivacyError("bad path")):
                 self.assertEqual(ps.main([str(run)]), 2)
+
+
+class LongChainTest(unittest.TestCase):
+    """fpga_steps must not hold one dict per link of every object: a real CPU has objects whose
+    chain is most of the design (a-z80-modified: 2515 objects x up to 30582 constructs)."""
+
+    DEPTH = 1500
+    OBJECTS = 300
+
+    def synthetic_map(self) -> name_map_v2.NameMap:
+        nm = name_map_v2.NameMap(version=2, width=8, ast="full")
+        nm.files = ["a.v"]
+        for n in range(1, self.DEPTH + 1):  # one chain: construct n has parent n - 1
+            nm.constructs.append(name_map_v2.MapConstruct(
+                n, "stmt", "stmt", n - 1, 1, f"{n}.1-{n}.9", f"s{n}", ""))
+        nm.records.append(name_map_v2.MapRecord(
+            1, "S", "stmt", "origin", "t1.1", (), ("f1:1.1-1.9",), (self.DEPTH,), (), ""))
+        for k in range(self.OBJECTS):
+            nm.objects.append(name_map_v2.MapObject(
+                "N", "top", "net", f"n{k}", "", "", "", 0, (1,), "stmt", ""))
+        return nm
+
+    def test_long_chains_stream_and_match_the_dict_form(self) -> None:
+        import tracemalloc
+        from unittest import mock
+
+        nm = self.synthetic_map()
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(name_map_v2, "read_name_map", return_value=nm):
+            out = Path(tmp)
+            (out / "t.blif.names").write_text("x\n")
+            tracemalloc.start()
+            ps.fpga_steps(out / "t.blif.names", out, "t", "t", "1.5.1", "t.blif")
+            peak = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+            # one dict per link would be 450000 dicts (over 100 MB); streaming stays far below
+            self.assertLess(peak, 30_000_000)
+            lines = (out / "prov" / "02-map.objects.jsonl").read_text().splitlines()
+            self.assertEqual(len(lines), self.OBJECTS)
+            row = json.loads(lines[0])
+            self.assertEqual(len(row["links"]), self.DEPTH)
+            self.assertEqual(row["links"][0], ps.link(f"hdl:c{self.DEPTH}", "fine"))
+            self.assertEqual(lines[0], json.dumps(row, sort_keys=True, separators=(",", ":")))
+            header = json.loads((out / "prov" / "02-map.json").read_text())
+            self.assertEqual(header["counts"]["by_link_kind"], {"fine": self.DEPTH * self.OBJECTS})
+            self.assertEqual(header["counts"]["objects"], self.OBJECTS)
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)")

@@ -291,9 +291,13 @@ class NameMap:
     def chain(self, obj: MapObject) -> list[MapConstruct]:
         """The HDL constructs of obj, as Node.chain(): for each source leaf of provenance() that
         has a construct, the construct and then its ancestors up to the module, each once."""
+        return self.chain_of(self.provenance(obj))
+
+    def chain_of(self, provenance: list[MapRecord]) -> list[MapConstruct]:
+        """chain() for a provenance() list the caller already has (one walk instead of two)."""
         chain: list[MapConstruct] = []
         reached: set[int] = set()
-        for record in self.provenance(obj):
+        for record in provenance:
             number = record.constructs[0] if record.kind != "D" and record.constructs else 0
             for _ in range(len(self.constructs)):
                 if number in reached or not 1 <= number <= len(self.constructs):
