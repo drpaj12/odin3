@@ -130,6 +130,9 @@ static void check_waiters(run *rt) {
  * value; true when the wire changed. */
 static bool settle_one(run *rt, const tb_assign *asg) {
     const tb_var *var = &rt->tb->vars[asg->var];
+    if (tb_forced(rt->tb, asg->var)) {
+        return false; /* a forced wire keeps the forced value */
+    }
     tbv val;
     tb_eval_assign(&rt->ev, asg->rhs, var->width, &val);
     if (asg->drv != 0) {
@@ -144,12 +147,33 @@ static bool settle_one(run *rt, const tb_assign *asg) {
     return true;
 }
 
+/* Every forced variable takes the current value of its force expression; true when one changed. */
+static bool settle_forces(run *rt) {
+    bool changed = false;
+    for (uint32_t i = 0; rt->tb->force_rhs != NULL && i < rt->tb->nvars; i++) {
+        if (rt->tb->force_rhs[i] == NULL || !rt->tb->force_on[i]) {
+            continue; /* not forced, or forced to a value evaluated once */
+        }
+        const tb_var *var = &rt->tb->vars[i];
+        tbv val;
+        tbv old;
+        tb_eval_assign(&rt->ev, rt->tb->force_rhs[i], var->width, &val);
+        tb_var_load(&old, var, 0);
+        if (!tbv_same(&old, &val, var->width)) {
+            tb_var_store(var, 0, &val);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 static void settle_assigns(run *rt) {
-    for (uint32_t round = 0; round <= rt->tb->nassigns; round++) {
+    for (uint32_t round = 0; round <= rt->tb->nassigns + 1U; round++) {
         bool changed = false;
         for (uint32_t i = 0; i < rt->tb->nassigns; i++) {
             changed = settle_one(rt, &rt->tb->assigns[i]) || changed;
         }
+        changed = settle_forces(rt) || changed;
         if (!changed) {
             break;
         }
@@ -425,6 +449,24 @@ static bool push(run *rt, proc *pr, const tb_stmt *stmt) {
     return true;
 }
 
+/* `force v = e;` takes the value of e now; when e is a plain variable the force follows it, any
+ * other expression is evaluated once (iverilog: "the RHS will only be evaluated once"). `release`
+ * lets go: a wire gets its drivers' value back, a reg keeps the forced value until assigned. */
+static void do_force(run *rt, const tb_stmt *stmt) {
+    tb_module *tb = rt->tb;
+    int var = stmt->lhs->var;
+    tb->force_on[var] = false; /* the first write goes through */
+    tb->force_rhs[var] = NULL;
+    if (stmt->kind == S_FORCE) {
+        tbv val;
+        tb_eval_assign(&rt->ev, stmt->rhs, tb->vars[var].width, &val);
+        tb_var_store(&tb->vars[var], 0, &val);
+        tb->force_on[var] = true;
+        tb->force_rhs[var] = stmt->rhs->kind == E_VAR ? stmt->rhs : NULL;
+    }
+    post_write(rt);
+}
+
 static void exec_leaf(run *rt, const tb_stmt *stmt) {
     switch (stmt->kind) {
     case S_ASSIGN: {
@@ -436,6 +478,10 @@ static void exec_leaf(run *rt, const tb_stmt *stmt) {
     }
     case S_NBA:
         push_nba(rt, stmt);
+        break;
+    case S_FORCE:
+    case S_RELEASE:
+        do_force(rt, stmt);
         break;
     case S_SYS:
         do_systask(rt, stmt);

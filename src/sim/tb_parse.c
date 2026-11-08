@@ -52,6 +52,7 @@ typedef struct parser {
     char prefix[TB_NAME]; /* the instance path of the module being parsed ("u0.u1."), or "" */
     const tb_module *pre; /* second pass: the module the first pass built (every instance path) */
     int dummy;            /* first pass: the variable a hierarchical name stands for, or -1 */
+    bool saw_force;       /* a force or release statement was parsed */
 } parser;
 
 /* Where a module of the testbench files starts: the index of its `module` token. */
@@ -1699,6 +1700,8 @@ typedef enum {
     KW_WAIT,
     KW_FOREVER,
     KW_DECL,
+    KW_FORCE,
+    KW_RELEASE,
     KW_REJECTED
 } stmt_kw;
 
@@ -1706,21 +1709,38 @@ static stmt_kw keyword_of(const parser *pr) {
     static const struct {
         const char *text;
         stmt_kw kw;
-    } TABLE[] = {{"begin", KW_BEGIN},       {"if", KW_IF},
-                 {"case", KW_CASE},         {"casez", KW_CASE},
-                 {"casex", KW_CASE},        {"for", KW_FOR},
-                 {"while", KW_WHILE},       {"repeat", KW_REPEAT},
-                 {"wait", KW_WAIT},         {"forever", KW_FOREVER},
-                 {"reg", KW_DECL},          {"integer", KW_DECL},
-                 {"disable", KW_REJECTED},  {"fork", KW_REJECTED},
-                 {"deassign", KW_REJECTED}, {"force", KW_REJECTED},
-                 {"release", KW_REJECTED},  {NULL, KW_NONE}};
+    } TABLE[] = {{"begin", KW_BEGIN},      {"if", KW_IF},           {"case", KW_CASE},
+                 {"casez", KW_CASE},       {"casex", KW_CASE},      {"for", KW_FOR},
+                 {"while", KW_WHILE},      {"repeat", KW_REPEAT},   {"wait", KW_WAIT},
+                 {"forever", KW_FOREVER},  {"reg", KW_DECL},        {"integer", KW_DECL},
+                 {"disable", KW_REJECTED}, {"fork", KW_REJECTED},   {"deassign", KW_REJECTED},
+                 {"force", KW_FORCE},      {"release", KW_RELEASE}, {NULL, KW_NONE}};
     for (size_t i = 0; TABLE[i].text != NULL; i++) {
         if (is_kw(pr, TABLE[i].text)) {
             return TABLE[i].kw;
         }
     }
     return KW_NONE;
+}
+
+/* `force v = expr;` or `release v;` (a whole reg, integer or wire). */
+static tb_stmt *parse_force(parser *pr, bool release) {
+    tb_stmt *stmt = new_stmt(pr, release ? S_RELEASE : S_FORCE);
+    pr->pos++;
+    tb_expr *target = stmt != NULL ? parse_primary(pr) : NULL;
+    if (target == NULL || target->kind != E_VAR || !assignable_var(pr, target)) {
+        fail(pr, "force/release of anything but a whole reg, integer or wire");
+        return NULL;
+    }
+    stmt->lhs = target;
+    if (!release) {
+        stmt->rhs = expect_op(pr, "=") ? parse_expr(pr) : NULL;
+        if (stmt->rhs == NULL) {
+            return NULL;
+        }
+    }
+    pr->saw_force = true;
+    return expect_op(pr, ";") ? stmt : NULL;
 }
 
 static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
@@ -1743,6 +1763,10 @@ static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
         return start_forever(pr);
     case KW_DECL:
         *out = parse_decl(pr) ? new_stmt(pr, S_NOP) : NULL;
+        return *out != NULL ? ST_LEAF : ST_FAIL;
+    case KW_FORCE:
+    case KW_RELEASE:
+        *out = parse_force(pr, kw == KW_RELEASE);
         return *out != NULL ? ST_LEAF : ST_FAIL;
     default:
         fail(pr, cur(pr)->text);
@@ -3185,6 +3209,14 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
         return ODIN3_ERR_INVALID_ARG;
     }
     tb->saw_hier = pr.saw_hier;
+    if (pr.saw_force) {
+        tb->force_rhs = tb_alloc(tb, ((size_t)tb->nvars + 1U) * sizeof *tb->force_rhs);
+        tb->force_on = tb_alloc(tb, ((size_t)tb->nvars + 1U) * sizeof *tb->force_on);
+        if (tb->force_rhs == NULL || tb->force_on == NULL) {
+            tb_module_free(tb);
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
     *out = tb;
     return ODIN3_OK;
 }

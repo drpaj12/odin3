@@ -116,7 +116,9 @@ typedef enum {
     S_REPEAT,
     S_FOREVER,
     S_SYS,
-    S_CALL /* task call: task = index into tb_module.tasks, args/n = the actual arguments */
+    S_FORCE,   /* force lhs = rhs: the variable holds the value of rhs until released */
+    S_RELEASE, /* release lhs */
+    S_CALL     /* task call: task = index into tb_module.tasks, args/n = the actual arguments */
 } tb_skind;
 
 typedef struct tb_event_term {
@@ -248,6 +250,11 @@ typedef struct tb_module {
     bool four_state; /* x/z values: regs start x, wires z, the DUTs are 4-state simulators */
     tb_drv *drvs;    /* driver slots of the wires with several drivers (set up by the run) */
     uint32_t ndrvs;
+    /* force: per variable, whether it is under a `force`, and the expression it follows (a force
+     * of a plain variable follows it; any other expression was evaluated once, as in iverilog);
+     * allocated by the parse when the source has a force, else NULL */
+    bool *force_on;
+    const tb_expr **force_rhs;
 } tb_module;
 
 /* Source text and the file name used in messages. */

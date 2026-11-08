@@ -51,6 +51,10 @@ static const tb_expr *lv_index(const tb_expr *lv) {
 /* Writes val (lv->width bits) to the leaf; an index out of range or unknown (UINT64_MAX) drops
  * the write. */
 static void write_leaf(tb_ev *ev, const tb_expr *lv, const tbv *val, uint64_t idx) {
+    bool select = lv->kind == E_BITSEL || lv->kind == E_PART;
+    if (tb_forced(ev->tb, select ? lv->a->var : lv->var)) {
+        return;
+    }
     switch (lv->kind) {
     case E_VAR:
         tb_var_store(&ev->tb->vars[lv->var], 0, val);
@@ -883,6 +887,10 @@ bool tb_const_val(tb_module *tb, const tb_expr *expr, uint32_t width, tbv *out) 
     return !ev.failed;
 }
 
+bool tb_forced(const tb_module *tb, int var) {
+    return tb->force_on != NULL && tb->force_on[var];
+}
+
 bool tb_drive(tb_ev *ev, uint32_t drv, const tbv *val) {
     tb_module *tb = ev->tb;
     tb_drv *slot = &tb->drvs[drv - 1U];
@@ -899,7 +907,7 @@ bool tb_drive(tb_ev *ev, uint32_t drv, const tbv *val) {
     }
     tbv old;
     tb_var_load(&old, var, 0);
-    if (tbv_same(&old, &res, var->width)) {
+    if (tbv_same(&old, &res, var->width) || tb_forced(tb, slot->var)) {
         return false;
     }
     tb_var_store(var, 0, &res);
