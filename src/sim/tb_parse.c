@@ -382,10 +382,13 @@ typedef enum {
     X_COND_Q, /* `cond ? ...` waiting for `:` */
     X_COND_E, /* `cond ? a : ...` waiting for the else expression */
     X_PAREN,
-    X_ARGS,   /* system function arguments */
-    X_CONCAT, /* `{ ... }`, possibly a replication */
-    X_INDEX,  /* `name[ ...` */
-    X_LOW     /* `name[high : ...` */
+    X_ARGS,    /* system function arguments */
+    X_CONCAT,  /* `{ ... }`, possibly a replication */
+    X_INDEX,   /* `name[ ...` */
+    X_HIERIDX, /* `inst.mem[ ...` */
+    X_WORDSEL, /* `mem[i][ ...`: a bit or part of an array word */
+    X_WORDLOW, /* `mem[i][high : ...` */
+    X_LOW      /* `name[high : ...` */
 } xkind;
 
 typedef struct xent {
@@ -534,29 +537,113 @@ static bool hier_name(parser *pr, char *path) {
 /* `[number]` (the "[" is read): appends it to path. */
 static bool hier_index(parser *pr, char *path) {
     char piece[TB_NAME + 2U];
-    if (cur(pr)->kind != TK_NUM || cur(pr)->sized) {
-        return false;
-    }
     (void)snprintf(piece, sizeof piece, "[%llu]", (unsigned long long)cur(pr)->num);
-    pr->pos++;
-    if (!is_op(pr, "]")) {
-        return fail(pr, "hierarchical name (name.name[number], constant indices only; "
-                        "part-selects are not supported)");
-    }
-    pr->pos++;
+    pr->pos += 2U; /* the number and the "]" */
     return path_add(path, piece);
 }
 
+/* True when the tokens after the "[" at the cursor are `number ]`. */
+static bool const_index_ahead(const parser *pr) {
+    const tb_tok *num = &pr->toks[pr->pos + 1U];
+    const tb_tok *close = &pr->toks[pr->pos + 2U];
+    return num->kind == TK_NUM && !num->sized && close->kind == TK_OP &&
+           strcmp(close->text, "]") == 0;
+}
+
+typedef enum { HP_FAIL, HP_DONE, HP_INDEX } hp_res;
+
 /* After `inst`: reads `.name` components and `[number]` indices into path (the part after the
- * instance name, as the DUT's signal table spells it). */
-static bool hier_path(parser *pr, char *path) {
-    bool ok = true;
-    while (ok && (is_op(pr, ".") || is_op(pr, "["))) {
-        bool dot = is_op(pr, ".");
+ * instance name, as the DUT's signal table spells it). Stops before a `[` whose index is an
+ * expression (HP_INDEX). */
+static hp_res hier_path(parser *pr, char *path) {
+    while (is_op(pr, ".") || is_op(pr, "[")) {
+        if (is_op(pr, "[")) {
+            if (!const_index_ahead(pr)) {
+                return HP_INDEX;
+            }
+            pr->pos++;
+            if (!hier_index(pr, path)) {
+                return HP_FAIL;
+            }
+            continue;
+        }
         pr->pos++;
-        ok = dot ? hier_name(pr, path) : hier_index(pr, path);
+        if (!hier_name(pr, path)) {
+            fail(pr, "hierarchical name (name.name[number], constant indices only)");
+            return HP_FAIL;
+        }
     }
-    return ok || fail(pr, "hierarchical name (name.name[number], constant indices only)");
+    return HP_DONE;
+}
+
+/* A word array of the DUT (`inst.mem[...]`, or the whole array): E_HIERMEM over the words. */
+static tb_expr *make_hiermem(parser *pr, int inst, const char *path, uint32_t first) {
+    tb_hier_arr arr = {NULL, 0, 1};
+    char where[TB_WHERE_MAX];
+    if (!pr->lenient) {
+        odin3_status st = tb_inst_array(pr->tb, &pr->tb->insts[inst], path, &arr);
+        if (st != ODIN3_OK || arr.n == 0) {
+            free(arr.ids);
+            pr->failed = true;
+            if (!is_op(pr, "[")) { /* a plain name: say there is no such signal */
+                tb_hier_sig none;
+                (void)tb_inst_signal(pr->tb, &pr->tb->insts[inst], path,
+                                     (tb_src_loc){pr->file, pr->toks[first].line}, &none);
+                return NULL;
+            }
+            odin3_log(ODIN3_LOG_ERROR,
+                      "%s: DUT `%s` has no word array `%s` (its words `%s[0]`, `%s[1]`, ... are "
+                      "named by `lower --keep-mem`; `opt` removes the name of a memory nothing "
+                      "reads)",
+                      tb_where(pr->file, pr->toks[first].line, where, sizeof where),
+                      pr->tb->insts[inst].name, path, path, path);
+            return NULL;
+        }
+    }
+    tb_expr *expr = new_expr(pr, E_HIERMEM);
+    uint32_t *ids = expr != NULL ? pnew(pr, ((size_t)arr.n + 1U) * sizeof *ids) : NULL;
+    if (ids != NULL && arr.n > 0) {
+        memcpy(ids, arr.ids, (size_t)arr.n * sizeof *ids);
+    }
+    free(arr.ids);
+    if (ids == NULL) {
+        return NULL;
+    }
+    expr->var = inst;
+    expr->ids = ids;
+    expr->n = arr.n;
+    expr->width = arr.width;
+    return expr;
+}
+
+/* `inst.path` or `inst.path[ index ]` of a word array; the "[" of an expression index is at the
+ * cursor. */
+static bool begin_hier_array(parser *pr, bool *want, const char *path, uint32_t first) {
+    int inst = pr->lenient ? 0 : find_inst(pr, pr->toks[first].text);
+    tb_expr *expr = make_hiermem(pr, inst, path, first);
+    if (expr == NULL) {
+        return false;
+    }
+    if (is_op(pr, "[")) {
+        pr->pos++;
+        *want = true;
+        return push_ent(pr, X_HIERIDX, expr) != NULL;
+    }
+    *want = false;
+    return push_val(pr, expr);
+}
+
+/* After `inst.mem[ index`: the select is complete at `]`. */
+static xres step_hieridx(parser *pr, xent *top, bool *want) {
+    tb_expr *expr = top->node;
+    expr->a = pop_val(pr);
+    odin3_vec_pop(&pr->ents);
+    *want = false;
+    if (is_op(pr, ":")) {
+        fail(pr, "hierarchical name (part-selects are not supported)");
+        return XR_FAIL;
+    }
+    return expect_op(pr, "]") && push_val(pr, expr) ? XR_CONT : XR_FAIL;
 }
 
 /* `inst.path`: a read of a signal of the DUT instance, resolved now (the width is needed). */
@@ -572,8 +659,18 @@ static bool begin_hier(parser *pr, bool *want) {
     tb_hier_sig sig = {0,
                        1}; /* the first pass only finds the instances and the hierarchical names */
     pr->pos++;
-    if (!hier_path(pr, path)) {
+    hp_res res = hier_path(pr, path);
+    if (res == HP_FAIL) {
         return false;
+    }
+    uint32_t found = 1;
+    if (!pr->lenient && res == HP_DONE &&
+        tb_inst_find(pr->tb, &pr->tb->insts[inst], path, &found) != ODIN3_OK) {
+        pr->failed = true;
+        return false;
+    }
+    if (res == HP_INDEX || found == 0) {
+        return begin_hier_array(pr, want, path, first);
     }
     tb_src_loc loc = {pr->file, pr->toks[first].line};
     if (!pr->lenient && tb_inst_signal(pr->tb, &pr->tb->insts[inst], path, loc, &sig) != ODIN3_OK) {
@@ -841,6 +938,75 @@ static xres step_low(parser *pr, xent *top, bool *want) {
     return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
 }
 
+/* After `mem[i][ index`: `]` closes a bit select of the word, `:` starts a part select. */
+static xres step_wordsel(parser *pr, xent *top, bool *want) {
+    tb_expr *base = top->node;
+    tb_expr *index = pop_val(pr);
+    bool part = is_op(pr, ":");
+    int64_t high = 0;
+    if (part && !tb_const(pr->tb, index, &high)) {
+        fail(pr, "part select (constants within the declared width)");
+        return XR_FAIL;
+    }
+    tb_expr *sel = new_expr(pr, part ? E_PART : E_BITSEL);
+    if (sel == NULL) {
+        return XR_FAIL;
+    }
+    sel->a = base;
+    sel->b = index;
+    sel->width = part ? base->width : 1U;
+    sel->num = (uint64_t)high;
+    if (part) {
+        pr->pos++;
+        top->kind = X_WORDLOW;
+        top->node = sel;
+        *want = true;
+        return XR_CONT;
+    }
+    odin3_vec_pop(&pr->ents);
+    *want = false;
+    return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
+}
+
+/* After `mem[i][high : low`: the part select is complete at `]`. */
+static xres step_wordlow(parser *pr, xent *top, bool *want) {
+    tb_expr *sel = top->node;
+    int64_t low = 0;
+    int64_t high = (int64_t)sel->num;
+    const tb_expr *low_expr = pop_val(pr);
+    if (!tb_const(pr->tb, low_expr, &low)) {
+        fail(pr, "non-constant expression where a constant is required");
+        return XR_FAIL;
+    }
+    if (high < low || low < 0 || (!pr->lenient && high >= (int64_t)sel->a->width)) {
+        fail(pr, "part select (constants within the declared width)");
+        return XR_FAIL;
+    }
+    sel->num = 0;
+    sel->aux = (uint32_t)low;
+    sel->width = (uint32_t)(high - low) + 1U;
+    odin3_vec_pop(&pr->ents);
+    *want = false;
+    return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
+}
+
+/* A select context (`name[`, `inst.mem[`, `mem[i][`, and their part-select tails) reaches its `]`.
+ */
+static xres step_select(parser *pr, xent *top, bool *want) {
+    switch (top->kind) {
+    case X_INDEX:
+        return step_index(pr, top, want);
+    case X_HIERIDX:
+        return step_hieridx(pr, top, want);
+    case X_WORDSEL:
+        return step_wordsel(pr, top, want);
+    case X_WORDLOW:
+        return step_wordlow(pr, top, want);
+    default:
+        return step_low(pr, top, want);
+    }
+}
+
 /* After a finished sub-expression with nothing left to reduce: act on the innermost context. */
 static xres step_close(parser *pr, bool *want) {
     xent *top = top_ent(pr);
@@ -869,10 +1035,8 @@ static xres step_close(parser *pr, bool *want) {
     case X_ARGS:
     case X_CONCAT:
         return step_list(pr, top, want);
-    case X_INDEX:
-        return step_index(pr, top, want);
     default:
-        return step_low(pr, top, want);
+        return step_select(pr, top, want);
     }
 }
 
@@ -892,8 +1056,27 @@ static bool push_binary(parser *pr, int prec) {
     return true;
 }
 
+/* True when the `[` at the cursor selects a bit or part of the array word just parsed. */
+static bool word_select_ahead(const parser *pr) {
+    if (pr->primary_only || !is_op(pr, "[") || pr->vals.len == 0) {
+        return false;
+    }
+    const tb_expr *word = *(tb_expr *const *)odin3_vec_cat(&pr->vals, pr->vals.len - 1U);
+    return word->kind == E_MEM || word->kind == E_HIERMEM;
+}
+
+static xres begin_word_select(parser *pr, bool *want) {
+    pr->pos++;
+    *want = true;
+    tb_expr *word = pop_val(pr);
+    return push_ent(pr, X_WORDSEL, word) != NULL ? XR_CONT : XR_FAIL;
+}
+
 /* One step at a position just after an operand. */
 static xres step_after(parser *pr, bool *want) {
+    if (word_select_ahead(pr)) {
+        return begin_word_select(pr, want);
+    }
     if (pr->primary_only && pr->ents.len == pr->efloor) {
         return XR_DONE;
     }

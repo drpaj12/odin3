@@ -6,6 +6,7 @@
 #include "util/log.h"
 #include "util/str.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -204,26 +205,28 @@ odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst, bool four_state) {
     return odin3_sim_build_opts(design, id, &opts, &inst->sim);
 }
 
-odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_src_loc loc,
-                            tb_hier_sig *out) {
-    char where[TB_WHERE_MAX];
+odin3_status tb_inst_find(tb_module *tb, tb_inst *inst, const char *path, uint32_t *id) {
     odin3_status st = tb_inst_sim(tb->design, inst, tb->four_state);
     if (st == ODIN3_OK && inst->sigs == NULL) {
         st = odin3_sim_signals_create(inst->sim, &inst->sigs);
     }
-    if (st != ODIN3_OK) {
-        return st;
-    }
+    *id = 0;
+    return st != ODIN3_OK ? st : odin3_sim_signals_find(inst->sigs, odin3_bytes_cstr(path), id);
+}
+
+odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_src_loc loc,
+                            tb_hier_sig *out) {
+    char where[TB_WHERE_MAX];
     uint32_t id = 0;
-    st = odin3_sim_signals_find(inst->sigs, odin3_bytes_cstr(path), &id);
+    odin3_status st = tb_inst_find(tb, inst, path, &id);
     const odin3_sim_signal *sig =
         st == ODIN3_OK && id != 0 ? odin3_sim_signals_at(inst->sigs, id) : NULL;
     if (sig == NULL) {
         if (st == ODIN3_OK) {
             odin3_log(ODIN3_LOG_ERROR,
-                      "%s: DUT `%s` (module `%s`) has no signal `%s` (a memory word is not "
-                      "readable by hierarchical path after lower; lowering turns it into a "
-                      "register bank)",
+                      "%s: DUT `%s` (module `%s`) has no signal `%s` (a memory word has a name "
+                      "only after `lower --keep-mem`, as `mem[3]`; `opt` removes the name of a "
+                      "memory nothing reads)",
                       tb_where(loc.file, loc.line, where, sizeof where), inst->name, inst->module,
                       path);
         }
@@ -236,6 +239,100 @@ odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_s
     }
     *out = (tb_hier_sig){id, sig->width};
     return ODIN3_OK;
+}
+
+enum { ARRAY_MAX = 1U << 20, ARRAY_GAP = 64, ARRAY_FIRST_CAP = 64, HIER_WORD_PATH = 280 };
+
+/* Word `index` of the array: its signal ID, 0 when the DUT has none (a word `opt` folded to a
+ * constant); false on an error (out of memory, a width past the limit or different from the
+ * others). */
+static bool array_word(const tb_array_ctx *ac, uint32_t index, uint32_t *id) {
+    char word[HIER_WORD_PATH];
+    (void)snprintf(word, sizeof word, "%s[%u]", ac->path, index);
+    *id = 0;
+    if (tb_inst_find(ac->tb, ac->inst, word, id) != ODIN3_OK) {
+        return false;
+    }
+    const odin3_sim_signal *sig = *id != 0 ? odin3_sim_signals_at(ac->inst->sigs, *id) : NULL;
+    if (sig == NULL) {
+        *id = 0;
+        return true;
+    }
+    if (sig->width > TB_MAX_WIDTH || (ac->out->width != 0 && sig->width != ac->out->width)) {
+        *id = 0;
+        return false;
+    }
+    ac->out->width = sig->width;
+    return true;
+}
+
+/* Room for word `index` in out->ids (zero-filled), *cap words now; false on out of memory. */
+static bool array_room(tb_hier_arr *out, uint32_t *cap, uint32_t index) {
+    if (index < *cap) {
+        return true;
+    }
+    uint32_t want = *cap == 0 ? (uint32_t)ARRAY_FIRST_CAP : *cap;
+    while (want <= index) {
+        want *= 2U;
+    }
+    uint32_t *grown = calloc(want, sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    if (out->ids != NULL) {
+        memcpy(grown, out->ids, (size_t)*cap * sizeof *grown);
+        free(out->ids);
+    }
+    out->ids = grown;
+    *cap = want;
+    return true;
+}
+
+odin3_status tb_inst_array(tb_module *tb, tb_inst *inst, const char *path, tb_hier_arr *out) {
+    *out = (tb_hier_arr){NULL, 0, 0};
+    tb_array_ctx ac = {tb, inst, path, out};
+    uint32_t cap = 0;
+    uint32_t misses = 0;
+    bool more = true;
+    for (uint32_t index = 0; more && index < ARRAY_MAX && misses < ARRAY_GAP; index++) {
+        uint32_t id = 0;
+        more = array_word(&ac, index, &id);
+        misses = id == 0 ? misses + 1U : 0U;
+        if (more && id != 0) {
+            if (!array_room(out, &cap, index)) {
+                free(out->ids);
+                *out = (tb_hier_arr){NULL, 0, 0};
+                return ODIN3_ERR_NO_MEMORY;
+            }
+            out->ids[index] = id;
+            out->n = index + 1U;
+        }
+    }
+    return ODIN3_OK;
+}
+
+bool tb_inst_poke(tb_inst *inst, uint32_t id, const tbv *val, tb_poke_err err) {
+    const odin3_sim_signal *sig = odin3_sim_signals_at(inst->sigs, id);
+    uint8_t codes[TB_MAX_WIDTH];
+    const char *why = NULL;
+    if (sig == NULL || sig->width > TB_MAX_WIDTH) {
+        return false;
+    }
+    bool four = odin3_sim_is_four_state(inst->sim);
+    for (uint32_t k = 0; k < sig->width; k++) {
+        uint32_t code = tbv_code(val, k);
+        codes[k] = (uint8_t)(four ? code : (uint32_t)(code == 1U)); /* 2-state: x and z read 0 */
+    }
+    if (odin3_sim_signals_poke(inst->sigs, id, codes, sig->width, &why) == ODIN3_OK) {
+        inst->poked = true;
+        return true;
+    }
+    (void)snprintf(err.text, err.cap,
+                   "cannot set `%s` of the DUT: %s (the memory must be kept by `lower --keep-mem`; "
+                   "`opt` may have removed it)",
+                   odin3_sim_signals_text(inst->sigs, sig->name),
+                   why != NULL ? why : "poke failed");
+    return false;
 }
 
 void tb_sig_peek(const odin3_sim_signals *sigs, uint32_t id, tbv *out) {
@@ -376,7 +473,9 @@ static void dut_status(tb_ev *ev, odin3_status st) {
 }
 
 bool tb_dut_comb(tb_ev *ev, tb_dut *dut) {
-    if (apply_inputs(ev, dut)) {
+    bool poked = dut->inst->poked;
+    dut->inst->poked = false;
+    if (apply_inputs(ev, dut) || poked) {
         dut_status(ev, odin3_sim_settle_events(dut->sim));
     }
     return publish(ev, dut);

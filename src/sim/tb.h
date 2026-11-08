@@ -76,7 +76,10 @@ typedef enum {
     E_BIN,
     E_COND,
     E_SYS,
-    E_HIER /* read of a DUT signal by hierarchical path: var = instance, num = signal ID */
+    E_HIER,   /* read of a DUT signal by hierarchical path: var = instance, num = signal ID */
+    E_HIERMEM /* a word array of the DUT (`inst.mem[i]` or, with a NULL, the whole array as the
+                 target of $readmem): var = instance, ids/n = signal ID of word 0..n-1, a = the
+                 index */
 } tb_ekind;
 
 typedef struct tb_expr {
@@ -91,6 +94,7 @@ typedef struct tb_expr {
     int var;                 /* variable index */
     struct tb_expr *a, *b, *c;
     struct tb_expr **list; /* E_CONCAT items, E_SYS args */
+    const uint32_t *ids;   /* E_HIERMEM: the signal ID of each word */
     uint32_t n;
     char *str;
     uint32_t line;
@@ -175,6 +179,7 @@ typedef struct tb_inst {
     uint32_t line;
     odin3_sim *sim; /* the DUT's simulator, built on first use (parse or run), owned here */
     odin3_sim_signals *sigs; /* its signal table, built with the first hierarchical read */
+    bool poked;              /* a state was poked since the last settle (tb_dut_comb settles) */
 } tb_inst;
 
 typedef struct tb_assign {

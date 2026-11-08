@@ -115,4 +115,15 @@ odin3_status odin3_sim_signals_read(const odin3_sim_signals *sig, uint32_t id, u
 odin3_status odin3_sim_signals_write(odin3_sim_signals *sig, uint32_t id, const uint8_t *bits,
                                      uint32_t count, const char **why);
 
+/*
+ * Sets the stored value of the flip-flops that drive the `count` bits of signal `id`, from codes
+ * (0, 1, 2 = x, 3 = z; 0 or 1 in a 2-state simulator), by odin3_sim_poke_state: the signal's own
+ * values change at the next settle. Not for inputs (use odin3_sim_signals_write). Additive, ABI
+ * stays 7. ODIN3_ERR_INVALID_ARG (not logged; *why, when not NULL, says "unknown signal", "count
+ * is not the width", "a code is out of range" or "a bit is not the output of a flip-flop") with
+ * the bits before the failing one already set; ODIN3_ERR_NO_MEMORY.
+ */
+odin3_status odin3_sim_signals_poke(odin3_sim_signals *sig, uint32_t id, const uint8_t *codes,
+                                    uint32_t count, const char **why);
+
 #endif

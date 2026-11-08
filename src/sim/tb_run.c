@@ -203,17 +203,64 @@ static void print_to(run *rt, FILE *fp, const tb_expr *call, uint32_t first, boo
     free(line);
 }
 
+/* The put of a DUT array target: the word goes into the flip-flops behind signal ids[addr]. */
+typedef struct dut_words {
+    tb_inst *inst;
+    const uint32_t *ids;
+} dut_words;
+
+static bool put_dut_word(const void *ctx, uint32_t addr, const tbv *val, tb_poke_err err) {
+    const dut_words *words = ctx;
+    if (words->ids[addr] == 0) {
+        (void)snprintf(err.text, err.cap, "word %u of the DUT array has no name (opt folded it)",
+                       addr);
+        return false;
+    }
+    return tb_inst_poke(words->inst, words->ids[addr], val, err);
+}
+
+static bool put_var_word(const void *ctx, uint32_t addr, const tbv *val, tb_poke_err err) {
+    (void)err;
+    tb_var_store(ctx, addr, val);
+    return true;
+}
+
+/* The readmem request for the target `array` of the call: a testbench array or a DUT array. */
+typedef struct readmem_target {
+    dut_words words; /* a DUT array: the instance and the word signals */
+    const tb_expr *array;
+} readmem_target;
+
+static void target_request(run *rt, readmem_target *tgt, tb_readmem_req *req) {
+    if (tgt->array->kind == E_HIERMEM) {
+        tgt->words = (dut_words){&rt->tb->insts[tgt->array->var], tgt->array->ids};
+        *req = (tb_readmem_req){.depth = tgt->array->n,
+                                .width = tgt->array->width,
+                                .put = put_dut_word,
+                                .ctx = &tgt->words};
+    } else {
+        const tb_var *mem = &rt->tb->vars[tgt->array->var];
+        *req = (tb_readmem_req){
+            .depth = mem->depth, .width = mem->width, .put = put_var_word, .ctx = mem};
+    }
+}
+
+/* True when the call's second argument is an array the load can fill. */
+static bool readmem_target_ok(const run *rt, const tb_expr *call) {
+    if (call->n < 2 || call->list[0]->kind != E_STR) {
+        return false;
+    }
+    const tb_expr *arr = call->list[1];
+    if (arr->kind == E_HIERMEM) {
+        return arr->a == NULL;
+    }
+    return arr->kind == E_VAR && rt->tb->vars[arr->var].depth > 0;
+}
+
 static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
     const tb_expr *call = stmt->sys;
     char err[ERR_BUF] = "";
-    if (call->n >= 2 && call->list[1]->kind == E_HIER) {
-        rfail(rt, stmt,
-              "$readmem into a hierarchical path is not supported (writes into a DUT "
-              "signal by path are not supported)");
-        return;
-    }
-    if (call->n < 2 || call->list[0]->kind != E_STR || call->list[1]->kind != E_VAR ||
-        rt->tb->vars[call->list[1]->var].depth == 0) {
+    if (!readmem_target_ok(rt, call)) {
         rfail(rt, stmt, "$readmem expects (\"file\", array [, start [, end]])");
         return;
     }
@@ -224,10 +271,21 @@ static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
         rfail(rt, stmt, "$readmem start/end must be constants");
         return;
     }
-    tb_readmem_req req = {call->list[0]->str, &rt->tb->vars[call->list[1]->var], hex, from, to, err,
-                          sizeof err};
+    readmem_target tgt = {{NULL, NULL}, call->list[1]};
+    tb_readmem_req req;
+    target_request(rt, &tgt, &req);
+    req.file = call->list[0]->str;
+    req.hex = hex;
+    req.from = from;
+    req.to = to;
+    req.err = err;
+    req.errcap = sizeof err;
     if (!tb_readmem(&req)) {
         rfail(rt, stmt, err);
+    } else if (tgt.array->kind == E_HIERMEM) { /* settle the DUT now, publish its outputs */
+        for (uint32_t i = 0; i < rt->nd; i++) {
+            (void)tb_dut_comb(&rt->ev, rt->duts[i]);
+        }
     }
 }
 

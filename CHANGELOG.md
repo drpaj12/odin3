@@ -6,6 +6,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added (sim_tb: DUT memories by hierarchical path)
+
+- `lower --keep-mem`: each `$mem` word gets a wire `<memory>[<index>]` and a ROM keeps flip-flop storage (x until
+  loaded). `sim_tb`: `$readmemh`/`$readmemb` into a DUT memory by hierarchical path, DUT array words with a variable
+  index (`uut.m.ram[i]`), bit and part selects of an array word (`mem[i][7:4]`, also testbench arrays). C (additive,
+  ABI stays 7): `odin3_sim_poke_state`, `odin3_sim_signals_poke`. Micro `poke`, unit test `test_sim_poke`.
+
 ### Added (graphlet instances and metrics)
 
 - `graphlets --instances G [--max N] --instances-out FILE`: the instances of one graphlet type, from the same ESU run

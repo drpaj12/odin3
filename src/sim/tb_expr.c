@@ -291,6 +291,12 @@ static bool next_child(const ev_frame *fr, ev_child *out) {
     case E_PART:
     case E_MEM:
         return child_select(fr, out);
+    case E_HIERMEM:
+        if (expr->a == NULL) {
+            return false;
+        }
+        *out = (ev_child){expr->a, expr->a->width, false};
+        return fr->stage == 0;
     case E_CONCAT:
     case E_REPL:
         if (fr->stage >= expr->n * fr->reps) {
@@ -656,6 +662,44 @@ static void finish_hier(tb_ev *ev, ev_frame *fr) {
     extend(&fr->val[0], expr->width, fr->width, false);
 }
 
+/* A word of a DUT array by an evaluated index: an unknown or out-of-range index reads x. */
+static void finish_hiermem(tb_ev *ev, ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    if (ev->const_only || expr->a == NULL) {
+        ev->failed = true;
+        ev->why = expr->a == NULL ? "a whole DUT array used as a value (only $readmem takes one)"
+                                  : ev->why;
+        tbv_zero(&fr->val[0], fr->width);
+        return;
+    }
+    uint64_t idx = index_of(&fr->val[0], expr->a->width);
+    if (idx < expr->n && expr->ids[idx] == 0) {
+        ev->failed = true;
+        ev->why = "a word of a DUT array has no name (opt folded it to a constant)";
+        tbv_zero(&fr->val[0], fr->width);
+    } else if (idx < expr->n) {
+        tb_inst_peek(&ev->tb->insts[expr->var], expr->ids[idx], &fr->val[0]);
+    } else {
+        tbv_fill(ODIN3_W4_X, &fr->val[0], expr->width);
+    }
+    extend(&fr->val[0], expr->width, fr->width, false);
+}
+
+/* A testbench array word, or a read of the DUT: one signal, or a word of an array. */
+static void finish_word(tb_ev *ev, ev_frame *fr) {
+    switch (fr->expr->kind) {
+    case E_MEM:
+        finish_mem(ev, fr);
+        break;
+    case E_HIER:
+        finish_hier(ev, fr);
+        break;
+    default:
+        finish_hiermem(ev, fr);
+        break;
+    }
+}
+
 static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     if (expr->kind == E_NUM) {
@@ -670,6 +714,13 @@ static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     }
 }
 
+/* ?: with an unknown condition merges the two sides. */
+static void finish_cond(ev_frame *fr) {
+    if (fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1) {
+        tb_op_merge(&fr->val[0], &fr->val[1], fr->width);
+    }
+}
+
 static void finish(tb_ev *ev, ev_frame *fr) {
     switch (fr->expr->kind) {
     case E_NUM:
@@ -677,10 +728,9 @@ static void finish(tb_ev *ev, ev_frame *fr) {
         finish_leaf(ev, fr);
         break;
     case E_MEM:
-        finish_mem(ev, fr);
-        break;
     case E_HIER:
-        finish_hier(ev, fr);
+    case E_HIERMEM:
+        finish_word(ev, fr);
         break;
     case E_BITSEL:
     case E_PART:
@@ -696,9 +746,7 @@ static void finish(tb_ev *ev, ev_frame *fr) {
         finish_bin(fr);
         break;
     case E_COND:
-        if (fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1) {
-            tb_op_merge(&fr->val[0], &fr->val[1], fr->width);
-        }
+        finish_cond(fr);
         break;
     case E_SYS:
         finish_sys(ev, fr);

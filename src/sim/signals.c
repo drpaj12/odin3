@@ -672,3 +672,26 @@ odin3_status odin3_sim_signals_write(odin3_sim_signals *sig, uint32_t id, const 
     }
     return ODIN3_OK;
 }
+
+odin3_status odin3_sim_signals_poke(odin3_sim_signals *sig, uint32_t id, const uint8_t *codes,
+                                    uint32_t count, const char **why) {
+    const char *local = NULL;
+    const odin3_sim_signal *item = odin3_sim_signals_at(sig, id);
+    why = why != NULL ? why : &local;
+    if (item == NULL || codes == NULL || count != item->width) {
+        *why = item == NULL ? "unknown signal" : "count is not the width";
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const uint32_t *slots = odin3_vec_cat(&sig->slots, item->slot_first);
+    for (uint32_t k = 0; k < count; k++) {
+        odin3_status st = odin3_sim_poke_state(sig->sim, slots[k], codes[k]);
+        if (st == ODIN3_ERR_INVALID_ARG) {
+            *why =
+                codes[k] > 3U ? "a code is out of range" : "a bit is not the output of a flip-flop";
+        }
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    return ODIN3_OK;
+}

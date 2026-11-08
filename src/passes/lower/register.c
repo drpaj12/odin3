@@ -100,12 +100,31 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
 
 static const char k_enable_first[] = "--async-enable-first";
 static const char k_keep_sel[] = "--keep-sel";
+static const char k_keep_mem[] = "--keep-mem";
 
 static bool is_option(const char *word) {
     static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits",
                                             "--lower-snapshot"};
     for (size_t i = 0; i < sizeof k_options / sizeof k_options[0]; i++) {
         if (strcmp(word, k_options[i]) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The options that take no value (--async-enable-first is hidden, test-only); true when word is
+ * one. */
+static bool set_flag(const char *word, odin3_lower_opts *opts) {
+    const struct {
+        const char *name;
+        bool *flag;
+    } flags[] = {{k_enable_first, &opts->async_enable_first},
+                 {k_keep_sel, &opts->keep_sel},
+                 {k_keep_mem, &opts->keep_mem}};
+    for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++) {
+        if (strcmp(word, flags[i].name) == 0) {
+            *flags[i].flag = true;
             return true;
         }
     }
@@ -122,19 +141,14 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
     odin3_status st = ODIN3_OK;
     for (const char *word = next_word(&args, &word_buf, &st); word != NULL;
          word = next_word(&args, &word_buf, &st)) {
-        if (strcmp(word, k_enable_first) == 0) { /* hidden, test-only: a flag without a value */
-            opts->async_enable_first = true;
-            continue;
-        }
-        if (strcmp(word, k_keep_sel) == 0) { /* a flag without a value */
-            opts->keep_sel = true;
+        if (set_flag(word, opts)) {
             continue;
         }
         if (!is_option(word)) {
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "
                       "sync|error, --report <file>, --max-mem-bits N, --lower-snapshot <dir>, "
-                      "--keep-sel)",
+                      "--keep-sel, --keep-mem)",
                       word);
             st = ODIN3_ERR_INVALID_ARG;
             break;

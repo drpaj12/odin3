@@ -824,5 +824,6 @@ void odin3_sim_destroy(odin3_sim *sim) {
     odin3_util_free(sim->out_bits);
     odin3_util_free(sim->frames);
     odin3_util_free(sim->netmap);
+    odin3_util_free(sim->poke_map);
     odin3_util_free(sim);
 }
