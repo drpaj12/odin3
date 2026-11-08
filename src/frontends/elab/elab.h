@@ -74,6 +74,8 @@ typedef struct odin3_elab_opts {
                      `src` attributes, assign comments and L-5 names restore HDL locations */
     struct odin3_name_resolver *names; /* -netlist -name-map (5.4f-c, H-6): hash names of module
                                           declarators become full names first; NULL: none */
+    bool case_xz_never; /* read_verilog --case-xz-never: an x/z bit of a plain `case` item never
+                           matches (IEEE simulation); the default is the Yosys/Parmys wildcard */
     bool vtr_compat;  /* VTR/Parmys compatibility: `initial x = <non-constant>` is `assign x = ...`
                          (Peter 2026-10-13; EL-40) */
     double stage1_ms; /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */

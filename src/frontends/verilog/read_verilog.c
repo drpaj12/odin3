@@ -414,6 +414,8 @@ static bool set_flag(odin3_bytes word, rv_args *out) {
         out->elab.netlist = true;
     } else if (odin3_pass_arg_is(word, "--vtr-compat")) {
         out->elab.vtr_compat = true;
+    } else if (odin3_pass_arg_is(word, "--case-xz-never")) {
+        out->elab.case_xz_never = true;
     } else {
         return false;
     }
@@ -948,6 +950,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "IBUF, IBUFG, OBUF, OBUFT, IOBUF, BUFG, ODDR2 or IDDR2 from Odin III's behavioural model (a "
     "warning each), --vtr-compat "
     "reads a non-constant `initial x = e;` as `assign x = e;` as Parmys does (a warning each); "
+    "--case-xz-never makes an x or z bit of a plain `case` item match nothing, as in simulation "
+    "(IEEE 1364-2005 9.5; the default is the wildcard of Yosys and Parmys, with a warning); "
     "-icells (or --icells) reads an instance of a `$` cell type as that registered cell, as Yosys "
     "does; -netlist (or --netlist) says the file is a netlist written by write_verilog or Yosys: "
     "its records are IMPORTED, a `(* src = \"file:line\" *)` attribute, a trailing `// file:line` "
