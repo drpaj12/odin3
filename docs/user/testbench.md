@@ -89,7 +89,7 @@ Refused with `unsupported: <construct>` at the helper's own file and line: recur
 instance array, connection to a port the module does not have, more ordered connections than ports, an override of a
 parameter the module does not have, a non-constant override, a name longer than 63 characters (instance path included),
 a design module instantiated inside a testbench module, `defparam`, `function`, `generate`, `specify`. Tests:
-`tests/tb/micro/sub_*_tb.v` (with `sub_*_lib.v`), `tests/tb/errors/sub*_tb.v`.
+`tests/tb/micro/sub_*_tb.v, xsub_*_tb.v` (with `sub_*_lib.v`), `tests/tb/errors/sub*_tb.v`.
 
 ## Waveform (`--vcd`)
 

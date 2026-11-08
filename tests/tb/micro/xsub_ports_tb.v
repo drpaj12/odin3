@@ -1,6 +1,6 @@
 // testbench-side submodule: port styles, output reg, ordered/named/empty/constant connections,
 // two instances with their own state, a helper clk next to the bench clk
-module sub_ports_tb;
+module xsub_ports_tb;
   reg clk, rst;
   reg [7:0] d;
   wire [7:0] q1, q2;
