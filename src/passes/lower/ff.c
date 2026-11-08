@@ -43,7 +43,7 @@
 #include <string.h>
 
 /* WIDTH and CLK_POLARITY are parameters 0 and 1 of every clocked family cell (ff.c of the IR). */
-enum { FF_P_WIDTH = 0, FF_P_CLK_POLARITY = 1, FF_INIT_UNKNOWN = 3 };
+enum { FF_P_WIDTH = 0, FF_P_CLK_POLARITY = 1, FF_INIT_UNKNOWN = 3, GATE_NAME_LEN = 24 };
 
 /* What a cell does besides D, EN and the clock. */
 typedef enum ff_ctl_kind { FF_CTL_NONE, FF_CTL_RESET, FF_CTL_LOAD, FF_CTL_SETCLR } ff_ctl_kind;
@@ -365,7 +365,7 @@ static bool keeps_async(const lw_ctx *lw, const ff_view *view) {
 static odin3_status build_bit_async(lw_ctx *lw, const ff_view *view, uint32_t bit, odin3_bit init,
                                     odin3_net_id qnet) {
     odin3_bit rval = (odin3_bit)view->value->bits[bit];
-    char name[24];
+    char name[GATE_NAME_LEN];
     char pol_clk = view->clk_high ? 'P' : 'N';
     char pol_rst = view->ctl.high ? 'P' : 'N';
     char val = rval == ODIN3_BIT_1 ? '1' : '0';
