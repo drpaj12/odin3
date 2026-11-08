@@ -169,7 +169,7 @@ static void test_a_join_over_the_cap_keeps_the_same_16_after_a_restore(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_prov_label_compute(design, join.v, &label));
     TEST_ASSERT_EQUAL_UINT32(MANY, label.info.n_joined);
     TEST_ASSERT_TRUE((label.info.flags & ODIN3_PROV_F_LOSSY_CAP) != 0);
-    TEST_ASSERT_EQUAL_UINT(MANY, label.joined.len);
+    TEST_ASSERT_EQUAL_UINT(ODIN3_PROV_JOIN_CAP, label.joined.len); /* the first rows only */
     odin3_prov_label_free(&label);
     const char *names[] = {"x"};
     expect_round_trip(names, &join, 1);
