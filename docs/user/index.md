@@ -23,7 +23,7 @@ suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilII
 
 ## Features at a glance
 
-Version 1.5.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
+Version 1.5.1, C ABI 7. Everything below is on `main` with tests; the table with links is in the
 [repository README](https://github.com/drpaj12/odin3#features).
 
 - Inputs and outputs: {doc}`inputs`, {doc}`outputs`, {doc}`odin3-flow`.
