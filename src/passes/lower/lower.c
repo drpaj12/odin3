@@ -184,9 +184,7 @@ static odin3_status postcondition(const lw_ctx *lw) {
         }
         const odin3_celltype_def *def =
             odin3_celltype_get(lw->design, odin3_node_type(lw->module, node));
-        bool kept_async = lw->opts->async_keep && lw_ff_gate_name(def->name) &&
-                          lw_ff_is_async(def->name); /* --async keep: a gate-level reset FF stays */
-        if (lowerable(def) && !kept_by_sel(lw, node, def) && !kept_async) {
+        if (lowerable(def) && !kept_by_sel(lw, node, def)) {
             char label[LW_LABEL_LEN];
             lw_node_label(lw, node, label, sizeof label);
             odin3_log(ODIN3_LOG_ERROR,
@@ -338,7 +336,7 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
         odin3_log(ODIN3_LOG_ERROR, "lower: no pass context or design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    static const odin3_lower_opts k_none = {.snapshot_dir = ""};
+    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, false, false, ""};
     lw_ctx lw;
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);

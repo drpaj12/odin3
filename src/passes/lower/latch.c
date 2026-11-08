@@ -198,8 +198,7 @@ static odin3_status storage(lw_ctx *lw, const lt_view *view, const lt_pins *pins
     int64_t value = init == ODIN3_BIT_0 || init == ODIN3_BIT_1 ? (int64_t)init : LT_INIT_UNKNOWN;
     const odin3_value param = odin3_value_int(value);
     const odin3_net_id in[2] = {pins->enable, pins->data};
-    const lw_gate_spec spec = {negative_latch(view) ? LW_G_DLATCH_N : LW_G_DLATCH_P, in, 2, &param,
-                               NULL};
+    const lw_gate_spec spec = {negative_latch(view) ? LW_G_DLATCH_N : LW_G_DLATCH_P, in, 2, &param};
     return lw_gate_on(lw, &spec, qnet);
 }
 

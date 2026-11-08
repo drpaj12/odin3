@@ -82,12 +82,10 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
         }
         opts->keep_neg_edge = strcmp(value, "keep") == 0;
     } else if (strcmp(name, "--async") == 0) {
-        if (strcmp(value, "sync") != 0 && strcmp(value, "error") != 0 &&
-            strcmp(value, "keep") != 0) {
-            return bad_value(name, "sync, error or keep");
+        if (strcmp(value, "sync") != 0 && strcmp(value, "error") != 0) {
+            return bad_value(name, "sync or error");
         }
         opts->async_is_error = strcmp(value, "error") == 0;
-        opts->async_keep = strcmp(value, "keep") == 0;
     } else if (strcmp(name, "--max-mem-bits") == 0) {
         if (!parse_u64(value, &opts->max_mem_bits) || opts->max_mem_bits == 0) {
             return bad_value(name, "a positive number");
@@ -149,7 +147,7 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
         if (!is_option(word)) {
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "
-                      "sync|error|keep, --report <file>, --max-mem-bits N, --lower-snapshot <dir>, "
+                      "sync|error, --report <file>, --max-mem-bits N, --lower-snapshot <dir>, "
                       "--keep-sel, --keep-mem)",
                       word);
             st = ODIN3_ERR_INVALID_ARG;

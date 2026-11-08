@@ -39,7 +39,6 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <string.h>
 
 /* WIDTH and CLK_POLARITY are parameters 0 and 1 of every clocked family cell (ff.c of the IR). */
@@ -351,40 +350,7 @@ static odin3_status lw_storage(lw_ctx *lw, const lw_storage_args *args, odin3_ne
                                                                           : FF_INIT_UNKNOWN;
     const odin3_value param = odin3_value_int(init);
     const odin3_net_id in[2] = {args->clk, args->next};
-    const lw_gate_spec spec = {args->negative ? LW_G_DFF_N : LW_G_DFF_P, in, 2, &param, NULL};
-    return lw_gate_on(lw, &spec, qnet);
-}
-
-/* --async keep: an $adff/$adffe (or gate-level async) bit stays a flip-flop with a reset pin,
- * `$_DFF_<c><r><v>_` (C R D) or `$_DFFE_<c><r><v><e>_` (C R E D); the simulator then applies the
- * reset when the reset input changes, not at the next clock edge. */
-static bool keeps_async(const lw_ctx *lw, const ff_view *view) {
-    return lw->opts->async_keep && view->shape->async && view->shape->ctl == FF_CTL_RESET;
-}
-
-static odin3_status build_bit_async(lw_ctx *lw, const ff_view *view, uint32_t bit, odin3_bit init,
-                                    odin3_net_id qnet) {
-    odin3_bit rval = (odin3_bit)view->value->bits[bit];
-    char name[24];
-    char pol_clk = view->clk_high ? 'P' : 'N';
-    char pol_rst = view->ctl.high ? 'P' : 'N';
-    char val = rval == ODIN3_BIT_1 ? '1' : '0';
-    if (view->shape->has_en) {
-        (void)snprintf(name, sizeof name, "$_DFFE_%c%c%c%c_", pol_clk, pol_rst, val,
-                       view->en.high ? 'P' : 'N');
-    } else {
-        (void)snprintf(name, sizeof name, "$_DFF_%c%c%c_", pol_clk, pol_rst, val);
-    }
-    odin3_net_id in[4] = {view->clk, view->ctl.net, view->data.nets[bit], view->data.nets[bit]};
-    uint32_t count = 3;
-    if (view->shape->has_en) {
-        in[2] = view->en.net;
-        count = 4;
-    }
-    int64_t init_param =
-        init == ODIN3_BIT_0 || init == ODIN3_BIT_1 ? (int64_t)init : FF_INIT_UNKNOWN;
-    const odin3_value param = odin3_value_int(init_param);
-    const lw_gate_spec spec = {LW_G_DFF_P, in, count, &param, name};
+    const lw_gate_spec spec = {args->negative ? LW_G_DFF_N : LW_G_DFF_P, in, 2, &param};
     return lw_gate_on(lw, &spec, qnet);
 }
 
@@ -415,15 +381,11 @@ static odin3_status build_bit(lw_ctx *lw, const ff_view *view, uint32_t bit,
                               const lw_storage_args *base, odin3_net_id *qnet) {
     odin3_status st = lw_net(lw, qnet);
     lw_storage_args args = *base;
-    bool keep = keeps_async(lw, view);
-    st = st == ODIN3_OK && !keep ? lw_next_state(lw, view, bit, *qnet, &args.next) : st;
+    st = st == ODIN3_OK ? lw_next_state(lw, view, bit, *qnet, &args.next) : st;
     odin3_net_id old = bit < view->out.n ? view->out.nets[bit] : (odin3_net_id){0};
     args.init = odin3_net_valid(old) ? odin3_ffinit_get(lw->module, old) : ODIN3_BIT_X;
     if (view->gate_init >= 0) {
         args.init = view->gate_init == 1 ? ODIN3_BIT_1 : ODIN3_BIT_0;
-    }
-    if (keep) {
-        return st == ODIN3_OK ? build_bit_async(lw, view, bit, args.init, *qnet) : st;
     }
     return st == ODIN3_OK ? lw_storage(lw, &args, *qnet) : st;
 }
@@ -434,13 +396,13 @@ static odin3_status book(lw_ctx *lw, const lw_cell *cell, const ff_view *view) {
     lw_node_label(lw, cell->node, label, sizeof label);
     lw_report_entry entry = {module_text(lw), label, cell->def->name, view->width, NULL};
     odin3_status st = ODIN3_OK;
-    if (!view->clk_high && !lw->opts->keep_neg_edge && !keeps_async(lw, view)) {
+    if (!view->clk_high && !lw->opts->keep_neg_edge) {
         odin3_log(ODIN3_LOG_WARN,
                   "lower: module '%s': falling-edge '%s' '%s' gets a clock inverter", entry.module,
                   entry.type, label);
         st = lw_report_add(lw, LW_REP_NEG_EDGE, &entry);
     }
-    if (st == ODIN3_OK && view->shape->async && !keeps_async(lw, view)) {
+    if (st == ODIN3_OK && view->shape->async) {
         entry.controls = view->shape->controls;
         st = lw_report_add(lw, LW_REP_ASYNC, &entry);
         lw->totals.async_bits += view->width;
@@ -451,8 +413,7 @@ static odin3_status book(lw_ctx *lw, const lw_cell *cell, const ff_view *view) {
 
 static odin3_status build_view(lw_ctx *lw, const lw_cell *cell, ff_view view, lw_bits *out) {
     lw_storage_args base = {false, view.clk, view.clk, ODIN3_BIT_X};
-    odin3_status st =
-        keeps_async(lw, &view) ? ODIN3_OK : clock_for(lw, &view, &base.clk, &base.negative);
+    odin3_status st = clock_for(lw, &view, &base.clk, &base.negative);
     lw_bits_clear(out);
     for (uint32_t bit = 0; st == ODIN3_OK && bit < view.width; bit++) {
         odin3_net_id qnet = {0};

@@ -334,8 +334,8 @@ static odin3_status gate_name(lw_ctx *lw, lw_kind kind, uint32_t *out) {
     return st;
 }
 
-/* The most pins of a gate `lower` creates: $_DFFE_<c><r><v><e>_ has four inputs and one output. */
-enum { MAX_GATE_PINS = 5 };
+/* The most pins of a gate `lower` creates: a $_MUX_ has three inputs and one output. */
+enum { MAX_GATE_PINS = 4 };
 
 /* Creates the node of `type` named `name` (0: unnamed) on `ports` (inputs then the output). */
 static odin3_status make_node(lw_ctx *lw, odin3_celltype_id type, uint32_t name,
@@ -377,10 +377,7 @@ odin3_status lw_gate_on(lw_ctx *lw, const lw_gate_spec *spec, odin3_net_id out_n
     }
     uint32_t name = 0;
     odin3_status st = gate_name(lw, spec->kind, &name);
-    odin3_celltype_id type =
-        spec->type_name != NULL ? type_named(lw->design, spec->type_name) : lw->gate[spec->kind];
-    st = st == ODIN3_OK && !odin3_celltype_valid(type) ? ODIN3_ERR_INVALID_ARG : st;
-    st = st == ODIN3_OK ? make_node(lw, type, name, spec->params, ports) : st;
+    st = st == ODIN3_OK ? make_node(lw, lw->gate[spec->kind], name, spec->params, ports) : st;
     if (st != ODIN3_OK) {
         return st;
     }
@@ -392,7 +389,7 @@ odin3_status lw_gate(lw_ctx *lw, lw_kind kind, const odin3_net_id *in, uint32_t 
                      odin3_net_id *out_net) {
     odin3_net_id net = {0};
     odin3_status st = lw_net(lw, &net);
-    const lw_gate_spec spec = {kind, in, n_in, NULL, NULL};
+    const lw_gate_spec spec = {kind, in, n_in, NULL};
     st = st == ODIN3_OK ? lw_gate_on(lw, &spec, net) : st;
     if (st == ODIN3_OK) {
         *out_net = net;

@@ -391,7 +391,7 @@ static odin3_status make_dff(mem_build *mb, const mem_dff_args *args, odin3_net_
     bool known = args->init == ODIN3_BIT_0 || args->init == ODIN3_BIT_1;
     const odin3_value param = odin3_value_int(known ? (int64_t)args->init : MEM_INIT_UNKNOWN);
     const odin3_net_id in[2] = {args->clk.net, args->data};
-    const lw_gate_spec spec = {args->clk.negative ? LW_G_DFF_N : LW_G_DFF_P, in, 2, &param, NULL};
+    const lw_gate_spec spec = {args->clk.negative ? LW_G_DFF_N : LW_G_DFF_P, in, 2, &param};
     odin3_status st = lw_gate_on(mb->lw, &spec, qnet);
     mb->dffs += st == ODIN3_OK ? 1U : 0U;
     return st;

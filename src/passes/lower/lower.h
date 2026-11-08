@@ -30,10 +30,8 @@
 
 /* Options of `lower` (spec §13). */
 typedef struct odin3_lower_opts {
-    bool keep_neg_edge;  /* --neg-edge keep */
-    bool async_is_error; /* --async error */
-    bool async_keep; /* --async keep: async-reset flip-flops keep their reset pin ($_DFF_<c><r><v>_)
-                      */
+    bool keep_neg_edge;      /* --neg-edge keep */
+    bool async_is_error;     /* --async error */
     uint64_t max_mem_bits;   /* 0 = ODIN3_LOWER_MAX_MEM_BITS */
     const char *report_path; /* NULL = none */
     bool keep_sel; /* --keep-sel: leave the cells with the attribute rtl_sel as word cells */
