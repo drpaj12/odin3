@@ -834,8 +834,8 @@ static bool chain_name(parser *pr, char (*comp)[TB_NAME], uint32_t count, char *
         }
         (void)snprintf(path + used, sizeof path - used, "%s", comp[i]);
         if (!is_sub_path(pr, path)) {
-            return fail(pr, "hierarchical name whose first part is not an instance of this "
-                            "testbench");
+            return fail(pr, "hierarchical name whose first part is not a DUT instance or an "
+                            "instance of this testbench");
         }
         (void)strcat(path, ".");
     }

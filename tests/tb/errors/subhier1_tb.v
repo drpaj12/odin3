@@ -1,4 +1,4 @@
-// EXPECT: not an instance of this testbench
+// EXPECT: an instance of this testbench
 module subhier1_tb;
   reg a;
   leaf u (.a(a));
