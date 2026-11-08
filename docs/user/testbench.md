@@ -60,8 +60,8 @@ With `lower --keep-mem` (no `opt` first when a word may be a constant: `opt` fol
 takes 0, such as register 0 of a register file, and removes a memory nothing reads) the testbench may:
 
 - `$readmemh` / `$readmemb` into a DUT memory: `$readmemb("prog.bin", uut.imem.rom);` (optional start and end
-  addresses as for a testbench array). The words are stored in the DUT's flip-flops (new C function
-  `odin3_sim_poke_state`, additive, ABI stays 7), the DUT settles at once and its outputs are published, so a read
+  addresses as for a testbench array). The words are stored in the DUT's flip-flops (new internal function
+  `odin3_sim_poke_state`, not part of the C ABI), the DUT settles at once and its outputs are published, so a read
   or a `$display` on the next line sees the loaded program.
 - read a word with a variable index: `uut.dmem.ram[i]`, and a bit or part of it: `uut.rom[i][7:4]`,
   `uut.regs[3][0]`. An index out of the range, or x, reads x.
@@ -159,7 +159,9 @@ other than `` `timescale ``.
 
 ## What is not modelled
 
-The DUT simulator is cycle-based. Gate or `#` delays in the DUT are not seen. A tri-state buffer
+`$display` and other system tasks written inside the DUT's RTL do not run: `sim_tb` simulates the synthesized
+DUT, so a bench that prints them under iverilog (mips_16 prints `ERROR: Unknown Instruction` at time 0) has those lines
+only in the iverilog text. The DUT simulator is cycle-based. Gate or `#` delays in the DUT are not seen. A tri-state buffer
 inside the DUT (`assign y = oe ? d : 'bz;`) is lowered to a plain driver of `d` by `lower` (as
 Parmys does, with a warning), so its output is not z while `oe` is low; the testbench side of a
 tri-state bus (several `assign`s) is resolved exactly. An x in the DUT after `opt` or `lower` may be

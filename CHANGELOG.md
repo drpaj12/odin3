@@ -4,14 +4,16 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## Unreleased
+## 1.5.0 (ready to tag; release notes `docs/V1.5.0.md`)
+
+The C ABI stays 7. This section holds everything since v1.3.0; the entries headed 1.4.0 shipped in v1.4.0, the rest is new since then (see `docs/V1.5.0.md`).
 
 ### Added (sim_tb: DUT memories by hierarchical path)
 
 - `lower --keep-mem`: each `$mem` word gets a wire `<memory>[<index>]` and a ROM keeps flip-flop storage (x until
   loaded). `sim_tb`: `$readmemh`/`$readmemb` into a DUT memory by hierarchical path, DUT array words with a variable
-  index (`uut.m.ram[i]`), bit and part selects of an array word (`mem[i][7:4]`, also testbench arrays). C (additive,
-  ABI stays 7): `odin3_sim_poke_state`, `odin3_sim_signals_poke`. Micro `poke`, unit test `test_sim_poke`.
+  index (`uut.m.ram[i]`), bit and part selects of an array word (`mem[i][7:4]`, also testbench arrays). Internal
+  functions (not C ABI, used by `sim_tb`): `odin3_sim_poke_state`, `odin3_sim_signals_poke`. Micro `poke`, unit test `test_sim_poke`.
 
 ### Added (graphlet instances and metrics)
 
