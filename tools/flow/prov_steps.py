@@ -80,6 +80,21 @@ def obj(stage: str, local: str, kind: str, name: str, origin: str,
     return row
 
 
+class PreRow:
+    """An object line already serialised (exactly as ``StepWriter`` writes a dict row), with the
+    fields ``add_step`` counts. For rows with very long ``links`` lists: building one dict per
+    link costs memory and time and the link text repeats, so the caller joins cached link text.
+    The caller guarantees the text holds no absolute path (``add_step`` does not check it)."""
+
+    __slots__ = ("text", "kind", "origin", "link_kinds")
+
+    def __init__(self, text: str, kind: str, origin: str, link_kinds: Mapping[str, int]) -> None:
+        self.text = text
+        self.kind = kind
+        self.origin = origin
+        self.link_kinds = link_kinds
+
+
 class StepWriter:
     """Writes the step files of one run into ``out/prov``."""
 
@@ -100,7 +115,7 @@ class StepWriter:
         self.index["inputs"].append({"role": "design", "path": name, "sha256": sha256_file(path)})
 
     def add_step(self, step: str, stage: str, tool: Mapping[str, str],
-                 objects: Iterable[Mapping[str, Any]] | None, needs: Sequence[str] = (),
+                 objects: Iterable[Mapping[str, Any] | PreRow] | None, needs: Sequence[str] = (),
                  inputs: Sequence[Mapping[str, str]] = (),
                  outputs: Sequence[Mapping[str, str]] = (),
                  links: Sequence[Mapping[str, Any]] = (),
@@ -118,14 +133,22 @@ class StepWriter:
             objects_file = f"{base}.objects.jsonl"
             with (self.dir / objects_file).open("w", encoding="utf-8") as fh:
                 for row in objects:
-                    _check_private(row, f"{step} object {row.get('id')}")
-                    fh.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+                    if isinstance(row, PreRow):
+                        fh.write(row.text + "\n")
+                        kind, origin, link_kinds = row.kind, row.origin, row.link_kinds
+                    else:
+                        _check_private(row, f"{step} object {row.get('id')}")
+                        fh.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
+                        kind, origin = row["kind"], row["origin"]
+                        link_kinds = {}
+                        for lk in row["links"]:
+                            link_kinds[lk["kind"]] = link_kinds.get(lk["kind"], 0) + 1
                     counts["objects"] += 1
-                    for field, val in (("by_kind", row["kind"]), ("by_origin", row["origin"])):
+                    for field, val in (("by_kind", kind), ("by_origin", origin)):
                         counts[field][val] = counts[field].get(val, 0) + 1
-                    for lk in row["links"]:
-                        counts["by_link_kind"][lk["kind"]] = \
-                            counts["by_link_kind"].get(lk["kind"], 0) + 1
+                    for lkind, lcount in link_kinds.items():
+                        by_link = counts["by_link_kind"]
+                        by_link[lkind] = by_link.get(lkind, 0) + lcount
         header = {"schema": SCHEMA, "step": step, "stage": stage, "tool": dict(tool),
                   "objects_file": objects_file, "needs": list(needs),
                   "inputs": [dict(x) for x in inputs], "outputs": [dict(x) for x in outputs],
@@ -210,27 +233,39 @@ def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: 
                               "sha256": map_ref["sha256"]}])
     number_of = {c.number: n for n, c in enumerate(nm.constructs, 1)}
     blif = map_path.with_name(blif_name)
-    lut_rows: list[dict[str, Any]] = []
     by_name: dict[str, str] = {}
-    for o in nm.objects:
-        links: list[dict[str, Any]] = []
-        for c in nm.chain(o):
-            links.append(link(f"hdl:c{number_of[c.number]}", "fine"))
-        chain_src = []
-        for r in nm.provenance(o):
-            loc = nm.location(r)
-            if loc is not None:
-                chain_src.append({"file": _rel_file(loc.file, root),
-                                  "span": f"{loc.line}.{loc.col}-{loc.end_line}.{loc.end_col}"})
-        kind = {"net": "net", "node": "cell", "wire": "net"}.get(o.kind, "net")
-        if o.level == "lut":
-            kind = "lut"
-        row = obj("luts", f"{o.module}/{o.name}", kind, o.name,
-                  "hdl" if links or chain_src else "unknown", links, src=chain_src[:8],
-                  recs=[f"r{n}" for n in o.records], attrs={"module": o.module, "level": o.level})
-        lut_rows.append(row)
-        by_name.setdefault(o.name, row["id"])
-    writer.add_step("map", "luts", tool, lut_rows, needs=["read"], map_=map_ref,
+    # a chain holds up to every construct of the design: the link text is made once per construct
+    # and joined per object, and the rows are streamed to the file (never all held at once)
+    fine_text = {n: json.dumps(link(f"hdl:c{n}", "fine"), sort_keys=True, separators=(",", ":"))
+                 for n in number_of.values()}
+    sentinel = json.dumps(["links\0"], separators=(",", ":"))
+
+    def lut_rows() -> Iterable[PreRow]:
+        for o in nm.objects:
+            prov = nm.provenance(o)
+            numbers = [number_of[c.number] for c in nm.chain_of(prov)]
+            chain_src = []
+            for r in prov:
+                loc = nm.location(r)
+                if loc is not None:
+                    chain_src.append({"file": _rel_file(loc.file, root),
+                                      "span": f"{loc.line}.{loc.col}-{loc.end_line}.{loc.end_col}"})
+            kind = {"net": "net", "node": "cell", "wire": "net"}.get(o.kind, "net")
+            if o.level == "lut":
+                kind = "lut"
+            row = obj("luts", f"{o.module}/{o.name}", kind, o.name,
+                      "hdl" if numbers or chain_src else "unknown",
+                      src=chain_src[:8], recs=[f"r{n}" for n in o.records],
+                      attrs={"module": o.module, "level": o.level})
+            row["links"] = ["links\0"]
+            _check_private(row, f"map object {row['id']}")
+            text = json.dumps(row, sort_keys=True, separators=(",", ":"))
+            text = text.replace(sentinel, "[" + ",".join(map(fine_text.__getitem__, numbers))
+                                + "]", 1)
+            by_name.setdefault(o.name, row["id"])
+            yield PreRow(text, kind, row["origin"], {"fine": len(numbers)} if numbers else {})
+
+    writer.add_step("map", "luts", tool, lut_rows(), needs=["read"], map_=map_ref,
                     links=[{"from_step": "read", "kind": "fine", "key": "recs",
                             "confidence": "exact", "scope": None}],
                     outputs=[{"role": "blif", "path": blif_name, "sha256":
