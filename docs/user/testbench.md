@@ -85,6 +85,14 @@ passed through a port reaches the helper's `@(posedge clk)` in the same delta as
 (expressions, selects, constants, other widths) become continuous assignments. A name inside a module is its own: the
 helper's `clk` is not the bench's `clk`.
 
+Hierarchical names reach into instances: `u0.adr`, `u0.mem[i]` (read or write, any index expression), `u0.ia.v` (nested),
+`u0.task(args)` as a statement, and the absolute form `tb.u0.x` from the testbench module; a name inside a helper
+reaches its own scope and its own sub-instances only (no upward references). `$display("%m")` inside a helper prints
+the scope path (`tb.u0`, with the task name inside a task). With `--vcd` each instance is a nested `$scope module`.
+A DUT instance and a helper must not share a name. In the first parse pass a dotted name that starts with an instance
+item written later in the file is taken for a helper instance (a DUT array read `uut.mem[i][3:0]` needs the instance
+item before it).
+
 Refused with `unsupported: <construct>` at the helper's own file and line: recursive module instance, `inout` port,
 instance array, connection to a port the module does not have, more ordered connections than ports, an override of a
 parameter the module does not have, a non-constant override, a name longer than 63 characters (instance path included),

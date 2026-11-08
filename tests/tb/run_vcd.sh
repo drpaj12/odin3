@@ -54,6 +54,27 @@ for tb in *_tb.v; do
     fi
 done
 
+# Testbench-side modules (sub_*_tb.v with sub_*_lib.v): the helper scopes nest as in iverilog.
+for tb in sub_*_tb.v; do
+    [ -f "$tb" ] || continue
+    n=${tb%_tb.v}
+    { echo '`timescale 1ns/1ps'; cat "$tb"; } >"$work/$n.tb.v"
+    printf 'module dumper;\n  initial begin $dumpfile("%s/%s.ref.vcd"); $dumpvars(0, %s_tb); end\nendmodule\n' \
+        "$work" "$n" "$n" >"$work/dumper.v"
+    if ! iverilog -g2005 -s "${n}_tb" -s dumper -o "$work/$n.vvp" "$work/$n.tb.v" "${n}_lib.v" "$work/dumper.v" 2>/dev/null \
+        || ! vvp "$work/$n.vvp" >/dev/null 2>&1; then
+        echo "SKIP $n (iverilog rejects)"; skip=$((skip + 1)); continue
+    fi
+    if ! "$odin3" -p "sim_tb --out $work/$n.out --vcd $work/$n.vcd $work/$n.tb.v ${n}_lib.v" >"$work/$n.log" 2>&1; then
+        echo "FAIL $n (odin3 error)"; tail -3 "$work/$n.log"; fail=1; continue
+    fi
+    if "$py" "$tool" "$work/$n.vcd" "$work/$n.ref.vcd" >"$work/$n.cmp" 2>&1; then
+        echo "PASS $n ($(cat "$work/$n.cmp"))"; pass=$((pass + 1)); mpass=$((mpass + 1))
+    else
+        echo "FAIL $n"; head -12 "$work/$n.cmp"; fail=1
+    fi
+done
+
 # A `$random` in a port connection is not evaluated by the sampler: output equal with and without.
 cat >"$work/rnd.v" <<'V'
 module rnd(input [31:0] a, output y);
