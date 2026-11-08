@@ -232,6 +232,8 @@ typedef struct lw_gate_spec {
     const odin3_net_id *in;
     uint32_t n_in;
     const odin3_value *params;
+    const char *type_name; /* the cell type by name (a gate-level flip-flop with a reset pin); NULL:
+                              the one of `kind` */
 } lw_gate_spec;
 
 /* The gate of `spec` driving the existing net out_net (a storage cell's Q is read before it is
