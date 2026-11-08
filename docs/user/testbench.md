@@ -67,6 +67,14 @@ A memory the DUT no longer has by that name (no `--keep-mem`, or `opt` removed i
 (`a word of a DUT array has no name`), never a silent x. Not supported: assigning a DUT register or memory word from
 the testbench (`uut.x = v`), `force` on a DUT signal.
 
+## force and release
+
+`force v = expr;` and `release v;` on a whole reg, integer or wire (also `u0.x`, a variable of a testbench-side
+instance). A forced variable ignores procedural and continuous writes; `release` gives a wire the value of its drivers
+back and leaves a reg at the forced value until it is assigned. As in iverilog, a force whose expression is a plain
+variable follows it; any other expression is evaluated once, when the statement runs. No `force` of a select, a
+concatenation or a DUT signal, and no `assign`/`deassign` statements.
+
 ## Testbench-side modules
 
 A real testbench instantiates behavioural helpers next to the DUT (a bus master model, a SPI slave model). A module
