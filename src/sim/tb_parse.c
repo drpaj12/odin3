@@ -46,7 +46,62 @@ typedef struct parser {
     uint32_t next_inst;  /* the instance slot the next instance item fills (second pass) */
     char scope[TB_NAME]; /* the task being parsed: its names are stored as "task.name" */
     odin3_vec calls;     /* tb_stmt *: task calls, linked to their task at the end of the module */
+    odin3_vec mods;      /* mod_def: every module of the testbench files (module index) */
+    odin3_vec subs;      /* sub_frame: open testbench-side module instances */
+    odin3_vec aliases;   /* alias_ent: port names that stand for a variable of the parent scope */
+    char prefix[TB_NAME]; /* the instance path of the module being parsed ("u0.u1."), or "" */
 } parser;
+
+/* Where a module of the testbench files starts: the index of its `module` token. */
+typedef struct mod_def {
+    char name[TB_NAME];
+    uint32_t pos;
+    bool informed; /* the INFO line "the design wins" was printed */
+} mod_def;
+
+/* A name of the current instance that is another name for a variable of the parent scope (a port
+ * connected to a whole variable of equal width). */
+typedef struct alias_ent {
+    char name[TB_NAME];
+    int var;
+    bool refinable; /* declared by direction only: a later reg declaration is absorbed */
+    bool is_out;
+} alias_ent;
+
+enum {
+    SUB_DEPTH = 16,    /* nested testbench-side module instances */
+    SUB_PORTS = 128,   /* ports of one module */
+    SUB_OVERRIDES = 32 /* parameter overrides of one instance */
+};
+
+typedef struct sub_ov {
+    char name[TB_NAME]; /* "" for a positional override */
+    tb_expr *expr;      /* parsed in the parent scope */
+    bool used;
+} sub_ov;
+
+typedef struct sub_port {
+    char name[TB_NAME];
+    int var; /* the port's variable, -1 until declared */
+    uint8_t dir;
+    bool aliased; /* the name stands for the connected variable of the parent scope */
+} sub_port;
+
+/* One open testbench-side module instance: its body is being parsed. */
+typedef struct sub_frame {
+    uint32_t ret_pos; /* token after the instance statement */
+    uint32_t line;    /* the instance statement */
+    char module[TB_NAME];
+    char prefix[TB_NAME]; /* instance path, "u0.u1." */
+    sub_ov *ovs;
+    uint32_t nov;
+    tb_conn *conns;
+    uint32_t nconns;
+    sub_port *ports;
+    uint32_t nports;
+    uint32_t nparam; /* `parameter` declarations met (positional overrides count these) */
+    bool ansi;
+} sub_frame;
 
 static const tb_tok *cur(const parser *pr) {
     return &pr->toks[pr->pos];
@@ -125,26 +180,42 @@ static tb_expr *new_expr(parser *pr, tb_ekind kind) {
 }
 
 /* --- variables --- */
+static alias_ent *find_alias(const parser *pr, const char *name) {
+    for (size_t i = 0; i < pr->aliases.len; i++) {
+        alias_ent *ent = odin3_vec_at((odin3_vec *)&pr->aliases, i);
+        if (strcmp(ent->name, name) == 0) {
+            return ent;
+        }
+    }
+    return NULL;
+}
+
+/* The variable called name in full (instance path included), through a port alias. */
 static int find_exact(const parser *pr, const char *name) {
     for (uint32_t i = 0; i < pr->tb->nvars; i++) {
         if (strcmp(pr->tb->vars[i].name, name) == 0) {
             return (int)i;
         }
     }
-    return -1;
+    const alias_ent *ent = find_alias(pr, name);
+    return ent != NULL ? ent->var : -1;
 }
 
-/* A name inside a task is that task's own first, then the module's. */
+enum { QNAME = (3 * TB_NAME) + 4 }; /* instance path + task + name */
+
+/* A name inside a task is that task's own first, then the module's; both under the instance
+ * path of the module being parsed (empty in the testbench itself). */
 static int find_var(const parser *pr, const char *name) {
+    char full[QNAME];
     if (pr->scope[0] != '\0') {
-        char scoped[(2 * TB_NAME) + 2];
-        (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
-        int found = find_exact(pr, scoped);
+        (void)snprintf(full, sizeof full, "%s%s.%s", pr->prefix, pr->scope, name);
+        int found = find_exact(pr, full);
         if (found >= 0) {
             return found;
         }
     }
-    return find_exact(pr, name);
+    (void)snprintf(full, sizeof full, "%s%s", pr->prefix, name);
+    return find_exact(pr, full);
 }
 
 /* (Re)allocates the planes of variable index for its width and depth and gives them their power-on
@@ -169,18 +240,20 @@ typedef struct var_shape {
     uint32_t width;
     bool sgn;
     bool is_wire;
+    bool ranged;    /* a [h:l] range was given */
+    bool refinable; /* see tb_var.refinable */
+    uint32_t lo;    /* the l of the range */
 } var_shape;
 
 static int add_var(parser *pr, const char *name, var_shape shape) {
     tb_module *tb = pr->tb;
-    char scoped[(2 * TB_NAME) + 2];
-    if (pr->scope[0] != '\0') {
-        (void)snprintf(scoped, sizeof scoped, "%s.%s", pr->scope, name);
-        name = scoped;
-    }
+    char scoped[QNAME];
+    (void)snprintf(scoped, sizeof scoped, "%s%s%s%s", pr->prefix, pr->scope,
+                   pr->scope[0] != '\0' ? "." : "", name);
+    name = scoped;
     size_t name_len = strlen(name);
     if (name_len >= TB_NAME) {
-        fail(pr, "task variable name too long");
+        fail(pr, "name longer than 63 characters (instance path included)");
         return -1;
     }
     if (find_exact(pr, name) >= 0) {
@@ -205,6 +278,8 @@ static int add_var(parser *pr, const char *name, var_shape shape) {
     var->width = shape.width;
     var->sgn = shape.sgn;
     var->is_wire = shape.is_wire;
+    var->lo = shape.lo;
+    var->refinable = shape.refinable;
     int index = (int)tb->nvars++;
     return var_storage(pr, index) ? index : -1;
 }
@@ -223,21 +298,23 @@ static bool const_int(parser *pr, int64_t *out) {
     return true;
 }
 
-/* `[h:0]` after the cursor is on `[`; width of the range. */
-static bool parse_range(parser *pr, uint32_t *width) {
+/* `[h:l]` (the cursor is on `[`, h >= l >= 0): sets the width and the low bound of shape. */
+static bool parse_range(parser *pr, var_shape *shape) {
     int64_t high = 0;
     int64_t low = 0;
     if (!expect_op(pr, "[") || !const_int(pr, &high) || !expect_op(pr, ":") ||
         !const_int(pr, &low) || !expect_op(pr, "]")) {
         return false;
     }
-    if (low != 0 || high < 0) {
-        return fail(pr, "range other than [h:0]");
+    if (low < 0 || high < low) {
+        return fail(pr, "range other than [h:l] with h >= l >= 0");
     }
-    if (high >= TB_MAX_WIDTH) {
+    if (high - low >= TB_MAX_WIDTH) {
         return fail(pr, "signal wider than 1024 bits");
     }
-    *width = (uint32_t)high + 1U;
+    shape->width = (uint32_t)(high - low) + 1U;
+    shape->lo = (uint32_t)low;
+    shape->ranged = true;
     return true;
 }
 
@@ -890,6 +967,10 @@ static tb_expr *make_select(parser *pr, tb_expr *base, tb_expr *index) {
 static xres step_index(parser *pr, xent *top, bool *want) {
     tb_expr *base = top->node;
     const tb_var *var = &pr->tb->vars[base->var];
+    if (var->depth == 0 && var->lo != 0) {
+        fail(pr, "bit or part select of a vector whose range does not end at 0 ([h:l], l > 0)");
+        return XR_FAIL;
+    }
     tb_expr *index = pop_val(pr);
     tb_expr *sel = make_select(pr, base, index);
     if (sel == NULL) {
@@ -1572,7 +1653,13 @@ static tb_stmt *parse_call(parser *pr) {
     if (stmt->callee == NULL || stmt->args == NULL) {
         return NULL;
     }
-    (void)snprintf(stmt->callee, TB_NAME, "%s", cur(pr)->text);
+    char full[QNAME];
+    (void)snprintf(full, sizeof full, "%s%s", pr->prefix, cur(pr)->text);
+    if (strlen(full) >= TB_NAME) {
+        fail(pr, "name longer than 63 characters (instance path included)");
+        return NULL;
+    }
+    memcpy(stmt->callee, full, strlen(full) + 1U);
     pr->pos++;
     tb_stmt **slot = call_args(pr, stmt) ? (tb_stmt **)odin3_vec_push(&pr->calls) : NULL;
     if (slot == NULL || !expect_op(pr, ";")) {
@@ -1717,12 +1804,17 @@ static tb_stmt *parse_stmt(parser *pr) {
 
 /* --- module items --- */
 static bool parse_array_range(parser *pr, int var_index) {
-    int64_t high = 0;
-    int64_t low = 0;
+    int64_t first = 0;
+    int64_t second = 0;
     pr->pos++;
-    if (!const_int(pr, &low) || !expect_op(pr, ":") || !const_int(pr, &high) ||
-        !expect_op(pr, "]") || low != 0 || high < 0 || high > (1 << ARRAY_MAX_LOG2)) {
-        return fail(pr, "array range (use [0:N])");
+    if (!const_int(pr, &first) || !expect_op(pr, ":") || !const_int(pr, &second) ||
+        !expect_op(pr, "]")) {
+        return fail(pr, "array range (use [0:N] or [N:0])");
+    }
+    int64_t high = first > second ? first : second;
+    int64_t low = first > second ? second : first;
+    if (low != 0 || high < 0 || high > (1 << ARRAY_MAX_LOG2)) {
+        return fail(pr, "array range (use [0:N] or [N:0])");
     }
     pr->tb->vars[var_index].depth = (uint32_t)high + 1U;
     return var_storage(pr, var_index);
@@ -1788,6 +1880,57 @@ static bool var_init(parser *pr, int var, const tb_expr *init, const var_shape *
     return true;
 }
 
+/* The expression a parameter of this instance is overridden with, or NULL (the default stays).
+ * Only `parameter` is overridable, positionally in declaration order or by name. */
+static tb_expr *param_override(parser *pr, const char *kw, const char *name) {
+    if (pr->subs.len == 0 || strcmp(kw, "parameter") != 0) {
+        return NULL;
+    }
+    sub_frame *frm = odin3_vec_at(&pr->subs, pr->subs.len - 1U);
+    uint32_t index = frm->nparam++;
+    for (uint32_t i = 0; i < frm->nov; i++) {
+        bool named = frm->ovs[i].name[0] != '\0';
+        if ((named && strcmp(frm->ovs[i].name, name) == 0) || (!named && i == index)) {
+            frm->ovs[i].used = true;
+            return frm->ovs[i].expr;
+        }
+    }
+    return NULL;
+}
+
+/* A reg, wire or integer declaration of a name already declared by direction only (a port, a task
+ * argument): it sets the type of that variable. *handled says so. */
+static bool refine_var(parser *pr, const char *kw, const char *name, var_shape shape,
+                       bool *handled) {
+    char full[QNAME];
+    (void)snprintf(full, sizeof full, "%s%s%s%s", pr->prefix, pr->scope,
+                   pr->scope[0] != '\0' ? "." : "", name);
+    *handled = false;
+    alias_ent *ali = find_alias(pr, full);
+    if (ali != NULL && ali->refinable) {
+        ali->refinable = false;
+        *handled = true;
+        if (ali->is_out && strcmp(kw, "reg") == 0 && pr->tb->four_state) {
+            tb_var_fill(&pr->tb->vars[ali->var], (uint32_t)ODIN3_W4_X);
+        }
+        return true;
+    }
+    int idx = find_exact(pr, full);
+    if (idx < 0 || ali != NULL || !pr->tb->vars[idx].refinable) {
+        return true;
+    }
+    tb_var *var = &pr->tb->vars[idx];
+    *handled = true;
+    var->refinable = false;
+    var->is_wire = shape.is_wire;
+    var->sgn = var->sgn || shape.sgn;
+    if (strcmp(kw, "integer") == 0 || shape.ranged) {
+        var->width = shape.width;
+        var->lo = shape.lo;
+    }
+    return var_storage(pr, idx);
+}
+
 static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     bool is_param = strcmp(kw, "parameter") == 0 || strcmp(kw, "localparam") == 0;
     if (cur(pr)->kind != TK_ID) {
@@ -1797,20 +1940,28 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     (void)snprintf(name, sizeof name, "%s", cur(pr)->text);
     pr->pos++;
     shape.is_wire = strcmp(kw, "wire") == 0;
-    int var = add_var(pr, name, shape);
+    bool refined = false;
+    if (!is_param && !refine_var(pr, kw, name, shape, &refined)) {
+        return false;
+    }
+    int var = refined ? find_var(pr, name) : add_var(pr, name, shape);
     if (var < 0) {
         return false;
     }
     pr->tb->vars[var].is_param = is_param;
-    if (is_op(pr, "[")) {
+    if (is_op(pr, "[") && !refined) {
         return parse_array_range(pr, var);
     }
     if (!accept_op(pr, "=")) {
         return !is_param || fail(pr, "parameter without a value");
     }
+    tb_expr *over = param_override(pr, kw, name);
     tb_expr *init = parse_expr(pr);
     if (init == NULL) {
         return false;
+    }
+    if (over != NULL) {
+        init = over;
     }
     if (shape.is_wire) {
         return add_assign(pr, var, init);
@@ -1818,10 +1969,8 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     return var_init(pr, var, init, is_param && shape.width == 0U ? &shape : NULL);
 }
 
-static bool parse_decl(parser *pr) {
-    char kw[TB_NAME];
-    (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
-    pr->pos++;
+/* After the declaration keyword kw: [signed] [range] into shape. */
+static bool decl_shape(parser *pr, const char *kw, var_shape *shape) {
     bool is_int = strcmp(kw, "integer") == 0;
     /* A parameter without a range has the type of its value (width 0 here, set from the
      * initialiser). */
@@ -1833,8 +1982,16 @@ static bool parse_decl(parser *pr) {
     if (is_param && !is_ranged) {
         base = 0U;
     }
-    var_shape shape = {base, (wide && !is_param) || is_signed, false};
-    if (is_ranged && !parse_range(pr, &shape.width)) {
+    *shape = (var_shape){.width = base, .sgn = (wide && !is_param) || is_signed};
+    return !is_ranged || parse_range(pr, shape);
+}
+
+static bool parse_decl(parser *pr) {
+    char kw[TB_NAME];
+    (void)snprintf(kw, sizeof kw, "%s", cur(pr)->text);
+    pr->pos++;
+    var_shape shape;
+    if (!decl_shape(pr, kw, &shape)) {
         return false;
     }
     do {
@@ -1899,10 +2056,12 @@ static uint8_t dir_of(const parser *pr) {
  * (ansi) the list ends before a direction keyword or `)`, in the old form at `;`. */
 static bool task_port_decl(parser *pr, tb_task *task, uint8_t dir, bool ansi) {
     bool is_int = accept_kw(pr, "integer");
-    (void)accept_kw(pr, "reg");
+    bool is_reg = accept_kw(pr, "reg");
     bool is_signed = accept_kw(pr, "signed");
-    var_shape shape = {is_int ? (uint32_t)TB_INT_BITS : 1U, is_int || is_signed, false};
-    if (is_op(pr, "[") && !parse_range(pr, &shape.width)) {
+    var_shape shape = {.width = is_int ? (uint32_t)TB_INT_BITS : 1U,
+                       .sgn = is_int || is_signed,
+                       .refinable = !is_int && !is_reg};
+    if (is_op(pr, "[") && !parse_range(pr, &shape)) {
         return false;
     }
     do {
@@ -1984,12 +2143,19 @@ static bool parse_task(parser *pr) {
     if (cur(pr)->kind != TK_ID) {
         return fail(pr, "task name");
     }
-    tb_task *task = add_task(pr, cur(pr)->text);
+    char local[TB_NAME];
+    char full[QNAME];
+    (void)snprintf(local, sizeof local, "%s", cur(pr)->text);
+    (void)snprintf(full, sizeof full, "%s%s", pr->prefix, local);
+    if (strlen(full) >= TB_NAME) {
+        return fail(pr, "name longer than 63 characters (instance path included)");
+    }
+    tb_task *task = add_task(pr, full);
     if (task == NULL) {
         return false;
     }
     pr->pos++;
-    (void)snprintf(pr->scope, sizeof pr->scope, "%s", task->name);
+    (void)snprintf(pr->scope, sizeof pr->scope, "%s", local);
     task->body = task_header(pr, task) ? task_body(pr) : NULL;
     pr->scope[0] = '\0';
     return task->body != NULL && !pr->failed;
@@ -2148,7 +2314,435 @@ static tb_inst *next_inst_slot(parser *pr) {
     return &grown[tb->ninsts++];
 }
 
+/* --- testbench-side module instances (design note docs/specs/2026-11-07-sim-tb-submodules.md) --- */
+
+enum { PORT_IN = 1, PORT_OUT = 2 };
+
+static mod_def *find_mod(const parser *pr, const char *name) {
+    for (size_t i = 0; i < pr->mods.len; i++) {
+        mod_def *def = odin3_vec_at((odin3_vec *)&pr->mods, i);
+        if (strcmp(def->name, name) == 0) {
+            return def;
+        }
+    }
+    return NULL;
+}
+
+/* The module at the cursor is testbench-side: its header is in the testbench files and the design
+ * has no module of that name (the design wins on a clash, with an INFO line). */
+static mod_def *tb_side_module(parser *pr) {
+    mod_def *def = find_mod(pr, cur(pr)->text);
+    if (def == NULL) {
+        return NULL;
+    }
+    if (tb_design_has_module(pr->tb->design, def->name)) {
+        if (!def->informed && pr->lenient) { /* the first pass always runs */
+            odin3_log(ODIN3_LOG_INFO,
+                      "sim_tb: module %s is in the design and in the testbench files: the design "
+                      "is used",
+                      def->name);
+            def->informed = true;
+        }
+        return NULL;
+    }
+    return def;
+}
+
+static sub_frame *top_sub(parser *pr) {
+    return pr->subs.len > 0 ? odin3_vec_at(&pr->subs, pr->subs.len - 1U) : NULL;
+}
+
+static void set_prefix(parser *pr) {
+    const sub_frame *frm = top_sub(pr);
+    (void)snprintf(pr->prefix, sizeof pr->prefix, "%s", frm != NULL ? frm->prefix : "");
+}
+
+/* `#( expr, .name(expr) )` of an instance: the overrides, parsed in the parent scope. */
+static bool parse_overrides(parser *pr, sub_frame *frm) {
+    sub_ov list[SUB_OVERRIDES];
+    uint32_t count = 0;
+    pr->pos++;
+    if (!expect_op(pr, "(")) {
+        return false;
+    }
+    do {
+        if (count == SUB_OVERRIDES) {
+            return fail(pr, "more than 32 parameter overrides");
+        }
+        list[count] = (sub_ov){0};
+        if (accept_op(pr, ".")) {
+            if (cur(pr)->kind != TK_ID) {
+                return fail(pr, "parameter override syntax");
+            }
+            (void)snprintf(list[count].name, sizeof list[count].name, "%s", cur(pr)->text);
+            pr->pos++;
+            if (!expect_op(pr, "(")) {
+                return false;
+            }
+        }
+        list[count].expr = parse_expr(pr);
+        if (list[count++].expr == NULL || (list[count - 1U].name[0] != '\0' && !expect_op(pr, ")"))) {
+            return false;
+        }
+    } while (accept_op(pr, ","));
+    frm->ovs = pnew(pr, count * sizeof *frm->ovs);
+    if (frm->ovs == NULL || !expect_op(pr, ")")) {
+        return false;
+    }
+    memcpy(frm->ovs, list, count * sizeof *frm->ovs);
+    frm->nov = count;
+    return true;
+}
+
+/* The connection of port number index called name, or NULL (not connected). Connections are all
+ * named or all ordered. */
+static tb_conn *conn_of(sub_frame *frm, uint32_t index, const char *name) {
+    if (frm->nconns > 0 && frm->conns[0].port[0] == '\0') {
+        return index < frm->nconns ? &frm->conns[index] : NULL;
+    }
+    for (uint32_t i = 0; i < frm->nconns; i++) {
+        if (strcmp(frm->conns[i].port, name) == 0) {
+            return &frm->conns[i];
+        }
+    }
+    return NULL;
+}
+
+static int port_index(const sub_frame *frm, const char *name) {
+    for (uint32_t i = 0; i < frm->nports; i++) {
+        if (strcmp(frm->ports[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* The port is connected to a whole variable of the parent scope with the same width: the port name
+ * becomes another name of that variable (the port and the connection are one net, as in iverilog:
+ * a clock passed through a port reaches the module's `@(posedge clk)` in the same delta). */
+static bool alias_port(parser *pr, const sub_port *port, const tb_conn *conn, var_shape shape) {
+    const tb_expr *expr = conn != NULL ? conn->expr : NULL;
+    if (expr == NULL || expr->kind != E_VAR) {
+        return false;
+    }
+    const tb_var *target = &pr->tb->vars[expr->var];
+    if (target->is_param || target->depth != 0 || target->width != shape.width) {
+        return false;
+    }
+    char full[QNAME];
+    (void)snprintf(full, sizeof full, "%s%s", pr->prefix, port->name);
+    alias_ent *ent = odin3_vec_push(&pr->aliases);
+    if (ent == NULL || strlen(full) >= TB_NAME) {
+        fail(pr, ent == NULL ? "out of memory" : "name longer than 63 characters");
+        return false;
+    }
+    *ent = (alias_ent){.var = expr->var, .refinable = shape.refinable, .is_out = port->dir == PORT_OUT};
+    memcpy(ent->name, full, strlen(full) + 1U);
+    if (port->dir == PORT_OUT && !shape.is_wire && pr->tb->four_state) {
+        tb_var_fill(&pr->tb->vars[expr->var], (uint32_t)ODIN3_W4_X); /* an output reg starts x */
+    }
+    return true;
+}
+
+/* Declares port `name` of the open instance with direction dir and shape. */
+static bool declare_port(parser *pr, const char *name, uint8_t dir, var_shape shape) {
+    sub_frame *frm = top_sub(pr);
+    int idx = port_index(frm, name);
+    if (idx < 0 && !frm->ansi) {
+        return fail(pr, "port declaration of a name that is not in the module's port list");
+    }
+    if (idx < 0) {
+        if (frm->nports == SUB_PORTS) {
+            return fail(pr, "module with more than 128 ports");
+        }
+        idx = (int)frm->nports++;
+        (void)snprintf(frm->ports[idx].name, sizeof frm->ports[idx].name, "%s", name);
+    }
+    sub_port *port = &frm->ports[idx];
+    port->dir = dir;
+    port->var = -1;
+    shape.is_wire = dir == PORT_IN || shape.is_wire;
+    tb_conn *conn = conn_of(frm, (uint32_t)idx, name);
+    if (alias_port(pr, port, conn, shape)) {
+        port->aliased = true;
+        return true;
+    }
+    if (pr->failed) {
+        return false;
+    }
+    port->var = add_var(pr, name, shape);
+    return port->var >= 0;
+}
+
+static uint8_t port_dir(const parser *pr) {
+    return is_kw(pr, "input") ? (uint8_t)PORT_IN : (uint8_t)PORT_OUT;
+}
+
+static bool is_dir_kw(const parser *pr) {
+    return is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout");
+}
+
+/* After the direction: [wire|reg|integer] [signed] [range] into shape. */
+static bool port_shape(parser *pr, uint8_t dir, var_shape *shape) {
+    bool is_int = accept_kw(pr, "integer");
+    bool is_reg = accept_kw(pr, "reg");
+    bool is_wire = accept_kw(pr, "wire");
+    bool is_signed = accept_kw(pr, "signed");
+    *shape = (var_shape){.width = is_int ? (uint32_t)TB_INT_BITS : 1U,
+                         .sgn = is_int || is_signed,
+                         .is_wire = dir == PORT_IN || !(is_reg || is_int),
+                         .refinable = !(is_int || is_reg || is_wire)};
+    return !is_op(pr, "[") || parse_range(pr, shape);
+}
+
+/* A direction keyword of a port: inout is refused. */
+static bool port_dir_ok(parser *pr) {
+    return !is_kw(pr, "inout") || fail(pr, "inout port of a testbench module");
+}
+
+/* `input|output [kind] [range] a, b;` in the body (old-style port declaration). */
+static bool parse_port_decl(parser *pr) {
+    if (!port_dir_ok(pr)) {
+        return false;
+    }
+    uint8_t dir = port_dir(pr);
+    var_shape shape;
+    pr->pos++;
+    if (!port_shape(pr, dir, &shape)) {
+        return false;
+    }
+    do {
+        if (cur(pr)->kind != TK_ID) {
+            return fail(pr, "port declaration syntax");
+        }
+        char name[TB_NAME];
+        (void)snprintf(name, sizeof name, "%s", cur(pr)->text);
+        pr->pos++;
+        if (!declare_port(pr, name, dir, shape)) {
+            return false;
+        }
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ";");
+}
+
+/* ANSI port list after `(`: `input wire [7:0] a, b, output reg c`. */
+static bool header_ansi_ports(parser *pr) {
+    uint8_t dir = 0;
+    var_shape shape = {0};
+    do {
+        if (is_dir_kw(pr)) {
+            if (!port_dir_ok(pr)) {
+                return false;
+            }
+            dir = port_dir(pr);
+            pr->pos++;
+            if (!port_shape(pr, dir, &shape)) {
+                return false;
+            }
+        }
+        if (dir == 0 || cur(pr)->kind != TK_ID) {
+            return fail(pr, "port list syntax");
+        }
+        char name[TB_NAME];
+        (void)snprintf(name, sizeof name, "%s", cur(pr)->text);
+        pr->pos++;
+        if (!declare_port(pr, name, dir, shape)) {
+            return false;
+        }
+    } while (accept_op(pr, ","));
+    return true;
+}
+
+/* Port list after `(`: names only (old style, the directions come in the body) or ANSI. */
+static bool header_ports(parser *pr) {
+    sub_frame *frm = top_sub(pr);
+    if (accept_op(pr, ")")) {
+        return true;
+    }
+    frm->ansi = is_dir_kw(pr);
+    if (frm->ansi) {
+        return header_ansi_ports(pr) && expect_op(pr, ")");
+    }
+    do {
+        if (cur(pr)->kind != TK_ID || frm->nports == SUB_PORTS) {
+            return fail(pr, "port list syntax");
+        }
+        sub_port *port = &frm->ports[frm->nports++];
+        port->var = -1;
+        (void)snprintf(port->name, sizeof port->name, "%s", cur(pr)->text);
+        pr->pos++;
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ")");
+}
+
+/* `#( parameter a = 1, b = 2 )` of the header. */
+static bool header_params(parser *pr) {
+    var_shape shape = {0};
+    pr->pos++;
+    if (!expect_op(pr, "(")) {
+        return false;
+    }
+    do {
+        if (accept_kw(pr, "parameter") && !decl_shape(pr, "parameter", &shape)) {
+            return false;
+        }
+        if (!parse_decl_item(pr, "parameter", shape)) {
+            return false;
+        }
+    } while (accept_op(pr, ","));
+    return expect_op(pr, ")");
+}
+
+/* Every connection names a port of the module, and there are no more ordered ones than ports. */
+static bool check_conns(parser *pr, const sub_frame *frm) {
+    char msg[(2 * TB_NAME) + MSG_EXTRA];
+    for (uint32_t i = 0; i < frm->nconns; i++) {
+        const char *port = frm->conns[i].port;
+        if (port[0] != '\0' && port_index(frm, port) < 0) {
+            (void)snprintf(msg, sizeof msg, "module %s has no port %s", frm->module, port);
+            return fail(pr, msg);
+        }
+    }
+    if (frm->nconns > frm->nports && frm->nconns > 0 && frm->conns[0].port[0] == '\0') {
+        (void)snprintf(msg, sizeof msg, "more connections than ports in module %s", frm->module);
+        return fail(pr, msg);
+    }
+    return true;
+}
+
+/* The header of the module the cursor is on: `module name [#(...)] [(ports)] ;`. */
+static bool parse_sub_header(parser *pr) {
+    pr->pos += 2U; /* module name */
+    if (is_op(pr, "#") && !header_params(pr)) {
+        return false;
+    }
+    sub_frame *frm = top_sub(pr);
+    frm->ports = pnew(pr, SUB_PORTS * sizeof *frm->ports);
+    if (frm->ports == NULL) {
+        return false;
+    }
+    if (accept_op(pr, "(") && !header_ports(pr)) {
+        return false;
+    }
+    return expect_op(pr, ";") && check_conns(pr, top_sub(pr));
+}
+
+/* Pushes the frame and moves the cursor to the module's body. */
+static bool push_sub(parser *pr, const sub_frame *frm, const mod_def *def, const char *inst) {
+    if (pr->subs.len >= SUB_DEPTH) {
+        return fail(pr, "recursive module instance (or nesting deeper than 16)");
+    }
+    if (strcmp(def->name, pr->tb->name) == 0) {
+        return fail(pr, "recursive module instance");
+    }
+    for (size_t i = 0; i < pr->subs.len; i++) {
+        const sub_frame *open = odin3_vec_at(&pr->subs, i);
+        if (strcmp(open->module, def->name) == 0) {
+            return fail(pr, "recursive module instance");
+        }
+    }
+    sub_frame *slot = odin3_vec_push(&pr->subs);
+    if (slot == NULL) {
+        return fail(pr, "out of memory");
+    }
+    *slot = *frm;
+    if (snprintf(slot->prefix, sizeof slot->prefix, "%s%s.", pr->prefix, inst) >=
+        (int)sizeof slot->prefix) {
+        odin3_vec_pop(&pr->subs);
+        return fail(pr, "name longer than 63 characters (instance path)");
+    }
+    set_prefix(pr);
+    pr->pos = def->pos;
+    return parse_sub_header(pr);
+}
+
+/* A testbench-side instance: `mod [#(...)] name (conns);` The parent-scope parts are parsed now,
+ * then the cursor jumps to the module; finish_sub returns to the token after the statement. */
+static bool parse_sub_instance(parser *pr, const mod_def *def) {
+    sub_frame frm = {.line = cur(pr)->line};
+    (void)snprintf(frm.module, sizeof frm.module, "%s", def->name);
+    pr->pos++;
+    if (is_op(pr, "#") && !parse_overrides(pr, &frm)) {
+        return false;
+    }
+    if (cur(pr)->kind != TK_ID) {
+        return fail(pr, "module item");
+    }
+    char inst[TB_NAME];
+    (void)snprintf(inst, sizeof inst, "%s", cur(pr)->text);
+    pr->pos++;
+    if (is_op(pr, "[")) {
+        return fail(pr, "instance array of a testbench module");
+    }
+    tb_inst conns = {.nconns = 0};
+    if (!parse_inst_conns(pr, &conns) || !expect_op(pr, ";")) {
+        return false;
+    }
+    frm.conns = conns.conns;
+    frm.nconns = conns.nconns;
+    frm.ret_pos = pr->pos;
+    return push_sub(pr, &frm, def, inst);
+}
+
+/* The port of the frame becomes a continuous assignment to or from its connection. */
+static bool connect_port(parser *pr, sub_frame *frm, uint32_t index) {
+    sub_port *port = &frm->ports[index];
+    const tb_conn *conn = conn_of(frm, index, port->name);
+    if (port->aliased || conn == NULL || conn->expr == NULL) {
+        return true;
+    }
+    if (port->var < 0) {
+        return fail(pr, "connected port without a direction declaration");
+    }
+    if (port->dir == PORT_IN) {
+        return add_assign(pr, port->var, conn->expr);
+    }
+    const tb_var *target = conn->expr->kind == E_VAR ? &pr->tb->vars[conn->expr->var] : NULL;
+    if (target == NULL || !target->is_wire || target->depth != 0) {
+        return fail(pr, "output port connected to anything but a whole wire");
+    }
+    tb_expr *src = pnew(pr, sizeof *src);
+    if (src == NULL) {
+        return false;
+    }
+    src->kind = E_VAR;
+    src->var = port->var;
+    src->width = pr->tb->vars[port->var].width;
+    src->sgn = pr->tb->vars[port->var].sgn;
+    src->line = conn->expr->line;
+    return add_assign(pr, conn->expr->var, src);
+}
+
+/* `endmodule` of an instance: ports to assignments, then back to the statement after it. */
+static bool finish_sub(parser *pr) {
+    sub_frame *frm = top_sub(pr);
+    char msg[(2 * TB_NAME) + MSG_EXTRA];
+    for (uint32_t i = 0; i < frm->nports; i++) {
+        if (!connect_port(pr, frm, i)) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < frm->nov; i++) {
+        if (frm->ovs[i].name[0] != '\0' ? !frm->ovs[i].used : i >= frm->nparam) {
+            (void)snprintf(msg, sizeof msg, "module %s has no parameter %s", frm->module,
+                           frm->ovs[i].name[0] != '\0' ? frm->ovs[i].name : "for a positional override");
+            return fail(pr, msg);
+        }
+    }
+    pr->pos = frm->ret_pos;
+    odin3_vec_pop(&pr->subs);
+    set_prefix(pr);
+    return true;
+}
+
 static bool parse_instance(parser *pr) {
+    mod_def *def = tb_side_module(pr);
+    if (def != NULL) {
+        return parse_sub_instance(pr, def);
+    }
+    if (pr->subs.len > 0) {
+        return fail(pr, "design module instance inside a testbench module");
+    }
     tb_inst *inst = next_inst_slot(pr);
     if (inst == NULL) {
         return false;
@@ -2190,7 +2784,7 @@ static bool parse_pull(parser *pr, uint8_t pull) {
     }
     int var = find_var(pr, cur(pr)->text);
     if (var < 0) { /* an undeclared name is an implicit one-bit wire (IEEE 1364 4.5) */
-        var = add_var(pr, cur(pr)->text, (var_shape){1, false, true});
+        var = add_var(pr, cur(pr)->text, (var_shape){.width = 1, .is_wire = true});
     }
     if (var < 0 || !pr->tb->vars[var].is_wire) {
         return fail(pr, "pullup/pulldown of anything but a wire");
@@ -2227,6 +2821,9 @@ static bool parse_item(parser *pr) {
     }
     if (is_kw(pr, "pullup") || is_kw(pr, "pulldown")) {
         return parse_pull(pr, is_kw(pr, "pullup") ? TB_PULL_UP : TB_PULL_DOWN);
+    }
+    if (pr->subs.len > 0 && is_dir_kw(pr)) {
+        return parse_port_decl(pr);
     }
     if (is_rejected_item(pr)) {
         return fail(pr, tok->text);
@@ -2267,8 +2864,13 @@ static bool parse_header(parser *pr, const char *top) {
 }
 
 static void parse_items(parser *pr) {
-    while (!pr->failed && !accept_kw(pr, "endmodule")) {
-        if (cur(pr)->kind == TK_EOF) {
+    while (!pr->failed) {
+        if (accept_kw(pr, "endmodule")) {
+            if (pr->subs.len == 0) {
+                return;
+            }
+            (void)finish_sub(pr);
+        } else if (cur(pr)->kind == TK_EOF) {
             fail(pr, "missing endmodule");
         } else if (is_kw(pr, "module")) {
             fail(pr, "module inside a module");
@@ -2276,6 +2878,23 @@ static void parse_items(parser *pr) {
             (void)parse_item(pr);
         }
     }
+}
+
+/* The module index: where every `module name` of the testbench files starts. */
+static bool index_modules(parser *pr, uint32_t ntoks) {
+    for (uint32_t i = 0; i + 1U < ntoks; i++) {
+        const tb_tok *tok = &pr->toks[i];
+        if (tok->kind != TK_ID || strcmp(tok->text, "module") != 0 || pr->toks[i + 1U].kind != TK_ID) {
+            continue;
+        }
+        mod_def *def = odin3_vec_push(&pr->mods);
+        if (def == NULL) {
+            return false;
+        }
+        *def = (mod_def){.pos = i};
+        (void)snprintf(def->name, sizeof def->name, "%s", pr->toks[i + 1U].text);
+    }
+    return true;
 }
 
 /* Parses src once. `pre` (may be NULL) is the module of a first pass: its instances are entered
@@ -2299,6 +2918,10 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_init(&pr.vals, sizeof(tb_expr *));
     odin3_vec_init(&pr.frames, sizeof(sframe));
     odin3_vec_init(&pr.calls, sizeof(tb_stmt *));
+    odin3_vec_init(&pr.mods, sizeof(mod_def));
+    odin3_vec_init(&pr.subs, sizeof(sub_frame));
+    odin3_vec_init(&pr.aliases, sizeof(alias_ent));
+    pr.failed = !index_modules(&pr, lexed.n);
     if (pre != NULL && pre->ninsts > 0) {
         tb->insts = pnew(&pr, (size_t)pre->ninsts * sizeof *tb->insts);
         for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
@@ -2315,6 +2938,9 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_free(&pr.ents);
     odin3_vec_free(&pr.vals);
     odin3_vec_free(&pr.frames);
+    odin3_vec_free(&pr.mods);
+    odin3_vec_free(&pr.subs);
+    odin3_vec_free(&pr.aliases);
     if (!pr.failed && !link_calls(&pr)) {
         pr.failed = true;
     }

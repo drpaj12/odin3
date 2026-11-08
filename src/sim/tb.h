@@ -157,6 +157,8 @@ typedef struct tb_var {
     uint8_t
         pull; /* wire: TB_PULL_UP / TB_PULL_DOWN from pullup(w) / pulldown(w): z bits read 1 / 0 */
     uint32_t depth; /* array length, 0 for a scalar */
+    uint32_t lo;    /* [h:lo] range: bit selects are refused unless lo is 0 (parse only) */
+    bool refinable; /* parse: declared by direction only; a later reg/wire/integer sets its type */
     /* The value planes: max(depth, 1) words of odin3_word_limbs(width) limbs each (word i of an
      * array at limb i * limbs). */
     uint64_t *v;
