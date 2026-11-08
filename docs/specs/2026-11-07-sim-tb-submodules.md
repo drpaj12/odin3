@@ -127,3 +127,17 @@ After simple_spi: `real` with timescale-precision ticks and mixed timescales (vg
    Accept, with the `tb race:` warning as the guard?
 3. The processes of an instance are appended at the instance item (section 4.6). Accept?
 4. Ordered port connections allowed for tb-side modules only. Accept?
+
+## 10. Decisions (controller 2026-11-07)
+
+1. Classification (section 3): approved as written. In the testbench files and not in the design = tb-side; on a
+   clash the design wins, with an INFO line.
+2. Ports (section 4.5): approved with one change. iverilog collapses a port connected to a whole net into one net, so
+   a clock passed through a port reaches the helper's `@(posedge clk)` in the same delta as the bench. Where the
+   connection is a whole identifier (wire or reg of the parent scope, no select, no expression), the port name is
+   ALIASED to the parent variable (an alias entry in the scope's name table) instead of a continuous assign. The
+   continuous assign stays for expressions, selects and constants. Required micro: bench `always #5 clk = ~clk;`,
+   helper `always @(posedge clk)` with `<=`, bench `@(posedge clk)` reading the helper's output; output equals
+   iverilog. If aliasing costs more than about 150 lines, stop and report before falling back to assigns.
+3. Processes appended at the instance item position (section 4.6): approved.
+4. Ordered connections for tb-side modules only (section 4.1): approved.
