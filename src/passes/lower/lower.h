@@ -35,6 +35,7 @@ typedef struct odin3_lower_opts {
     uint64_t max_mem_bits;   /* 0 = ODIN3_LOWER_MAX_MEM_BITS */
     const char *report_path; /* NULL = none */
     bool keep_sel; /* --keep-sel: leave the cells with the attribute rtl_sel as word cells */
+    bool keep_mem; /* --keep-mem: a ROM keeps storage cells, and each memory word gets a wire */
     bool async_enable_first; /* hidden, test-only: the enable over a reset/load (Parmys's shape) */
     char snapshot_dir[ODIN3_LOWER_SNAPSHOT_PATH]; /* --lower-snapshot DIR, "" = none (spec 14.4) */
 } odin3_lower_opts;

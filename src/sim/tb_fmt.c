@@ -437,11 +437,11 @@ static int readmem_word(const tb_readmem_req *req, readmem_state *st, char *tok)
         (void)snprintf(req->err, req->errcap, "$readmem: bad word `%s`", tok);
         return -1;
     }
-    if (st->addr >= 0 && st->addr <= st->last && (uint64_t)st->addr < req->mem->depth) {
-        tb_resize rs = {bits, req->mem->width, false, false};
+    if (st->addr >= 0 && st->addr <= st->last && (uint64_t)st->addr < req->depth) {
+        tb_resize rs = {bits, req->width, false, false};
         tbv_extend(&val, &rs);
-        tb_var_store(req->mem, (uint32_t)st->addr++, &val);
-        return 1;
+        tb_poke_err err = {req->err, req->errcap};
+        return req->put(req->ctx, (uint32_t)st->addr++, &val, err) ? 1 : -1;
     }
     return 0;
 }
@@ -453,7 +453,7 @@ bool tb_readmem(const tb_readmem_req *req) {
         return false;
     }
     strip_comments(text);
-    readmem_state st = {req->from, req->to >= 0 ? req->to : (int64_t)req->mem->depth - 1};
+    readmem_state st = {req->from, req->to >= 0 ? req->to : (int64_t)req->depth - 1};
     int status = 1;
     char *save = NULL;
     for (char *tok = strtok_r(text, " \t\r\n", &save); tok != NULL && status > 0;

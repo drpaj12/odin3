@@ -100,6 +100,7 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
 
 static const char k_enable_first[] = "--async-enable-first";
 static const char k_keep_sel[] = "--keep-sel";
+static const char k_keep_mem[] = "--keep-mem";
 
 static bool is_option(const char *word) {
     static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits",
@@ -130,11 +131,15 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
             opts->keep_sel = true;
             continue;
         }
+        if (strcmp(word, k_keep_mem) == 0) { /* a flag without a value */
+            opts->keep_mem = true;
+            continue;
+        }
         if (!is_option(word)) {
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "
                       "sync|error, --report <file>, --max-mem-bits N, --lower-snapshot <dir>, "
-                      "--keep-sel)",
+                      "--keep-sel, --keep-mem)",
                       word);
             st = ODIN3_ERR_INVALID_ARG;
             break;

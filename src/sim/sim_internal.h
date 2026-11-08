@@ -119,6 +119,7 @@ struct odin3_sim {
     uint32_t n_frames;
     uint32_t *netmap;
     size_t n_netmap;
+    uint32_t *poke_map; /* per value slot: 1 + the state index of the flop it is the output of */
 };
 
 /* True when the cell type is edge-triggered storage (cuts the combinational graph). */

@@ -4,6 +4,7 @@
 #include "sim/prng.h"
 #include "sim/sim.h"
 #include "sim/sim_internal.h"
+#include "util/alloc.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -386,4 +387,49 @@ void odin3_sim_drive_random(odin3_sim *sim, odin3_prng *prng) {
             sim->values[sim->in_bits[k]] = odin3_prng_bit(prng) ? 1 : 0;
         }
     }
+}
+
+/* --- poke (odin3_sim_poke_state) ----------------------------------------------------------------
+ */
+
+/* Maps the output slots of the edge-triggered cells to their state bytes (+ 1). */
+static odin3_status build_poke_map(odin3_sim *sim) {
+    sim->poke_map = odin3_util_calloc(sizeof(uint32_t) * ((size_t)sim->n_values + 1U));
+    if (sim->poke_map == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (uint32_t c = 0; c < sim->n_cells; c++) {
+        const odin3_sim_flat *flat = &sim->cells[c];
+        if (!odin3_sim_is_edge(flat->def)) {
+            continue;
+        }
+        uint32_t at = flat->state_first;
+        for (uint32_t p = 0; p < flat->view.n_ports; p++) {
+            if (flat->def->ports[p].dir != ODIN3_DIR_OUT) {
+                continue;
+            }
+            for (uint32_t b = 0; b < flat->view.ports[p].width; b++) {
+                sim->poke_map[flat->view.ports[p].idx[b]] = ++at;
+            }
+        }
+    }
+    return ODIN3_OK;
+}
+
+odin3_status odin3_sim_poke_state(odin3_sim *sim, uint32_t slot, uint8_t code) {
+    if (code > (sim->four_state ? 3U : 1U) || slot < ODIN3_SIM_SLOT_FIRST ||
+        slot >= sim->n_values) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (sim->poke_map == NULL) {
+        odin3_status st = build_poke_map(sim);
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    if (sim->poke_map[slot] == 0) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    sim->state[sim->poke_map[slot] - 1U] = code;
+    return ODIN3_OK;
 }

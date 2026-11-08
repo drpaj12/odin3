@@ -1948,6 +1948,9 @@ if(BUILD_TESTING)
     target_compile_definitions(test_sim_four_state PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     target_compile_definitions(test_sim_word PRIVATE ODIN3_LIB_DIR="${PROJECT_SOURCE_DIR}/lib")
+    odin3_add_unit_test(test_sim_poke)
+    target_compile_definitions(test_sim_poke PRIVATE
+        ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")
     odin3_add_unit_test(test_sim_signals)
     target_compile_definitions(test_sim_signals PRIVATE
         ODIN3_SIM_FIXTURES="${PROJECT_SOURCE_DIR}/tests/sim")

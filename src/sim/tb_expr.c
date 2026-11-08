@@ -291,6 +291,12 @@ static bool next_child(const ev_frame *fr, ev_child *out) {
     case E_PART:
     case E_MEM:
         return child_select(fr, out);
+    case E_HIERMEM:
+        if (expr->a == NULL) {
+            return false;
+        }
+        *out = (ev_child){expr->a, expr->a->width, false};
+        return fr->stage == 0;
     case E_CONCAT:
     case E_REPL:
         if (fr->stage >= expr->n * fr->reps) {
@@ -656,6 +662,29 @@ static void finish_hier(tb_ev *ev, ev_frame *fr) {
     extend(&fr->val[0], expr->width, fr->width, false);
 }
 
+/* A word of a DUT array by an evaluated index: an unknown or out-of-range index reads x. */
+static void finish_hiermem(tb_ev *ev, ev_frame *fr) {
+    const tb_expr *expr = fr->expr;
+    if (ev->const_only || expr->a == NULL) {
+        ev->failed = true;
+        ev->why = expr->a == NULL ? "a whole DUT array used as a value (only $readmem takes one)"
+                                  : ev->why;
+        tbv_zero(&fr->val[0], fr->width);
+        return;
+    }
+    uint64_t idx = index_of(&fr->val[0], expr->a->width);
+    if (idx < expr->n && expr->ids[idx] == 0) {
+        ev->failed = true;
+        ev->why = "a word of a DUT array has no name (opt folded it to a constant)";
+        tbv_zero(&fr->val[0], fr->width);
+    } else if (idx < expr->n) {
+        tb_inst_peek(&ev->tb->insts[expr->var], expr->ids[idx], &fr->val[0]);
+    } else {
+        tbv_fill(ODIN3_W4_X, &fr->val[0], expr->width);
+    }
+    extend(&fr->val[0], expr->width, fr->width, false);
+}
+
 static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     if (expr->kind == E_NUM) {
@@ -681,6 +710,9 @@ static void finish(tb_ev *ev, ev_frame *fr) {
         break;
     case E_HIER:
         finish_hier(ev, fr);
+        break;
+    case E_HIERMEM:
+        finish_hiermem(ev, fr);
         break;
     case E_BITSEL:
     case E_PART:

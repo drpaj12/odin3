@@ -95,6 +95,7 @@ odin3_status lw_ctx_init(lw_ctx *lw, odin3_pass_ctx *pass, odin3_design *design,
         odin3_strbuf_init(&lw->report[i]);
     }
     odin3_strbuf_init(&lw->namebuf);
+    lw_bits_init(&lw->memnames.q);
     for (uint32_t i = 0; i < LW_G_COUNT; i++) {
         lw->gate[i] = type_named(design, k_gate_names[i]);
         if (!odin3_celltype_valid(lw->gate[i])) {
@@ -135,6 +136,7 @@ void lw_ctx_free(lw_ctx *lw) {
     odin3_vec_free(&lw->portnets);
     odin3_vec_free(&lw->merged);
     odin3_strbuf_free(&lw->namebuf);
+    lw_bits_free(&lw->memnames.q);
     odin3_strbuf_free(&lw->prefix);
     for (uint32_t i = 0; i < LW_REP_COUNT; i++) {
         odin3_strbuf_free(&lw->report[i]);

@@ -79,7 +79,9 @@ static odin3_status lower_cell(lw_ctx *lw, odin3_node_id node, const lw_rule *ru
     lw_node_label(lw, node, label, sizeof label);
     odin3_status st = build_cell(lw, node, rule, &cell, &outs);
     st = st == ODIN3_OK ? lw_commit(lw, &cell, &outs) : st;
+    st = st == ODIN3_OK ? lw_mem_name_words(lw) : st;
     if (st != ODIN3_OK) {
+        lw->memnames.pending = false;
         if (lw->created.len > 0 || lw->created_nets.len > 0) {
             if (odin3_node_live(lw->module, node)) {
                 lw_rollback(lw); /* the word cell is intact: undo what was built */
@@ -334,7 +336,7 @@ odin3_status odin3_lower_run(odin3_pass_ctx *ctx, odin3_design *design,
         odin3_log(ODIN3_LOG_ERROR, "lower: no pass context or design");
         return ODIN3_ERR_INVALID_ARG;
     }
-    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, false, ""};
+    static const odin3_lower_opts k_none = {false, false, 0, NULL, false, false, false, ""};
     lw_ctx lw;
     lw_rules rules = {NULL, 0};
     odin3_status st = lw_ctx_init(&lw, ctx, design, opts != NULL ? opts : &k_none);

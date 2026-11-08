@@ -18,6 +18,10 @@ and the DUT's registers are x until reset. When a testbench prints the DUT befor
 read it with `lower --keep-sel` (`read_verilog dut.v; proc; opt; lower --keep-sel; sim_tb ...`):
 an `if` or `case` with an x select then takes its else or default branch as in the RTL, where plain
 `lower` turns the select into gates that propagate x.
+A testbench that loads or reads a memory of the DUT by hierarchical path (`$readmemh("rom.hex", uut.imem.rom);`,
+`uut.dmem.ram[i]`) needs the memory kept: `lower --keep-mem` gives every word of every `$mem` a wire named
+`<memory>[<index>]` (`rom[3]`) over its storage, and makes a ROM (a memory nothing writes) real storage that starts x
+(it is a constant otherwise). See "DUT memories by hierarchical path" below.
 Options: `--top <module>` (the testbench module, default the first), `--max-time N` (default
 10,000,000 time units), `--seed N` (the seed of `$random`), `--out <file>` (the `$display` text;
 default stdout), `--vcd <file>` (a waveform, below), `--2state` (the old 2-state
@@ -41,6 +45,27 @@ Plusargs: `--plusarg name=value` (repeatable, up to 16; a leading `+` is dropped
 before the `%` and its rest parses in that conversion, else 0 and `var` is unchanged). A `%s` value keeps its
 first 8 bytes. `run_testbenches` takes `--plusarg`
 too. A file name from a variable (`$readmemh(firmware_file, ...)`) is not supported.
+
+## DUT memories by hierarchical path
+
+```
+odin3 -p "read_verilog cpu.v; proc; lower --keep-sel --keep-mem; sim_tb tb.v"
+```
+
+With `lower --keep-mem` (no `opt` first when a word may be a constant: `opt` folds a register that only ever
+takes 0, such as register 0 of a register file, and removes a memory nothing reads) the testbench may:
+
+- `$readmemh` / `$readmemb` into a DUT memory: `$readmemb("prog.bin", uut.imem.rom);` (optional start and end
+  addresses as for a testbench array). The words are stored in the DUT's flip-flops (new C function
+  `odin3_sim_poke_state`, additive, ABI stays 7), the DUT settles at once and its outputs are published, so a read
+  or a `$display` on the next line sees the loaded program.
+- read a word with a variable index: `uut.dmem.ram[i]`, and a bit or part of it: `uut.rom[i][7:4]`,
+  `uut.regs[3][0]`. An index out of the range, or x, reads x.
+
+A memory the DUT no longer has by that name (no `--keep-mem`, or `opt` removed it) is a located error:
+`DUT 'uut' has no word array 'imem.rom'`. A word that `opt` folded to a constant is an error at the read
+(`a word of a DUT array has no name`), never a silent x. Not supported: assigning a DUT register or memory word from
+the testbench (`uut.x = v`), `force` on a DUT signal.
 
 ## Waveform (`--vcd`)
 
@@ -80,7 +105,7 @@ the `` `timescale `` precision, 20 columns), `$display`, `$write`,
 `$strobe`, `$monitor`, `$fopen`, `$fdisplay`, `$fwrite`, `$fclose`, `$readmemh`, `$readmemb`,
 `$finish`, `$stop`, `$time`, `$random`, `$signed`, `$unsigned`, `$clog2`. A DUT instance may have up to 16
 independent clock inputs, and an expression may read a DUT signal by hierarchical path (`dut.u_regs.r`,
-`dut.u.v[3]`, literal indices; read only; not a memory word, which has no name after `lower`; no part-selects; a multi-bit DUT port may not carry a clock; with several clocks every register needs a clock pin, so a BLIF `.latch` needs a control). Values are at
+`dut.u.v[3]`, literal indices; read only; a memory word only after `lower --keep-mem`, see below; no part-selects of a DUT signal; a multi-bit DUT port may not carry a clock; with several clocks every register needs a clock pin, so a BLIF `.latch` needs a control). Values are at
 most 1024 bits wide (signals, literals, concatenations, DUT ports, hierarchical reads). A wire
 with several drivers (two `assign`s, an `assign` and a DUT output) takes the resolution of them: z
 gives way, equal values stay, a 0 against a 1 or an x gives x. Anything else stops the run with

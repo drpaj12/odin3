@@ -166,9 +166,18 @@ int32_t tb_random(int32_t *seed);
  * NUL-terminated string of any length; the caller frees it. NULL when out of memory. */
 char *tb_format(tb_ev *ev, tb_expr *const *args, uint32_t nargs);
 bool tb_fmt_valid(const char *fmt, char *bad);
+/* Where a failed store writes its reason. */
+typedef struct tb_poke_err {
+    char *text;
+    size_t cap;
+} tb_poke_err;
 typedef struct tb_readmem_req {
     const char *file;
-    tb_var *mem;
+    uint64_t depth; /* the words of the target */
+    uint32_t width;
+    /* stores the word at addr (< depth); false, with the reason in err, stops the load */
+    bool (*put)(void *ctx, uint32_t addr, const tbv *val, tb_poke_err err);
+    void *ctx;
     bool hex;
     int64_t from, to; /* addresses; to < 0: the last word */
     char *err;
@@ -215,6 +224,28 @@ typedef struct tb_src_loc {
  * The DUT's simulator is built with tb->four_state. */
 odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_src_loc loc,
                             tb_hier_sig *out);
+/* A word array of the DUT: `path[0]`, `path[1]`, ... until 64 in a row have no signal; ids[k] is 0
+ * for a word with none (folded by opt). ids is malloc'd (the caller frees it); n 0 and ids NULL
+ * when no word has a signal. */
+typedef struct tb_hier_arr {
+    uint32_t *ids;
+    uint32_t n;
+    uint32_t width;
+} tb_hier_arr;
+/* Builds the simulator and the signal table of inst and looks `path` up; *id 0 (ODIN3_OK) when the
+ * DUT has no such signal, nothing logged. */
+odin3_status tb_inst_find(tb_module *tb, tb_inst *inst, const char *path, uint32_t *id);
+typedef struct tb_array_ctx {
+    tb_module *tb;
+    tb_inst *inst;
+    const char *path;
+    tb_hier_arr *out;
+} tb_array_ctx;
+odin3_status tb_inst_array(tb_module *tb, tb_inst *inst, const char *path, tb_hier_arr *out);
+/* Sets the flip-flops behind signal `id` of inst to val (its width), see odin3_sim_poke_state; the
+ * DUT settles at the next tb_dut_comb. False, with the reason in err, when a bit is not a
+ * flip-flop output. */
+bool tb_inst_poke(tb_inst *inst, uint32_t id, const tbv *val, tb_poke_err err);
 /* The value of signal `id` (its width) as of the last settle of the DUT. */
 void tb_inst_peek(const tb_inst *inst, uint32_t id, tbv *out);
 /* The value of signal `id` of any signal table (its width, 4-state codes) as of the last settle. */

@@ -140,6 +140,16 @@ typedef struct lw_totals {
     uint64_t soft[LW_N_SOFT]; /* cells of $add, $mem, $mul, $sub (the soft-logic INFO line) */
 } lw_totals;
 
+/* The storage nets of the memory just built, kept for naming after its commit (--keep-mem). */
+typedef struct lw_memnames {
+    bool pending;
+    lw_bits q; /* [word][bit] */
+    uint32_t memid;
+    uint32_t width;
+    uint64_t words;
+    int64_t offset;
+} lw_memnames;
+
 typedef struct lw_ctx {
     odin3_pass_ctx *pass;
     odin3_design *design;
@@ -167,6 +177,7 @@ typedef struct lw_ctx {
     uint64_t next_budget;          /* total_created at which the budget is checked next */
     uint64_t live_nodes;           /* live nodes of the module (kept up to date) */
     lw_totals totals;
+    lw_memnames memnames;
     odin3_strbuf namebuf;              /* scratch: a bit node's name being built */
     odin3_strbuf prefix;               /* the open cell's bit-node name prefix (PHASE3 #38) */
     bool prefix_set;                   /* prefix is valid for the open cell */
@@ -539,6 +550,10 @@ LW_DECLARE_BUILDER(mem);
  * write port, write ports on different clocks or polarities, ABITS above 64) as `lower: module
  * 'm': '$mem' '<cell>' <reason>` and returns true. False for any other type and for a `$mem` with
  * no read port (it is deleted). Nothing has been changed yet. */
+/* After a $mem was committed with --keep-mem: wires `<MEMID>[<index>]` over the storage nets of
+ * its words (a name already in use is skipped with a warning). A no-op when none is pending. */
+odin3_status lw_mem_name_words(lw_ctx *lw);
+
 bool lw_mem_refused(const lw_ctx *lw, odin3_node_id node, const char *type_name);
 
 /* --- latch.c: $dlatch $adlatch $dlatchsr $sr (spec §6.2, LW-8) ----------------------------------

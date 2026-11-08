@@ -565,7 +565,7 @@ static odin3_status storage_bit(mem_build *mb, const mem_clk *clk, mem_at at) {
     odin3_bit init = init_bit(geo, at.word * geo->width + at.bit);
     odin3_net_id qnet = {0};
     odin3_status st = ODIN3_OK;
-    if (n_acts(mb) == 0) {
+    if (n_acts(mb) == 0 && !mb->lw->opts->keep_mem) {
         st = lw_const(mb->lw, init == ODIN3_BIT_0 || init == ODIN3_BIT_1 ? init : ODIN3_BIT_X,
                       &qnet);
         return st == ODIN3_OK ? lw_bits_push(&mb->q, qnet) : st;
@@ -586,6 +586,8 @@ static odin3_status storage_all(mem_build *mb) {
     if (n_acts(mb) > 0) {
         uint32_t wport = act_port(mb, 0);
         st = clock_for(mb, geo->wr_clk.nets[wport], flag(geo->wr_clk_pol, wport), &clk);
+    } else if (mb->lw->opts->keep_mem) {
+        st = lw_const(mb->lw, ODIN3_BIT_0, &clk.net); /* a ROM word never clocks: a poke sets it */
     }
     for (uint32_t ai = 0; st == ODIN3_OK && ai < n_acts(mb); ai++) {
         mem_share none = {{0}, {0}};
@@ -828,6 +830,71 @@ static odin3_status book(const mem_build *mb) {
     return st;
 }
 
+/* --- --keep-mem: the words get wires ---------------------------------------------------------- */
+
+/* Keeps the storage nets and the geometry of the memory for lw_mem_name_words. */
+static odin3_status stash_names(const mem_build *mb) {
+    lw_ctx *lw = mb->lw;
+    lw_memnames *keep = &lw->memnames;
+    lw_bits_clear(&keep->q);
+    keep->pending = false;
+    for (uint32_t i = 0; i < lw_bits_len(&mb->q); i++) {
+        odin3_status st = lw_bits_push(&keep->q, lw_bits_at(&mb->q, i));
+        if (st != ODIN3_OK) {
+            return st;
+        }
+    }
+    keep->memid = mb->cell->params[0].kind == ODIN3_VAL_STRING ? mb->cell->params[0].str : 0U;
+    keep->width = mb->geo.width;
+    keep->words = mb->geo.words;
+    keep->offset = mb->geo.offset;
+    keep->pending = true;
+    return ODIN3_OK;
+}
+
+/* The wire of word `word`: name `<base>[<index>]`, bit k on the storage net of bit k. */
+static odin3_status name_word(lw_ctx *lw, const char *base, uint64_t word) {
+    const lw_memnames *keep = &lw->memnames;
+    odin3_strbuf text;
+    odin3_strbuf_init(&text);
+    odin3_status st =
+        odin3_strbuf_appendf(&text, "%s[%" PRId64 "]", base, (int64_t)word + keep->offset);
+    uint32_t name = 0;
+    st = st == ODIN3_OK ? odin3_strtab_intern(odin3_design_strtab(lw->design),
+                                              odin3_bytes_cstr(text.data), &name)
+                        : st;
+    if (st == ODIN3_OK && odin3_wire_valid(odin3_module_find_wire(lw->module, name))) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "lower: module '%s': wire '%s' exists; the memory word is not named",
+                  module_text(lw), text.data);
+    } else if (st == ODIN3_OK) {
+        odin3_wire_spec spec = {name, (int32_t)keep->width - 1, 0, false, lw->prov};
+        odin3_wire_id wire = {0};
+        st = odin3_wire_create(lw->module, &spec,
+                               lw_bits_span(&keep->q).nets + (size_t)word * keep->width, &wire);
+    }
+    odin3_strbuf_free(&text);
+    return st;
+}
+
+odin3_status lw_mem_name_words(lw_ctx *lw) {
+    lw_memnames *keep = &lw->memnames;
+    if (!keep->pending) {
+        return ODIN3_OK;
+    }
+    keep->pending = false;
+    const char *base = odin3_strtab_get(odin3_design_strtab(lw->design), keep->memid);
+    base = base != NULL && base[0] == '\\' ? base + 1 : base;
+    if (base == NULL || base[0] == '\0' || base[0] == '$') {
+        return ODIN3_OK; /* an unnamed memory has no name to give */
+    }
+    odin3_status st = ODIN3_OK;
+    for (uint64_t word = 0; st == ODIN3_OK && word < keep->words; word++) {
+        st = name_word(lw, base, word);
+    }
+    return st;
+}
+
 odin3_status lw_build_mem(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
     mem_build mb;
     build_init(&mb, lw, cell);
@@ -839,6 +906,7 @@ odin3_status lw_build_mem(lw_ctx *lw, const lw_cell *cell, lw_bits *out) {
         st = st == ODIN3_OK ? decode_all(&mb) : st;
         st = st == ODIN3_OK ? storage_all(&mb) : st;
         st = st == ODIN3_OK ? read_all(&mb, out) : st;
+        st = st == ODIN3_OK && lw->opts->keep_mem ? stash_names(&mb) : st;
     }
     st = st == ODIN3_OK ? book(&mb) : st;
     build_free(&mb);

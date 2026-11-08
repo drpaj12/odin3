@@ -208,6 +208,19 @@ odin3_status odin3_sim_set_input4(odin3_sim *sim, odin3_sim_bit at, uint8_t code
 odin3_status odin3_sim_get_input4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code);
 odin3_status odin3_sim_get_output4(const odin3_sim *sim, odin3_sim_bit at, uint8_t *code);
 
+/*
+ * Sets the stored value of a flip-flop: the edge-triggered cell whose output drives value slot
+ * `slot` (the value slot of a signal bit, odin3_sim_signals_poke finds it) gets state `code` (0, 1,
+ * 2 = x, 3 = z; 0 or 1 in a 2-state simulator), as if it had been clocked in. The output and the
+ * logic behind it change at the next settle (odin3_sim_settle_events), not before: poke all the
+ * bits, then settle once. For loading a memory or a register of the design under test from a
+ * testbench. Additive, ABI stays 7. ODIN3_ERR_INVALID_ARG (not logged, nothing changed) when `slot`
+ * is not the output of an edge-triggered cell (a net that is not state, such as a constant or a
+ * gate output) or the code is out of range; ODIN3_ERR_NO_MEMORY on the first call when the slot map
+ * cannot be built.
+ */
+odin3_status odin3_sim_poke_state(odin3_sim *sim, uint32_t slot, uint8_t code);
+
 /* *value gets output bit `at` as of the last settle; ODIN3_ERR_INVALID_ARG (not logged, *value
  * untouched) out of range. */
 odin3_status odin3_sim_get_output(const odin3_sim *sim, odin3_sim_bit at, bool *value);

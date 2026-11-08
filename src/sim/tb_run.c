@@ -203,17 +203,35 @@ static void print_to(run *rt, FILE *fp, const tb_expr *call, uint32_t first, boo
     free(line);
 }
 
+/* The put of a DUT array target: the word goes into the flip-flops behind signal ids[addr]. */
+typedef struct dut_words {
+    tb_inst *inst;
+    const uint32_t *ids;
+} dut_words;
+
+static bool put_dut_word(void *ctx, uint32_t addr, const tbv *val, tb_poke_err err) {
+    const dut_words *words = ctx;
+    if (words->ids[addr] == 0) {
+        (void)snprintf(err.text, err.cap, "word %u of the DUT array has no name (opt folded it)",
+                       addr);
+        return false;
+    }
+    return tb_inst_poke(words->inst, words->ids[addr], val, err);
+}
+
+static bool put_var_word(void *ctx, uint32_t addr, const tbv *val, tb_poke_err err) {
+    (void)err;
+    tb_var_store(ctx, addr, val);
+    return true;
+}
+
 static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
     const tb_expr *call = stmt->sys;
     char err[ERR_BUF] = "";
-    if (call->n >= 2 && call->list[1]->kind == E_HIER) {
-        rfail(rt, stmt,
-              "$readmem into a hierarchical path is not supported (writes into a DUT "
-              "signal by path are not supported)");
-        return;
-    }
-    if (call->n < 2 || call->list[0]->kind != E_STR || call->list[1]->kind != E_VAR ||
-        rt->tb->vars[call->list[1]->var].depth == 0) {
+    bool dut = call->n >= 2 && call->list[1]->kind == E_HIERMEM && call->list[1]->a == NULL;
+    bool plain =
+        call->n >= 2 && call->list[1]->kind == E_VAR && rt->tb->vars[call->list[1]->var].depth > 0;
+    if (call->n < 2 || call->list[0]->kind != E_STR || !(dut || plain)) {
         rfail(rt, stmt, "$readmem expects (\"file\", array [, start [, end]])");
         return;
     }
@@ -224,10 +242,32 @@ static void do_readmem(run *rt, const tb_stmt *stmt, bool hex) {
         rfail(rt, stmt, "$readmem start/end must be constants");
         return;
     }
-    tb_readmem_req req = {call->list[0]->str, &rt->tb->vars[call->list[1]->var], hex, from, to, err,
-                          sizeof err};
+    tb_readmem_req req = {.file = call->list[0]->str,
+                          .hex = hex,
+                          .from = from,
+                          .to = to,
+                          .err = err,
+                          .errcap = sizeof err};
+    dut_words words = {NULL, NULL};
+    if (dut) {
+        words = (dut_words){&rt->tb->insts[call->list[1]->var], call->list[1]->ids};
+        req.depth = call->list[1]->n;
+        req.width = call->list[1]->width;
+        req.put = put_dut_word;
+        req.ctx = &words;
+    } else {
+        tb_var *mem = &rt->tb->vars[call->list[1]->var];
+        req.depth = mem->depth;
+        req.width = mem->width;
+        req.put = put_var_word;
+        req.ctx = mem;
+    }
     if (!tb_readmem(&req)) {
         rfail(rt, stmt, err);
+    } else if (dut) { /* settle the DUT now and publish its outputs, as the active region does */
+        for (uint32_t i = 0; i < rt->nd; i++) {
+            (void)tb_dut_comb(&rt->ev, rt->duts[i]);
+        }
     }
 }
 
