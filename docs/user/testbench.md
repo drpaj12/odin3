@@ -67,6 +67,30 @@ A memory the DUT no longer has by that name (no `--keep-mem`, or `opt` removed i
 (`a word of a DUT array has no name`), never a silent x. Not supported: assigning a DUT register or memory word from
 the testbench (`uut.x = v`), `force` on a DUT signal.
 
+## Testbench-side modules
+
+A real testbench instantiates behavioural helpers next to the DUT (a bus master model, a SPI slave model). A module
+whose header is in the testbench files and which the design does not contain is **testbench-side**: its instance is
+flattened into the testbench at parse time (its variables, tasks and processes become `<instance>.<name>` items of the
+one interpreter, one event queue). If the design has a module of the same name, the design wins (the DUT) and an INFO
+line says the testbench copy is ignored. List the helper files after the bench: `sim_tb tb.v helper.v`.
+
+Supported: `#(...)` parameter overrides (positional or `.name(value)`, constants), the header forms
+`module m (a, b); input a; ...`, `module m (input wire a, output reg [7:0] b);` and `module m #(parameter W = 4) (...)`,
+port connections named or ordered, an empty connection `.p()`, a constant or an expression on an input, `parameter`,
+`localparam`, `reg`, `wire`, `integer`, arrays, `[h:l]` ranges with `l > 0` (whole-vector use only), `assign`,
+`initial`, `always`, tasks (called from inside the module), `wire w = expr;`, nested instances (depth 16).
+A port connected to a whole `reg` or `wire` of the parent with the same width is one net with it (as in iverilog: a clock
+passed through a port reaches the helper's `@(posedge clk)` in the same delta as the bench). Other connections
+(expressions, selects, constants, other widths) become continuous assignments. A name inside a module is its own: the
+helper's `clk` is not the bench's `clk`.
+
+Refused with `unsupported: <construct>` at the helper's own file and line: recursive module instance, `inout` port,
+instance array, connection to a port the module does not have, more ordered connections than ports, an override of a
+parameter the module does not have, a non-constant override, a name longer than 63 characters (instance path included),
+a design module instantiated inside a testbench module, `defparam`, `function`, `generate`, `specify`. Tests:
+`tests/tb/micro/sub_*_tb.v, xsub_*_tb.v` (with `sub_*_lib.v`), `tests/tb/errors/sub*_tb.v`.
+
 ## Waveform (`--vcd`)
 
 `sim_tb --vcd wave.vcd tb.v` writes an IEEE 1364 VCD of the run. It holds every scalar `reg`,

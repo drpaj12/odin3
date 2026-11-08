@@ -711,6 +711,7 @@ static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     } else {
         tb_var_load(&fr->val[0], &ev->tb->vars[expr->var], 0);
         extend(&fr->val[0], expr->width, fr->width, fr->sgn);
+        ev->failed = ev->failed || (ev->const_only && !ev->tb->vars[expr->var].is_param);
     }
 }
 

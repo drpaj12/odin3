@@ -206,6 +206,8 @@ void tb_dut_close(tb_dut *dut);
 /* Hierarchical reads of DUT signals (tb_dut.c). The simulator of an instance is built on the first
  * use, at parse time for a hierarchical name, and kept in the instance until the module is freed.
  */
+/* True when the design has a module called name (design may be NULL: false). */
+bool tb_design_has_module(odin3_design *design, const char *name);
 /* Builds the simulator of instance `inst` of the design if it has none (4-state when four_state).
  */
 odin3_status tb_inst_sim(odin3_design *design, tb_inst *inst, bool four_state);

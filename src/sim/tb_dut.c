@@ -54,6 +54,11 @@ static bool find_module(odin3_design *design, const char *name, odin3_module_id 
     return false;
 }
 
+bool tb_design_has_module(odin3_design *design, const char *name) {
+    odin3_module_id id;
+    return design != NULL && find_module(design, name, &id);
+}
+
 static bool port_lookup(const odin3_sim *sim, const char *name, tb_conn *conn) {
     for (uint32_t i = 0; i < odin3_sim_input_count(sim); i++) {
         if (strcmp(odin3_sim_input_name(sim, i), name) == 0) {
