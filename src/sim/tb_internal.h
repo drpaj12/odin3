@@ -161,6 +161,8 @@ bool tb_const_val(tb_module *tb, const tb_expr *expr, uint32_t width, tbv *out);
  * resolution of its drivers. True when the wire's value changed. */
 bool tb_drive(tb_ev *ev, uint32_t drv, const tbv *val);
 int32_t tb_random(int32_t *seed);
+/* True while variable var is under a `force` (procedural and continuous writes leave it alone). */
+bool tb_forced(const tb_module *tb, int var);
 
 /* Display formatting (tb_fmt.c): formats args (first may be a format string) into a new
  * NUL-terminated string of any length; the caller frees it. NULL when out of memory. */

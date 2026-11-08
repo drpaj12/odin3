@@ -52,6 +52,7 @@ typedef struct parser {
     char prefix[TB_NAME]; /* the instance path of the module being parsed ("u0.u1."), or "" */
     const tb_module *pre; /* second pass: the module the first pass built (every instance path) */
     int dummy;            /* first pass: the variable a hierarchical name stands for, or -1 */
+    bool saw_force;       /* a force or release statement was parsed */
 } parser;
 
 /* Where a module of the testbench files starts: the index of its `module` token. */
@@ -1699,6 +1700,8 @@ typedef enum {
     KW_WAIT,
     KW_FOREVER,
     KW_DECL,
+    KW_FORCE,
+    KW_RELEASE,
     KW_REJECTED
 } stmt_kw;
 
@@ -1706,21 +1709,38 @@ static stmt_kw keyword_of(const parser *pr) {
     static const struct {
         const char *text;
         stmt_kw kw;
-    } TABLE[] = {{"begin", KW_BEGIN},       {"if", KW_IF},
-                 {"case", KW_CASE},         {"casez", KW_CASE},
-                 {"casex", KW_CASE},        {"for", KW_FOR},
-                 {"while", KW_WHILE},       {"repeat", KW_REPEAT},
-                 {"wait", KW_WAIT},         {"forever", KW_FOREVER},
-                 {"reg", KW_DECL},          {"integer", KW_DECL},
-                 {"disable", KW_REJECTED},  {"fork", KW_REJECTED},
-                 {"deassign", KW_REJECTED}, {"force", KW_REJECTED},
-                 {"release", KW_REJECTED},  {NULL, KW_NONE}};
+    } TABLE[] = {{"begin", KW_BEGIN},      {"if", KW_IF},           {"case", KW_CASE},
+                 {"casez", KW_CASE},       {"casex", KW_CASE},      {"for", KW_FOR},
+                 {"while", KW_WHILE},      {"repeat", KW_REPEAT},   {"wait", KW_WAIT},
+                 {"forever", KW_FOREVER},  {"reg", KW_DECL},        {"integer", KW_DECL},
+                 {"disable", KW_REJECTED}, {"fork", KW_REJECTED},   {"deassign", KW_REJECTED},
+                 {"force", KW_FORCE},      {"release", KW_RELEASE}, {NULL, KW_NONE}};
     for (size_t i = 0; TABLE[i].text != NULL; i++) {
         if (is_kw(pr, TABLE[i].text)) {
             return TABLE[i].kw;
         }
     }
     return KW_NONE;
+}
+
+/* `force v = expr;` or `release v;` (a whole reg, integer or wire). */
+static tb_stmt *parse_force(parser *pr, bool release) {
+    tb_stmt *stmt = new_stmt(pr, release ? S_RELEASE : S_FORCE);
+    pr->pos++;
+    tb_expr *target = stmt != NULL ? parse_primary(pr) : NULL;
+    if (target == NULL || target->kind != E_VAR || !assignable_var(pr, target)) {
+        fail(pr, "force/release of anything but a whole reg, integer or wire");
+        return NULL;
+    }
+    stmt->lhs = target;
+    if (!release) {
+        stmt->rhs = expect_op(pr, "=") ? parse_expr(pr) : NULL;
+        if (stmt->rhs == NULL) {
+            return NULL;
+        }
+    }
+    pr->saw_force = true;
+    return expect_op(pr, ";") ? stmt : NULL;
 }
 
 static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
@@ -1743,6 +1763,10 @@ static sstart start_keyword(parser *pr, stmt_kw kw, tb_stmt **out) {
         return start_forever(pr);
     case KW_DECL:
         *out = parse_decl(pr) ? new_stmt(pr, S_NOP) : NULL;
+        return *out != NULL ? ST_LEAF : ST_FAIL;
+    case KW_FORCE:
+    case KW_RELEASE:
+        *out = parse_force(pr, kw == KW_RELEASE);
         return *out != NULL ? ST_LEAF : ST_FAIL;
     default:
         fail(pr, cur(pr)->text);
@@ -3127,6 +3151,29 @@ static bool index_modules(parser *pr, uint32_t ntoks) {
     return true;
 }
 
+/* Second pass: the DUT instances the first pass found are entered before the items are read. */
+static void seed_insts(parser *pr, const tb_module *pre) {
+    tb_module *tb = pr->tb;
+    if (pre == NULL || pre->ninsts == 0) {
+        return;
+    }
+    tb->insts = pnew(pr, (size_t)pre->ninsts * sizeof *tb->insts);
+    for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
+        tb->insts[i] = (tb_inst){.line = pre->insts[i].line};
+        memcpy(tb->insts[i].name, pre->insts[i].name, sizeof tb->insts[i].name);
+        memcpy(tb->insts[i].module, pre->insts[i].module, sizeof tb->insts[i].module);
+    }
+    tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
+}
+
+/* The per-variable force tables of a module whose source has a force or release. */
+static bool alloc_force(tb_module *tb) {
+    size_t count = (size_t)tb->nvars + 1U;
+    tb->force_rhs = (const tb_expr **)tb_alloc(tb, count * sizeof(void *));
+    tb->force_on = tb_alloc(tb, count * sizeof(bool));
+    return tb->force_rhs != NULL && tb->force_on != NULL;
+}
+
 /* Parses src once. `pre` (may be NULL) is the module of a first pass: its instances are entered
  * before the items are read. */
 static odin3_status parse_once(const tb_source *src, const char *top, const tb_module *pre,
@@ -3157,15 +3204,7 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_init(&pr.subs, sizeof(sub_frame));
     odin3_vec_init(&pr.aliases, sizeof(alias_ent));
     pr.failed = !index_modules(&pr, lexed.n);
-    if (pre != NULL && pre->ninsts > 0) {
-        tb->insts = pnew(&pr, (size_t)pre->ninsts * sizeof *tb->insts);
-        for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
-            tb->insts[i] = (tb_inst){.line = pre->insts[i].line};
-            memcpy(tb->insts[i].name, pre->insts[i].name, sizeof tb->insts[i].name);
-            memcpy(tb->insts[i].module, pre->insts[i].module, sizeof tb->insts[i].module);
-        }
-        tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
-    }
+    seed_insts(&pr, pre);
     locate_top(&pr, top, lexed.n);
     if (!pr.failed && parse_header(&pr, top)) {
         parse_items(&pr);
@@ -3185,6 +3224,10 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
         return ODIN3_ERR_INVALID_ARG;
     }
     tb->saw_hier = pr.saw_hier;
+    if (pr.saw_force && !alloc_force(tb)) {
+        tb_module_free(tb);
+        return ODIN3_ERR_NO_MEMORY;
+    }
     *out = tb;
     return ODIN3_OK;
 }
