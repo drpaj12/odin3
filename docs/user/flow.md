@@ -107,6 +107,9 @@ boxes are untouched. Asynchronous controls are made synchronous unless `--async 
 `$adff`/`$adffe` (and the gate-level `$_DFF_<c><r><v>_`, `$_DFFE_<c><r><v><e>_`) as a bit flip-flop with its reset pin, which
 `sim` and `sim_tb` apply when the reset input changes, as the RTL does; it is for simulation, not for the VTR flow (the
 architecture's flip-flop has no reset pin). `$aldff` and `$dffsr` are still made synchronous.
+The `$_DFF_<c><r><v>_` cells it leaves are for `sim` and `sim_tb` only: `write_blif` (plain or `--vtr`) refuses them with
+a located error (BLIF has no form for a gate-level flip-flop with a reset or an enable, and VPR has no asynchronous
+flip-flop); `write_json` writes them. Run `lower` without the option for any netlist that goes to a writer or to VTR.
 
 ```{mermaid}
 flowchart LR
