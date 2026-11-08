@@ -46,6 +46,10 @@ before the `%` and its rest parses in that conversion, else 0 and `var` is uncha
 first 8 bytes. `run_testbenches` takes `--plusarg`
 too. A file name from a variable (`$readmemh(firmware_file, ...)`) is not supported.
 
+A DUT whose RTL writes `3'bxxx` as a "don't care" case item (mips_16's ALU) simulates differently from its netlist
+unless `read_verilog --case-xz-never` is used (`flow.md`): the item then matches nothing, as in iverilog. Flow for such a
+bench: `read_verilog --case-xz-never ...; proc; lower --keep-sel --keep-mem; sim_tb ...`.
+
 ## DUT memories by hierarchical path
 
 ```

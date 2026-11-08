@@ -101,6 +101,9 @@ static odin3_sigbit wild_bit(uint8_t wild, odin3_sigbit bit) {
  * simulates one way and synthesises another (mips_16: the ALU result becomes x for every command),
  * so the item is warned. */
 static odin3_status warn_xz_item(odin3_pg *pg, odin3_ast_id expr, const odin3_sig *cmp) {
+    if (pg->e2->opts.case_xz_never) {
+        return ODIN3_OK; /* --case-xz-never: the item is dropped (open_item), no wildcard */
+    }
     for (uint32_t i = 0; i < cmp->width; i++) {
         odin3_sigbit bit = cmp->bits[i];
         if (odin3_sb_is_const(bit) && odin3_sb_bit(bit) > ODIN3_BIT_1) {
@@ -684,6 +687,27 @@ typedef struct item_cmps {
     uint32_t count;
 } item_cmps;
 
+/* Whether the compare has an x or z bit that is no wildcard. */
+static bool compare_has_xz(const odin3_sig *cmp) {
+    for (uint32_t i = 0; i < cmp->width; i++) {
+        if (odin3_sb_is_const(cmp->bits[i]) && odin3_sb_bit(cmp->bits[i]) > ODIN3_BIT_1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* --case-xz-never: the compares with an x or z bit match nothing and are dropped. */
+static void drop_xz_compares(item_cmps *cmps) {
+    uint32_t kept = 0;
+    for (uint32_t i = 0; i < cmps->count; i++) {
+        if (!compare_has_xz(&cmps->sigs[i])) {
+            cmps->sigs[kept++] = cmps->sigs[i];
+        }
+    }
+    cmps->count = kept;
+}
+
 static odin3_status item_compares(odin3_pg *pg, const pg_frame *frame, uint32_t idx,
                                   item_cmps *out) {
     const odin3_ast *ast = pg->e2->elab;
@@ -722,6 +746,14 @@ static odin3_status open_item(odin3_pg *pg, const item_ref *ref) {
     pg_frame frame = *(const pg_frame *)odin3_vec_cat(&pg->frames, frame_at);
     item_cmps cmps = {NULL, 0};
     odin3_status st = item_compares(pg, &frame, idx, &cmps);
+    bool is_case = odin3_ast_kind_of(pg->e2->elab, frame.node) == ODIN3_AST_CASE;
+    if (st == ODIN3_OK && is_case && pg->e2->opts.case_xz_never) {
+        uint32_t had = cmps.count;
+        drop_xz_compares(&cmps);
+        if (had > 0 && cmps.count == 0) {
+            return ODIN3_OK; /* no compare can match: the item is dead, its arm is not made */
+        }
+    }
     odin3_ast_id stmt = odin3_ast_kind_of(pg->e2->elab, frame.node) == ODIN3_AST_IF
                             ? frame.node
                             : odin3_ast_child(pg->e2->elab, frame.node, idx);

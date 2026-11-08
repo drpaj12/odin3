@@ -31,6 +31,13 @@ flowchart LR
 Elaboration, part of `read_verilog`, resolves parameters and generate constructs and produces the
 word-level IR. Each `always` block becomes a `$proc` node that later stages must not see.
 
+A plain `case` item with an x or z bit (`3'bxxx: ...`) matches any value in the synthesised netlist, as in Yosys and
+Parmys (the default, with a warning), but nothing in simulation (IEEE 1364-2005 9.5). `read_verilog --case-xz-never`
+gives the simulation meaning: a compare with an x or z bit that is no `casez`/`casex` wildcard matches nothing, and an
+item left with no compare is dropped. Use it when a testbench runs the design (`sim_tb`) and the RTL uses `3'bxxx` as
+"don't care" (mips_16's ALU); do not use it for a design that goes to a VTR flow, where the wildcard is what the
+reference tools build.
+
 ```{mermaid}
 flowchart LR
   A[AST] --> E[elaborate] --> W["word-level IR with $proc nodes"]
