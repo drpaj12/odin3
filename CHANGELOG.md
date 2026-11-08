@@ -4,6 +4,17 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
+## 1.5.1 (ready to tag; release notes `docs/V1.5.1.md`)
+
+The C ABI stays 7. Two performance fixes for provenance runs of a real CPU (a-z80-modified); output unchanged.
+
+### Fixed
+- `odin3-prov-steps` held one dict per link of every object (up to 30k links each) and was OOM-killed at 10 GB; it now
+  streams the `luts` step: peak RSS 340 MB (#407).
+- `write_blif --prov-map` sorted the whole join set of every coarsen record, and again for each data parent; now once per
+  distinct anchor list, with stamp arrays for the scratch sets: 1423 s to 64 s, name map byte identical (#408).
+  `odin3_prov_label.joined` (internal) holds the first 16 rows; `n_joined` is still the total.
+
 ## 1.5.0 (ready to tag; release notes `docs/V1.5.0.md`)
 
 The C ABI stays 7. This section holds everything since v1.3.0; the entries headed 1.4.0 shipped in v1.4.0, the rest is new since then (see `docs/V1.5.0.md`).
