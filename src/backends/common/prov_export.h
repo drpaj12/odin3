@@ -20,7 +20,8 @@
 /* The most rows of J a record lists (3.3, "one cap rule"); n_joined is still the total. */
 enum { ODIN3_PROV_JOIN_CAP = 16 };
 
-/* The labels of one record. joined: every row of J (uint32_t), in the key order of 3.3. */
+/* The labels of one record. joined: the first ODIN3_PROV_JOIN_CAP rows of J (uint32_t), in the
+ * key order of 3.3 (info.n_joined is the size of all of J). */
 typedef struct odin3_prov_label {
     odin3_prov_info info;
     odin3_vec joined;
@@ -34,7 +35,7 @@ void odin3_prov_label_free(odin3_prov_label *label);
  * Fills label for record: its fields, and for a coarsen record the join (3.3: J reduced to
  * anchors of level stmt or coarser, a join when two or more are distinct and no single data
  * parent has the same set; a join of instances when one anchor is reached through two context
- * chains) and the rows of J. Walks the record graph with an explicit worklist; the context
+ * chains) and the first rows of J. Walks the record graph with an explicit worklist; the context
  * parents (the declared tail) are not entered. INVALID_ARG (logged) for record 0 or one past the
  * last; NO_MEMORY. label is unchanged on failure.
  */

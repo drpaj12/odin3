@@ -58,18 +58,65 @@ static uint32_t anchor_of(const odin3_design *design, uint32_t row) {
     }
 }
 
-/* Puts every ancestor of row that is in members into covered. */
-static odin3_status cover_ancestors(const odin3_design *design, uint32_t row,
-                                    const odin3_u64map *members, odin3_u64map *covered) {
-    uint64_t unused = 0;
-    for (uint32_t up = odin3_construct_get(design, row)->parent; up != 0;
-         up = odin3_construct_get(design, up)->parent) {
-        if (odin3_u64map_get(members, up, &unused) &&
-            odin3_u64map_put(covered, (odin3_kv){up, 1}) != ODIN3_OK) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
+/* A set of construct rows as a stamp per row: begin() empties it in O(1) (the generation moves
+ * on), has() and add() are one array access. The hash maps these replace were the cost of the
+ * labels of a design whose sets hold most of its constructs. */
+typedef struct mark_set {
+    odin3_vec stamps; /* uint32_t per row */
+    uint32_t gen;
+} mark_set;
+
+/* The three sets one label needs: the anchors, the ones some other anchor is below, the seen. */
+typedef struct label_marks {
+    mark_set members;
+    mark_set covered;
+    mark_set seen;
+} label_marks;
+
+static void marks_init(label_marks *marks) {
+    *marks = (label_marks){0};
+    odin3_vec_init(&marks->members.stamps, sizeof(uint32_t));
+    odin3_vec_init(&marks->covered.stamps, sizeof(uint32_t));
+    odin3_vec_init(&marks->seen.stamps, sizeof(uint32_t));
+}
+
+static void marks_free(label_marks *marks) {
+    odin3_vec_free(&marks->members.stamps);
+    odin3_vec_free(&marks->covered.stamps);
+    odin3_vec_free(&marks->seen.stamps);
+}
+
+/* Empties the set; it holds rows below `end`. */
+static odin3_status mark_begin(mark_set *set, uint32_t end) {
+    if (odin3_vec_reserve(&set->stamps, end) != ODIN3_OK) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    while (set->stamps.len < end) {
+        *(uint32_t *)odin3_vec_push(&set->stamps) = 0; /* reserved */
+    }
+    if (++set->gen == 0) { /* wrapped: no stamp may match the new generation */
+        memset(set->stamps.data, 0, set->stamps.len * sizeof(uint32_t));
+        set->gen = 1;
     }
     return ODIN3_OK;
+}
+
+static bool mark_has(const mark_set *set, uint32_t row) {
+    return *(const uint32_t *)odin3_vec_cat(&set->stamps, row) == set->gen;
+}
+
+static void mark_add(mark_set *set, uint32_t row) {
+    *(uint32_t *)odin3_vec_at(&set->stamps, row) = set->gen;
+}
+
+/* Puts every ancestor of row that is in members into covered. */
+static void cover_ancestors(const odin3_design *design, uint32_t row, label_marks *marks) {
+    for (uint32_t up = odin3_construct_get(design, row)->parent; up != 0;
+         up = odin3_construct_get(design, up)->parent) {
+        if (mark_has(&marks->members, up)) {
+            mark_add(&marks->covered, up);
+        }
+    }
 }
 
 static int cmp_u32(uint32_t lhs, uint32_t rhs) {
@@ -77,6 +124,13 @@ static int cmp_u32(uint32_t lhs, uint32_t rhs) {
         return 0;
     }
     return lhs < rhs ? -1 : 1;
+}
+
+static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
+static const uint64_t FNV_PRIME = 0x100000001b3ULL;
+
+static uint64_t mix(uint64_t hash, uint64_t word) {
+    return (hash ^ word) * FNV_PRIME;
 }
 
 /* Compares two elements of a vec being sorted. */
@@ -140,22 +194,17 @@ static odin3_status sort_u32(odin3_vec *vec) {
     return merge_sort(vec, &ec);
 }
 
-/* Removes from rows (sorted afterwards ascending) every anchor that is an ancestor of another. */
-static odin3_status reduce_rows(const odin3_design *design, odin3_vec *rows,
-                                const odin3_u64map *members) {
-    odin3_u64map *covered = odin3_u64map_create(0);
-    if (covered == NULL) {
-        return ODIN3_ERR_NO_MEMORY;
-    }
-    odin3_status st = ODIN3_OK;
+/* Removes from rows (sorted afterwards ascending) every anchor that is an ancestor of another;
+ * marks.members holds the anchors. */
+static odin3_status reduce_rows(const odin3_design *design, odin3_vec *rows, label_marks *marks) {
+    odin3_status st = mark_begin(&marks->covered, odin3_construct_end(design));
     for (size_t i = 0; st == ODIN3_OK && i < rows->len; i++) {
-        st = cover_ancestors(design, *(const uint32_t *)odin3_vec_cat(rows, i), members, covered);
+        cover_ancestors(design, *(const uint32_t *)odin3_vec_cat(rows, i), marks);
     }
     size_t keep = 0;
     uint32_t *data = rows->data;
-    uint64_t unused = 0;
     for (size_t i = 0; st == ODIN3_OK && i < rows->len; i++) {
-        if (!odin3_u64map_get(covered, data[i], &unused)) {
+        if (!mark_has(&marks->covered, data[i])) {
             data[keep++] = data[i];
         }
     }
@@ -163,7 +212,6 @@ static odin3_status reduce_rows(const odin3_design *design, odin3_vec *rows,
         rows->len = keep;
         st = sort_u32(rows);
     }
-    odin3_u64map_destroy(covered);
     return st;
 }
 
@@ -182,6 +230,9 @@ typedef struct order_ctx {
 } order_ctx;
 
 static int cmp_str(const odin3_design *design, uint32_t lhs, uint32_t rhs) {
+    if (lhs == rhs) {
+        return 0; /* the strtab interns: one ID is one text */
+    }
     const odin3_strtab *tab = odin3_design_strtab(design);
     const char *lhs_text = odin3_strtab_get(tab, lhs);
     const char *rhs_text = odin3_strtab_get(tab, rhs);
@@ -315,6 +366,16 @@ typedef struct ij_entry {
     bool multi;
 } ij_entry;
 
+/* The set J of one anchor list, summarised: how many rows, a hash of their chains in order (two
+ * equal sets have equal summaries), and where the first ODIN3_PROV_JOIN_CAP rows are in the heads
+ * pool. J is long (a CPU net can have most of the design behind it) and only these are needed. */
+typedef struct join_sum {
+    uint32_t count;
+    uint32_t head_off;
+    uint32_t head_len;
+    uint64_t hash;
+} join_sum;
+
 /* Not thread safe: the cache of a design is filled lazily and without a lock; labels of one design
  * must be computed from one thread at a time (the writers are single threaded). `busy` catches an
  * overlapping use of an existing cache and fails it (logged) instead of racing. */
@@ -327,6 +388,10 @@ typedef struct label_cache {
     odin3_vec ij_pool;       /* uint64_t: anchor << 32 | chain */
     odin3_u64map *chain_ids; /* (first record << 32 | rest chain) -> chain ID (> 0; 0: empty) */
     uint32_t chain_count;
+    label_marks marks;        /* scratch row sets, reused by every label of the design */
+    odin3_u64map *join_index; /* (entry off << 32 | len) -> join summary number + 1 */
+    odin3_vec joins;          /* join_sum */
+    odin3_vec join_heads;     /* uint32_t: the first rows of the J of each summary */
     atomic_flag busy;
 } label_cache;
 
@@ -335,6 +400,10 @@ static void cache_destroy(void *data) {
     odin3_u64map_destroy(cache->index);
     odin3_u64map_destroy(cache->ij_index);
     odin3_u64map_destroy(cache->chain_ids);
+    odin3_u64map_destroy(cache->join_index);
+    marks_free(&cache->marks);
+    odin3_vec_free(&cache->joins);
+    odin3_vec_free(&cache->join_heads);
     odin3_vec_free(&cache->entries);
     odin3_vec_free(&cache->pool);
     odin3_vec_free(&cache->ij_entries);
@@ -355,7 +424,12 @@ static void *cache_create(void) {
     cache->index = odin3_u64map_create(0);
     cache->ij_index = odin3_u64map_create(0);
     cache->chain_ids = odin3_u64map_create(0);
-    if (cache->index == NULL || cache->ij_index == NULL || cache->chain_ids == NULL) {
+    cache->join_index = odin3_u64map_create(0);
+    marks_init(&cache->marks);
+    odin3_vec_init(&cache->joins, sizeof(join_sum));
+    odin3_vec_init(&cache->join_heads, sizeof(uint32_t));
+    if (cache->index == NULL || cache->ij_index == NULL || cache->chain_ids == NULL ||
+        cache->join_index == NULL) {
         cache_destroy(cache);
         return NULL;
     }
@@ -424,30 +498,30 @@ static odin3_status parents_ready(const label_cache *cache, odin3_vec *todo,
 }
 
 /* Adds the anchors of one entry not yet in seen to merged. */
-static odin3_status merge_part(const label_cache *cache, const anchor_entry *part,
-                               odin3_u64map *seen, odin3_vec *merged) {
+static odin3_status merge_part(const label_cache *cache, const anchor_entry *part, mark_set *seen,
+                               odin3_vec *merged) {
     const uint32_t *list = entry_anchors(cache, part);
     for (uint32_t i = 0; i < part->len; i++) {
-        uint64_t unused = 0;
-        if (odin3_u64map_get(seen, list[i], &unused)) {
+        if (mark_has(seen, list[i])) {
             continue;
         }
         uint32_t *slot = odin3_vec_push(merged);
-        if (slot == NULL || odin3_u64map_put(seen, (odin3_kv){list[i], 1}) != ODIN3_OK) {
+        if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
         }
+        mark_add(seen, list[i]);
         *slot = list[i];
     }
     return ODIN3_OK;
 }
 
 /* The union of the anchors of the data parents into the pool; entry gets its range. */
-static odin3_status union_entry(label_cache *cache, const odin3_prov_record *rec, uint32_t data,
-                                anchor_entry *entry) {
-    odin3_u64map *seen = odin3_u64map_create(0);
+static odin3_status union_entry(const odin3_design *design, label_cache *cache,
+                                const odin3_prov_record *rec, uint32_t data, anchor_entry *entry) {
     odin3_vec merged;
     odin3_vec_init(&merged, sizeof(uint32_t));
-    odin3_status st = seen != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    mark_set *seen = &cache->marks.seen;
+    odin3_status st = mark_begin(seen, odin3_construct_end(design));
     for (uint32_t k = 0; st == ODIN3_OK && k < data; k++) {
         const anchor_entry *part = entry_of(cache, rec->parents.ids[k].v);
         entry->flags |= part->flags & (E_SPAN_ONLY | E_HAS_CTX);
@@ -467,7 +541,6 @@ static odin3_status union_entry(label_cache *cache, const odin3_prov_record *rec
                 *(const uint32_t *)odin3_vec_cat(&merged, i);
         }
     }
-    odin3_u64map_destroy(seen);
     odin3_vec_free(&merged);
     return st;
 }
@@ -483,7 +556,7 @@ static odin3_status derived_entry(const odin3_design *design, label_cache *cache
         entry = (anchor_entry){only->off, only->len, only->flags & (E_SPAN_ONLY | E_HAS_CTX)};
         entry.flags |= data < count ? (uint32_t)E_HAS_CTX : 0U;
     } else {
-        odin3_status st = union_entry(cache, rec, data, &entry);
+        odin3_status st = union_entry(design, cache, rec, data, &entry);
         if (st != ODIN3_OK) {
             return st;
         }
@@ -541,26 +614,22 @@ static odin3_status cache_entry(const odin3_design *design, uint32_t record, lab
 }
 
 /* rows := the reduced anchors of entry (3.3) in the key order, a chain once. */
-static odin3_status entry_set(const odin3_design *design, const label_cache *cache,
+static odin3_status entry_set(const odin3_design *design, label_cache *cache,
                               const anchor_entry *entry, odin3_vec *rows) {
-    odin3_u64map *members = odin3_u64map_create(0);
-    odin3_status st = members != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = mark_begin(&cache->marks.members, odin3_construct_end(design));
     const uint32_t *list = entry_anchors(cache, entry);
     for (uint32_t i = 0; st == ODIN3_OK && i < entry->len; i++) {
         uint32_t *slot = odin3_vec_push(rows);
-        st = slot != NULL ? odin3_u64map_put(members, (odin3_kv){list[i], 1}) : ODIN3_ERR_NO_MEMORY;
+        st = slot != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
         if (slot != NULL) {
             *slot = list[i];
+            mark_add(&cache->marks.members, list[i]);
         }
     }
     if (st == ODIN3_OK) {
-        st = reduce_rows(design, rows, members);
+        st = reduce_rows(design, rows, &cache->marks);
     }
-    if (st == ODIN3_OK) {
-        st = order_rows(design, rows);
-    }
-    odin3_u64map_destroy(members);
-    return st;
+    return st == ODIN3_OK ? order_rows(design, rows) : st;
 }
 
 /* True when two rows have the same chain from the module down (the same construct, 3.3). */
@@ -575,39 +644,90 @@ static bool same_chain(const odin3_design *design, uint32_t lhs, uint32_t rhs) {
     return lhs == 0 && rhs == 0;
 }
 
-/* True when the ordered sets hold the same constructs, one by one. */
-static bool sets_equal(const odin3_design *design, const odin3_vec *lhs, const odin3_vec *rhs) {
-    if (lhs->len != rhs->len) {
-        return false;
+/* A hash of the chain of row from the module down, over the fields cmp_row compares (strings by
+ * ID: the strtab interns, so one ID is one text). */
+static uint64_t chain_hash(const odin3_design *design, uint32_t row) {
+    uint64_t hash = FNV_OFFSET;
+    for (uint32_t up = row; up != 0; up = odin3_construct_get(design, up)->parent) {
+        const odin3_construct_row *cur = odin3_construct_get(design, up);
+        hash = mix(mix(mix(mix(mix(hash, cur->file), cur->line), cur->col), cur->end_line),
+                   cur->end_col);
+        hash = mix(mix(mix(hash, cur->kind), cur->name), cur->part);
     }
-    for (size_t i = 0; i < lhs->len; i++) {
-        if (!same_chain(design, *(const uint32_t *)odin3_vec_cat(lhs, i),
-                        *(const uint32_t *)odin3_vec_cat(rhs, i))) {
-            return false;
-        }
-    }
-    return true;
+    return hash;
 }
 
-/* The ordered set J of a record, and whether a single data parent has the same one. */
+/* The summary of J of an anchor list, from the rows (key order, a chain once). */
+static join_sum summarise_rows(const odin3_design *design, const odin3_vec *rows) {
+    join_sum sum = {.count = (uint32_t)rows->len, .hash = FNV_OFFSET};
+    for (size_t i = 0; i < rows->len; i++) {
+        sum.hash = mix(sum.hash, chain_hash(design, *(const uint32_t *)odin3_vec_cat(rows, i)));
+    }
+    return sum;
+}
+
+/* Stores sum and the head of rows for the entry key. */
+static odin3_status join_store(label_cache *cache, uint64_t key, join_sum sum,
+                               const odin3_vec *rows) {
+    uint32_t head = sum.count < ODIN3_PROV_JOIN_CAP ? sum.count : (uint32_t)ODIN3_PROV_JOIN_CAP;
+    sum.head_off = (uint32_t)cache->join_heads.len;
+    sum.head_len = head;
+    for (uint32_t i = 0; i < head; i++) {
+        uint32_t *slot = odin3_vec_push(&cache->join_heads);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = *(const uint32_t *)odin3_vec_cat(rows, i);
+    }
+    join_sum *slot = odin3_vec_push(&cache->joins);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = sum;
+    return odin3_u64map_put(cache->join_index, (odin3_kv){key, cache->joins.len}) == ODIN3_OK
+               ? ODIN3_OK
+               : ODIN3_ERR_NO_MEMORY;
+}
+
+/* The summary of J of an anchor entry, worked out once per distinct anchor list (records with one
+ * data parent share the list of that parent). */
+static odin3_status join_of(const odin3_design *design, label_cache *cache,
+                            const anchor_entry *entry, join_sum *out) {
+    uint64_t key = ((uint64_t)entry->off << KEY_SHIFT) | entry->len;
+    uint64_t at = 0;
+    if (odin3_u64map_get(cache->join_index, key, &at)) {
+        *out = *(const join_sum *)odin3_vec_cat(&cache->joins, at - 1U);
+        return ODIN3_OK;
+    }
+    odin3_vec rows;
+    odin3_vec_init(&rows, sizeof(uint32_t));
+    odin3_status st = entry_set(design, cache, entry, &rows);
+    if (st == ODIN3_OK) {
+        *out = summarise_rows(design, &rows);
+        st = join_store(cache, key, *out, &rows);
+        *out = *(const join_sum *)odin3_vec_cat(&cache->joins, cache->joins.len - 1U);
+    }
+    odin3_vec_free(&rows);
+    return st;
+}
+
+/* The set J of a record, and whether a single data parent has the same one. */
 typedef struct same_probe {
-    const odin3_vec *rows;
+    join_sum own;
     bool same;
 } same_probe;
 
 /* Sets probe->same when a single data parent of rec has the same set J. */
-static odin3_status parent_has_same_set(const odin3_design *design, const label_cache *cache,
+static odin3_status parent_has_same_set(const odin3_design *design, label_cache *cache,
                                         const odin3_prov_record *rec, uint32_t data,
                                         same_probe *probe) {
     for (uint32_t k = 0; k < data && !probe->same; k++) {
-        odin3_vec theirs;
-        odin3_vec_init(&theirs, sizeof(uint32_t));
-        odin3_status st = entry_set(design, cache, entry_of(cache, rec->parents.ids[k].v), &theirs);
-        probe->same = st == ODIN3_OK && sets_equal(design, &theirs, probe->rows);
-        odin3_vec_free(&theirs);
+        join_sum theirs;
+        odin3_status st = join_of(design, cache, entry_of(cache, rec->parents.ids[k].v), &theirs);
         if (st != ODIN3_OK) {
             return st;
         }
+        probe->same = theirs.count == probe->own.count && theirs.hash == probe->own.hash;
     }
     return ODIN3_OK;
 }
@@ -826,12 +946,10 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
                                const odin3_prov_record *rec, const anchor_entry *entry,
                                odin3_prov_label *label) {
     odin3_prov_info *info = &label->info;
-    odin3_vec rows;
-    odin3_vec_init(&rows, sizeof(uint32_t));
-    same_probe probe = {&rows, false};
+    same_probe probe = {.same = false};
     bool instance = false;
     uint32_t data = rec->parents.count - info->n_context;
-    odin3_status st = entry_set(design, cache, entry, &rows);
+    odin3_status st = join_of(design, cache, entry, &probe.own);
     if (st == ODIN3_OK) {
         st = parent_has_same_set(design, cache, rec, data, &probe);
     }
@@ -839,14 +957,14 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
         st = instance_join_of(design, cache, info->record, &instance);
     }
     if (st != ODIN3_OK) {
-        odin3_vec_free(&rows);
         return st;
     }
-    info->n_joined = (uint32_t)rows.len;
-    if (rows.len >= 2 && !probe.same) {
+    const join_sum own = probe.own;
+    info->n_joined = own.count;
+    if (own.count >= 2 && !probe.same) {
         info->flags |= ODIN3_PROV_F_JOIN;
     }
-    if (rows.len > ODIN3_PROV_JOIN_CAP) {
+    if (own.count > ODIN3_PROV_JOIN_CAP) {
         info->flags |= ODIN3_PROV_F_LOSSY_CAP;
     }
     odin3_opclass cls;
@@ -856,8 +974,14 @@ static odin3_status label_join(const odin3_design *design, label_cache *cache,
     if (instance) {
         info->flags |= ODIN3_PROV_F_JOIN_INSTANCE;
     }
-    odin3_vec_free(&label->joined);
-    label->joined = rows;
+    odin3_vec_clear(&label->joined);
+    for (uint32_t i = 0; i < own.head_len; i++) {
+        uint32_t *slot = odin3_vec_push(&label->joined);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = *(const uint32_t *)odin3_vec_cat(&cache->join_heads, own.head_off + i);
+    }
     return ODIN3_OK;
 }
 
@@ -1127,13 +1251,6 @@ static uint32_t pm_resolve(const pm *st, uint32_t row) {
         row = odin3_construct_get(st->design, row)->parent;
     }
     return row;
-}
-
-static const uint64_t FNV_OFFSET = 0xcbf29ce484222325ULL;
-static const uint64_t FNV_PRIME = 0x100000001b3ULL;
-
-static uint64_t mix(uint64_t hash, uint64_t word) {
-    return (hash ^ word) * FNV_PRIME;
 }
 
 /* The hash of every row's chain: its own key fields mixed into the parent's. Parents come first
