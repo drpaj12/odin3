@@ -1882,15 +1882,21 @@ static bool var_init(parser *pr, int var, const tb_expr *init, const var_shape *
 
 /* The expression a parameter of this instance is overridden with, or NULL (the default stays).
  * Only `parameter` is overridable, positionally in declaration order or by name. */
-static tb_expr *param_override(parser *pr, const char *kw, const char *name) {
-    if (pr->subs.len == 0 || strcmp(kw, "parameter") != 0) {
+/* A declaration keyword and the name it declares. */
+typedef struct decl_name {
+    const char *kw;
+    const char *name;
+} decl_name;
+
+static tb_expr *param_override(parser *pr, decl_name decl) {
+    if (pr->subs.len == 0 || strcmp(decl.kw, "parameter") != 0) {
         return NULL;
     }
     sub_frame *frm = odin3_vec_at(&pr->subs, pr->subs.len - 1U);
     uint32_t index = frm->nparam++;
     for (uint32_t i = 0; i < frm->nov; i++) {
         bool named = frm->ovs[i].name[0] != '\0';
-        if ((named && strcmp(frm->ovs[i].name, name) == 0) || (!named && i == index)) {
+        if ((named && strcmp(frm->ovs[i].name, decl.name) == 0) || (!named && i == index)) {
             frm->ovs[i].used = true;
             return frm->ovs[i].expr;
         }
@@ -1900,17 +1906,16 @@ static tb_expr *param_override(parser *pr, const char *kw, const char *name) {
 
 /* A reg, wire or integer declaration of a name already declared by direction only (a port, a task
  * argument): it sets the type of that variable. *handled says so. */
-static bool refine_var(parser *pr, const char *kw, const char *name, var_shape shape,
-                       bool *handled) {
+static bool refine_var(parser *pr, decl_name decl, var_shape shape, bool *handled) {
     char full[QNAME];
     (void)snprintf(full, sizeof full, "%s%s%s%s", pr->prefix, pr->scope,
-                   pr->scope[0] != '\0' ? "." : "", name);
+                   pr->scope[0] != '\0' ? "." : "", decl.name);
     *handled = false;
     alias_ent *ali = find_alias(pr, full);
     if (ali != NULL && ali->refinable) {
         ali->refinable = false;
         *handled = true;
-        if (ali->is_out && strcmp(kw, "reg") == 0 && pr->tb->four_state) {
+        if (ali->is_out && strcmp(decl.kw, "reg") == 0 && pr->tb->four_state) {
             tb_var_fill(&pr->tb->vars[ali->var], (uint32_t)ODIN3_W4_X);
         }
         return true;
@@ -1924,11 +1929,28 @@ static bool refine_var(parser *pr, const char *kw, const char *name, var_shape s
     var->refinable = false;
     var->is_wire = shape.is_wire;
     var->sgn = var->sgn || shape.sgn;
-    if (strcmp(kw, "integer") == 0 || shape.ranged) {
+    if (strcmp(decl.kw, "integer") == 0 || shape.ranged) {
         var->width = shape.width;
         var->lo = shape.lo;
     }
     return var_storage(pr, idx);
+}
+
+/* The initialiser after `name =` of a declaration; a parameter takes its override instead. */
+static bool decl_init(parser *pr, decl_name decl, int var, var_shape shape) {
+    bool is_param = strcmp(decl.kw, "parameter") == 0 || strcmp(decl.kw, "localparam") == 0;
+    tb_expr *over = param_override(pr, decl);
+    tb_expr *init = parse_expr(pr);
+    if (init == NULL) {
+        return false;
+    }
+    if (over != NULL) {
+        init = over;
+    }
+    if (shape.is_wire) {
+        return add_assign(pr, var, init);
+    }
+    return var_init(pr, var, init, is_param && shape.width == 0U ? &shape : NULL);
 }
 
 static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
@@ -1941,7 +1963,8 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     pr->pos++;
     shape.is_wire = strcmp(kw, "wire") == 0;
     bool refined = false;
-    if (!is_param && !refine_var(pr, kw, name, shape, &refined)) {
+    decl_name decl = {kw, name};
+    if (!is_param && !refine_var(pr, decl, shape, &refined)) {
         return false;
     }
     int var = refined ? find_var(pr, name) : add_var(pr, name, shape);
@@ -1955,18 +1978,7 @@ static bool parse_decl_item(parser *pr, const char *kw, var_shape shape) {
     if (!accept_op(pr, "=")) {
         return !is_param || fail(pr, "parameter without a value");
     }
-    tb_expr *over = param_override(pr, kw, name);
-    tb_expr *init = parse_expr(pr);
-    if (init == NULL) {
-        return false;
-    }
-    if (over != NULL) {
-        init = over;
-    }
-    if (shape.is_wire) {
-        return add_assign(pr, var, init);
-    }
-    return var_init(pr, var, init, is_param && shape.width == 0U ? &shape : NULL);
+    return decl_init(pr, decl, var, shape);
 }
 
 /* After the declaration keyword kw: [signed] [range] into shape. */
@@ -2314,7 +2326,8 @@ static tb_inst *next_inst_slot(parser *pr) {
     return &grown[tb->ninsts++];
 }
 
-/* --- testbench-side module instances (design note docs/specs/2026-11-07-sim-tb-submodules.md) --- */
+/* --- testbench-side module instances (design note docs/specs/2026-11-07-sim-tb-submodules.md) ---
+ */
 
 enum { PORT_IN = 1, PORT_OUT = 2 };
 
@@ -2357,6 +2370,24 @@ static void set_prefix(parser *pr) {
     (void)snprintf(pr->prefix, sizeof pr->prefix, "%s", frm != NULL ? frm->prefix : "");
 }
 
+/* One override: `expr` or `.name(expr)`. */
+static bool parse_one_override(parser *pr, sub_ov *ov) {
+    *ov = (sub_ov){0};
+    bool named = accept_op(pr, ".");
+    if (named) {
+        if (cur(pr)->kind != TK_ID) {
+            return fail(pr, "parameter override syntax");
+        }
+        (void)snprintf(ov->name, sizeof ov->name, "%s", cur(pr)->text);
+        pr->pos++;
+        if (!expect_op(pr, "(")) {
+            return false;
+        }
+    }
+    ov->expr = parse_expr(pr);
+    return ov->expr != NULL && (!named || expect_op(pr, ")"));
+}
+
 /* `#( expr, .name(expr) )` of an instance: the overrides, parsed in the parent scope. */
 static bool parse_overrides(parser *pr, sub_frame *frm) {
     sub_ov list[SUB_OVERRIDES];
@@ -2369,21 +2400,10 @@ static bool parse_overrides(parser *pr, sub_frame *frm) {
         if (count == SUB_OVERRIDES) {
             return fail(pr, "more than 32 parameter overrides");
         }
-        list[count] = (sub_ov){0};
-        if (accept_op(pr, ".")) {
-            if (cur(pr)->kind != TK_ID) {
-                return fail(pr, "parameter override syntax");
-            }
-            (void)snprintf(list[count].name, sizeof list[count].name, "%s", cur(pr)->text);
-            pr->pos++;
-            if (!expect_op(pr, "(")) {
-                return false;
-            }
-        }
-        list[count].expr = parse_expr(pr);
-        if (list[count++].expr == NULL || (list[count - 1U].name[0] != '\0' && !expect_op(pr, ")"))) {
+        if (!parse_one_override(pr, &list[count])) {
             return false;
         }
+        count++;
     } while (accept_op(pr, ","));
     frm->ovs = pnew(pr, count * sizeof *frm->ovs);
     if (frm->ovs == NULL || !expect_op(pr, ")")) {
@@ -2436,7 +2456,8 @@ static bool alias_port(parser *pr, const sub_port *port, const tb_conn *conn, va
         fail(pr, ent == NULL ? "out of memory" : "name longer than 63 characters");
         return false;
     }
-    *ent = (alias_ent){.var = expr->var, .refinable = shape.refinable, .is_out = port->dir == PORT_OUT};
+    *ent = (alias_ent){
+        .var = expr->var, .refinable = shape.refinable, .is_out = port->dir == PORT_OUT};
     memcpy(ent->name, full, strlen(full) + 1U);
     if (port->dir == PORT_OUT && !shape.is_wire && pr->tb->four_state) {
         tb_var_fill(&pr->tb->vars[expr->var], (uint32_t)ODIN3_W4_X); /* an output reg starts x */
@@ -2462,7 +2483,7 @@ static bool declare_port(parser *pr, const char *name, uint8_t dir, var_shape sh
     port->dir = dir;
     port->var = -1;
     shape.is_wire = dir == PORT_IN || shape.is_wire;
-    tb_conn *conn = conn_of(frm, (uint32_t)idx, name);
+    const tb_conn *conn = conn_of(frm, (uint32_t)idx, name);
     if (alias_port(pr, port, conn, shape)) {
         port->aliased = true;
         return true;
@@ -2686,7 +2707,7 @@ static bool parse_sub_instance(parser *pr, const mod_def *def) {
 
 /* The port of the frame becomes a continuous assignment to or from its connection. */
 static bool connect_port(parser *pr, sub_frame *frm, uint32_t index) {
-    sub_port *port = &frm->ports[index];
+    const sub_port *port = &frm->ports[index];
     const tb_conn *conn = conn_of(frm, index, port->name);
     if (port->aliased || conn == NULL || conn->expr == NULL) {
         return true;
@@ -2725,7 +2746,8 @@ static bool finish_sub(parser *pr) {
     for (uint32_t i = 0; i < frm->nov; i++) {
         if (frm->ovs[i].name[0] != '\0' ? !frm->ovs[i].used : i >= frm->nparam) {
             (void)snprintf(msg, sizeof msg, "module %s has no parameter %s", frm->module,
-                           frm->ovs[i].name[0] != '\0' ? frm->ovs[i].name : "for a positional override");
+                           frm->ovs[i].name[0] != '\0' ? frm->ovs[i].name
+                                                       : "for a positional override");
             return fail(pr, msg);
         }
     }
@@ -2736,7 +2758,7 @@ static bool finish_sub(parser *pr) {
 }
 
 static bool parse_instance(parser *pr) {
-    mod_def *def = tb_side_module(pr);
+    const mod_def *def = tb_side_module(pr);
     if (def != NULL) {
         return parse_sub_instance(pr, def);
     }
@@ -2797,13 +2819,17 @@ static bool parse_pull(parser *pr, uint8_t pull) {
     return expect_op(pr, ")") && expect_op(pr, ";");
 }
 
+static bool is_decl_kw(const parser *pr) {
+    return is_kw(pr, "reg") || is_kw(pr, "wire") || is_kw(pr, "integer") ||
+           is_kw(pr, "parameter") || is_kw(pr, "localparam");
+}
+
 static bool parse_item(parser *pr) {
     const tb_tok *tok = cur(pr);
     if (tok->kind != TK_ID) {
         return fail(pr, "module item");
     }
-    if (is_kw(pr, "reg") || is_kw(pr, "wire") || is_kw(pr, "integer") || is_kw(pr, "parameter") ||
-        is_kw(pr, "localparam")) {
+    if (is_decl_kw(pr)) {
         return parse_decl(pr);
     }
     if (is_kw(pr, "initial")) {
@@ -2884,7 +2910,8 @@ static void parse_items(parser *pr) {
 static bool index_modules(parser *pr, uint32_t ntoks) {
     for (uint32_t i = 0; i + 1U < ntoks; i++) {
         const tb_tok *tok = &pr->toks[i];
-        if (tok->kind != TK_ID || strcmp(tok->text, "module") != 0 || pr->toks[i + 1U].kind != TK_ID) {
+        if (tok->kind != TK_ID || strcmp(tok->text, "module") != 0 ||
+            pr->toks[i + 1U].kind != TK_ID) {
             continue;
         }
         mod_def *def = odin3_vec_push(&pr->mods);
