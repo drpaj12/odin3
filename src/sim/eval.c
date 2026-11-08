@@ -398,18 +398,18 @@ static odin3_status build_poke_map(odin3_sim *sim) {
     if (sim->poke_map == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    for (uint32_t c = 0; c < sim->n_cells; c++) {
-        const odin3_sim_flat *flat = &sim->cells[c];
+    for (uint32_t cell_no = 0; cell_no < sim->n_cells; cell_no++) {
+        const odin3_sim_flat *flat = &sim->cells[cell_no];
         if (!odin3_sim_is_edge(flat->def)) {
             continue;
         }
         uint32_t at = flat->state_first;
-        for (uint32_t p = 0; p < flat->view.n_ports; p++) {
-            if (flat->def->ports[p].dir != ODIN3_DIR_OUT) {
+        for (uint32_t port_no = 0; port_no < flat->view.n_ports; port_no++) {
+            if (flat->def->ports[port_no].dir != ODIN3_DIR_OUT) {
                 continue;
             }
-            for (uint32_t b = 0; b < flat->view.ports[p].width; b++) {
-                sim->poke_map[flat->view.ports[p].idx[b]] = ++at;
+            for (uint32_t bit_no = 0; bit_no < flat->view.ports[port_no].width; bit_no++) {
+                sim->poke_map[flat->view.ports[port_no].idx[bit_no]] = ++at;
             }
         }
     }

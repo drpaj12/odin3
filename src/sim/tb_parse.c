@@ -980,6 +980,23 @@ static xres step_wordlow(parser *pr, xent *top, bool *want) {
     return expect_op(pr, "]") && push_val(pr, sel) ? XR_CONT : XR_FAIL;
 }
 
+/* A select context (`name[`, `inst.mem[`, `mem[i][`, and their part-select tails) reaches its `]`.
+ */
+static xres step_select(parser *pr, xent *top, bool *want) {
+    switch (top->kind) {
+    case X_INDEX:
+        return step_index(pr, top, want);
+    case X_HIERIDX:
+        return step_hieridx(pr, top, want);
+    case X_WORDSEL:
+        return step_wordsel(pr, top, want);
+    case X_WORDLOW:
+        return step_wordlow(pr, top, want);
+    default:
+        return step_low(pr, top, want);
+    }
+}
+
 /* After a finished sub-expression with nothing left to reduce: act on the innermost context. */
 static xres step_close(parser *pr, bool *want) {
     xent *top = top_ent(pr);
@@ -1008,16 +1025,8 @@ static xres step_close(parser *pr, bool *want) {
     case X_ARGS:
     case X_CONCAT:
         return step_list(pr, top, want);
-    case X_INDEX:
-        return step_index(pr, top, want);
-    case X_HIERIDX:
-        return step_hieridx(pr, top, want);
-    case X_WORDSEL:
-        return step_wordsel(pr, top, want);
-    case X_WORDLOW:
-        return step_wordlow(pr, top, want);
     default:
-        return step_low(pr, top, want);
+        return step_select(pr, top, want);
     }
 }
 
@@ -1037,15 +1046,26 @@ static bool push_binary(parser *pr, int prec) {
     return true;
 }
 
+/* True when the `[` at the cursor selects a bit or part of the array word just parsed. */
+static bool word_select_ahead(const parser *pr) {
+    if (pr->primary_only || !is_op(pr, "[") || pr->vals.len == 0) {
+        return false;
+    }
+    const tb_expr *word = *(tb_expr *const *)odin3_vec_cat(&pr->vals, pr->vals.len - 1U);
+    return word->kind == E_MEM || word->kind == E_HIERMEM;
+}
+
+static xres begin_word_select(parser *pr, bool *want) {
+    pr->pos++;
+    *want = true;
+    tb_expr *word = pop_val(pr);
+    return push_ent(pr, X_WORDSEL, word) != NULL ? XR_CONT : XR_FAIL;
+}
+
 /* One step at a position just after an operand. */
 static xres step_after(parser *pr, bool *want) {
-    if (!pr->primary_only && is_op(pr, "[") && pr->vals.len > 0) {
-        tb_expr *word = *(tb_expr **)odin3_vec_at(&pr->vals, pr->vals.len - 1U);
-        if (word->kind == E_MEM || word->kind == E_HIERMEM) {
-            pr->pos++;
-            *want = true;
-            return pop_val(pr) != NULL && push_ent(pr, X_WORDSEL, word) != NULL ? XR_CONT : XR_FAIL;
-        }
+    if (word_select_ahead(pr)) {
+        return begin_word_select(pr, want);
     }
     if (pr->primary_only && pr->ents.len == pr->efloor) {
         return XR_DONE;

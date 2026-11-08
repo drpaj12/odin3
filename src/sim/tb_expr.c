@@ -685,6 +685,21 @@ static void finish_hiermem(tb_ev *ev, ev_frame *fr) {
     extend(&fr->val[0], expr->width, fr->width, false);
 }
 
+/* A testbench array word, or a read of the DUT: one signal, or a word of an array. */
+static void finish_word(tb_ev *ev, ev_frame *fr) {
+    switch (fr->expr->kind) {
+    case E_MEM:
+        finish_mem(ev, fr);
+        break;
+    case E_HIER:
+        finish_hier(ev, fr);
+        break;
+    default:
+        finish_hiermem(ev, fr);
+        break;
+    }
+}
+
 static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     const tb_expr *expr = fr->expr;
     if (expr->kind == E_NUM) {
@@ -699,6 +714,13 @@ static void finish_leaf(tb_ev *ev, ev_frame *fr) {
     }
 }
 
+/* ?: with an unknown condition merges the two sides. */
+static void finish_cond(ev_frame *fr) {
+    if (fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1) {
+        tb_op_merge(&fr->val[0], &fr->val[1], fr->width);
+    }
+}
+
 static void finish(tb_ev *ev, ev_frame *fr) {
     switch (fr->expr->kind) {
     case E_NUM:
@@ -706,13 +728,9 @@ static void finish(tb_ev *ev, ev_frame *fr) {
         finish_leaf(ev, fr);
         break;
     case E_MEM:
-        finish_mem(ev, fr);
-        break;
     case E_HIER:
-        finish_hier(ev, fr);
-        break;
     case E_HIERMEM:
-        finish_hiermem(ev, fr);
+        finish_word(ev, fr);
         break;
     case E_BITSEL:
     case E_PART:
@@ -728,9 +746,7 @@ static void finish(tb_ev *ev, ev_frame *fr) {
         finish_bin(fr);
         break;
     case E_COND:
-        if (fr->cond != ODIN3_W4_0 && fr->cond != ODIN3_W4_1) {
-            tb_op_merge(&fr->val[0], &fr->val[1], fr->width);
-        }
+        finish_cond(fr);
         break;
     case E_SYS:
         finish_sys(ev, fr);

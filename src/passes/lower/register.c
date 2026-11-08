@@ -113,6 +113,24 @@ static bool is_option(const char *word) {
     return false;
 }
 
+/* The options that take no value (--async-enable-first is hidden, test-only); true when word is
+ * one. */
+static bool set_flag(const char *word, odin3_lower_opts *opts) {
+    const struct {
+        const char *name;
+        bool *flag;
+    } flags[] = {{k_enable_first, &opts->async_enable_first},
+                 {k_keep_sel, &opts->keep_sel},
+                 {k_keep_mem, &opts->keep_mem}};
+    for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++) {
+        if (strcmp(word, flags[i].name) == 0) {
+            *flags[i].flag = true;
+            return true;
+        }
+    }
+    return false;
+}
+
 odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
                                     odin3_lower_opts *opts) {
     memset(opts, 0, sizeof *opts);
@@ -123,16 +141,7 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
     odin3_status st = ODIN3_OK;
     for (const char *word = next_word(&args, &word_buf, &st); word != NULL;
          word = next_word(&args, &word_buf, &st)) {
-        if (strcmp(word, k_enable_first) == 0) { /* hidden, test-only: a flag without a value */
-            opts->async_enable_first = true;
-            continue;
-        }
-        if (strcmp(word, k_keep_sel) == 0) { /* a flag without a value */
-            opts->keep_sel = true;
-            continue;
-        }
-        if (strcmp(word, k_keep_mem) == 0) { /* a flag without a value */
-            opts->keep_mem = true;
+        if (set_flag(word, opts)) {
             continue;
         }
         if (!is_option(word)) {

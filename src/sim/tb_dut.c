@@ -241,13 +241,14 @@ odin3_status tb_inst_signal(tb_module *tb, tb_inst *inst, const char *path, tb_s
     return ODIN3_OK;
 }
 
-enum { ARRAY_MAX = 1U << 20, ARRAY_GAP = 64, HIER_WORD_PATH = 280 };
+enum { ARRAY_MAX = 1U << 20, ARRAY_GAP = 64, ARRAY_FIRST_CAP = 64, HIER_WORD_PATH = 280 };
 
-/* Word k of the array: its signal ID, 0 when the DUT has none (a word `opt` folded to a constant);
- * false on an error (out of memory, a width past the limit or different from the others). */
-static bool array_word(const tb_array_ctx *ac, uint32_t k, uint32_t *id) {
+/* Word `index` of the array: its signal ID, 0 when the DUT has none (a word `opt` folded to a
+ * constant); false on an error (out of memory, a width past the limit or different from the
+ * others). */
+static bool array_word(const tb_array_ctx *ac, uint32_t index, uint32_t *id) {
     char word[HIER_WORD_PATH];
-    (void)snprintf(word, sizeof word, "%s[%u]", ac->path, k);
+    (void)snprintf(word, sizeof word, "%s[%u]", ac->path, index);
     *id = 0;
     if (tb_inst_find(ac->tb, ac->inst, word, id) != ODIN3_OK) {
         return false;
@@ -265,40 +266,47 @@ static bool array_word(const tb_array_ctx *ac, uint32_t k, uint32_t *id) {
     return true;
 }
 
+/* Room for word `index` in out->ids (zero-filled), *cap words now; false on out of memory. */
+static bool array_room(tb_hier_arr *out, uint32_t *cap, uint32_t index) {
+    if (index < *cap) {
+        return true;
+    }
+    uint32_t want = *cap == 0 ? (uint32_t)ARRAY_FIRST_CAP : *cap;
+    while (want <= index) {
+        want *= 2U;
+    }
+    uint32_t *grown = calloc(want, sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    if (out->ids != NULL) {
+        memcpy(grown, out->ids, (size_t)*cap * sizeof *grown);
+        free(out->ids);
+    }
+    out->ids = grown;
+    *cap = want;
+    return true;
+}
+
 odin3_status tb_inst_array(tb_module *tb, tb_inst *inst, const char *path, tb_hier_arr *out) {
     *out = (tb_hier_arr){NULL, 0, 0};
     tb_array_ctx ac = {tb, inst, path, out};
     uint32_t cap = 0;
     uint32_t misses = 0;
-    for (uint32_t k = 0; k < ARRAY_MAX && misses < ARRAY_GAP; k++) {
+    bool more = true;
+    for (uint32_t index = 0; more && index < ARRAY_MAX && misses < ARRAY_GAP; index++) {
         uint32_t id = 0;
-        if (!array_word(&ac, k, &id)) {
-            break;
-        }
+        more = array_word(&ac, index, &id);
         misses = id == 0 ? misses + 1U : 0U;
-        if (id == 0) {
-            continue;
-        }
-        if (k >= cap) {
-            uint32_t want = cap == 0 ? 64U : cap;
-            while (want <= k) {
-                want *= 2U;
-            }
-            uint32_t *grown = calloc(want, sizeof *grown);
-            if (grown == NULL) {
+        if (more && id != 0) {
+            if (!array_room(out, &cap, index)) {
                 free(out->ids);
                 *out = (tb_hier_arr){NULL, 0, 0};
                 return ODIN3_ERR_NO_MEMORY;
             }
-            if (out->ids != NULL) {
-                memcpy(grown, out->ids, (size_t)cap * sizeof *grown);
-                free(out->ids);
-            }
-            out->ids = grown;
-            cap = want;
+            out->ids[index] = id;
+            out->n = index + 1U;
         }
-        out->ids[k] = id;
-        out->n = k + 1U;
     }
     return ODIN3_OK;
 }

@@ -176,8 +176,8 @@ typedef struct tb_readmem_req {
     uint64_t depth; /* the words of the target */
     uint32_t width;
     /* stores the word at addr (< depth); false, with the reason in err, stops the load */
-    bool (*put)(void *ctx, uint32_t addr, const tbv *val, tb_poke_err err);
-    void *ctx;
+    bool (*put)(const void *ctx, uint32_t addr, const tbv *val, tb_poke_err err);
+    const void *ctx;
     bool hex;
     int64_t from, to; /* addresses; to < 0: the last word */
     char *err;
