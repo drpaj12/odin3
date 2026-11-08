@@ -3151,6 +3151,29 @@ static bool index_modules(parser *pr, uint32_t ntoks) {
     return true;
 }
 
+/* Second pass: the DUT instances the first pass found are entered before the items are read. */
+static void seed_insts(parser *pr, const tb_module *pre) {
+    tb_module *tb = pr->tb;
+    if (pre == NULL || pre->ninsts == 0) {
+        return;
+    }
+    tb->insts = pnew(pr, (size_t)pre->ninsts * sizeof *tb->insts);
+    for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
+        tb->insts[i] = (tb_inst){.line = pre->insts[i].line};
+        memcpy(tb->insts[i].name, pre->insts[i].name, sizeof tb->insts[i].name);
+        memcpy(tb->insts[i].module, pre->insts[i].module, sizeof tb->insts[i].module);
+    }
+    tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
+}
+
+/* The per-variable force tables of a module whose source has a force or release. */
+static bool alloc_force(tb_module *tb) {
+    size_t count = (size_t)tb->nvars + 1U;
+    tb->force_rhs = (const tb_expr **)tb_alloc(tb, count * sizeof(void *));
+    tb->force_on = tb_alloc(tb, count * sizeof(bool));
+    return tb->force_rhs != NULL && tb->force_on != NULL;
+}
+
 /* Parses src once. `pre` (may be NULL) is the module of a first pass: its instances are entered
  * before the items are read. */
 static odin3_status parse_once(const tb_source *src, const char *top, const tb_module *pre,
@@ -3181,15 +3204,7 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     odin3_vec_init(&pr.subs, sizeof(sub_frame));
     odin3_vec_init(&pr.aliases, sizeof(alias_ent));
     pr.failed = !index_modules(&pr, lexed.n);
-    if (pre != NULL && pre->ninsts > 0) {
-        tb->insts = pnew(&pr, (size_t)pre->ninsts * sizeof *tb->insts);
-        for (uint32_t i = 0; tb->insts != NULL && i < pre->ninsts; i++) {
-            tb->insts[i] = (tb_inst){.line = pre->insts[i].line};
-            memcpy(tb->insts[i].name, pre->insts[i].name, sizeof tb->insts[i].name);
-            memcpy(tb->insts[i].module, pre->insts[i].module, sizeof tb->insts[i].module);
-        }
-        tb->ninsts = tb->insts != NULL ? pre->ninsts : 0U;
-    }
+    seed_insts(&pr, pre);
     locate_top(&pr, top, lexed.n);
     if (!pr.failed && parse_header(&pr, top)) {
         parse_items(&pr);
@@ -3209,13 +3224,9 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
         return ODIN3_ERR_INVALID_ARG;
     }
     tb->saw_hier = pr.saw_hier;
-    if (pr.saw_force) {
-        tb->force_rhs = tb_alloc(tb, ((size_t)tb->nvars + 1U) * sizeof *tb->force_rhs);
-        tb->force_on = tb_alloc(tb, ((size_t)tb->nvars + 1U) * sizeof *tb->force_on);
-        if (tb->force_rhs == NULL || tb->force_on == NULL) {
-            tb_module_free(tb);
-            return ODIN3_ERR_NO_MEMORY;
-        }
+    if (pr.saw_force && !alloc_force(tb)) {
+        tb_module_free(tb);
+        return ODIN3_ERR_NO_MEMORY;
     }
     *out = tb;
     return ODIN3_OK;
