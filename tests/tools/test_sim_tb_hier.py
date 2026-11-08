@@ -340,9 +340,8 @@ class HierarchicalReadTest(unittest.TestCase):
         tb = HIER_TB.replace("dut.u_leaf.r[0])", "dut.u_leaf.r[d])")
         done = sim_tb({"dut.v": TWO_LEVEL, "tb.v": tb}, "tb.v",
                       prefix="hierarchy --top top; proc; opt; lower; ")
-        self.assertNotEqual(done.returncode, 0)
-        self.assertIn("tb.v:10: unsupported: hierarchical name (name.name[number], constant "
-                      "indices only)", done.stderr)
+        # a variable bit index of a DUT signal reads one bit (since the DUT array reads)
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
 
     def test_part_select_is_an_error(self) -> None:
         tb = HIER_TB.replace("dut.u_leaf.r[0])", "dut.u_leaf.r[3:0])")
@@ -356,7 +355,7 @@ class HierarchicalReadTest(unittest.TestCase):
         done = sim_tb({"dut.v": TWO_LEVEL, "tb.v": tb}, "tb.v",
                       prefix="hierarchy --top top; proc; opt; lower; ")
         self.assertNotEqual(done.returncode, 0)
-        self.assertIn("$readmem into a hierarchical path is not supported", done.stderr)
+        self.assertIn("$readmem expects", done.stderr)
 
     def test_dut_declared_after_its_use(self) -> None:
         inst = "  top dut(.clk(clk), .d(d), .q(q));\n"
@@ -389,8 +388,8 @@ endmodule
         done = sim_tb({"dut.v": dut, "tb.v": tb}, "tb.v")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("tb.v:8:", done.stderr)
-        self.assertIn("a memory word is not readable by hierarchical path after lower",
-                      done.stderr)
+        self.assertIn("has no signal `m[1]`", done.stderr)
+        self.assertIn("lower --keep-mem", done.stderr)
 
     def test_write_to_a_hierarchical_name_is_refused(self) -> None:
         tb = HIER_TB.replace("d = 5;", "d = 5; dut.u_leaf.r = 1;", 1)

@@ -583,14 +583,20 @@ static tb_expr *make_hiermem(parser *pr, int inst, const char *path, uint32_t fi
     if (!pr->lenient) {
         odin3_status st = tb_inst_array(pr->tb, &pr->tb->insts[inst], path, &arr);
         if (st != ODIN3_OK || arr.n == 0) {
+            free(arr.ids);
+            pr->failed = true;
+            if (!is_op(pr, "[")) { /* a plain name: say there is no such signal */
+                tb_hier_sig none;
+                (void)tb_inst_signal(pr->tb, &pr->tb->insts[inst], path,
+                                     (tb_src_loc){pr->file, pr->toks[first].line}, &none);
+                return NULL;
+            }
             odin3_log(ODIN3_LOG_ERROR,
                       "%s: DUT `%s` has no word array `%s` (its words `%s[0]`, `%s[1]`, ... are "
                       "named by `lower --keep-mem`; `opt` removes the name of a memory nothing "
                       "reads)",
                       tb_where(pr->file, pr->toks[first].line, where, sizeof where),
                       pr->tb->insts[inst].name, path, path, path);
-            free(arr.ids);
-            pr->failed = true;
             return NULL;
         }
     }
@@ -633,6 +639,10 @@ static xres step_hieridx(parser *pr, xent *top, bool *want) {
     expr->a = pop_val(pr);
     odin3_vec_pop(&pr->ents);
     *want = false;
+    if (is_op(pr, ":")) {
+        fail(pr, "hierarchical name (part-selects are not supported)");
+        return XR_FAIL;
+    }
     return expect_op(pr, "]") && push_val(pr, expr) ? XR_CONT : XR_FAIL;
 }
 

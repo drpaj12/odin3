@@ -1,12 +1,12 @@
 // $readmemh into a DUT memory, hierarchical reads with a variable index, a part select of a word
-module poke_tb;
+module xpoke_tb;
   reg clk;
   reg [2:0] addr;
   reg we;
   reg [7:0] din;
   wire [7:0] data, q;
   integer i;
-  poke uut (.clk(clk), .addr(addr), .we(we), .din(din), .data(data), .q(q));
+  xpoke uut (.clk(clk), .addr(addr), .we(we), .din(din), .data(data), .q(q));
   always #5 clk = ~clk;
   initial begin
     clk = 0; we = 0; din = 0; addr = 0;
