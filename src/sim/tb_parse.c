@@ -50,6 +50,8 @@ typedef struct parser {
     odin3_vec subs;      /* sub_frame: open testbench-side module instances */
     odin3_vec aliases;   /* alias_ent: port names that stand for a variable of the parent scope */
     char prefix[TB_NAME]; /* the instance path of the module being parsed ("u0.u1."), or "" */
+    const tb_module *pre; /* second pass: the module the first pass built (every instance path) */
+    int dummy;            /* first pass: the variable a hierarchical name stands for, or -1 */
 } parser;
 
 /* Where a module of the testbench files starts: the index of its `module` token. */
@@ -765,19 +767,12 @@ static bool begin_hier(parser *pr, bool *want) {
     return push_val(pr, expr);
 }
 
-static bool begin_ident(parser *pr, bool *want) {
-    if (pr->toks[pr->pos + 1U].kind == TK_OP && strcmp(pr->toks[pr->pos + 1U].text, ".") == 0) {
-        return begin_hier(pr, want);
-    }
-    int var = find_var(pr, cur(pr)->text);
-    if (var < 0) {
-        return fail(pr, "undeclared identifier (declare before use)");
-    }
+/* A reference to variable var at the cursor-1 token: a name, or a name with `[` select. */
+static bool var_ref(parser *pr, int var, bool *want) {
     tb_expr *expr = new_expr(pr, E_VAR);
     if (expr == NULL) {
         return false;
     }
-    pr->pos++;
     expr->var = var;
     expr->width = pr->tb->vars[var].width;
     expr->sgn = pr->tb->vars[var].sgn;
@@ -789,12 +784,152 @@ static bool begin_ident(parser *pr, bool *want) {
     return push_val(pr, expr);
 }
 
+/* A dotted name `a.b.c` is at the cursor (the first part is an identifier followed by `.`). */
+static bool at_dotted(const parser *pr) {
+    return pr->toks[pr->pos].kind == TK_ID && pr->toks[pr->pos + 1U].kind == TK_OP &&
+           strcmp(pr->toks[pr->pos + 1U].text, ".") == 0;
+}
+
+enum { CHAIN_MAX = 8 };
+
+/* The identifiers of a dotted name at the cursor (consumed); their count, 0 if one is missing. */
+static uint32_t read_chain(parser *pr, char (*comp)[TB_NAME]) {
+    uint32_t count = 0;
+    while (cur(pr)->kind == TK_ID && count < CHAIN_MAX) {
+        (void)snprintf(comp[count], TB_NAME, "%s", cur(pr)->text);
+        count++;
+        pr->pos++;
+        if (!(is_op(pr, ".") && pr->toks[pr->pos + 1U].kind == TK_ID)) {
+            return count;
+        }
+        pr->pos++;
+    }
+    return 0;
+}
+
+static bool is_sub_path(const parser *pr, const char *path) {
+    for (uint32_t i = 0; pr->pre != NULL && i < pr->pre->nsubs; i++) {
+        if (strcmp(pr->pre->subs[i].path, path) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The full name of the dotted name comp[0..count): instances of the current module first, or an
+ * absolute path from the testbench module; the last part is not looked up here. False (reported)
+ * when a part before the last is not an instance. */
+static bool chain_name(parser *pr, char (*comp)[TB_NAME], uint32_t count, char *full) {
+    char path[QNAME];
+    uint32_t first = 0;
+    (void)snprintf(path, sizeof path, "%s", pr->prefix);
+    if (count > 1U && strcmp(comp[0], pr->tb->name) == 0) {
+        path[0] = '\0';
+        first = 1;
+    }
+    for (uint32_t i = first; i + 1U < count; i++) {
+        size_t used = strlen(path);
+        if (used + strlen(comp[i]) + 2U >= sizeof path) {
+            return fail(pr, "name longer than 63 characters (instance path included)");
+        }
+        (void)snprintf(path + used, sizeof path - used, "%s", comp[i]);
+        if (!is_sub_path(pr, path)) {
+            return fail(pr, "hierarchical name whose first part is not an instance of this "
+                            "testbench");
+        }
+        (void)strcat(path, ".");
+    }
+    if (strlen(path) + strlen(comp[count - 1U]) >= TB_NAME) {
+        return fail(pr, "name longer than 63 characters (instance path included)");
+    }
+    (void)snprintf(full, QNAME, "%s%s", path, comp[count - 1U]);
+    return true;
+}
+
+/* The first pass stands for every dotted name with one wide variable (nothing is resolved). */
+static int dummy_var(parser *pr) {
+    if (pr->dummy < 0) {
+        pr->dummy = add_var(pr, "$hier", (var_shape){.width = TB_MAX_WIDTH});
+    }
+    return pr->dummy;
+}
+
+/* A dotted name that is a variable of a testbench-side instance (`u0.adr`, `u0.mem[i]`). */
+static bool begin_tbhier(parser *pr, bool *want) {
+    char comp[CHAIN_MAX][TB_NAME];
+    char full[QNAME];
+    uint32_t count = read_chain(pr, comp);
+    pr->saw_hier = true;
+    if (pr->lenient) {
+        int dummy = count > 0 ? dummy_var(pr) : -1;
+        return dummy >= 0 ? var_ref(pr, dummy, want) : fail(pr, "hierarchical name");
+    }
+    if (count == 0) {
+        return fail(pr, "hierarchical name");
+    }
+    if (!chain_name(pr, comp, count, full)) {
+        return false;
+    }
+    int var = find_exact(pr, full);
+    if (var < 0) {
+        return fail(pr, "hierarchical name that is not a variable of a testbench-side instance");
+    }
+    return var_ref(pr, var, want);
+}
+
+static bool begin_ident(parser *pr, bool *want) {
+    if (at_dotted(pr)) {
+        /* The first pass knows the DUT instances met so far; an instance item that comes after the
+         * name that reads it is taken for a testbench-side one there (the second pass knows all).
+         */
+        bool dut = pr->prefix[0] == '\0' && find_inst(pr, cur(pr)->text) >= 0;
+        return dut ? begin_hier(pr, want) : begin_tbhier(pr, want);
+    }
+    int var = find_var(pr, cur(pr)->text);
+    if (var < 0) {
+        return fail(pr, "undeclared identifier (declare before use)");
+    }
+    pr->pos++;
+    return var_ref(pr, var, want);
+}
+
+/* In a testbench-side module `%m` names the instance (`tb.u0`, plus the task inside one): the
+ * string is copied with the scope path in place of each `%m`. Other strings are kept. */
+static char *scoped_string(parser *pr, char *text) {
+    if (pr->prefix[0] == '\0' || strstr(text, "%m") == NULL) {
+        return text;
+    }
+    char scope[QNAME];
+    (void)snprintf(scope, sizeof scope, "%s.%.*s%s%s", pr->tb->name, (int)strlen(pr->prefix) - 1,
+                   pr->prefix, pr->scope[0] != '\0' ? "." : "", pr->scope);
+    size_t cap = strlen(text) + (strlen(text) * strlen(scope)) + 1U;
+    char *out = pnew(pr, cap);
+    size_t used = 0;
+    for (const char *src = text; out != NULL && *src != '\0';) {
+        if (src[0] == '%' && src[1] == '%') {
+            memcpy(out + used, src, 2U);
+            used += 2U;
+            src += 2;
+        } else if (src[0] == '%' && src[1] == 'm') {
+            memcpy(out + used, scope, strlen(scope) + 1U);
+            used += strlen(scope);
+            src += 2;
+        } else {
+            out[used++] = *src++;
+        }
+    }
+    return out;
+}
+
 static bool begin_string(parser *pr) {
     tb_expr *expr = new_expr(pr, E_STR);
     if (expr == NULL) {
         return false;
     }
-    expr->str = cur(pr)->str;
+    expr->str = scoped_string(pr, cur(pr)->str);
+    if (expr->str == NULL) {
+        return false;
+    }
     expr->width = CHAR_BITS;
     pr->pos++;
     return push_val(pr, expr);
@@ -1624,6 +1759,49 @@ static bool at_task_call(const parser *pr) {
            find_var(pr, tok->text) < 0;
 }
 
+/* True when the cursor is at `a.b.task (` or `a.b.task ;`: a call of a task of an instance. */
+static bool at_hier_call(const parser *pr) {
+    uint32_t pos = pr->pos;
+    if (!at_dotted(pr)) {
+        return false;
+    }
+    while (pr->toks[pos].kind == TK_ID && pr->toks[pos + 1U].kind == TK_OP &&
+           strcmp(pr->toks[pos + 1U].text, ".") == 0) {
+        pos += 2U;
+    }
+    const tb_tok *last = &pr->toks[pos];
+    const tb_tok *next = &pr->toks[pos + 1U];
+    return last->kind == TK_ID && next->kind == TK_OP &&
+           (strcmp(next->text, "(") == 0 || strcmp(next->text, ";") == 0);
+}
+
+/* The callee name of the call at the cursor into stmt->callee (consumed): the task's full name;
+ * the first pass keeps a dotted name as written (it resolves nothing). */
+static bool call_name(parser *pr, tb_stmt *stmt) {
+    char full[QNAME];
+    if (at_dotted(pr)) {
+        char comp[CHAIN_MAX][TB_NAME];
+        uint32_t count = read_chain(pr, comp);
+        pr->saw_hier = true;
+        if (count == 0) {
+            return fail(pr, "hierarchical task call");
+        }
+        if (pr->lenient) {
+            (void)snprintf(full, sizeof full, "%s", comp[count - 1U]);
+        } else if (!chain_name(pr, comp, count, full)) {
+            return false;
+        }
+    } else {
+        (void)snprintf(full, sizeof full, "%s%s", pr->prefix, cur(pr)->text);
+        pr->pos++;
+    }
+    if (strlen(full) >= TB_NAME) {
+        return fail(pr, "name longer than 63 characters (instance path included)");
+    }
+    memcpy(stmt->callee, full, strlen(full) + 1U);
+    return true;
+}
+
 /* ( expr {, expr} ) of a task call, when there is an argument list. */
 static bool call_args(parser *pr, tb_stmt *stmt) {
     if (!accept_op(pr, "(")) {
@@ -1653,15 +1831,15 @@ static tb_stmt *parse_call(parser *pr) {
     if (stmt->callee == NULL || stmt->args == NULL) {
         return NULL;
     }
-    char full[QNAME];
-    (void)snprintf(full, sizeof full, "%s%s", pr->prefix, cur(pr)->text);
-    if (strlen(full) >= TB_NAME) {
-        fail(pr, "name longer than 63 characters (instance path included)");
+    bool unresolved = pr->lenient && at_dotted(pr); /* the first pass links no dotted call */
+    if (!call_name(pr, stmt)) {
         return NULL;
     }
-    memcpy(stmt->callee, full, strlen(full) + 1U);
-    pr->pos++;
-    tb_stmt **slot = call_args(pr, stmt) ? (tb_stmt **)odin3_vec_push(&pr->calls) : NULL;
+    tb_stmt *scratch = NULL;
+    tb_stmt **slot = NULL;
+    if (call_args(pr, stmt)) {
+        slot = unresolved ? &scratch : (tb_stmt **)odin3_vec_push(&pr->calls);
+    }
     if (slot == NULL || !expect_op(pr, ";")) {
         return NULL;
     }
@@ -1685,7 +1863,7 @@ static sstart start_stmt(parser *pr, tb_stmt **out) {
     }
     if (tok->kind == TK_SYS) {
         *out = parse_systask(pr);
-    } else if (at_task_call(pr) && keyword_of(pr) == KW_NONE) {
+    } else if ((at_task_call(pr) && keyword_of(pr) == KW_NONE) || at_hier_call(pr)) {
         *out = parse_call(pr);
     } else if (tok->kind == TK_ID && keyword_of(pr) != KW_NONE) {
         return start_keyword(pr, keyword_of(pr), out);
@@ -2139,7 +2317,14 @@ static bool task_header(parser *pr, tb_task *task) {
     if (!expect_op(pr, ";")) {
         return false;
     }
-    while (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout")) {
+    while (is_kw(pr, "input") || is_kw(pr, "output") || is_kw(pr, "inout") ||
+           is_kw(pr, "integer") || is_kw(pr, "reg")) {
+        if (is_kw(pr, "integer") || is_kw(pr, "reg")) { /* a type for an argument, or a local */
+            if (!parse_decl(pr)) {
+                return false;
+            }
+            continue;
+        }
         uint8_t dir = dir_of(pr);
         pr->pos++;
         if (!task_port_decl(pr, task, dir, false)) {
@@ -2648,6 +2833,24 @@ static bool parse_sub_header(parser *pr) {
     return expect_op(pr, ";") && check_conns(pr, top_sub(pr));
 }
 
+/* The instance path (prefix without its final dot) joins the module's list of instances. */
+static bool record_sub(parser *pr, const char *module) {
+    tb_module *tb = pr->tb;
+    tb_sub *grown = pnew(pr, ((size_t)tb->nsubs + 1U) * sizeof *grown);
+    if (grown == NULL) {
+        return false;
+    }
+    if (tb->nsubs > 0) {
+        memcpy(grown, tb->subs, (size_t)tb->nsubs * sizeof *grown);
+    }
+    tb->subs = grown;
+    tb_sub *sub = &tb->subs[tb->nsubs++];
+    size_t len = strlen(pr->prefix);
+    memcpy(sub->path, pr->prefix, len - 1U); /* "u0.ia." -> "u0.ia" */
+    (void)snprintf(sub->module, sizeof sub->module, "%s", module);
+    return true;
+}
+
 /* Pushes the frame and moves the cursor to the module's body. */
 static bool push_sub(parser *pr, const sub_frame *frm, const mod_def *def, const char *inst) {
     if (pr->subs.len >= SUB_DEPTH) {
@@ -2674,7 +2877,7 @@ static bool push_sub(parser *pr, const sub_frame *frm, const mod_def *def, const
     }
     set_prefix(pr);
     pr->pos = def->pos;
-    return parse_sub_header(pr);
+    return record_sub(pr, def->name) && parse_sub_header(pr);
 }
 
 /* A testbench-side instance: `mod [#(...)] name (conns);` The parent-scope parts are parsed now,
@@ -2940,7 +3143,12 @@ static odin3_status parse_once(const tb_source *src, const char *top, const tb_m
     }
     tb->design = src->design;
     tb->four_state = src->four_state;
-    parser pr = {.tb = tb, .toks = lexed.toks, .file = src->file, .lenient = lenient};
+    parser pr = {.tb = tb,
+                 .toks = lexed.toks,
+                 .file = src->file,
+                 .lenient = lenient,
+                 .pre = pre,
+                 .dummy = -1};
     odin3_vec_init(&pr.ents, sizeof(xent));
     odin3_vec_init(&pr.vals, sizeof(tb_expr *));
     odin3_vec_init(&pr.frames, sizeof(sframe));

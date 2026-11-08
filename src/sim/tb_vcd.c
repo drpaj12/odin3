@@ -105,19 +105,126 @@ static void write_inst(tb_vcd *vcd, const tb_inst *inst, uint32_t idx) {
     (void)fputs("$upscope $end\n", vcd->fp);
 }
 
+/* The testbench-side instance a variable belongs to (the longest instance path that is a prefix
+ * of its name, "u0.ia" for "u0.ia.v"), or -1 for a variable of the testbench itself. */
+static int sub_of(const tb_module *tb, const char *name) {
+    int best = -1;
+    size_t best_len = 0;
+    for (uint32_t i = 0; i < tb->nsubs; i++) {
+        size_t len = strlen(tb->subs[i].path);
+        if (len > best_len && strncmp(name, tb->subs[i].path, len) == 0 && name[len] == '.') {
+            best = (int)i;
+            best_len = len;
+        }
+    }
+    return best;
+}
+
+/* A variable of an instance, to be written in the scope of that instance. */
+typedef struct sub_var {
+    const char *path; /* the instance path "u0.ia" */
+    uint32_t var;
+} sub_var;
+
+static int cmp_sub_var(const void *lhs, const void *rhs) {
+    const sub_var *left = lhs;
+    const sub_var *right = rhs;
+    int by_path = strcmp(left->path, right->path);
+    if (by_path != 0) {
+        return by_path;
+    }
+    if (left->var == right->var) {
+        return 0;
+    }
+    return left->var < right->var ? -1 : 1;
+}
+
+/* Number of leading dot-separated components that the two paths share. */
+static uint32_t common_parts(const char *left, const char *right) {
+    uint32_t parts = 0;
+    while (*left != '\0' && *right != '\0') {
+        size_t llen = strcspn(left, ".");
+        size_t rlen = strcspn(right, ".");
+        if (llen != rlen || strncmp(left, right, llen) != 0) {
+            break;
+        }
+        parts++;
+        left += llen + (left[llen] == '.' ? 1U : 0U);
+        right += rlen + (right[rlen] == '.' ? 1U : 0U);
+    }
+    return parts;
+}
+
+static uint32_t path_parts(const char *path) {
+    uint32_t parts = path[0] != '\0' ? 1U : 0U;
+    for (const char *ch = path; *ch != '\0'; ch++) {
+        parts += *ch == '.' ? 1U : 0U;
+    }
+    return parts;
+}
+
+/* Moves the open scope from path `from` to path `to` (both "" for none). */
+static void move_scope(FILE *fp, const char *from, const char *to) {
+    uint32_t keep = common_parts(from, to);
+    for (uint32_t i = keep; i < path_parts(from); i++) {
+        (void)fputs("$upscope $end\n", fp);
+    }
+    const char *start = to;
+    for (uint32_t i = 0; i < keep && start != NULL; i++) {
+        start = strchr(start, '.');
+        start = start != NULL ? start + 1 : NULL;
+    }
+    while (start != NULL && *start != '\0') {
+        const char *dot = strchr(start, '.');
+        int len = dot != NULL ? (int)(dot - start) : (int)strlen(start);
+        (void)fprintf(fp, "$scope module %.*s $end\n", len, start);
+        start = dot != NULL ? dot + 1 : NULL;
+    }
+}
+
+/* The variables of the testbench-side instances, each instance in a nested scope. */
+static void write_sub_vars(tb_vcd *vcd, const tb_module *tb) {
+    sub_var *list = calloc((size_t)tb->nvars + 1U, sizeof *list);
+    size_t count = 0;
+    for (uint32_t i = 0; list != NULL && i < tb->nvars; i++) {
+        int sub = dumpable(&tb->vars[i]) ? sub_of(tb, tb->vars[i].name) : -1;
+        if (sub >= 0) {
+            list[count++] = (sub_var){tb->subs[sub].path, i};
+        }
+    }
+    if (list != NULL) {
+        qsort(list, count, sizeof *list, cmp_sub_var);
+    }
+    const char *open = "";
+    for (size_t k = 0; k < count; k++) {
+        const tb_var *var = &tb->vars[list[k].var];
+        move_scope(vcd->fp, open, list[k].path);
+        open = list[k].path;
+        vcd_sig *sig = &vcd->sigs[vcd->nsigs];
+        sig->var = var;
+        sig->width = var->width;
+        declare(vcd, sig, var->is_wire ? "wire" : "reg", var->name + strlen(open) + 1U);
+    }
+    if (list != NULL) {
+        move_scope(vcd->fp, open, "");
+    }
+    free(list);
+}
+
 static void write_header(tb_vcd *vcd, const tb_module *tb) {
     (void)fprintf(vcd->fp,
                   "$version odin3 sim_tb $end\n$timescale %s $end\n$scope module %s $end\n",
                   tb->timescale, tb->name);
     for (uint32_t i = 0; i < tb->nvars; i++) {
         const tb_var *var = &tb->vars[i];
-        if (dumpable(var)) {
+        if (dumpable(var) && sub_of(tb, var->name) < 0) {
             vcd_sig *sig = &vcd->sigs[vcd->nsigs];
             sig->var = var;
             sig->width = var->width;
             declare(vcd, sig, var->is_wire ? "wire" : "reg", var->name);
         }
     }
+    write_sub_vars(vcd, tb);
     for (uint32_t i = 0; i < tb->ninsts; i++) {
         write_inst(vcd, &tb->insts[i], i);
     }

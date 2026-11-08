@@ -214,12 +214,21 @@ typedef struct tb_task {
     uint32_t line;
 } tb_task;
 
+/* A testbench-side module instance (flattened into the testbench): its path ("u0", "u0.ia") and
+ * module. Its variables are named "<path>.<name>". */
+typedef struct tb_sub {
+    char path[TB_NAME];
+    char module[TB_NAME];
+} tb_sub;
+
 typedef struct tb_module {
     char name[TB_NAME];
     tb_var *vars;
     uint32_t nvars, cap_vars;
     tb_inst *insts;
     uint32_t ninsts;
+    tb_sub *subs;
+    uint32_t nsubs;
     tb_assign *assigns;
     uint32_t nassigns;
     tb_proc_def *procs;
