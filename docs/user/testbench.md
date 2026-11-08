@@ -165,7 +165,7 @@ nets derived from it (divided, gated or muxed clocks: `tests/tb/micro/dclk.v`, e
 the simulator evaluates after each input change and each edge. Divide by zero gives x, as
 in iverilog (it gave 0 before 2026-11-06).
 
-Asynchronous resets: `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
+Asynchronous resets: for a testbench that asserts and releases a reset between clock edges (or in one edge's time step), use `lower --async keep` (`proc; opt; lower --keep-sel --async keep`): the flip-flops keep their reset pin and the reset acts at once, as in iverilog (`tests/tb/micro/xasync`). Without it, `lower` makes them synchronous, as Parmys does (PHASE3 decision 19), because the
 VTR architecture's flip-flop (`.latch`) has no set or reset pin. `sim_tb` runs the lowered netlist, so
 a reset raised between clock edges takes effect at the next edge; iverilog applies it at once. On the
 IR before `lower`, `sim` and `sim_tb` stop at the `$adff` cell. `testbench_gen` holds reset for four

@@ -96,7 +96,10 @@ flowchart LR
 ## 8. lower
 
 `lower` converts word-level soft logic to single-bit gates and flip-flops. Hard cells and black
-boxes are untouched. Asynchronous controls are made synchronous unless `--async error` is given.
+boxes are untouched. Asynchronous controls are made synchronous unless `--async error` is given. `--async keep` leaves an
+`$adff`/`$adffe` (and the gate-level `$_DFF_<c><r><v>_`, `$_DFFE_<c><r><v><e>_`) as a bit flip-flop with its reset pin, which
+`sim` and `sim_tb` apply when the reset input changes, as the RTL does; it is for simulation, not for the VTR flow (the
+architecture's flip-flop has no reset pin). `$aldff` and `$dffsr` are still made synchronous.
 
 ```{mermaid}
 flowchart LR
