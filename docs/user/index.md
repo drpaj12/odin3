@@ -23,7 +23,7 @@ suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilII
 
 ## Features at a glance
 
-Version 1.4.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
+Version 1.5.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
 [repository README](https://github.com/drpaj12/odin3#features).
 
 - Inputs and outputs: {doc}`inputs`, {doc}`outputs`, {doc}`odin3-flow`.
@@ -34,7 +34,7 @@ Version 1.4.0, C ABI 7. Everything below is on `main` with tests; the table with
 - Graph features: graphlets and orbits, SCOAP, analysis and timing attribution ({doc}`graphlets`, {doc}`scoap`,
   {doc}`analysis`, {doc}`timing-attribution`).
 - Netlist editing API and edit events ({doc}`edit`).
-- Simulation and testbenches: `sim`, `sim_tb`, `testbench_gen`, `tb-compare`, `run_testbenches`, plusargs, `%t`, VCD, derived
+- Simulation and testbenches (1.5.0: 4-state `sim_tb` by default, `--vcd-all`, testbench-side modules, DUT memory load, `force`, `lower --async keep`, `read_verilog --case-xz-never`; see `docs/V1.5.0.md`): `sim`, `sim_tb`, `testbench_gen`, `tb-compare`, `run_testbenches`, plusargs, `%t`, VCD, derived
   clocks ({doc}`testbench`); on main after 1.3.0 (Unreleased): up to 16 independent clocks per DUT instance and read-only
   hierarchical reads (`dut.u_regs.r`) in testbenches ({doc}`testbench`), and the tested `$tribuf` exclusions of `lower` ({doc}`passes`).
 - Python binding, plugins and the ABI ({doc}`python-api`); reverse-engineering workflow ({doc}`re-workflow`).
