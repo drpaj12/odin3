@@ -1,0 +1,12 @@
+.model const_fn
+.inputs a
+.outputs y z
+.names a a y
+11 1
+10 1
+01 1
+00 1
+.names a a z
+10 1
+01 1
+.end

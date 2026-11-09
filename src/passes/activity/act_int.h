@@ -75,6 +75,9 @@ typedef struct act_model {
     uint64_t hash;
 } act_model;
 
+/* The input nets of cell; NULL for a cell without inputs (a constant function). */
+const uint32_t *act_cell_ins(const act_model *md, const act_cell *cell);
+
 odin3_status act_model_build(act_model *md, odin3_module *mod, const act_opts *opts);
 void act_model_free(act_model *md);
 
