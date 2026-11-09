@@ -25,7 +25,7 @@ static const act_range k_unit = {0.0, 1.0};
 static act_fn_ref ref_of(const act_model *md, const act_cell *cell, double *scratch, bool dens) {
     return (act_fn_ref){md->prob,
                         dens ? md->dens : NULL,
-                        odin3_vec_cat(&md->in_pool, cell->in_off),
+                        act_cell_ins(md, cell),
                         odin3_vec_cat(&md->tab_pool, cell->tab_off),
                         scratch,
                         cell->n_in};
@@ -47,7 +47,7 @@ static odin3_status build_readers(graph *gr) {
         return ODIN3_ERR_NO_MEMORY;
     }
     for (size_t ci = 0; ci < md->n_cells; ci++) {
-        const uint32_t *ins = odin3_vec_cat(&md->in_pool, md->cells[ci].in_off);
+        const uint32_t *ins = act_cell_ins(md, &md->cells[ci]);
         for (uint32_t kk = 0; kk < md->cells[ci].n_in; kk++) {
             gr->rd_start[ins[kk] + 1U]++;
         }
@@ -63,7 +63,7 @@ static odin3_status build_readers(graph *gr) {
     }
     memcpy(fill, gr->rd_start, nets * sizeof *fill);
     for (size_t ci = 0; ci < md->n_cells; ci++) {
-        const uint32_t *ins = odin3_vec_cat(&md->in_pool, md->cells[ci].in_off);
+        const uint32_t *ins = act_cell_ins(md, &md->cells[ci]);
         for (uint32_t kk = 0; kk < md->cells[ci].n_in; kk++) {
             gr->rd_items[fill[ins[kk]]++] = (uint32_t)ci;
         }
@@ -206,7 +206,7 @@ typedef struct solver {
 static void count_comb_fanin(const act_model *md, const uint32_t *drv, uint32_t *indeg) {
     for (size_t ci = 0; ci < md->n_cells; ci++) {
         const act_cell *cell = &md->cells[ci];
-        const uint32_t *ins = odin3_vec_cat(&md->in_pool, cell->in_off);
+        const uint32_t *ins = act_cell_ins(md, cell);
         for (uint32_t kk = 0; cell->is_ff == 0 && kk < cell->n_in; kk++) {
             uint32_t src = drv[ins[kk]];
             indeg[ci] += (src != ACT_NONE && md->cells[src].is_ff == 0) ? 1U : 0U;
@@ -505,7 +505,7 @@ static odin3_status solve_cyclic(solver *sv, const uint32_t *cells, uint32_t cou
 }
 
 static bool self_reads(const act_model *md, const act_cell *cell) {
-    const uint32_t *ins = odin3_vec_cat(&md->in_pool, cell->in_off);
+    const uint32_t *ins = act_cell_ins(md, cell);
     for (uint32_t kk = 0; kk < cell->n_in; kk++) {
         if (ins[kk] == cell->out) {
             return true;

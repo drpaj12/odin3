@@ -755,6 +755,10 @@ static uint64_t model_hash(const act_model *md) {
     return hash;
 }
 
+const uint32_t *act_cell_ins(const act_model *md, const act_cell *cell) {
+    return cell->n_in == 0 ? NULL : odin3_vec_cat(&md->in_pool, cell->in_off);
+}
+
 odin3_status act_model_build(act_model *md, odin3_module *mod, const act_opts *opts) {
     memset(md, 0, sizeof *md);
     md->mod = mod;
