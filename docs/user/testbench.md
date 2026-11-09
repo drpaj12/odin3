@@ -27,7 +27,7 @@ Options: `--top <module>` (the testbench module, default the first), `--max-time
 default stdout), `--vcd <file>` (a waveform, below), `--2state` (the old 2-state
 interpreter: every value starts 0 and the DUT is simulated with 0 and 1 only; the default, since
 2026-11-07, is 4-state: x and z values, regs start x, the DUT is a 4-state simulator, as iverilog,
-best with `lower --keep-sel`; `--4state` is accepted and changes nothing). Python: `design.run("sim_tb --out run.txt tb.v")`
+best with `lower --keep-sel`; `--4state` is accepted and changes nothing). A register with no reset whose hold or enable is computed from its own value (`HLT ? X : next` with `HLT` depending on `X`) stays x in 4-state mode, as in iverilog, and the old 2-state mode (Odin III 1.4.0 and earlier) hides it as 0; compare two traces in one mode, and treat x as a don't-care or reset that state first. Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
 Several files and directives: `sim_tb a.v b.v ...` joins the files (after the Verilog preprocessor,
