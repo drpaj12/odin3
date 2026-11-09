@@ -628,21 +628,80 @@ uint32_t odin3_sim4_scratch_bytes(const odin3_celltype_def *def, const odin3_sim
     return bytes;
 }
 
-void odin3_sim4_generic(const odin3_sim_cell *cell) {
+/* Completion search of the generic model: at most this many unknown input bits and output bits. */
+enum { GENERIC_MAX_UNKNOWN = 6, GENERIC_MAX_OUT = 64 };
+
+typedef struct generic_pins {
+    uint32_t unk[GENERIC_MAX_UNKNOWN]; /* value slots of the unknown input bits */
+    uint32_t n_unk;
+    uint32_t out[GENERIC_MAX_OUT]; /* value slots of the output bits */
+    uint32_t n_out;
+} generic_pins;
+
+/* Collects the unknown input slots and the output slots; false when either exceeds its cap. */
+static bool generic_collect(const odin3_sim_cell *cell, generic_pins *pins) {
     const odin3_celltype_def *def = cell->type4;
-    bool any_unknown = false;
-    for (uint32_t port = 0; port < cell->n_ports && !any_unknown; port++) {
-        if (def->ports[port].dir != ODIN3_DIR_IN) {
-            continue;
-        }
+    *pins = (generic_pins){0};
+    for (uint32_t port = 0; port < cell->n_ports; port++) {
+        bool is_in = def->ports[port].dir == ODIN3_DIR_IN;
         for (uint32_t k = 0; k < cell->ports[port].width; k++) {
-            any_unknown = any_unknown || unknown(cell->values[cell->ports[port].idx[k]]);
+            uint32_t slot = cell->ports[port].idx[k];
+            if (!is_in) {
+                if (pins->n_out == GENERIC_MAX_OUT) {
+                    return false;
+                }
+                pins->out[pins->n_out++] = slot;
+            } else if (unknown(cell->values[slot])) {
+                if (pins->n_unk == GENERIC_MAX_UNKNOWN) {
+                    return false;
+                }
+                pins->unk[pins->n_unk++] = slot;
+            }
         }
     }
-    if (!any_unknown) {
+    return true;
+}
+
+/* Output bit i is known only when every completion of the unknown inputs gives the same value. */
+static void generic_complete(const odin3_sim_cell *cell, const generic_pins *pins) {
+    const odin3_celltype_def *def = cell->type4;
+    uint8_t saved[GENERIC_MAX_UNKNOWN];
+    uint8_t first[GENERIC_MAX_OUT];
+    bool agree[GENERIC_MAX_OUT];
+    for (uint32_t i = 0; i < pins->n_unk; i++) {
+        saved[i] = cell->values[pins->unk[i]];
+    }
+    for (uint32_t combo = 0; combo < (1U << pins->n_unk); combo++) {
+        for (uint32_t i = 0; i < pins->n_unk; i++) {
+            cell->values[pins->unk[i]] = (uint8_t)((combo >> i) & 1U);
+        }
         def->simulate(cell);
+        for (uint32_t i = 0; i < pins->n_out; i++) {
+            uint8_t val = cell->values[pins->out[i]];
+            first[i] = combo == 0 ? val : first[i];
+            agree[i] = (combo == 0 || agree[i]) && val == first[i];
+        }
+    }
+    for (uint32_t i = 0; i < pins->n_unk; i++) {
+        cell->values[pins->unk[i]] = saved[i];
+    }
+    for (uint32_t i = 0; i < pins->n_out; i++) {
+        cell->values[pins->out[i]] = agree[i] ? first[i] : (uint8_t)CODE_X;
+    }
+}
+
+void odin3_sim4_generic(const odin3_sim_cell *cell) {
+    generic_pins pins;
+    bool exact = generic_collect(cell, &pins);
+    if (exact && pins.n_unk == 0) {
+        ((const odin3_celltype_def *)cell->type4)->simulate(cell);
         return;
     }
+    if (exact) {
+        generic_complete(cell, &pins);
+        return;
+    }
+    const odin3_celltype_def *def = cell->type4;
     for (uint32_t port = 0; port < cell->n_ports; port++) {
         if (def->ports[port].dir == ODIN3_DIR_IN) {
             continue;
