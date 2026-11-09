@@ -199,6 +199,37 @@ class FpgaStepsTest(unittest.TestCase):
             self.assertTrue(all(r["links"] and r["recs"] for r in linked))
             self.assertTrue(all(r["links"][0]["to"].startswith("hdl:c") for r in linked))
 
+    def test_activity_attributes_on_luts_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            work = Path(tmp)
+            map_path = write_map(work, "ch_intrinsics", "blif", 2)
+            blif = Path(str(map_path)[:-6])
+            plain = ps.fpga_steps(map_path, work, "t", "t", "1.6.0", blif.name)
+            first = (plain.parent / "02-map.objects.jsonl").read_text().splitlines()
+            rows = [json.loads(x) for x in first]
+            self.assertTrue(all("act_p1" not in r["attrs"] for r in rows))
+            name = rows[0]["name"]
+            out = work / "act"
+            out.mkdir()
+            index = ps.fpga_steps(map_path, out, "t", "t", "1.6.0", blif.name,
+                                  activity={name: (0.25, 0.125)})
+            lines = (index.parent / "02-map.objects.jsonl").read_text().splitlines()
+            got = [json.loads(x) for x in lines]
+            hit = [r for r in got if r["name"] == name]
+            self.assertTrue(hit)
+            for row in hit:
+                self.assertEqual(row["attrs"]["act_p1"], 0.25)
+                self.assertEqual(row["attrs"]["act_density"], 0.125)
+                self.assertEqual(row["attrs"]["act_source"], "odin3-vectorless")
+            self.assertEqual(sum("act_p1" in r["attrs"] for r in got), len(hit))
+            self.assertEqual(schema_check.check_dir(index.parent, SCHEMAS), [])
+
+    def test_read_act(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "a.act"
+            path.write_text("n1 0.5 0.2\n\nn2 0.25 0.125\n")
+            self.assertEqual(ps.read_act(path), {"n1": (0.5, 0.2), "n2": (0.25, 0.125)})
+
 
 if __name__ == "__main__":
     unittest.main()
