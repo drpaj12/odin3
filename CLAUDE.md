@@ -121,7 +121,7 @@ ADRs, IR, passes, oracles, phase checklists.
 
 ## Where things are going
 
-Version 1.5.1 is ready to tag (the tag is Peter's; notes `docs/V1.5.1.md`: two provenance performance fixes; ABI still 7). Version 1.5.0 (notes `docs/V1.5.0.md`: simulator parity and OpenCores testbenches; ABI still 7). Version 1.4.0 (tag `v1.4.0`, 2026-11-03, notes `docs/V1.4.0.md`: silicon flow, project-file flows, provenance step files). Version 1.3.0 (changes in `CHANGELOG.md`).
+Version 1.6.0 is ready to tag (the tag is Peter's; notes `docs/V1.6.0.md`: vectorless switching activity pass, `odin3-prov-steps --activity`, `sim_tb` hard-cell fix; ABI still 7). Version 1.5.1 (notes `docs/V1.5.1.md`: two provenance performance fixes; ABI still 7). Version 1.5.0 (notes `docs/V1.5.0.md`: simulator parity and OpenCores testbenches; ABI still 7). Version 1.4.0 (tag `v1.4.0`, 2026-11-03, notes `docs/V1.4.0.md`: silicon flow, project-file flows, provenance step files). Version 1.3.0 (changes in `CHANGELOG.md`).
 Version 1.2.0 (tag `v1.2.0`, notes `docs/V1.2.0.md`: provenance as a two-way
 granularity DAG, D14, ABI 7). Version 1.1.1 (tag `v1.1.1`, 2026-10-25, notes `docs/V1.1.1.md`: critical-path
 attribution to HDL, `odin3-timing`; ABI still 6). Version 1.1.0 (tag `v1.1.0`, 2026-10-24, notes

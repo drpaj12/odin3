@@ -55,8 +55,8 @@ extern "C" {
 #endif
 
 #define ODIN3_VERSION_MAJOR 1
-#define ODIN3_VERSION_MINOR 5
-#define ODIN3_VERSION_PATCH 1
+#define ODIN3_VERSION_MINOR 6
+#define ODIN3_VERSION_PATCH 0
 
 /* ODIN3_CDEF_BEGIN */
 
