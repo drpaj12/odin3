@@ -772,6 +772,51 @@ class Design:
             result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
             return result
 
+    def activity(
+        self,
+        *,
+        pi_prob: float = 0.5,
+        pi_density: float = 0.2,
+        pi_file: str | Path | None = None,
+        vcd: str | Path | None = None,
+        vcd_clock: str | None = None,
+        clock: str | None = None,
+        ff_start: float = 0.5,
+        name_style: str = "short",
+        act: str | Path | None = None,
+    ) -> dict[str, Any]:
+        """Run the activity pass and return its JSON (schema odin3-activity, version 1).
+
+        Vectorless static probability "p1" and transition density "d" (changes per cycle of the
+        reference clock; a clock is 2) of every net of the top module, keyed by the module-local
+        net id and the name write_blif --vtr gives it (name_style short|provenance|hash); "kind"
+        is pi, clock, const, comb, ff, opaque or undriven. Inputs default to the ACE 2.0 values
+        (0.5, 0.2); pi_file ("name p1 d" lines) or vcd (rising edges of vcd_clock) replace them.
+        act= also writes the VPR activity file. See docs/user/activity.md.
+        """
+        import json
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "activity.json"
+            words = [
+                "--json",
+                _quote(out),
+                "--pi-prob",
+                repr(pi_prob),
+                "--pi-density",
+                repr(pi_density),
+            ]
+            words += ["--ff-start", repr(ff_start), "--name-style", name_style]
+            words += ["--pi-file", _quote(pi_file)] if pi_file else []
+            words += ["--vcd", _quote(vcd)] if vcd else []
+            words += ["--vcd-clock", _quote(vcd_clock)] if vcd and vcd_clock else []
+            words += ["--clock", _quote(clock)] if clock else []
+            words += ["--out", _quote(act)] if act else []
+            self.run_pass("activity", " ".join(words))
+            result: dict[str, Any] = json.loads(out.read_text(encoding="utf-8"))
+            return result
+
     def simulate(self, top: str | None = None) -> Simulation:
         """Open a Simulation of module `top` (default: the design's top); see Simulation."""
         return Simulation(self, top)

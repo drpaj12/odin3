@@ -31,7 +31,7 @@ Version 1.5.1, C ABI 7. Everything below is on `main` with tests; the table with
   rule), ABC, LPM, `unmap` ({doc}`passes`).
 - Provenance at every granularity ({doc}`provenance`), written as step files at every stage ({doc}`provenance-files`).
 - Silicon flow: Odin III to a routed SKY130 layout and back, no Yosys ({doc}`silicon-flow`); flows described in the project file ({doc}`project-flows`).
-- Graph features: graphlets and orbits, SCOAP, analysis and timing attribution ({doc}`graphlets`, {doc}`scoap`,
+- Graph features: graphlets and orbits, SCOAP, analysis and timing attribution ({doc}`graphlets`, {doc}`scoap`, switching activity ({doc}`activity`),
   {doc}`analysis`, {doc}`timing-attribution`).
 - Netlist editing API and edit events ({doc}`edit`).
 - Simulation and testbenches (1.5.0: 4-state `sim_tb` by default, `--vcd-all`, testbench-side modules, DUT memory load, `force`, `lower --async keep`, `read_verilog --case-xz-never`; see `docs/V1.5.0.md`): `sim`, `sim_tb`, `testbench_gen`, `tb-compare`, `run_testbenches`, plusargs, `%t`, VCD, derived
@@ -56,6 +56,7 @@ analysis
 graphlets
 edit
 scoap
+activity
 graph-views
 timing-attribution
 testbench

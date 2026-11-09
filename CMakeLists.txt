@@ -140,6 +140,12 @@ add_library(odin3_core OBJECT
     src/passes/scoap/sc_model.c
     src/passes/scoap/sc_solve.c
     src/passes/scoap/sc_sigprob.c
+    src/passes/activity/activity.c
+    src/passes/activity/act_model.c
+    src/passes/activity/act_prop.c
+    src/passes/activity/act_solve.c
+    src/passes/activity/act_out.c
+    src/passes/activity/act_vcd.c
     src/passes/levelize/sweep.c
     src/passes/submod/submod.c
     src/passes/submod/busattr.c
@@ -3087,6 +3093,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_scoap
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(scoap_unit PROPERTIES LABELS tools TIMEOUT 600)
+    # activity: hand-derived circuits, the independent reference and the sequential micros.
+    add_test(NAME activity_unit
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_activity
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(activity_unit PROPERTIES LABELS tools TIMEOUT 600)
     # Per-LUT lineage on a micro with a case and an FSM: each LUT traces to its own source lines.
     add_test(NAME lineage
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
