@@ -1,13 +1,15 @@
 # Python API
 
 `plugins/python/odin3.py` is a cffi binding to the C ABI (`include/odin3/odin3.h`). The cdef is
-generated from the header at import time, so the binding follows the header. There is no API
-stability promise before the 1.0 release.
+generated from the header at import time, so the binding follows the header. The C ABI is
+version 7 (Odin III 1.6.0); the Python names may still change between releases.
 
 ## Setup
 
-The binding needs `cffi` (`pip install -r requirements-dev.txt`) and a shared library built
-without sanitizers: `build/release/libodin3.so`.
+The binding needs `cffi` (`python3 -m venv .venv && .venv/bin/pip install cffi networkx`, or
+`pip install -r requirements-dev.txt`; `networkx` is only for the graph loader below) and a shared
+library built without sanitizers: `build/release/libodin3.so`. Run the commands on this page from the
+repository root with that virtual environment's `python3`.
 
 ```bash
 cmake --preset release
@@ -23,7 +25,7 @@ python3 plugins/python/example_plugin.py
 ```
 
 ```text
-example_plugin.py: libodin3 1.3.0 (ABI 7)
+example_plugin.py: libodin3 1.6.0 (ABI 7)
 ```
 
 ## Walking the IR

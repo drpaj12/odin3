@@ -57,7 +57,7 @@ the sha256 of the design files, the architecture and the artifacts. The host is 
 binary cannot be shown to come from (the Odin III `--version` text names no commit) is recorded
 `unknown`, so Mimir marks the configuration `partial` and names that parameter. A record that would hold an
 absolute path, a home path, the user name or the host name is not written (a line on stderr names the
-rule and the key). The format is Mimir's `docs/specs/2026-10-28-mimir-run-record.md`; the flow does
+rule and the key). The format is the run-record spec of Mimir III (`docs/specs/2026-10-28-mimir-run-record.md` in <https://github.com/drpaj12/mimirIII>); the flow does
 not import Mimir.
 
 Exit codes: 0 all steps passed, 1 a step failed (the `timing` step too), 2 usage error.
