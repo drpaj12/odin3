@@ -4,7 +4,7 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## 1.6.0 (ready to tag; release notes `docs/V1.6.0.md`)
+## 1.6.0 (2026-11-09; release notes `docs/V1.6.0.md`)
 
 The C ABI stays 7.
 
