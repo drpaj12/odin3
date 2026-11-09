@@ -165,5 +165,7 @@ Per design against ACE 2.0 (ACE-like configuration), and against the Monte Carlo
 ## Provenance
 
 The JSON `id` of a net is the module-local net id; with `--name-style hash` the name is the one in the version 2 name map, so a tool joins activity to the
-HDL line through the existing chain. `odin3-prov-steps` can add `attrs.act_p1`, `attrs.act_density` and `attrs.act_source` to the `luts` objects of a run
-({doc}`provenance-files`): the attributes are free-form, no schema changes.
+HDL line through the existing chain. `odin3-prov-steps FLOW_DIR --activity F.act` (`F.act` from `odin3 activity --name-style hash --out F.act` on the same
+BLIF) adds `attrs.act_p1`, `attrs.act_density` and `attrs.act_source` (`odin3-vectorless`, or `--activity-source LABEL`) to the `luts` objects of the run it
+names ({doc}`provenance-files`); `prov_steps.fpga_steps(..., activity={name: (p1, density)})` does the same from Python. The attributes are free-form: no
+schema changes, and an object the file does not name has none.

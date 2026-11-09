@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = 1
+ACTIVITY_SOURCE = "odin3-vectorless"  # the label Heimdall reads (docs/user/activity.md)
 STAGES = ("hdl", "ir", "gates", "luts", "packed", "placed", "routed", "gds", "extracted",
           "recovered")
 LINK_KINDS = ("id", "name", "cone", "fine", "join", "resize", "physical_origin",
@@ -204,14 +205,29 @@ def odin3_version(binary: Path | str | None = None) -> str:
     return lines[0].strip() if res.returncode == 0 and lines else ""
 
 
+def read_act(path: Path) -> dict[str, tuple[float, float]]:
+    """A VPR activity file: ``name P1 density`` per line (what ``odin3 activity --out`` writes)."""
+    out: dict[str, tuple[float, float]] = {}
+    for line in path.read_text().splitlines():
+        words = line.split()
+        if len(words) == 3:
+            out[words[0]] = (float(words[1]), float(words[2]))
+    return out
+
+
 def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: str,
                blif_name: str, tools: Sequence[tuple[str, str]] = (),
-               root: Path | None = None) -> Path:
+               root: Path | None = None,
+               activity: Mapping[str, tuple[float, float]] | None = None,
+               activity_source: str = ACTIVITY_SOURCE) -> Path:
     """Write ``out/prov`` for a ``--prov`` run from its name map: stages ``hdl`` (constructs),
     ``luts`` (objects of the BLIF, link ``fine`` to the constructs of their record chain), and
     ``placed`` (atoms with a site record, link ``name`` to the LUT object) when
     ``odin3-prov-post`` added ``A`` lines. The chains stay in the map (``recs``). Source file
-    names are made relative to ``root`` (base name when outside it or ``root`` is None)."""
+    names are made relative to ``root`` (base name when outside it or ``root`` is None).
+    ``activity`` (BLIF net name to (P1, density), as ``read_act`` returns; names under the name
+    style of the map, i.e. ``activity --name-style hash``) adds ``attrs.act_p1``,
+    ``attrs.act_density`` and ``attrs.act_source`` to every ``luts`` object it names."""
     import name_map_v2
 
     nm = name_map_v2.read_name_map(map_path)
@@ -257,6 +273,9 @@ def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: 
                       "hdl" if numbers or chain_src else "unknown",
                       src=chain_src[:8], recs=[f"r{n}" for n in o.records],
                       attrs={"module": o.module, "level": o.level})
+            hit = activity.get(o.name) if activity else None
+            if hit is not None:
+                row["attrs"].update(act_p1=hit[0], act_density=hit[1], act_source=activity_source)
             row["links"] = ["links\0"]
             _check_private(row, f"map object {row['id']}")
             text = json.dumps(row, sort_keys=True, separators=(",", ":"))
@@ -288,10 +307,27 @@ def fpga_steps(map_path: Path, out: Path, design: str, top: str, odin3_version: 
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """odin3-prov-steps FLOW_DIR: convert the name map of a ``--prov`` run into step files."""
+    """odin3-prov-steps FLOW_DIR [--activity F.act [--activity-source LABEL]]: convert the name
+    map of a ``--prov`` run into step files."""
     args = list(sys.argv[1:] if argv is None else argv)
+    activity_file: Path | None = None
+    source = ACTIVITY_SOURCE
+    while "--activity" in args or "--activity-source" in args:
+        flag = "--activity" if "--activity" in args else "--activity-source"
+        at = args.index(flag)
+        if at + 1 >= len(args):
+            args = []
+            break
+        value = args[at + 1]
+        del args[at : at + 2]
+        if flag == "--activity":
+            activity_file = Path(value)
+        else:
+            source = value
     if len(args) != 1 or args[0] in ("-h", "--help"):
-        print("usage: odin3-prov-steps FLOW_DIR   (a --prov run directory)", file=sys.stderr)
+        print("usage: odin3-prov-steps FLOW_DIR [--activity F.act [--activity-source LABEL]]\n"
+              "  FLOW_DIR is a --prov run directory; F.act is the output of `odin3 activity "
+              "--name-style hash` for the same BLIF", file=sys.stderr)
         return 2
     flow_dir = Path(args[0])
     maps = sorted(flow_dir.glob("odin3/*.names"))
@@ -301,10 +337,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
     top = maps[0].name.split(".")[0]
     try:
-        fpga_steps(maps[0], flow_dir, top, top, odin3_version(), maps[0].name[:-6])
+        act = read_act(activity_file) if activity_file else None
+        fpga_steps(maps[0], flow_dir, top, top, odin3_version(), maps[0].name[:-6],
+                   activity=act, activity_source=source)
     except PrivacyError as exc:
         print(f"odin3-prov-steps: {exc}", file=sys.stderr)
         return 2
+    except OSError as exc:
+        print(f"odin3-prov-steps: {exc}", file=sys.stderr)
+        return 1
     print(f"wrote {flow_dir / 'prov' / 'index.json'}")
     return 0
 

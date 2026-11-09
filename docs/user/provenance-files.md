@@ -90,7 +90,8 @@ hierarchical extraction, one object per standard cell). The `device` object kind
 lines), stage `luts` (the `O` and `N` lines; link `fine` to the constructs of the record chain, `recs`
 to the records). `odin3-prov-steps FLOW_DIR` (or `python3 tools/flow/prov_steps.py FLOW_DIR`) converts a past
 `--prov` run. When `odin3-prov-post` has added `A` lines, one more stage `placed` is written (one `site`
-object per atom, link `name` to the LUT object, `recs` from the atom). Stage `packed` (BLE, CLB), the
+object per atom, link `name` to the LUT object, `recs` from the atom). With `--activity F.act` (the file `odin3 activity --name-style hash` writes for the same BLIF) every `luts` object it names also carries `attrs.act_p1`,
+`attrs.act_density` and `attrs.act_source` ({doc}`activity`). Stage `packed` (BLE, CLB), the
 `Q`/`K` join links and an `ir` stage are not written in v1.4, and the index lists no design `inputs`
 (the map and the BLIF are recorded as step `outputs` with their sha256). Source file names are made
 relative to the design directory (base name when outside it). Without `--prov` no step files are written.

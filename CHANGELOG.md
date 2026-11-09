@@ -13,6 +13,7 @@ The C ABI stays 7.
   VPR `.act` output under the `write_blif --vtr` names, JSON `odin3-activity`, module attributes `odin3:activity_*`, Python
   `Design.activity`. Spec `docs/specs/2026-11-08-activity-design.md`, user page `docs/user/activity.md`, test `activity_unit`,
   comparison tool `tools/activity/act_check.py`.
+- `odin3-prov-steps FLOW_DIR --activity F.act`: `attrs.act_p1`, `attrs.act_density`, `attrs.act_source` on the `luts` objects (no schema change).
 
 ### Fixed
 - `sim_tb` 4-state: a tech-library hard cell with an unknown input bit made every output x, so a testbench that passes on
