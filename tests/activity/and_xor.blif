@@ -1,0 +1,9 @@
+.model and_xor
+.inputs a b
+.outputs y x
+.names a b y
+11 1
+.names a b x
+10 1
+01 1
+.end

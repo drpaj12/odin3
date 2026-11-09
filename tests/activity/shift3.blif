@@ -1,0 +1,7 @@
+.model shift3
+.inputs clk din
+.outputs q3
+.latch din q1 re clk 0
+.latch q1 q2 re clk 0
+.latch q2 q3 re clk 0
+.end

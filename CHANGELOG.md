@@ -4,7 +4,15 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## Unreleased
+## Unreleased (v1.6)
+
+The C ABI stays 7.
+
+### Added
+- `activity` pass: vectorless static probability and transition density of every net on the netlist view, ACE 2.0 comparable;
+  VPR `.act` output under the `write_blif --vtr` names, JSON `odin3-activity`, module attributes `odin3:activity_*`, Python
+  `Design.activity`. Spec `docs/specs/2026-11-08-activity-design.md`, user page `docs/user/activity.md`, test `activity_unit`,
+  comparison tool `tools/activity/act_check.py`.
 
 ### Fixed
 - `sim_tb` 4-state: a tech-library hard cell with an unknown input bit made every output x, so a testbench that passes on

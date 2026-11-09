@@ -1,0 +1,23 @@
+.model counter4
+.inputs clk
+.outputs q0 q1 q2 q3
+.latch d0 q0 re clk 0
+.latch d1 q1 re clk 0
+.latch d2 q2 re clk 0
+.latch d3 q3 re clk 0
+.names q0 d0
+0 1
+.names q0 q1 d1
+10 1
+01 1
+.names q0 q1 c2
+11 1
+.names c2 q2 d2
+10 1
+01 1
+.names q0 q1 q2 c3
+111 1
+.names c3 q3 d3
+10 1
+01 1
+.end
