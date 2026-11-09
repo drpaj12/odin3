@@ -13,7 +13,7 @@ adders. Power is not measured. The hub is <https://github.com/drpaj12/YggdrasilI
 This manual follows the layout of the VTR documentation: a getting-started page, an overview of
 the flow with one diagram per stage, then the references.
 
-Beyond the manual: the [v1.2.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.2.0.md)
+Beyond the manual: the release notes [v1.6.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.6.0.md) (switching activity), [v1.5.1](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.1.md), [v1.5.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.0.md) (simulator parity), [v1.4.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.4.0.md) (silicon flow) and the [v1.2.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.2.0.md)
 (provenance at every granularity; see the {doc}`provenance` page; version 1.3.0 changes are in the CHANGELOG), the [v1.1.1 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.1.md)
 (critical-path attribution to HDL), the [v1.1.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.0.md)
 (SystemVerilog and the VerilogEval run; the [v1.0 notes](https://github.com/drpaj12/odin3/blob/main/docs/RELEASE-NOTES-1.0.md) are older),
@@ -35,7 +35,7 @@ Version 1.6.0, C ABI 7. Everything below is on `main` with tests; the table with
   {doc}`analysis`, {doc}`timing-attribution`).
 - Netlist editing API and edit events ({doc}`edit`).
 - Simulation and testbenches (1.5.0: 4-state `sim_tb` by default, `--vcd-all`, testbench-side modules, DUT memory load, `force`, `lower --async keep`, `read_verilog --case-xz-never`; see `docs/V1.5.0.md`): `sim`, `sim_tb`, `testbench_gen`, `tb-compare`, `run_testbenches`, plusargs, `%t`, VCD, derived
-  clocks ({doc}`testbench`); on main after 1.3.0 (Unreleased): up to 16 independent clocks per DUT instance and read-only
+  clocks ({doc}`testbench`); since 1.5.0: up to 16 independent clocks per DUT instance and read-only
   hierarchical reads (`dut.u_regs.r`) in testbenches ({doc}`testbench`), and the tested `$tribuf` exclusions of `lower` ({doc}`passes`).
 - Python binding, plugins and the ABI ({doc}`python-api`); reverse-engineering workflow ({doc}`re-workflow`).
 

@@ -24,7 +24,7 @@ The C ABI stays 7.
   netlist, because `abc` drops the RTL select attribute (`lower --keep-sel`) and the LUT cover propagates x; run such a
   netlist with `sim_tb --2state` (wb_lcd: 307 checks pass on the full flow plus `abc --lut 6`; mmuart and verilog_cordic_core pass in both modes).
 
-## 1.5.1 (ready to tag; release notes `docs/V1.5.1.md`)
+## 1.5.1 (2026-11-08; release notes `docs/V1.5.1.md`)
 
 The C ABI stays 7. Two performance fixes for provenance runs of a real CPU (a-z80-modified); output unchanged.
 
@@ -35,7 +35,7 @@ The C ABI stays 7. Two performance fixes for provenance runs of a real CPU (a-z8
   distinct anchor list, with stamp arrays for the scratch sets: 1423 s to 64 s, name map byte identical (#408).
   `odin3_prov_label.joined` (internal) holds the first 16 rows; `n_joined` is still the total.
 
-## 1.5.0 (ready to tag; release notes `docs/V1.5.0.md`)
+## 1.5.0 (2026-11-08; release notes `docs/V1.5.0.md`)
 
 The C ABI stays 7. This section holds everything since v1.3.0; the entries headed 1.4.0 shipped in v1.4.0, the rest is new since then (see `docs/V1.5.0.md`).
 

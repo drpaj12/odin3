@@ -7,7 +7,7 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-Version 1.6.0 (ready to tag; the hub snapshot [v1.4.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.4.0/docs/versions.md) is the last tagged one).
+Version 1.6.0 (ready to tag; the latest tagged release is [v1.5.1](https://github.com/drpaj12/odin3/releases/tag/v1.5.1); hub snapshot: [v1.4.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.4.0/docs/versions.md)).
 
 **What it is today.** The trunk of Yggdrasil III (hub: <https://github.com/drpaj12/YggdrasilIII>). A C17 framework with
 one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
@@ -19,13 +19,13 @@ produced for the 15 VTR benchmarks that fit the development laptop routes in VPR
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
 
-**Status: version 1.6.0 (ready to tag; 1.6.0 adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); the tag is Peter's; the latest tagged release is 1.4.0, 2026-11-03).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.6.0 (ready to tag; 1.6.0 adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); the tag is Peter's; the latest tagged release is 1.5.1, 2026-11-08).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.6.0](docs/V1.6.0.md) (switching activity pass), [v1.5.1](docs/V1.5.1.md) (provenance tool memory and speed), [v1.5.0](docs/V1.5.0.md) (simulator parity, OpenCores testbenches), [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: kept locally by the author. Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
 
-Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. Version 1.4.0 (`pyproject.toml`). The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
+Odin III is the trunk of **Yggdrasil III**, a suite of research tools that includes Wyrd III (<https://github.com/drpaj12/wyrd>, the canopy, with Bifrost III and Midgard III), Loki III (<https://github.com/drpaj12/loki>), The Norns III (<https://github.com/drpaj12/nornsIII>) and Verdandi III (<https://github.com/drpaj12/verdandiIII>) on side branches, and Mímir III (<https://github.com/drpaj12/mimirIII>, the fruit). Odin III is the trunk of the tree, and the other pieces use it as a package without changing its core. The hub is <https://github.com/drpaj12/YggdrasilIII> (documentation: <https://drpaj12.github.io/YggdrasilIII/>, versions of every piece: <https://drpaj12.github.io/YggdrasilIII/versions.html>) and its picture of the tree is <https://github.com/drpaj12/YggdrasilIII/blob/main/images/yggdrasil-tree.png>.
 
 ## Documentation
 
@@ -72,9 +72,9 @@ Each line points to the manual page; the pass table is [`docs/PASSES.md`](docs/P
 | Cycle simulator `sim` (vectors, random inputs, VCD), toggle counting and `run_vectors` from Python, derived clocks (gated, muxed, divided) | works (2-state, cycle-based; derived-clock limits in the manual) | [edit](docs/user/edit.md), [python-api](docs/user/python-api.md), [testbench](docs/user/testbench.md), [MCU testbench note](docs/notes/2026-10-31-mcu-testbench.md), [DarkRISCV note](docs/notes/2026-11-01-darkriscv-testbench.md) |
 | Testbenches: `sim_tb` interprets a Verilog testbench subset against RTL or netlist, `--plusarg` with `$test$plusargs` and `$value$plusargs`, `%t` in `$display`, up to 4096 named DUT port connections, `--vcd` waveform | works (2-state; subset limits in the manual) | [testbench](docs/user/testbench.md), [MCU testbench note](docs/notes/2026-10-31-mcu-testbench.md), [DarkRISCV note](docs/notes/2026-11-01-darkriscv-testbench.md) |
 | `testbench_gen` writes a testbench for a design; `tools/tb-compare` runs one testbench on two designs; `run_testbenches` runs the testbenches declared in a project (`testbench` key, `on rtl\|netlist\|both`) | works | [testbench](docs/user/testbench.md) |
-| Multi-clock testbenches (on main after 1.3.0, Unreleased): a `sim_tb` DUT instance may have up to 16 independent clock inputs (more than 16, a clock on a multi-bit port, or a cell with no clock pin in a DUT with two or more clocks is an error) | works | [testbench](docs/user/testbench.md) |
-| Read-only hierarchical reads in testbenches (on main after 1.3.0, Unreleased): `dut.u_regs.r`, `dut.u.v[3]` with literal indices, after `flatten`; a write, `$readmemh` into a path, a variable index, a part-select or a memory word after `lower` is a located error | works | [testbench](docs/user/testbench.md) |
-| `$tribuf` exclusions in `lower` tested (on main after 1.3.0, Unreleased): a constant 0, x or z enable (`$_CONSTZ_` included) and a `$tribuf` fed by a `$tribuf` (in any cell order) are refused | works | [passes](docs/user/passes.md) |
+| Multi-clock testbenches (since 1.5.0): a `sim_tb` DUT instance may have up to 16 independent clock inputs (more than 16, a clock on a multi-bit port, or a cell with no clock pin in a DUT with two or more clocks is an error) | works | [testbench](docs/user/testbench.md) |
+| Read-only hierarchical reads in testbenches (since 1.5.0): `dut.u_regs.r`, `dut.u.v[3]` with literal indices, after `flatten`; a write, `$readmemh` into a path, a variable index, a part-select or a memory word after `lower` is a located error | works | [testbench](docs/user/testbench.md) |
+| `$tribuf` exclusions in `lower` tested (since 1.5.0): a constant 0, x or z enable (`$_CONSTZ_` included) and a `$tribuf` fed by a `$tribuf` (in any cell order) are refused | works | [passes](docs/user/passes.md) |
 | Reverse-engineering passes `submod`, `cone_check`, `raise` and the RE loop | works | [re-workflow](docs/user/re-workflow.md) |
 | Python binding (cffi) over the C ABI 7, plugin loading with `--plugin` and ABI check, `odin3_graph.py` reader of the JSON export | works | [python-api](docs/user/python-api.md) |
 
@@ -99,6 +99,8 @@ cmake --install build/release --prefix "$HOME/odin3-1.6.0"
 
 Or the Python wheel from the GitHub release (bundles `libodin3`, ABC, the `odin3` CLI and
 `odin3-flow`): `pip install odin3-1.6.0-py3-none-linux_x86_64.whl`.
+
+The tools outside the suite that some flows need (VTR, iverilog, OpenROAD and others) and their tested versions are on the hub's [tools page](https://github.com/drpaj12/YggdrasilIII/blob/main/docs/tools.md). Wyrd III and Loki III use Odin III through the `odin3` Python package; they need 1.6.0 (C ABI 7).
 
 Then follow the manual's getting-started page: one command, `odin3-flow`, takes a Verilog design
 to a routed VPR result (with `VTR_ROOT` set) or to LPM Verilog.

@@ -28,9 +28,29 @@ the copy and try the next hypothesis.
 
 ## Run it
 
-An 8-bit adder is made anonymous (every signal renamed `n0`, `n1`, ...) and read back:
+An 8-bit adder is mapped to 3-input LUTs and made anonymous (every signal renamed `n0`, `n1`, ...).
+Set `ODIN3_LIB` as in {doc}`python-api` and use a Python with `cffi`. `anonymize.py` below is the
+renaming of `tests/tools/test_re_round.py`:
+
+```python
+# anonymize.py: python3 anonymize.py IN.blif OUT.blif
+import sys
+names = {}
+out = []
+for line in open(sys.argv[1]).read().splitlines():
+    w = line.split()
+    if w and w[0] in (".inputs", ".outputs", ".names"):
+        for i, x in enumerate(w[1:], 1):
+            w[i] = names.setdefault(x, f"n{len(names)}")
+        line = " ".join(w)
+    out.append(line)
+open(sys.argv[2], "w").write("\n".join(out) + "\n")
+```
 
 ```bash
+echo 'module add(input [7:0] a, input [7:0] b, output [7:0] y); assign y = a + b; endmodule' > add.v
+odin3 -p "read_verilog add.v; proc; opt; lower; abc --lut 3; write_blif add.blif"
+python3 anonymize.py add.blif anon.blif
 python3 plugins/python/re_round.py anon.blif out.v --json out.json
 ```
 

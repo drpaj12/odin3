@@ -11,7 +11,7 @@ unchanged.
 ## Run it
 
 ```bash
-export VTR_ROOT=~/odin3-ws/external/vtr-verilog-to-routing
+export VTR_ROOT=/path/to/vtr-verilog-to-routing    # your VTR checkout, see the hub tools page
 odin3-flow design.v --top top --timing-attr --out out/design
 cat out/design/timing/summary.txt
 ```

@@ -21,7 +21,7 @@ From the release's source tarball (it has the ABC and Unity submodules, no git n
 build is:
 
 ```sh
-tar xzf odin3-1.3.0.tar.gz && cd odin3-1.3.0
+tar xzf odin3-1.6.0.tar.gz && cd odin3-1.6.0
 cmake --preset release && cmake --build --preset release
 ```
 
@@ -34,13 +34,18 @@ odin3 --version
 ```
 
 ```text
-odin3 1.3.0 (ABI 7)
+odin3 1.6.0 (ABI 7)
+commit <40-hex commit of the build>
 SystemVerilog via slang (adapters/slang, third_party/slang)
 linked ABC a3001b72edc5de22442e942165487fddf150e3d0 (adapters/abc/NOTICE)
 ```
 
 (The `debug` preset adds ASan and UBSan and is the one the test suite uses. The Python binding
 needs the release build; see {doc}`python-api`.)
+
+Tools outside the suite (VTR for the routed result, `dot` for pictures, iverilog for some testbench
+comparisons) are listed with their tested versions on the hub's
+[tools page](https://github.com/drpaj12/YggdrasilIII/blob/main/docs/tools.md).
 
 ## Run one design
 
@@ -57,12 +62,15 @@ NOTE: VTR_ROOT is not set: VPR skipped (use --no-vpr to silence this)
 step odin3: ok (0.1 s) log out/enc/odin3/odin3.log
 step analysis: ok (0.0 s) log out/enc/analysis/analysis.log
   luts             4
+  luts_note        .names with two or more inputs (constants and one-input buffers or inverters excluded)
+  seconds          {'odin3': 0.196, 'analysis': 0.0}
 ```
 
 The top module was found by itself (the one module nothing instantiates). The result:
 
 ```text
 out/enc/summary.json
+out/enc/mimir-run.json                    the run record (see odin3-flow)
 out/enc/odin3/bm_DL_2_4_encoder.blif      the netlist
 out/enc/odin3/odin3.log                   the exact odin3 command and its log
 out/enc/analysis/*.dot, *.odin3.json, locs.txt, levelize.txt
@@ -85,7 +93,7 @@ The first line of `out/enc/odin3/odin3.log` is the `odin3` command line. It is t
 ```text
 odin3 --diag-paths resolved --top bm_DL_2_4_encoder -p read_techlib lib/vtr.o3lib;
   read_verilog --nolatches --vtr-compat tests/micro/verilog/micro/bm_DL_2_4_encoder.v;
-  proc; fsm; opt; flatten; opt -full; wreduce; hardmap; lower; abc --lut 6;
+  proc; fsm; opt; flatten; tristate; opt -full; wreduce; hardmap; lower; abc --lut 6;
   write_blif --vtr --lut-k 6 out/enc/odin3/bm_DL_2_4_encoder.blif
 ```
 

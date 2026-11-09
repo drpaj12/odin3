@@ -12,7 +12,7 @@ flowchart LR
 ```
 
 The script of the `vtr` target is `read_techlib; read_verilog; proc; fsm; opt; flatten; opt -full;
-wreduce; hardmap; lower; abc; write_blif`. Stages the script does not use (`memory_merge`,
+wreduce; hardmap; lower; abc; write_blif` (the full script, with `tristate` after `flatten`, is under Targets below). Stages the script does not use (`memory_merge`,
 `lpmmap`) are listed where they belong.
 
 ## 1. Read
@@ -77,6 +77,10 @@ object. Black boxes, hard cells and library cells stay as they are.
 flowchart LR
   A["top + sub-modules"] --> F[flatten] --> B["one module, dotted names"]
 ```
+
+The `vtr` and silicon flows then run `tristate`, which turns an internal tri-state into logic and splits a
+top-level `inout` into `p_i`, `p_o` and `p_oe`, with one WARNING per conversion (`tristate --strict` makes any
+conversion an error). A design with no tri-state is unchanged.
 
 ## 6. fsm
 
@@ -176,7 +180,7 @@ flowchart LR
 
 | Target | Passes after `read_verilog` | Writes |
 |---|---|---|
-| `vtr` | `proc; fsm; opt; flatten; opt -full; wreduce; hardmap; lower; abc --lut K` | BLIF for VPR |
+| `vtr` | `proc; fsm; opt; flatten; tristate; opt -full; wreduce; hardmap; lower; abc --lut K` | BLIF for VPR |
 | `lpm` | `proc; opt; wreduce; opt_clean; opt -full; lpmmap; opt_clean; opt -full` | Verilog with LPM cells |
 
 The `vtr` script lives in `tools/vtr-qor/qor_legs.py` and the `lpm` script in
