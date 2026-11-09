@@ -14,6 +14,15 @@ The C ABI stays 7.
   `Design.activity`. Spec `docs/specs/2026-11-08-activity-design.md`, user page `docs/user/activity.md`, test `activity_unit`,
   comparison tool `tools/activity/act_check.py`.
 
+### Fixed
+- `sim_tb` 4-state: a tech-library hard cell with an unknown input bit made every output x, so a testbench that passes on
+  the lowered gates failed on a `hardmap`'d netlist (mmuart, verilog_cordic_core, wb_lcd on the abc-mapped netlist, carry
+  chains of `adder`). The generic wrapper now runs the cell on every 0/1 completion of up to 6 unknown input bits and keeps an
+  output bit known when all completions agree (as the gate netlist does); beyond the caps all outputs are x. Test `tb_hard4`.
+  A testbench that relies on the RTL meaning of `if (x)` (wb_lcd) still fails in the default 4-state mode on an `abc`-mapped
+  netlist, because `abc` drops the RTL select attribute (`lower --keep-sel`) and the LUT cover propagates x; run such a
+  netlist with `sim_tb --2state` (wb_lcd: 307 checks pass on the full flow plus `abc --lut 6`; mmuart and verilog_cordic_core pass in both modes).
+
 ## 1.5.1 (ready to tag; release notes `docs/V1.5.1.md`)
 
 The C ABI stays 7. Two performance fixes for provenance runs of a real CPU (a-z80-modified); output unchanged.

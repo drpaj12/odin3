@@ -134,8 +134,12 @@ front end, not the simulator. Where Odin III cannot match iverilog, it prints a 
 construct), per the Parmys-default rule applied to simulation.
 
 Types with no exact 4-state hook (tech-library hard cells interpreted by `fnsim_eval`, plugin types)
-get a generic wrapper: all inputs known runs the 2-state hook; any unknown input makes every output
-x, and a one-time WARNING names the type ("x-pessimistic: <type>").
+get a generic wrapper: all inputs known runs the 2-state hook. With up to 6 unknown input bits and
+at most 64 output bits the hook runs on every 0/1 completion of the unknown bits and an output bit
+is known only when all completions agree (exact, as the gate netlist `lower` makes; v1.6 step 0:
+the old rule, any unknown input makes every output x, made a hardmap'd adder chain x where the
+lowered gates are known, and failed testbenches that pass on the lowered netlist). Beyond those
+caps every output is x.
 
 ## 6. Tri-state and several drivers
 

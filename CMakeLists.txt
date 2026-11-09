@@ -2861,6 +2861,11 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                     ${Python3_EXECUTABLE})
         set_tests_properties(tb_vcd PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " SKIP_RETURN_CODE 77
                                                LABELS tools)
+        # 4-state simulation of tech-library hard cells (adder): exact over the unknown inputs.
+        add_test(NAME tb_hard4
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_hard4.sh $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/lib/vtr.o3lib)
+        set_tests_properties(tb_hard4 PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
     endif()
     add_test(NAME tb_project
         COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_project.sh $<TARGET_FILE:odin3>)
