@@ -487,6 +487,36 @@ static void test_vendor_prims_refused_with_lib(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("read_verilog", "--lib --vendor-prims t.v"));
 }
 
+/* A module read by an earlier (plain) read_verilog is instantiated by a later one (v1.6.1). */
+static void test_earlier_read_module_resolves(void) {
+    et_src srcs[] = {
+        {"a.v", "module leafm (input [1:0] x, output y);\n  assign y = &x;\nendmodule\n"},
+        {"b.v", "module topm (input [1:0] x, output y);\n"
+                "  leafm u (.x(x), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "a.v"), et_log(&rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "b.v"), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    TEST_ASSERT_NOT_NULL(module_like("leafm"));
+    TEST_ASSERT_NOT_NULL(module_like("topm"));
+    TEST_ASSERT_EQUAL_UINT32(1, cells_of("leafm"));
+}
+
+/* ... but not with a parameter override: the earlier read fixed its values. */
+static void test_earlier_read_module_has_no_parameters(void) {
+    et_src srcs[] = {{"a.v", "module leafp #(parameter W = 2) (input [W-1:0] x, output y);\n"
+                             "  assign y = &x;\nendmodule\n"},
+                     {"b.v", "module topp (input [3:0] x, output y);\n"
+                             "  leafp #(.W(4)) u (.x(x), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "a.v"), et_log(&rs));
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "b.v"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, "has no parameter 'W'"),
+                                     et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1, et_count_with(&rs, ODIN3_LOG_ERROR, "read it with read_verilog --lib"), et_log(&rs));
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
     X(test_lib_unit_elaborated_where_used)                                                         \
@@ -514,7 +544,9 @@ static void test_vendor_prims_refused_with_lib(void) {
     X(test_vendor_prims_are_built_from_the_models)                                                 \
     X(test_vendor_prims_off_keeps_the_error)                                                       \
     X(test_vendor_prims_never_replace_a_definition)                                                \
-    X(test_vendor_prims_refused_with_lib)
+    X(test_vendor_prims_refused_with_lib)                                                          \
+    X(test_earlier_read_module_resolves)                                                           \
+    X(test_earlier_read_module_has_no_parameters)
 
 #define RUN_ONE(name) RUN_TEST(name);
 
