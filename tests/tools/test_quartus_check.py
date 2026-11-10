@@ -167,6 +167,16 @@ class EveryStorageCell(unittest.TestCase):
                 self.run_case(label, instance, blocks)
 
 
+@unittest.skipUnless(ODIN3 and shutil.which("iverilog"), "ODIN3_CLI and iverilog are needed")
+class MemoryForms(unittest.TestCase):
+    def test_transparent_read_with_byte_enables(self) -> None:
+        base = Path(__file__).resolve().parents[1] / "quartus" / "icells"
+        code = qc.main(["--odin3", ODIN3, "--icells", "--gold",
+                        str(base / "mem_transparent_bytes_gold.v"), "--top", "t",
+                        str(base / "mem_transparent_bytes.v")])
+        self.assertEqual(code, 0)
+
+
 @unittest.skipUnless(ODIN3, "ODIN3_CLI is needed")
 class BlackBox(unittest.TestCase):
     def test_megafunction_passes_through_with_parameters(self) -> None:

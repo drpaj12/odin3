@@ -156,26 +156,28 @@ def testbench(top: str, plist: list[tuple[str, str, str]], cycles: int, seed: in
 
     lines.append(f"  gold gold_u ({pins('g_')});")
     lines.append(f"  {top} dut ({pins('d_')});")
-    lines.append("  integer i, bad;")
-    lines.append("  task cmp; begin")
+    lines.append("  integer tb_i, tb_bad;")
+    lines.append("  task tb_cmp; begin")
     for _, n in outs:
-        lines.append(f"    if (g_{n} !== d_{n}) begin bad = bad + 1; "
+        lines.append(f"    if (g_{n} !== d_{n}) begin tb_bad = tb_bad + 1; "
                      f'$display("MISMATCH %0t {n}: gold=%b dut=%b", $time, g_{n}, d_{n}); end')
     lines.append("  end endtask")
     lines.append("  initial begin")
-    lines.append(f"    bad = 0; i = {seed};")
+    lines.append(f"    tb_bad = 0; tb_i = {seed};")
     lines += [f"    {n} = 0;" for _, n in ins]
-    lines.append(f"    for (i = 0; i < {cycles}; i = i + 1) begin")
+    lines.append(f"    for (tb_i = 0; tb_i < {cycles}; tb_i = tb_i + 1) begin")
     lines += [f"      {n} = 1;" for n in clocks]
-    lines += ["      #2; cmp; #3;"]
+    lines += ["      #2; tb_cmp; #3;"]
     lines += [f"      {n} = 0;" for n in clocks]
     lines.append("      #1;")
     for _, n in ins:
         if n not in clocks:
             rate = "(($random & 7) == 0)" if re.search(r"rst|clr|set|ald", n) else "$random"
             lines.append(f"      {n} = {rate};")
-    lines += ["      #2; cmp; #2;", "    end"]
-    lines.append('    if (bad == 0) $display("EQUIV PASS"); else $display("EQUIV FAIL %0d", bad);')
+    lines += ["      #2; tb_cmp; #2;", "    end"]
+    lines.append(
+        '    if (tb_bad == 0) $display("EQUIV PASS"); else $display("EQUIV FAIL %0d", tb_bad);'
+    )
     lines += ["    $finish;", "  end", "endmodule"]
     return "\n".join(lines) + "\n"
 

@@ -1904,7 +1904,7 @@ if(BUILD_TESTING)
     # V1.6.1: one micro per storage-cell shape and memory form through `write_verilog --quartus`
     # (tools/quartus-check): purity of the netlist, read-back, lint, random-simulation equivalence.
     foreach(_q_micro IN ITEMS ff_plain ff_async ff_sync ff_aload latch mem_async mem_sync
-                              mem_sync_en mem_two_ports mem_init)
+                              mem_sync_en mem_two_ports mem_init shift_pow)
         add_test(NAME quartus_check_${_q_micro}
             COMMAND ${PROJECT_SOURCE_DIR}/tools/quartus-check/quartus-check
                     --odin3 $<TARGET_FILE:odin3>
