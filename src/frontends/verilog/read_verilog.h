@@ -34,6 +34,11 @@ typedef struct odin3_rv_opts {
     odin3_passrun_id run;
     odin3_vec *tokens;
     bool keep_streams; /* --lib: keep each design file's preprocessed stream in the store */
+    const odin3_pp_define
+        *defines; /* -D defines of the command (after the record's); may be NULL */
+    uint32_t ndefines;
+    const char *const *incdirs; /* -I directories of the command, resolved (after the record's) */
+    uint32_t nincdirs;
 } odin3_rv_opts;
 
 /*

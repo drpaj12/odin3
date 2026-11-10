@@ -7,6 +7,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- `read_verilog -D NAME[=VALUE]` and `-I DIR` (repeatable): command-line preprocessor defines and include directories for a Verilog read, after the project record's. A `sim_tb` run on a design that needs defines no longer needs an `.o3proj` (`sim_tb` already took `-D`/`-I` for its testbench files).
 - `write_verilog --quartus [--sim-file F]` and the LPM target `odin3-flow --target lpm` write a netlist Quartus can read: no
   Odin-internal cell type and no module definition of a library name. Every flip-flop and latch cell type (`$sdffe`, `$adffe`,
   `$sdffce`, `$aldff`, `$aldffe`, `$dffsr`, `$dffsre`, `$dlatch`, `$adlatch`, `$dlatchsr`, `$sr` and the 68 gate-level
@@ -21,6 +22,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   instance does); `write_verilog` writes them as `#(.NAME(value))`.
 
 ### Fixed
+- A module read by an earlier `read_verilog` can be instantiated by a later one (`unresolved_module: module 'TreeLUT' is not defined` with two `read_verilog` commands). It resolves to the elaborated module with its default parameters; a `#()` override of it is an error that says to read it with `--lib`.
 - `write_verilog --quartus` keeps the power-up value of a word flip-flop: the `init` attribute of the nets its Q bits drive is written as `initial <reg> = N'b...;` (one word when every bit is known, else one line per known bit), so Quartus starts the register where the RTL did. `$aldff` stays an edge-only `always @(posedge clk, posedge aload)` (Quartus infers an asynchronous load from it; a change of AD while ALOAD is high is not followed in simulation).
 - A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
   `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one
