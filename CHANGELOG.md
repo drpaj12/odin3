@@ -21,6 +21,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   instance does); `write_verilog` writes them as `#(.NAME(value))`.
 
 ### Fixed
+- `write_verilog --quartus` keeps the power-up value of a word flip-flop: the `init` attribute of the nets its Q bits drive is written as `initial <reg> = N'b...;` (one word when every bit is known, else one line per known bit), so Quartus starts the register where the RTL did. `$aldff` stays an edge-only `always @(posedge clk, posedge aload)` (Quartus infers an asynchronous load from it; a change of AD while ALOAD is high is not followed in simulation).
 - A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
   `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one
   switch per dimension, instead of the error `non-constant index into the multi-dimensional register array`. IEEE 1364-2005

@@ -13,6 +13,7 @@
 #include "ir/proc.h"
 #include "ir/prov.h"
 #include "ir/value.h"
+#include "passes/ffinit.h"
 #include "util/alloc.h"
 #include "util/file.h"
 #include "util/hash.h"
@@ -1558,6 +1559,47 @@ static void put_condition(verilog_writer *wr, odin3_node_id node) {
     vw_puts(wr, ") ");
 }
 
+enum { WORD_INIT_MAX = 4096 }; /* the widest word flip-flop whose init is written */
+
+/* A word flip-flop's power-up value: the `init` attribute (v1.6.1; ffinit.h) of the nets its Q bits
+ * drive, as one `initial reg[bit] = 1'bV;` per defined bit, so Quartus starts the register there
+ * (the attribute alone is a comment to it). */
+static void write_word_init(verilog_writer *wr, odin3_node_id node) {
+    odin3_pinslice q = out_port(wr, node);
+    odin3_bit bits[WORD_INIT_MAX];
+    uint32_t defined = 0;
+    for (uint32_t bit = 0; bit < q.count && bit < WORD_INIT_MAX; bit++) {
+        odin3_net_id net = odin3_pin_net(wr->mod.module, (odin3_pin_id){q.first.v + bit});
+        bits[bit] = odin3_net_valid(net) ? odin3_ffinit_get(wr->mod.module, net) : ODIN3_BIT_X;
+        defined += bits[bit] == ODIN3_BIT_0 || bits[bit] == ODIN3_BIT_1 ? 1U : 0U;
+    }
+    if (defined == q.count && q.count > 1) { /* every bit known: one word */
+        vw_puts(wr, "  initial ");
+        vw_name(wr, OBJ_NODE, node.v);
+        vw_puts(wr, " = ");
+        vw_u32(wr, q.count);
+        vw_puts(wr, "'b");
+        for (uint32_t bit = q.count; bit-- > 0;) {
+            vw_char(wr, bits[bit] == ODIN3_BIT_1 ? '1' : '0');
+        }
+        vw_puts(wr, ";\n");
+        return;
+    }
+    for (uint32_t bit = 0; bit < q.count && bit < WORD_INIT_MAX; bit++) {
+        if (bits[bit] != ODIN3_BIT_0 && bits[bit] != ODIN3_BIT_1) {
+            continue;
+        }
+        vw_puts(wr, "  initial ");
+        vw_name(wr, OBJ_NODE, node.v);
+        if (q.count > 1) {
+            vw_char(wr, '[');
+            vw_u32(wr, bit);
+            vw_char(wr, ']');
+        }
+        vw_puts(wr, bits[bit] == ODIN3_BIT_0 ? " = 1'b0;\n" : " = 1'b1;\n");
+    }
+}
+
 /* $dff (CLK D Q), $dffe (CLK EN D Q), $adff (CLK ARST D Q), $sdff (CLK SRST D Q). */
 static void write_ff(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
     uint32_t data = node_def(wr, node)->n_ports - 2;
@@ -1584,6 +1626,9 @@ static void write_ff(verilog_writer *wr, odin3_node_id node, const vw_builtin *b
     vw_puts(wr, " <= ");
     put_port(wr, node, data, false);
     end_stmt(wr, node);
+    if (wr->quartus && !q_reg) {
+        write_word_init(wr, node);
+    }
     connect_reg(wr, node, q_reg);
 }
 
@@ -1885,6 +1930,8 @@ static void write_ffx(verilog_writer *wr, odin3_node_id node, const vw_builtin *
         vw_puts(wr, "  initial ");
         vw_name(wr, OBJ_NODE, node.v);
         vw_puts(wr, init_val == 0 ? " = 1'b0;\n" : " = 1'b1;\n");
+    } else {
+        write_word_init(wr, node);
     }
     connect_reg(wr, node, false);
 }
