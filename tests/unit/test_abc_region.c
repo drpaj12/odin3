@@ -560,6 +560,26 @@ static void test_long_chain(void) {
 #endif
 }
 
+/* v1.6.1 (gap 6): a gate costs the ANDs of its cover, not 2^(k-1) * (k + 1): AND and OR 1, XOR 3,
+ * an inverter 0 (it was 6, 6, 6 and 2, which put 2 M gates over a 4 GiB budget). */
+static void test_gate_estimate_is_the_cover(void) {
+    new_module("m");
+    odin3_net_id a = afx_port(design, mod, "a", ODIN3_DIR_IN);
+    odin3_net_id b = afx_port(design, mod, "b", ODIN3_DIR_IN);
+    static const char *const k_types[] = {"$_AND_", "$_OR_", "$_XOR_"};
+    static const char *const k_outs[] = {"y0", "y1", "y2"};
+    for (uint32_t i = 0; i < 3; i++) {
+        odin3_net_id gate[3] = {a, b, afx_port(design, mod, k_outs[i], ODIN3_DIR_OUT)};
+        (void)AFX_CELL(design, mod, k_types[i], NULL, gate, 3);
+    }
+    odin3_net_id inv[2] = {a, afx_port(design, mod, "y3", ODIN3_DIR_OUT)};
+    (void)AFX_CELL(design, mod, "$_NOT_", NULL, inv, 2);
+    start();
+    build(0);
+    uint64_t others = 1ULL + region.cis.len + 2ULL * region.regs.len + region.cos.len;
+    TEST_ASSERT_EQUAL_UINT64(1 + 1 + 3 + 0, region.objs_est - others);
+}
+
 static void test_region_oom_sweep(void) {
     new_module("m");
     odin3_net_id in_a = afx_port(design, mod, "a", ODIN3_DIR_IN);
@@ -606,6 +626,7 @@ int main(void) {
     RUN_TEST(test_loop_is_cut);
     RUN_TEST(test_cut_counts);
     RUN_TEST(test_long_chain);
+    RUN_TEST(test_gate_estimate_is_the_cover);
     RUN_TEST(test_region_oom_sweep);
     return UNITY_END();
 }

@@ -21,6 +21,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   instance does); `write_verilog` writes them as `#(.NAME(value))`.
 
 ### Fixed
+- `abc` no longer refuses a large gate-level design for memory it would not use. Its pre-run estimate of AIG objects charged a 2-input gate 6 (and an inverter 2); it now charges the ANDs of the gate's irredundant cover (AND and OR 1, XOR 3, inverter 0). The NeuraLUT designs nl-A and nl-C (2 M gates after `lower`) estimated 6.9 M objects, 3.6 GB at 520 B each, and hit the 4 GiB budget (`abc needs more than 4294967296 bytes`); they now estimate about a third of that.
 - A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
   `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one
   switch per dimension, instead of the error `non-constant index into the multi-dimensional register array`. IEEE 1364-2005
