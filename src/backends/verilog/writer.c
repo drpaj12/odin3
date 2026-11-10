@@ -1564,40 +1564,57 @@ enum { WORD_INIT_MAX = 4096 }; /* the widest word flip-flop whose init is writte
 /* A word flip-flop's power-up value: the `init` attribute (v1.6.1; ffinit.h) of the nets its Q bits
  * drive, as one `initial reg[bit] = 1'bV;` per defined bit, so Quartus starts the register there
  * (the attribute alone is a comment to it). */
-static void write_word_init(verilog_writer *wr, odin3_node_id node) {
-    odin3_pinslice q = out_port(wr, node);
-    odin3_bit bits[WORD_INIT_MAX];
-    uint32_t defined = 0;
-    for (uint32_t bit = 0; bit < q.count && bit < WORD_INIT_MAX; bit++) {
-        odin3_net_id net = odin3_pin_net(wr->mod.module, (odin3_pin_id){q.first.v + bit});
+static bool bit_known(odin3_bit bit) {
+    return bit == ODIN3_BIT_0 || bit == ODIN3_BIT_1;
+}
+
+/* The init bits of the Q port into bits[]; the number of known ones. */
+static uint32_t word_init_bits(const verilog_writer *wr, odin3_pinslice port, odin3_bit *bits) {
+    uint32_t known = 0;
+    for (uint32_t bit = 0; bit < port.count && bit < WORD_INIT_MAX; bit++) {
+        odin3_net_id net = odin3_pin_net(wr->mod.module, (odin3_pin_id){port.first.v + bit});
         bits[bit] = odin3_net_valid(net) ? odin3_ffinit_get(wr->mod.module, net) : ODIN3_BIT_X;
-        defined += bits[bit] == ODIN3_BIT_0 || bits[bit] == ODIN3_BIT_1 ? 1U : 0U;
+        known += bit_known(bits[bit]) ? 1U : 0U;
     }
-    if (defined == q.count && q.count > 1) { /* every bit known: one word */
-        vw_puts(wr, "  initial ");
-        vw_name(wr, OBJ_NODE, node.v);
-        vw_puts(wr, " = ");
-        vw_u32(wr, q.count);
-        vw_puts(wr, "'b");
-        for (uint32_t bit = q.count; bit-- > 0;) {
-            vw_char(wr, bits[bit] == ODIN3_BIT_1 ? '1' : '0');
-        }
-        vw_puts(wr, ";\n");
-        return;
-    }
-    for (uint32_t bit = 0; bit < q.count && bit < WORD_INIT_MAX; bit++) {
-        if (bits[bit] != ODIN3_BIT_0 && bits[bit] != ODIN3_BIT_1) {
+    return known;
+}
+
+/* `initial reg[bit] = 1'bV;` for each known bit. */
+static void write_bit_inits(verilog_writer *wr, odin3_node_id node, const odin3_bit *bits,
+                            uint32_t width) {
+    for (uint32_t bit = 0; bit < width; bit++) {
+        if (!bit_known(bits[bit])) {
             continue;
         }
         vw_puts(wr, "  initial ");
         vw_name(wr, OBJ_NODE, node.v);
-        if (q.count > 1) {
+        if (width > 1) {
             vw_char(wr, '[');
             vw_u32(wr, bit);
             vw_char(wr, ']');
         }
         vw_puts(wr, bits[bit] == ODIN3_BIT_0 ? " = 1'b0;\n" : " = 1'b1;\n");
     }
+}
+
+static void write_word_init(verilog_writer *wr, odin3_node_id node) {
+    odin3_pinslice port = out_port(wr, node);
+    odin3_bit bits[WORD_INIT_MAX];
+    uint32_t known = word_init_bits(wr, port, bits);
+    uint32_t width = port.count < WORD_INIT_MAX ? port.count : WORD_INIT_MAX;
+    if (known != width || width < 2) {
+        write_bit_inits(wr, node, bits, width);
+        return;
+    }
+    vw_puts(wr, "  initial "); /* every bit known: one word */
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_puts(wr, " = ");
+    vw_u32(wr, width);
+    vw_puts(wr, "'b");
+    for (uint32_t bit = width; bit-- > 0;) {
+        vw_char(wr, bits[bit] == ODIN3_BIT_1 ? '1' : '0');
+    }
+    vw_puts(wr, ";\n");
 }
 
 /* $dff (CLK D Q), $dffe (CLK EN D Q), $adff (CLK ARST D Q), $sdff (CLK SRST D Q). */
