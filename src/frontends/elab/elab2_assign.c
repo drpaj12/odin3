@@ -670,13 +670,6 @@ static odin3_status lv_regs_target(odin3_elab2 *e2, odin3_elab2_lvalue *lv, odin
                           lv_name(e2, rec));
         return ODIN3_ERR_PARSE;
     }
-    if (ref->n != 1) {
-        odin3_elab2_error(e2, loc,
-                          "non-constant index into the multi-dimensional register array '%s' is "
-                          "not supported",
-                          lv_name(e2, rec));
-        return ODIN3_ERR_PARSE;
-    }
     lv->regs = (odin3_elab2_regsel){sel, odin3_elab2_mem_word_index(e2, sel, 0), ref->mem};
     odin3_status st = ODIN3_OK;
     for (size_t pos = 0; st == ODIN3_OK && pos < mem->words.len; pos++) {

@@ -466,7 +466,7 @@ odin3_status odin3_elab2_sig_new(odin3_elab2 *e2, uint32_t width, odin3_sig *out
 typedef struct odin3_elab2_regs_rd {
     odin3_ast_id select;  /* the word SELECT */
     uint32_t mem;         /* the register array's table index */
-    const odin3_sig *idx; /* the index of the one dimension, generated */
+    const odin3_sig *idx; /* one index per dimension of the array, generated */
 } odin3_elab2_regs_rd;
 
 /*
@@ -895,7 +895,7 @@ odin3_status odin3_elab2_varsel_make(odin3_elab2 *e2, odin3_elab2_varsel *vs);
  * holds the bits of every word, word 0 first. */
 typedef struct odin3_elab2_regsel {
     odin3_ast_id node;  /* the word SELECT */
-    odin3_ast_id index; /* its index expression, not generated */
+    odin3_ast_id index; /* its first index expression, not generated */
     uint32_t mem;       /* the table index of the array */
 } odin3_elab2_regsel;
 
@@ -1169,6 +1169,7 @@ typedef struct odin3_elab_mem {
     /* the fields the brief did not list (agent default) */
     bool is_signed;
     bool failed;   /* an error was reported for the array (no second one for its accesses) */
+    bool frame;    /* a function's or task's array: registers, its words made per call */
     uint32_t name; /* strtab ID of the array's IR name: the MEMID, and the base of word names */
     uint32_t n_dims;
     odin3_vec words; /* odin3_wire_id of word position 0 .. size - 1 (registers per word) */
@@ -1199,6 +1200,16 @@ const odin3_elab_mem *odin3_elab2_mem_get(const odin3_elab2 *e2, uint32_t mem);
  * for a module that is not the one being emitted.
  */
 odin3_status odin3_elab2_mem_decide(odin3_elab2 *e2, odin3_ast_id module_node);
+
+/*
+ * The words of a function's or task's array (mem->frame) for one call: unnamed wires, one per
+ * word, replacing the last call's (the call frame owns them, as it owns the scalar locals). Each
+ * wire is passed to note (the frame's bookkeeping) as it is made. ODIN3_ERR_INVALID_ARG for an
+ * array that is not a frame array.
+ */
+typedef odin3_status (*odin3_elab2_word_note)(void *user, odin3_wire_id wire, uint32_t width);
+odin3_status odin3_elab2_mem_frame_words(odin3_elab2 *e2, uint32_t index,
+                                         odin3_elab2_word_note note, void *user);
 
 /* How the word SELECT chain of a node names a table entry. */
 typedef struct odin3_elab2_wordref {

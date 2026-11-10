@@ -4,6 +4,19 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
+## Unreleased
+
+### Fixed
+- A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
+  `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one
+  switch per dimension, instead of the error `non-constant index into the multi-dimensional register array`. IEEE 1364-2005
+  allows it; Yosys 0.55 elaborates it. An index outside a dimension reads x, as for one dimension.
+- A function or task with a local array (`reg [7:0] m [7:0]` in `lfsr_mask`, verilog-ethernet) no longer fails with `'m' is a
+  memory; select a word`: the array is registers, its words made per call like the callee's other locals; a bit of a word
+  (`m[i][i] = 1'b1`) can be written.
+- `tests/micro/verilog/syntax/matrix_multiplication.v` now elaborates (it had the multi-dimensional error); its Yosys 0.55
+  bridge still stops at the dual-edge rejection that Parmys also hits.
+
 ## 1.6.0 (2026-11-09; release notes `docs/V1.6.0.md`)
 
 The C ABI stays 7.

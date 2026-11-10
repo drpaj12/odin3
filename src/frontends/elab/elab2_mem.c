@@ -124,9 +124,11 @@ static void mem_init(odin3_elab_mem *mem, odin3_sym_id sym, const odin3_symbol *
 }
 
 /* One array onto the table: its geometry, its name, and the memory-bits cap (fatal). */
-static odin3_status mem_add(odin3_elab2 *e2, odin3_sym_id sym, const odin3_symbol *rec) {
+static odin3_status mem_add(odin3_elab2 *e2, odin3_sym_id sym, const odin3_symbol *rec,
+                            bool frame) {
     odin3_elab_mem mem;
     mem_init(&mem, sym, rec);
+    mem.frame = frame;
     uint64_t bits = mem_geometry(e2, rec, &mem);
     odin3_status st = odin3_elab2_scoped_name(e2, rec, &mem.name);
     if (st == ODIN3_OK && bits > e2->limits->max_memory_bits) {
@@ -148,6 +150,20 @@ static odin3_status mem_add(odin3_elab2 *e2, odin3_sym_id sym, const odin3_symbo
 /* --- finding the arrays ------------------------------------------------------------------------
  */
 
+/* Whether the scope is, or is inside, a function's or a task's. */
+static bool mem_in_frame(const odin3_elab2 *e2, odin3_scope_id scope) {
+    for (; scope.v != 0; scope = odin3_scope_get(e2->st, scope)->parent) {
+        uint8_t kind = odin3_scope_get(e2->st, scope)->kind;
+        if (kind == ODIN3_SCOPE_FUNCTION || kind == ODIN3_SCOPE_TASK) {
+            return true;
+        }
+        if (kind == ODIN3_SCOPE_MODULE) {
+            break;
+        }
+    }
+    return false;
+}
+
 /* The arrays of one scope: a net or variable with unpacked dimensions that has no wire. */
 static odin3_status mem_scope(odin3_elab2 *e2, odin3_scope_id scope) {
     odin3_status st = ODIN3_OK;
@@ -156,20 +172,17 @@ static odin3_status mem_scope(odin3_elab2 *e2, odin3_scope_id scope) {
         const odin3_symbol *rec = odin3_symbol_get(e2->st, sym);
         bool variable = rec->kind == ODIN3_SYM_NET || rec->kind == ODIN3_SYM_VAR;
         if (variable && rec->n_unpacked > 0 && rec->ir_wire.v == 0) {
-            st = mem_add(e2, sym, rec);
+            st = mem_add(e2, sym, rec, mem_in_frame(e2, scope));
         }
     }
     return st;
 }
 
-/* The child scopes of scope that are the module's: not a function's or a task's. */
+/* The child scopes of scope: the module's, and a function's or a task's (their arrays are
+ * mem->frame: registers whose words each call makes). */
 static odin3_status mem_push_scopes(const odin3_elab2 *e2, odin3_vec *todo, odin3_scope_id scope) {
     for (odin3_scope_id kid = odin3_scope_first_child(e2->st, scope); kid.v != 0;
          kid = odin3_scope_next_sibling(e2->st, kid)) {
-        uint8_t kind = odin3_scope_get(e2->st, kid)->kind;
-        if (kind == ODIN3_SCOPE_FUNCTION || kind == ODIN3_SCOPE_TASK) {
-            continue;
-        }
         odin3_scope_id *slot = odin3_vec_push(todo);
         if (slot == NULL) {
             return ODIN3_ERR_NO_MEMORY;
@@ -421,6 +434,53 @@ static odin3_status mem_make_words(odin3_elab2 *e2, odin3_elab_mem *mem, const o
     return st;
 }
 
+typedef struct frame_note_req {
+    odin3_elab2_word_note note;
+    void *user;
+} frame_note_req;
+
+/* One word wire of a frame array: unnamed, noted to the frame, appended to the array's words. */
+static odin3_status frame_word_make(odin3_elab2 *e2, odin3_elab_mem *mem,
+                                    const odin3_wire_spec *spec, odin3_loc loc,
+                                    const frame_note_req *fn) {
+    odin3_wire_id wire = {0};
+    odin3_status st = odin3_elab2_reserve_nets(e2, mem->width, loc);
+    st = st != ODIN3_OK ? st : odin3_wire_create(e2->mod, spec, NULL, &wire);
+    odin3_wire_id *slot = st == ODIN3_OK ? odin3_vec_push(&mem->words) : NULL;
+    if (st == ODIN3_OK && slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    if (slot == NULL) {
+        return st;
+    }
+    *slot = wire;
+    odin3_elab2_counts made = {0, 0, mem->width, 1};
+    st = odin3_elab2_account(e2, &made);
+    return st != ODIN3_OK ? st : fn->note(fn->user, wire, mem->width);
+}
+
+odin3_status odin3_elab2_mem_frame_words(odin3_elab2 *e2, uint32_t index,
+                                         odin3_elab2_word_note note, void *user) {
+    odin3_elab_mem *mem = odin3_elab2_mem_at(e2, index);
+    if (mem == NULL || !mem->frame) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    odin3_vec_clear(&mem->words);
+    odin3_wire_spec spec = {.msb = rec->has_packed ? rec->packed.msb : 0,
+                            .lsb = rec->has_packed ? rec->packed.lsb : 0,
+                            .is_signed = mem->is_signed};
+    odin3_elab2_prov_req req = {
+        rec->declarator.v != 0 ? rec->declarator : rec->decl, {0}, rec->scope.v};
+    odin3_loc loc = odin3_ast_loc(e2->elab, req.node);
+    frame_note_req fn = {note, user};
+    odin3_status st = odin3_elab2_prov(e2, &req, &spec.prov);
+    for (uint32_t pos = 0; st == ODIN3_OK && pos < mem->size && !e2->stopped; pos++) {
+        st = frame_word_make(e2, mem, &spec, loc, &fn);
+    }
+    return st;
+}
+
 /* --- the decision ------------------------------------------------------------------------------
  */
 
@@ -445,6 +505,10 @@ static odin3_status mem_resolve(odin3_elab2 *e2, uint32_t index, const odin3_mem
                                 const mem_keys *keys) {
     odin3_elab_mem *mem = odin3_elab2_mem_at(e2, index);
     const odin3_symbol *rec = odin3_symbol_get(e2->st, mem->sym);
+    if (mem->frame) { /* registers, as the callee's scalars are; the words come with each call */
+        mem->to_regs = true;
+        return ODIN3_OK;
+    }
     if (e2->mod_nomem2reg) {
         mem_conflict(e2, mem, fact);
         return ODIN3_OK;
@@ -563,6 +627,10 @@ static int64_t dim_position(const odin3_elab_mem *mem, const odin3_dim *dim, int
         return idx - low;
     }
     return idx > dim->msb ? idx - dim->msb : (int64_t)dim->msb - idx;
+}
+
+int64_t odin3_elab2_mem_dim_pos(const odin3_elab_mem *mem, const odin3_dim *dim, int64_t idx) {
+    return dim_position(mem, dim, idx);
 }
 
 /* The checks every word and port request shares. */

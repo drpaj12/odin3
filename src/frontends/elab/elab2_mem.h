@@ -40,6 +40,9 @@ uint32_t odin3_elab2_mem_find(const odin3_elab2 *e2, odin3_sym_id sym);
 /* The table entry at index mem for update; NULL outside the table. */
 odin3_elab_mem *odin3_elab2_mem_at(odin3_elab2 *e2, uint32_t mem);
 
+/* The word position along dimension dim of the declared index idx (-1: outside it). */
+int64_t odin3_elab2_mem_dim_pos(const odin3_elab_mem *mem, const odin3_dim *dim, int64_t idx);
+
 /* The lowest declared index of a dimension (its size is odin3_elab2_dim_size). */
 int32_t odin3_elab2_dim_low(const odin3_dim *dim);
 
