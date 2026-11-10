@@ -114,11 +114,31 @@ static odin3_status fill_config(const odin3_design *design, const odin3_project 
     return ODIN3_OK;
 }
 
-static odin3_status create_pp(odin3_rv *rv) {
+/* The command's own -D defines and -I directories, after the record's. */
+static odin3_status add_command_config(const odin3_rv_opts *opts, rv_config *config) {
+    for (uint32_t i = 0; i < opts->ndefines; i++) {
+        odin3_pp_define *slot = odin3_vec_push(&config->defines);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = opts->defines[i];
+    }
+    for (uint32_t i = 0; i < opts->nincdirs; i++) {
+        const char **slot = (const char **)odin3_vec_push(&config->incdirs);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = opts->incdirs[i];
+    }
+    return ODIN3_OK;
+}
+
+static odin3_status create_pp(odin3_rv *rv, const odin3_rv_opts *opts) {
     rv_config config;
     odin3_vec_init(&config.defines, sizeof(odin3_pp_define));
     odin3_vec_init(&config.incdirs, sizeof(const char *));
     odin3_status st = fill_config(rv->design, rv->proj, &config);
+    st = st != ODIN3_OK ? st : add_command_config(opts, &config);
     if (st == ODIN3_OK) {
         odin3_pp_config pc = {config.defines.data, (uint32_t)config.defines.len,
                               (const char *const *)config.incdirs.data,
@@ -155,7 +175,7 @@ static odin3_status rv_open(odin3_rv *rv, odin3_design *design, const odin3_rv_o
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = odin3_ast_create(design, ODIN3_AST_FORM_PARSED, opts->run, &rv->ast);
-    return st != ODIN3_OK ? st : create_pp(rv);
+    return st != ODIN3_OK ? st : create_pp(rv, opts);
 }
 
 /* The run's error cap before a file (plan point (r)): the preprocessor logs its own error, so a
@@ -389,6 +409,8 @@ typedef struct rv_args {
     bool vendor_prims; /* --vendor-prims: vendor primitives from the behavioural models */
     odin3_elab_opts elab;
     odin3_vec files;
+    odin3_vec defines;    /* -D words (odin3_bytes views: name or name=value) */
+    odin3_vec incdirs;    /* -I words (odin3_bytes views) */
     odin3_bytes name_map; /* -name-map's file (H-6), ptr NULL when not given */
     bool prov_set;        /* --prov-ast given */
     odin3_construct_mode prov_ast;
@@ -533,6 +555,24 @@ static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *ou
     return ODIN3_OK;
 }
 
+/* -D name[=value] or -I dir: the next word goes to the defines or the include directories. */
+static odin3_status take_command_word(odin3_bytes flag, odin3_bytes *rest, rv_args *out) {
+    odin3_bytes value = odin3_pass_arg_next(rest);
+    if (value.ptr == NULL || value.len == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: %.*s expects a %s", (int)flag.len,
+                  (const char *)flag.ptr,
+                  ((const char *)flag.ptr)[1] == 'D' ? "name[=value]" : "directory");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_bytes *slot =
+        odin3_vec_push(((const char *)flag.ptr)[1] == 'D' ? &out->defines : &out->incdirs);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = value;
+    return ODIN3_OK;
+}
+
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
@@ -542,6 +582,13 @@ static odin3_status parse_args(odin3_bytes args, rv_args *out) {
             return st;
         }
         if (taken) {
+            continue;
+        }
+        if (odin3_pass_arg_is(word, "-D") || odin3_pass_arg_is(word, "-I")) {
+            odin3_status vst = take_command_word(word, &args, out);
+            if (vst != ODIN3_OK) {
+                return vst;
+            }
             continue;
         }
         if (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0) {
@@ -887,11 +934,63 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     return st;
 }
 
+/* Splits "name=value" (value may be empty) into a preprocessor define; no "=" is a bare name. */
+static odin3_pp_define make_define(odin3_bytes word) {
+    const char *text = word.ptr;
+    const char *eq = memchr(text, '=', word.len);
+    if (eq == NULL) {
+        return (odin3_pp_define){word, {NULL, 0}, false};
+    }
+    return (odin3_pp_define){
+        {text, (size_t)(eq - text)}, {eq + 1, word.len - (size_t)(eq - text) - 1U}, true};
+}
+
+/* The -D defines and the -I directories (resolved against the working directory, strtab text) of
+ * the command, for odin3_rv_opts. */
+static odin3_status command_config(odin3_design *design, const rv_args *args, odin3_vec *defs,
+                                   odin3_vec *dirs) {
+    for (size_t i = 0; i < args->defines.len; i++) {
+        odin3_pp_define *slot = odin3_vec_push(defs);
+        if (slot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *slot = make_define(*(const odin3_bytes *)odin3_vec_cat(&args->defines, i));
+    }
+    odin3_strbuf cwd;
+    odin3_strbuf_init(&cwd);
+    odin3_status st = args->incdirs.len > 0 ? working_dir(&cwd) : ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < args->incdirs.len; i++) {
+        odin3_bytes word = *(const odin3_bytes *)odin3_vec_cat(&args->incdirs, i);
+        odin3_strbuf path;
+        odin3_strbuf_init(&path);
+        uint32_t id = 0;
+        st = odin3_path_resolve((odin3_path_join){odin3_bytes_cstr(cwd.data), word}, &path);
+        st = st != ODIN3_OK ? st
+                            : odin3_design_intern(design, (odin3_bytes){path.data, path.len}, &id);
+        const char **slot = st == ODIN3_OK ? (const char **)odin3_vec_push(dirs) : NULL;
+        if (st == ODIN3_OK) {
+            st = slot == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+        }
+        if (slot != NULL) {
+            *slot = text_of(design, id);
+        }
+        odin3_strbuf_free(&path);
+    }
+    odin3_strbuf_free(&cwd);
+    return st;
+}
+
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
     rv_args parsed = {.parse_only = false, .elab = {0}};
     odin3_vec_init(&parsed.files, sizeof(odin3_bytes));
+    odin3_vec_init(&parsed.defines, sizeof(odin3_bytes));
+    odin3_vec_init(&parsed.incdirs, sizeof(odin3_bytes));
+    odin3_vec cmd_defs;
+    odin3_vec_init(&cmd_defs, sizeof(odin3_pp_define));
+    odin3_vec cmd_dirs;
+    odin3_vec_init(&cmd_dirs, sizeof(const char *));
     odin3_vec srcs;
     odin3_vec_init(&srcs, sizeof(odin3_pp_source));
     odin3_vec svs;
@@ -910,6 +1009,13 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
                   "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet");
         st = ODIN3_ERR_PARSE;
     }
+    if (st == ODIN3_OK && svs.len > 0 && parsed.defines.len + parsed.incdirs.len > 0) {
+        odin3_log(
+            ODIN3_LOG_ERROR,
+            "read_verilog: -D and -I are not supported for SystemVerilog yet (use a project)");
+        st = ODIN3_ERR_INVALID_ARG;
+    }
+    st = st != ODIN3_OK ? st : command_config(design, &parsed, &cmd_defs, &cmd_dirs);
     odin3_ast *ast = NULL;
     odin3_name_resolver names;
     if (st == ODIN3_OK && svs.len > 0) {
@@ -919,7 +1025,15 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
         uint32_t soft = soft_blocks_of(design, &parsed);
         st = open_names(&parsed, design, &names);
         if (st == ODIN3_OK) {
-            odin3_rv_opts opts = {srcs.data, (uint32_t)srcs.len, ctx->run, NULL, parsed.lib};
+            odin3_rv_opts opts = {srcs.data,
+                                  (uint32_t)srcs.len,
+                                  ctx->run,
+                                  NULL,
+                                  parsed.lib,
+                                  cmd_defs.data,
+                                  (uint32_t)cmd_defs.len,
+                                  cmd_dirs.data,
+                                  (uint32_t)cmd_dirs.len};
             st = odin3_read_verilog_files_soft(design, &opts, soft, vtr, &ast);
         }
         st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
@@ -931,6 +1045,10 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_vec_free(&svs);
     odin3_vec_free(&srcs);
     odin3_vec_free(&parsed.files);
+    odin3_vec_free(&parsed.defines);
+    odin3_vec_free(&parsed.incdirs);
+    odin3_vec_free(&cmd_defs);
+    odin3_vec_free(&cmd_dirs);
     return st;
 }
 
@@ -938,7 +1056,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog",
     "read_verilog [--parse-only] [--lib] [--prov-ast refs|constructs|full|off] [--nolatches] "
     "[--nomem2reg] [--auto-blackbox] [--vendor-prims] "
-    "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [<file>...]: "
+    "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [-D <name[=value]>]... [-I <dir>]... "
+    "[<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
     "libraries (the project's SystemVerilog files, or files ending in .sv/.svh, go through the "
@@ -958,7 +1077,8 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "comment on an assign and a `\\hier/short@file:line ` net name restore HDL locations; "
     "--prov-ast keeps the construct table of the read (refs: the nodes provenance records point "
     "at and their ancestors; constructs: without expressions; full: every node; off: none); "
-    "-name-map "
+    "-D defines a preprocessor macro and -I adds an include directory, after the project's own "
+    "(Verilog files only); -name-map "
     "(with -netlist) first replaces each hash net name the map (write_verilog --name-style hash) "
     "holds by its full name; --lib "
     "keeps "

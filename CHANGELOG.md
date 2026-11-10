@@ -7,6 +7,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- `read_verilog -D NAME[=VALUE]` and `-I DIR` (repeatable): command-line preprocessor defines and include directories for a Verilog read, after the project record's. A `sim_tb` run on a design that needs defines no longer needs an `.o3proj` (`sim_tb` already took `-D`/`-I` for its testbench files).
 - `write_verilog --quartus [--sim-file F]` and the LPM target `odin3-flow --target lpm` write a netlist Quartus can read: no
   Odin-internal cell type and no module definition of a library name. Every flip-flop and latch cell type (`$sdffe`, `$adffe`,
   `$sdffce`, `$aldff`, `$aldffe`, `$dffsr`, `$dffsre`, `$dlatch`, `$adlatch`, `$dlatchsr`, `$sr` and the 68 gate-level
