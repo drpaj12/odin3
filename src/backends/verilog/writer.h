@@ -129,6 +129,9 @@ typedef struct odin3_verilog_opts {
  * with `.v` replaced by `_lpm_sim.v`), for read-back and simulation only, never into Quartus: the
  * netlist instances of `lpm_add_sub`, `altsyncram` or a user black box (`scfifo`) stay instances
  * with their parameters. The second file is written even when it holds no stub.
+ * The netlist is renamed into place before the stub file is written: when the stub file cannot be
+ * written the call fails and the netlist stays. `$shiftx` is `({hi x pad, A, lo x pad} >> (B +
+ * lo))`, the pads covering every B of up to 12 bits so that a read outside A is x.
  *
  * Errors (logged): ODIN3_ERR_INVALID_ARG for a NULL design or path, an unknown name style, a
  * port or stub name that cannot be written, a net on two input/inout port bits, a `$sop` cover

@@ -176,6 +176,13 @@ class MemoryForms(unittest.TestCase):
                         str(base / "mem_transparent_bytes.v")])
         self.assertEqual(code, 0)
 
+    def test_shiftx_with_a_signed_shift_amount(self) -> None:
+        base = Path(__file__).resolve().parents[1] / "quartus" / "icells"
+        code = qc.main(["--odin3", ODIN3, "--icells", "--gold",
+                        str(base / "shiftx_signed_gold.v"), "--top", "s",
+                        str(base / "shiftx_signed.v")])
+        self.assertEqual(code, 0)
+
 
 @unittest.skipUnless(ODIN3, "ODIN3_CLI is needed")
 class BlackBox(unittest.TestCase):

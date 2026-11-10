@@ -55,7 +55,7 @@ LIB_NAMES = "lpm_add_sub|lpm_mult|lpm_compare|altsyncram|scfifo|dcfifo"
 LIBRARY_MODULE = re.compile(rf"^\s*module\s+\\?({LIB_NAMES})\b", re.M)
 LIBRARY_INSTANCE = re.compile(rf"^\s*(?:\(\*[^\n]*?\*\)\s*)?({LIB_NAMES})\s+#?\(", re.M)
 PORT_RE = re.compile(
-    r"^\s*(input|output|inout)?\s*(?:reg|wire)?\s*(\[[^\]]+\])?\s*(\w+)\s*$"
+    r"^\s*(input|output|inout)?\s*(?:reg|wire)?\s*(?:signed\s+)?(\[[^\]]+\])?\s*(\w+)\s*$"
 )
 
 

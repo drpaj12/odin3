@@ -52,6 +52,7 @@ typedef enum vw_form {
     FORM_PMUX,   /* priority chain */
     FORM_TRIBUF, /* Y = EN ? A : z */
     FORM_FF,     /* word-level flip-flop */
+    FORM_SHIFTX, /* Quartus mode: $shiftx */
     FORM_FFX,    /* Quartus mode: any other flip-flop or latch, as plain always blocks */
     FORM_MEMQ,   /* Quartus mode: $mem as a behavioural reg array */
     FORM_COUNT
@@ -135,7 +136,7 @@ static const vw_builtin BUILTINS[] = {
     {"$sdff", FORM_FF, NULL, VB_SRST},
     /* Quartus mode only (registered by name in wr_init): word cells written as `assign`s. */
     {"$pow", FORM_BINARY, "**", 0},
-    {"$shiftx", FORM_BINARY, ">>", VB_SHIFT},
+    {"$shiftx", FORM_SHIFTX, NULL, 0},
     /* Quartus mode only: the shared entries of the storage cells and memories (no type name). */
     {"$ffx", FORM_FFX, NULL, 0},
     {"$memq", FORM_MEMQ, NULL, 0},
@@ -144,7 +145,7 @@ enum { N_BUILTINS = sizeof BUILTINS / sizeof BUILTINS[0] };
 enum { BI_QUARTUS_FIRST = N_BUILTINS - 4, BI_FFX = N_BUILTINS - 2, BI_MEMQ = N_BUILTINS - 1 };
 
 /* Parameter indices: word cells (A_SIGNED B_SIGNED …), $sop, word flip-flops, bit storage. */
-enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1 };
+enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1, PARAM_SHIFTX_B_WIDTH = 3, PARAM_SHIFTX_Y_WIDTH = 4 };
 enum { SOP_WIDTH = 0, SOP_COVER = 1 };
 enum { FF_WIDTH = 0, FF_CLK_POLARITY = 1, FF_CTRL_POLARITY = 2, FF_RESET_VALUE = 3 };
 enum { LATCH_INIT = 0 };
@@ -1270,6 +1271,46 @@ static void write_binary(verilog_writer *wr, odin3_node_id node, const vw_builti
     end_stmt(wr, node);
 }
 
+/* The widest B whose whole range the x padding of $shiftx covers (above it the far reads are 0). */
+enum { SHIFTX_PAD_BITS_MAX = 12 };
+
+/* One `{N{1'bx}}` of N bits. */
+static void put_x_pad(verilog_writer *wr, int64_t bits) {
+    vw_char(wr, '{');
+    vw_i64(wr, bits);
+    vw_puts(wr, "{1'bx}}");
+}
+
+/*
+ * $shiftx (A B Y; A_SIGNED B_SIGNED A_WIDTH B_WIDTH Y_WIDTH): Y = A[B +: Y_WIDTH], the bits outside
+ * A reading x. Written as `({hi pad of x, A, lo pad of x} >> (B + lo))`: the pads cover every B the
+ * port can hold (up to SHIFTX_PAD_BITS_MAX bits of B; a negative signed B selects below bit 0), so
+ * a read outside A is x as in the IR. A wider B reads 0 far outside the pads (a don't-care).
+ */
+static void write_shiftx(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    (void)bi;
+    const int64_t width = param_int(wr, node, PARAM_SHIFTX_Y_WIDTH);
+    const int64_t b_bits = param_int(wr, node, PARAM_SHIFTX_B_WIDTH);
+    const bool b_signed = param_int(wr, node, PARAM_B_SIGNED) != 0;
+    const bool padded = b_bits > 0 && b_bits <= SHIFTX_PAD_BITS_MAX;
+    const int64_t below = width + (padded && b_signed ? (int64_t)1 << (b_bits - 1) : 0);
+    const int64_t above = width + (padded ? (int64_t)1 << b_bits : 0);
+    begin_assign(wr, node);
+    vw_char(wr, '(');
+    vw_char(wr, '{');
+    put_x_pad(wr, above);
+    vw_puts(wr, ", ");
+    put_port(wr, node, 0, false);
+    vw_puts(wr, ", ");
+    put_x_pad(wr, below);
+    vw_puts(wr, "} >> (");
+    put_port(wr, node, 1, b_signed);
+    vw_puts(wr, b_signed ? " + $signed(32'd" : " + 32'd");
+    vw_i64(wr, below);
+    vw_puts(wr, b_signed ? ")))" : "))");
+    end_stmt(wr, node);
+}
+
 static void write_unary(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
     begin_assign(wr, node);
     vw_puts(wr, bi->op);
@@ -2113,28 +2154,39 @@ static bool same_write_clock(const verilog_writer *wr, const vw_mem *mem, vw_por
                                       mem_pin(wr, mem, MEMP_WR_CLK, pair.second)});
 }
 
-/* One clocked always block per distinct write clock, the ports in port order (a later port
- * wins on one address, as in the IR); an unclocked write port is a level-sensitive block. */
+/* One always block for write port wport and the later ports on its clock (a later port wins on one
+ * address, as in the IR); marks them done. An unclocked write port is a level-sensitive block. */
+static void write_mem_write_block(verilog_writer *wr, const vw_mem *mem, uint32_t wport,
+                                  bool *done) {
+    bool clocked = mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_ENABLE, wport});
+    if (clocked) {
+        put_mem_clock(wr, mem, MEMP_WR_CLK, wport, MEM_P_WR_CLK_POLARITY);
+    } else {
+        vw_puts(wr, "  always @* begin\n");
+    }
+    for (uint32_t other = wport; other < mem->wr; other++) {
+        if (other == wport ||
+            (clocked && same_write_clock(wr, mem, (vw_port_pair){wport, other}))) {
+            done[other] = true;
+            write_mem_stores(wr, mem, other, &(vw_store){true, 0});
+        }
+    }
+    vw_line_end(wr, "  end\n");
+}
+
+/* One clocked always block per distinct write clock. */
 static void write_mem_writes(verilog_writer *wr, const vw_mem *mem) {
     bool done[MEM_PORTS_MAX] = {false};
-    for (uint32_t wport = 0; wport < mem->wr && wport < MEM_PORTS_MAX; wport++) {
-        if (done[wport]) {
-            continue;
+    if (mem->wr > MEM_PORTS_MAX) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: module '%s': a memory with more than %d write ports",
+                  wr->path, wr->mod.name != NULL ? wr->mod.name : "", MEM_PORTS_MAX);
+        (void)vw_fail(wr, ODIN3_ERR_INVALID_ARG);
+        return;
+    }
+    for (uint32_t wport = 0; wport < mem->wr; wport++) {
+        if (!done[wport]) {
+            write_mem_write_block(wr, mem, wport, done);
         }
-        bool clocked = mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_ENABLE, wport});
-        if (clocked) {
-            put_mem_clock(wr, mem, MEMP_WR_CLK, wport, MEM_P_WR_CLK_POLARITY);
-        } else {
-            vw_puts(wr, "  always @* begin\n");
-        }
-        for (uint32_t other = wport; other < mem->wr && other < MEM_PORTS_MAX; other++) {
-            if (other == wport ||
-                (clocked && same_write_clock(wr, mem, (vw_port_pair){wport, other}))) {
-                done[other] = true;
-                write_mem_stores(wr, mem, other, &(vw_store){true, 0});
-            }
-        }
-        vw_line_end(wr, "  end\n");
     }
 }
 
@@ -2228,7 +2280,7 @@ static const vw_cell_writer CELL_WRITERS[FORM_COUNT] = {
     [FORM_MUX] = write_mux,     [FORM_SOP] = write_sop,       [FORM_LATCH] = write_latch,
     [FORM_LUT] = write_lut,     [FORM_BINARY] = write_binary, [FORM_UNARY] = write_unary,
     [FORM_PMUX] = write_pmux,   [FORM_TRIBUF] = write_tribuf, [FORM_FF] = write_ff,
-    [FORM_FFX] = write_ffx,     [FORM_MEMQ] = write_memq,
+    [FORM_FFX] = write_ffx,     [FORM_MEMQ] = write_memq,     [FORM_SHIFTX] = write_shiftx,
 };
 
 /* --- parameter values ---------------------------------------------------------------------- */
@@ -2434,24 +2486,25 @@ static bool is_implicit_bbox(const odin3_celltype_def *def) {
     return def->gran == ODIN3_GRAN_BLACKBOX && def->n_params == 0;
 }
 
-enum { BB_INT_BITS_MAX = 63 };
+enum { BB_INT_BITS = 32 }; /* a Verilog integer parameter */
 
 typedef struct vw_bb_ctx {
     verilog_writer *wr;
     bool any;
 } vw_bb_ctx;
 
-/* A parameter value of an implicit black box: an integer without x/z bits is decimal, so that
- * `.lpm_width(8)` stays readable and Quartus reads it as the integer it is. */
+/* A parameter value of an implicit black box: a 32-bit value without x/z bits is the signed
+ * decimal integer it was written as, so that `.lpm_width(8)` stays readable; other widths keep
+ * their sized binary form. */
 static void put_bb_value(verilog_writer *wr, const odin3_value *val) {
-    uint64_t num = 0;
-    bool plain = val->kind == ODIN3_VAL_BITS && val->len <= BB_INT_BITS_MAX && val->len > 0;
+    uint32_t num = 0;
+    bool plain = val->kind == ODIN3_VAL_BITS && val->len == BB_INT_BITS;
     for (uint32_t i = 0; plain && i < val->len; i++) {
         plain = val->bits[i] <= ODIN3_BIT_1;
-        num |= (uint64_t)(val->bits[i] == ODIN3_BIT_1) << i;
+        num |= (uint32_t)(val->bits[i] == ODIN3_BIT_1) << i;
     }
     if (plain) {
-        vw_i64(wr, (int64_t)num);
+        vw_i64(wr, (int64_t)(int32_t)num); /* a 32-bit integer parameter is signed */
     } else {
         put_value(wr, val);
     }
@@ -3294,6 +3347,11 @@ static bool write_args_ok(const odin3_design *design, const char *path,
     }
     if (opts != NULL && opts->quartus && strcmp(path, "-") == 0 && opts->sim_file == NULL) {
         odin3_log(ODIN3_LOG_ERROR, "verilog_write: --quartus to stdout needs --sim-file");
+        return false;
+    }
+    if (opts != NULL && opts->quartus && opts->sim_file != NULL &&
+        strcmp(opts->sim_file, path) == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "verilog_write: --sim-file is the netlist file itself");
         return false;
     }
     return true;
