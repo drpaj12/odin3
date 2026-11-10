@@ -113,8 +113,40 @@ def find_tops(designs: Sequence[Path]) -> list[str]:
     return [n for n in names if mentions(n) == 1]
 
 
+def _module_bodies(designs: Sequence[Path]) -> dict[str, str]:
+    """Module name -> its text (header to ``endmodule``), comments removed."""
+    text = "\n".join(_COMMENT.sub("", p.read_text(errors="replace")) for p in designs)
+    bodies: dict[str, str] = {}
+    for match in _MODULE.finditer(text):
+        end = text.find("endmodule", match.end())
+        bodies.setdefault(match.group(1), text[match.end():end if end >= 0 else len(text)])
+    return bodies
+
+
+def top_scores(designs: Sequence[Path], tops: Sequence[str]) -> dict[str, int]:
+    """Design levels under each of ``tops`` (Yosys ``hierarchy -auto-top``, which Parmys runs): a
+    module with no instance has 0, else 1 + the deepest module it mentions."""
+    bodies = _module_bodies(designs)
+    words = {n: re.compile(rf"(?<![A-Za-z0-9_$]){re.escape(n)}(?![A-Za-z0-9_$])") for n in bodies}
+    memo: dict[str, int] = {}
+
+    def score(name: str, active: frozenset[str]) -> int:
+        if name in memo:
+            return memo[name]
+        deepest = -1
+        for other, pattern in words.items():
+            if other != name and other not in active and pattern.search(bodies[name]):
+                deepest = max(deepest, score(other, active | {name}))
+        memo[name] = deepest + 1
+        return memo[name]
+
+    return {name: score(name, frozenset()) for name in tops}
+
+
 def resolve_top(designs: Sequence[Path], top: str | None) -> str:
-    """``top`` when given, else the one uninstantiated module; UsageError naming the candidates."""
+    """``top`` when given, else the one uninstantiated module. Several: the one with the most
+    design levels below it, as Parmys / Yosys ``hierarchy -auto-top`` choose, with a WARNING
+    naming the others; a tie for the most levels is a UsageError naming the candidates."""
     if top is not None:
         return top
     tops = find_tops(designs)
@@ -122,7 +154,16 @@ def resolve_top(designs: Sequence[Path], top: str | None) -> str:
         return tops[0]
     if not tops:
         raise UsageError("no top module found: give --top")
-    raise UsageError(f"more than one top module ({', '.join(tops)}): give --top")
+    scores = top_scores(designs, tops)
+    best = max(scores.values())
+    leaders = [n for n in tops if scores[n] == best]
+    if len(leaders) > 1:
+        raise UsageError(f"more than one top module ({', '.join(tops)}): give --top")
+    others = ", ".join(n for n in tops if n != leaders[0])
+    print(f"WARNING: more than one uninstantiated module ({', '.join(tops)}): top {leaders[0]} "
+          f"({best} design levels, as Parmys / Yosys hierarchy -auto-top); unused: {others}",
+          file=sys.stderr)
+    return leaders[0]
 
 
 def _has_data(root: Path) -> bool:

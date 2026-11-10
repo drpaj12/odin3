@@ -17,7 +17,7 @@ odin3-flow design.v [more.v ...] [-f LIST] [-I DIR] [-D NAME[=VAL]] [--read-opt=
 | `-f LIST` | a Verilog file list: files, `+incdir+a+b`, `+define+X=1`, `-I`, `-D`, `-f` (paths relative to the working directory), `-F` (relative to the list); `//` and `#` comments; `$VAR` expanded; any other option is refused. Repeatable; its files follow the files on the command line |
 | `--strict-tristate` | the `tristate` pass runs after `flatten` in the `vtr` flow and the silicon flow: an internal tri-state becomes logic and a top-level `inout` is split into `p_i`/`p_o`/`p_oe`, one WARNING per conversion in the `odin3` log. This flag makes any conversion an error (the behaviour before the pass). A design with no tri-state is unchanged |
 | `--read-opt=OPT` | an extra `read_verilog` option such as `--read-opt=--auto-blackbox` or `--read-opt=--nomem2reg`; repeatable. The equals sign is needed |
-| `--top TOP` | top module; default is the one uninstantiated module. If the files hold more than one candidate the script stops with exit code 2 and names them |
+| `--top TOP` | top module; default is the one uninstantiated module. With several, the one with the most design levels below it is the top (as Parmys and Yosys `hierarchy -auto-top` choose) and a WARNING names the unused ones; if the most levels are tied the script stops with exit code 2 and names the candidates |
 | `--target` | `vtr` (BLIF for VPR, default) or `lpm` (Verilog with LPM cells plus a read-back lint) |
 | `--arch ARCH` | VTR architecture XML (default `k6`); needs `VTR_ROOT`, without it K = 6 is assumed with a warning |
 | `--family FAMILY` | LPM device family for `--target lpm` |

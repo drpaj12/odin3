@@ -84,6 +84,36 @@ class VtrTarget(FlowCase):
         self.assertFalse((self.tmp / "out" / "vpr").exists())
 
 
+class ResolveTopTest(unittest.TestCase):
+    """resolve_top: the deepest of several uninstantiated modules wins, with a WARNING."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, text: str) -> Path:
+        path = self.tmp / "d.v"
+        path.write_text(text)
+        return path
+
+    def test_unused_module_loses_to_the_deeper_top(self) -> None:
+        design = self.write(
+            "module leaf(input a, output y); assign y = a; endmodule\n"
+            "module unused(input a, output y); assign y = ~a; endmodule\n"
+            "module real_top(input a, output y); leaf u(.a(a), .y(y)); endmodule\n")
+        with mock.patch("sys.stderr", new_callable=io.StringIO) as err:
+            self.assertEqual(flow.resolve_top([design], None), "real_top")
+        self.assertIn("WARNING", err.getvalue())
+        self.assertIn("unused", err.getvalue())
+
+    def test_tie_is_still_an_error(self) -> None:
+        design = self.write(
+            "module alpha(input a, output y); assign y = a; endmodule\n"
+            "module beta(input a, output y); assign y = ~a; endmodule\n")
+        with self.assertRaises(flow.UsageError):
+            flow.resolve_top([design], None)
+
+
 @needs_odin3
 class LpmTarget(FlowCase):
     def test_lpm_writes_verilog_and_lints(self) -> None:
