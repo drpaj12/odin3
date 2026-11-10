@@ -487,25 +487,53 @@ static void test_vendor_prims_refused_with_lib(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, run("read_verilog", "--lib --vendor-prims t.v"));
 }
 
-/* read_verilog -D defines a macro for the files of this read (v1.6.1): an undefined `VAL or the
- * `ifndef FOO branch would be an error. */
-static void test_command_line_defines(void) {
-    et_src srcs[] = {{"d.v", "module dd (output y);\n`ifndef FOO\n  bad bad bad;\n`endif\n"
-                             "  assign y = `VAL;\nendmodule\n"}};
-    setup_files(srcs, 1, NULL);
-    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-D FOO -D VAL=1'b1 d.v"),
-                                  et_log(&rs));
+/* A module read by an earlier (plain) read_verilog is instantiated by a later one (v1.6.1). */
+static void test_earlier_read_module_resolves(void) {
+    et_src srcs[] = {
+        {"a.v", "module leafm (input [1:0] x, output y);\n  assign y = &x;\nendmodule\n"},
+        {"b.v", "module topm (input [1:0] x, output y);\n"
+                "  leafm u (.x(x), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "a.v"), et_log(&rs));
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "b.v"), et_log(&rs));
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
-    TEST_ASSERT_NOT_NULL(module_like("dd"));
+    TEST_ASSERT_NOT_NULL(module_like("leafm"));
+    TEST_ASSERT_NOT_NULL(module_like("topm"));
+    TEST_ASSERT_EQUAL_UINT32(1, cells_of("leafm"));
 }
 
-static void test_command_line_define_needs_a_value(void) {
-    et_src srcs[] = {{"d.v", "module dd (output y);\n  assign y = 1'b0;\nendmodule\n"}};
-    setup_files(srcs, 1, NULL);
-    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "d.v -D"));
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, "-D expects a"),
+/* ... but not with a parameter override: the earlier read fixed its values. */
+static void test_earlier_read_module_has_no_parameters(void) {
+    et_src srcs[] = {{"a.v", "module leafp #(parameter W = 2) (input [W-1:0] x, output y);\n"
+                             "  assign y = &x;\nendmodule\n"},
+                     {"b.v", "module topp (input [3:0] x, output y);\n"
+                             "  leafp #(.W(4)) u (.x(x), .y(y));\nendmodule\n"}};
+    setup_files(srcs, 2, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "a.v"), et_log(&rs));
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "b.v"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, "has no parameter 'W'"),
                                      et_log(&rs));
-}
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1, et_count_with(&rs, ODIN3_LOG_ERROR, "read it with read_verilog --lib"), et_log(&rs));
+    /* read_verilog -D defines a macro for the files of this read (v1.6.1): an undefined `VAL or the
+     * `ifndef FOO branch would be an error. */
+    static void test_command_line_defines(void) {
+        et_src srcs[] = {{"d.v", "module dd (output y);\n`ifndef FOO\n  bad bad bad;\n`endif\n"
+                                 "  assign y = `VAL;\nendmodule\n"}};
+        setup_files(srcs, 1, NULL);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-D FOO -D VAL=1'b1 d.v"),
+                                      et_log(&rs));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+        TEST_ASSERT_NOT_NULL(module_like("dd"));
+    }
+
+    static void test_command_line_define_needs_a_value(void) {
+        et_src srcs[] = {{"d.v", "module dd (output y);\n  assign y = 1'b0;\nendmodule\n"}};
+        setup_files(srcs, 1, NULL);
+        TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "d.v -D"));
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, "-D expects a"),
+                                         et_log(&rs));
+    }
 
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
@@ -535,13 +563,15 @@ static void test_command_line_define_needs_a_value(void) {
     X(test_vendor_prims_off_keeps_the_error)                                                       \
     X(test_vendor_prims_never_replace_a_definition)                                                \
     X(test_vendor_prims_refused_with_lib)                                                          \
+    X(test_earlier_read_module_resolves)                                                           \
+    X(test_earlier_read_module_has_no_parameters)                                                  \
     X(test_command_line_defines)                                                                   \
     X(test_command_line_define_needs_a_value)
 
 #define RUN_ONE(name) RUN_TEST(name);
 
-int main(void) {
-    UNITY_BEGIN();
-    ALL_TESTS(RUN_ONE)
-    return UNITY_END();
-}
+    int main(void) {
+        UNITY_BEGIN();
+        ALL_TESTS(RUN_ONE)
+        return UNITY_END();
+    }
