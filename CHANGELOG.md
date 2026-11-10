@@ -21,6 +21,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   instance does); `write_verilog` writes them as `#(.NAME(value))`.
 
 ### Fixed
+- A module read by an earlier `read_verilog` can be instantiated by a later one (`unresolved_module: module 'TreeLUT' is not defined` with two `read_verilog` commands). It resolves to the elaborated module with its default parameters; a `#()` override of it is an error that says to read it with `--lib`.
 - A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
   `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one
   switch per dimension, instead of the error `non-constant index into the multi-dimensional register array`. IEEE 1364-2005
