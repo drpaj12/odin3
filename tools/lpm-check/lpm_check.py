@@ -15,7 +15,8 @@ Legs, in order (the first failure is printed and the exit status is 1):
    Rows ``pin <micro> <type> <pin> <value>`` do the same for a pin connection, and ``noroundtrip
    <micro>`` skips the round trip and ``nolint <micro>`` the lint (a micro that keeps ``$mem``
    cells: the writer emits them without a stub and only ``read_verilog -icells``, item 5.2,
-   reads them; tools/icells-check round-trips that micro at the LPM level, 5.2 T-4). Every
+   reads them; tools/icells-check round-trips that micro at the LPM level, 5.2 T-4; since the
+   Quartus mode writes a ``$mem`` as a reg array, which has no text fixpoint on read-back). Every
    written instance is also checked for the defaults of spec M1: an input pin that has a
    documented default must be tied, never open and never ``1'bx``
    (``DEFAULTED`` below; ``add_sub`` is exempt, it cannot be used with ``lpm_direction``).
@@ -35,7 +36,10 @@ Legs, in order (the first failure is printed and the exit status is 1):
 3. ``lint`` (spec T-4): ``iverilog -g2005 -Wall`` must report nothing but the floating-input
    notes (the LPM defaults of unconnected inputs are the point, spec H-4), and Verilator, when
    installed, must pass ``--lint-only -Wall`` apart from the empty-pin warnings. Both read the
-   stub modules the writer emits, so a port width that disagrees with its parameter is a finding.
+   netlist and the stub file beside it (``<out>_lpm_sim.v``; the script ends in ``write_verilog
+   --quartus``, which keeps the stubs out of the netlist), so a port width that disagrees with its
+   parameter is a finding. Before leg 1 the netlist must be pure: no Odin-internal cell
+   instance (``\\$sdffe``, ``\\$mem``, ...) and no ``module lpm_*`` / ``module altsyncram``.
 
 ``--lint-only`` runs only the lint leg on MICRO.v taken as already written Verilog (for the
 planted-mismatch test). Exit 77 when ``iverilog`` is not installed.
@@ -74,6 +78,15 @@ PIN_RE = re.compile(r"^\s*\.(\w+)\((.*)\),?\s*$")
 # What an open pin becomes on read-back: the constant x (an input) or a fresh net named $n<ID>
 # (an output; a vector of them is a concatenation).
 OPEN_PIN = re.compile(r"^(?:1'bx|\\\$n\d+ ?|\{(?:\\\$n\d+ ?,? ?)+\})$")
+# What Quartus must not see: an instance of an Odin-internal cell type (`\$type #(` or
+# `\$type name (` at the start of a statement; `\$c12 <= ...` is a reg name) and a module
+# definition of a library name.
+INTERNAL_INSTANCE = re.compile(
+    r"^\s*(?:\(\*[^\n]*?\*\)\s*)?\\\$\S+\s+(?:#\(|[^<=\[\s]\S*\s*\()", re.M
+)
+LIBRARY_MODULE = re.compile(
+    r"^\s*module\s+\\?(lpm_add_sub|lpm_mult|lpm_compare|altsyncram|scfifo|dcfifo)\b", re.M
+)
 FLOATING = re.compile(r"dangling input port .* floating")
 
 
@@ -177,6 +190,18 @@ def read_expect(path: Path, micro: str) -> Expect:
     return exp
 
 
+def check_pure(text: str) -> None:
+    """The netlist is for Quartus: no Odin-internal cell instance, no stub module."""
+    hit = INTERNAL_INSTANCE.search(text)
+    if hit:
+        raise CheckError(f"pure: an Odin-internal cell instance: {hit.group(0).strip()[:60]}")
+    lib = LIBRARY_MODULE.search(text)
+    if lib:
+        raise CheckError(f"pure: the netlist defines the library module {lib.group(1)}")
+    if "(* blackbox" in text:
+        raise CheckError("pure: the netlist holds a blackbox stub")
+
+
 # --- parsing the written Verilog ----------------------------------------------------------------
 
 
@@ -241,7 +266,11 @@ def check_counts(
 
 
 def read_back(odin3: str, lib: Path, source: Path, out: Path) -> str:
-    odin3_run(odin3, f"read_techlib {lib}; read_verilog {source}; write_verilog {out}", ["--check"])
+    odin3_run(
+        odin3,
+        f"read_techlib {lib}; read_verilog {source}; proc; write_verilog {out} --quartus",
+        ["--check"],
+    )
     return out.read_text()
 
 
@@ -306,7 +335,7 @@ def check_blif(args: argparse.Namespace, text: str, out: Path, work: Path) -> No
     """Write BLIF, read it back, write again: identical text, netlist-compare identical."""
     first = work / "gen1.blif"
     second = work / "gen2.blif"
-    odin3_run(args.odin3, text.replace(f"write_verilog {out}", f"write_blif {first}"))
+    odin3_run(args.odin3, text.replace(f"write_verilog {out} --quartus", f"write_blif {first}"))
     odin3_run(
         args.odin3,
         f"read_techlib {args.lib}; read_blif {first}; write_blif {second}",
@@ -329,7 +358,9 @@ def check_blif(args: argparse.Namespace, text: str, out: Path, work: Path) -> No
 
 
 def check_lint(v1: Path, use_verilator: bool = True) -> None:
-    proc = run(["iverilog", "-g2005", "-Wall", "-o", "/dev/null", str(v1)])
+    sim = v1.with_name(v1.stem + "_lpm_sim.v")
+    files = [str(v1)] + ([str(sim)] if sim.is_file() else [])
+    proc = run(["iverilog", "-g2005", "-Wall", "-o", "/dev/null", *files])
     notes = [ln for ln in proc.stderr.splitlines() if ln.strip() and not FLOATING.search(ln)]
     if proc.returncode != 0 or notes:
         raise CheckError("lint: iverilog: " + "; ".join(notes[:3] or [f"exit {proc.returncode}"]))
@@ -344,7 +375,7 @@ def check_lint(v1: Path, use_verilator: bool = True) -> None:
                 "-Wno-UNDRIVEN",
                 "-Wno-PINCONNECTEMPTY",
                 "-Wno-PINMISSING",
-                str(v1),
+                *files,
             ]
         )
         if vp.returncode != 0:
@@ -378,6 +409,7 @@ def check_micro(args: argparse.Namespace, work: Path) -> None:
     if args.family:  # the expect rows name the default family
         params = [row for row in params if row[1] != "intended_device_family"]
     written = out.read_text()
+    check_pure(written)
     check_counts(written, proc.stderr, exp.counts, params, exp.pins)
     check_defaults(written, "generation 1")
     wrote = f'.intended_device_family("{args.family}")' in written

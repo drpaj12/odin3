@@ -46,4 +46,3 @@ param lpm_mixed.v lpm_mult lpm_widthb 4
 param lpm_mixed.v lpm_mult lpm_widthp 12
 param lpm_mixed.v lpm_compare lpm_representation "UNSIGNED"
 param lpm_mixed.v lpm_compare lpm_width 8
-nolint altsyncram_soft.v

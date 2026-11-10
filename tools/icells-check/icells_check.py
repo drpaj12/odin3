@@ -307,9 +307,12 @@ def level_script(template: str, subs: dict[str, str]) -> str:
 
 
 def lpm_template(text: str) -> str:
-    """The 5.1 LPM script with ``write_rtlil @IL@`` put before its ``write_verilog @OUT@``."""
+    """The 5.1 LPM script with ``write_rtlil @IL@`` put before its ``write_verilog @OUT@``. The
+    script writes with ``--quartus`` (plain always blocks and reg arrays); this check proves the
+    ``-icells`` read-back of the default writer's ``$`` and library instances, so it drops it."""
     if "write_verilog @OUT@" not in text:
         raise ToolError("tools/flow/lpm.script has no 'write_verilog @OUT@'")
+    text = text.replace(" --quartus", "")
     text = text.replace("write_verilog @OUT@", "write_rtlil @IL@; write_verilog @OUT@")
     return "@TECHLIB@\n" + text
 

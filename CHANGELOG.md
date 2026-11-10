@@ -6,6 +6,20 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 
 ## Unreleased
 
+### Added
+- `write_verilog --quartus [--sim-file F]` and the LPM target `odin3-flow --target lpm` write a netlist Quartus can read: no
+  Odin-internal cell type and no module definition of a library name. Every flip-flop and latch cell type (`$sdffe`, `$adffe`,
+  `$sdffce`, `$aldff`, `$aldffe`, `$dffsr`, `$dffsre`, `$dlatch`, `$adlatch`, `$dlatchsr`, `$sr` and the 68 gate-level
+  `$_DFFE_`, `$_SDFF_`, ... types) is plain Verilog-2001 `always` blocks on a `reg`, the cell type and name in a comment; a
+  `$mem` lpmmap leaves soft is a behavioural `reg` array that Quartus infers as RAM (INFO line per memory); `$shiftx` and
+  `$pow` are `assign`s. The stubs of the LPM and black-box modules go to `<top>_lpm_sim.v` (read-back and iverilog only).
+  An implicit black box (`--read-opt=--auto-blackbox`, e.g. `scfifo`) keeps its parameter overrides as `#(.NAME(value))` and
+  its unconnected ports as `.port()`. Tests: `tools/quartus-check`, `tests/quartus`, `tests/tools/test_quartus_check.py`.
+
+### Changed
+- An instance of an implicit black box now carries its parameter overrides as `parameter:<NAME>` node attributes (as a module
+  instance does); `write_verilog` writes them as `#(.NAME(value))`.
+
 ### Fixed
 - A variable index into every dimension of a multi-dimensional register array or net array (`unit_out[i_col][i_row]`,
   `mem[i][j]`, as a read in a process or in `assign`, and as the target of a process) is a nested case over the words, one

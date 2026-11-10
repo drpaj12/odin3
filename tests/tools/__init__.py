@@ -39,6 +39,7 @@ for _sub in (
     "tools/hardmap-check",
     "tools/partial-map-check",
     "tools/lpm-check",
+    "tools/quartus-check",
     "tools/icells-check",
     "tools/json-check",
     "tools/loc-check",

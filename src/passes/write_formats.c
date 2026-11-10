@@ -31,6 +31,7 @@ typedef struct write_args {
     odin3_strbuf
         name_map; /* --name-map's value (write_verilog, write_json), empty when not given */
     odin3_strbuf color;
+    odin3_strbuf sim_file; /* --sim-file's value (write_verilog --quartus), empty when not given */
     odin3_verilog_opts verilog;
     odin3_json_write_opts json;
     odin3_dot_opts dot;
@@ -160,6 +161,21 @@ static bool is_dot_option(odin3_bytes word) {
            odin3_pass_arg_is(word, "--color-by") || odin3_pass_arg_is(word, "--locs");
 }
 
+static bool is_quartus_option(odin3_bytes word) {
+    return odin3_pass_arg_is(word, "--quartus") || odin3_pass_arg_is(word, "--sim-file");
+}
+
+/* write_verilog's --quartus and --sim-file <file>. */
+static odin3_status parse_quartus_option(odin3_bytes *rest, odin3_bytes word, write_args *out) {
+    if (odin3_pass_arg_is(word, "--quartus")) {
+        out->verilog.quartus = true;
+        return ODIN3_OK;
+    }
+    odin3_bytes value = {0};
+    odin3_status st = option_value("write_verilog", rest, word, &value);
+    return st == ODIN3_OK ? odin3_strbuf_append(&out->sim_file, value) : st;
+}
+
 /* Handles option word of pass (its value read from rest); unknown options are INVALID_ARG. */
 static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_bytes word,
                                  write_args *out) {
@@ -172,6 +188,9 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
     if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--net-ids")) {
         out->json.net_ids = true;
         return ODIN3_OK;
+    }
+    if (strcmp(pass, "write_verilog") == 0 && is_quartus_option(word)) {
+        return parse_quartus_option(rest, word, out);
     }
     if (names && odin3_pass_arg_is(word, "--prov-map")) {
         return parse_prov_map(pass, rest, out);
@@ -228,18 +247,25 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
     const char *map = parsed->name_map.len > 0 ? parsed->name_map.data : NULL;
     parsed->verilog.name_map = map;
     parsed->json.name_map = map;
+    if (parsed->sim_file.len > 0 && !parsed->verilog.quartus) {
+        odin3_log(ODIN3_LOG_ERROR, "%s: --sim-file needs --quartus", pass);
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    parsed->verilog.sim_file = parsed->sim_file.len > 0 ? parsed->sim_file.data : NULL;
     return ODIN3_OK;
 }
 
 /* Shared body: parse, then call the format's writer (1F; each writes atomically). */
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
-    write_args parsed = {.verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL, ODIN3_PROV_MAP_NONE},
-                         .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, false, ODIN3_PROV_MAP_NONE},
-                         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
+    write_args parsed = {
+        .verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL, ODIN3_PROV_MAP_NONE, false, NULL},
+        .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, false, ODIN3_PROV_MAP_NONE},
+        .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
     odin3_strbuf_init(&parsed.name_map);
     odin3_strbuf_init(&parsed.color);
+    odin3_strbuf_init(&parsed.sim_file);
     odin3_status st = parse_write_args(FORMAT_PASS[format], args, &parsed);
     st = st == ODIN3_OK ? check_name_map(FORMAT_PASS[format], &parsed) : st;
     odin3_module_id top = odin3_design_top(design);
@@ -261,6 +287,7 @@ static odin3_status write_format_run(odin3_design *design, odin3_bytes args, wri
     odin3_strbuf_free(&parsed.focus);
     odin3_strbuf_free(&parsed.name_map);
     odin3_strbuf_free(&parsed.color);
+    odin3_strbuf_free(&parsed.sim_file);
     return st;
 }
 
@@ -308,9 +335,11 @@ const odin3_pass_def odin3_pass_write_json = {
 const odin3_pass_def odin3_pass_write_verilog = {
     "write_verilog",
     "write_verilog <file> [--name-style short|provenance|hash [--name-map <file>] "
-    "[--prov-map [refs|constructs|full]]]: write "
+    "[--prov-map [refs|constructs|full]]] [--quartus [--sim-file <file>]]: write "
     "structural Verilog (file - is stdout); hash names write the name map to <file>.names or "
-    "--name-map; --prov-map (hash names only) writes the version 2 map",
+    "--name-map; --prov-map (hash names only) writes the version 2 map; --quartus writes plain "
+    "Verilog-2001 for Quartus (flip-flops and latches as always blocks, memories as reg arrays) "
+    "and the black-box stubs to --sim-file, else <file minus .v>_lpm_sim.v",
     write_verilog_run,
     NULL,
     false,
