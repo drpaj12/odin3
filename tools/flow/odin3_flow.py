@@ -21,6 +21,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -254,6 +255,48 @@ def lut_k(args: FlowArgs, vtr_root: Path | None, log: Path) -> int:
 def vtr_root_from_env() -> Path | None:
     value = os.environ.get("VTR_ROOT")
     return Path(value) if value else None
+
+
+PROJECT_REFUSED = ("libfile", "libdir", "libext", "param")  # keys that change the read
+
+
+def expand_project(path: Path) -> tuple[list[Path], list[str], list[str], str | None]:
+    """The design files, include directories, defines and top module of an ``.o3proj`` (paths
+    relative to the project file). ``file <language> <path> [library <name>]``, ``incdir``,
+    ``define`` and ``top [<library>.]<module>`` are read; the library of a file is not used. A key
+    that would change the read and that the flow cannot carry (``libfile``, ``libdir``, ``libext``,
+    ``param``) is a UsageError; any other key (``arch``, ``flow``, ``tool`` ...) is not used."""
+    path = path.resolve()
+    if not path.is_file():
+        raise UsageError(f"no such project file: {path}")
+    files: list[Path] = []
+    incdirs: list[str] = []
+    defines: list[str] = []
+    top: str | None = None
+    for num, line in enumerate(path.read_text().splitlines(), 1):
+        try:
+            words = shlex.split(line, comments=True)
+        except ValueError as exc:
+            raise UsageError(f"{path}:{num}: {exc}") from exc
+        if not words:
+            continue
+        key, args = words[0], words[1:]
+        if key in PROJECT_REFUSED:
+            raise UsageError(f"{path}:{num}: '{key}' is not carried by odin3-flow; "
+                             f"read the project with odin3 itself")
+        if key == "file" and len(args) >= 2:
+            if args[0] not in ("verilog", "systemverilog"):
+                raise UsageError(f"{path}:{num}: file language '{args[0]}' is not Verilog")
+            files.append((path.parent / args[1]).resolve())
+        elif key == "incdir" and len(args) == 1:
+            incdirs.append(str((path.parent / args[0]).resolve()))
+        elif key == "define" and len(args) == 1:
+            defines.append(args[0])
+        elif key == "top" and len(args) == 1:
+            top = args[0].split(".", 1)[-1]
+        elif key in ("file", "incdir", "define", "top"):
+            raise UsageError(f"{path}:{num}: bad '{key}' line")
+    return files, incdirs, defines, top
 
 
 def expand_filelist(path: Path, seen: tuple[Path, ...] = ()) \
@@ -843,7 +886,12 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--read-opt", action="append", default=[], metavar="OPT",
                     help="an extra read_verilog option, written with an equals sign, e.g. "
                          "--read-opt=--auto-blackbox or --read-opt=--nomem2reg (repeatable)")
-    ap.add_argument("--top", help="top module (default: the one uninstantiated module)")
+    ap.add_argument("--project", type=Path, metavar="X.o3proj",
+                    help="an .o3proj: its files, include directories, defines and `top` "
+                         "(files and options given as well are added; a different --top is an "
+                         "error)")
+    ap.add_argument("--top", help="top module (default: the project's, else the one "
+                                  "uninstantiated module)")
     ap.add_argument("--target", default="vtr", choices=TARGETS,
                     help="vtr: BLIF (and VPR); lpm: LPM-cell Verilog plus a read-back lint "
                          "(default: vtr)")
@@ -894,8 +942,16 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
         designs += files
         incdirs += inc
         defines += dfn
+    if ns.project is not None:
+        files, inc, dfn, ptop = expand_project(ns.project)
+        designs = files + designs
+        incdirs += inc
+        defines += dfn
+        if ptop is not None and ns.top not in (None, ptop):
+            raise UsageError(f"--top {ns.top} conflicts with the top of {ns.project}: {ptop}")
+        ns.top = ns.top or ptop
     if not designs:
-        ap.error("no design files: give files or -f LIST")
+        ap.error("no design files: give files, -f LIST or --project X.o3proj")
     ns.designs = designs
     out = ns.out
     if out is None:
