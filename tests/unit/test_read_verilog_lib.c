@@ -517,6 +517,26 @@ static void test_earlier_read_module_has_no_parameters(void) {
         1, et_count_with(&rs, ODIN3_LOG_ERROR, "read it with read_verilog --lib"), et_log(&rs));
 }
 
+/* read_verilog -D defines a macro for the files of this read (v1.6.1): an undefined `VAL or the
+ * `ifndef FOO branch would be an error. */
+static void test_command_line_defines(void) {
+    et_src srcs[] = {{"d.v", "module dd (output y);\n`ifndef FOO\n  bad bad bad;\n`endif\n"
+                             "  assign y = `VAL;\nendmodule\n"}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-D FOO -D VAL=1'b1 d.v"),
+                                  et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    TEST_ASSERT_NOT_NULL(module_like("dd"));
+}
+
+static void test_command_line_define_needs_a_value(void) {
+    et_src srcs[] = {{"d.v", "module dd (output y);\n  assign y = 1'b0;\nendmodule\n"}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "d.v -D"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, et_count_with(&rs, ODIN3_LOG_ERROR, "-D expects a"),
+                                     et_log(&rs));
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
     X(test_lib_unit_elaborated_where_used)                                                         \
@@ -546,7 +566,9 @@ static void test_earlier_read_module_has_no_parameters(void) {
     X(test_vendor_prims_never_replace_a_definition)                                                \
     X(test_vendor_prims_refused_with_lib)                                                          \
     X(test_earlier_read_module_resolves)                                                           \
-    X(test_earlier_read_module_has_no_parameters)
+    X(test_earlier_read_module_has_no_parameters)                                                  \
+    X(test_command_line_defines)                                                                   \
+    X(test_command_line_define_needs_a_value)
 
 #define RUN_ONE(name) RUN_TEST(name);
 
