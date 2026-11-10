@@ -763,14 +763,6 @@ static odin3_status ex_word_variable(ex_run *run, const ex_frame *frame,
                                      odin3_sig *out) {
     odin3_elab2 *e2 = run->e2;
     odin3_ast_id node = frame->node;
-    if (ref->n != 1) {
-        odin3_elab2_error(e2, odin3_ast_loc(e2->elab, node),
-                          "non-constant index into the multi-dimensional register array '%s' is "
-                          "not supported",
-                          odin3_strtab_get(odin3_design_strtab(e2->design),
-                                           odin3_elab2_mem_get(e2, ref->mem)->name));
-        return ODIN3_ERR_PARSE;
-    }
     const odin3_elab2_regs_rd rd = {node, ref->mem, idx};
     const odin3_elab2_reads *reads = run->req->reads;
     if (reads != NULL && reads->word != NULL) {

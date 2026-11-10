@@ -13,6 +13,7 @@
 #include "ast/ast.h"
 #include "ast/kinds.h"
 #include "ast/symtab.h"
+#include "frontends/elab/elab2_mem.h"
 #include "frontends/elab/elab_internal.h"
 #include "ir/ids.h"
 #include "odin3/odin3.h"
@@ -81,9 +82,17 @@ static bool scan_local(const odin3_elab2 *e2, odin3_ast_id lhs) {
     if (kind != ODIN3_AST_IDENT && kind != ODIN3_AST_HIER_NAME) {
         return false;
     }
-    const odin3_symbol *rec = odin3_symbol_get(e2->st, odin3_elab_sym_of(&e2->bind, lhs));
-    return rec != NULL && (rec->kind == ODIN3_SYM_VAR || rec->kind == ODIN3_SYM_NET) &&
-           rec->ir_wire.v == 0 && rec->n_unpacked == 0;
+    odin3_sym_id sym = odin3_elab_sym_of(&e2->bind, lhs);
+    const odin3_symbol *rec = odin3_symbol_get(e2->st, sym);
+    if (rec == NULL || (rec->kind != ODIN3_SYM_VAR && rec->kind != ODIN3_SYM_NET) ||
+        rec->ir_wire.v != 0) {
+        return false;
+    }
+    if (rec->n_unpacked == 0) {
+        return true;
+    }
+    uint32_t mem = odin3_elab2_mem_find(e2, sym); /* a callee's array has no words until the call */
+    return mem != UINT32_MAX && odin3_elab2_mem_get(e2, mem)->frame;
 }
 
 /* Whether a lvalue reads a variable of a function or task that has no frame now (in an index). */

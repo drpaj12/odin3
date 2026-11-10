@@ -68,6 +68,7 @@ large/sv_chip2_hierarchy_no_mem.v [only in A: $_DFF_PN0_ Q=tm3_sram_adsp] tool l
 keywords/always/always_posedge_negedge.v [Multiple edge sensitive events found for this signal] Yosys 0.55 side A proc rejects the dual-edge / second-edge register 2D elaborates (2E E1a rejects it too; Parmys fails as well)
 syntax/bm_function_1.v [Multiple edge sensitive events found for this signal] Yosys 0.55 side A proc rejects the dual-edge / second-edge register 2D elaborates (2E E1a rejects it too; Parmys fails as well)
 syntax/bm_function_2.v [Multiple edge sensitive events found for this signal] Yosys 0.55 side A proc rejects the dual-edge / second-edge register 2D elaborates (2E E1a rejects it too; Parmys fails as well)
+syntax/matrix_multiplication.v [Multiple edge sensitive events found for this signal] Yosys 0.55 side A proc rejects the dual-edge / second-edge register 2D elaborates (Parmys fails as well); the variable index into the register arrays matrixA and matrixB elaborates since the multi-dimensional word case
 large/paj_top_hierarchy_no_mem.v [Async reset \we yields non-constant value] Yosys 0.55 side A proc rejects a non-constant async reset value (2E E2 rejects it too)
 preprocessor/default_net.v [Unsupported default nettype: tri] Yosys 0.55 side B rejects `default_nettype tri (coverage row L19)
 keywords/integer/integer_outside.v [Incompatible re-declaration of wire] Yosys 0.55 side B rejects the non-ANSI `output integer c; integer c;` re-declaration (coverage row M3)

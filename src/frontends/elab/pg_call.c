@@ -218,11 +218,24 @@ odin3_status pg_unnamed_wire(odin3_pg *pg, odin3_sym_id id, uint32_t *width_out)
     return st;
 }
 
-/* The unnamed wire of one symbol of the callee. */
+/* One word wire of a callee's array: noted for the module's end, its nets a temporary group. */
+static odin3_status frame_word(void *user, odin3_wire_id wire, uint32_t width) {
+    odin3_pg *pg = user;
+    odin3_status st = fwire_note(pg, wire);
+    return st != ODIN3_OK ? st : frame_nets(pg, wire, width);
+}
+
+/* The unnamed wire of one symbol of the callee; an array gets a wire per word. */
 static odin3_status frame_wire(odin3_pg *pg, odin3_sym_id id) {
     const odin3_symbol *rec = odin3_symbol_get(pg->e2->st, id);
-    if ((rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR) || rec->n_unpacked > 0) {
+    if ((rec->kind != ODIN3_SYM_NET && rec->kind != ODIN3_SYM_VAR)) {
         return ODIN3_OK;
+    }
+    if (rec->n_unpacked > 0) {
+        uint32_t mem = odin3_elab2_mem_find(pg->e2, id);
+        return mem != UINT32_MAX && odin3_elab2_mem_get(pg->e2, mem)->frame
+                   ? odin3_elab2_mem_frame_words(pg->e2, mem, frame_word, pg)
+                   : ODIN3_OK;
     }
     uint32_t width = 0;
     odin3_status st = frame_note(pg, id);
@@ -898,7 +911,7 @@ typedef struct regs_run {
     odin3_pg *pg;
     odin3_ast_id node;
     uint32_t mem;
-    const odin3_sig *idx;
+    const odin3_sig *idx;        /* one index signal per dimension of the array */
     const odin3_sig *value;      /* a write: the word's new value; a read: NULL */
     const odin3_net_id *dst;     /* a read: the nets that get the word */
     const odin3_sigbit *targets; /* the bits the arms assign by `=`, sorted (blocking only) */
@@ -955,28 +968,109 @@ static odin3_status regs_default(const regs_run *rr) {
     return st;
 }
 
-static odin3_status regs_switch(const regs_run *rr) {
-    odin3_pg *pg = rr->pg;
-    const odin3_elab_mem *mem = odin3_elab2_mem_get(pg->e2, rr->mem);
-    pg_sw_req sw = {rr->node, rr->idx,        rr->targets,        rr->n_targets,
-                    0,        rr->idx->width, rr->idx->is_signed, PG_WILD_NONE};
-    odin3_status st = pg_sw_begin(pg, &sw);
-    for (size_t pos = 0; st == ODIN3_OK && pos < mem->words.len; pos++) {
-        int64_t value = (int64_t)mem->offset + (int64_t)pos;
-        if (!value_fits(value, rr->idx)) {
+/* Where the walk over the nested switches of a word stands: per dimension the next declared
+ * index to try, and the row-major position over that dimension and those above it. */
+typedef struct regs_walk {
+    const odin3_dim *dims;
+    int64_t *next;
+    int64_t *pos;
+} regs_walk;
+
+/* The next declared index of dimension dim that has a position and fits the index signal: the
+ * case item it makes (cmp) and the position over the dimension (walk->pos[dim]). False when
+ * there is none left. */
+static bool regs_next_item(const regs_run *rr, const regs_walk *walk, uint32_t dim, odin3_sig *cmp,
+                           odin3_status *st) {
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(rr->pg->e2, rr->mem);
+    const odin3_sig *idx = &rr->idx[dim];
+    int64_t low = odin3_elab2_dim_low(&walk->dims[dim]);
+    int64_t size = (int64_t)odin3_elab2_dim_size(&walk->dims[dim]);
+    for (; walk->next[dim] < low + size; walk->next[dim]++) {
+        int64_t value = walk->next[dim];
+        int64_t part = odin3_elab2_mem_dim_pos(mem, &walk->dims[dim], value);
+        if (part < 0 || !value_fits(value, idx)) {
             continue;
         }
+        int64_t above = dim > 0 ? walk->pos[dim - 1U] : 0;
+        walk->pos[dim] = above * size + part;
+        *st = value_sig(rr->pg->e2, value, idx, cmp);
+        return true;
+    }
+    return false;
+}
+
+/* The walk's whole state: the arms, where it stands, and the dimension of the open switch. */
+typedef struct regs_state {
+    const regs_run *rr;
+    regs_walk walk;
+    uint32_t dim;
+} regs_state;
+
+/* Opens the switch over the dimension st->dim on its index signal. */
+static odin3_status regs_open(const regs_state *rs) {
+    const odin3_sig *idx = &rs->rr->idx[rs->dim];
+    pg_sw_req sw = {rs->rr->node,   idx,         rs->rr->targets, rs->rr->n_targets, 0, idx->width,
+                    idx->is_signed, PG_WILD_NONE};
+    rs->walk.next[rs->dim] = odin3_elab2_dim_low(&rs->walk.dims[rs->dim]);
+    return pg_sw_begin(rs->rr->pg, &sw);
+}
+
+/* One case of the open switch: below the last dimension it opens the switch of the next one, at
+ * the last it is the arm of the word and closes. */
+static odin3_status regs_item(regs_state *rs, const odin3_sig *cmp, uint32_t last) {
+    odin3_pg_case_req item = {rs->rr->node, cmp, 1};
+    odin3_status st = pg_sw_case(rs->rr->pg, &item, false);
+    if (st == ODIN3_OK && rs->dim < last) {
+        rs->dim++;
+        return regs_open(rs);
+    }
+    st = st != ODIN3_OK ? st : regs_arm(rs->rr, (size_t)rs->walk.pos[rs->dim]);
+    if (st == ODIN3_OK) {
+        pg_sw_case_end(rs->rr->pg);
+        rs->walk.next[rs->dim]++;
+    }
+    return st;
+}
+
+/* The open switch has no index left: its default, its end, and the case above it closes. */
+static odin3_status regs_close(regs_state *rs) {
+    odin3_status st = regs_default(rs->rr);
+    st = st != ODIN3_OK ? st : pg_sw_end(rs->rr->pg);
+    if (st == ODIN3_OK && rs->dim > 0) {
+        rs->dim--;
+        pg_sw_case_end(rs->rr->pg);
+        rs->walk.next[rs->dim]++;
+    }
+    return st;
+}
+
+/* The nested switches over the dimensions of the word, outermost first, one case per index value
+ * (the row-major position of the word at the innermost): an index outside a dimension, and one
+ * the index signal cannot hold, has no case; each switch's default is the x word (a read) or
+ * nothing (a write). The walk is a depth-first one with an explicit level (no recursion). */
+static odin3_status regs_switch(const regs_run *rr) {
+    const odin3_elab_mem *mem = odin3_elab2_mem_get(rr->pg->e2, rr->mem);
+    size_t bytes = (size_t)mem->n_dims * sizeof(int64_t);
+    regs_state rs = {rr,
+                     {odin3_symbol_unpacked(rr->pg->e2->st, mem->sym).dims,
+                      odin3_arena_alloc(rr->pg->e2->scratch, bytes),
+                      odin3_arena_alloc(rr->pg->e2->scratch, bytes)},
+                     0};
+    if (rs.walk.next == NULL || rs.walk.pos == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    odin3_status st = regs_open(&rs);
+    bool done = false;
+    while (st == ODIN3_OK && !done) {
         odin3_sig cmp;
-        st = value_sig(pg->e2, value, rr->idx, &cmp);
-        odin3_pg_case_req item = {rr->node, &cmp, 1};
-        st = st != ODIN3_OK ? st : pg_sw_case(pg, &item, false);
-        st = st != ODIN3_OK ? st : regs_arm(rr, pos);
-        if (st == ODIN3_OK) {
-            pg_sw_case_end(pg);
+        if (regs_next_item(rr, &rs.walk, rs.dim, &cmp, &st)) {
+            st = st != ODIN3_OK ? st : regs_item(&rs, &cmp, mem->n_dims - 1U);
+        } else {
+            done = rs.dim == 0;
+            st = regs_close(&rs);
         }
     }
-    st = st != ODIN3_OK ? st : regs_default(rr);
-    return st != ODIN3_OK ? st : pg_sw_end(pg);
+    return st;
 }
 
 /* A read inside a process: a temporary of the word's width gets the word by a case with case
@@ -1018,12 +1112,16 @@ odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     const odin3_elab2_regsel regs = pg->lvs.regs;
     pg_asg mixed = {&pg->lvs, req->rhs, req->stmt, req->blocking, false};
     odin3_elab2_reads reads = pg_reads(pg);
-    odin3_elab2_expr_req ireq = {regs.index, {0, false, false}, NULL, &reads};
-    odin3_sig idx;
+    uint32_t n_dims = odin3_elab2_mem_get(pg->e2, regs.mem)->n_dims;
+    odin3_sig *idx = odin3_arena_alloc(pg->e2->scratch, (size_t)n_dims * sizeof *idx);
     pg_mem_ref wref = {regs.mem, NULL, req->stmt, req->blocking};
-    odin3_status st = pg_check_mixed(pg, &mixed);
+    odin3_status st = idx != NULL ? pg_check_mixed(pg, &mixed) : ODIN3_ERR_NO_MEMORY;
     st = st != ODIN3_OK ? st : pg_mem_check_mixed(pg, &wref);
-    st = st != ODIN3_OK ? st : odin3_elab2_expr(pg->e2, &ireq, &idx);
+    for (uint32_t k = 0; st == ODIN3_OK && k < n_dims; k++) {
+        odin3_elab2_expr_req ireq = {
+            odin3_elab2_mem_word_index(pg->e2, regs.node, k), {0, false, false}, NULL, &reads};
+        st = odin3_elab2_expr(pg->e2, &ireq, &idx[k]);
+    }
     size_t count = pg->lvs.nets.len;
     odin3_sigbit *targets =
         st == ODIN3_OK ? odin3_arena_alloc(pg->e2->scratch, (count + 1U) * sizeof *targets) : NULL;
@@ -1033,7 +1131,7 @@ odin3_status pg_regs_apply(odin3_pg *pg, const odin3_pg_assign_req *req) {
     for (size_t i = 0; st == ODIN3_OK && i < count; i++) {
         targets[i] = ((const odin3_net_id *)odin3_vec_cat(&pg->lvs.nets, i))->v;
     }
-    regs_run rr = {pg,   regs.node, regs.mem,        &idx,         req->rhs,
+    regs_run rr = {pg,   regs.node, regs.mem,        idx,          req->rhs,
                    NULL, targets,   (uint32_t)count, req->blocking};
     rr.n_targets = req->blocking ? (uint32_t)count : 0U;
     return st != ODIN3_OK ? st : regs_switch(&rr);
