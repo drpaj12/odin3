@@ -679,6 +679,26 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     return blif if result.steps[-1].ok else None
 
 
+LPM_NOTE = ("Only the netlist goes to Quartus. The sim file holds empty stubs of the LPM and "
+            "black-box modules, for the read-back and iverilog only: a user module with a "
+            "library name would override the megafunction in Quartus.")
+LPM_INSTANCE_RE = re.compile(
+    r"^\s*(?:\(\*[^\n]*?\*\)\s*)?(lpm_add_sub|lpm_mult|lpm_compare|altsyncram)\s+#\(", re.M)
+LPM_ALWAYS_RE = re.compile(r"^\s*always\s+@", re.M)
+LPM_REG_ARRAY_RE = re.compile(r"^\s*reg\s+(?:\[[^\]]*\]\s*)?\S+\s+\[[^\]]*\]\s*;", re.M)
+
+
+def lpm_cell_counts(text: str) -> dict[str, int]:
+    """Instances of each LPM type, ``always`` blocks (flip-flops and latches) and reg arrays
+    (memories left to Quartus inference) in a netlist written by ``write_verilog --quartus``."""
+    counts = {kind: 0 for kind in ("lpm_add_sub", "lpm_mult", "lpm_compare", "altsyncram")}
+    for match in LPM_INSTANCE_RE.finditer(text):
+        counts[match.group(1)] += 1
+    counts["always_blocks"] = len(LPM_ALWAYS_RE.findall(text))
+    counts["reg_arrays"] = len(LPM_REG_ARRAY_RE.findall(text))
+    return counts
+
+
 def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     """The odin3 step and the read-back lint of target ``lpm``."""
     step_dir = args.out / "odin3"
@@ -691,11 +711,17 @@ def lpm_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     result.runs.append(step)
     if not step.ok:
         return None
+    sim = step_dir / f"{top}_lpm_sim.v"
     back = f"read_techlib {quote(resource_root() / LPM_LIB_REL)}; " \
-           f"read_verilog -icells {quote(written)}"
+           f"read_verilog -icells {quote(written)} {quote(sim)}; proc"
     lint = run_step("readback", [str(args.odin3), "--check", "-p", back], args.out / "readback")
     result.steps.append(lint)
     result.runs.append(lint)
+    result.summary["lpm_netlist"] = str(written)
+    result.summary["lpm_sim_file"] = str(sim)
+    result.summary["lpm_note"] = LPM_NOTE
+    if written.is_file():
+        result.summary["lpm_cells"] = lpm_cell_counts(written.read_text())
     return written if lint.ok else None
 
 

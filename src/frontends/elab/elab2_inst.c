@@ -549,8 +549,15 @@ static odin3_status inst_attrs(inst_run *run, odin3_node_id node) {
         odin3_elab2_attrs(e2, run->instantiation, (odin3_objref){ODIN3_OBJ_NODE, node.v});
     odin3_ast_span list =
         odin3_ast_children(e2->elab, odin3_ast_child(e2->elab, run->instantiation, 0));
-    for (uint32_t i = 0; st == ODIN3_OK && run->tg.is_module && i < list.n; i++) {
-        st = param_attr(run, list.ids[i], node);
+    /* An implicit black box (--auto-blackbox) has no declared parameters; the overrides of its
+     * instance stay as `parameter:<NAME>` attributes too, for the writers (write_verilog puts
+     * them back as `#(.NAME(value))`). An ordered value has no name and is not kept. */
+    bool keep = run->tg.is_module ||
+                (run->tg.def->gran == ODIN3_GRAN_BLACKBOX && run->tg.def->n_params == 0);
+    for (uint32_t i = 0; st == ODIN3_OK && keep && i < list.n; i++) {
+        if (run->tg.is_module || odin3_ast_name(e2->elab, list.ids[i]) != 0) {
+            st = param_attr(run, list.ids[i], node);
+        }
     }
     return st;
 }

@@ -1901,6 +1901,17 @@ if(BUILD_TESTING)
                 ${PROJECT_SOURCE_DIR}/tests/lpm/altsyncram_sp.v)
     set_tests_properties(lpm_check_family PROPERTIES LABELS "unit;micro" SKIP_RETURN_CODE 77
                          TIMEOUT 300)
+    # V1.6.1: one micro per storage-cell shape and memory form through `write_verilog --quartus`
+    # (tools/quartus-check): purity of the netlist, read-back, lint, random-simulation equivalence.
+    foreach(_q_micro IN ITEMS ff_plain ff_async ff_sync ff_aload latch mem_async mem_sync
+                              mem_sync_en mem_two_ports mem_init)
+        add_test(NAME quartus_check_${_q_micro}
+            COMMAND ${PROJECT_SOURCE_DIR}/tools/quartus-check/quartus-check
+                    --odin3 $<TARGET_FILE:odin3>
+                    ${PROJECT_SOURCE_DIR}/tests/quartus/${_q_micro}.v)
+        set_tests_properties(quartus_check_${_q_micro} PROPERTIES LABELS "unit;micro"
+                             SKIP_RETURN_CODE 77 TIMEOUT 300)
+    endforeach()
     odin3_add_unit_test(test_lpmmap_ram)
     target_sources(test_lpmmap_ram PRIVATE tests/unit/lpmmap_fixture.c tests/unit/proc_build.c)
     target_compile_definitions(test_lpmmap_ram PRIVATE

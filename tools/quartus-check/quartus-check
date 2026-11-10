@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# quartus-check: one micro through the Quartus-mode Verilog writer (write_verilog --quartus), the
+# purity checks on the netlist and a random-simulation equivalence against the RTL. Exit codes: 0
+# pass; 1 a mismatch; 2 usage or tool error; 77 iverilog is missing. See quartus_check.py.
+set -euo pipefail
+here="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+exec python3 "$here/quartus_check.py" "$@"

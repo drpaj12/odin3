@@ -23,6 +23,8 @@ typedef struct odin3_verilog_opts {
     odin3_verilog_name_style name_style;
     const char *name_map; /* HASH only: the name map file; NULL means `<path>.names` (H-4) */
     odin3_prov_map_mode prov_map; /* HASH only: the name map is version 2 (V1.2.0 3.5) */
+    bool quartus;                 /* Quartus mode: plain Verilog-2001 only, stubs in sim_file */
+    const char *sim_file;         /* quartus only: the stub file; NULL means `<path>_lpm_sim.v` */
 } odin3_verilog_opts;
 
 /*
@@ -114,6 +116,19 @@ typedef struct odin3_verilog_opts {
  * joined by `|`), after the object's own attributes: a user `src` attribute wins. An `assign`
  * has the comment only (an attribute is illegal there). A file name with a byte outside
  * 0x20..0x7e or a `|` is skipped with one WARNING per file.
+ *
+ * Quartus mode (opts->quartus, `write_verilog --quartus`): the file is the netlist for Quartus
+ * Prime and holds no Odin-internal cell and no module definition of a library name. Every
+ * flip-flop and latch cell type of the IR (`$sdffe`, `$adffe`, `$sdffce`, `$aldff`, `$aldffe`,
+ * `$dffsr`, `$dffsre`, `$dlatch`, `$adlatch`, `$dlatchsr`, `$sr` and the 68 gate-level
+ * `$_DFFE_`/`$_SDFF_`/… types) is written as plain Verilog-2001 `always` blocks on a `reg` (one
+ * block per cell; per bit for the set/clear types), the cell type and name in a comment before
+ * the block. A `$mem` is written as a behavioural `reg` array with `assign` (async read) or
+ * clocked (sync read) ports, which Quartus infers as RAM, and an INFO line says so. `$shiftx` and
+ * `$pow` are `assign`s. The black-box stubs go to a second file (opts->sim_file, else the path
+ * with `.v` replaced by `_lpm_sim.v`), for read-back and simulation only, never into Quartus: the
+ * netlist instances of `lpm_add_sub`, `altsyncram` or a user black box (`scfifo`) stay instances
+ * with their parameters. The second file is written even when it holds no stub.
  *
  * Errors (logged): ODIN3_ERR_INVALID_ARG for a NULL design or path, an unknown name style, a
  * port or stub name that cannot be written, a net on two input/inout port bits, a `$sop` cover

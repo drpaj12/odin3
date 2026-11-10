@@ -2,4 +2,6 @@
 # @LIB@ is lib/lpm.o3lib, @DESIGN@ the micro, @FAMILY@ is empty or `--family "NAME"`, @OUT@ the
 # Verilog written. No `lower`: the soft remainder is written as word-level assigns. The second
 # opt_clean removes the nets of the flip-flops lpmmap merged into a RAM read port (review L1).
-read_techlib @LIB@; read_verilog @DESIGN@; proc; opt; wreduce; opt_clean; opt -full; lpmmap @FAMILY@; opt_clean; opt -full; write_verilog @OUT@
+# `--quartus`: plain Verilog-2001 for Quartus; the stub modules go to @OUT@ minus `.v` plus
+# `_lpm_sim.v` (read-back and iverilog only).
+read_techlib @LIB@; read_verilog @DESIGN@; proc; opt; wreduce; opt_clean; opt -full; lpmmap @FAMILY@; opt_clean; opt -full; write_verilog @OUT@ --quartus

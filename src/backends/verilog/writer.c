@@ -52,6 +52,8 @@ typedef enum vw_form {
     FORM_PMUX,   /* priority chain */
     FORM_TRIBUF, /* Y = EN ? A : z */
     FORM_FF,     /* word-level flip-flop */
+    FORM_FFX,    /* Quartus mode: any other flip-flop or latch, as plain always blocks */
+    FORM_MEMQ,   /* Quartus mode: $mem as a behavioural reg array */
     FORM_COUNT
 } vw_form;
 
@@ -131,8 +133,15 @@ static const vw_builtin BUILTINS[] = {
     {"$dffe", FORM_FF, NULL, VB_EN},
     {"$adff", FORM_FF, NULL, VB_ARST},
     {"$sdff", FORM_FF, NULL, VB_SRST},
+    /* Quartus mode only (registered by name in wr_init): word cells written as `assign`s. */
+    {"$pow", FORM_BINARY, "**", 0},
+    {"$shiftx", FORM_BINARY, ">>", VB_SHIFT},
+    /* Quartus mode only: the shared entries of the storage cells and memories (no type name). */
+    {"$ffx", FORM_FFX, NULL, 0},
+    {"$memq", FORM_MEMQ, NULL, 0},
 };
 enum { N_BUILTINS = sizeof BUILTINS / sizeof BUILTINS[0] };
+enum { BI_QUARTUS_FIRST = N_BUILTINS - 4, BI_FFX = N_BUILTINS - 2, BI_MEMQ = N_BUILTINS - 1 };
 
 /* Parameter indices: word cells (A_SIGNED B_SIGNED …), $sop, word flip-flops, bit storage. */
 enum { PARAM_A_SIGNED = 0, PARAM_B_SIGNED = 1 };
@@ -154,7 +163,7 @@ typedef struct vw_ref {
 } vw_ref;
 
 /* Kinds of named things in a module's one Verilog namespace. */
-typedef enum vw_obj { OBJ_WIRE = 1, OBJ_NET, OBJ_NODE, OBJ_PIN, OBJ_GCLK } vw_obj;
+typedef enum vw_obj { OBJ_WIRE = 1, OBJ_NET, OBJ_NODE, OBJ_PIN, OBJ_GCLK, OBJ_AUX } vw_obj;
 
 typedef struct vw_module {
     const odin3_module *module;
@@ -174,6 +183,9 @@ typedef struct verilog_writer {
     const odin3_strtab *tab;
     const char *path;
     odin3_verilog_name_style name_style;
+    bool quartus;           /* Quartus mode (writer.h) */
+    bool bb_params;         /* the node being written is an implicit black box: its parameters
+                               are `#(...)`, not attributes */
     odin3_atomic_file file; /* a temporary beside path, renamed over it on success */
     bool opened;            /* file is open: wr_finish commits or removes it */
     bool oom_logged;
@@ -191,6 +203,8 @@ typedef struct verilog_writer {
     odin3_wattr_seen seen; /* attribute names written in the current (* … *) */
     vw_module mod;
 } verilog_writer;
+
+static void name_mem_regs(verilog_writer *wr, odin3_node_id node);
 
 /* --- errors and output --------------------------------------------------------------------- */
 
@@ -628,6 +642,9 @@ static bool needs_name(const verilog_writer *wr, odin3_node_id node) {
     if (!has_output(wr, node)) {
         return false;
     }
+    if (bi->form == FORM_FFX || bi->form == FORM_MEMQ) {
+        return true;
+    }
     return (bi->form == FORM_FF || bi->form == FORM_LATCH) && !q_is_reg(wr, node);
 }
 
@@ -850,6 +867,9 @@ static void generate_cell_names(verilog_writer *wr, odin3_node_id node) {
     }
     name_dangling(wr, node);
     const vw_builtin *bi = node_builtin(wr, node);
+    if (bi != NULL && bi->form == FORM_MEMQ && has_output(wr, node)) {
+        name_mem_regs(wr, node);
+    }
     if (bi != NULL && (bi->flags & VB_GCLK) != 0 && has_output(wr, node)) {
         generate(wr, OBJ_GCLK, 0, "$gclk");
     }
@@ -1526,6 +1546,681 @@ static void write_ff(verilog_writer *wr, odin3_node_id node, const vw_builtin *b
     connect_reg(wr, node, q_reg);
 }
 
+/* --- Quartus mode: storage cells and memories as plain Verilog-2001 ------------------------ */
+
+/* What a word or gate-level storage cell does, read from its type's port and parameter names. */
+typedef struct vw_ffx {
+    bool latch;      /* level-sensitive: no clock */
+    bool per_bit;    /* set/clear inputs per bit ($dffsr, $dffsre, $dlatchsr, $sr) */
+    bool srst_first; /* a sync reset beats the enable ($sdffce is the exception) */
+    int clk, en, arst, srst, aload, ad, set, clr, d;
+    bool clk_pos, en_pos, arst_pos, srst_pos, aload_pos, set_pos, clr_pos;
+    const odin3_value *rv; /* word cells: the reset value */
+    int rbit;              /* gate-level cells: the reset value 0/1, else -1 */
+    uint32_t width;
+} vw_ffx;
+
+static int port_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_ports; i++) {
+        if (strcmp(def->ports[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int param_index(const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+/* The INT parameter `<ctl>_POLARITY` of node (1 when the type has none). */
+static bool ffx_polarity(const verilog_writer *wr, odin3_node_id node, const char *ctl) {
+    char name[GENERATED_NAME_BYTES];
+    (void)snprintf(name, sizeof name, "%s_POLARITY", ctl);
+    int idx = param_index(node_def(wr, node), name);
+    return idx < 0 || param_int(wr, node, (uint32_t)idx) != 0;
+}
+
+/* Fills ffx for the eleven word flip-flops and latches by their port and parameter names. */
+static void ffx_word(const verilog_writer *wr, odin3_node_id node, vw_ffx *ffx) {
+    const odin3_celltype_def *def = node_def(wr, node);
+    ffx->clk = port_index(def, "CLK");
+    ffx->en = port_index(def, "EN");
+    ffx->arst = port_index(def, "ARST");
+    ffx->srst = port_index(def, "SRST");
+    ffx->aload = port_index(def, "ALOAD");
+    ffx->ad = port_index(def, "AD");
+    ffx->set = port_index(def, "SET");
+    ffx->clr = port_index(def, "CLR");
+    ffx->d = port_index(def, "D");
+    ffx->latch = ffx->clk < 0 && ffx->aload < 0;
+    ffx->per_bit = ffx->set >= 0;
+    ffx->srst_first = strcmp(def->name, "$sdffce") != 0;
+    ffx->clk_pos = ffx_polarity(wr, node, "CLK");
+    ffx->en_pos = ffx_polarity(wr, node, "EN");
+    ffx->arst_pos = ffx_polarity(wr, node, "ARST");
+    ffx->srst_pos = ffx_polarity(wr, node, "SRST");
+    ffx->aload_pos = ffx_polarity(wr, node, "ALOAD");
+    ffx->set_pos = ffx_polarity(wr, node, "SET");
+    ffx->clr_pos = ffx_polarity(wr, node, "CLR");
+    int rv = param_index(def, ffx->arst >= 0 ? "ARST_VALUE" : "SRST_VALUE");
+    ffx->rv = rv >= 0 ? odin3_node_param(wr->mod.module, node, (uint32_t)rv) : NULL;
+    int width = param_index(def, "WIDTH");
+    ffx->width = width >= 0 ? (uint32_t)param_int(wr, node, (uint32_t)width) : 1;
+}
+
+/* The gate-level families of ir/cells/dffx.h: `$_<family>_<c>[<r><other>][<e>]_`. */
+typedef struct vw_gate_family {
+    const char *prefix;
+    size_t letters;
+    bool sync;      /* the reset is synchronous */
+    bool reset;     /* has R and a reset value */
+    bool enable;    /* has E */
+    bool reset_top; /* the reset beats the enable */
+} vw_gate_family;
+
+static const vw_gate_family GATE_FAMILIES[] = {
+    {"$_DFF_", 3, false, true, false, true}, {"$_DFFE_", 2, false, false, true, true},
+    {"$_DFFE_", 4, false, true, true, true}, {"$_SDFF_", 3, true, true, false, true},
+    {"$_SDFFE_", 4, true, true, true, true}, {"$_SDFFCE_", 4, true, true, true, false},
+};
+
+/* True for the 68 gate-level types with a reset or an enable; fills ffx from the name letters. */
+static bool ffx_gate(const odin3_celltype_def *def, vw_ffx *ffx) {
+    size_t len = strlen(def->name);
+    for (size_t i = 0; i < sizeof GATE_FAMILIES / sizeof GATE_FAMILIES[0]; i++) {
+        const vw_gate_family *fam = &GATE_FAMILIES[i];
+        size_t plen = strlen(fam->prefix);
+        if (len != plen + fam->letters + 1 || strncmp(def->name, fam->prefix, plen) != 0 ||
+            def->name[len - 1] != '_') {
+            continue;
+        }
+        const char *let = def->name + plen;
+        ffx->clk = port_index(def, "C");
+        ffx->arst = !fam->sync && fam->reset ? port_index(def, "R") : -1;
+        ffx->srst = fam->sync ? port_index(def, "R") : -1;
+        ffx->en = fam->enable ? port_index(def, "E") : -1;
+        ffx->d = port_index(def, "D");
+        ffx->clk_pos = let[0] == 'P';
+        ffx->arst_pos = ffx->srst_pos = fam->reset && let[1] == 'P';
+        ffx->rbit = fam->reset ? let[2] - '0' : -1;
+        ffx->en_pos = fam->enable && let[fam->letters - 1] == 'P';
+        ffx->srst_first = fam->reset_top;
+        ffx->width = 1;
+        return true;
+    }
+    return false;
+}
+
+/* Fills ffx for a word or gate-level storage cell of Quartus mode; false for any other type. */
+static bool ffx_describe(const verilog_writer *wr, odin3_node_id node, vw_ffx *ffx) {
+    const odin3_celltype_def *def = node_def(wr, node);
+    *ffx = (vw_ffx){.rbit = -1,
+                    .clk = -1,
+                    .en = -1,
+                    .arst = -1,
+                    .srst = -1,
+                    .aload = -1,
+                    .ad = -1,
+                    .set = -1,
+                    .clr = -1,
+                    .d = -1};
+    if (def->name[1] == '_') {
+        return ffx_gate(def, ffx);
+    }
+    ffx_word(wr, node, ffx);
+    return true;
+}
+
+/* `  // <type> <cell name>` before a storage cell or memory, for provenance. */
+static void put_cell_comment(verilog_writer *wr, odin3_node_id node) {
+    char id[NODE_ID_TEXT];
+    odin3_bytes label = cell_label(wr, node, id);
+    vw_puts(wr, "  // ");
+    vw_puts(wr, node_def(wr, node)->name);
+    vw_char(wr, ' ');
+    for (size_t i = 0; i < label.len; i++) {
+        char chr = ((const char *)label.ptr)[i];
+        if ((unsigned char)chr < FIRST_PRINTABLE) {
+            chr = '?';
+        }
+        vw_char(wr, chr);
+    }
+    vw_line_end(wr, "\n");
+}
+
+/* `<kw> (` + `!` when active low + the control pin `)` ; port is a one-bit port. */
+static void put_ctl_cond(verilog_writer *wr, odin3_node_id node, int port, bool positive) {
+    vw_puts(wr, positive ? "if (" : "if (!");
+    put_port(wr, node, (uint32_t)port, false);
+    vw_puts(wr, ") ");
+}
+
+static void put_ffx_edge(verilog_writer *wr, odin3_node_id node, int port, bool positive) {
+    vw_puts(wr, positive ? "posedge " : "negedge ");
+    put_port(wr, node, (uint32_t)port, false);
+}
+
+/* The reset value: a word cell's parameter, a gate-level cell's one bit. */
+static void put_ffx_reset_value(verilog_writer *wr, const vw_ffx *ffx) {
+    if (ffx->rv != NULL) {
+        put_bits(wr, ffx->rv->bits, ffx->rv->len);
+    } else {
+        vw_puts(wr, ffx->rbit == 1 ? "1'b1" : "1'b0");
+    }
+}
+
+/* `always @(posedge clk, <edge of each async control>) ` or `always @* `. */
+static void put_ffx_sens(verilog_writer *wr, odin3_node_id node, const vw_ffx *ffx) {
+    if (ffx->latch) {
+        vw_puts(wr, "  always @* ");
+        return;
+    }
+    vw_puts(wr, "  always @(");
+    put_ffx_edge(wr, node, ffx->clk, ffx->clk_pos);
+    if (ffx->arst >= 0) {
+        vw_puts(wr, ", ");
+        put_ffx_edge(wr, node, ffx->arst, ffx->arst_pos);
+    }
+    if (ffx->aload >= 0) {
+        vw_puts(wr, ", ");
+        put_ffx_edge(wr, node, ffx->aload, ffx->aload_pos);
+    }
+    vw_puts(wr, ") ");
+}
+
+/* `if (<reset>) <q> <= <value>; else ` */
+static void put_ffx_reset(verilog_writer *wr, odin3_node_id node, const vw_ffx *ffx, int port) {
+    put_ctl_cond(wr, node, port, port == ffx->arst ? ffx->arst_pos : ffx->srst_pos);
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_puts(wr, " <= ");
+    put_ffx_reset_value(wr, ffx);
+    vw_puts(wr, "; else ");
+}
+
+/* One always block for a word-wide (or one-bit gate-level) cell:
+ * [async reset | async load] [sync reset] [enable] [sync reset] q <= d. */
+static void write_ffx_word(verilog_writer *wr, odin3_node_id node, const vw_ffx *ffx) {
+    put_ffx_sens(wr, node, ffx);
+    if (ffx->arst >= 0) {
+        put_ffx_reset(wr, node, ffx, ffx->arst);
+    }
+    if (ffx->aload >= 0) {
+        put_ctl_cond(wr, node, ffx->aload, ffx->aload_pos);
+        vw_name(wr, OBJ_NODE, node.v);
+        vw_puts(wr, " <= ");
+        put_port(wr, node, (uint32_t)ffx->ad, false);
+        vw_puts(wr, "; else ");
+    }
+    if (ffx->srst >= 0 && ffx->srst_first) {
+        put_ffx_reset(wr, node, ffx, ffx->srst);
+    }
+    if (ffx->en >= 0) {
+        put_ctl_cond(wr, node, ffx->en, ffx->en_pos);
+    }
+    if (ffx->srst >= 0 && !ffx->srst_first) {
+        put_ffx_reset(wr, node, ffx, ffx->srst);
+    }
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_puts(wr, " <= ");
+    put_port(wr, node, (uint32_t)ffx->d, false);
+    end_stmt(wr, node);
+}
+
+/* `if (<pin>) q[bit] <= 1'bV; else ` for the set or clear input of one bit. */
+static void put_ffx_bit_set(verilog_writer *wr, odin3_node_id node, int port, uint32_t bit,
+                            bool positive) {
+    odin3_pin_id pin = {odin3_node_port(wr->mod.module, node, (uint32_t)port).first.v + bit};
+    vw_puts(wr, positive ? "if (" : "if (!");
+    put_pin(wr, pin);
+    vw_puts(wr, ") ");
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_char(wr, '[');
+    vw_u32(wr, bit);
+    vw_puts(wr, "] <= ");
+}
+
+/* $dffsr, $dffsre, $dlatchsr, $sr: one always block per bit, clear beats set beats data. */
+static void write_ffx_bits(verilog_writer *wr, odin3_node_id node, const vw_ffx *ffx) {
+    for (uint32_t bit = 0; bit < ffx->width; bit++) {
+        if (ffx->latch) {
+            vw_puts(wr, "  always @* ");
+        } else {
+            vw_puts(wr, "  always @(");
+            put_ffx_edge(wr, node, ffx->clk, ffx->clk_pos);
+            vw_puts(wr, ", ");
+            vw_puts(wr, ffx->set_pos ? "posedge " : "negedge ");
+            put_pin(wr,
+                    (odin3_pin_id){
+                        odin3_node_port(wr->mod.module, node, (uint32_t)ffx->set).first.v + bit});
+            vw_puts(wr, ", ");
+            vw_puts(wr, ffx->clr_pos ? "posedge " : "negedge ");
+            put_pin(wr,
+                    (odin3_pin_id){
+                        odin3_node_port(wr->mod.module, node, (uint32_t)ffx->clr).first.v + bit});
+            vw_puts(wr, ") ");
+        }
+        put_ffx_bit_set(wr, node, ffx->clr, bit, ffx->clr_pos);
+        vw_puts(wr, "1'b0; else ");
+        put_ffx_bit_set(wr, node, ffx->set, bit, ffx->set_pos);
+        vw_puts(wr, "1'b1;");
+        if (ffx->d >= 0) {
+            vw_puts(wr, " else ");
+            if (ffx->en >= 0) {
+                put_ctl_cond(wr, node, ffx->en, ffx->en_pos);
+            }
+            vw_name(wr, OBJ_NODE, node.v);
+            vw_char(wr, '[');
+            vw_u32(wr, bit);
+            vw_puts(wr, "] <= ");
+            put_pin(wr, (odin3_pin_id){
+                            odin3_node_port(wr->mod.module, node, (uint32_t)ffx->d).first.v + bit});
+            vw_char(wr, ';');
+        }
+        vw_eol(wr, odin3_node_prov(wr->mod.module, node));
+    }
+}
+
+/* Quartus mode: any flip-flop or latch type the IR holds, as plain `always` blocks on a reg. */
+static void write_ffx(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    (void)bi;
+    vw_ffx ffx;
+    if (!ffx_describe(wr, node, &ffx)) {
+        return;
+    }
+    if (ffx.per_bit) {
+        write_ffx_bits(wr, node, &ffx);
+    } else {
+        write_ffx_word(wr, node, &ffx);
+    }
+    int init = param_index(node_def(wr, node), "INIT");
+    int64_t init_val = init >= 0 ? param_int(wr, node, (uint32_t)init) : 2;
+    if (init_val == 0 || init_val == 1) {
+        vw_puts(wr, "  initial ");
+        vw_name(wr, OBJ_NODE, node.v);
+        vw_puts(wr, init_val == 0 ? " = 1'b0;\n" : " = 1'b1;\n");
+    }
+    connect_reg(wr, node, false);
+}
+
+/* --- Quartus mode: $mem as a behavioural reg array ------------------------------------------ */
+
+typedef enum vw_mem_param {
+    MEM_P_MEMID = 0,
+    MEM_P_SIZE,
+    MEM_P_OFFSET,
+    MEM_P_ABITS,
+    MEM_P_WIDTH,
+    MEM_P_RD_PORTS,
+    MEM_P_WR_PORTS,
+    MEM_P_RD_CLK_ENABLE,
+    MEM_P_RD_CLK_POLARITY,
+    MEM_P_RD_TRANSPARENT,
+    MEM_P_WR_CLK_ENABLE,
+    MEM_P_WR_CLK_POLARITY,
+    MEM_P_INIT
+} vw_mem_param;
+
+typedef enum vw_mem_port {
+    MEMP_RD_CLK = 0,
+    MEMP_RD_EN,
+    MEMP_RD_ADDR,
+    MEMP_RD_DATA,
+    MEMP_WR_CLK,
+    MEMP_WR_EN,
+    MEMP_WR_ADDR,
+    MEMP_WR_DATA
+} vw_mem_port;
+
+enum { MEM_PORTS_MAX = 256 };
+
+typedef struct vw_mem {
+    odin3_node_id node;
+    int64_t size, offset;
+    uint32_t abits, width, rd, wr;
+} vw_mem;
+
+static vw_mem mem_describe(const verilog_writer *wr, odin3_node_id node) {
+    return (vw_mem){node,
+                    param_int(wr, node, MEM_P_SIZE),
+                    param_int(wr, node, MEM_P_OFFSET),
+                    (uint32_t)param_int(wr, node, MEM_P_ABITS),
+                    (uint32_t)param_int(wr, node, MEM_P_WIDTH),
+                    (uint32_t)param_int(wr, node, MEM_P_RD_PORTS),
+                    (uint32_t)param_int(wr, node, MEM_P_WR_PORTS)};
+}
+
+/* Bit idx of a BITS parameter of the memory (0 when short). */
+typedef struct vw_bit_ref {
+    vw_mem_param param;
+    uint32_t idx;
+} vw_bit_ref;
+
+static bool mem_bit(const verilog_writer *wr, odin3_node_id node, vw_bit_ref ref) {
+    const odin3_value *val = odin3_node_param(wr->mod.module, node, ref.param);
+    return val != NULL && ref.idx < val->len && val->bits[ref.idx] == ODIN3_BIT_1;
+}
+
+/* The pins per read or write port of a memory port: 1 (clock, read enable), ABITS (address) or
+ * WIDTH (data, write enable). */
+static uint32_t mem_stride(const vw_mem *mem, vw_mem_port port) {
+    switch (port) {
+    case MEMP_RD_ADDR:
+    case MEMP_WR_ADDR:
+        return mem->abits;
+    case MEMP_RD_DATA:
+    case MEMP_WR_DATA:
+    case MEMP_WR_EN:
+        return mem->width;
+    case MEMP_RD_CLK:
+    case MEMP_RD_EN:
+    case MEMP_WR_CLK:
+    default:
+        return 1;
+    }
+}
+
+/* The pins of port `port` that belong to read or write port number index. */
+typedef struct vw_port_ref {
+    vw_mem_port port;
+    uint32_t index;
+} vw_port_ref;
+
+static odin3_pinslice mem_slice(const verilog_writer *wr, const vw_mem *mem, vw_port_ref ref) {
+    odin3_pinslice all = odin3_node_port(wr->mod.module, mem->node, (uint32_t)ref.port);
+    uint32_t stride = mem_stride(mem, ref.port);
+    return (odin3_pinslice){{all.first.v + ref.index * stride}, stride};
+}
+
+/* Pin number index (counted from the first pin) of port `port`. */
+static odin3_pin_id mem_pin(const verilog_writer *wr, const vw_mem *mem, vw_mem_port port,
+                            uint32_t index) {
+    return (odin3_pin_id){odin3_node_port(wr->mod.module, mem->node, (uint32_t)port).first.v +
+                          index};
+}
+
+static void put_mem_slice(verilog_writer *wr, odin3_pinslice pins) {
+    if (pins.count == 0) {
+        vw_puts(wr, "1'b0");
+        return;
+    }
+    vw_items items = pin_items(pins);
+    put_items(wr, &items, false);
+}
+
+static bool mem_pins_driven(const verilog_writer *wr, odin3_pinslice pins) {
+    for (uint32_t i = 0; i < pins.count; i++) {
+        if (odin3_net_valid(odin3_pin_net(wr->mod.module, (odin3_pin_id){pins.first.v + i}))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool mem_read_sync(const verilog_writer *wr, const vw_mem *mem, uint32_t idx) {
+    return mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_RD_CLK_ENABLE, idx});
+}
+
+/* The aux name of the register of read port idx (keyed by the first data pin of the port). */
+static uint32_t mem_rd_key(const verilog_writer *wr, const vw_mem *mem, uint32_t idx) {
+    return mem_slice(wr, mem, (vw_port_ref){MEMP_RD_DATA, idx}).first.v;
+}
+
+static bool mem_read_used(const verilog_writer *wr, const vw_mem *mem, uint32_t idx) {
+    return mem_pins_driven(wr, mem_slice(wr, mem, (vw_port_ref){MEMP_RD_DATA, idx}));
+}
+
+/* `  // memory ...` plus the declarations: the array, the read registers and the INIT block. */
+static void declare_mem(verilog_writer *wr, odin3_node_id node) {
+    vw_mem mem = mem_describe(wr, node);
+    vw_puts(wr, "  reg [");
+    vw_u32(wr, mem.width - 1);
+    vw_puts(wr, ":0] ");
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_puts(wr, " [");
+    vw_i64(wr, mem.offset);
+    vw_char(wr, ':');
+    vw_i64(wr, mem.offset + mem.size - 1);
+    vw_line_end(wr, "];\n");
+    for (uint32_t idx = 0; idx < mem.rd; idx++) {
+        if (mem_read_sync(wr, &mem, idx) && mem_read_used(wr, &mem, idx)) {
+            vw_puts(wr, "  reg [");
+            vw_u32(wr, mem.width - 1);
+            vw_puts(wr, ":0] ");
+            vw_name(wr, OBJ_AUX, mem_rd_key(wr, &mem, idx));
+            vw_line_end(wr, ";\n");
+        }
+    }
+}
+
+/* `initial` words for the INIT bits that are not all x. */
+static void write_mem_init(verilog_writer *wr, const vw_mem *mem) {
+    const odin3_value *init = odin3_node_param(wr->mod.module, mem->node, MEM_P_INIT);
+    if (init == NULL || init->len == 0) {
+        return;
+    }
+    for (int64_t word = 0; word < mem->size; word++) {
+        uint64_t base = (uint64_t)word * mem->width;
+        bool known = false;
+        for (uint32_t bit = 0; bit < mem->width && base + bit < init->len; bit++) {
+            known = known || (init->bits[base + bit] & 3U) < ODIN3_BIT_X;
+        }
+        if (known) {
+            vw_puts(wr, "  initial ");
+            vw_name(wr, OBJ_NODE, mem->node.v);
+            vw_char(wr, '[');
+            vw_i64(wr, mem->offset + word);
+            vw_puts(wr, "] = ");
+            uint32_t avail = base < init->len ? (uint32_t)(init->len - base) : 0;
+            put_bits(wr, init->bits + base, avail < mem->width ? avail : mem->width);
+            vw_line_end(wr, ";\n");
+        }
+    }
+}
+
+/* What a store writes into: the array word at the write address, or a sync read register. */
+typedef struct vw_store {
+    bool to_array;
+    uint32_t read_port;
+} vw_store;
+
+typedef struct vw_pin_pair {
+    odin3_pin_id first, second;
+} vw_pin_pair;
+
+/* True when both pins are on the same net. */
+static bool same_net(const verilog_writer *wr, vw_pin_pair pair) {
+    return odin3_pin_net(wr->mod.module, pair.first).v ==
+           odin3_pin_net(wr->mod.module, pair.second).v;
+}
+
+/* The stores of write port wport: one `if (<enable>) target[hi:lo] <= data[hi:lo];` per run of data
+ * bits with the same enable net. Into a read register (the transparent bypass) the store also
+ * needs the write address to equal the read address. */
+static void write_mem_stores(verilog_writer *wr, const vw_mem *mem, uint32_t wport,
+                             const vw_store *st) {
+    odin3_pinslice waddr = mem_slice(wr, mem, (vw_port_ref){MEMP_WR_ADDR, wport});
+    odin3_pinslice raddr = mem_slice(wr, mem, (vw_port_ref){MEMP_RD_ADDR, st->read_port});
+    uint32_t bit = 0;
+    while (bit < mem->width) {
+        odin3_pin_id en = mem_pin(wr, mem, MEMP_WR_EN, wport * mem->width + bit);
+        uint32_t end = bit + 1;
+        while (end < mem->width &&
+               same_net(
+                   wr, (vw_pin_pair){en, mem_pin(wr, mem, MEMP_WR_EN, wport * mem->width + end)})) {
+            end++;
+        }
+        vw_puts(wr, "    if (");
+        put_pin(wr, en);
+        if (!st->to_array) {
+            vw_puts(wr, " && (");
+            put_mem_slice(wr, waddr);
+            vw_puts(wr, " == ");
+            put_mem_slice(wr, raddr);
+            vw_char(wr, ')');
+        }
+        vw_puts(wr, ") ");
+        if (st->to_array) {
+            vw_name(wr, OBJ_NODE, mem->node.v);
+            vw_char(wr, '[');
+            put_mem_slice(wr, waddr);
+            vw_char(wr, ']');
+        } else {
+            vw_name(wr, OBJ_AUX, mem_rd_key(wr, mem, st->read_port));
+        }
+        if (bit != 0 || end != mem->width) {
+            vw_char(wr, '[');
+            vw_u32(wr, end - 1);
+            if (end - 1 != bit) {
+                vw_char(wr, ':');
+                vw_u32(wr, bit);
+            }
+            vw_char(wr, ']');
+        }
+        vw_puts(wr, " <= ");
+        put_mem_slice(wr, (odin3_pinslice){mem_pin(wr, mem, MEMP_WR_DATA, wport * mem->width + bit),
+                                           end - bit});
+        vw_line_end(wr, ";\n");
+        bit = end;
+    }
+}
+
+/* The `always @(<edge> clk)` header of a clocked port: bit idx of the clock polarity parameter. */
+static void put_mem_clock(verilog_writer *wr, const vw_mem *mem, uint32_t port, uint32_t idx,
+                          uint32_t polarity_param) {
+    vw_puts(wr, "  always @(");
+    vw_puts(wr,
+            mem_bit(wr, mem->node, (vw_bit_ref){polarity_param, idx}) ? "posedge " : "negedge ");
+    put_pin(wr, mem_pin(wr, mem, port, idx));
+    vw_puts(wr, ") begin\n");
+}
+
+/* True when write ports a and b are clocked by the same net and polarity. */
+typedef struct vw_port_pair {
+    uint32_t first, second;
+} vw_port_pair;
+
+static bool same_write_clock(const verilog_writer *wr, const vw_mem *mem, vw_port_pair pair) {
+    return mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_ENABLE, pair.second}) &&
+           mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_POLARITY, pair.first}) ==
+               mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_POLARITY, pair.second}) &&
+           same_net(wr, (vw_pin_pair){mem_pin(wr, mem, MEMP_WR_CLK, pair.first),
+                                      mem_pin(wr, mem, MEMP_WR_CLK, pair.second)});
+}
+
+/* One clocked always block per distinct write clock, the ports in port order (a later port
+ * wins on one address, as in the IR); an unclocked write port is a level-sensitive block. */
+static void write_mem_writes(verilog_writer *wr, const vw_mem *mem) {
+    bool done[MEM_PORTS_MAX] = {false};
+    for (uint32_t wport = 0; wport < mem->wr && wport < MEM_PORTS_MAX; wport++) {
+        if (done[wport]) {
+            continue;
+        }
+        bool clocked = mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_ENABLE, wport});
+        if (clocked) {
+            put_mem_clock(wr, mem, MEMP_WR_CLK, wport, MEM_P_WR_CLK_POLARITY);
+        } else {
+            vw_puts(wr, "  always @* begin\n");
+        }
+        for (uint32_t other = wport; other < mem->wr && other < MEM_PORTS_MAX; other++) {
+            if (other == wport ||
+                (clocked && same_write_clock(wr, mem, (vw_port_pair){wport, other}))) {
+                done[other] = true;
+                write_mem_stores(wr, mem, other, &(vw_store){true, 0});
+            }
+        }
+        vw_line_end(wr, "  end\n");
+    }
+}
+
+/* Read port idx: `assign data = mem[addr];` (async) or a clocked register (sync). A transparent
+ * sync port also takes the data of the write ports of its clock that hit its address. */
+static void write_mem_read(verilog_writer *wr, const vw_mem *mem, uint32_t idx) {
+    odin3_pinslice data = mem_slice(wr, mem, (vw_port_ref){MEMP_RD_DATA, idx});
+    odin3_pinslice addr = mem_slice(wr, mem, (vw_port_ref){MEMP_RD_ADDR, idx});
+    bool sync = mem_read_sync(wr, mem, idx);
+    odin3_pin_id en = mem_pin(wr, mem, MEMP_RD_EN, idx);
+    bool gated = sync && odin3_net_valid(odin3_pin_net(wr->mod.module, en));
+    if (sync) {
+        put_mem_clock(wr, mem, MEMP_RD_CLK, idx, MEM_P_RD_CLK_POLARITY);
+        if (gated) {
+            vw_puts(wr, "    if (");
+            put_pin(wr, en);
+            vw_puts(wr, ") begin\n");
+        }
+        vw_puts(wr, "    ");
+        vw_name(wr, OBJ_AUX, mem_rd_key(wr, mem, idx));
+        vw_puts(wr, " <= ");
+    } else {
+        vw_puts(wr, "  assign ");
+        put_mem_slice(wr, data);
+        vw_puts(wr, " = ");
+    }
+    vw_name(wr, OBJ_NODE, mem->node.v);
+    vw_char(wr, '[');
+    put_mem_slice(wr, addr);
+    vw_line_end(wr, "];\n");
+    if (!sync) {
+        return;
+    }
+    for (uint32_t wport = 0;
+         wport < mem->wr && mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_RD_TRANSPARENT, idx});
+         wport++) {
+        bool same = mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_ENABLE, wport}) &&
+                    mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_WR_CLK_POLARITY, wport}) ==
+                        mem_bit(wr, mem->node, (vw_bit_ref){MEM_P_RD_CLK_POLARITY, idx}) &&
+                    same_net(wr, (vw_pin_pair){mem_pin(wr, mem, MEMP_WR_CLK, wport),
+                                               mem_pin(wr, mem, MEMP_RD_CLK, idx)});
+        if (same) {
+            write_mem_stores(wr, mem, wport, &(vw_store){false, idx});
+        }
+    }
+    vw_line_end(wr, gated ? "    end\n  end\n" : "  end\n");
+    vw_puts(wr, "  assign ");
+    put_mem_slice(wr, data);
+    vw_puts(wr, " = ");
+    vw_name(wr, OBJ_AUX, mem_rd_key(wr, mem, idx));
+    vw_line_end(wr, ";\n");
+}
+
+/* Names the registers of the synchronous read ports of a `$mem` (Quartus mode). */
+static void name_mem_regs(verilog_writer *wr, odin3_node_id node) {
+    vw_mem mem = mem_describe(wr, node);
+    for (uint32_t idx = 0; idx < mem.rd; idx++) {
+        if (mem_read_sync(wr, &mem, idx) && mem_read_used(wr, &mem, idx)) {
+            generate(wr, OBJ_AUX, mem_rd_key(wr, &mem, idx), "$mem");
+        }
+    }
+}
+
+/* A `$mem` in Quartus mode: array stores, then the read ports. */
+static void write_memq(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    (void)bi;
+    vw_mem mem = mem_describe(wr, node);
+    write_mem_init(wr, &mem);
+    write_mem_writes(wr, &mem);
+    for (uint32_t idx = 0; idx < mem.rd; idx++) {
+        if (mem_read_used(wr, &mem, idx)) {
+            write_mem_read(wr, &mem, idx);
+        }
+    }
+    uint32_t sync = 0;
+    for (uint32_t idx = 0; idx < mem.rd; idx++) {
+        sync += mem_read_sync(wr, &mem, idx) ? 1U : 0U;
+    }
+    const odin3_value *id = odin3_node_param(wr->mod.module, node, MEM_P_MEMID);
+    odin3_log(ODIN3_LOG_INFO,
+              "write_verilog: memory '%s' (%lld x %u): behavioural reg array, %u read ports "
+              "(%u synchronous), %u write ports",
+              id != NULL ? odin3_strtab_get(wr->tab, id->str) : "?", (long long)mem.size, mem.width,
+              mem.rd, sync, mem.wr);
+}
+
 typedef void (*vw_cell_writer)(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi);
 
 static const vw_cell_writer CELL_WRITERS[FORM_COUNT] = {
@@ -1533,6 +2228,7 @@ static const vw_cell_writer CELL_WRITERS[FORM_COUNT] = {
     [FORM_MUX] = write_mux,     [FORM_SOP] = write_sop,       [FORM_LATCH] = write_latch,
     [FORM_LUT] = write_lut,     [FORM_BINARY] = write_binary, [FORM_UNARY] = write_unary,
     [FORM_PMUX] = write_pmux,   [FORM_TRIBUF] = write_tribuf, [FORM_FF] = write_ff,
+    [FORM_FFX] = write_ffx,     [FORM_MEMQ] = write_memq,
 };
 
 /* --- parameter values ---------------------------------------------------------------------- */
@@ -1645,6 +2341,9 @@ static odin3_status attr_visit(void *ctx, uint32_t key_str, const odin3_value *v
     verilog_writer *wr = va->wr;
     odin3_wattr attr = odin3_wattr_classify(wr->tab, key_str, value);
     bool fresh = false;
+    if (attr.instance_param && wr->bb_params) {
+        return wr->st; /* written as `#(.NAME(value))` by put_bb_overrides */
+    }
     if (attr.instance_param) {
         /* An instance's parameters stay attributes under their full name: the instantiated module
          * is already specialised (it declares no parameter to override). */
@@ -1729,8 +2428,85 @@ static bool port_open(const verilog_writer *wr, odin3_pinslice pins) {
     return true;
 }
 
+/* True for an implicit black box (--auto-blackbox): no declared parameters, the overrides of the
+ * instance are its `parameter:<NAME>` attributes. */
+static bool is_implicit_bbox(const odin3_celltype_def *def) {
+    return def->gran == ODIN3_GRAN_BLACKBOX && def->n_params == 0;
+}
+
+enum { BB_INT_BITS_MAX = 63 };
+
+typedef struct vw_bb_ctx {
+    verilog_writer *wr;
+    bool any;
+} vw_bb_ctx;
+
+/* A parameter value of an implicit black box: an integer without x/z bits is decimal, so that
+ * `.lpm_width(8)` stays readable and Quartus reads it as the integer it is. */
+static void put_bb_value(verilog_writer *wr, const odin3_value *val) {
+    uint64_t num = 0;
+    bool plain = val->kind == ODIN3_VAL_BITS && val->len <= BB_INT_BITS_MAX && val->len > 0;
+    for (uint32_t i = 0; plain && i < val->len; i++) {
+        plain = val->bits[i] <= ODIN3_BIT_1;
+        num |= (uint64_t)(val->bits[i] == ODIN3_BIT_1) << i;
+    }
+    if (plain) {
+        vw_i64(wr, (int64_t)num);
+    } else {
+        put_value(wr, val);
+    }
+}
+
+static odin3_status bb_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
+    vw_bb_ctx *bc = ctx;
+    verilog_writer *wr = bc->wr;
+    odin3_wattr attr = odin3_wattr_classify(wr->tab, key_str, value);
+    if (!attr.instance_param || wr->st != ODIN3_OK) {
+        return wr->st;
+    }
+    const size_t prefix = strlen(ODIN3_ATTR_PARAM_PREFIX);
+    odin3_bytes full = {odin3_strtab_get(wr->tab, key_str), odin3_strtab_len(wr->tab, key_str)};
+    vw_puts(wr, bc->any ? ", ." : " #(.");
+    bc->any = true;
+    vw_ident(wr, (odin3_bytes){(const char *)full.ptr + prefix, full.len - prefix},
+             "parameter name");
+    vw_char(wr, '(');
+    put_bb_value(wr, value);
+    vw_char(wr, ')');
+    return wr->st;
+}
+
+/* ` #(.NAME(value), …)` of an implicit black box from its `parameter:<NAME>` attributes. */
+static void put_bb_overrides(verilog_writer *wr, odin3_node_id node) {
+    vw_bb_ctx ctx = {wr, false};
+    odin3_status st =
+        odin3_attr_foreach(wr->mod.module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, bb_visit, &ctx);
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+    }
+    vw_puts(wr, ctx.any ? ")" : "");
+}
+
+/* Quartus mode, black box: a port every bit of which is the constant x (the elaborator ties an
+ * unconnected input to x) is left open, as in the source: Quartus refuses a constant on an output
+ * and takes the megafunction's default for an open input. */
+static bool port_all_x(const verilog_writer *wr, odin3_pinslice pins) {
+    for (uint32_t i = 0; i < pins.count; i++) {
+        odin3_net_id net = odin3_pin_net(wr->mod.module, (odin3_pin_id){pins.first.v + i});
+        if (!odin3_net_valid(net) || net_ref(wr, net).kind != REF_CONST ||
+            net_ref(wr, net).bit != 'x') {
+            return false;
+        }
+    }
+    return pins.count > 0;
+}
+
 /* ` #(.P(v), …)` with every parameter, for any type but a module. */
 static void put_overrides(verilog_writer *wr, odin3_node_id node, const odin3_celltype_def *def) {
+    if (is_implicit_bbox(def)) {
+        put_bb_overrides(wr, node);
+        return;
+    }
     if (def->gran == ODIN3_GRAN_MODULE || def->n_params == 0) {
         return;
     }
@@ -1765,7 +2541,9 @@ static void write_instance(verilog_writer *wr, odin3_node_id node) {
         vw_puts(wr, "    .");
         vw_ident(wr, odin3_bytes_cstr(def->ports[port].name), "port name");
         vw_char(wr, '(');
-        if (!port_open(wr, pins)) {
+        bool open = port_open(wr, pins) ||
+                    (wr->quartus && def->gran == ODIN3_GRAN_BLACKBOX && port_all_x(wr, pins));
+        if (!open) {
             vw_items items = pin_items(pins);
             put_items(wr, &items, false);
         }
@@ -1780,20 +2558,31 @@ static bool const_omitted(const verilog_writer *wr, odin3_node_id node, const vw
            net_ref(wr, odin3_pin_net(wr->mod.module, out_port(wr, node).first)).kind == REF_CONST;
 }
 
+/* The comment and attributes before a built-in cell's statement(s); Icarus rejects attributes on a
+ * continuous assign: there they are a comment. */
+static void put_cell_head(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    bool always = bi->form == FORM_LATCH || bi->form == FORM_FF || bi->form == FORM_FFX;
+    if (wr->quartus && (always || bi->form == FORM_MEMQ)) {
+        put_cell_comment(wr, node);
+    }
+    odin3_prov_id src = always ? odin3_node_prov(wr->mod.module, node) : (odin3_prov_id){0};
+    put_attrs(wr, (odin3_objref){ODIN3_OBJ_NODE, node.v},
+              (vw_attr_frame){always ? "  " : "  // ", "\n", src});
+}
+
 /* The cell's attributes on a line of their own (a comment before an `assign`), then its
  * statement(s). */
 static void write_cell(verilog_writer *wr, odin3_node_id node) {
     const vw_builtin *bi = node_builtin(wr, node);
     odin3_objref obj = {ODIN3_OBJ_NODE, node.v};
     if (bi == NULL) {
+        wr->bb_params = is_implicit_bbox(node_def(wr, node));
         put_attrs(wr, obj, (vw_attr_frame){"  ", "\n", odin3_node_prov(wr->mod.module, node)});
+        wr->bb_params = false;
         write_instance(wr, node);
     } else if (has_output(wr, node)) {
         if (!const_omitted(wr, node, bi)) {
-            /* Icarus rejects attributes on a continuous assign: there they are a comment. */
-            bool always = bi->form == FORM_LATCH || bi->form == FORM_FF;
-            odin3_prov_id src = always ? odin3_node_prov(wr->mod.module, node) : (odin3_prov_id){0};
-            put_attrs(wr, obj, (vw_attr_frame){always ? "  " : "  // ", "\n", src});
+            put_cell_head(wr, node, bi);
         }
         CELL_WRITERS[bi->form](wr, node, bi);
     }
@@ -1882,6 +2671,23 @@ static void declare_wires_and_nets(verilog_writer *wr) {
     }
 }
 
+/* The `reg` of a storage cell (a vector for a word flip-flop), or the array of a Quartus-mode
+ * memory. */
+static void declare_cell_reg(verilog_writer *wr, odin3_node_id node, const vw_builtin *bi) {
+    if (bi->form == FORM_MEMQ) {
+        declare_mem(wr, node);
+        return;
+    }
+    vw_puts(wr, "  reg ");
+    if (bi->form == FORM_FF || bi->form == FORM_FFX) {
+        vw_char(wr, '[');
+        vw_u32(wr, out_port(wr, node).count - 1);
+        vw_puts(wr, ":0] ");
+    }
+    vw_name(wr, OBJ_NODE, node.v);
+    vw_line_end(wr, ";\n");
+}
+
 /* Dangling output wires, the regs of storage cells and the global clock. */
 static void declare_cell_extras(verilog_writer *wr) {
     const odin3_module *module = wr->mod.module;
@@ -1896,15 +2702,7 @@ static void declare_cell_extras(verilog_writer *wr) {
         odin3_node_id node = {i};
         const vw_builtin *bi = odin3_node_live(module, node) ? node_builtin(wr, node) : NULL;
         if (bi != NULL && name_of(wr, OBJ_NODE, i) != 0) {
-            uint32_t width = out_port(wr, node).count;
-            vw_puts(wr, "  reg ");
-            if (bi->form == FORM_FF) {
-                vw_char(wr, '[');
-                vw_u32(wr, width - 1);
-                vw_puts(wr, ":0] ");
-            }
-            vw_name(wr, OBJ_NODE, i);
-            vw_line_end(wr, ";\n");
+            declare_cell_reg(wr, node, bi);
         }
     }
     if (name_of(wr, OBJ_GCLK, 0) != 0) {
@@ -1970,7 +2768,8 @@ static uint32_t cell_group(const verilog_writer *wr, odin3_node_id node) {
     if (bi->form == FORM_CONST) {
         return GROUP_CONST;
     }
-    return bi->form == FORM_FF || bi->form == FORM_LATCH ? GROUP_STORAGE : GROUP_PLAIN;
+    return bi->form == FORM_FF || bi->form == FORM_FFX || bi->form == FORM_LATCH ? GROUP_STORAGE
+                                                                                 : GROUP_PLAIN;
 }
 
 /* The live cells in node order, one group at a time: the others, the storage cells, the constants.
@@ -2156,6 +2955,74 @@ static void write_stub_params(verilog_writer *wr, const odin3_celltype_def *def)
     vw_char(wr, ')');
 }
 
+/* One parameter an instance of an implicit black box overrides: the key `parameter:<NAME>` and
+ * the first value seen. */
+typedef struct vw_bb_param {
+    uint32_t key;
+    odin3_value value;
+} vw_bb_param;
+
+typedef struct vw_bb_collect {
+    verilog_writer *wr;
+    odin3_vec list; /* of vw_bb_param */
+} vw_bb_collect;
+
+static odin3_status bb_collect_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
+    vw_bb_collect *col = ctx;
+    if (!odin3_wattr_classify(col->wr->tab, key_str, value).instance_param) {
+        return ODIN3_OK;
+    }
+    for (size_t i = 0; i < col->list.len; i++) {
+        if (((const vw_bb_param *)odin3_vec_cat(&col->list, i))->key == key_str) {
+            return ODIN3_OK;
+        }
+    }
+    vw_bb_param *slot = odin3_vec_push(&col->list);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (vw_bb_param){key_str, *value};
+    return ODIN3_OK;
+}
+
+/* The overrides of every instance of the implicit black box `type`, in the design. */
+static void collect_bb_params(verilog_writer *wr, odin3_celltype_id type, vw_bb_collect *col) {
+    const uint32_t end = odin3_design_module_end(wr->design);
+    for (uint32_t i = 1; i < end && wr->st == ODIN3_OK; i++) {
+        const odin3_module *module =
+            odin3_module_get((odin3_design *)wr->design, (odin3_module_id){i});
+        for (uint32_t pos = 1; pos < odin3_module_node_end(module) && wr->st == ODIN3_OK; pos++) {
+            odin3_node_id node = {pos};
+            if (odin3_node_live(module, node) && odin3_node_type(module, node).v == type.v) {
+                odin3_status st = odin3_attr_foreach(module, (odin3_objref){ODIN3_OBJ_NODE, pos},
+                                                     bb_collect_visit, col);
+                (void)vw_fail(wr, st);
+            }
+        }
+    }
+}
+
+/* ` #(parameter NAME = value, …)` of an implicit black box's stub: the parameters its instances
+ * override (the stub has no other source), so that the netlist reads back against it. */
+static void write_bb_stub_params(verilog_writer *wr, odin3_celltype_id type) {
+    vw_bb_collect col = {wr, {0}};
+    odin3_vec_init(&col.list, sizeof(vw_bb_param));
+    collect_bb_params(wr, type, &col);
+    const size_t prefix = strlen(ODIN3_ATTR_PARAM_PREFIX);
+    for (size_t i = 0; i < col.list.len && wr->st == ODIN3_OK; i++) {
+        const vw_bb_param *param = odin3_vec_cat(&col.list, i);
+        vw_puts(wr, i == 0 ? " #(\n  parameter " : ",\n  parameter ");
+        vw_ident(wr,
+                 (odin3_bytes){odin3_strtab_get(wr->tab, param->key) + prefix,
+                               odin3_strtab_len(wr->tab, param->key) - prefix},
+                 "parameter name");
+        vw_puts(wr, " = ");
+        put_bb_value(wr, &param->value);
+    }
+    vw_puts(wr, col.list.len > 0 ? "\n)" : "");
+    odin3_vec_free(&col.list);
+}
+
 /* `(* blackbox *) module name #(parameters) (ports); endmodule` for a cell type, once. */
 static void write_stub(verilog_writer *wr, odin3_celltype_id type) {
     const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
@@ -2170,7 +3037,11 @@ static void write_stub(verilog_writer *wr, odin3_celltype_id type) {
     begin_unit(wr);
     vw_puts(wr, "(* blackbox *)\nmodule ");
     vw_ident(wr, odin3_bytes_cstr(def->name), "black-box name cannot be written in Verilog:");
-    write_stub_params(wr, def);
+    if (is_implicit_bbox(def)) {
+        write_bb_stub_params(wr, type);
+    } else {
+        write_stub_params(wr, def);
+    }
     vw_puts(wr, def->n_ports == 0 ? ";\n" : " (\n");
     for (uint32_t i = 0; i < def->n_ports; i++) {
         vw_puts(wr, "  ");
@@ -2211,8 +3082,45 @@ static odin3_status write_stubs(verilog_writer *wr) {
 
 /* --- entry point --------------------------------------------------------------------------- */
 
-static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, const char *path) {
+/* True for the storage cell types written as plain always blocks in Quartus mode. */
+static bool quartus_storage(const odin3_celltype_def *def) {
+    static const char *const WORD[] = {"$adffe",   "$sdffe",    "$sdffce", "$aldff",
+                                       "$aldffe",  "$dffsr",    "$dffsre", "$dlatch",
+                                       "$adlatch", "$dlatchsr", "$sr"};
+    for (size_t i = 0; i < sizeof WORD / sizeof WORD[0]; i++) {
+        if (strcmp(def->name, WORD[i]) == 0) {
+            return true;
+        }
+    }
+    vw_ffx probe = {0};
+    return ffx_gate(def, &probe);
+}
+
+/* Quartus mode: the storage cells and `$mem` take the shared FFX / MEMQ entries. */
+static odin3_status register_quartus(verilog_writer *wr) {
+    for (uint32_t i = 1; wr->st == ODIN3_OK; i++) {
+        odin3_celltype_id type = {i};
+        const odin3_celltype_def *def = odin3_celltype_get(wr->design, type);
+        if (def == NULL) {
+            break;
+        }
+        uint64_t index = BI_FFX;
+        if (strcmp(def->name, "$mem") == 0) {
+            index = BI_MEMQ;
+        } else if (!quartus_storage(def)) {
+            continue;
+        }
+        if (odin3_u64map_put(wr->builtin, (odin3_kv){type.v, index}) != ODIN3_OK) {
+            return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
+        }
+    }
+    return wr->st;
+}
+
+static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, const char *path,
+                            bool quartus) {
     *wr = (verilog_writer){.design = design,
+                           .quartus = quartus,
                            .tab = odin3_design_strtab(design),
                            .path = path,
                            .escaped_end = SIZE_MAX};
@@ -2227,7 +3135,8 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
     if (wr->builtin == NULL || wr->hdl == NULL || wr->stubbed == NULL) {
         return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
     }
-    for (uint32_t i = 0; i < N_BUILTINS; i++) {
+    const uint32_t named = quartus ? BI_FFX : BI_QUARTUS_FIRST;
+    for (uint32_t i = 0; i < named; i++) {
         uint32_t name = 0;
         odin3_celltype_id type = {0};
         if (odin3_strtab_find(wr->tab, odin3_bytes_cstr(BUILTINS[i].name), &name) &&
@@ -2236,7 +3145,7 @@ static odin3_status wr_init(verilog_writer *wr, const odin3_design *design, cons
             return vw_fail(wr, ODIN3_ERR_NO_MEMORY);
         }
     }
-    return ODIN3_OK;
+    return quartus ? register_quartus(wr) : ODIN3_OK;
 }
 
 /* Creates a private temporary beside the destination; the destination is untouched until the
@@ -2336,33 +3245,94 @@ static odin3_status write_modules(verilog_writer *wr) {
     return st;
 }
 
-odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
-                                 const odin3_verilog_opts *opts) {
+/* The stub file of Quartus mode: the given path, else `<path minus .v>_lpm_sim.v`. */
+static odin3_status sim_path(const verilog_writer *wr, const char *given, odin3_strbuf *out) {
+    const char *path = wr->path;
+    if (given != NULL) {
+        return odin3_strbuf_append(out, odin3_bytes_cstr(given));
+    }
+    size_t len = strlen(path);
+    bool dot_v = len > 2 && strcmp(path + len - 2, ".v") == 0;
+    odin3_status st = odin3_strbuf_append(out, (odin3_bytes){path, dot_v ? len - 2 : len});
+    return st == ODIN3_OK ? odin3_strbuf_append(out, odin3_bytes_cstr("_lpm_sim.v")) : st;
+}
+
+/* Quartus mode: the black-box stubs, in a file of their own (never read by Quartus). */
+static void write_sim_file(verilog_writer *wr, const char *given) {
+    odin3_strbuf sim;
+    odin3_strbuf_init(&sim);
+    const char *main_path = wr->path;
+    odin3_status st = sim_path(wr, given, &sim);
+    if (st != ODIN3_OK) {
+        (void)vw_fail(wr, st);
+    } else {
+        wr->path = sim.data;
+        wr->units = 0;
+        if (wr_open(wr) == ODIN3_OK) {
+            vw_puts(wr, "// Odin III simulation and read-back stubs (write_verilog --quartus).\n");
+            vw_puts(wr,
+                    "// Read this file with the netlist for iverilog or Odin III; never add it ");
+            vw_puts(wr, "to a Quartus project.\n\n");
+            (void)write_stubs(wr);
+            vw_flush(wr);
+            wr_finish(wr);
+        }
+        wr->path = main_path;
+    }
+    odin3_strbuf_free(&sim);
+}
+
+/* True when the arguments are usable (logged otherwise). */
+static bool write_args_ok(const odin3_design *design, const char *path,
+                          const odin3_verilog_opts *opts) {
     if (design == NULL || path == NULL ||
         (opts != NULL && opts->name_style != ODIN3_VERILOG_NAMES_SHORT &&
          opts->name_style != ODIN3_VERILOG_NAMES_PROVENANCE &&
          opts->name_style != ODIN3_VERILOG_NAMES_HASH)) {
         odin3_log(ODIN3_LOG_ERROR, "verilog_write: NULL design or path, or an unknown name style");
+        return false;
+    }
+    if (opts != NULL && opts->quartus && strcmp(path, "-") == 0 && opts->sim_file == NULL) {
+        odin3_log(ODIN3_LOG_ERROR, "verilog_write: --quartus to stdout needs --sim-file");
+        return false;
+    }
+    return true;
+}
+
+/* The netlist (and the name map), then in Quartus mode the stub file. The first failure is sticky
+ * in wr->st. */
+static void write_files(verilog_writer *wr, const odin3_verilog_opts *opts) {
+    odin3_hash_map_file map = {.open = false};
+    odin3_status st = vw_fail(wr, enable_prov_map(wr, opts));
+    st = st == ODIN3_OK ? open_outputs(wr, opts, &map) : st;
+    st = st == ODIN3_OK ? write_modules(wr) : st;
+    if (st == ODIN3_OK && !wr->quartus) {
+        (void)write_stubs(wr);
+    }
+    vw_flush(wr);
+    if (map.open) {
+        map_end(wr, &map);
+    } else {
+        wr_finish(wr);
+    }
+    if (wr->quartus && wr->st == ODIN3_OK) {
+        write_sim_file(wr, opts->sim_file);
+    }
+}
+
+odin3_status odin3_verilog_write(const odin3_design *design, const char *path,
+                                 const odin3_verilog_opts *opts) {
+    if (!write_args_ok(design, path, opts)) {
         return ODIN3_ERR_INVALID_ARG;
     }
     if (odin3_design_refuse_processes(design, NULL) != ODIN3_OK) {
         return ODIN3_ERR_INVALID_ARG; /* 2D EL-33: before the path is opened */
     }
     verilog_writer wr;
-    odin3_status st = wr_init(&wr, design, path);
+    odin3_status st = wr_init(&wr, design, path, opts != NULL && opts->quartus);
     wr.name_style = opts != NULL ? opts->name_style : ODIN3_VERILOG_NAMES_SHORT;
-    st = st == ODIN3_OK ? vw_fail(&wr, enable_prov_map(&wr, opts)) : st;
-    odin3_hash_map_file map = {.open = false};
-    st = st == ODIN3_OK ? open_outputs(&wr, opts, &map) : st;
-    st = st == ODIN3_OK ? write_modules(&wr) : st;
     if (st == ODIN3_OK) {
-        (void)write_stubs(&wr);
-    }
-    vw_flush(&wr);
-    if (map.open) {
-        map_end(&wr, &map);
-    } else {
-        wr_finish(&wr); /* the status is sticky: wr.st holds the first failure */
+        write_files(&wr, opts);
     }
     st = wr.st;
     wr_free(&wr);

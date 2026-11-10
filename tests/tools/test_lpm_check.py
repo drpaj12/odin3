@@ -63,7 +63,6 @@ GEN1 = (
   );
 endmodule
 """
-    + STUB
 )
 
 GEN2 = (
@@ -84,9 +83,10 @@ if "write_blif " in script:
     out = script.split("write_blif ")[1].split(";")[0].strip()
     Path(out).write_text((HERE / "model.blif").read_text())
     sys.exit(0)
-out = script.split("write_verilog ")[1].split(";")[0].strip()
+out = script.split("write_verilog ")[1].split(";")[0].split()[0]
 name = "gen1" if "lpmmap" in script else "gen2"
 Path(out).write_text((HERE / (name + ".v")).read_text())
+Path(out[:-2] + "_lpm_sim.v").write_text((HERE / "stub.v").read_text())
 sys.stderr.write((HERE / "info.txt").read_text())
 """
 
@@ -160,9 +160,11 @@ class Lint(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             good = Path(tmp) / "good.v"
             good.write_text(GEN1)
+            (Path(tmp) / "good_lpm_sim.v").write_text(STUB)
             lc.check_lint(good)
             bad = Path(tmp) / "bad.v"
             bad.write_text(GEN1.replace(".lpm_width(9)", ".lpm_width(10)"))
+            (Path(tmp) / "bad_lpm_sim.v").write_text(STUB)
             with self.assertRaises(lc.CheckError):
                 lc.check_lint(bad, use_verilator=False)
             code, _, err = run_main(lc.main, ["--lint-only", str(bad)])
@@ -198,6 +200,7 @@ class Driver(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.addCleanup(self.tmp.cleanup)
+        (self.dir / "stub.v").write_text(STUB)
         (self.dir / "gen1.v").write_text(GEN1)
         (self.dir / "gen2.v").write_text(GEN2)
         (self.dir / "info.txt").write_text(
