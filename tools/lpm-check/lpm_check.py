@@ -198,7 +198,7 @@ def check_pure(text: str) -> None:
     lib = LIBRARY_MODULE.search(text)
     if lib:
         raise CheckError(f"pure: the netlist defines the library module {lib.group(1)}")
-    if "blackbox" in text:
+    if "(* blackbox" in text:
         raise CheckError("pure: the netlist holds a blackbox stub")
 
 

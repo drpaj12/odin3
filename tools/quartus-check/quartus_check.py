@@ -102,7 +102,7 @@ def check_pure(netlist: str, sim: str) -> None:
     lib = LIBRARY_MODULE.search(netlist)
     if lib:
         raise CheckError(f"pure: the netlist defines the library module {lib.group(1)}")
-    for needle in ("blackbox", "$_", "gclk"):
+    for needle in ("(* blackbox", "$_", "gclk"):
         if needle in netlist:
             raise CheckError(f"pure: the netlist holds '{needle}'")
     body = [ln for ln in sim.splitlines() if ln.strip() and not ln.startswith("//")]

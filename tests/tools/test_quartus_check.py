@@ -80,12 +80,12 @@ def word_cases_for(pol: int) -> list[tuple[str, str, str]]:
         (f"adlatch{pol}", cell("adlatch", ".EN(en), .ARST(rst), .D(d), .Q(q)", f"{en}, {arst}"),
          f"always @* if ({re_}) q <= {RV}; else if ({on}) q <= d;"),
         (f"dffsr{pol}", cell("dffsr", f".CLK(clk), {pins_sr}, .D(d), .Q(q)", f"{clk}, {setclr}"),
-         per_bit(f"always @({ck}, {sr_edges}) {sr_body[:-1]} else q[#] <= d[#];")),
+         per_bit(f"always @({ck}, {sr_edges}) {sr_body} else q[#] <= d[#];")),
         (f"dffsre{pol}", cell("dffsre", f".CLK(clk), {pins_sr}, .EN(en), .D(d), .Q(q)",
                               f"{clk}, {setclr}, {en}"),
-         per_bit(f"always @({ck}, {sr_edges}) {sr_body[:-1]} else if ({on}) q[#] <= d[#];")),
+         per_bit(f"always @({ck}, {sr_edges}) {sr_body} else if ({on}) q[#] <= d[#];")),
         (f"dlatchsr{pol}", cell("dlatchsr", f".EN(en), {pins_sr}, .D(d), .Q(q)", f"{en}, {setclr}"),
-         per_bit(f"always @* {sr_body[:-1]} else if ({on}) q[#] <= d[#];")),
+         per_bit(f"always @* {sr_body} else if ({on}) q[#] <= d[#];")),
         (f"sr{pol}", cell("sr", f"{pins_sr}, .Q(q)", setclr), per_bit(f"always @* {sr_body}")),
     ]
 

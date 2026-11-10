@@ -12,6 +12,7 @@ module \i7_black_box
     connect \b \q1
     connect \y \r
   end
+  attribute \parameter:W 32'00000000000000000000000000000100
   cell \black_box_cell \u2
     connect \a \p2
     connect \b \q2
