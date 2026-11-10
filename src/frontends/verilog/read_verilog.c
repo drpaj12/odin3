@@ -539,22 +539,6 @@ static odin3_status take_prov_ast(odin3_bytes *rest, rv_args *out) {
     return ODIN3_ERR_INVALID_ARG;
 }
 
-/* A flag or -name-map <file>: *taken says the word was one. */
-static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *out, bool *taken) {
-    *taken = true;
-    if (set_flag(word, out)) {
-        return ODIN3_OK;
-    }
-    if (odin3_pass_arg_is(word, "-name-map") || odin3_pass_arg_is(word, "--name-map")) {
-        return take_name_map(rest, out);
-    }
-    if (odin3_pass_arg_is(word, "--prov-ast")) {
-        return take_prov_ast(rest, out);
-    }
-    *taken = false;
-    return ODIN3_OK;
-}
-
 /* -D name[=value] or -I dir: the next word goes to the defines or the include directories. */
 static odin3_status take_command_word(odin3_bytes flag, odin3_bytes *rest, rv_args *out) {
     odin3_bytes value = odin3_pass_arg_next(rest);
@@ -573,6 +557,25 @@ static odin3_status take_command_word(odin3_bytes flag, odin3_bytes *rest, rv_ar
     return ODIN3_OK;
 }
 
+/* A flag or -name-map <file>: *taken says the word was one. */
+static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *out, bool *taken) {
+    *taken = true;
+    if (set_flag(word, out)) {
+        return ODIN3_OK;
+    }
+    if (odin3_pass_arg_is(word, "-name-map") || odin3_pass_arg_is(word, "--name-map")) {
+        return take_name_map(rest, out);
+    }
+    if (odin3_pass_arg_is(word, "--prov-ast")) {
+        return take_prov_ast(rest, out);
+    }
+    if (odin3_pass_arg_is(word, "-D") || odin3_pass_arg_is(word, "-I")) {
+        return take_command_word(word, rest, out);
+    }
+    *taken = false;
+    return ODIN3_OK;
+}
+
 static odin3_status parse_args(odin3_bytes args, rv_args *out) {
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
@@ -582,13 +585,6 @@ static odin3_status parse_args(odin3_bytes args, rv_args *out) {
             return st;
         }
         if (taken) {
-            continue;
-        }
-        if (odin3_pass_arg_is(word, "-D") || odin3_pass_arg_is(word, "-I")) {
-            odin3_status vst = take_command_word(word, &args, out);
-            if (vst != ODIN3_OK) {
-                return vst;
-            }
             continue;
         }
         if (word.len >= 2 && memcmp(word.ptr, "--", 2) == 0) {
@@ -945,10 +941,40 @@ static odin3_pp_define make_define(odin3_bytes word) {
         {text, (size_t)(eq - text)}, {eq + 1, word.len - (size_t)(eq - text) - 1U}, true};
 }
 
+/* Everything one read_verilog call owns. */
+typedef struct rv_call {
+    rv_args parsed;
+    odin3_vec cmd_defs; /* odin3_pp_define, from -D */
+    odin3_vec cmd_dirs; /* const char *, from -I */
+    odin3_vec srcs;     /* Verilog sources */
+    odin3_vec svs;      /* SystemVerilog sources */
+} rv_call;
+
+/* One -I word: resolved against cwd, interned, pushed on dirs. */
+static odin3_status add_incdir(odin3_design *design, const char *cwd, odin3_bytes word,
+                               odin3_vec *dirs) {
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    uint32_t id = 0;
+    odin3_status st = odin3_path_resolve((odin3_path_join){odin3_bytes_cstr(cwd), word}, &path);
+    st = st != ODIN3_OK ? st : odin3_design_intern(design, (odin3_bytes){path.data, path.len}, &id);
+    const char **slot = st == ODIN3_OK ? (const char **)odin3_vec_push(dirs) : NULL;
+    if (st == ODIN3_OK) {
+        st = slot == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
+    }
+    if (slot != NULL) {
+        *slot = text_of(design, id);
+    }
+    odin3_strbuf_free(&path);
+    return st;
+}
+
 /* The -D defines and the -I directories (resolved against the working directory, strtab text) of
  * the command, for odin3_rv_opts. */
-static odin3_status command_config(odin3_design *design, const rv_args *args, odin3_vec *defs,
-                                   odin3_vec *dirs) {
+static odin3_status command_config(odin3_design *design, rv_call *call) {
+    const rv_args *args = &call->parsed;
+    odin3_vec *defs = &call->cmd_defs;
+    odin3_vec *dirs = &call->cmd_dirs;
     for (size_t i = 0; i < args->defines.len; i++) {
         odin3_pp_define *slot = odin3_vec_push(defs);
         if (slot == NULL) {
@@ -960,95 +986,100 @@ static odin3_status command_config(odin3_design *design, const rv_args *args, od
     odin3_strbuf_init(&cwd);
     odin3_status st = args->incdirs.len > 0 ? working_dir(&cwd) : ODIN3_OK;
     for (size_t i = 0; st == ODIN3_OK && i < args->incdirs.len; i++) {
-        odin3_bytes word = *(const odin3_bytes *)odin3_vec_cat(&args->incdirs, i);
-        odin3_strbuf path;
-        odin3_strbuf_init(&path);
-        uint32_t id = 0;
-        st = odin3_path_resolve((odin3_path_join){odin3_bytes_cstr(cwd.data), word}, &path);
-        st = st != ODIN3_OK ? st
-                            : odin3_design_intern(design, (odin3_bytes){path.data, path.len}, &id);
-        const char **slot = st == ODIN3_OK ? (const char **)odin3_vec_push(dirs) : NULL;
-        if (st == ODIN3_OK) {
-            st = slot == NULL ? ODIN3_ERR_NO_MEMORY : ODIN3_OK;
-        }
-        if (slot != NULL) {
-            *slot = text_of(design, id);
-        }
-        odin3_strbuf_free(&path);
+        st = add_incdir(design, cwd.data, *(const odin3_bytes *)odin3_vec_cat(&args->incdirs, i),
+                        dirs);
     }
     odin3_strbuf_free(&cwd);
+    return st;
+}
+
+static void call_init(rv_call *call) {
+    call->parsed = (rv_args){.parse_only = false, .elab = {0}};
+    odin3_vec_init(&call->parsed.files, sizeof(odin3_bytes));
+    odin3_vec_init(&call->parsed.defines, sizeof(odin3_bytes));
+    odin3_vec_init(&call->parsed.incdirs, sizeof(odin3_bytes));
+    odin3_vec_init(&call->cmd_defs, sizeof(odin3_pp_define));
+    odin3_vec_init(&call->cmd_dirs, sizeof(const char *));
+    odin3_vec_init(&call->srcs, sizeof(odin3_pp_source));
+    odin3_vec_init(&call->svs, sizeof(odin3_pp_source));
+}
+
+static void call_free(rv_call *call) {
+    odin3_vec_free(&call->svs);
+    odin3_vec_free(&call->srcs);
+    odin3_vec_free(&call->parsed.files);
+    odin3_vec_free(&call->parsed.defines);
+    odin3_vec_free(&call->parsed.incdirs);
+    odin3_vec_free(&call->cmd_defs);
+    odin3_vec_free(&call->cmd_dirs);
+}
+
+/* The sources and the command's -D and -I, and the combinations the read refuses. */
+static odin3_status call_sources(odin3_design *design, rv_call *call) {
+    odin3_status st = collect_sources(design, &call->parsed, &call->srcs, &call->svs);
+    if (st == ODIN3_OK && call->svs.len > 0 && call->srcs.len > 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet");
+        return ODIN3_ERR_PARSE;
+    }
+    if (st == ODIN3_OK && call->svs.len > 0 &&
+        call->parsed.defines.len + call->parsed.incdirs.len > 0) {
+        odin3_log(
+            ODIN3_LOG_ERROR,
+            "read_verilog: -D and -I are not supported for SystemVerilog yet (use a project)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    return st != ODIN3_OK ? st : command_config(design, call);
+}
+
+/* The Verilog branch: parse, then hand the store to elaboration. */
+static odin3_status call_verilog(odin3_pass_ctx *ctx, odin3_design *design, rv_call *call) {
+    rv_args *parsed = &call->parsed;
+    odin3_ast *ast = NULL;
+    odin3_name_resolver names;
+    const bool vtr = soft_read(parsed);
+    uint32_t soft = soft_blocks_of(design, parsed);
+    odin3_status st = open_names(parsed, design, &names);
+    if (st == ODIN3_OK) {
+        odin3_rv_opts opts = {call->srcs.data,
+                              (uint32_t)call->srcs.len,
+                              ctx->run,
+                              NULL,
+                              parsed->lib,
+                              call->cmd_defs.data,
+                              (uint32_t)call->cmd_defs.len,
+                              (const char *const *)call->cmd_dirs.data,
+                              (uint32_t)call->cmd_dirs.len};
+        st = odin3_read_verilog_files_soft(design, &opts, soft, vtr, &ast);
+    }
+    st = st != ODIN3_OK ? st : hand_over(ctx, ast, parsed);
+    if (parsed->elab.names != NULL) {
+        odin3_name_resolver_close(&names);
+    }
     return st;
 }
 
 static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                      void *user) {
     (void)user;
-    rv_args parsed = {.parse_only = false, .elab = {0}};
-    odin3_vec_init(&parsed.files, sizeof(odin3_bytes));
-    odin3_vec_init(&parsed.defines, sizeof(odin3_bytes));
-    odin3_vec_init(&parsed.incdirs, sizeof(odin3_bytes));
-    odin3_vec cmd_defs;
-    odin3_vec_init(&cmd_defs, sizeof(odin3_pp_define));
-    odin3_vec cmd_dirs;
-    odin3_vec_init(&cmd_dirs, sizeof(const char *));
-    odin3_vec srcs;
-    odin3_vec_init(&srcs, sizeof(odin3_pp_source));
-    odin3_vec svs;
-    odin3_vec_init(&svs, sizeof(odin3_pp_source));
-    odin3_status st = parse_args(args, &parsed);
+    rv_call call;
+    call_init(&call);
+    odin3_status st = parse_args(args, &call.parsed);
     if (st == ODIN3_OK) {
-        prov_ast_from_env(&parsed);
+        prov_ast_from_env(&call.parsed);
     }
     const odin3_construct_mode prov_before = odin3_construct_read_mode(design);
-    if (parsed.prov_set) {
-        odin3_construct_set_read_mode(design, parsed.prov_ast); /* restored below */
+    if (call.parsed.prov_set) {
+        odin3_construct_set_read_mode(design, call.parsed.prov_ast); /* restored below */
     }
-    st = st != ODIN3_OK ? st : collect_sources(design, &parsed, &srcs, &svs);
-    if (st == ODIN3_OK && svs.len > 0 && srcs.len > 0) {
-        odin3_log(ODIN3_LOG_ERROR,
-                  "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet");
-        st = ODIN3_ERR_PARSE;
-    }
-    if (st == ODIN3_OK && svs.len > 0 && parsed.defines.len + parsed.incdirs.len > 0) {
-        odin3_log(
-            ODIN3_LOG_ERROR,
-            "read_verilog: -D and -I are not supported for SystemVerilog yet (use a project)");
-        st = ODIN3_ERR_INVALID_ARG;
-    }
-    st = st != ODIN3_OK ? st : command_config(design, &parsed, &cmd_defs, &cmd_dirs);
-    odin3_ast *ast = NULL;
-    odin3_name_resolver names;
-    if (st == ODIN3_OK && svs.len > 0) {
-        st = read_sv(design, ctx, &parsed, &svs);
+    st = st != ODIN3_OK ? st : call_sources(design, &call);
+    if (st == ODIN3_OK && call.svs.len > 0) {
+        st = read_sv(design, ctx, &call.parsed, &call.svs);
     } else if (st == ODIN3_OK) {
-        const bool vtr = soft_read(&parsed);
-        uint32_t soft = soft_blocks_of(design, &parsed);
-        st = open_names(&parsed, design, &names);
-        if (st == ODIN3_OK) {
-            odin3_rv_opts opts = {srcs.data,
-                                  (uint32_t)srcs.len,
-                                  ctx->run,
-                                  NULL,
-                                  parsed.lib,
-                                  cmd_defs.data,
-                                  (uint32_t)cmd_defs.len,
-                                  cmd_dirs.data,
-                                  (uint32_t)cmd_dirs.len};
-            st = odin3_read_verilog_files_soft(design, &opts, soft, vtr, &ast);
-        }
-        st = st != ODIN3_OK ? st : hand_over(ctx, ast, &parsed);
-        if (parsed.elab.names != NULL) {
-            odin3_name_resolver_close(&names);
-        }
+        st = call_verilog(ctx, design, &call);
     }
     odin3_construct_set_read_mode(design, prov_before);
-    odin3_vec_free(&svs);
-    odin3_vec_free(&srcs);
-    odin3_vec_free(&parsed.files);
-    odin3_vec_free(&parsed.defines);
-    odin3_vec_free(&parsed.incdirs);
-    odin3_vec_free(&cmd_defs);
-    odin3_vec_free(&cmd_dirs);
+    call_free(&call);
     return st;
 }
 
