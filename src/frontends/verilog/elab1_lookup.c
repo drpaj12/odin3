@@ -436,7 +436,8 @@ static odin3_elab_res resolve_outside(odin3_elab1 *e1, uint32_t name) {
         /* A bit-granularity cell is a library gate (read_techlib; gatemap spec 9 G-7): an
          * instance of its name in a structural netlist binds to it, so write_verilog's output
          * reads back through this front end (v1.1.0 roundtrip). */
-        if (gran == ODIN3_GRAN_HARD || gran == ODIN3_GRAN_BLACKBOX || gran == ODIN3_GRAN_BIT) {
+        if (gran == ODIN3_GRAN_HARD || gran == ODIN3_GRAN_BLACKBOX || gran == ODIN3_GRAN_BIT ||
+            gran == ODIN3_GRAN_MODULE) {
             res.kind = ODIN3_RES_CELLTYPE;
             res.type = type;
             return res;
