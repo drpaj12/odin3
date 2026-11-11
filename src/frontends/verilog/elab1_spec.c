@@ -486,13 +486,13 @@ static odin3_status project_override(odin3_elab1 *e1, size_t idx, odin3_elab_ove
     return st != ODIN3_OK ? st : project_value(e1, param, ovr);
 }
 
-/* read_verilog -P number k as an override of the top (order k: before the project's lines). */
-static odin3_status command_override(odin3_elab1 *e1, uint32_t k, odin3_elab_override *ovr) {
-    const odin3_elab_cmd_param *param = &e1->opts.params[k];
+/* read_verilog -P number idx as an override of the top (order idx: before the project's lines). */
+static odin3_status command_override(odin3_elab1 *e1, uint32_t idx, odin3_elab_override *ovr) {
+    const odin3_elab_cmd_param *param = &e1->opts.params[idx];
     odin3_strbuf value;
     odin3_strbuf_init(&value);
     odin3_status st = odin3_strbuf_append(&value, param->value);
-    *ovr = (odin3_elab_override){.source = ODIN3_OVR_PROJECT, .order = k};
+    *ovr = (odin3_elab_override){.source = ODIN3_OVR_PROJECT, .order = idx};
     st = st != ODIN3_OK ? st : odin3_design_intern(e1->design, param->name, &ovr->path);
     st = st != ODIN3_OK
              ? st

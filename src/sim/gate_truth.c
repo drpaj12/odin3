@@ -82,8 +82,9 @@ static odin3_status simulate_table(const odin3_celltype_def *def, const void *ty
         index[port] = def->ports[port].dir == ODIN3_DIR_IN ? next_in++ : out_slot;
         spans[port] = (odin3_sim_span){&index[port], 1};
     }
-    odin3_sim_cell cell = {values,         spans,     def->n_ports, NULL, NULL, 0,
-                           ODIN3_SIM_COMB, type_data, NULL,         0,    0,    NULL, NULL};
+    odin3_sim_cell cell = {values, spans,          def->n_ports, NULL, NULL,
+                           0,      ODIN3_SIM_COMB, type_data,    NULL, 0,
+                           0,      NULL,           NULL};
     odin3_status st = alloc_scratch(def, &cell);
     if (st != ODIN3_OK) {
         return st;

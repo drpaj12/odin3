@@ -538,40 +538,48 @@ static void test_command_line_define_needs_a_value(void) {
                                      et_log(&rs));
 }
 
-/* The attribute `odin3 param default:<name>` of module `top`, as an integer (a BITS value with
- * only 0/1 bits, an INT) or, for a STRING value, its text in *text; false when absent. */
-static bool top_param(const char *name, uint64_t *num, const char **text) {
+/* The module named top*, or NULL; *id gets its ID. */
+static const odin3_module *find_top(uint32_t *id) {
+    uint32_t end = odin3_design_module_end(rs.design);
+    for (*id = 1; *id < end; (*id)++) {
+        const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){*id});
+        const char *name = module != NULL ? odin3_strtab_get(odin3_design_strtab(rs.design),
+                                                             odin3_module_name(module))
+                                          : NULL;
+        if (name != NULL && strncmp(name, "top", 3) == 0) {
+            return module;
+        }
+    }
+    return NULL;
+}
+
+/* The value of a BITS or INT attribute as an integer (unknown bits count as 0). */
+static uint64_t value_number(const odin3_value *val) {
+    uint64_t num = val->kind == ODIN3_VAL_INT ? (uint64_t)val->i : 0U;
+    for (uint32_t pos = 0; val->kind == ODIN3_VAL_BITS && pos < val->len && pos < 64U; pos++) {
+        num |= (val->bits[pos] == ODIN3_BIT_1 ? (uint64_t)1 : 0U) << pos;
+    }
+    return num;
+}
+
+/* The attribute `odin3 param default:<name>` of module `top` as an integer (a string is 8 bits a
+ * character); false when absent. */
+static bool top_param(const char *name, uint64_t *num) {
     char key[64];
     (void)snprintf(key, sizeof key, "%s%s", ODIN3_ATTR_PARAM_DEFAULT_PREFIX, name);
     uint32_t key_str = 0;
-    uint32_t end = odin3_design_module_end(rs.design);
-    for (uint32_t id = 1; id < end; id++) {
-        const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){id});
-        const char *mname = module != NULL ? odin3_strtab_get(odin3_design_strtab(rs.design),
-                                                              odin3_module_name(module))
-                                           : NULL;
-        if (mname == NULL || strncmp(mname, "top", 3) != 0 ||
-            odin3_design_intern(rs.design, odin3_bytes_cstr(key), &key_str) != ODIN3_OK) {
-            continue;
-        }
-        const odin3_value *val =
-            odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_MODULE, id}, key_str);
-        if (val == NULL) {
-            return false;
-        }
-        *num = 0;
-        if (val->kind == ODIN3_VAL_STRING) {
-            *text = odin3_strtab_get(odin3_design_strtab(rs.design), val->str);
-        } else if (val->kind == ODIN3_VAL_INT) {
-            *num = (uint64_t)val->i;
-        } else {
-            for (uint32_t i = 0; i < val->len && i < 64U; i++) {
-                *num |= (uint64_t)(val->bits[i] == 1 ? 1U : 0U) << i;
-            }
-        }
-        return true;
+    uint32_t id = 0;
+    const odin3_module *module = find_top(&id);
+    if (module == NULL ||
+        odin3_design_intern(rs.design, odin3_bytes_cstr(key), &key_str) != ODIN3_OK) {
+        return false;
     }
-    return false;
+    const odin3_value *val = odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_MODULE, id}, key_str);
+    if (val == NULL) {
+        return false;
+    }
+    *num = value_number(val);
+    return true;
 }
 
 static const char k_pparams[] =
@@ -587,13 +595,12 @@ static void test_command_line_params(void) {
     TEST_ASSERT_EQUAL_INT_MESSAGE(
         ODIN3_OK, run("read_verilog", "-P W=12 -P N=8'h1F -P \"S=xyz\" p.v"), et_log(&rs));
     uint64_t num = 0;
-    const char *text = NULL;
-    TEST_ASSERT_TRUE(top_param("W", &num, &text));
+    TEST_ASSERT_TRUE(top_param("W", &num));
     TEST_ASSERT_EQUAL_UINT64(12, num);
-    TEST_ASSERT_TRUE(top_param("N", &num, &text));
+    TEST_ASSERT_TRUE(top_param("N", &num));
     TEST_ASSERT_EQUAL_UINT64(0x1F, num);
-    TEST_ASSERT_TRUE(top_param("S", &num, &text));
-    TEST_ASSERT_EQUAL_STRING("xyz", text);
+    TEST_ASSERT_TRUE(top_param("S", &num));
+    TEST_ASSERT_EQUAL_UINT64(0x78797AU, num); /* "xyz", 8 bits a character */
 }
 
 /* A number-looking string needs the single quotes; the first -P of a name wins over none. */
@@ -602,9 +609,8 @@ static void test_command_line_param_forced_string(void) {
     setup_files(srcs, 1, NULL);
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-P \"S='12'\" p.v"), et_log(&rs));
     uint64_t num = 0;
-    const char *text = NULL;
-    TEST_ASSERT_TRUE(top_param("S", &num, &text));
-    TEST_ASSERT_EQUAL_STRING("12", text);
+    TEST_ASSERT_TRUE(top_param("S", &num));
+    TEST_ASSERT_EQUAL_UINT64(0x3132U, num); /* "12", not the number 12 */
 }
 
 static void test_command_line_param_unknown_name(void) {

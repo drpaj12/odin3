@@ -1256,20 +1256,50 @@ static uint32_t clock_bits_of(const odin3_sim *sim, odin3_sim_bit *out) {
     return count;
 }
 
-/* Random inputs, then a random non-empty set of the clocks takes the edge `event` together: the
- * lowered netlist and the memory cell must show the same RD_DATA after every step. */
-static void run_clock_schedule(const mcase *cs, uint64_t seed) {
+/* The lowered netlist (0) and the memory cell (1) of one case, simulated side by side. */
+typedef struct pair {
     md dd[2];
-    odin3_sim *sim[2] = {NULL, NULL};
-    for (int k = 0; k < 2; k++) {
-        g_memcell = k == 1;
-        md_lowered(&dd[k], cs, "");
-        TEST_ASSERT_EQUAL_INT_MESSAGE(
-            ODIN3_OK, odin3_sim_build(dd[k].fix.design, odin3_module_id_of(dd[k].mod), &sim[k]),
-            log_text);
+    odin3_sim *sim[2];
+} pair;
+
+static void pair_start(pair *pp, const mcase *cs) {
+    for (int which = 0; which < 2; which++) {
+        g_memcell = which == 1;
+        md_lowered(&pp->dd[which], cs, "");
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK,
+                                      odin3_sim_build(pp->dd[which].fix.design,
+                                                      odin3_module_id_of(pp->dd[which].mod),
+                                                      &pp->sim[which]),
+                                      log_text);
     }
+}
+
+static void pair_end(pair *pp) {
+    for (int which = 0; which < 2; which++) {
+        odin3_sim_destroy(pp->sim[which]);
+        lf_end(&pp->dd[which].fix);
+    }
+}
+
+/* Drives `in`, settles, takes the edges together; both must show the same RD_DATA. */
+static void pair_step(pair *pp, const mcase *cs, const memref_in *in, odin3_sim_clock_event *events,
+                      uint32_t used) {
+    for (int which = 0; which < 2; which++) {
+        drive_inputs(pp->sim[which], &cs->cfg, in);
+        odin3_sim_settle(pp->sim[which]); /* the cells take their inputs as settled */
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edges(pp->sim[which], events, used));
+    }
+    TEST_ASSERT_EQUAL_UINT64_MESSAGE(read_port(pp->sim[0], "RD_DATA"),
+                                     read_port(pp->sim[1], "RD_DATA"), cs->name);
+}
+
+/* Random inputs, then a random non-empty set of the clocks takes a rising and a falling edge
+ * together: the lowered netlist and the memory cell must show the same RD_DATA after each. */
+static void run_clock_schedule(const mcase *cs, uint64_t seed) {
+    pair pp;
+    pair_start(&pp, cs);
     odin3_sim_bit clocks[MAX_CLOCK_BITS];
-    uint32_t n_clocks = clock_bits_of(sim[0], clocks);
+    uint32_t n_clocks = clock_bits_of(pp.sim[0], clocks);
     odin3_prng prng;
     odin3_prng_seed(&prng, seed);
     for (uint32_t step = 0; n_clocks > 0 && step < 2U * RANDOM_CYCLES; step++) {
@@ -1279,31 +1309,18 @@ static void run_clock_schedule(const mcase *cs, uint64_t seed) {
         odin3_sim_clock_event events[MAX_CLOCK_BITS];
         uint32_t used = 0;
         uint64_t pick = 1U + draw(&prng, ((uint64_t)1 << n_clocks) - 1U);
-        for (uint32_t c = 0; c < n_clocks; c++) {
-            if (((pick >> c) & 1U) != 0) {
-                events[used++] = (odin3_sim_clock_event){clocks[c], ODIN3_SIM_POSEDGE};
+        for (uint32_t clk = 0; clk < n_clocks; clk++) {
+            if (((pick >> clk) & 1U) != 0) {
+                events[used++] = (odin3_sim_clock_event){clocks[clk], ODIN3_SIM_POSEDGE};
             }
         }
-        for (int phase = 0; phase < 2; phase++) {
-            for (int k = 0; k < 2; k++) {
-                drive_inputs(sim[k], &cs->cfg, &in);
-                odin3_sim_settle(sim[k]); /* the cells take their inputs as settled */
-                TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edges(sim[k], events, used));
-            }
-            char msg[MSG_LEN];
-            (void)snprintf(msg, sizeof msg, "%s: step %u phase %d clocks %llx", cs->name, step,
-                           phase, (unsigned long long)pick);
-            TEST_ASSERT_EQUAL_UINT64_MESSAGE(read_port(sim[0], "RD_DATA"),
-                                             read_port(sim[1], "RD_DATA"), msg);
-            for (uint32_t e = 0; e < used; e++) {
-                events[e].event = ODIN3_SIM_NEGEDGE;
-            }
+        pair_step(&pp, cs, &in, events, used);
+        for (uint32_t ev = 0; ev < used; ev++) {
+            events[ev].event = ODIN3_SIM_NEGEDGE;
         }
+        pair_step(&pp, cs, &in, events, used);
     }
-    for (int k = 0; k < 2; k++) {
-        odin3_sim_destroy(sim[k]);
-        lf_end(&dd[k].fix);
-    }
+    pair_end(&pp);
 }
 
 /* A write clock and different read clocks (write port 0 on its own clock, each read port on its

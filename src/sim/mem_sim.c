@@ -110,10 +110,9 @@ static void load_ctx(mctx *mc, const odin3_sim_cell *cell, bool four) {
     mc->xval = four ? (uint8_t)CODE_X : (uint8_t)CODE_0;
 }
 
-/* True when port `port` of the per-port clock span `span` (E_WR_CLK, E_RD_CLK) is on this cell's
+/* True when port `port` of the per-port clock span `clocks` (E_WR_CLK, E_RD_CLK) is on this cell's
  * clock: the builder gives such a pin this cell's clock slot and every other port the zero slot. */
-static bool on_this_clock(const odin3_sim_cell *cell, uint32_t span, uint32_t port) {
-    const odin3_sim_span *clocks = &cell->ports[span];
+static bool on_this_clock(const odin3_sim_cell *cell, const odin3_sim_span *clocks, uint32_t port) {
     return port < clocks->width && clocks->idx[port] == cell->ports[E_CLK].idx[0];
 }
 
@@ -246,9 +245,11 @@ static wpins write_pins(const mctx *mc, uint32_t port) {
                    pins_at(ports[E_WR_ADDR].idx, (size_t)port * mc->geo.abits)};
 }
 
-/* One word takes the data under select = AND(dec, en[bit]), dec 1 (exact) or x. */
-static void write_word(const mctx *mc, const uint8_t *en, const uint8_t *data, uint8_t *word,
-                       uint8_t dec) {
+/* One word takes the data of record `rec` (pending flag, WR_EN, WR_DATA) under select =
+ * AND(dec, WR_EN[bit]), dec 1 (exact) or x. */
+static void write_word(const mctx *mc, const uint8_t *rec, uint8_t *word, uint8_t dec) {
+    const uint8_t *en = rec + 1;
+    const uint8_t *data = en + mc->geo.width;
     for (uint32_t bit = 0; bit < mc->geo.width; bit++) {
         uint8_t sel = and4(dec, en[bit]);
         if (sel == CODE_1) {
@@ -299,19 +300,17 @@ static void stage_write(const mctx *mc, uint32_t port) {
 /* Applies the record of write port `port` to the array. */
 static void apply_write(const mctx *mc, const uint8_t *rec) {
     const odin3_sim_mem_geo *geo = &mc->geo;
-    const uint8_t *en = rec + 1;
-    const uint8_t *data = en + geo->width;
-    maddr addr = load_addr_codes(data + geo->width, geo->abits);
+    maddr addr = load_addr_codes(rec + 1 + 2 * (size_t)geo->width, geo->abits);
     if (addr.known == geo->mask) {
         uint64_t word = word_of(geo, addr.val);
         if (word < geo->words) {
-            write_word(mc, en, data, mc->arr + word * geo->width, CODE_1);
+            write_word(mc, rec, mc->arr + word * geo->width, CODE_1);
         }
         return;
     }
     for (uint64_t word = 0; word < geo->words; word++) {
         if (may_match(geo, &addr, word)) {
-            write_word(mc, en, data, mc->arr + word * geo->width, CODE_X);
+            write_word(mc, rec, mc->arr + word * geo->width, CODE_X);
         }
     }
 }
@@ -347,7 +346,7 @@ static void bypass(const mctx *mc, uint32_t rport, uint8_t *word) {
     const uint8_t *values = mc->cell->values;
     for (uint32_t wport = 0; wport < mc->geo.n_wr; wport++) {
         wpins pins = write_pins(mc, wport);
-        if (!on_this_clock(mc->cell, E_WR_CLK, wport) || !any_enable(mc, &pins)) {
+        if (!on_this_clock(mc->cell, &mc->cell->ports[E_WR_CLK], wport) || !any_enable(mc, &pins)) {
             continue; /* lower: a read sees the writes of its own clock net and edge only */
         }
         uint8_t same = addr_equal(mc, rport, wport);
@@ -394,12 +393,12 @@ static void edge_update(const mctx *mc) {
     const odin3_sim_cell *cell = mc->cell;
     uint32_t slot = 0;
     for (uint32_t rport = 0; rport < mc->geo.n_rd; rport++) {
-        if (on_this_clock(cell, E_RD_CLK, rport)) {
+        if (on_this_clock(cell, &cell->ports[E_RD_CLK], rport)) {
             sync_read(mc, (sync_port){rport, slot++});
         }
     }
     for (uint32_t wport = 0; wport < mc->geo.n_wr; wport++) {
-        if (on_this_clock(cell, E_WR_CLK, wport)) {
+        if (on_this_clock(cell, &cell->ports[E_WR_CLK], wport)) {
             stage_write(mc, wport);
         }
     }
