@@ -477,6 +477,8 @@ add_library(odin3_core OBJECT
     src/sim/build.c
     src/sim/build_clock.c
     src/sim/build_hier.c
+    src/sim/build_mem.c
+    src/sim/mem_sim.c
     src/sim/build_names.c
     src/sim/eval.c
     src/sim/levelize.c

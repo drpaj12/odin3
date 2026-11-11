@@ -6,6 +6,7 @@
 # flow for x-bearing benches: if/case selects keep their RTL meaning). SIM_TB_FLAGS (environment)
 # is added to every sim_tb command; with --2state in it the 4-state micros (x*_tb.v) are skipped; the x micros get --4state,
 # since 2-state mode cannot print x like iverilog.
+# LOWER_EXTRA (environment) is added to every `lower` command (e.g. --keep-mem-cells).
 set -u
 odin3=$1
 flags=${SIM_TB_FLAGS:-}
@@ -20,6 +21,7 @@ for tb in *_tb.v; do
     case "$n" in x*) mflags="--4state" ;; esac
     lflags=""
     [ -f "$n.flags" ] && lflags=$(cat "$n.flags")
+    lflags="$lflags ${LOWER_EXTRA:-}"
     rflags=""
     [ -f "$n.rflags" ] && rflags=$(cat "$n.rflags")
     dut=""
