@@ -42,21 +42,27 @@ static bool is_edit_events(const odin3_strtab *tab, odin3_bytes key, const odin3
            odin3_edit_events_wellformed(odin3_strtab_get(tab, value->str));
 }
 
+/* True when key is exactly name. */
+static bool is_key(odin3_bytes key, const char *name) {
+    return key.len == strlen(name) && memcmp(key.ptr, name, key.len) == 0;
+}
+
+/* The attributes no writer prints: bookkeeping, not design content. */
+static bool is_bookkeeping(const odin3_strtab *tab, odin3_bytes key, const odin3_value *value) {
+    return is_key(key, ODIN3_BLIF_ATTR_EXTRAS) || is_edit_events(tab, key, value) ||
+           is_key(key, ODIN3_ATTR_FLATTENED_AWAY) || is_key(key, ODIN3_ATTR_RTL_SEL) ||
+           is_key(key, ODIN3_ATTR_ROM_INIT) ||
+           (key.len >= strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX) &&
+            memcmp(key.ptr, ODIN3_ATTR_PARAM_DEFAULT_PREFIX,
+                   strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX)) == 0);
+}
+
 odin3_wattr odin3_wattr_classify(const odin3_strtab *tab, uint32_t key_str,
                                  const odin3_value *value) {
     const char *name = odin3_strtab_get(tab, key_str);
     odin3_bytes key = {name != NULL ? name : "", odin3_strtab_len(tab, key_str)};
     odin3_wattr attr = {ODIN3_WATTR_ATTRIBUTE, ODIN3_WATTR_VALUE, key, {NULL, 0}, value, false};
-    if ((key.len == strlen(ODIN3_BLIF_ATTR_EXTRAS) &&
-         memcmp(key.ptr, ODIN3_BLIF_ATTR_EXTRAS, key.len) == 0) ||
-        is_edit_events(tab, key, value) ||
-        (key.len == strlen(ODIN3_ATTR_FLATTENED_AWAY) &&
-         memcmp(key.ptr, ODIN3_ATTR_FLATTENED_AWAY, key.len) == 0) ||
-        (key.len == strlen(ODIN3_ATTR_RTL_SEL) &&
-         memcmp(key.ptr, ODIN3_ATTR_RTL_SEL, key.len) == 0) ||
-        (key.len >= strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX) &&
-         memcmp(key.ptr, ODIN3_ATTR_PARAM_DEFAULT_PREFIX,
-                strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX)) == 0)) {
+    if (is_bookkeeping(tab, key, value)) {
         attr.role = ODIN3_WATTR_SKIP;
     } else if (strip_prefix(key, ODIN3_BLIF_ATTR_PREFIX, &attr.key)) {
         blif_value(&attr, tab, value);

@@ -167,6 +167,7 @@ class Expect:
         self.counts: list[int] | None = None
         self.params: list[tuple[str, str, str]] = []
         self.pins: list[tuple[str, str, str]] = []
+        self.mifs: list[tuple[int, list[str]]] = []
         self.roundtrip = True
         self.lint = True
 
@@ -183,6 +184,9 @@ def read_expect(path: Path, micro: str) -> Expect:
             exp.params.append((parts[2], parts[3], parts[4]))
         elif parts[0] == "pin":
             exp.pins.append((parts[2], parts[3], parts[4]))
+        elif parts[0] == "mif":
+            words = raw.split()
+            exp.mifs.append((int(words[2]), words[3:]))
         elif parts[0] == "noroundtrip":
             exp.roundtrip = False
         elif parts[0] == "nolint":
@@ -224,10 +228,34 @@ def instances(text: str) -> list[tuple[str, dict[str, str], str, dict[str, str]]
 
 def check_defaults(text: str, label: str) -> None:
     """Every defaulted input pin of every LPM instance is tied (spec M1)."""
-    for kind, _params, name, pins in instances(text):
+    for kind, params, name, pins in instances(text):
+        if kind == "altsyncram" and params.get("operation_mode") == '"ROM"':
+            continue  # a ROM uses address_a, clock0 and q_a only (the wizard instance)
         for pin in DEFAULTED.get(kind, ()):
             if pin not in pins:
                 raise CheckError(f"defaults: {label}: {kind} {name}: input .{pin}() is open or x")
+
+
+MIF_WORD = re.compile(r"^\s*([0-9a-fA-F]+)\s*:\s*([0-9a-fA-F]+);\s*$")
+
+
+def check_mif(text: str, out: Path, index: int, words: list[str]) -> None:
+    """ROM number ``index`` of the netlist: its init_file names the .mif beside it and the file
+    holds exactly ``words`` (hex, address 0 first)."""
+    name = f"{out.stem}_rom{index}.mif"
+    if f'.init_file("{name}")' not in text:
+        raise CheckError(f"mif: the netlist has no .init_file(\"{name}\")")
+    path = out.with_name(name)
+    if not path.is_file():
+        raise CheckError(f"mif: {name} was not written")
+    got: dict[int, int] = {}
+    for line in path.read_text().splitlines():
+        match = MIF_WORD.match(line)
+        if match:
+            got[int(match.group(1), 16)] = int(match.group(2), 16)
+    want = {addr: int(word, 16) for addr, word in enumerate(words)}
+    if got != want:
+        raise CheckError(f"mif: {name} holds {sorted(got.items())[:4]}..., expected {words[:4]}...")
 
 
 def check_counts(
@@ -412,6 +440,8 @@ def check_micro(args: argparse.Namespace, work: Path) -> None:
     check_pure(written)
     check_counts(written, proc.stderr, exp.counts, params, exp.pins)
     check_defaults(written, "generation 1")
+    for index, words in exp.mifs:
+        check_mif(written, out, index, words)
     wrote = f'.intended_device_family("{args.family}")' in written
     if args.family and exp.counts and exp.counts[3] and not wrote:
         raise CheckError(f"counts: --family {args.family}: no altsyncram carries it")

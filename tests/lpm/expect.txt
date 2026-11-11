@@ -46,3 +46,11 @@ param lpm_mixed.v lpm_mult lpm_widthb 4
 param lpm_mixed.v lpm_mult lpm_widthp 12
 param lpm_mixed.v lpm_compare lpm_representation "UNSIGNED"
 param lpm_mixed.v lpm_compare lpm_width 8
+counts altsyncram_rom.v 0 0 0 1 0
+param altsyncram_rom.v altsyncram operation_mode "ROM"
+param altsyncram_rom.v altsyncram width_a 16
+param altsyncram_rom.v altsyncram widthad_a 3
+param altsyncram_rom.v altsyncram numwords_a 8
+mif altsyncram_rom.v 0 0001 0203 0405 f607 0809 0a0b 0c0d 8e0f
+counts altsyncram_rom_soft.v 0 0 0 0 3
+noroundtrip altsyncram_rom_soft.v

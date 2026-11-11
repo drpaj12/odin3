@@ -93,6 +93,7 @@ cell altsyncram blackbox
   param clock_enable_input_b string "NORMAL"
   param clock_enable_output_a string "NORMAL"
   param clock_enable_output_b string "NORMAL"
+  param init_file string "UNUSED"
   in  clock0 1 clock
   in  clock1 1 clock
   in  address_a widthad_a
