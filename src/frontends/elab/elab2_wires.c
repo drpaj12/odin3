@@ -518,6 +518,60 @@ static odin3_status register_module(odin3_elab2 *e2, odin3_ast_id node, odin3_mo
     return odin3_u64map_put(e2->modules, (odin3_kv){node.v, id.v});
 }
 
+/* One `odin3 param default:<NAME>` attribute for a declarator of a parameter declaration, holding
+ * the value the module was elaborated with (a specialization: the overridden value; the module's
+ * symbol carries it). */
+static odin3_status param_default_one(odin3_elab2 *e2, odin3_scope_id scope, odin3_objref obj,
+                                      odin3_ast_id declarator) {
+    const odin3_symbol *rec = odin3_symbol_get(
+        e2->st, odin3_symtab_lookup_local(e2->st, scope, odin3_ast_name(e2->elab, declarator)));
+    if (rec == NULL || !rec->has_value) {
+        return ODIN3_OK;
+    }
+    uint32_t key = 0;
+    odin3_strbuf_clear(&e2->text);
+    odin3_status st = odin3_strbuf_appendf(&e2->text, "%s%s", ODIN3_ATTR_PARAM_DEFAULT_PREFIX,
+                                           odin3_ast_name_str(e2->elab, declarator));
+    st = st != ODIN3_OK
+             ? st
+             : odin3_design_intern(e2->design, (odin3_bytes){e2->text.data, e2->text.len}, &key);
+    return st != ODIN3_OK ? st : odin3_attr_set(e2->mod, obj, key, &rec->value);
+}
+
+/* The declarators of one PARAM_DECL (after its slots). */
+static odin3_status param_default_decl(odin3_elab2 *e2, odin3_scope_id scope, odin3_objref obj,
+                                       odin3_ast_id decl) {
+    odin3_ast_span kids = odin3_ast_children(e2->elab, decl);
+    odin3_status st = ODIN3_OK;
+    for (uint32_t k = odin3_ast_slot_count(ODIN3_AST_PARAM_DECL); st == ODIN3_OK && k < kids.n;
+         k++) {
+        st = param_default_one(e2, scope, obj, kids.ids[k]);
+    }
+    return st;
+}
+
+/* `odin3 param default:<NAME>` per parameter of the module, in declaration order: the header
+ * parameters (the params LIST); a module without a header list has its body `parameter`s. The
+ * elaborated form keeps no difference between a body `parameter` and `localparam`, so a body
+ * localparam counts as a parameter here. `sim_tb` reads them to check a `#()` on the DUT
+ * instance. */
+static odin3_status param_defaults(odin3_elab2 *e2, odin3_ast_id node, odin3_objref obj) {
+    odin3_scope_id scope = odin3_elab_scope_of(&e2->bind, node);
+    odin3_ast_id list = odin3_ast_child(e2->elab, node, 0);
+    odin3_ast_span decls = odin3_ast_children(e2->elab, list.v != 0 ? list : node);
+    odin3_status st = ODIN3_OK;
+    bool header = list.v != 0 && decls.n > 0;
+    if (!header) {
+        decls = odin3_ast_children(e2->elab, node);
+    }
+    for (uint32_t i = 0; scope.v != 0 && st == ODIN3_OK && i < decls.n; i++) {
+        if (odin3_ast_kind_of(e2->elab, decls.ids[i]) == ODIN3_AST_PARAM_DECL) {
+            st = param_default_decl(e2, scope, obj, decls.ids[i]);
+        }
+    }
+    return st;
+}
+
 /* The IR module of MODULE node (named like it, EL-9) with the node's record and attributes. */
 static odin3_status create_module(odin3_elab2 *e2, odin3_ast_id node) {
     uint32_t name = odin3_ast_name(e2->elab, node);
@@ -537,7 +591,8 @@ static odin3_status create_module(odin3_elab2 *e2, odin3_ast_id node) {
     st = st != ODIN3_OK ? st : register_module(e2, node, id);
     st = st != ODIN3_OK ? st : odin3_elab2_enter(e2, node);
     odin3_objref obj = {ODIN3_OBJ_MODULE, id.v};
-    return st != ODIN3_OK ? st : attrs_apply(e2, node, obj, 0);
+    st = st != ODIN3_OK ? st : attrs_apply(e2, node, obj, 0);
+    return st != ODIN3_OK ? st : param_defaults(e2, node, obj);
 }
 
 /* Every port of MODULE node, in port order (the ports LIST is its second slot). */

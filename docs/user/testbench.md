@@ -153,9 +153,22 @@ independent clock inputs, and an expression may read a DUT signal by hierarchica
 most 1024 bits wide (signals, literals, concatenations, DUT ports, hierarchical reads). A wire
 with several drivers (two `assign`s, an `assign` and a DUT output) takes the resolution of them: z
 gives way, equal values stay, a 0 against a 1 or an x gives x. Anything else stops the run with
-`tb.v:LINE: unsupported: <construct>`: real numbers, tasks and functions, generate, parameter overrides on the DUT
-instance, ordered port connections, several modules in the testbench file, compiler directives
+`tb.v:LINE: unsupported: <construct>`: real numbers, tasks and functions, generate, a parameter override on the DUT
+instance that differs from the default (see "DUT parameter overrides"), ordered port connections, several modules in the testbench file, compiler directives
 other than `` `timescale ``.
+
+## DUT parameter overrides
+
+The DUT was elaborated by `read_verilog` with its default parameters, so `sim_tb` cannot change them. A DUT
+instance may still repeat the defaults: `dut #(.W(8), .N(3)) u (...)` and the ordered `dut #(8, 3) u (...)` are accepted
+when each value equals the default, compared by value and width-insensitively (`8`, `8'd8` and `32'd8` are the same; a
+string parameter compares as 8 bits per character). A value that differs, a name the module does not have, more ordered
+values than parameters, or a non-constant value stops the run with a located error, for example
+`tb.v:8: unsupported: DUT instance u (module dut): parameter N is given 4 but the DUT was elaborated with 3; pass it to
+read_verilog (-P, not yet)`. Elaboration records each parameter as the module attribute `odin3 param default:<NAME>` (not
+written by `write_json`, `write_verilog` or `write_rtlil`). A module without a `#(parameter ...)` header list has its body
+`parameter` declarations counted, and its body `localparam`s with them (the elaborated form keeps no difference). Tests:
+`tests/tb/micro/dutparams*_tb.v` (compared with iverilog), `tests/tb/errors/dutparam*_tb.v`.
 
 ## What is not modelled
 

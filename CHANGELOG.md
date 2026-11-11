@@ -17,6 +17,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `$pow` are `assign`s. The stubs of the LPM and black-box modules go to `<top>_lpm_sim.v` (read-back and iverilog only).
   An implicit black box (`--read-opt=--auto-blackbox`, e.g. `scfifo`) keeps its parameter overrides as `#(.NAME(value))` and
   its unconnected ports as `.port()`. Tests: `tools/quartus-check`, `tests/quartus`, `tests/tools/test_quartus_check.py`.
+- `sim_tb` accepts a `#()` on the DUT instance when every value equals the DUT's default parameter (named or ordered, constants, strings); a different value, an unknown name, too many ordered values or a non-constant value is a located error that says to pass it to `read_verilog (-P, not yet)`. Elaboration now records each module parameter as the module attribute `odin3 param default:<NAME>` (bookkeeping, not written by the JSON, Verilog or RTLIL writers).
 
 ### Changed
 - An instance of an implicit black box now carries its parameter overrides as `parameter:<NAME>` node attributes (as a module

@@ -152,6 +152,10 @@ static odin3_status put_attr(void *user, uint32_t key_str, const odin3_value *va
     if (strcmp(key, ODIN3_ATTR_RTL_SEL) == 0) {
         return rw->st; /* the simulator's mark: not design content */
     }
+    if (strncmp(key, ODIN3_ATTR_PARAM_DEFAULT_PREFIX, strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX)) ==
+        0) {
+        return rw->st; /* the testbench's parameter defaults: not design content */
+    }
     if (strcmp(key, ODIN3_ATTR_FLATTENED_AWAY) == 0) {
         return rw->st; /* flatten's bookkeeping mark: not design content */
     }
