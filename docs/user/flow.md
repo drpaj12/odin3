@@ -181,7 +181,7 @@ flowchart LR
 | Target | Passes after `read_verilog` | Writes |
 |---|---|---|
 | `vtr` | `proc; fsm; opt; flatten; tristate; opt -full; wreduce; hardmap; lower; abc --lut K` | BLIF for VPR |
-| `lpm` | `proc; opt; wreduce; opt_clean; opt -full; lpmmap; opt_clean; opt -full; write_verilog --quartus` | Verilog with LPM cells for Quartus, stubs in `<top>_lpm_sim.v` |
+| `lpm` | `proc; opt; wreduce; opt_clean; opt -full; lpmmap; opt_clean; opt -full; write_verilog --quartus` | Verilog with LPM cells for Quartus, stubs in `<top>_lpm_sim.v`; a `$readmemh` ROM becomes `altsyncram` ROM with its contents in `<top>_rom<N>.mif` beside the netlist |
 
 The `vtr` script lives in `tools/vtr-qor/qor_legs.py` and the `lpm` script in
 `tools/flow/lpm.script`; `odin3_flow.py` uses both unchanged.

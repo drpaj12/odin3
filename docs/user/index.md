@@ -13,7 +13,7 @@ adders. Power is not measured. The hub is <https://github.com/drpaj12/YggdrasilI
 This manual follows the layout of the VTR documentation: a getting-started page, an overview of
 the flow with one diagram per stage, then the references.
 
-Beyond the manual: the release notes [v1.6.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.6.0.md) (switching activity), [v1.5.1](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.1.md), [v1.5.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.0.md) (simulator parity), [v1.4.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.4.0.md) (silicon flow) and the [v1.2.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.2.0.md)
+Beyond the manual: the release notes [v1.6.1](https://github.com/drpaj12/odin3/blob/main/docs/V1.6.1.md) (Quartus leg, simulator `$mem`), [v1.6.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.6.0.md) (switching activity), [v1.5.1](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.1.md), [v1.5.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.5.0.md) (simulator parity), [v1.4.0](https://github.com/drpaj12/odin3/blob/main/docs/V1.4.0.md) (silicon flow) and the [v1.2.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.2.0.md)
 (provenance at every granularity; see the {doc}`provenance` page; version 1.3.0 changes are in the CHANGELOG), the [v1.1.1 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.1.md)
 (critical-path attribution to HDL), the [v1.1.0 release notes](https://github.com/drpaj12/odin3/blob/main/docs/V1.1.0.md)
 (SystemVerilog and the VerilogEval run; the [v1.0 notes](https://github.com/drpaj12/odin3/blob/main/docs/RELEASE-NOTES-1.0.md) are older),
@@ -23,7 +23,7 @@ suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilII
 
 ## Features at a glance
 
-Version 1.6.0, C ABI 7. Everything below is on `main` with tests; the table with links is in the
+Version 1.6.1, C ABI 7. Everything below is on `main` with tests; the table with links is in the
 [repository README](https://github.com/drpaj12/odin3#features).
 
 - Inputs and outputs: {doc}`inputs`, {doc}`outputs`, {doc}`odin3-flow`.
