@@ -4,7 +4,7 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## 1.6.1 (ready to tag; release notes `docs/V1.6.1.md`)
+## Unreleased
 
 ### Added
 - `read_verilog -P NAME=VALUE` overrides a parameter of the top module at elaboration, as a project `param` line does (and ahead
@@ -21,6 +21,10 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   Tests: `test_lower_mem` (cell against the lowered netlist, random clock subsets, every polarity mix), micros `mem2clk`,
   `mem2clkm`, `mem2pol` (4-state, 2-state, lowered, cell; iverilog), `tests/tb/run_memclk.sh` (`tb_memclk`: two write clocks vs
   iverilog).
+
+## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
+
+### Added
 - `lpmmap` maps a ROM to `altsyncram` in `ROM` mode (`--target lpm`, `write_verilog --quartus`): an inferred `$mem` with one read
   port, no write port, every `INIT` bit 0 or 1 (`reg [W-1:0] m [0:N-1]; initial $readmemh(...)`), a synchronous read on a
   rising edge and no read enable (the read register is merged as for a RAM). Before this the ROM stayed a behavioural `reg`
