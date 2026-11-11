@@ -554,7 +554,7 @@ static uint8_t *memword_bytes(const odin3_sim *sim, const odin3_sim_signal *item
     const odin3_sim_flat *flat = &sim->cells[item->obj_id];
     odin3_sim_mem_geo geo;
     odin3_sim_mem_geometry(flat->view.params, &geo);
-    return flat->view.state + ((size_t)geo.n_sync + item->first_bit) * geo.width;
+    return flat->view.aux + (size_t)item->first_bit * geo.width;
 }
 
 /* Step 3b: text is `<memory>[<index>]` for a simulated `$mem` of the scope. */

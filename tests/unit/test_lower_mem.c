@@ -51,6 +51,10 @@ static uint8_t g_wr_flip;
 /* The memcell tests: `lower --keep-mem-cells` leaves the `$mem`, and the simulator runs it. */
 static bool g_memcell;
 
+/* The multi-clock tests: write ports share the clock net of write port 0, every read port keeps a
+ * clock input of its own (`lower` takes write ports on one clock, read ports on any). */
+static bool g_split_reads;
+
 static void text_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     (void)level;
@@ -65,6 +69,7 @@ void setUp(void) {
     g_rd_flip = 0;
     g_wr_flip = 0;
     g_memcell = false;
+    g_split_reads = false;
     odin3_log_set_sink(text_sink, NULL);
 }
 
@@ -204,6 +209,13 @@ static void wire_enables(md *dd) {
 /* Every clock pin on the net of the first clock pin (write port 0, else read port 0). */
 static void wire_clocks(md *dd) {
     const memref_cfg *cfg = &dd->cs.cfg;
+    if (g_split_reads) {
+        odin3_net_id wnet = lf_wnet(&dd->fix, dd->mod, "WR_CLK", 0);
+        for (uint32_t wport = 1; wport < cfg->n_wr; wport++) {
+            retarget(dd, (pin_ref){P_WR_CLK, wport}, wnet);
+        }
+        return;
+    }
     if (!dd->cs.share_clock) {
         return;
     }
@@ -1204,17 +1216,109 @@ static void expect_sim_refused(const mcase *cs, const char *text) {
     lf_end(&dd.fix);
 }
 
-static void test_memcell_several_clocks_are_refused_with_a_located_error(void) {
+/* Builds `cs` as a memory cell: the simulator accepts the clocks it has. */
+static void expect_sim_builds(const mcase *cs) {
+    md dd;
+    g_memcell = true;
+    md_lowered(&dd, cs, "");
+    odin3_sim *sim = NULL;
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, odin3_sim_build(dd.fix.design, odin3_module_id_of(dd.mod), &sim), log_text);
+    odin3_sim_destroy(sim);
+    lf_end(&dd.fix);
+}
+
+static void test_memcell_several_clocks_and_polarities_build(void) {
     mcase cs = k_cases[2];
-    cs.share_clock = false;
-    expect_sim_refused(&cs, "cannot simulate `$mem` (node `");
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "several clocks or clock polarities"));
+    cs.share_clock = false; /* a clock net per port, two write clocks (`lower` refuses that) */
+    expect_sim_builds(&cs);
     cs = k_cases[2];
-    g_wr_flip = 2U;
-    expect_sim_refused(&cs, "several clocks or clock polarities");
+    g_wr_flip = 2U; /* write ports on both edges */
+    expect_sim_builds(&cs);
     cs = k_cases[1];
     g_rd_flip = 1U; /* the sync read port on the other edge than the write port */
-    expect_sim_refused(&cs, "several clocks or clock polarities");
+    expect_sim_builds(&cs);
+}
+
+/* The clock input bits of the simulator, in port order. */
+enum { MAX_CLOCK_BITS = 8 };
+
+static uint32_t clock_bits_of(const odin3_sim *sim, odin3_sim_bit *out) {
+    uint32_t count = 0;
+    for (uint32_t port = 0; port < odin3_sim_input_count(sim); port++) {
+        for (uint32_t bit = 0; bit < odin3_sim_input_width(sim, port); bit++) {
+            odin3_sim_bit at = {port, bit};
+            if (odin3_sim_input_is_clock(sim, at) && count < MAX_CLOCK_BITS) {
+                out[count++] = at;
+            }
+        }
+    }
+    return count;
+}
+
+/* Random inputs, then a random non-empty set of the clocks takes the edge `event` together: the
+ * lowered netlist and the memory cell must show the same RD_DATA after every step. */
+static void run_clock_schedule(const mcase *cs, uint64_t seed) {
+    md dd[2];
+    odin3_sim *sim[2] = {NULL, NULL};
+    for (int k = 0; k < 2; k++) {
+        g_memcell = k == 1;
+        md_lowered(&dd[k], cs, "");
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, odin3_sim_build(dd[k].fix.design, odin3_module_id_of(dd[k].mod), &sim[k]),
+            log_text);
+    }
+    odin3_sim_bit clocks[MAX_CLOCK_BITS];
+    uint32_t n_clocks = clock_bits_of(sim[0], clocks);
+    odin3_prng prng;
+    odin3_prng_seed(&prng, seed);
+    for (uint32_t step = 0; n_clocks > 0 && step < 2U * RANDOM_CYCLES; step++) {
+        memref_in in;
+        random_inputs(&prng, &cs->cfg, &in);
+        adapt_enables(cs, &in);
+        odin3_sim_clock_event events[MAX_CLOCK_BITS];
+        uint32_t used = 0;
+        uint64_t pick = 1U + draw(&prng, ((uint64_t)1 << n_clocks) - 1U);
+        for (uint32_t c = 0; c < n_clocks; c++) {
+            if (((pick >> c) & 1U) != 0) {
+                events[used++] = (odin3_sim_clock_event){clocks[c], ODIN3_SIM_POSEDGE};
+            }
+        }
+        for (int phase = 0; phase < 2; phase++) {
+            for (int k = 0; k < 2; k++) {
+                drive_inputs(sim[k], &cs->cfg, &in);
+                odin3_sim_settle(sim[k]); /* the cells take their inputs as settled */
+                TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_sim_clock_edges(sim[k], events, used));
+            }
+            char msg[MSG_LEN];
+            (void)snprintf(msg, sizeof msg, "%s: step %u phase %d clocks %llx", cs->name, step,
+                           phase, (unsigned long long)pick);
+            TEST_ASSERT_EQUAL_UINT64_MESSAGE(read_port(sim[0], "RD_DATA"),
+                                             read_port(sim[1], "RD_DATA"), msg);
+            for (uint32_t e = 0; e < used; e++) {
+                events[e].event = ODIN3_SIM_NEGEDGE;
+            }
+        }
+    }
+    for (int k = 0; k < 2; k++) {
+        odin3_sim_destroy(sim[k]);
+        lf_end(&dd[k].fix);
+    }
+}
+
+/* A write clock and different read clocks (write port 0 on its own clock, each read port on its
+ * own), with every polarity mix. */
+static void test_memcell_read_clocks_differ_from_the_write_clock(void) {
+    g_split_reads = true;
+    for (int i = 0; i < N_CASES; i++) {
+        if (k_cases[i].cfg.n_rd > 0 && k_cases[i].cfg.n_wr > 0 && !k_cases[i].async_write) {
+            for (uint8_t flip = 0; flip < 2; flip++) {
+                g_rd_flip = flip == 0 ? 0U : 0x5U; /* some read ports on the falling edge */
+                g_wr_flip = flip != 0 ? 0xFU : 0U; /* write ports share one net: one edge */
+                run_clock_schedule(&k_cases[i], 5000U + (uint64_t)i);
+            }
+        }
+    }
 }
 
 static void test_memcell_an_asynchronous_write_port_is_refused(void) {
@@ -1277,7 +1381,8 @@ int main(void) {
     RUN_TEST(test_memcell_init_contents_are_read_before_any_write);
     RUN_TEST(test_memcell_falling_edge);
     RUN_TEST(test_memcell_matches_the_lowered_netlist);
-    RUN_TEST(test_memcell_several_clocks_are_refused_with_a_located_error);
+    RUN_TEST(test_memcell_several_clocks_and_polarities_build);
+    RUN_TEST(test_memcell_read_clocks_differ_from_the_write_clock);
     RUN_TEST(test_memcell_an_asynchronous_write_port_is_refused);
     RUN_TEST(test_memcell_a_mem_without_a_read_port_builds);
     return UNITY_END();

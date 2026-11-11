@@ -38,9 +38,10 @@
 /* odin3_sim_cell.flags */
 enum {
     ODIN3_SIM_CELL_RTL_SEL = 1, /* the node has the `rtl_sel` attribute (design note, addendum 1) */
-    ODIN3_SIM_CELL_RTL_SEL_B = 2, /* its value is 2: an unknown select of a $mux takes input B */
-    ODIN3_SIM_CELL_MEM_INIT = 4,  /* a $mem cell (mem_sim.h) that sets the array from INIT */
-    ODIN3_SIM_CELL_MEM_NEG = 8,   /* a $mem edge cell on the falling edge */
+    ODIN3_SIM_CELL_RTL_SEL_B = 2,  /* its value is 2: an unknown select of a $mux takes input B */
+    ODIN3_SIM_CELL_MEM_INIT = 4,   /* a $mem cell (mem_sim.h) that sets the array from INIT */
+    ODIN3_SIM_CELL_MEM_NEG = 8,    /* a $mem edge cell on the falling edge */
+    ODIN3_SIM_CELL_MEM_DEFER = 16, /* a $mem on several clocks: writes apply at the next settle */
 };
 
 typedef enum odin3_sim_event {
@@ -86,6 +87,7 @@ typedef struct odin3_sim_cell {
     /* 4-state mode only (sim/sim4.h): the cell's flags and the data of its 4-state hook */
     uint32_t flags;
     const void *type4;
+    uint8_t *aux; /* a $mem cell: the memory's shared block (array and staged writes); else NULL */
 } odin3_sim_cell;
 
 /*

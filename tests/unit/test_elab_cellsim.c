@@ -164,8 +164,9 @@ static void run_hook(const odin3_celltype_def *def, const rcase *rc, hook_run *h
         lay_out_port(hr, &next, 1, rc->bbits, rc->wb);
     }
     lay_out_port(hr, &next, def->n_ports - 1, NULL, rc->wy);
-    odin3_sim_cell cell = {hr->values,     hr->spans, def->n_ports, hr->params, NULL, 0,
-                           ODIN3_SIM_COMB, NULL,      NULL,         0,          0,    NULL};
+    odin3_sim_cell cell = {hr->values, hr->spans,      def->n_ports, hr->params, NULL,
+                           0,          ODIN3_SIM_COMB, NULL,         NULL,       0,
+                           0,          NULL,           NULL};
     uint32_t bytes = 0;
     if (def->sim_scratch_bytes != NULL) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, def->sim_scratch_bytes(&cell, &bytes));
