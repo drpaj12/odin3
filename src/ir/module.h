@@ -385,6 +385,15 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);
  */
 #define ODIN3_ATTR_RTL_SEL "odin3 rtl_sel"
 
+/*
+ * Module attributes `odin3 param default:<NAME>`, one per `parameter` of the module in declaration
+ * order, set by elaboration. The value is the one the module was elaborated with (BITS, or INT or
+ * STRING when another front end sets them). The simulator's testbench reads them to check a `#()`
+ * on the DUT instance. Bookkeeping, not design content: the RTLIL, JSON and Verilog writers do
+ * not print them.
+ */
+#define ODIN3_ATTR_PARAM_DEFAULT_PREFIX "odin3 param default:"
+
 /* An object of a module: kind and ID (for ODIN3_OBJ_MODULE, the module's own ID). */
 typedef struct odin3_objref {
     odin3_objkind kind;

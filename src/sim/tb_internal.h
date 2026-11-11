@@ -208,6 +208,17 @@ void tb_dut_close(tb_dut *dut);
 /* Hierarchical reads of DUT signals (tb_dut.c). The simulator of an instance is built on the first
  * use, at parse time for a hierarchical name, and kept in the instance until the module is freed.
  */
+/* One `parameter` of a design module as elaborated: name, value (width bits, at most
+ * TB_MAX_WIDTH; wider values keep the low bits). */
+typedef struct tb_param_def {
+    char name[TB_NAME];
+    tbv val;
+    uint32_t width;
+} tb_param_def;
+/* The index-th `parameter` of the design's module (declaration order, the
+ * `odin3 param default:<NAME>` attributes elaboration sets); false when the module is missing
+ * (design may be NULL) or has fewer. */
+bool tb_dut_param_at(odin3_design *design, const char *module, uint32_t index, tb_param_def *out);
 /* True when the design has a module called name (design may be NULL: false). */
 bool tb_design_has_module(odin3_design *design, const char *name);
 /* Builds the simulator of instance `inst` of the design if it has none (4-state when four_state).

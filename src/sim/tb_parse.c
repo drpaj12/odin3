@@ -8,6 +8,7 @@
 #include "util/log.h"
 #include "util/vec.h"
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -2984,6 +2985,141 @@ static bool finish_sub(parser *pr) {
     return true;
 }
 
+/* --- `#()` on a DUT instance: the DUT is elaborated, so an override must equal the default --- */
+
+enum {
+    OVR_MSG = 448,
+    OVR_WHAT = 256,
+    OVR_VAL = 40,
+    OVR_HEX_BITS = 4,
+    OVR_U64_BITS = 64,
+    OVR_X_AT = 16
+};
+
+/* A value for a message: decimal when known and up to 64 bits, else hex (x for unknown bits). */
+static void ovr_text(const tbv *val, uint32_t width, char *buf, size_t cap) {
+    uint64_t num = 0;
+    if (width <= OVR_U64_BITS && tbv_u64(val, width, &num)) {
+        (void)snprintf(buf, cap, "%llu", (unsigned long long)num);
+        return;
+    }
+    size_t at = 0;
+    at += (size_t)snprintf(buf, cap, "%u'h", width);
+    for (uint32_t pos = width; pos > 0 && at + 2U < cap;) {
+        uint32_t nib = 0;
+        bool unknown = false;
+        uint32_t take = (pos % OVR_HEX_BITS) != 0 ? pos % OVR_HEX_BITS : OVR_HEX_BITS;
+        for (uint32_t bit = 0; bit < take; bit++) {
+            uint32_t code = tbv_code(val, pos - 1U - bit);
+            unknown = unknown || code > 1U;
+            nib = (nib << 1U) | (code & 1U);
+        }
+        pos -= take;
+        static const char hex[] = "0123456789abcdefx";
+        buf[at++] = hex[unknown ? OVR_X_AT : nib];
+    }
+    buf[at] = '\0';
+}
+
+/* The override's value in *val (*width bits), a string literal as 8 bits per character. */
+static bool ovr_value(parser *pr, const tb_expr *expr, const tb_param_def *def, tbv *val,
+                      uint32_t *width) {
+    if (expr->kind == E_STR) {
+        size_t len = strlen(expr->str);
+        len = len > (size_t)TB_MAX_WIDTH / CHAR_BITS ? (size_t)TB_MAX_WIDTH / CHAR_BITS : len;
+        uint32_t sw = len == 0 ? (uint32_t)CHAR_BITS : (uint32_t)(len * CHAR_BITS);
+        *width = sw > def->width ? sw : def->width;
+        tbv_zero(val, *width);
+        for (size_t i = 0; i < len; i++) {
+            tbv byte;
+            tbv_set_u64((uint8_t)expr->str[i], &byte, CHAR_BITS);
+            tb_field_put((tb_planes){val->v, val->u, *width},
+                         (tb_field){(uint32_t)((len - 1U - i) * CHAR_BITS), CHAR_BITS}, &byte);
+        }
+        return true;
+    }
+    *width = expr->width > def->width ? expr->width : def->width;
+    *width = *width > (uint32_t)TB_MAX_WIDTH ? (uint32_t)TB_MAX_WIDTH : *width;
+    return tb_const_val(pr->tb, expr, *width, val);
+}
+
+/* The default parameter an override stands for: by name, or by position (ordered). */
+static bool ovr_target(const parser *pr, const tb_inst *inst, const sub_ov *ov, uint32_t pos,
+                       tb_param_def *def) {
+    if (ov->name[0] == '\0') {
+        return tb_dut_param_at(pr->tb->design, inst->module, pos, def);
+    }
+    for (uint32_t i = 0; tb_dut_param_at(pr->tb->design, inst->module, i, def); i++) {
+        if (strcmp(def->name, ov->name) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool ovr_fail(parser *pr, const tb_inst *inst, const char *what) {
+    char msg[OVR_MSG];
+    (void)snprintf(msg, sizeof msg, "DUT instance %s (module %s): %s", inst->name, inst->module,
+                   what);
+    if (!pr->failed) {
+        tb_error(pr->file, inst->line, msg);
+    }
+    pr->failed = true;
+    return false;
+}
+
+/* One override against its default. */
+static bool check_one_override(parser *pr, const tb_inst *inst, const sub_ov *ov, uint32_t pos) {
+    char msg[OVR_WHAT];
+    tb_param_def def;
+    if (!ovr_target(pr, inst, ov, pos, &def)) {
+        if (ov->name[0] != '\0') {
+            (void)snprintf(msg, sizeof msg, "no parameter %s", ov->name);
+        } else {
+            (void)snprintf(msg, sizeof msg,
+                           "more ordered parameter values than the module has "
+                           "parameters");
+        }
+        return ovr_fail(pr, inst, msg);
+    }
+    tbv given;
+    uint32_t width = 0;
+    if (!ovr_value(pr, ov->expr, &def, &given, &width)) {
+        (void)snprintf(msg, sizeof msg, "parameter %s: the override is not a constant expression",
+                       def.name);
+        return ovr_fail(pr, inst, msg);
+    }
+    tbv dflt;
+    tbv_zero(&dflt, width);
+    tb_field_put((tb_planes){dflt.v, dflt.u, width}, (tb_field){0, def.width}, &def.val);
+    if (tbv_same(&given, &dflt, width)) {
+        return true;
+    }
+    char got[OVR_VAL];
+    char want[OVR_VAL];
+    ovr_text(&given, width, got, sizeof got);
+    ovr_text(&dflt, width, want, sizeof want);
+    (void)snprintf(msg, sizeof msg,
+                   "parameter %s is given %s but the DUT was elaborated with %s; pass it to "
+                   "read_verilog (-P, not yet)",
+                   def.name, got, want);
+    return ovr_fail(pr, inst, msg);
+}
+
+/* The DUT was elaborated with its default parameters: a `#()` is accepted when each value equals
+ * the default (by value, any width), refused otherwise (`read_verilog -P` will set parameters). */
+static bool check_dut_overrides(parser *pr, const tb_inst *inst, const sub_frame *ovr) {
+    if (ovr->nov == 0 || !tb_design_has_module(pr->tb->design, inst->module)) {
+        return true; /* none, or no such module: the run says so */
+    }
+    for (uint32_t i = 0; i < ovr->nov; i++) {
+        if (!check_one_override(pr, inst, &ovr->ovs[i], i)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 static bool parse_instance(parser *pr) {
     const mod_def *def = tb_side_module(pr);
     if (def != NULL) {
@@ -2999,15 +3135,16 @@ static bool parse_instance(parser *pr) {
     inst->line = cur(pr)->line;
     (void)snprintf(inst->module, sizeof inst->module, "%s", cur(pr)->text);
     pr->pos++;
-    if (is_op(pr, "#")) {
-        return fail(pr, "parameter override on a DUT instance (the DUT is already elaborated)");
+    sub_frame ovr = {0};
+    if (is_op(pr, "#") && !parse_overrides(pr, &ovr)) {
+        return false;
     }
     if (cur(pr)->kind != TK_ID) {
         return fail(pr, "module item");
     }
     (void)snprintf(inst->name, sizeof inst->name, "%s", cur(pr)->text);
     pr->pos++;
-    return parse_inst_conns(pr, inst) && expect_op(pr, ";");
+    return parse_inst_conns(pr, inst) && expect_op(pr, ";") && check_dut_overrides(pr, inst, &ovr);
 }
 
 /* A module item keyword outside the subset. */

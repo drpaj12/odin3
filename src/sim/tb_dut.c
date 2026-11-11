@@ -11,8 +11,10 @@
 #include <string.h>
 
 enum {
-    EDGE_CAP = 64,  /* clock edges recorded between two NBA regions */
-    MAX_CLOCKS = 16 /* clock inputs of one DUT instance */
+    EDGE_CAP = 64,   /* clock edges recorded between two NBA regions */
+    MAX_CLOCKS = 16, /* clock inputs of one DUT instance */
+    PARAM_CHAR_BITS = 8,
+    PARAM_INT_BITS = 64
 };
 
 /* One clock input of the DUT: the connection that drives it, and the code of its bit 0 at the last
@@ -57,6 +59,72 @@ static bool find_module(odin3_design *design, const char *name, odin3_module_id 
 bool tb_design_has_module(odin3_design *design, const char *name) {
     odin3_module_id id;
     return design != NULL && find_module(design, name, &id);
+}
+
+typedef struct param_walk {
+    const odin3_design *design;
+    uint32_t want, seen;
+    bool found;
+    tb_param_def *out;
+} param_walk;
+
+/* The value as tb bits: BITS as they are, INT as 64 bits, STRING 8 bits per character (first
+ * character in the high byte). */
+static void param_bits(const odin3_design *design, const odin3_value *value, tb_param_def *out) {
+    uint32_t width = 0;
+    if (value->kind == ODIN3_VAL_BITS) {
+        width = value->len > (uint32_t)TB_MAX_WIDTH ? (uint32_t)TB_MAX_WIDTH : value->len;
+        tbv_zero(&out->val, width);
+        for (uint32_t i = 0; i < width; i++) {
+            tbv code;
+            tbv_set_code(value->bits[i], &code, 1);
+            tb_field_put((tb_planes){out->val.v, out->val.u, width}, (tb_field){i, 1}, &code);
+        }
+    } else if (value->kind == ODIN3_VAL_STRING) {
+        const char *text = odin3_strtab_get(odin3_design_strtab(design), value->str);
+        size_t len = text != NULL ? strlen(text) : 0;
+        len = len > (size_t)TB_MAX_WIDTH / PARAM_CHAR_BITS ? (size_t)TB_MAX_WIDTH / PARAM_CHAR_BITS
+                                                           : len;
+        width = len == 0 ? (uint32_t)PARAM_CHAR_BITS : (uint32_t)(len * (uint32_t)PARAM_CHAR_BITS);
+        tbv_zero(&out->val, width);
+        for (size_t i = 0; i < len; i++) {
+            tbv byte;
+            tbv_set_u64((uint8_t)text[i], &byte, PARAM_CHAR_BITS);
+            tb_field_put(
+                (tb_planes){out->val.v, out->val.u, width},
+                (tb_field){(uint32_t)((len - 1U - i) * (uint32_t)PARAM_CHAR_BITS), PARAM_CHAR_BITS},
+                &byte);
+        }
+    } else {
+        width = PARAM_INT_BITS;
+        tbv_set_u64((uint64_t)value->i, &out->val, width);
+    }
+    out->width = width;
+}
+
+static odin3_status param_visit(void *ctx, uint32_t key_str, const odin3_value *value) {
+    param_walk *pw = ctx;
+    const char *key = odin3_strtab_get(odin3_design_strtab(pw->design), key_str);
+    size_t pre = strlen(ODIN3_ATTR_PARAM_DEFAULT_PREFIX);
+    if (pw->found || key == NULL || strncmp(key, ODIN3_ATTR_PARAM_DEFAULT_PREFIX, pre) != 0 ||
+        pw->seen++ != pw->want) {
+        return ODIN3_OK;
+    }
+    (void)snprintf(pw->out->name, sizeof pw->out->name, "%s", key + pre);
+    param_bits(pw->design, value, pw->out);
+    pw->found = true;
+    return ODIN3_OK;
+}
+
+bool tb_dut_param_at(odin3_design *design, const char *module, uint32_t index, tb_param_def *out) {
+    odin3_module_id id = {0};
+    if (design == NULL || !find_module(design, module, &id)) {
+        return false;
+    }
+    param_walk pw = {design, index, 0, false, out};
+    (void)odin3_attr_foreach(odin3_module_get(design, id), (odin3_objref){ODIN3_OBJ_MODULE, id.v},
+                             param_visit, &pw);
+    return pw.found;
 }
 
 static bool port_lookup(const odin3_sim *sim, const char *name, tb_conn *conn) {
