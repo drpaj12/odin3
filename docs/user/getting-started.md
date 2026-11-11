@@ -21,7 +21,7 @@ From the release's source tarball (it has the ABC and Unity submodules, no git n
 build is:
 
 ```sh
-tar xzf odin3-1.6.0.tar.gz && cd odin3-1.6.0
+tar xzf odin3-1.6.1.tar.gz && cd odin3-1.6.1
 cmake --preset release && cmake --build --preset release
 ```
 
@@ -34,7 +34,7 @@ odin3 --version
 ```
 
 ```text
-odin3 1.6.0 (ABI 7)
+odin3 1.6.1 (ABI 7)
 commit <40-hex commit of the build>
 SystemVerilog via slang (adapters/slang, third_party/slang)
 linked ABC a3001b72edc5de22442e942165487fddf150e3d0 (adapters/abc/NOTICE)

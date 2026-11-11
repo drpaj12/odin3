@@ -181,7 +181,10 @@ flowchart LR
 | Target | Passes after `read_verilog` | Writes |
 |---|---|---|
 | `vtr` | `proc; fsm; opt; flatten; tristate; opt -full; wreduce; hardmap; lower; abc --lut K` | BLIF for VPR |
-| `lpm` | `proc; opt; wreduce; opt_clean; opt -full; lpmmap; opt_clean; opt -full; write_verilog --quartus` | Verilog with LPM cells for Quartus, stubs in `<top>_lpm_sim.v` |
+| `lpm` | `proc; opt; wreduce; opt_clean; opt -full; lpmmap; opt_clean; opt -full; write_verilog --quartus` | Verilog with LPM cells for Quartus, stubs in `<top>_lpm_sim.v`; a `$readmemh` ROM becomes `altsyncram` ROM with its contents in `<top>_rom<N>.mif` beside the netlist |
+
+The `lpm` target is **untested in Quartus**: its netlists are checked by `tools/lpm-check` (pins, parameters,
+`.mif` contents) but have never been compiled by Quartus, which the project does not have.
 
 The `vtr` script lives in `tools/vtr-qor/qor_legs.py` and the `lpm` script in
 `tools/flow/lpm.script`; `odin3_flow.py` uses both unchanged.

@@ -2,7 +2,7 @@
 
 `plugins/python/odin3.py` is a cffi binding to the C ABI (`include/odin3/odin3.h`). The cdef is
 generated from the header at import time, so the binding follows the header. The C ABI is
-version 7 (Odin III 1.6.0); the Python names may still change between releases.
+version 7 (Odin III 1.6.1); the Python names may still change between releases.
 
 ## Setup
 
@@ -25,7 +25,7 @@ python3 plugins/python/example_plugin.py
 ```
 
 ```text
-example_plugin.py: libodin3 1.6.0 (ABI 7)
+example_plugin.py: libodin3 1.6.1 (ABI 7)
 ```
 
 ## Walking the IR
