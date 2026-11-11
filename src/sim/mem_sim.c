@@ -13,7 +13,7 @@
 #include <stdint.h>
 #include <string.h>
 
-enum { CODE_0 = 0, CODE_1 = 1, CODE_X = 2, MAX_ABITS = 64, MAX_CAP_SHIFT = 62 };
+enum { CODE_0 = 0, CODE_1 = 1, CODE_X = 2, MAX_ABITS = 64, MAX_CAP_SHIFT = 62, MEM_NODE_PORTS = 8 };
 
 /* E (edge cell) port numbers. */
 enum { E_CLK, E_WR_EN, E_WR_ADDR, E_WR_DATA, E_RD_EN, E_RD_ADDR, E_RD_DATA, E_N_PORTS };
@@ -69,7 +69,8 @@ void odin3_sim_mem_geometry(const odin3_value *params, odin3_sim_mem_geo *geo) {
 }
 
 bool odin3_sim_is_mem_type(const odin3_celltype_def *def) {
-    return def->gran == ODIN3_GRAN_WORD && def->n_ports == 8U && strcmp(def->name, "$mem") == 0;
+    return def->gran == ODIN3_GRAN_WORD && def->n_ports == MEM_NODE_PORTS &&
+           strcmp(def->name, "$mem") == 0;
 }
 
 /* --- the cell as the hooks use it ------------------------------------------------------------- */
@@ -82,12 +83,12 @@ typedef struct mctx {
     uint8_t xval;  /* what an x constant reads: x (4-state) or 0 */
 } mctx;
 
-static void load_ctx(mctx *m, const odin3_sim_cell *cell, bool four) {
-    m->cell = cell;
-    odin3_sim_mem_geometry(cell->params, &m->geo);
-    m->regs = cell->state;
-    m->arr = cell->state + (size_t)m->geo.n_sync * m->geo.width;
-    m->xval = four ? (uint8_t)CODE_X : (uint8_t)CODE_0;
+static void load_ctx(mctx *mc, const odin3_sim_cell *cell, bool four) {
+    mc->cell = cell;
+    odin3_sim_mem_geometry(cell->params, &mc->geo);
+    mc->regs = cell->state;
+    mc->arr = cell->state + (size_t)mc->geo.n_sync * mc->geo.width;
+    mc->xval = four ? (uint8_t)CODE_X : (uint8_t)CODE_0;
 }
 
 /* --- 4-state gate functions on codes (sim4.c) --------------------------------------------------
@@ -152,14 +153,14 @@ static bool may_match(const odin3_sim_mem_geo *geo, const maddr *addr, uint64_t 
  * An address with x/z bits reads the merge of every word the known bits allow, and x when an
  * address they allow has no word: x unless all are the same known value (nested `$_MUX_` merges).
  */
-static void read_unknown(const mctx *m, const maddr *addr, uint8_t *dst) {
-    const odin3_sim_mem_geo *geo = &m->geo;
+static void read_unknown(const mctx *mc, const maddr *addr, uint8_t *dst) {
+    const odin3_sim_mem_geo *geo = &mc->geo;
     uint64_t found = 0;
     for (uint64_t word = 0; word < geo->words; word++) {
         if (!may_match(geo, addr, word)) {
             continue;
         }
-        const uint8_t *src = m->arr + word * geo->width;
+        const uint8_t *src = mc->arr + word * geo->width;
         for (uint32_t bit = 0; bit < geo->width; bit++) {
             dst[bit] = found == 0 || dst[bit] == src[bit] ? src[bit] : (uint8_t)CODE_X;
         }
@@ -173,18 +174,18 @@ static void read_unknown(const mctx *m, const maddr *addr, uint8_t *dst) {
 }
 
 /* The word at the address on the pins aidx, into dst (WIDTH bytes). */
-static void read_word(const mctx *m, const uint32_t *aidx, uint8_t *dst) {
-    const odin3_sim_mem_geo *geo = &m->geo;
-    maddr addr = load_addr(m->cell->values, aidx, geo->abits);
+static void read_word(const mctx *mc, const uint32_t *aidx, uint8_t *dst) {
+    const odin3_sim_mem_geo *geo = &mc->geo;
+    maddr addr = load_addr(mc->cell->values, aidx, geo->abits);
     if (addr.known != geo->mask) {
-        read_unknown(m, &addr, dst);
+        read_unknown(mc, &addr, dst);
         return;
     }
     uint64_t word = word_of(geo, addr.val);
     if (word < geo->words) {
-        memcpy(dst, m->arr + word * geo->width, geo->width);
+        memcpy(dst, mc->arr + word * geo->width, geo->width);
     } else {
-        memset(dst, m->xval, geo->width);
+        memset(dst, mc->xval, geo->width);
     }
 }
 
@@ -197,17 +198,17 @@ typedef struct wpins {
     const uint32_t *addr;
 } wpins;
 
-static wpins write_pins(const mctx *m, uint32_t port) {
-    const odin3_sim_span *ports = m->cell->ports;
-    return (wpins){ports[E_WR_EN].idx + (size_t)port * m->geo.width,
-                   ports[E_WR_DATA].idx + (size_t)port * m->geo.width,
-                   ports[E_WR_ADDR].idx + (size_t)port * m->geo.abits};
+static wpins write_pins(const mctx *mc, uint32_t port) {
+    const odin3_sim_span *ports = mc->cell->ports;
+    return (wpins){ports[E_WR_EN].idx + (size_t)port * mc->geo.width,
+                   ports[E_WR_DATA].idx + (size_t)port * mc->geo.width,
+                   ports[E_WR_ADDR].idx + (size_t)port * mc->geo.abits};
 }
 
 /* One word takes the port's data under select = AND(dec, WR_EN[bit]), dec 1 (exact) or x. */
-static void write_word(const mctx *m, const wpins *pins, uint8_t *word, uint8_t dec) {
-    const uint8_t *values = m->cell->values;
-    for (uint32_t bit = 0; bit < m->geo.width; bit++) {
+static void write_word(const mctx *mc, const wpins *pins, uint8_t *word, uint8_t dec) {
+    const uint8_t *values = mc->cell->values;
+    for (uint32_t bit = 0; bit < mc->geo.width; bit++) {
         uint8_t sel = and4(dec, values[pins->en[bit]]);
         uint8_t data = values[pins->data[bit]];
         if (sel == CODE_1) {
@@ -218,32 +219,32 @@ static void write_word(const mctx *m, const wpins *pins, uint8_t *word, uint8_t 
     }
 }
 
-static bool any_enable(const mctx *m, const wpins *pins) {
-    for (uint32_t bit = 0; bit < m->geo.width; bit++) {
-        if (m->cell->values[pins->en[bit]] != CODE_0) {
+static bool any_enable(const mctx *mc, const wpins *pins) {
+    for (uint32_t bit = 0; bit < mc->geo.width; bit++) {
+        if (mc->cell->values[pins->en[bit]] != CODE_0) {
             return true;
         }
     }
     return false;
 }
 
-static void write_port(const mctx *m, uint32_t port) {
-    const odin3_sim_mem_geo *geo = &m->geo;
-    wpins pins = write_pins(m, port);
-    if (!any_enable(m, &pins)) {
+static void write_port(const mctx *mc, uint32_t port) {
+    const odin3_sim_mem_geo *geo = &mc->geo;
+    wpins pins = write_pins(mc, port);
+    if (!any_enable(mc, &pins)) {
         return;
     }
-    maddr addr = load_addr(m->cell->values, pins.addr, geo->abits);
+    maddr addr = load_addr(mc->cell->values, pins.addr, geo->abits);
     if (addr.known == geo->mask) {
         uint64_t word = word_of(geo, addr.val);
         if (word < geo->words) {
-            write_word(m, &pins, m->arr + word * geo->width, CODE_1);
+            write_word(mc, &pins, mc->arr + word * geo->width, CODE_1);
         }
         return;
     }
     for (uint64_t word = 0; word < geo->words; word++) {
         if (may_match(geo, &addr, word)) {
-            write_word(m, &pins, m->arr + word * geo->width, CODE_X);
+            write_word(mc, &pins, mc->arr + word * geo->width, CODE_X);
         }
     }
 }
@@ -251,12 +252,12 @@ static void write_port(const mctx *m, uint32_t port) {
 /* --- synchronous reads ------------------------------------------------------------------------ */
 
 /* (read address == write address) of read port rport and write port wport, 4-state. */
-static uint8_t addr_equal(const mctx *m, uint32_t rport, uint32_t wport) {
-    const uint8_t *values = m->cell->values;
-    const uint32_t *raddr = m->cell->ports[E_RD_ADDR].idx + (size_t)rport * m->geo.abits;
-    wpins pins = write_pins(m, wport);
+static uint8_t addr_equal(const mctx *mc, uint32_t rport, uint32_t wport) {
+    const uint8_t *values = mc->cell->values;
+    const uint32_t *raddr = mc->cell->ports[E_RD_ADDR].idx + (size_t)rport * mc->geo.abits;
+    wpins pins = write_pins(mc, wport);
     uint8_t same = CODE_1;
-    for (uint32_t k = 0; k < m->geo.abits; k++) {
+    for (uint32_t k = 0; k < mc->geo.abits; k++) {
         same = and4(same, xnor4(values[raddr[k]], values[pins.addr[k]]));
     }
     return same;
@@ -264,15 +265,15 @@ static uint8_t addr_equal(const mctx *m, uint32_t rport, uint32_t wport) {
 
 /* Transparent read: the data a write port writes to the read address in this cycle replaces the
  * bits of the freshly read word (ports in order, the later one wins). */
-static void bypass(const mctx *m, uint32_t rport, uint8_t *word) {
-    const uint8_t *values = m->cell->values;
-    for (uint32_t wport = 0; wport < m->geo.n_wr; wport++) {
-        wpins pins = write_pins(m, wport);
-        if (!any_enable(m, &pins)) {
+static void bypass(const mctx *mc, uint32_t rport, uint8_t *word) {
+    const uint8_t *values = mc->cell->values;
+    for (uint32_t wport = 0; wport < mc->geo.n_wr; wport++) {
+        wpins pins = write_pins(mc, wport);
+        if (!any_enable(mc, &pins)) {
             continue;
         }
-        uint8_t same = addr_equal(m, rport, wport);
-        for (uint32_t bit = 0; bit < m->geo.width; bit++) {
+        uint8_t same = addr_equal(mc, rport, wport);
+        for (uint32_t bit = 0; bit < mc->geo.width; bit++) {
             uint8_t cond = and4(values[pins.en[bit]], same);
             uint8_t data = values[pins.data[bit]];
             if (cond == CODE_1) {
@@ -285,34 +286,42 @@ static void bypass(const mctx *m, uint32_t rport, uint8_t *word) {
 }
 
 /* The register of sync port `slot` (read port rport) takes the word as it was before the edge. */
-static void sync_read(const mctx *m, uint32_t rport, uint32_t slot) {
-    const odin3_sim_cell *cell = m->cell;
-    const odin3_sim_mem_geo *geo = &m->geo;
+/* Read port rport, the slot-th synchronous one. */
+typedef struct sync_port {
+    uint32_t rport;
+    uint32_t slot;
+} sync_port;
+
+static void sync_read(const mctx *mc, sync_port port) {
+    uint32_t rport = port.rport;
+    uint32_t slot = port.slot;
+    const odin3_sim_cell *cell = mc->cell;
+    const odin3_sim_mem_geo *geo = &mc->geo;
     uint8_t enable = cell->values[cell->ports[E_RD_EN].idx[rport]];
     if (enable == CODE_0) {
         return;
     }
     uint8_t *word = cell->scratch;
-    uint8_t *reg = m->regs + (size_t)slot * geo->width;
-    read_word(m, cell->ports[E_RD_ADDR].idx + (size_t)rport * geo->abits, word);
+    uint8_t *reg = mc->regs + (size_t)slot * geo->width;
+    read_word(mc, cell->ports[E_RD_ADDR].idx + (size_t)rport * geo->abits, word);
     if (flag_set(&cell->params[ODIN3_SIM_MEM_P_RD_TRANSPARENT], rport)) {
-        bypass(m, rport, word);
+        bypass(mc, rport, word);
     }
     for (uint32_t bit = 0; bit < geo->width; bit++) {
         reg[bit] = enable == CODE_1 ? word[bit] : merge4(reg[bit], word[bit]);
     }
 }
 
-static void edge_update(const mctx *m) {
-    const odin3_sim_cell *cell = m->cell;
+static void edge_update(const mctx *mc) {
+    const odin3_sim_cell *cell = mc->cell;
     uint32_t slot = 0;
-    for (uint32_t rport = 0; rport < m->geo.n_rd; rport++) {
+    for (uint32_t rport = 0; rport < mc->geo.n_rd; rport++) {
         if (flag_set(&cell->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], rport)) {
-            sync_read(m, rport, slot++);
+            sync_read(mc, (sync_port){rport, slot++});
         }
     }
-    for (uint32_t wport = 0; wport < m->geo.n_wr; wport++) {
-        write_port(m, wport);
+    for (uint32_t wport = 0; wport < mc->geo.n_wr; wport++) {
+        write_port(mc, wport);
     }
 }
 
@@ -326,42 +335,42 @@ static uint8_t init_code(const odin3_value *init, uint64_t at, bool four) {
     return bit == ODIN3_BIT_1 ? (uint8_t)CODE_1 : (uint8_t)CODE_0;
 }
 
-static void init_state(const mctx *m, bool four) {
-    const odin3_value *init = &m->cell->params[ODIN3_SIM_MEM_P_INIT];
-    memset(m->regs, m->xval, (size_t)m->geo.n_sync * m->geo.width);
-    uint64_t total = m->geo.words * m->geo.width;
+static void init_state(const mctx *mc, bool four) {
+    const odin3_value *init = &mc->cell->params[ODIN3_SIM_MEM_P_INIT];
+    memset(mc->regs, mc->xval, (size_t)mc->geo.n_sync * mc->geo.width);
+    uint64_t total = mc->geo.words * mc->geo.width;
     for (uint64_t at = 0; at < total; at++) {
-        m->arr[at] = init_code(init, at, four);
+        mc->arr[at] = init_code(init, at, four);
     }
 }
 
 /* --- the hooks -------------------------------------------------------------------------------- */
 
 static void edge_hook(const odin3_sim_cell *cell, bool four) {
-    mctx m;
-    load_ctx(&m, cell, four);
+    mctx mc;
+    load_ctx(&mc, cell, four);
     if (cell->event == ODIN3_SIM_INIT) {
-        init_state(&m, four);
+        init_state(&mc, four);
     } else if (cell->event == ODIN3_SIM_COMB) {
         const odin3_sim_span *out = &cell->ports[E_RD_DATA];
         for (uint32_t k = 0; k < out->width; k++) {
-            cell->values[out->idx[k]] = m.regs[k];
+            cell->values[out->idx[k]] = mc.regs[k];
         }
     } else {
         odin3_sim_event want =
             (cell->flags & ODIN3_SIM_CELL_MEM_NEG) != 0 ? ODIN3_SIM_NEGEDGE : ODIN3_SIM_POSEDGE;
         if (cell->event == want) {
-            edge_update(&m);
+            edge_update(&mc);
         }
     }
 }
 
 static void async_hook(const odin3_sim_cell *cell, bool four) {
-    mctx m;
-    load_ctx(&m, cell, four);
+    mctx mc;
+    load_ctx(&mc, cell, four);
     if (cell->event == ODIN3_SIM_INIT) {
         if ((cell->flags & ODIN3_SIM_CELL_MEM_INIT) != 0) {
-            init_state(&m, four);
+            init_state(&mc, four);
         }
         return;
     }
@@ -369,9 +378,9 @@ static void async_hook(const odin3_sim_cell *cell, bool four) {
         return;
     }
     const odin3_sim_span *out = &cell->ports[A_RD_DATA];
-    uint32_t width = m.geo.width;
+    uint32_t width = mc.geo.width;
     for (uint32_t port = 0; port < out->width / width; port++) {
-        read_word(&m, cell->ports[A_RD_ADDR].idx + (size_t)port * m.geo.abits, cell->scratch);
+        read_word(&mc, cell->ports[A_RD_ADDR].idx + (size_t)port * mc.geo.abits, cell->scratch);
         for (uint32_t bit = 0; bit < width; bit++) {
             cell->values[out->idx[(size_t)port * width + bit]] = cell->scratch[bit];
         }

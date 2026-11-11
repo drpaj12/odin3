@@ -1118,7 +1118,6 @@ static void test_oom_at_every_allocation_leaves_a_valid_design(void) {
     oom_sweep(&cs);
 }
 
-
 /* --- the simulator's own `$mem` model (src/sim/mem_sim.c) ---------------------------------- */
 
 /* True for a case one clock net and one polarity serves: what the cell model supports. */

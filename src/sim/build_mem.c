@@ -8,6 +8,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+enum { MEM_MAX_SPANS = 16 }; /* spans a node adds at most (7 + 2, with room) */
+
 /* What the node needs, found by the scan of its ports. */
 typedef struct mem_plan {
     odin3_sim_mem_geo geo;
@@ -19,13 +21,18 @@ typedef struct mem_plan {
     const char *refuse; /* why the memory cannot be simulated, NULL when it can */
 } mem_plan;
 
-static odin3_net_id port_net(const odin3_module *mod, odin3_node_id node, uint32_t port,
-                             uint32_t bit) {
-    odin3_pinslice pins = odin3_node_port(mod, node, port);
-    if (bit >= pins.count) {
+/* Bit `bit` of port `port` of a node. */
+typedef struct pin_at {
+    uint32_t port;
+    uint32_t bit;
+} pin_at;
+
+static odin3_net_id port_net(const odin3_module *mod, odin3_node_id node, pin_at at) {
+    odin3_pinslice pins = odin3_node_port(mod, node, at.port);
+    if (at.bit >= pins.count) {
         return (odin3_net_id){0};
     }
-    return odin3_pin_net(mod, (odin3_pin_id){pins.first.v + bit});
+    return odin3_pin_net(mod, (odin3_pin_id){pins.first.v + at.bit});
 }
 
 /* True when every WR_EN bit of write port wport is constant 0 (or open): the port never writes. */
@@ -33,7 +40,7 @@ static bool write_dead(const odin3_module *mod, odin3_node_id node, const mem_pl
                        uint32_t wport) {
     for (uint32_t bit = 0; bit < plan->geo.width; bit++) {
         odin3_net_id net =
-            port_net(mod, node, ODIN3_SIM_MEM_PORT_WR_EN, wport * plan->geo.width + bit);
+            port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_WR_EN, wport * plan->geo.width + bit});
         if (odin3_net_valid(net) && odin3_net_const_value(mod, net) != ODIN3_CONST_0) {
             return false;
         }
@@ -72,7 +79,7 @@ static void scan_write_ports(odin3_sim_builder *bld, uint32_t frame, odin3_node_
             plan->refuse = "has an asynchronous write port";
             return;
         }
-        note_clock(bld, frame, port_net(mod, node, ODIN3_SIM_MEM_PORT_WR_CLK, wport),
+        note_clock(bld, frame, port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_WR_CLK, wport}),
                    !bit_flag(&plan->params[ODIN3_SIM_MEM_P_WR_CLK_POLARITY], wport), plan);
     }
 }
@@ -85,7 +92,7 @@ static void scan_read_ports(odin3_sim_builder *bld, uint32_t frame, odin3_node_i
             plan->n_async++;
             continue;
         }
-        note_clock(bld, frame, port_net(mod, node, ODIN3_SIM_MEM_PORT_RD_CLK, rport),
+        note_clock(bld, frame, port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_RD_CLK, rport}),
                    !bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_POLARITY], rport), plan);
     }
 }
@@ -282,7 +289,8 @@ odin3_status odin3_sim_add_mem(odin3_sim_builder *bld, uint32_t frame, odin3_nod
     if (!odin3_sim_check_budget(bld, frame, node, grow)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (bld->cells.len + 2U >= ODIN3_SIM_UNSET || bld->spans.len + 16U >= ODIN3_SIM_UNSET) {
+    if (bld->cells.len + 2U >= ODIN3_SIM_UNSET ||
+        bld->spans.len + MEM_MAX_SPANS >= ODIN3_SIM_UNSET) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = ODIN3_OK;

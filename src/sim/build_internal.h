@@ -67,7 +67,6 @@ odin3_status odin3_sim_check_hierarchy(odin3_sim_builder *bld, odin3_module_id t
 uint32_t odin3_sim_child_module(const odin3_sim_builder *bld, const odin3_module *module,
                                 odin3_node_id node);
 
-
 /* What one step of expansion adds: cells/frames, and net-map entries, slots or pin bits. */
 typedef struct odin3_sim_growth {
     uint64_t units;

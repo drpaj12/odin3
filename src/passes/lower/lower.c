@@ -154,8 +154,9 @@ static const lw_rule *rule_of(const lw_ctx *lw, const lw_rules *rules, odin3_nod
     return *is_word && type.v <= rules->n_types ? rules->by_type[type.v].rule : NULL;
 }
 
-/* True for a cell --keep-sel (or, for a `$mem`, --keep-mem-cells) leaves alone: a word cell of an if or case (attribute rtl_sel) whose
- * type the 4-state simulator models at word level (sim/sim4.c). */
+/* True for a cell --keep-sel (or, for a `$mem`, --keep-mem-cells) leaves alone: a word cell of an
+ * if or case (attribute rtl_sel) whose type the 4-state simulator models at word level
+ * (sim/sim4.c). */
 static bool kept_by_sel(const lw_ctx *lw, odin3_node_id node, const odin3_celltype_def *def) {
     static const char *const k_types[] = {"$mux",       "$pmux",        "$eq",       "$ne",
                                           "$reduce_or", "$reduce_bool", "$logic_not"};
