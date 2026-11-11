@@ -174,6 +174,12 @@ static void read_unknown(const mctx *mc, const maddr *addr, uint8_t *dst) {
 }
 
 /* The word at the address on the pins aidx, into dst (WIDTH bytes). */
+/* BASE + OFF, or NULL when BASE is NULL (a zero-width port such as ABITS = 0 has no pin array;
+ * NULL + 0 is undefined behaviour). */
+static const uint32_t *pins_at(const uint32_t *base, size_t off) {
+    return base == NULL ? NULL : base + off;
+}
+
 static void read_word(const mctx *mc, const uint32_t *aidx, uint8_t *dst) {
     const odin3_sim_mem_geo *geo = &mc->geo;
     maddr addr = load_addr(mc->cell->values, aidx, geo->abits);
@@ -200,9 +206,9 @@ typedef struct wpins {
 
 static wpins write_pins(const mctx *mc, uint32_t port) {
     const odin3_sim_span *ports = mc->cell->ports;
-    return (wpins){ports[E_WR_EN].idx + (size_t)port * mc->geo.width,
-                   ports[E_WR_DATA].idx + (size_t)port * mc->geo.width,
-                   ports[E_WR_ADDR].idx + (size_t)port * mc->geo.abits};
+    return (wpins){pins_at(ports[E_WR_EN].idx, (size_t)port * mc->geo.width),
+                   pins_at(ports[E_WR_DATA].idx, (size_t)port * mc->geo.width),
+                   pins_at(ports[E_WR_ADDR].idx, (size_t)port * mc->geo.abits)};
 }
 
 /* One word takes the port's data under select = AND(dec, WR_EN[bit]), dec 1 (exact) or x. */
@@ -254,7 +260,7 @@ static void write_port(const mctx *mc, uint32_t port) {
 /* (read address == write address) of read port rport and write port wport, 4-state. */
 static uint8_t addr_equal(const mctx *mc, uint32_t rport, uint32_t wport) {
     const uint8_t *values = mc->cell->values;
-    const uint32_t *raddr = mc->cell->ports[E_RD_ADDR].idx + (size_t)rport * mc->geo.abits;
+    const uint32_t *raddr = pins_at(mc->cell->ports[E_RD_ADDR].idx, (size_t)rport * mc->geo.abits);
     wpins pins = write_pins(mc, wport);
     uint8_t same = CODE_1;
     for (uint32_t k = 0; k < mc->geo.abits; k++) {
@@ -303,7 +309,7 @@ static void sync_read(const mctx *mc, sync_port port) {
     }
     uint8_t *word = cell->scratch;
     uint8_t *reg = mc->regs + (size_t)slot * geo->width;
-    read_word(mc, cell->ports[E_RD_ADDR].idx + (size_t)rport * geo->abits, word);
+    read_word(mc, pins_at(cell->ports[E_RD_ADDR].idx, (size_t)rport * geo->abits), word);
     if (flag_set(&cell->params[ODIN3_SIM_MEM_P_RD_TRANSPARENT], rport)) {
         bypass(mc, rport, word);
     }
@@ -380,7 +386,8 @@ static void async_hook(const odin3_sim_cell *cell, bool four) {
     const odin3_sim_span *out = &cell->ports[A_RD_DATA];
     uint32_t width = mc.geo.width;
     for (uint32_t port = 0; port < out->width / width; port++) {
-        read_word(&mc, cell->ports[A_RD_ADDR].idx + (size_t)port * mc.geo.abits, cell->scratch);
+        read_word(&mc, pins_at(cell->ports[A_RD_ADDR].idx, (size_t)port * mc.geo.abits),
+                  cell->scratch);
         for (uint32_t bit = 0; bit < width; bit++) {
             cell->values[out->idx[(size_t)port * width + bit]] = cell->scratch[bit];
         }
