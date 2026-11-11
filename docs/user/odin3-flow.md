@@ -4,7 +4,7 @@
 and, when VTR is available, VPR. It uses only the Python standard library.
 
 ```text
-odin3-flow design.v [more.v ...] [-f LIST] [-I DIR] [-D NAME[=VAL]] [--read-opt=OPT] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml]
+odin3-flow design.v [more.v ...] [-f LIST] [--project X.o3proj] [-I DIR] [-D NAME[=VAL]] [--read-opt=OPT] [--top TOP] [--target vtr|lpm] [--arch ARCH.xml]
            [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--timing-attr]
            [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
            [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
@@ -14,6 +14,7 @@ odin3-flow design.v [more.v ...] [-f LIST] [-I DIR] [-D NAME[=VAL]] [--read-opt=
 |---|---|
 | `designs` | Verilog files (or give `-f`) |
 | `-I DIR`, `-D NAME[=VALUE]` | include directory (also searched for `$readmemh/b` files, after the source file's directory and the working directory) and preprocessor define; repeatable. Carried to `read_verilog` by a generated `odin3/flow.o3proj`. `vtr` and `lpm` targets |
+| `--project X.o3proj` | read the design from a project file: its `file` lines (Verilog and SystemVerilog; paths relative to the project), `incdir`, `define` and `top [<library>.]<module>`. The project is then the single source of the top: `--top` is not needed, and a `--top` that differs is exit code 2. Files and options given as well are added. `libfile`, `libdir`, `libext` and `param` lines are refused (the flow does not carry them); other keys (`arch`, `flow`, `tool`, ...) are not used |
 | `-f LIST` | a Verilog file list: files, `+incdir+a+b`, `+define+X=1`, `-I`, `-D`, `-f` (paths relative to the working directory), `-F` (relative to the list); `//` and `#` comments; `$VAR` expanded; any other option is refused. Repeatable; its files follow the files on the command line |
 | `--strict-tristate` | the `tristate` pass runs after `flatten` in the `vtr` flow and the silicon flow: an internal tri-state becomes logic and a top-level `inout` is split into `p_i`/`p_o`/`p_oe`, one WARNING per conversion in the `odin3` log. This flag makes any conversion an error (the behaviour before the pass). A design with no tri-state is unchanged |
 | `--read-opt=OPT` | an extra `read_verilog` option such as `--read-opt=--auto-blackbox` or `--read-opt=--nomem2reg`; repeatable. The equals sign is needed |

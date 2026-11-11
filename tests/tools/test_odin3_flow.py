@@ -84,6 +84,48 @@ class VtrTarget(FlowCase):
         self.assertFalse((self.tmp / "out" / "vpr").exists())
 
 
+class ProjectTest(unittest.TestCase):
+    """--project: files, include directories, defines and top from an .o3proj."""
+
+    def setUp(self) -> None:
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        (self.tmp / "src").mkdir()
+        body = "(input x, output y); assign y = {}x; endmodule\n"
+        (self.tmp / "src" / "a.v").write_text("module a" + body.format(""))
+        (self.tmp / "src" / "b.v").write_text("module b" + body.format("~"))
+
+    def project(self, text: str) -> Path:
+        path = self.tmp / "p.o3proj"
+        path.write_text(text)
+        return path
+
+    def test_reads_files_defines_incdirs_top(self) -> None:
+        proj = self.project("# c\nfile verilog src/a.v\nfile verilog src/b.v library lib\n"
+                            "incdir src\ndefine N=4\ntop work.a\narch k6.xml\n")
+        files, inc, dfn, top = flow.expand_project(proj)
+        want = [(self.tmp / "src/a.v").resolve(), (self.tmp / "src/b.v").resolve()]
+        self.assertEqual(files, want)
+        self.assertEqual(inc, [str((self.tmp / "src").resolve())])
+        self.assertEqual((dfn, top), (["N=4"], "a"))
+
+    def test_top_conflict_is_an_error(self) -> None:
+        proj = self.project("file verilog src/a.v\nfile verilog src/b.v\ntop a\n")
+        with self.assertRaises(flow.UsageError):
+            flow.parse_args(["--project", str(proj), "--top", "b"])
+        args = flow.parse_args(["--project", str(proj), "--no-vpr", "--odin3", sys.executable])
+        self.assertEqual(args.top, "a")
+        self.assertEqual(len(args.designs), 2)
+
+    def test_key_the_flow_cannot_carry_is_refused(self) -> None:
+        proj = self.project("file verilog src/a.v\nlibdir src\n")
+        with self.assertRaises(flow.UsageError):
+            flow.expand_project(proj)
+        proj = self.project("file vhdl src/a.v\n")
+        with self.assertRaises(flow.UsageError):
+            flow.expand_project(proj)
+
+
 @needs_odin3
 class LpmTarget(FlowCase):
     def test_lpm_writes_verilog_and_lints(self) -> None:
