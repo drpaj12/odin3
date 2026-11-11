@@ -48,6 +48,9 @@ static char log_text[LOG_TEXT];
 static uint8_t g_rd_flip;
 static uint8_t g_wr_flip;
 
+/* The memcell tests: `lower --keep-mem-cells` leaves the `$mem`, and the simulator runs it. */
+static bool g_memcell;
+
 static void text_sink(odin3_log_level level, const char *msg, void *user) {
     (void)user;
     (void)level;
@@ -61,6 +64,7 @@ void setUp(void) {
     log_text[0] = '\0';
     g_rd_flip = 0;
     g_wr_flip = 0;
+    g_memcell = false;
     odin3_log_set_sink(text_sink, NULL);
 }
 
@@ -241,6 +245,13 @@ static void md_lowered(md *dd, const mcase *cs, const char *args) {
     md_make(dd, cs);
     char msg[MSG_LEN];
     describe(cs, msg);
+    if (g_memcell) {
+        char kept[MSG_LEN];
+        (void)snprintf(kept, sizeof kept, "%s --keep-mem-cells", args);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, md_lower(dd, kept), msg);
+        TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, lf_count_type(&dd->fix, dd->mod, "$mem"), msg);
+        return;
+    }
     TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, md_lower(dd, args), msg);
     check_netlist_view(dd->mod);
     TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, lf_word_nodes(&dd->fix, dd->mod), msg);
@@ -1107,6 +1118,125 @@ static void test_oom_at_every_allocation_leaves_a_valid_design(void) {
     oom_sweep(&cs);
 }
 
+
+/* --- the simulator's own `$mem` model (src/sim/mem_sim.c) ---------------------------------- */
+
+/* True for a case one clock net and one polarity serves: what the cell model supports. */
+static bool one_clock(const mcase *cs) {
+    return cs->share_clock;
+}
+
+static void test_memcell_write_all_addresses_then_read_all(void) {
+    g_memcell = true;
+    for (int i = 0; i < N_CASES; i++) {
+        if (one_clock(&k_cases[i])) {
+            run_script(&k_cases[i], script_write_then_read, "");
+        }
+    }
+}
+
+static void test_memcell_two_write_ports_the_later_one_wins(void) {
+    g_memcell = true;
+    for (int i = 0; i < N_CASES; i++) {
+        if (one_clock(&k_cases[i]) && k_cases[i].cfg.n_wr > 1) {
+            run_script(&k_cases[i], script_priority, "");
+        }
+    }
+}
+
+static void test_memcell_random_cycles_follow_the_model(void) {
+    g_memcell = true;
+    for (int i = 0; i < N_CASES; i++) {
+        if (one_clock(&k_cases[i])) {
+            run_random(&k_cases[i], 1000U + (uint64_t)i, "");
+        }
+    }
+}
+
+static void test_memcell_init_contents_are_read_before_any_write(void) {
+    g_memcell = true;
+    for (int i = 0; i < N_CASES; i++) {
+        mcase cs = k_cases[i];
+        cs.use_init = true;
+        if (one_clock(&cs)) {
+            run_script(&cs, script_write_then_read, "");
+            run_random(&cs, 2000U + (uint64_t)i, "");
+        }
+    }
+}
+
+static void test_memcell_falling_edge(void) {
+    g_memcell = true;
+    for (int i = 0; i < N_CASES; i++) {
+        mcase cs = k_cases[i];
+        cs.falling = true;
+        if (one_clock(&cs)) {
+            run_random(&cs, 3000U + (uint64_t)i, "");
+        }
+    }
+}
+
+/* The memory runs the same cycles as the lowered netlist: outputs of both, every cycle. */
+static void test_memcell_matches_the_lowered_netlist(void) {
+    for (int i = 0; i < N_CASES; i++) {
+        if (!one_clock(&k_cases[i])) {
+            continue;
+        }
+        for (uint64_t seed = 0; seed < 3; seed++) {
+            g_memcell = false;
+            run_random(&k_cases[i], 4000U + seed, "");
+            g_memcell = true;
+            run_random(&k_cases[i], 4000U + seed, "");
+        }
+    }
+}
+
+/* odin3_sim_build refuses `cs` as a memory cell, the log saying `text`. */
+static void expect_sim_refused(const mcase *cs, const char *text) {
+    md dd;
+    g_memcell = true;
+    md_lowered(&dd, cs, "");
+    odin3_sim *sim = NULL;
+    log_text[0] = '\0';
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_sim_build(dd.fix.design, odin3_module_id_of(dd.mod), &sim));
+    TEST_ASSERT_NULL(sim);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, text), log_text);
+    lf_end(&dd.fix);
+}
+
+static void test_memcell_several_clocks_are_refused_with_a_located_error(void) {
+    mcase cs = k_cases[2];
+    cs.share_clock = false;
+    expect_sim_refused(&cs, "cannot simulate `$mem` (node `");
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "several clocks or clock polarities"));
+    cs = k_cases[2];
+    g_wr_flip = 2U;
+    expect_sim_refused(&cs, "several clocks or clock polarities");
+    cs = k_cases[1];
+    g_rd_flip = 1U; /* the sync read port on the other edge than the write port */
+    expect_sim_refused(&cs, "several clocks or clock polarities");
+}
+
+static void test_memcell_an_asynchronous_write_port_is_refused(void) {
+    mcase cs = k_cases[0];
+    cs.async_write = true;
+    expect_sim_refused(&cs, "has an asynchronous write port");
+}
+
+static void test_memcell_a_mem_without_a_read_port_builds(void) {
+    mcase cs = k_cases[0];
+    cs.cfg.n_rd = 0;
+    g_memcell = true;
+    md dd;
+    md_lowered(&dd, &cs, "");
+    odin3_sim *sim = NULL;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_sim_build(dd.fix.design, odin3_module_id_of(dd.mod), &sim));
+    odin3_sim_destroy(sim);
+    lf_end(&dd.fix);
+}
+
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_write_all_addresses_then_read_all);
@@ -1142,5 +1272,14 @@ int main(void) {
     RUN_TEST(test_the_report_lists_the_mem);
     RUN_TEST(test_standalone_memrd_and_memwr_are_errors);
     RUN_TEST(test_oom_at_every_allocation_leaves_a_valid_design);
+    RUN_TEST(test_memcell_write_all_addresses_then_read_all);
+    RUN_TEST(test_memcell_two_write_ports_the_later_one_wins);
+    RUN_TEST(test_memcell_random_cycles_follow_the_model);
+    RUN_TEST(test_memcell_init_contents_are_read_before_any_write);
+    RUN_TEST(test_memcell_falling_edge);
+    RUN_TEST(test_memcell_matches_the_lowered_netlist);
+    RUN_TEST(test_memcell_several_clocks_are_refused_with_a_located_error);
+    RUN_TEST(test_memcell_an_asynchronous_write_port_is_refused);
+    RUN_TEST(test_memcell_a_mem_without_a_read_port_builds);
     return UNITY_END();
 }

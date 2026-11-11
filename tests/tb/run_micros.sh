@@ -2,6 +2,7 @@
 # run_micros.sh <odin3> [iverilog-bin]: for each tests/tb/micro/<n>_tb.v (and misc_tb.v, no DUT; an optional <n>_lib.v is a second testbench file, -I . for `include) the
 # $display output of `odin3 sim_tb` must equal iverilog + vvp line for line (spec section 7a).
 # An optional <n>.rflags file holds extra arguments of `read_verilog` (e.g. --case-xz-never).
+# An optional <n>.pre file holds passes run between `opt` and `lower` (e.g. `memory_merge;`).
 # An optional <n>.flags file holds extra arguments of `lower` for the DUT (e.g. --keep-sel, the
 # flow for x-bearing benches: if/case selects keep their RTL meaning). SIM_TB_FLAGS (environment)
 # is added to every sim_tb command; with --2state in it the 4-state micros (x*_tb.v) are skipped; the x micros get --4state,
@@ -22,6 +23,8 @@ for tb in *_tb.v; do
     lflags=""
     [ -f "$n.flags" ] && lflags=$(cat "$n.flags")
     lflags="$lflags ${LOWER_EXTRA:-}"
+    pre=""
+    [ -f "$n.pre" ] && pre=$(cat "$n.pre")
     rflags=""
     [ -f "$n.rflags" ] && rflags=$(cat "$n.rflags")
     dut=""
@@ -34,7 +37,7 @@ for tb in *_tb.v; do
         echo "SKIP $n (iverilog rejects)"; continue
     fi
     if [ -n "$dut" ]; then
-        script="read_verilog $rflags $dut; proc; opt; lower $lflags; sim_tb $flags $mflags -I . --out $work/$n.out $tb $extra"
+        script="read_verilog $rflags $dut; proc; opt; $pre lower $lflags; sim_tb $flags $mflags -I . --out $work/$n.out $tb $extra"
     else
         script="sim_tb $flags $mflags -I . --out $work/$n.out $tb $extra"
     fi

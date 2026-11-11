@@ -2869,6 +2869,20 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_micros_2state PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL "
                                               ENVIRONMENT "SIM_TB_FLAGS=--2state" LABELS tools)
+        # The same micros with every `$mem` simulated as a cell (lower --keep-mem-cells), 4- and 2-state.
+        add_test(NAME tb_micros_memcell
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros_memcell PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL "
+                                               ENVIRONMENT "LOWER_EXTRA=--keep-mem-cells" LABELS tools)
+        add_test(NAME tb_micros_memcell_2state
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_micros.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_micros_memcell_2state PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL "
+                             ENVIRONMENT "SIM_TB_FLAGS=--2state;LOWER_EXTRA=--keep-mem-cells"
+                             LABELS tools)
+        # x/z inputs on memories: lowered gates and the memory cell print the same.
+        add_test(NAME tb_memx
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_memx.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_memx PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
         add_test(NAME tb_vcd
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
                     ${Python3_EXECUTABLE})
