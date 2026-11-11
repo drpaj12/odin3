@@ -2987,12 +2987,19 @@ static bool finish_sub(parser *pr) {
 
 /* --- `#()` on a DUT instance: the DUT is elaborated, so an override must equal the default --- */
 
-enum { OVR_MSG = 448, OVR_WHAT = 256, OVR_VAL = 40, OVR_HEX_BITS = 4 };
+enum {
+    OVR_MSG = 448,
+    OVR_WHAT = 256,
+    OVR_VAL = 40,
+    OVR_HEX_BITS = 4,
+    OVR_U64_BITS = 64,
+    OVR_X_AT = 16
+};
 
 /* A value for a message: decimal when known and up to 64 bits, else hex (x for unknown bits). */
 static void ovr_text(const tbv *val, uint32_t width, char *buf, size_t cap) {
     uint64_t num = 0;
-    if (width <= (uint32_t)64U && tbv_u64(val, width, &num)) {
+    if (width <= OVR_U64_BITS && tbv_u64(val, width, &num)) {
         (void)snprintf(buf, cap, "%llu", (unsigned long long)num);
         return;
     }
@@ -3008,7 +3015,8 @@ static void ovr_text(const tbv *val, uint32_t width, char *buf, size_t cap) {
             nib = (nib << 1U) | (code & 1U);
         }
         pos -= take;
-        buf[at++] = unknown ? 'x' : "0123456789abcdef"[nib];
+        static const char hex[] = "0123456789abcdefx";
+        buf[at++] = hex[unknown ? OVR_X_AT : nib];
     }
     buf[at] = '\0';
 }
@@ -3060,42 +3068,53 @@ static bool ovr_fail(parser *pr, const tb_inst *inst, const char *what) {
     return false;
 }
 
+/* One override against its default. */
+static bool check_one_override(parser *pr, const tb_inst *inst, const sub_ov *ov, uint32_t pos) {
+    char msg[OVR_WHAT];
+    tb_param_def def;
+    if (!ovr_target(pr, inst, ov, pos, &def)) {
+        if (ov->name[0] != '\0') {
+            (void)snprintf(msg, sizeof msg, "no parameter %s", ov->name);
+        } else {
+            (void)snprintf(msg, sizeof msg,
+                           "more ordered parameter values than the module has "
+                           "parameters");
+        }
+        return ovr_fail(pr, inst, msg);
+    }
+    tbv given;
+    uint32_t width = 0;
+    if (!ovr_value(pr, ov->expr, &def, &given, &width)) {
+        (void)snprintf(msg, sizeof msg, "parameter %s: the override is not a constant expression",
+                       def.name);
+        return ovr_fail(pr, inst, msg);
+    }
+    tbv dflt;
+    tbv_zero(&dflt, width);
+    tb_field_put((tb_planes){dflt.v, dflt.u, width}, (tb_field){0, def.width}, &def.val);
+    if (tbv_same(&given, &dflt, width)) {
+        return true;
+    }
+    char got[OVR_VAL];
+    char want[OVR_VAL];
+    ovr_text(&given, width, got, sizeof got);
+    ovr_text(&dflt, width, want, sizeof want);
+    (void)snprintf(msg, sizeof msg,
+                   "parameter %s is given %s but the DUT was elaborated with %s; pass it to "
+                   "read_verilog (-P, not yet)",
+                   def.name, got, want);
+    return ovr_fail(pr, inst, msg);
+}
+
 /* The DUT was elaborated with its default parameters: a `#()` is accepted when each value equals
  * the default (by value, any width), refused otherwise (`read_verilog -P` will set parameters). */
 static bool check_dut_overrides(parser *pr, const tb_inst *inst, const sub_frame *ovr) {
     if (ovr->nov == 0 || !tb_design_has_module(pr->tb->design, inst->module)) {
         return true; /* none, or no such module: the run says so */
     }
-    char msg[OVR_WHAT];
     for (uint32_t i = 0; i < ovr->nov; i++) {
-        const sub_ov *ov = &ovr->ovs[i];
-        tb_param_def def;
-        if (!ovr_target(pr, inst, ov, i, &def)) {
-            (void)snprintf(msg, sizeof msg, "%s%s%s", ov->name[0] != '\0' ? "no parameter " : "",
-                           ov->name[0] != '\0' ? ov->name : "more ordered parameter values",
-                           ov->name[0] != '\0' ? "" : " than the module has parameters");
-            return ovr_fail(pr, inst, msg);
-        }
-        tbv given;
-        uint32_t width = 0;
-        if (!ovr_value(pr, ov->expr, &def, &given, &width)) {
-            (void)snprintf(msg, sizeof msg,
-                           "parameter %s: the override is not a constant expression", def.name);
-            return ovr_fail(pr, inst, msg);
-        }
-        tbv dflt;
-        tbv_zero(&dflt, width);
-        tb_field_put((tb_planes){dflt.v, dflt.u, width}, (tb_field){0, def.width}, &def.val);
-        if (!tbv_same(&given, &dflt, width)) {
-            char got[OVR_VAL];
-            char want[OVR_VAL];
-            ovr_text(&given, width, got, sizeof got);
-            ovr_text(&dflt, width, want, sizeof want);
-            (void)snprintf(msg, sizeof msg,
-                           "parameter %s is given %s but the DUT was elaborated with %s; pass it "
-                           "to read_verilog (-P, not yet)",
-                           def.name, got, want);
-            return ovr_fail(pr, inst, msg);
+        if (!check_one_override(pr, inst, &ovr->ovs[i], i)) {
+            return false;
         }
     }
     return true;
