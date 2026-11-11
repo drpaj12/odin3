@@ -44,6 +44,8 @@ typedef struct odin3_abc_gate {
     uint8_t kind;      /* an ODIN3_ABC_TK_* value */
     uint32_t n_inputs; /* GATE: input bits */
     uint64_t table;    /* GATE: 2^n_inputs bits; TIE: the constant */
+    uint32_t
+        aig_objs; /* GATE: the AND objects of its cover (aig.c builds that cover), no sharing */
 } odin3_abc_gate;
 
 /* The phase times and counts of the run in progress (abc_test.h's odin3_abc_run_report). */

@@ -4,6 +4,7 @@
  */
 #include "passes/abc/region.h"
 
+#include "backends/blif/isop.h"
 #include "ir/celltype.h"
 #include "ir/module.h"
 #include "passes/abc/abc.h"
@@ -247,6 +248,38 @@ static odin3_status tie_entry(const odin3_abc_run *run, odin3_celltype_id type,
     return st == ODIN3_ERR_NO_MEMORY ? st : ODIN3_OK;
 }
 
+/* Plane characters per row of odin3_blif_isop's spaced rows after the k planes: a blank, the output
+ * character and a newline. */
+enum { ISOP_ROW_TAIL = 3 };
+
+/* The AND objects aig.c builds for a gate of the given truth table: its irredundant cover (the
+ * shorter of the on-set and off-set) costs, per cube, one AND less than its literals, plus one AND
+ * less than its cubes for the OR. An upper bound of the real count (the AIG shares equal ANDs);
+ * 2 inputs: AND, OR 1, XOR 3, an inverter 0. If the cover cannot be made, the old bound
+ * 2^(k-1) * (k+1). */
+static uint32_t gate_aig_objs(uint64_t table, uint32_t inputs) {
+    odin3_strbuf cover;
+    odin3_strbuf_init(&cover);
+    uint32_t n_rows = 0;
+    int constant = -1;
+    uint32_t objs = 0;
+    if (odin3_blif_isop(&table, inputs, &cover, &n_rows, &constant) != ODIN3_OK) {
+        odin3_strbuf_free(&cover);
+        return (1U << (inputs == 0 ? 0 : inputs - 1)) * (inputs + 1U);
+    }
+    for (uint32_t row = 0; constant < 0 && row < n_rows; row++) {
+        const char *planes = cover.data + (size_t)row * (inputs + ISOP_ROW_TAIL);
+        uint32_t lits = 0;
+        for (uint32_t col = 0; col < inputs; col++) {
+            lits += planes[col] != '-' ? 1U : 0U;
+        }
+        objs += lits > 0 ? lits - 1U : 0U;
+    }
+    objs += constant < 0 && n_rows > 0 ? n_rows - 1U : 0U;
+    odin3_strbuf_free(&cover);
+    return objs;
+}
+
 /* The cached entry of a type, made on first use. NULL on out of memory. */
 static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id type) {
     uint64_t index = 0;
@@ -254,7 +287,7 @@ static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id ty
         return odin3_vec_cat(&run->gates, (size_t)index);
     }
     const odin3_celltype_def *def = odin3_celltype_get(run->design, type);
-    odin3_abc_gate entry = {type.v, def == NULL ? ODIN3_ABC_TK_OTHER : type_kind(def), 0, 0};
+    odin3_abc_gate entry = {type.v, def == NULL ? ODIN3_ABC_TK_OTHER : type_kind(def), 0, 0, 0};
     if (entry.kind == ODIN3_ABC_TK_GATE) {
         odin3_status st =
             odin3_gate_truth(def, odin3_celltype_lib(run->design, type), &entry.table);
@@ -264,6 +297,7 @@ static const odin3_abc_gate *type_entry(odin3_abc_run *run, odin3_celltype_id ty
         /* A type the simulator cannot size (its scratch hook refuses it) is a cut cell. */
         entry.kind = st == ODIN3_OK ? ODIN3_ABC_TK_GATE : ODIN3_ABC_TK_OTHER;
         entry.n_inputs = st == ODIN3_OK ? odin3_gate_truth_inputs(def) : 0;
+        entry.aig_objs = st == ODIN3_OK ? gate_aig_objs(entry.table, entry.n_inputs) : 0;
     } else if (entry.kind == ODIN3_ABC_TK_OTHER && tie_entry(run, type, def, &entry) != ODIN3_OK) {
         return NULL;
     }
@@ -716,6 +750,9 @@ static uint64_t soft_estimate(const rscan *sc, odin3_node_id node, const odin3_a
         return cover == NULL ? 0 : cover->len;
     }
     uint32_t inputs = entry->n_inputs;
+    if (entry->kind == ODIN3_ABC_TK_GATE) {
+        return entry->aig_objs;
+    }
     if (entry->kind == ODIN3_ABC_TK_LUT) {
         const odin3_value *width = odin3_node_param(sc->module, node, 0);
         inputs = width == NULL ? 0 : (uint32_t)width->i;
