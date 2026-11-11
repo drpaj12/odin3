@@ -50,6 +50,36 @@ A DUT whose RTL writes `3'bxxx` as a "don't care" case item (mips_16's ALU) simu
 unless `read_verilog --case-xz-never` is used (`flow.md`): the item then matches nothing, as in iverilog. Flow for such a
 bench: `read_verilog --case-xz-never ...; proc; lower --keep-sel --keep-mem; sim_tb ...`.
 
+## Memories as cells: `lower --keep-mem-cells`
+
+```
+odin3 -p "read_verilog cpu.v; proc; opt; lower --keep-mem-cells; sim_tb tb.v"
+```
+
+`lower` normally turns every `$mem` into one flip-flop per stored bit plus read multiplexers, which is why a design
+with large RAMs or ROMs simulates slowly (a 2,048-word memory is 16,384 flip-flops). With `--keep-mem-cells` the
+`$mem` stays a cell and `sim_tb` (and `sim`) simulate it directly: one byte of state per stored bit, no gates. The
+output is the same as through `lower`, line for line (`tests/tb/run_micros.sh` with `LOWER_EXTRA=--keep-mem-cells`,
+`tests/tb/run_memx.sh`, and the memory cases of `test_lower_mem`); on the AI-digit layer `l_fc2` (an 84 x 120 weight ROM
+and a 256-byte activation RAM, 30,395 cycles) it runs 13 times faster. The netlist still holds a `$mem`, so this is for
+simulation: `abc`, `write_blif` and the other netlist-view passes need the default `lower`.
+
+Supported: asynchronous and synchronous read ports (RD_EN, `RD_TRANSPARENT`), several write ports (the later port wins),
+per-bit write enables, OFFSET, ABITS above or below log2(SIZE), `INIT`, either clock edge. The rules for x and z are those
+of the lowered netlist: an address that reaches no word reads x (0 with `--2state`) and a write to it is lost; an
+address with x or z bits reads x unless every word it may reach holds the same known value, and a write through it
+makes the words it may reach x (iverilog drops that write); an x write enable makes the written bit x unless the data
+equals the old value. A synchronous read with RD_EN x merges the new word with the old one bit by bit (the lowered
+netlist registers the pieces of a transparent read separately, so the two can differ there).
+
+Refused, with a located error `cannot simulate `$mem` (node ...)`: write and synchronous read ports on several clock
+nets or both clock edges, and an asynchronous write port. Multi-clock memories are a later step. A `$mem` with no read
+port is ignored.
+
+`$readmemh` / `$readmemb` into a DUT memory works as with `--keep-mem` (above) and needs no extra flag: the words of a
+`$mem` are named `<memory>[<index>]`, the index being the declared one (OFFSET added). `--keep-mem` is not needed with
+`--keep-mem-cells`; a ROM keeps its `INIT` contents and starts x without one.
+
 ## DUT memories by hierarchical path
 
 ```

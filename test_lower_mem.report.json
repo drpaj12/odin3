@@ -1,0 +1,8 @@
+{
+  "async_to_sync": [],
+  "neg_edge": [],
+  "mixed_sign": [],
+  "mem": [
+    {"module": "m", "cell": "dut", "type": "$mem", "bits": 8}
+  ]
+}

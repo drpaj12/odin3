@@ -103,6 +103,7 @@ static odin3_status apply_option(const char *name, const char *value, odin3_strb
 static const char k_enable_first[] = "--async-enable-first";
 static const char k_keep_sel[] = "--keep-sel";
 static const char k_keep_mem[] = "--keep-mem";
+static const char k_keep_mem_cells[] = "--keep-mem-cells";
 
 static bool is_option(const char *word) {
     static const char *const k_options[] = {"--neg-edge", "--async", "--report", "--max-mem-bits",
@@ -123,7 +124,8 @@ static bool set_flag(const char *word, odin3_lower_opts *opts) {
         bool *flag;
     } flags[] = {{k_enable_first, &opts->async_enable_first},
                  {k_keep_sel, &opts->keep_sel},
-                 {k_keep_mem, &opts->keep_mem}};
+                 {k_keep_mem, &opts->keep_mem},
+                 {k_keep_mem_cells, &opts->keep_mem_cells}};
     for (size_t i = 0; i < sizeof flags / sizeof flags[0]; i++) {
         if (strcmp(word, flags[i].name) == 0) {
             *flags[i].flag = true;
@@ -150,7 +152,7 @@ odin3_status odin3_lower_parse_args(odin3_bytes args, odin3_strbuf *report,
             odin3_log(ODIN3_LOG_ERROR,
                       "lower: unknown argument '%s' (options: --neg-edge invert|keep, --async "
                       "sync|error|keep, --report <file>, --max-mem-bits N, --lower-snapshot <dir>, "
-                      "--keep-sel, --keep-mem)",
+                      "--keep-sel, --keep-mem, --keep-mem-cells)",
                       word);
             st = ODIN3_ERR_INVALID_ARG;
             break;

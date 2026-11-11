@@ -7,6 +7,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- `lower --keep-mem-cells`: leaves each `$mem` as a cell, and the simulator (`sim_tb`, `sim`) models it directly instead of
+  one flip-flop per stored bit: one byte of state per bit, an edge cell for the write ports and synchronous read ports and
+  a combinational cell for the asynchronous read ports, with the semantics (and x rules) of the lowered netlist. Async and
+  sync reads, `RD_TRANSPARENT`, `RD_EN`, several write ports, per-bit write enables, OFFSET, `INIT`, `$readmemh` into a DUT
+  memory by path (`uut.mem[i]`, no `--keep-mem` needed). One clock net and one edge per memory; several clocks or an
+  asynchronous write port are a located error. The AI-digit layer `l_fc2` unit test (30,395 cycles) runs 13 times faster than
+  through `lower`. Netlist-view passes still need the default `lower`. Design: `docs/specs/2026-11-11-sim-mem-hook-design.md`.
 - `read_verilog -D NAME[=VALUE]` and `-I DIR` (repeatable): command-line preprocessor defines and include directories for a Verilog read, after the project record's. A `sim_tb` run on a design that needs defines no longer needs an `.o3proj` (`sim_tb` already took `-D`/`-I` for its testbench files).
 - `odin3-flow --project X.o3proj`: the design files, include directories, defines and `top` come from the project file, so the top is declared and never guessed (a different `--top` is an error; several uninstantiated modules without a top is still exit 2 naming them).
 - `write_verilog --quartus [--sim-file F]` and the LPM target `odin3-flow --target lpm` write a netlist Quartus can read: no

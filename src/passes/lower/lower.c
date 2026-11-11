@@ -154,12 +154,16 @@ static const lw_rule *rule_of(const lw_ctx *lw, const lw_rules *rules, odin3_nod
     return *is_word && type.v <= rules->n_types ? rules->by_type[type.v].rule : NULL;
 }
 
-/* True for a cell --keep-sel leaves alone: a word cell of an if or case (attribute rtl_sel) whose
- * type the 4-state simulator models at word level (sim/sim4.c). */
+/* True for a cell --keep-sel (or, for a `$mem`, --keep-mem-cells) leaves alone: a word cell of an
+ * if or case (attribute rtl_sel) whose type the 4-state simulator models at word level
+ * (sim/sim4.c). */
 static bool kept_by_sel(const lw_ctx *lw, odin3_node_id node, const odin3_celltype_def *def) {
     static const char *const k_types[] = {"$mux",       "$pmux",        "$eq",       "$ne",
                                           "$reduce_or", "$reduce_bool", "$logic_not"};
     uint32_t key = 0;
+    if (def != NULL && lw->opts->keep_mem_cells && strcmp(def->name, "$mem") == 0) {
+        return true; /* --keep-mem-cells: the simulator models the memory (sim/mem_sim.h) */
+    }
     if (!lw->opts->keep_sel || def == NULL ||
         !odin3_strtab_find(odin3_design_strtab(lw->design), odin3_bytes_cstr(ODIN3_ATTR_RTL_SEL),
                            &key)) {
@@ -312,7 +316,7 @@ static bool module_has_ruleless(lw_ctx *lw, const lw_rules *rules, odin3_module 
             odin3_celltype_get(lw->design, odin3_node_type(module, node));
         if (rule != NULL) {
             found = lw_ff_async_refused(lw, node, def->name) || found;
-            found = lw_mem_refused(lw, node, def->name) || found;
+            found = (!kept_by_sel(lw, node, def) && lw_mem_refused(lw, node, def->name)) || found;
             continue;
         }
         lw_log_no_rule(lw, node, def->name);

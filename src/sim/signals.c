@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/ids.h"
 #include "ir/module.h"
+#include "sim/mem_sim.h"
 #include "sim/sim_internal.h"
 #include "util/alloc.h"
 #include "util/str.h"
@@ -23,6 +24,10 @@
 #define NO_PORT UINT32_MAX /* no top input port */
 #define WHOLE UINT32_MAX   /* the whole wire, not one bit of it */
 
+/* obj_kind of a word of a `$mem` simulated as a cell (obj_id: the flat cell, first_bit: the word)
+ */
+#define OBJ_MEMWORD 0x4d454d57U
+
 enum { NAME_MAP_CAP = 64, MAX_INDEX_DIGITS = 9, DECIMAL_BASE = 10, ANON_CAP = 32 };
 
 struct odin3_sim_signals {
@@ -32,6 +37,7 @@ struct odin3_sim_signals {
     odin3_vec signals;     /* odin3_sim_signal */
     odin3_vec slots;       /* uint32_t value slot per signal bit */
     odin3_vec scopes;      /* odin3_sim_scope */
+    odin3_vec memcells; /* uint32_t: the flat cell of each simulated `$mem` that holds its state */
     uint32_t listed;
 };
 
@@ -42,6 +48,8 @@ typedef struct sig_spec {
 } sig_spec;
 
 /* --- small helpers ---------------------------------------------------------------------------- */
+
+static odin3_status list_memcells(odin3_sim_signals *sig);
 
 static odin3_module *scope_module(const odin3_sim_signals *sig, uint32_t scope) {
     return odin3_module_get(sig->sim->design, sig->sim->frames[scope].module);
@@ -96,7 +104,7 @@ static odin3_status register_name(odin3_sim_signals *sig, uint32_t name, uint32_
 static odin3_status push_slots(odin3_sim_signals *sig, const sig_spec *spec) {
     const odin3_sim_signal *item = &spec->sig;
     const odin3_module *mod = scope_module(sig, item->scope);
-    for (uint32_t k = 0; k < item->width; k++) {
+    for (uint32_t k = 0; item->obj_kind != OBJ_MEMWORD && k < item->width; k++) {
         uint32_t slot = 0;
         if (spec->direct != NULL) {
             slot = spec->direct[k];
@@ -400,11 +408,13 @@ static odin3_status create_table(odin3_sim *sim, const net_namer *nn, odin3_sim_
     odin3_vec_init(&sig->signals, sizeof(odin3_sim_signal));
     odin3_vec_init(&sig->slots, sizeof(uint32_t));
     odin3_vec_init(&sig->scopes, sizeof(odin3_sim_scope));
+    odin3_vec_init(&sig->memcells, sizeof(uint32_t));
     sig->names = odin3_strtab_create();
     sig->by_name = odin3_u64map_create(NAME_MAP_CAP);
     odin3_status st = ODIN3_ERR_NO_MEMORY;
     if (sig->names != NULL && sig->by_name != NULL) {
         st = nn != NULL ? fill_nets(sig, nn) : fill(sig);
+        st = st != ODIN3_OK ? st : list_memcells(sig);
     }
     if (st != ODIN3_OK) {
         odin3_sim_signals_destroy(sig);
@@ -433,6 +443,7 @@ void odin3_sim_signals_destroy(odin3_sim_signals *sig) {
     odin3_vec_free(&sig->signals);
     odin3_vec_free(&sig->slots);
     odin3_vec_free(&sig->scopes);
+    odin3_vec_free(&sig->memcells);
     odin3_util_free(sig);
 }
 
@@ -517,6 +528,71 @@ static odin3_status try_bit_select(odin3_sim_signals *sig, uint32_t scope, const
     return ODIN3_OK;
 }
 
+/* --- simulated memories (mem_sim.h) ------------------------------------------------------------
+ */
+
+/* Collects the flat cells that own the state of a `$mem` (flag ODIN3_SIM_CELL_MEM_INIT). */
+static odin3_status list_memcells(odin3_sim_signals *sig) {
+    const odin3_sim *sim = sig->sim;
+    for (uint32_t cell = 0; cell < sim->n_cells; cell++) {
+        const odin3_sim_flat *flat = &sim->cells[cell];
+        if ((flat->def != &odin3_sim_mem_edge_def && flat->def != &odin3_sim_mem_async_def) ||
+            (flat->view.flags & ODIN3_SIM_CELL_MEM_INIT) == 0) {
+            continue;
+        }
+        uint32_t *dst = odin3_vec_push(&sig->memcells);
+        if (dst == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+        *dst = cell;
+    }
+    return ODIN3_OK;
+}
+
+/* The storage of word `word` of the memory held by the flat cell of item (WIDTH bytes). */
+static uint8_t *memword_bytes(const odin3_sim *sim, const odin3_sim_signal *item) {
+    const odin3_sim_flat *flat = &sim->cells[item->obj_id];
+    odin3_sim_mem_geo geo;
+    odin3_sim_mem_geometry(flat->view.params, &geo);
+    return flat->view.state + ((size_t)geo.n_sync + item->first_bit) * geo.width;
+}
+
+/* Step 3b: text is `<memory>[<index>]` for a simulated `$mem` of the scope. */
+static odin3_status try_mem_word(odin3_sim_signals *sig, uint32_t scope, const char *text,
+                                 sig_spec *spec, bool *found) {
+    size_t len = strlen(text);
+    const char *open = len > 0 && text[len - 1] == ']' ? strrchr(text, '[') : NULL;
+    int32_t index = 0;
+    *found = false;
+    if (open == NULL || open == text ||
+        !parse_index(open + 1, len - (size_t)(open - text) - 2, &index)) {
+        return ODIN3_OK;
+    }
+    for (size_t k = 0; k < sig->memcells.len; k++) {
+        uint32_t cell = *(const uint32_t *)odin3_vec_cat(&sig->memcells, k);
+        const odin3_sim_flat *flat = &sig->sim->cells[cell];
+        const char *memid = flat->view.params[0].kind == ODIN3_VAL_STRING
+                                ? design_text(sig, flat->view.params[0].str)
+                                : "";
+        memid = memid[0] == '\\' ? memid + 1 : memid;
+        odin3_sim_mem_geo geo;
+        odin3_sim_mem_geometry(flat->view.params, &geo);
+        int64_t word = (int64_t)index - geo.offset;
+        if (flat->frame != scope || strlen(memid) != (size_t)(open - text) ||
+            strncmp(memid, text, (size_t)(open - text)) != 0 || word < 0 ||
+            (uint64_t)word >= geo.words) {
+            continue;
+        }
+        spec_init(spec, (obj_ref){scope, OBJ_MEMWORD, cell});
+        spec->sig.width = geo.width;
+        spec->sig.first_bit = (uint32_t)word;
+        spec->sig.msb = (int32_t)geo.width - 1;
+        *found = true;
+        return intern_names(sig, scope, text, &spec->sig);
+    }
+    return ODIN3_OK;
+}
+
 /* Step 4: a live wire named text, else a live net whose name or bare alias is text. */
 static odin3_status try_name(odin3_sim_signals *sig, uint32_t scope, const char *text,
                              sig_spec *spec, bool *found) {
@@ -573,6 +649,7 @@ static odin3_status resolve(odin3_sim_signals *sig, const char *text, sig_spec *
     uint32_t scope = 0;
     for (;;) {
         odin3_status st = try_bit_select(sig, scope, text, spec, found);
+        st = st != ODIN3_OK || *found ? st : try_mem_word(sig, scope, text, spec, found);
         st = st != ODIN3_OK || *found ? st : try_name(sig, scope, text, spec, found);
         if (st != ODIN3_OK || *found) {
             return st;
@@ -625,6 +702,10 @@ odin3_status odin3_sim_signals_read(const odin3_sim_signals *sig, uint32_t id, u
     if (item == NULL || bits == NULL || count != item->width) {
         return ODIN3_ERR_INVALID_ARG;
     }
+    if (item->obj_kind == OBJ_MEMWORD) {
+        memcpy(bits, memword_bytes(sig->sim, item), count);
+        return ODIN3_OK;
+    }
     const uint32_t *slots = odin3_vec_cat(&sig->slots, item->slot_first);
     for (uint32_t k = 0; k < count; k++) {
         bits[k] = sig->sim->values[slots[k]];
@@ -673,6 +754,20 @@ odin3_status odin3_sim_signals_write(odin3_sim_signals *sig, uint32_t id, const 
     return ODIN3_OK;
 }
 
+/* Sets the stored bits of a simulated memory word; the codes are checked first. */
+static odin3_status poke_memword(const odin3_sim_signals *sig, const odin3_sim_signal *item,
+                                 const uint8_t *codes, const char **why) {
+    uint8_t max = sig->sim->four_state ? 3U : 1U;
+    for (uint32_t k = 0; k < item->width; k++) {
+        if (codes[k] > max) {
+            *why = "a code is out of range";
+            return ODIN3_ERR_INVALID_ARG;
+        }
+    }
+    memcpy(memword_bytes(sig->sim, item), codes, item->width);
+    return ODIN3_OK;
+}
+
 odin3_status odin3_sim_signals_poke(odin3_sim_signals *sig, uint32_t id, const uint8_t *codes,
                                     uint32_t count, const char **why) {
     const char *local = NULL;
@@ -681,6 +776,9 @@ odin3_status odin3_sim_signals_poke(odin3_sim_signals *sig, uint32_t id, const u
     if (item == NULL || codes == NULL || count != item->width) {
         *why = item == NULL ? "unknown signal" : "count is not the width";
         return ODIN3_ERR_INVALID_ARG;
+    }
+    if (item->obj_kind == OBJ_MEMWORD) {
+        return poke_memword(sig, item, codes, why);
     }
     const uint32_t *slots = odin3_vec_cat(&sig->slots, item->slot_first);
     for (uint32_t k = 0; k < count; k++) {
