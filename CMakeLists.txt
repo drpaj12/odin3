@@ -2883,6 +2883,10 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
         add_test(NAME tb_memx
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_memx.sh $<TARGET_FILE:odin3>)
         set_tests_properties(tb_memx PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
+        # Memories written on several clocks (lower refuses those): the memory cell against iverilog.
+        add_test(NAME tb_memclk
+            COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_memclk.sh $<TARGET_FILE:odin3>)
+        set_tests_properties(tb_memclk PROPERTIES FAIL_REGULAR_EXPRESSION "FAIL " LABELS tools)
         add_test(NAME tb_vcd
             COMMAND sh ${PROJECT_SOURCE_DIR}/tests/tb/run_vcd.sh $<TARGET_FILE:odin3>
                     ${Python3_EXECUTABLE})
