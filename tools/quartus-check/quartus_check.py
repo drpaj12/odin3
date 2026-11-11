@@ -165,6 +165,7 @@ def testbench(top: str, plist: list[tuple[str, str, str]], cycles: int, seed: in
     lines.append("  initial begin")
     lines.append(f"    tb_bad = 0; tb_i = {seed};")
     lines += [f"    {n} = 0;" for _, n in ins]
+    lines.append("    #1;  // the first edge comes after the `initial` blocks of both sides")
     lines.append(f"    for (tb_i = 0; tb_i < {cycles}; tb_i = tb_i + 1) begin")
     lines += [f"      {n} = 1;" for n in clocks]
     lines += ["      #2; tb_cmp; #3;"]
