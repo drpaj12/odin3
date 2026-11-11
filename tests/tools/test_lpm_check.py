@@ -121,6 +121,29 @@ class Parsing(unittest.TestCase):
         with self.assertRaises(lc.CheckError):
             lc.check_defaults(blank, "gen1")
 
+    def test_rom_instance_needs_only_its_own_pins(self) -> None:
+        rom = (
+            'altsyncram #(.width_a(8), .operation_mode("ROM"), .init_file("g_rom0.mif")) \\$c1 (\n'
+            "    .clock0(clk),\n    .address_a(a),\n    .q_a(q)\n  );\n"
+        )
+        lc.check_defaults(rom, "rom")
+        sram = rom.replace('"ROM"', '"SINGLE_PORT"')
+        with self.assertRaises(lc.CheckError):
+            lc.check_defaults(sram, "ram")
+
+    def test_check_mif(self) -> None:
+        text = 'altsyncram #(.init_file("g_rom0.mif")) \\$c1 ();'
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "g.v"
+            Path(tmp, "g_rom0.mif").write_text(
+                "DEPTH = 2;\nWIDTH = 8;\nCONTENT BEGIN\n  0 : 0a;\n  1 : ff;\nEND;\n"
+            )
+            lc.check_mif(text, out, 0, ["0a", "ff"])
+            with self.assertRaises(lc.CheckError):
+                lc.check_mif(text, out, 0, ["0a", "fe"])
+            with self.assertRaises(lc.CheckError):
+                lc.check_mif(text, out, 1, ["0a", "ff"])
+
     def test_a_real_difference_is_seen(self) -> None:
         changed = GEN2.replace(".dataa({1'b0, a})", ".dataa({1'b1, a})")
         self.assertNotEqual(lc.instances(GEN1), lc.instances(changed))

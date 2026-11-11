@@ -7,6 +7,16 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- `lpmmap` maps a ROM to `altsyncram` in `ROM` mode (`--target lpm`, `write_verilog --quartus`): an inferred `$mem` with one read
+  port, no write port, every `INIT` bit 0 or 1 (`reg [W-1:0] m [0:N-1]; initial $readmemh(...)`), a synchronous read on a
+  rising edge and no read enable (the read register is merged as for a RAM). Before this the ROM stayed a behavioural `reg`
+  array (2.7 MB of per-word `initial` statements for the AI-digit I3 P=1 design); now the instance carries
+  `.operation_mode("ROM")` and `.init_file("<netlist>_rom<N>.mif")`, and `write_verilog` writes the contents to that
+  Memory Initialization File beside the netlist (`ODIN3_ATTR_ROM_INIT` node attribute; no writer prints it). Port a only
+  (`address_a`, `clock0`, `q_a`). A ROM with an asynchronous read, a falling edge, a read enable or unknown INIT bits stays soft
+  with a warning. A RAM with `INIT` still stays soft. `lib/lpm.o3lib` gains `init_file` (default `"UNUSED"`). The VTR leg is
+  unchanged. Tests: `tests/lpm/altsyncram_rom.v` (contents checked against the `.mif`), `altsyncram_rom_soft.v`,
+  `test_lpmmap_ram`, `test_lpm_check`.
 - `lower --keep-mem-cells`: leaves each `$mem` as a cell, and the simulator (`sim_tb`, `sim`) models it directly instead of
   one flip-flop per stored bit: one byte of state per bit, an edge cell for the write ports and synchronous read ports and
   a combinational cell for the asynchronous read ports, with the semantics (and x rules) of the lowered netlist. Async and

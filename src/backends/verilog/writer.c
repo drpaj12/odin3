@@ -22,6 +22,7 @@
 #include "util/u64map.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -186,6 +187,7 @@ typedef struct verilog_writer {
     const char *path;
     odin3_verilog_name_style name_style;
     bool quartus;           /* Quartus mode (writer.h) */
+    uint32_t n_rom;         /* `.mif` files written so far (ODIN3_ATTR_ROM_INIT) */
     bool bb_params;         /* the node being written is an implicit black box: its parameters
                                are `#(...)`, not attributes */
     odin3_atomic_file file; /* a temporary beside path, renamed over it on success */
@@ -2618,6 +2620,93 @@ static bool port_all_x(const verilog_writer *wr, odin3_pinslice pins) {
     return pins.count > 0;
 }
 
+/* --- ROM contents ---------------------------------------------------------------------------- */
+
+/* The int parameter `name` of an altsyncram node, 0 when the type has none. */
+static int64_t int_param(const verilog_writer *wr, odin3_node_id node,
+                         const odin3_celltype_def *def, const char *name) {
+    for (uint32_t i = 0; i < def->n_params; i++) {
+        if (strcmp(def->params[i].name, name) == 0) {
+            return odin3_node_param(wr->mod.module, node, i)->i;
+        }
+    }
+    return 0;
+}
+
+/* The ODIN3_ATTR_ROM_INIT text of node, else NULL. */
+static const odin3_value *rom_init_of(const verilog_writer *wr, odin3_node_id node,
+                                      const odin3_celltype_def *def) {
+    uint32_t key = 0;
+    if (strcmp(def->name, "altsyncram") != 0 ||
+        !odin3_strtab_find(wr->tab, odin3_bytes_cstr(ODIN3_ATTR_ROM_INIT), &key)) {
+        return NULL;
+    }
+    const odin3_value *val =
+        odin3_attr_get(wr->mod.module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key);
+    return val != NULL && val->kind == ODIN3_VAL_STRING ? val : NULL;
+}
+
+/* The `.mif` path of ROM number n: the netlist path minus `.v`, `_rom<n>.mif`. */
+static odin3_status mif_path(const verilog_writer *wr, uint32_t n, odin3_strbuf *out) {
+    size_t len = strlen(wr->path);
+    bool dot_v = len > 2 && strcmp(wr->path + len - 2, ".v") == 0;
+    odin3_status st = odin3_strbuf_append(out, (odin3_bytes){wr->path, dot_v ? len - 2 : len});
+    return st == ODIN3_OK ? odin3_strbuf_appendf(out, "_rom%" PRIu32 ".mif", n) : st;
+}
+
+/* Writes the contents of one ROM as a Quartus Memory Initialization File and returns the file's
+ * name without its directory in *base (into path's buffer); the sticky status on failure. */
+static odin3_status write_mif(verilog_writer *wr, odin3_node_id node, const odin3_celltype_def *def,
+                              const odin3_value *init, odin3_strbuf *path) {
+    if (strcmp(wr->path, "-") == 0) {
+        odin3_log(ODIN3_LOG_ERROR, "write_verilog: a ROM needs an initialisation file; "
+                                   "writing to standard output has none");
+        return vw_fail(wr, ODIN3_ERR_INVALID_ARG);
+    }
+    int64_t width = int_param(wr, node, def, "width_a");
+    int64_t depth = int_param(wr, node, def, "numwords_a");
+    size_t digits = (size_t)((width + 3) / 4);
+    odin3_bytes text = str_bytes(wr, init->str);
+    if (width <= 0 || depth <= 0 || text.len != digits * (size_t)depth) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "%s: ROM contents do not fit width_a %" PRId64 " and numwords_a %" PRId64,
+                  wr->path, width, depth);
+        return vw_fail(wr, ODIN3_ERR_INVALID_ARG);
+    }
+    odin3_status st = mif_path(wr, wr->n_rom, path);
+    odin3_atomic_file file = {0};
+    st = st == ODIN3_OK ? odin3_atomic_file_open(&file, path->data) : st;
+    if (st != ODIN3_OK) {
+        return vw_fail(wr, st);
+    }
+    (void)fprintf(file.fp,
+                  "-- Odin III ROM contents (write_verilog)\nDEPTH = %" PRId64 ";\nWIDTH = %" PRId64
+                  ";\nADDRESS_RADIX = HEX;\nDATA_RADIX = HEX;\nCONTENT BEGIN\n",
+                  depth, width);
+    for (int64_t word = 0; word < depth; word++) {
+        (void)fprintf(file.fp, "  %" PRIx64 " : %.*s;\n", (uint64_t)word, (int)digits,
+                      (const char *)text.ptr + (size_t)word * digits);
+    }
+    (void)fputs("END;\n", file.fp);
+    return vw_fail(wr, odin3_atomic_file_close(&file, ODIN3_OK));
+}
+
+/* The init_file value of a ROM: writes its `.mif` and puts the file's name (no directory) in
+ * quotes. */
+static void put_rom_file(verilog_writer *wr, odin3_node_id node, const odin3_celltype_def *def,
+                         const odin3_value *init) {
+    odin3_strbuf path;
+    odin3_strbuf_init(&path);
+    if (wr->st == ODIN3_OK && write_mif(wr, node, def, init, &path) == ODIN3_OK) {
+        const char *base = strrchr(path.data, '/');
+        base = base != NULL ? base + 1 : path.data;
+        put_string(wr, odin3_bytes_cstr(base), 0);
+        odin3_log(ODIN3_LOG_INFO, "write_verilog: ROM contents written to %s", path.data);
+        wr->n_rom++;
+    }
+    odin3_strbuf_free(&path);
+}
+
 /* ` #(.P(v), …)` with every parameter, for any type but a module. */
 static void put_overrides(verilog_writer *wr, odin3_node_id node, const odin3_celltype_def *def) {
     if (is_implicit_bbox(def)) {
@@ -2627,12 +2716,17 @@ static void put_overrides(verilog_writer *wr, odin3_node_id node, const odin3_ce
     if (def->gran == ODIN3_GRAN_MODULE || def->n_params == 0) {
         return;
     }
+    const odin3_value *rom = rom_init_of(wr, node, def);
     vw_puts(wr, " #(");
     for (uint32_t i = 0; i < def->n_params; i++) {
         vw_puts(wr, i > 0 ? ", ." : ".");
         vw_ident(wr, odin3_bytes_cstr(def->params[i].name), "parameter name");
         vw_char(wr, '(');
-        put_value(wr, odin3_node_param(wr->mod.module, node, i));
+        if (rom != NULL && strcmp(def->params[i].name, "init_file") == 0) {
+            put_rom_file(wr, node, def, rom);
+        } else {
+            put_value(wr, odin3_node_param(wr->mod.module, node, i));
+        }
         vw_char(wr, ')');
     }
     vw_char(wr, ')');

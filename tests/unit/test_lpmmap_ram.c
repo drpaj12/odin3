@@ -64,6 +64,7 @@ typedef struct memcase {
     bool rd_neg, wr_neg;
     bool rd_clk2; /* the read port is on clk2 */
     bool init;
+    bool init_full; /* every INIT bit is 0 or 1: bit i is 1 when i is even (word 0 = 0x55...) */
     bool split_en;
     bool en_var;  /* R_SYNC: RD_EN is the input wire ren */
     bool rd_init; /* the output wire q carries init 8'hAA (a read register with an init value) */
@@ -148,7 +149,14 @@ static void params(odin3_strbuf *out, const memcase *mc) {
     uint32_t wmask = (1U << mc->n_wr) - 1U;
     bits(out, "WR_CLK_ENABLE", (bitspec){mc->n_wr, wmask});
     bits(out, "WR_CLK_POLARITY", (bitspec){mc->n_wr, mc->wr_neg ? 0 : wmask});
-    if (mc->init) {
+    if (mc->init_full) {
+        uint32_t total = size_of(mc) * mc->width;
+        put(out, "    parameter \\INIT %" PRIu32 "'", total);
+        for (uint32_t i = total; i > 0; i--) {
+            put(out, "%c", (i - 1U) % 2U == 0 ? '1' : '0');
+        }
+        put(out, "\n");
+    } else if (mc->init) {
         uint32_t total = size_of(mc) * mc->width;
         put(out, "    parameter \\INIT %" PRIu32 "'1", total);
         for (uint32_t i = 1; i < total; i++) {
@@ -493,6 +501,63 @@ static void test_h1_read_register_init_stays_soft(void) {
     pb_free(&res);
 }
 
+/* --- ROM (v1.6.1 Part A) ---------------------------------------------------------------------- */
+
+static const memcase k_rom = {
+    .abits = 3, .width = 6, .n_rd = 1, .n_wr = 0, .mode = R_SYNC, .init_full = true};
+
+/* The ODIN3_ATTR_ROM_INIT text of blk: 8 words of 6 bits are 2 hex digits each, and bit i is 1
+ * for even i, so every word is 0x15. */
+static void expect_rom_text(const pb_result *res, odin3_node_id blk, const char *want) {
+    const odin3_strtab *tab = odin3_design_strtab(res->design);
+    uint32_t key = 0;
+    TEST_ASSERT_TRUE(odin3_strtab_find(tab, odin3_bytes_cstr(ODIN3_ATTR_ROM_INIT), &key));
+    const odin3_value *init =
+        odin3_attr_get(res->module, (odin3_objref){ODIN3_OBJ_NODE, blk.v}, key);
+    TEST_ASSERT_NOT_NULL(init);
+    TEST_ASSERT_EQUAL_UINT32(strlen(want), (uint32_t)odin3_strtab_len(tab, init->str));
+    TEST_ASSERT_EQUAL_MEMORY(want, odin3_strtab_get(tab, init->str), strlen(want));
+}
+
+static void test_rom_maps_with_contents(void) {
+    pb_result res;
+    build(k_rom, &res);
+    odin3_lpmmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, lm_run(&res, NULL, &stats));
+    TEST_ASSERT_EQUAL_UINT32(1, lm_count(res.module, "altsyncram"));
+    TEST_ASSERT_EQUAL_UINT32(0, lm_count(res.module, "$mem"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.ram);
+    odin3_node_id blk = lm_nth(res.module, "altsyncram", 0);
+    TEST_ASSERT_EQUAL_STRING("ROM", lm_param_str(res.module, blk, "operation_mode"));
+    TEST_ASSERT_EQUAL_INT64(6, lm_param_int(res.module, blk, "width_a"));
+    TEST_ASSERT_EQUAL_INT64(3, lm_param_int(res.module, blk, "widthad_a"));
+    TEST_ASSERT_EQUAL_INT64(8, lm_param_int(res.module, blk, "numwords_a"));
+    TEST_ASSERT_EQUAL_STRING("mem.mif", lm_param_str(res.module, blk, "init_file"));
+    expect_rom_text(&res, blk, "1515151515151515");
+    TEST_ASSERT_FALSE(odin3_net_valid(lm_pin_net(res.module, blk, "address_b", 0)));
+    TEST_ASSERT_FALSE(odin3_net_valid(lm_pin_net(res.module, blk, "data_a", 0)));
+    pb_free(&res);
+}
+
+static void test_rom_stays_soft_cases(void) {
+    memcase mc = k_rom;
+    mc.mode = R_ASYNC;
+    expect_soft(mc, "lpmmap: memory 'mem' has an asynchronous read port; left soft");
+    mc = k_rom;
+    mc.init_full = false;
+    mc.init = true;
+    expect_soft(mc, "lpmmap: memory 'mem' has initial contents with unknown bits; left soft");
+    mc = k_rom;
+    mc.init_full = false;
+    expect_soft(mc, "lpmmap: memory 'mem' (1 read, 0 write ports) has no 5.1 mapping; left soft");
+    mc = k_rom;
+    mc.en_var = true;
+    expect_soft(mc, "lpmmap: memory 'mem' has a read enable that is not constant 1; left soft");
+    mc = k_rom;
+    mc.rd_neg = true;
+    expect_soft(mc, "lpmmap: memory 'mem' has a port on the falling clock edge; left soft");
+}
+
 static void test_r2_unmapped_patterns(void) {
     memcase mc = k_sp;
     mc.n_wr = 0;
@@ -626,6 +691,8 @@ int main(void) {
     RUN_TEST(test_r1_soft_keeps_ffs);
     RUN_TEST(test_r6_soft_cases);
     RUN_TEST(test_h1_read_register_init_stays_soft);
+    RUN_TEST(test_rom_maps_with_contents);
+    RUN_TEST(test_rom_stays_soft_cases);
     RUN_TEST(test_r2_unmapped_patterns);
     RUN_TEST(test_r7_widths);
     RUN_TEST(test_r7_abits_zero);

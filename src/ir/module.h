@@ -394,6 +394,14 @@ odin3_status odin3_net_merge(odin3_module *module, odin3_net_pair pair);
  */
 #define ODIN3_ATTR_PARAM_DEFAULT_PREFIX "odin3 param default:"
 
+/*
+ * Node attribute (STRING) that lpmmap sets on an altsyncram ROM: the initial contents, one word
+ * after the other from address 0, each word (width_a + 3) / 4 hex digits, most significant digit
+ * first. write_verilog writes the contents to a `.mif` file beside the netlist and puts that
+ * file's name in the init_file parameter; no writer prints the attribute itself.
+ */
+#define ODIN3_ATTR_ROM_INIT "odin3 rom_init"
+
 /* An object of a module: kind and ID (for ODIN3_OBJ_MODULE, the module's own ID). */
 typedef struct odin3_objref {
     odin3_objkind kind;

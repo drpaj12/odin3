@@ -4,7 +4,10 @@
  * design is untouched, so a `$mem` that ends soft keeps its flip-flops). Mapped: one write port and
  * one read port, one rising-edge clock, a write enable that is one net, a read enable that is
  * constant 1, no INIT, no OFFSET. Read and write on the same address is a SINGLE_PORT block; two
- * addresses is a simple DUAL_PORT block (write on port a, read on port b). Every other `$mem` stays
+ * addresses is a simple DUAL_PORT block (write on port a, read on port b). A ROM (one read port,
+ * no write port, every INIT bit 0 or 1, a synchronous read on a rising edge, no read enable) is a
+ * ROM block whose contents travel as the node attribute ODIN3_ATTR_ROM_INIT; write_verilog writes
+ * them to the `.mif` that `init_file` names (Part A of the v1.6.1 brief). Every other `$mem` stays
  * soft with a warning. The tie-offs of the unused ports are those of the Quartus wizard and the
  * Yosys M9K techmap (spec R-3, R-4).
  */
@@ -16,9 +19,10 @@
 #include "passes/partial_map/mem.h"
 
 #include <inttypes.h>
+#include <stdio.h>
 #include <string.h>
 
-enum { P_SIZE = 1, ABITS_MIN = 1, LM_SCALAR_NETS = 8 };
+enum { P_SIZE = 1, ABITS_MIN = 1, LM_SCALAR_NETS = 8, ROM_FILE_MAX = 256 };
 
 typedef enum lm_verdict {
     LV_OK,
@@ -31,7 +35,8 @@ typedef enum lm_verdict {
     LV_WEN,
     LV_REN,
     LV_TRANSPARENT,
-    LV_RDINIT
+    LV_RDINIT,
+    LV_INITX
 } lm_verdict;
 
 static const mem_rport *rd0(const mem_model *mm) {
@@ -40,6 +45,53 @@ static const mem_rport *rd0(const mem_model *mm) {
 
 static const mem_wport *wr0(const mem_model *mm) {
     return odin3_vec_cat(&mm->wr, 0);
+}
+
+static bool read_always(const lm_ctx *lc, const mem_rport *rp);
+static bool dead_ff_has_init(const lm_ctx *lc, const mem_model *mm);
+
+static bool is_rom(const mem_model *mm) {
+    return mm->n_wr == 0;
+}
+
+/* True when SIZE x WIDTH INIT bits are all 0 or 1 (a .mif holds no unknown bit). */
+static bool init_complete(const lm_ctx *lc, const mem_model *mm) {
+    const odin3_value *init = odin3_node_param(lc->module, mm->node, MP_INIT);
+    int64_t size = odin3_node_param(lc->module, mm->node, P_SIZE)->i;
+    uint64_t need = (uint64_t)size * mm->width;
+    if (size <= 0 || init->len < need) {
+        return false;
+    }
+    for (uint64_t i = 0; i < need; i++) {
+        if (init->bits[i] > ODIN3_BIT_1) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/* A ROM: the read port must be synchronous on a rising edge with no enable. */
+static lm_verdict rom_verdict(const lm_ctx *lc, const mem_model *mm) {
+    const mem_rport *rp = rd0(mm);
+    if (!mm->init_defined) {
+        return LV_PATTERN; /* nothing to read */
+    }
+    if (!init_complete(lc, mm)) {
+        return LV_INITX;
+    }
+    if (dead_ff_has_init(lc, mm)) {
+        return LV_RDINIT;
+    }
+    if (!rp->sync) {
+        return LV_ASYNC;
+    }
+    if (!odin3_net_valid(rp->clk)) {
+        return LV_PATTERN;
+    }
+    if (!rp->posedge) {
+        return LV_EDGE;
+    }
+    return read_always(lc, rp) ? LV_OK : LV_REN;
 }
 
 /* The same net, or two constants of the same 0/1 value, or both open. */
@@ -115,8 +167,11 @@ static lm_verdict verdict_of(const lm_ctx *lc, const mem_model *mm) {
     if (mm->offset != 0) {
         return LV_OFFSET;
     }
-    if (mm->too_wide || mm->n_rd != 1 || mm->n_wr != 1) {
+    if (mm->too_wide || mm->n_rd != 1 || mm->n_wr > 1) {
         return LV_PATTERN;
+    }
+    if (is_rom(mm)) {
+        return rom_verdict(lc, mm);
     }
     if (mm->init_defined) {
         return LV_INIT;
@@ -146,7 +201,8 @@ static void warn_soft(const lm_ctx *lc, const mem_model *mm, lm_verdict verdict)
         [LV_WEN] = "has a write enable that is not one net",
         [LV_REN] = "has a read enable that is not constant 1",
         [LV_TRANSPARENT] = "has a transparent read across two ports",
-        [LV_RDINIT] = "has a read register with an initial value"};
+        [LV_RDINIT] = "has a read register with an initial value",
+        [LV_INITX] = "has initial contents with unknown bits"};
     const char *name = mem_name(lc, mm);
     if (verdict == LV_OFFSET) {
         lm_diag(lc, ODIN3_LOG_WARN, mm->node,
@@ -249,6 +305,77 @@ static odin3_status new_block(lm_ctx *lc, const mem_model *mm, ram_nets *rn, boo
                        &node);
 }
 
+/* The hex digit `digit` (0 = least significant) of the word whose bits start at `bits`. */
+typedef struct rom_word {
+    const uint8_t *bits;
+    uint32_t width;
+} rom_word;
+
+static char hex_digit(rom_word word, uint32_t digit) {
+    unsigned nibble = 0;
+    for (uint32_t off = 0; off < 4; off++) {
+        uint32_t bit = digit * 4U + off;
+        if (bit < word.width && word.bits[bit] == ODIN3_BIT_1) {
+            nibble |= 1U << off;
+        }
+    }
+    return "0123456789abcdef"[nibble];
+}
+
+/* The contents of the ROM as the hex text of ODIN3_ATTR_ROM_INIT, set on node. */
+static odin3_status set_rom_init(lm_ctx *lc, const mem_model *mm, odin3_node_id node) {
+    const odin3_value *init = odin3_node_param(lc->module, mm->node, MP_INIT);
+    uint64_t size = (uint64_t)odin3_node_param(lc->module, mm->node, P_SIZE)->i;
+    uint32_t digits = (mm->width + 3U) / 4U;
+    odin3_strbuf_clear(&lc->text);
+    for (uint64_t word = 0; word < size; word++) {
+        for (uint32_t digit = digits; digit > 0; digit--) {
+            char chr = hex_digit((rom_word){init->bits + word * mm->width, mm->width}, digit - 1U);
+            odin3_status st = odin3_strbuf_append(&lc->text, (odin3_bytes){&chr, 1});
+            if (st != ODIN3_OK) {
+                return st;
+            }
+        }
+    }
+    uint32_t key = 0;
+    uint32_t val = 0;
+    odin3_status st = odin3_design_intern(
+        lc->design, (odin3_bytes){lc->text.data != NULL ? lc->text.data : "", lc->text.len}, &val);
+    st = st == ODIN3_OK
+             ? odin3_design_intern(lc->design, odin3_bytes_cstr(ODIN3_ATTR_ROM_INIT), &key)
+             : st;
+    odin3_value value = {ODIN3_VAL_STRING, 0, NULL, 0, val, 0};
+    return st == ODIN3_OK
+               ? odin3_attr_set(lc->module, (odin3_objref){ODIN3_OBJ_NODE, node.v}, key, &value)
+               : st;
+}
+
+/* A ROM block: port a reads, the address is registered by clock0, the contents are in the node
+ * attribute and `<memory name>.mif` is the informational init_file (the writer names the file). */
+static odin3_status new_rom_block(lm_ctx *lc, const mem_model *mm, ram_nets *rn) {
+    const mem_rport *rp = rd0(mm);
+    int64_t size = odin3_node_param(lc->module, mm->node, P_SIZE)->i;
+    uint32_t awid = rn->awid;
+    char file[ROM_FILE_MAX];
+    (void)snprintf(file, sizeof file, "%s.mif", mem_name(lc, mm));
+    const lm_pset params[] = {{"width_a", (int64_t)mm->width, NULL},
+                              {"widthad_a", (int64_t)awid, NULL},
+                              {"numwords_a", size, NULL},
+                              {"operation_mode", 0, "ROM"},
+                              {"intended_device_family", 0, lc->family},
+                              {"init_file", 0, file}};
+    const lm_pconn ports[] = {{"clock0", &rn->clk, 1},
+                              {"address_a", addr_of(rn, rp->addr, mm->abits), awid},
+                              {"q_a", rn->q, mm->width}};
+    odin3_node_id node = {0};
+    odin3_status st =
+        lm_new_node(lc,
+                    &(lm_node_req){LM_ALTSYNCRAM, params, sizeof params / sizeof params[0], ports,
+                                   sizeof ports / sizeof ports[0], "rom"},
+                    &node);
+    return st == ODIN3_OK ? set_rom_init(lc, mm, node) : st;
+}
+
 /* The ties: each RD_DATA bit's net takes the block's read output. */
 static odin3_status make_ties(const mem_model *mm, const ram_nets *rn, odin3_vec *ties) {
     const mem_rport *rp = rd0(mm);
@@ -274,7 +401,8 @@ static odin3_status build_job(lm_ctx *lc, const map_job *job, odin3_vec *ties) {
     }
     st = st == ODIN3_OK ? nets_make(lc, job->mm, &rn) : st;
     if (st == ODIN3_OK) {
-        st = new_block(lc, job->mm, &rn, job->single);
+        st = is_rom(job->mm) ? new_rom_block(lc, job->mm, &rn)
+                             : new_block(lc, job->mm, &rn, job->single);
         st = st == ODIN3_OK ? make_ties(job->mm, &rn, ties) : st;
     }
     odin3_vec_free(&rn.pool);
@@ -305,7 +433,8 @@ odin3_status lm_map_mem(lm_ctx *lc, odin3_node_id src) {
     if (st == ODIN3_OK && verdict == LV_OK) {
         odin3_celltype_id type = {0};
         st = lm_need(lc, LM_ALTSYNCRAM, src, &type);
-        st = st == ODIN3_OK ? commit_job(lc, &(map_job){&mm, same_addr(lc, &mm)}) : st;
+        st = st == ODIN3_OK ? commit_job(lc, &(map_job){&mm, !is_rom(&mm) && same_addr(lc, &mm)})
+                            : st;
         lc->stats.ram += st == ODIN3_OK ? 1U : 0U;
     } else if (st == ODIN3_OK) {
         warn_soft(lc, &mm, verdict);
