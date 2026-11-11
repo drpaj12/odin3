@@ -2988,8 +2988,8 @@ static bool finish_sub(parser *pr) {
 /* --- `#()` on a DUT instance: the DUT is elaborated, so an override must equal the default --- */
 
 enum {
-    OVR_MSG = 448,
-    OVR_WHAT = 256,
+    OVR_MSG = 768,
+    OVR_WHAT = 384,
     OVR_VAL = 40,
     OVR_HEX_BITS = 4,
     OVR_U64_BITS = 64,
@@ -3100,14 +3100,15 @@ static bool check_one_override(parser *pr, const tb_inst *inst, const sub_ov *ov
     ovr_text(&given, width, got, sizeof got);
     ovr_text(&dflt, width, want, sizeof want);
     (void)snprintf(msg, sizeof msg,
-                   "parameter %s is given %s but the DUT was elaborated with %s; pass it to "
-                   "read_verilog (-P, not yet)",
-                   def.name, got, want);
+                   "parameter %s is given %s but the DUT was elaborated with %s; read the DUT "
+                   "with 'read_verilog -P %s=%s'",
+                   def.name, got, want, def.name, got);
     return ovr_fail(pr, inst, msg);
 }
 
 /* The DUT was elaborated with its default parameters: a `#()` is accepted when each value equals
- * the default (by value, any width), refused otherwise (`read_verilog -P` will set parameters). */
+ * the elaborated value (by value, any width), refused otherwise (`read_verilog -P` sets
+ * parameters). */
 static bool check_dut_overrides(parser *pr, const tb_inst *inst, const sub_frame *ovr) {
     if (ovr->nov == 0 || !tb_design_has_module(pr->tb->design, inst->module)) {
         return true; /* none, or no such module: the run says so */

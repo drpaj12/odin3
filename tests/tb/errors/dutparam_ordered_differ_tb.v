@@ -1,4 +1,4 @@
-// EXPECT: parameter W is given 16 but the DUT was elaborated with 8; pass it to read_verilog (-P, not yet)
+// EXPECT: parameter W is given 16 but the DUT was elaborated with 8; read the DUT with 'read_verilog -P W=16'
 // DUT: dutparams_dut.v
 module dutparam_ordered_differ_tb;
   reg clk = 0;

@@ -62,6 +62,15 @@ uint64_t odin3_elab_default_max_bytes(void);
 
 struct odin3_name_resolver;
 
+/* One `read_verilog -P NAME=VALUE`: an override of a parameter of the top module, as a project
+ * `param` line would give it (name and value are views that outlive the elaboration). A string
+ * value is the text without quotes. */
+typedef struct odin3_elab_cmd_param {
+    odin3_bytes name;
+    odin3_bytes value;
+    bool is_string;
+} odin3_elab_cmd_param;
+
 /* The options of one elaboration (§2.2, EL-3). */
 typedef struct odin3_elab_opts {
     uint32_t top;       /* strtab ID of "[lib.]mod" (CLI --top, else the project top); 0 = auto */
@@ -76,6 +85,9 @@ typedef struct odin3_elab_opts {
                                           declarators become full names first; NULL: none */
     bool case_xz_never; /* read_verilog --case-xz-never: an x/z bit of a plain `case` item never
                            matches (IEEE simulation); the default is the Yosys/Parmys wildcard */
+    const odin3_elab_cmd_param
+        *params; /* read_verilog -P overrides of the top; beat the project's */
+    uint32_t nparams;
     bool vtr_compat;  /* VTR/Parmys compatibility: `initial x = <non-constant>` is `assign x = ...`
                          (Peter 2026-10-13; EL-40) */
     double stage1_ms; /* stage 1's time, for stage 2's summary line (odin3_elab_run fills it) */

@@ -941,12 +941,21 @@ odin3_status odin3_elab1_override_text(const odin3_elab1 *e1, const odin3_elab_o
         return append_hier(e1, odin3_ast_child(e1->parsed, ovr->from, 0), out);
     }
     const odin3_project *proj = odin3_design_project(e1->design);
-    if (ovr->source == ODIN3_OVR_PROJECT && proj != NULL && ovr->order < proj->params.len) {
-        const odin3_proj_param *param = odin3_vec_cat(&proj->params, ovr->order);
+    const uint32_t cmd = e1->opts.nparams; /* -P overrides come first; then the project's lines */
+    if (ovr->source == ODIN3_OVR_PROJECT && proj != NULL && ovr->order >= cmd &&
+        ovr->order - cmd < proj->params.len) {
+        const odin3_proj_param *param = odin3_vec_cat(&proj->params, ovr->order - cmd);
         return odin3_strbuf_appendf(out, "%s.%s", odin3_elab1_str(e1, param->scope),
                                     odin3_elab1_str(e1, param->name));
     }
     size_t from = out->len;
+    if (ovr->source == ODIN3_OVR_PROJECT && ovr->order < cmd && ovr->at.v == 0) {
+        odin3_status pst = odin3_strbuf_append(out, odin3_bytes_cstr("-P "));
+        from = out->len;
+        if (pst != ODIN3_OK) {
+            return pst;
+        }
+    }
     odin3_status st = odin3_strbuf_append(out, odin3_bytes_cstr(odin3_elab1_str(e1, ovr->path)));
     if (st == ODIN3_OK) {
         odin3_elab1_path_print(out->data + from, out->len - from);

@@ -19,6 +19,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 static et_result rs;
@@ -537,6 +538,94 @@ static void test_command_line_define_needs_a_value(void) {
                                      et_log(&rs));
 }
 
+/* The attribute `odin3 param default:<name>` of module `top`, as an integer (a BITS value with
+ * only 0/1 bits, an INT) or, for a STRING value, its text in *text; false when absent. */
+static bool top_param(const char *name, uint64_t *num, const char **text) {
+    char key[64];
+    (void)snprintf(key, sizeof key, "%s%s", ODIN3_ATTR_PARAM_DEFAULT_PREFIX, name);
+    uint32_t key_str = 0;
+    uint32_t end = odin3_design_module_end(rs.design);
+    for (uint32_t id = 1; id < end; id++) {
+        const odin3_module *module = odin3_module_get(rs.design, (odin3_module_id){id});
+        const char *mname = module != NULL ? odin3_strtab_get(odin3_design_strtab(rs.design),
+                                                              odin3_module_name(module))
+                                           : NULL;
+        if (mname == NULL || strncmp(mname, "top", 3) != 0 ||
+            odin3_design_intern(rs.design, odin3_bytes_cstr(key), &key_str) != ODIN3_OK) {
+            continue;
+        }
+        const odin3_value *val =
+            odin3_attr_get(module, (odin3_objref){ODIN3_OBJ_MODULE, id}, key_str);
+        if (val == NULL) {
+            return false;
+        }
+        *num = 0;
+        if (val->kind == ODIN3_VAL_STRING) {
+            *text = odin3_strtab_get(odin3_design_strtab(rs.design), val->str);
+        } else if (val->kind == ODIN3_VAL_INT) {
+            *num = (uint64_t)val->i;
+        } else {
+            for (uint32_t i = 0; i < val->len && i < 64U; i++) {
+                *num |= (uint64_t)(val->bits[i] == 1 ? 1U : 0U) << i;
+            }
+        }
+        return true;
+    }
+    return false;
+}
+
+static const char k_pparams[] =
+    "module top #(parameter W = 4, parameter N = 3, parameter S = \"ab\")"
+    " (input [W-1:0] a, output [W-1:0] y);\n"
+    "  assign y = a + N;\nendmodule\n";
+
+/* read_verilog -P overrides top-level parameters: a plain number, a sized number, a negative one
+ * and a string (v1.6.2). */
+static void test_command_line_params(void) {
+    et_src srcs[] = {{"p.v", k_pparams}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(
+        ODIN3_OK, run("read_verilog", "-P W=12 -P N=8'h1F -P \"S=xyz\" p.v"), et_log(&rs));
+    uint64_t num = 0;
+    const char *text = NULL;
+    TEST_ASSERT_TRUE(top_param("W", &num, &text));
+    TEST_ASSERT_EQUAL_UINT64(12, num);
+    TEST_ASSERT_TRUE(top_param("N", &num, &text));
+    TEST_ASSERT_EQUAL_UINT64(0x1F, num);
+    TEST_ASSERT_TRUE(top_param("S", &num, &text));
+    TEST_ASSERT_EQUAL_STRING("xyz", text);
+}
+
+/* A number-looking string needs the single quotes; the first -P of a name wins over none. */
+static void test_command_line_param_forced_string(void) {
+    et_src srcs[] = {{"p.v", k_pparams}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-P \"S='12'\" p.v"), et_log(&rs));
+    uint64_t num = 0;
+    const char *text = NULL;
+    TEST_ASSERT_TRUE(top_param("S", &num, &text));
+    TEST_ASSERT_EQUAL_STRING("12", text);
+}
+
+static void test_command_line_param_unknown_name(void) {
+    et_src srcs[] = {{"p.v", k_pparams}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "-P Q=3 p.v"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        1, et_count_with(&rs, ODIN3_LOG_ERROR, "param '-P Q' does not name a parameter"),
+        et_log(&rs));
+}
+
+static void test_command_line_param_syntax(void) {
+    et_src srcs[] = {{"p.v", k_pparams}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "p.v -P W"));
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "-P =3 p.v"));
+    TEST_ASSERT_NOT_EQUAL(ODIN3_OK, run("read_verilog", "-P 1W=3 p.v"));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        3, et_count_with(&rs, ODIN3_LOG_ERROR, "-P expects NAME=VALUE"), et_log(&rs));
+}
+
 #define ALL_TESTS(X)                                                                               \
     X(test_lib_read_alone)                                                                         \
     X(test_lib_unit_elaborated_where_used)                                                         \
@@ -568,7 +657,11 @@ static void test_command_line_define_needs_a_value(void) {
     X(test_earlier_read_module_resolves)                                                           \
     X(test_earlier_read_module_has_no_parameters)                                                  \
     X(test_command_line_defines)                                                                   \
-    X(test_command_line_define_needs_a_value)
+    X(test_command_line_define_needs_a_value)                                                      \
+    X(test_command_line_params)                                                                    \
+    X(test_command_line_param_forced_string)                                                       \
+    X(test_command_line_param_unknown_name)                                                        \
+    X(test_command_line_param_syntax)
 
 #define RUN_ONE(name) RUN_TEST(name);
 

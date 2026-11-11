@@ -434,16 +434,15 @@ static odin3_status literal_of(odin3_elab1 *e1, odin3_number_text pieces, odin3_
     return st;
 }
 
-/* A project value: a number (`-` negates it as an operator would) or a string. */
-static odin3_status project_value(odin3_elab1 *e1, const odin3_proj_param *param,
-                                  odin3_elab_override *ovr) {
-    const char *text = odin3_elab1_str(e1, param->value);
-    if (param->type == ODIN3_PARAM_STRING) {
+/* A parameter value as text: a number (`-` negates it as an operator would) or a string. */
+static odin3_status text_value(odin3_elab1 *e1, const char *text, bool is_string, odin3_loc at,
+                               odin3_elab_override *ovr) {
+    if (is_string) {
         ovr->base = ODIN3_AST_NUMBER_BIN;
         return odin3_cval_from_string(e1->arena, odin3_bytes_cstr(text), &ovr->value);
     }
     bool negative = text[0] == '-';
-    odin3_status st = literal_of(e1, number_pieces(text + (negative ? 1 : 0)), param->at, ovr);
+    odin3_status st = literal_of(e1, number_pieces(text + (negative ? 1 : 0)), at, ovr);
     if (st == ODIN3_OK && negative) {
         odin3_cval magnitude = ovr->value;
         odin3_cop_args neg = {ODIN3_COP_NEG, &magnitude, NULL, magnitude.width,
@@ -454,8 +453,16 @@ static odin3_status project_value(odin3_elab1 *e1, const odin3_proj_param *param
     return st;
 }
 
+/* A project value. */
+static odin3_status project_value(odin3_elab1 *e1, const odin3_proj_param *param,
+                                  odin3_elab_override *ovr) {
+    return text_value(e1, odin3_elab1_str(e1, param->value), param->type == ODIN3_PARAM_STRING,
+                      param->at, ovr);
+}
+
 /* Project line i (`param top[.inst…].name value`) as an override of the top: its path below
- * the top ("name" or "inst….name"; the reader checked that the scope starts at the top). */
+ * the top ("name" or "inst….name"; the reader checked that the scope starts at the top). The
+ * command's -P overrides come first, so a project line's order starts after them. */
 static odin3_status project_override(odin3_elab1 *e1, size_t idx, odin3_elab_override *ovr) {
     const odin3_proj_param *param = odin3_vec_cat(&odin3_design_project(e1->design)->params, idx);
     const char *below = strchr(odin3_elab1_str(e1, param->scope), '.');
@@ -470,8 +477,8 @@ static odin3_status project_override(odin3_elab1 *e1, size_t idx, odin3_elab_ove
     st = st != ODIN3_OK
              ? st
              : odin3_strbuf_append(&path, odin3_bytes_cstr(odin3_elab1_str(e1, param->name)));
-    *ovr =
-        (odin3_elab_override){.source = ODIN3_OVR_PROJECT, .order = (uint32_t)idx, .at = param->at};
+    *ovr = (odin3_elab_override){
+        .source = ODIN3_OVR_PROJECT, .order = e1->opts.nparams + (uint32_t)idx, .at = param->at};
     st = st != ODIN3_OK
              ? st
              : odin3_design_intern(e1->design, (odin3_bytes){path.data, path.len}, &ovr->path);
@@ -479,14 +486,32 @@ static odin3_status project_override(odin3_elab1 *e1, size_t idx, odin3_elab_ove
     return st != ODIN3_OK ? st : project_value(e1, param, ovr);
 }
 
-/* The project's `param` lines as the top's overrides (EL-8 item 1). */
+/* read_verilog -P number k as an override of the top (order k: before the project's lines). */
+static odin3_status command_override(odin3_elab1 *e1, uint32_t k, odin3_elab_override *ovr) {
+    const odin3_elab_cmd_param *param = &e1->opts.params[k];
+    odin3_strbuf value;
+    odin3_strbuf_init(&value);
+    odin3_status st = odin3_strbuf_append(&value, param->value);
+    *ovr = (odin3_elab_override){.source = ODIN3_OVR_PROJECT, .order = k};
+    st = st != ODIN3_OK ? st : odin3_design_intern(e1->design, param->name, &ovr->path);
+    st = st != ODIN3_OK
+             ? st
+             : text_value(e1, value.data != NULL ? value.data : "", param->is_string, ovr->at, ovr);
+    odin3_strbuf_free(&value);
+    return st;
+}
+
+/* The command's -P overrides, then the project's `param` lines, as the top's overrides (EL-8
+ * item 1). */
 static odin3_status project_overrides(odin3_elab1 *e1, odin3_vec *out) {
     const odin3_project *proj = odin3_design_project(e1->design);
     size_t count = proj != NULL && proj->finished ? proj->params.len : 0;
+    size_t cmd = e1->opts.nparams;
     odin3_status st = ODIN3_OK;
-    for (size_t i = 0; st == ODIN3_OK && i < count; i++) {
+    for (size_t i = 0; st == ODIN3_OK && i < cmd + count; i++) {
         odin3_elab_override ovr;
-        st = project_override(e1, i, &ovr);
+        st =
+            i < cmd ? command_override(e1, (uint32_t)i, &ovr) : project_override(e1, i - cmd, &ovr);
         odin3_elab_override *slot = st == ODIN3_OK ? odin3_vec_push(out) : NULL;
         st = st != ODIN3_OK ? st : have(slot);
         if (slot != NULL) {

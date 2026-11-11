@@ -411,6 +411,7 @@ typedef struct rv_args {
     odin3_vec files;
     odin3_vec defines;    /* -D words (odin3_bytes views: name or name=value) */
     odin3_vec incdirs;    /* -I words (odin3_bytes views) */
+    odin3_vec params;     /* -P NAME=VALUE (odin3_elab_cmd_param) */
     odin3_bytes name_map; /* -name-map's file (H-6), ptr NULL when not given */
     bool prov_set;        /* --prov-ast given */
     odin3_construct_mode prov_ast;
@@ -557,6 +558,32 @@ static odin3_status take_command_word(odin3_bytes flag, odin3_bytes *rest, rv_ar
     return ODIN3_OK;
 }
 
+/* -P NAME=VALUE: a top-level parameter override. A value that is a Verilog number (`16`, `-3`,
+ * `8'hFF`) is a number; anything else is a string, and `'text'` forces a string. */
+static odin3_status take_param(odin3_bytes *rest, rv_args *out) {
+    odin3_bytes word = odin3_pass_arg_next(rest);
+    const char *text = word.ptr;
+    const char *eq = word.ptr != NULL ? memchr(text, '=', word.len) : NULL;
+    size_t name_len = eq != NULL ? (size_t)(eq - text) : 0;
+    if (eq == NULL || name_len == 0 || odin3_proj_ident_len(word, 0) != name_len) {
+        odin3_log(ODIN3_LOG_ERROR, "read_verilog: -P expects NAME=VALUE (a parameter name, '=', "
+                                   "a Verilog number or a string)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    odin3_elab_cmd_param *slot = odin3_vec_push(&out->params);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    slot->name = (odin3_bytes){text, name_len};
+    slot->value = (odin3_bytes){eq + 1, word.len - name_len - 1U};
+    slot->is_string = !odin3_proj_is_number(slot->value);
+    const char *val = slot->value.ptr;
+    if (slot->value.len >= 2 && val[0] == '\'' && val[slot->value.len - 1] == '\'') {
+        slot->value = (odin3_bytes){val + 1, slot->value.len - 2};
+    }
+    return ODIN3_OK;
+}
+
 /* A flag or -name-map <file>: *taken says the word was one. */
 static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *out, bool *taken) {
     *taken = true;
@@ -571,6 +598,9 @@ static odin3_status option_word(odin3_bytes word, odin3_bytes *rest, rv_args *ou
     }
     if (odin3_pass_arg_is(word, "-D") || odin3_pass_arg_is(word, "-I")) {
         return take_command_word(word, rest, out);
+    }
+    if (odin3_pass_arg_is(word, "-P")) {
+        return take_param(rest, out);
     }
     *taken = false;
     return ODIN3_OK;
@@ -998,6 +1028,7 @@ static void call_init(rv_call *call) {
     odin3_vec_init(&call->parsed.files, sizeof(odin3_bytes));
     odin3_vec_init(&call->parsed.defines, sizeof(odin3_bytes));
     odin3_vec_init(&call->parsed.incdirs, sizeof(odin3_bytes));
+    odin3_vec_init(&call->parsed.params, sizeof(odin3_elab_cmd_param));
     odin3_vec_init(&call->cmd_defs, sizeof(odin3_pp_define));
     odin3_vec_init(&call->cmd_dirs, sizeof(const char *));
     odin3_vec_init(&call->srcs, sizeof(odin3_pp_source));
@@ -1010,6 +1041,7 @@ static void call_free(rv_call *call) {
     odin3_vec_free(&call->parsed.files);
     odin3_vec_free(&call->parsed.defines);
     odin3_vec_free(&call->parsed.incdirs);
+    odin3_vec_free(&call->parsed.params);
     odin3_vec_free(&call->cmd_defs);
     odin3_vec_free(&call->cmd_dirs);
 }
@@ -1029,6 +1061,13 @@ static odin3_status call_sources(odin3_design *design, rv_call *call) {
             "read_verilog: -D and -I are not supported for SystemVerilog yet (use a project)");
         return ODIN3_ERR_INVALID_ARG;
     }
+    if (st == ODIN3_OK && call->svs.len > 0 && call->parsed.params.len > 0) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_verilog: -P is not supported for SystemVerilog yet (use a project)");
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    call->parsed.elab.params = call->parsed.params.data;
+    call->parsed.elab.nparams = (uint32_t)call->parsed.params.len;
     return st != ODIN3_OK ? st : command_config(design, call);
 }
 
@@ -1088,6 +1127,7 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "read_verilog [--parse-only] [--lib] [--prov-ast refs|constructs|full|off] [--nolatches] "
     "[--nomem2reg] [--auto-blackbox] [--vendor-prims] "
     "[--vtr-compat] [-icells] [-netlist [-name-map <file>]] [-D <name[=value]>]... [-I <dir>]... "
+    "[-P <name=value>]... "
     "[<file>...]: "
     "read "
     "Verilog-2005 (the project's Verilog files, or the files given) into one parsed AST with -v/-y "
@@ -1109,7 +1149,9 @@ const odin3_pass_def odin3_read_verilog_pass = {
     "--prov-ast keeps the construct table of the read (refs: the nodes provenance records point "
     "at and their ancestors; constructs: without expressions; full: every node; off: none); "
     "-D defines a preprocessor macro and -I adds an include directory, after the project's own "
-    "(Verilog files only); -name-map "
+    "(Verilog files only); -P NAME=VALUE overrides a parameter of the top module (a Verilog "
+    "number such as 16 or 8'hFF, else a string; 'text' forces a string), before the project's "
+    "own param lines; -name-map "
     "(with -netlist) first replaces each hash net name the map (write_verilog --name-style hash) "
     "holds by its full name; --lib "
     "keeps "
