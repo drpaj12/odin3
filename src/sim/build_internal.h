@@ -67,6 +67,26 @@ odin3_status odin3_sim_check_hierarchy(odin3_sim_builder *bld, odin3_module_id t
 uint32_t odin3_sim_child_module(const odin3_sim_builder *bld, const odin3_module *module,
                                 odin3_node_id node);
 
+
+/* What one step of expansion adds: cells/frames, and net-map entries, slots or pin bits. */
+typedef struct odin3_sim_growth {
+    uint64_t units;
+    uint64_t bits;
+} odin3_sim_growth;
+
+/* Builder services for build_mem.c (defined in build.c). */
+const odin3_module *odin3_sim_frame_module(const odin3_sim_builder *bld, uint32_t frame);
+/* The provisional slot of net of frame, and the root of a provisional slot. */
+uint32_t odin3_sim_net_slot(odin3_sim_builder *bld, uint32_t frame, odin3_net_id net);
+uint32_t odin3_sim_slot_root(odin3_sim_builder *bld, uint32_t slot);
+/* False (and logged) when adding grow for node of frame would pass the budget. */
+bool odin3_sim_check_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                            odin3_sim_growth grow);
+
+/* "cannot simulate `$mem` (node ...): <why>" (build_names.c). */
+void odin3_sim_err_mem(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                       const char *why);
+
 /* Messages (build_names.c). Each logs one located error. */
 
 /* "cannot simulate `<type>`" for node of frame. */

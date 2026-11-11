@@ -194,6 +194,11 @@ void odin3_sim_err_no_four_state(const odin3_sim_builder *bld, uint32_t frame, o
     err_cell(bld, frame, node, "the cell type keeps state and has no x/z model");
 }
 
+void odin3_sim_err_mem(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                       const char *why) {
+    err_cell(bld, frame, node, why);
+}
+
 void odin3_sim_err_too_large(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node) {
     err_cell(bld, frame, node, "the cell is too wide to simulate");
 }

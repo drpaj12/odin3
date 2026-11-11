@@ -4,6 +4,7 @@
 #include "ir/celltype.h"
 #include "ir/lut.h"
 #include "ir/module.h"
+#include "sim/mem_sim.h"
 #include "sim/sim.h"
 #include "sim/sim4.h"
 #include "sim/sim_internal.h"
@@ -68,12 +69,6 @@ static const odin3_module *frame_module(const odin3_sim_builder *bld, uint32_t f
 /* --- the budget: checked before the flattened design grows -------------------------------------
  */
 
-/* What one step of expansion adds: cells/frames, and net-map entries, slots or pin bits. */
-typedef struct odin3_sim_growth {
-    uint64_t units;
-    uint64_t bits;
-} odin3_sim_growth;
-
 /*
  * False (and logged) when adding units cells/frames and bits net-map entries, slots or pin bits
  * for node of frame would pass the budget.
@@ -91,6 +86,23 @@ static bool within_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_no
         return false;
     }
     return true;
+}
+
+const odin3_module *odin3_sim_frame_module(const odin3_sim_builder *bld, uint32_t frame) {
+    return frame_module(bld, frame);
+}
+
+uint32_t odin3_sim_net_slot(odin3_sim_builder *bld, uint32_t frame, odin3_net_id net) {
+    return *map_at(bld, frame, net);
+}
+
+uint32_t odin3_sim_slot_root(odin3_sim_builder *bld, uint32_t slot) {
+    return uf_find(bld->uf.data, slot);
+}
+
+bool odin3_sim_check_budget(const odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
+                            odin3_sim_growth grow) {
+    return within_budget(bld, frame, node, grow);
 }
 
 /* --- frames: one per expanded module instance ------------------------------------------------- */
@@ -283,6 +295,9 @@ static odin3_status setup_four_state(const odin3_sim_builder *bld, odin3_sim_fla
 static odin3_status add_flat(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
                              const odin3_celltype_def *def) {
     const odin3_module *mod = frame_module(bld, frame);
+    if (odin3_sim_is_mem_type(def)) {
+        return odin3_sim_add_mem(bld, frame, node);
+    }
     if (def->simulate == NULL) {
         odin3_sim_err_unsupported(bld, frame, node);
         return ODIN3_ERR_INVALID_ARG;
