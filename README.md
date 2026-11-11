@@ -7,7 +7,7 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-Version 1.6.0 (released 2026-11-09, tag [v1.6.0](https://github.com/drpaj12/odin3/releases/tag/v1.6.0); hub snapshot: [v1.6.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.6.0/docs/versions.md)).
+Version 1.6.1 (ready to tag; the last tagged release is [v1.6.0](https://github.com/drpaj12/odin3/releases/tag/v1.6.0), 2026-11-09; hub snapshot: [v1.6.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.6.0/docs/versions.md)).
 
 **What it is today.** The trunk of Yggdrasil III (hub: <https://github.com/drpaj12/YggdrasilIII>). A C17 framework with
 one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
@@ -19,8 +19,8 @@ produced for the 15 VTR benchmarks that fit the development laptop routes in VPR
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
 
-**Status: version 1.6.0 (released 2026-11-09; 1.6.0 adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); tag `v1.6.0`).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
-Release notes: [v1.6.0](docs/V1.6.0.md) (switching activity pass), [v1.5.1](docs/V1.5.1.md) (provenance tool memory and speed), [v1.5.0](docs/V1.5.0.md) (simulator parity, OpenCores testbenches), [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
+**Status: version 1.6.1 (ready to tag; 1.6.1 is 1.6.0 plus front-end, Quartus-leg and simulator gap fixes, docs/V1.6.1.md). Version 1.6.0 (released 2026-11-09; adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); tag `v1.6.0`).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+Release notes: [v1.6.1](docs/V1.6.1.md) (Quartus leg, ROM to `altsyncram`, simulator `$mem`), [v1.6.0](docs/V1.6.0.md) (switching activity pass), [v1.5.1](docs/V1.5.1.md) (provenance tool memory and speed), [v1.5.0](docs/V1.5.0.md) (simulator parity, OpenCores testbenches), [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: kept locally by the author. Token, model and
 time cost of building it: [`docs/log_cost_of_tokens_and_time.md`](docs/log_cost_of_tokens_and_time.md).
@@ -46,7 +46,7 @@ Start at the Yggdrasil III hub; every manual links to the others.
 
 ## Features
 
-Version 1.6.0 on this branch (C ABI 7). Status: **works** = on `main` with tests; **limit** = works with a documented limit.
+Version 1.6.1 on this branch (C ABI 7). Status: **works** = on `main` with tests; **limit** = works with a documented limit.
 Each line points to the manual page; the pass table is [`docs/PASSES.md`](docs/PASSES.md) and the changes are in
 [`CHANGELOG.md`](CHANGELOG.md).
 
@@ -86,19 +86,19 @@ From source (Ubuntu 24.04, native or WSL2; CMake 3.28 or later for the default
 ```bash
 git clone --recursive https://github.com/drpaj12/odin3.git && cd odin3
 cmake --preset release && cmake --build --preset release
-cmake --install build/release --prefix "$HOME/odin3-1.6.0"
+cmake --install build/release --prefix "$HOME/odin3-1.6.1"
 ```
 
 Or from the release's source tarball, which carries the ABC and Unity submodules and needs no git:
 
 ```sh
-tar xzf odin3-1.6.0.tar.gz && cd odin3-1.6.0
+tar xzf odin3-1.6.1.tar.gz && cd odin3-1.6.1
 cmake --preset release && cmake --build --preset release
-cmake --install build/release --prefix "$HOME/odin3-1.6.0"
+cmake --install build/release --prefix "$HOME/odin3-1.6.1"
 ```
 
 Or the Python wheel from the GitHub release (bundles `libodin3`, ABC, the `odin3` CLI and
-`odin3-flow`): `pip install odin3-1.6.0-py3-none-linux_x86_64.whl`.
+`odin3-flow`): `pip install odin3-1.6.1-py3-none-linux_x86_64.whl`.
 
 The tools outside the suite that some flows need (VTR, iverilog, OpenROAD and others) and their tested versions are on the hub's [tools page](https://github.com/drpaj12/YggdrasilIII/blob/main/docs/tools.md). Wyrd III and Loki III use Odin III through the `odin3` Python package; they need 1.6.0 (C ABI 7).
 

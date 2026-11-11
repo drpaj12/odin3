@@ -4,7 +4,7 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## Unreleased
+## 1.6.1 (ready to tag; release notes `docs/V1.6.1.md`)
 
 ### Added
 - `lpmmap` maps a ROM to `altsyncram` in `ROM` mode (`--target lpm`, `write_verilog --quartus`): an inferred `$mem` with one read
