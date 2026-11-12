@@ -44,6 +44,7 @@ odin3_status odin3_prov_store_init(odin3_design *design) {
     odin3_vec_init(&store->marks, sizeof(uint32_t));
     odin3_vec_init(&store->stack, sizeof(uint32_t));
     odin3_vec_init(&store->scratch, sizeof(odin3_prov_id));
+    odin3_vec_init(&store->annots, sizeof(odin3_prov_annot));
     odin3_pagevec_spec spec = {sizeof(odin3_prov_record), PROV_PAGE_SHIFT};
     store->records = odin3_pagevec_create_paged(spec);
     store->arena = odin3_arena_create(0);
@@ -69,6 +70,8 @@ void odin3_prov_store_free(odin3_design *design) {
     odin3_vec_free(&store->marks);
     odin3_vec_free(&store->stack);
     odin3_vec_free(&store->scratch);
+    odin3_vec_free(&store->annots);
+    odin3_u64map_destroy(store->annot);
     odin3_util_free(store);
     design->prov = NULL;
 }
@@ -237,6 +240,12 @@ odin3_status odin3_prov_store_clone(odin3_design *dst, const odin3_design *src) 
         return ODIN3_ERR_NO_MEMORY;
     }
     to->gen = from->gen;
+    if (from->annot != NULL) {
+        to->annot = odin3_u64map_clone(from->annot);
+        if (to->annot == NULL || odin3_vec_copy(&to->annots, &from->annots) != ODIN3_OK) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
     odin3_status st = clone_records(to);
     for (uint32_t id = 1; st == ODIN3_OK && id < to->tombstones.len; id++) {
         st = odin3_tombstone_own(dst, odin3_vec_at(&to->tombstones, id));
@@ -608,6 +617,39 @@ size_t odin3_prov_bytes_reserved(const odin3_design *design) {
            odin3_arena_bytes_reserved(store->arena) + odin3_idindex_bytes_reserved(store->index) +
            vec_bytes(&store->runs) + vec_bytes(&store->tombstones) + vec_bytes(&store->marks) +
            vec_bytes(&store->stack) + vec_bytes(&store->scratch);
+}
+
+odin3_status odin3_prov_annotate(odin3_design *design, odin3_prov_id id,
+                                 const odin3_prov_annot *annot) {
+    odin3_prov_store *store = design != NULL ? design->prov : NULL;
+    if (store == NULL || annot == NULL || record_cat(store, id.v) == NULL) {
+        return ODIN3_ERR_INVALID_ARG;
+    }
+    if (store->annot == NULL) {
+        store->annot = odin3_u64map_create(0);
+        if (store->annot == NULL) {
+            return ODIN3_ERR_NO_MEMORY;
+        }
+    }
+    odin3_prov_annot *slot = odin3_vec_push(&store->annots);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = *annot;
+    odin3_status st = odin3_u64map_put(store->annot, (odin3_kv){id.v, store->annots.len});
+    if (st != ODIN3_OK) {
+        odin3_vec_pop(&store->annots);
+    }
+    return st;
+}
+
+const odin3_prov_annot *odin3_prov_annotation(const odin3_design *design, odin3_prov_id id) {
+    const odin3_prov_store *store = design != NULL ? design->prov : NULL;
+    uint64_t at = 0;
+    if (store == NULL || store->annot == NULL || !odin3_u64map_get(store->annot, id.v, &at)) {
+        return NULL;
+    }
+    return odin3_vec_cat(&store->annots, (size_t)at - 1U);
 }
 
 bool odin3_prov_class_of(const odin3_design *design, odin3_prov_id id, odin3_opclass *out) {

@@ -62,6 +62,8 @@ typedef struct odin3_prov_store {
     uint32_t gen;           /* current walk generation */
     odin3_vec stack;        /* uint32_t walk worklist */
     odin3_vec scratch;      /* odin3_prov_id: derive's de-duplicated parents */
+    odin3_u64map *annot;    /* record ID -> 1 + index into annots (NULL until the first) */
+    odin3_vec annots;       /* odin3_prov_annot, in the order they were set */
 } odin3_prov_store;
 
 /* Creates the design's provenance store (design.c calls it); ODIN3_ERR_NO_MEMORY on OOM. */

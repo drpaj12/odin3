@@ -302,6 +302,9 @@ typedef struct rs_con {
 typedef struct rs_rec {
     const odin3_nm_line *line;
     odin3_bytes hier;
+    odin3_bytes cell;  /* the flag cell=<type>, unescaped (empty: none) */
+    uint32_t cw, ca;   /* cw=<width> and ca=<arms> (0: none) */
+    uint8_t cut;       /* cut=exact (1) or cut=approx (2) */
     uint32_t run, op, con;
     size_t foreign_off, foreign_len; /* flags the map writers of this version do not define */
     uint8_t kind, dir, from, to, bulk, tail;
@@ -627,7 +630,9 @@ static bool known_flag(odin3_bytes elem) {
         }
     }
     return number_after(elem, "n=", NULL) || number_after(elem, "ctx=", NULL) ||
-           number_after(elem, "uid=", NULL) || ref_after(elem, "call=", 'c') ||
+           number_after(elem, "uid=", NULL) || number_after(elem, "cw=", NULL) ||
+           number_after(elem, "ca=", NULL) || bytes_is(elem, "cut=exact") ||
+           bytes_is(elem, "cut=approx") || ref_after(elem, "call=", 'c') ||
            ref_after(elem, "stale=", 't') || (bytes_has_prefix(elem, "hier=")) ||
            (bytes_has_prefix(elem, "cell=") && elem.len > CELL_PREFIX);
 }
@@ -635,7 +640,7 @@ static bool known_flag(odin3_bytes elem) {
 /* True when the element has the form of a flag this version defines but its value is bad. */
 static bool broken_flag(odin3_bytes elem) {
     static const char *const PREFIXES[] = {
-        "lossy=", "n=", "call=", "cell=", "ctx=", "stale=", "uid="};
+        "lossy=", "n=", "call=", "cell=", "ctx=", "stale=", "uid=", "cw=", "ca=", "cut="};
     for (size_t k = 0; k < sizeof PREFIXES / sizeof PREFIXES[0]; k++) {
         if (bytes_has_prefix(elem, PREFIXES[k])) {
             return true;
@@ -678,6 +683,16 @@ static bool read_flag(flag_job *job, odin3_bytes elem) {
         }
         job->rec->hier =
             (odin3_bytes){(const char *)text.ptr + sizeof HIER - 1U, text.len - (sizeof HIER - 1U)};
+    } else if (bytes_has_prefix(elem, "cell=")) {
+        if (rs_unescape(job->st, job->line, elem, &text) != ODIN3_OK) {
+            return false;
+        }
+        job->rec->cell = (odin3_bytes){(const char *)text.ptr + CELL_PREFIX, text.len - CELL_PREFIX};
+    } else if (bytes_has_prefix(elem, "cw=") || bytes_has_prefix(elem, "ca=")) {
+        uint32_t *dst = bytes_has_prefix(elem, "cw=") ? &job->rec->cw : &job->rec->ca;
+        (void)number_after(elem, bytes_has_prefix(elem, "cw=") ? "cw=" : "ca=", dst);
+    } else if (bytes_has_prefix(elem, "cut=")) {
+        job->rec->cut = bytes_is(elem, "cut=exact") ? ODIN3_PROV_CUT_EXACT : ODIN3_PROV_CUT_APPROX;
     } else if (bytes_has_prefix(elem, "ctx=")) {
         uint32_t tail = 0;
         if (!number_after(elem, "ctx=", &tail) || tail > UINT8_MAX) {
@@ -1070,6 +1085,16 @@ static odin3_status make_derived(rs *st, const rs_rec *rec, uint32_t run, odin3_
     return status == ODIN3_OK ? odin3_prov_derive_class(&ctx, parents, hier, &cls, out) : status;
 }
 
+/* Sets the annotation a record's flags gave (cell=, cw=, ca=, cut=). */
+static odin3_status add_annotation(rs *st, const rs_rec *rec, odin3_prov_id id) {
+    if (rec->cell.len == 0 && rec->cw == 0 && rec->ca == 0 && rec->cut == 0) {
+        return ODIN3_OK;
+    }
+    odin3_prov_annot annot = {0, rec->cw, rec->ca, rec->cut};
+    odin3_status status = rec->cell.len > 0 ? intern_bytes(st, rec->cell, &annot.cell) : ODIN3_OK;
+    return status == ODIN3_OK ? odin3_prov_annotate(st->design, id, &annot) : status;
+}
+
 /* Keeps the foreign flags of a record (and its `capped` mark) in the extra table's flag list. */
 static odin3_status add_foreign_line(rs *st, const rs_rec *rec, odin3_prov_id id) {
     if (rec->foreign_len == 0 && !rec->capped) {
@@ -1107,7 +1132,8 @@ static odin3_status apply_recs(rs *st) {
             return status != ODIN3_OK ? status : ODIN3_ERR_NO_MEMORY;
         }
         *slot = id.v;
-        status = add_foreign_line(st, rec, id);
+        status = add_annotation(st, rec, id);
+        status = status == ODIN3_OK ? add_foreign_line(st, rec, id) : status;
         if (status != ODIN3_OK) {
             return status;
         }

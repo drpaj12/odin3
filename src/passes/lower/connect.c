@@ -51,6 +51,24 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node) {
     return ODIN3_OK;
 }
 
+/* Port position of the select input of $mux and $pmux (A B S Y). */
+enum { LW_SEL_PORT = 2, LW_MUX_ARMS = 2 };
+
+odin3_status lw_annotate(lw_ctx *lw, const lw_cell *cell) {
+    if (!odin3_prov_valid(lw->prov)) {
+        return ODIN3_OK;
+    }
+    odin3_prov_annot annot = {0, cell->port[cell->out_port].n, 0, ODIN3_PROV_CUT_NONE};
+    odin3_status st = odin3_design_intern(lw->design, odin3_bytes_cstr(cell->def->name), &annot.cell);
+    if (st == ODIN3_OK && strcmp(cell->def->name, "$mux") == 0) {
+        annot.arms = LW_MUX_ARMS;
+    } else if (st == ODIN3_OK && strcmp(cell->def->name, "$pmux") == 0 &&
+               cell->n_ports > LW_SEL_PORT) {
+        annot.arms = cell->port[LW_SEL_PORT].n + 1U; /* the selected arms and the default */
+    }
+    return st == ODIN3_OK ? odin3_prov_annotate(lw->design, lw->prov, &annot) : st;
+}
+
 odin3_status lw_connect(lw_ctx *lw, odin3_net_id keep, odin3_net_id drop) {
     if (!odin3_net_valid(keep) || !odin3_net_valid(drop) || keep.v == drop.v) {
         return ODIN3_OK;
