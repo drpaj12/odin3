@@ -507,9 +507,9 @@ def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_
 
 
 def promote_retry_run(job_dir: Path, retry: dict[str, int], result: FlowResult) -> None:
-    """With ``--keep-results`` after a route retry: ``vpr/run`` holds the failed first attempt,
-    whose ``.net``, ``.place`` and ``.route`` are not one routed result (``vpr --analysis`` cannot use
-    them) and ``odin3-prov-post`` finds two run directories. The failed attempt moves to
+    """With ``--keep-results`` after a route retry, ``vpr/run`` holds the failed first attempt.
+    Its ``.net``, ``.place`` and ``.route`` are not one routed result (``vpr --analysis`` cannot
+    use them) and ``odin3-prov-post`` finds two run directories. The failed attempt moves to
     ``vpr/run-failed-W<failed width>`` and the routed retry's run directory becomes ``vpr/run``."""
     failed = job_dir / f"run-failed-W{retry['failed_width']}"
     used = job_dir / f"retry-{retry['used_width']}" / "run"
