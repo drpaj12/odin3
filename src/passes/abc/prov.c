@@ -595,6 +595,9 @@ static odin3_status precise_records(pv *pw, odin3_vec *obj_prov) {
         }
     }
     odin3_vec_free(&rec);
+    st = st == ODIN3_OK && pw->run->opts.prov_cut
+             ? odin3_abc_cut_records(pw->run, pw->res, pw->anchors, obj_prov)
+             : st;
     return st;
 }
 

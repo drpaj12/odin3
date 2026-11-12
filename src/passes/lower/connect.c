@@ -59,7 +59,8 @@ odin3_status lw_annotate(lw_ctx *lw, const lw_cell *cell) {
         return ODIN3_OK;
     }
     odin3_prov_annot annot = {0, cell->port[cell->out_port].n, 0, ODIN3_PROV_CUT_NONE};
-    odin3_status st = odin3_design_intern(lw->design, odin3_bytes_cstr(cell->def->name), &annot.cell);
+    odin3_status st =
+        odin3_design_intern(lw->design, odin3_bytes_cstr(cell->def->name), &annot.cell);
     if (st == ODIN3_OK && strcmp(cell->def->name, "$mux") == 0) {
         annot.arms = LW_MUX_ARMS;
     } else if (st == ODIN3_OK && strcmp(cell->def->name, "$pmux") == 0 &&

@@ -302,9 +302,9 @@ typedef struct rs_con {
 typedef struct rs_rec {
     const odin3_nm_line *line;
     odin3_bytes hier;
-    odin3_bytes cell;  /* the flag cell=<type>, unescaped (empty: none) */
-    uint32_t cw, ca;   /* cw=<width> and ca=<arms> (0: none) */
-    uint8_t cut;       /* cut=exact (1) or cut=approx (2) */
+    odin3_bytes cell; /* the flag cell=<type>, unescaped (empty: none) */
+    uint32_t cw, ca;  /* cw=<width> and ca=<arms> (0: none) */
+    uint8_t cut;      /* cut=exact (1) or cut=approx (2) */
     uint32_t run, op, con;
     size_t foreign_off, foreign_len; /* flags the map writers of this version do not define */
     uint8_t kind, dir, from, to, bulk, tail;
@@ -669,6 +669,25 @@ static bool add_foreign(flag_job *job, odin3_bytes elem) {
     return odin3_strbuf_append(&st->foreign, elem) == ODIN3_OK;
 }
 
+/* cell=<type>, cw=<n>, ca=<n> and cut=exact|approx: the annotation of the record. */
+static bool read_annot_flag(flag_job *job, odin3_bytes elem) {
+    odin3_bytes text = {NULL, 0};
+    if (bytes_has_prefix(elem, "cell=")) {
+        if (rs_unescape(job->st, job->line, elem, &text) != ODIN3_OK) {
+            return false;
+        }
+        job->rec->cell =
+            (odin3_bytes){(const char *)text.ptr + CELL_PREFIX, text.len - CELL_PREFIX};
+    } else if (bytes_has_prefix(elem, "cw=")) {
+        (void)number_after(elem, "cw=", &job->rec->cw);
+    } else if (bytes_has_prefix(elem, "ca=")) {
+        (void)number_after(elem, "ca=", &job->rec->ca);
+    } else {
+        job->rec->cut = bytes_is(elem, "cut=exact") ? ODIN3_PROV_CUT_EXACT : ODIN3_PROV_CUT_APPROX;
+    }
+    return true;
+}
+
 /* hier=<text>, ctx=<n>, bulk and capped are read, the other known flags are recomputed. */
 static bool read_flag(flag_job *job, odin3_bytes elem) {
     static const char HIER[] = "hier=";
@@ -683,16 +702,9 @@ static bool read_flag(flag_job *job, odin3_bytes elem) {
         }
         job->rec->hier =
             (odin3_bytes){(const char *)text.ptr + sizeof HIER - 1U, text.len - (sizeof HIER - 1U)};
-    } else if (bytes_has_prefix(elem, "cell=")) {
-        if (rs_unescape(job->st, job->line, elem, &text) != ODIN3_OK) {
-            return false;
-        }
-        job->rec->cell = (odin3_bytes){(const char *)text.ptr + CELL_PREFIX, text.len - CELL_PREFIX};
-    } else if (bytes_has_prefix(elem, "cw=") || bytes_has_prefix(elem, "ca=")) {
-        uint32_t *dst = bytes_has_prefix(elem, "cw=") ? &job->rec->cw : &job->rec->ca;
-        (void)number_after(elem, bytes_has_prefix(elem, "cw=") ? "cw=" : "ca=", dst);
-    } else if (bytes_has_prefix(elem, "cut=")) {
-        job->rec->cut = bytes_is(elem, "cut=exact") ? ODIN3_PROV_CUT_EXACT : ODIN3_PROV_CUT_APPROX;
+    } else if (bytes_has_prefix(elem, "cell=") || bytes_has_prefix(elem, "cw=") ||
+               bytes_has_prefix(elem, "ca=") || bytes_has_prefix(elem, "cut=")) {
+        return read_annot_flag(job, elem);
     } else if (bytes_has_prefix(elem, "ctx=")) {
         uint32_t tail = 0;
         if (!number_after(elem, "ctx=", &tail) || tail > UINT8_MAX) {

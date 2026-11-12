@@ -2,7 +2,7 @@
 section 2.1).
 
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
-        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--timing-attr]
+        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--timing-attr]
         [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
         [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 
@@ -81,6 +81,7 @@ class FlowArgs:
     defines: tuple[str, ...] = ()  # -D / +define+: NAME or NAME=VALUE
     read_opts: tuple[str, ...] = ()  # --read-opt: extra read_verilog options
     strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
+    prov_cut: bool = False  # --prov-cut: abc keeps the exact cut of each LUT (needs --prov)
 
 
 @dataclass(frozen=True)
@@ -685,6 +686,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     if args.prov:
         script = prov_script(script, k)
+    if args.prov_cut:
+        script = script.replace(f"abc --lut {k}", f"abc --lut {k} --prov-cut on")
     script = with_read_options(args, script, step_dir)
     script = tristate_script(script, args.strict_tristate)
     adir = args.out / "analysis"
@@ -909,6 +912,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     help="write the BLIF with hash names and the version 2 name map "
                          "(<top>.blif.names: records, spans, constructs); implied by "
                          "--timing-attr; needs --target vtr")
+    ap.add_argument("--prov-cut", action="store_true",
+                    help="with --prov: give each LUT the record of the gates its function covers "
+                         "(abc --prov-cut on; the netlist is the same); needs --target vtr")
     ap.add_argument("--timing-attr", action="store_true",
                     help="attribute the critical path to HDL statements, modules and words "
                          "(timing/attribution.json and summary.txt); needs VPR")
@@ -960,6 +966,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                 raise UsageError(f"no such design file: {design}")
         out = Path("odin3_out") / resolve_top(ns.designs, ns.top)
     vpr = resolve_vpr(ns.vpr, ns.target)
+    if ns.prov_cut and not (ns.prov or ns.timing_attr or ns.timing_paths is not None):
+        ap.error("--prov-cut needs --prov (or --timing-attr)")
     if ns.keep_results and not vpr:
         ap.error("--keep-results needs VPR (--vpr)")
     arch = ns.arch.resolve() if ns.arch else None
@@ -972,7 +980,7 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     ns.tools.resolve() if ns.tools else None,
                     ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
                     tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
-                    ns.strict_tristate)
+                    ns.strict_tristate, ns.prov_cut)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

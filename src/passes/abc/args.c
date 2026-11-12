@@ -44,11 +44,12 @@ typedef enum abc_option {
     OPT_PROV,
     OPT_GATES,
     OPT_PROV_EDGES,
+    OPT_PROV_CUT,
     OPT_COUNT
 } abc_option;
 
-static const char *const k_option_names[OPT_COUNT] = {"--script", "--lut",   "--via-blif",  "--log",
-                                                      "--prov",   "--gates", "--prov-edges"};
+static const char *const k_option_names[OPT_COUNT] = {
+    "--script", "--lut", "--via-blif", "--log", "--prov", "--gates", "--prov-edges", "--prov-cut"};
 
 static int option_of(odin3_bytes word) {
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -116,6 +117,13 @@ static odin3_status set_option(abc_option which, const char *value, odin3_abc_op
                       value);
             return ODIN3_ERR_INVALID_ARG;
         }
+        return ODIN3_OK;
+    case OPT_PROV_CUT:
+        if (strcmp(value, "on") != 0 && strcmp(value, "off") != 0) {
+            odin3_log(ODIN3_LOG_ERROR, "abc: --prov-cut must be on or off, not '%s'", value);
+            return ODIN3_ERR_INVALID_ARG;
+        }
+        out->prov_cut = strcmp(value, "on") == 0;
         return ODIN3_OK;
     case OPT_PROV_EDGES:
         if (!parse_prov_edges(value, &out->prov_edges)) {
@@ -222,7 +230,14 @@ odin3_status odin3_abc_choose_script(const odin3_design *design, const odin3_abc
 odin3_status odin3_abc_exchange_choice(const odin3_abc_opts *opts, uint32_t *exchange) {
     *exchange = ODIN3_ABC_EXCHANGE_BLIF;
     const char *env = getenv("ODIN3_ABC_EXCHANGE");
-    if (opts->via_blif != NULL || env == NULL) {
+    if (opts->via_blif != NULL) {
+        return ODIN3_OK;
+    }
+    if (env == NULL) {
+        /* --prov-cut on needs the name map, which only the in-memory exchange makes; the netlist
+         * is the same. ODIN3_ABC_EXCHANGE=blif still wins (the cuts are then mostly approximate).
+         */
+        *exchange = opts->prov_cut ? ODIN3_ABC_EXCHANGE_AIG : ODIN3_ABC_EXCHANGE_BLIF;
         return ODIN3_OK;
     }
     if (strcmp(env, "aig") == 0) {

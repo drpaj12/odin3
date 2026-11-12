@@ -69,6 +69,16 @@ odin3_status odin3_abc_records(odin3_abc_run *run, const odin3_abc_result *res,
                                const odin3_vec *anchors, odin3_vec *obj_prov);
 
 /*
+ * The exact cut of each LUT (cut.c, `abc --prov-cut on`): replaces the record of each LUT in
+ * obj_prov by one whose parents are the records of the old gates the LUT's function covers,
+ * annotated cut=exact; a LUT whose leaves or root have no old equivalent net, or whose walk from
+ * the root leaves the leaves, gets a one-parent record on its region record, annotated cut=approx.
+ * Logs the counts. NO_MEMORY.
+ */
+odin3_status odin3_abc_cut_records(odin3_abc_run *run, const odin3_abc_result *res,
+                                   const odin3_vec *anchors, odin3_vec *obj_prov);
+
+/*
  * One DERIVED record, in a new operation of the run, whose parents are the records of every old
  * soft cell and register of the run's region in node-ID order (the over-budget form; also the
  * record of a new object that no anchor reaches). *out stays 0 when no old cell has a record.

@@ -1772,9 +1772,8 @@ static odin3_status flags_annot(const pm_rec *pr, const pm *st, odin3_strbuf *ou
     }
     if (an->cell != 0) {
         status = add_flag(out, "cell=");
-        status = status == ODIN3_OK
-                     ? odin3_name_map_escape(out, str_of(st->design, an->cell))
-                     : status;
+        status =
+            status == ODIN3_OK ? odin3_name_map_escape(out, str_of(st->design, an->cell)) : status;
     }
     status = status == ODIN3_OK && an->width != 0 ? add_flag_num(out, "cw=%u", an->width) : status;
     status = status == ODIN3_OK && an->arms != 0 ? add_flag_num(out, "ca=%u", an->arms) : status;

@@ -53,6 +53,7 @@ typedef struct odin3_abc_run_stats {
     double classify_ms, aig_ms, check_ms, splice_ms, prov_ms, abc_ms, namemap_ms;
     uint64_t edges;
     uint32_t namemap_hit, namemap_total;
+    uint32_t cut_exact, cut_approx; /* --prov-cut: LUTs with an exact or an approximate cut */
 } odin3_abc_run_stats;
 
 struct odin3_abc_run {

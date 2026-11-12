@@ -7,6 +7,16 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- Provenance gaps for per-LUT cell attribution (additive; netlists and the name map version are unchanged). (1) The records
+  `lower` makes for a word cell now carry the cell type, its width and, for muxes, the number of arms, written in the `flags`
+  field of the `R` line as `cell=<type>`, `cw=<width>` and `ca=<arms>` (`$mux` has 2 arms, `$pmux` its selects plus the default);
+  restore reads them back. Two cells from one HDL statement have two such records (one `lower` operation per cell). (2) `abc
+  --prov-cut on` gives each LUT a record whose parents are the records of the old gates its function covers, flagged `cut=exact`;
+  a LUT whose leaves or root have no old equivalent net gets a one-parent record on its region record, flagged `cut=approx`. The
+  option selects the in-memory exchange (the name map finds the equivalent nets; the netlist is the same) unless
+  `ODIN3_ABC_EXCHANGE=blif` is set. The abc INFO line `LUT cuts: N exact, M approximate` gives the counts. Default behaviour of
+  `--prov fine|cone` is unchanged. `odin3-flow --prov-cut` passes it on. Docs: `docs/user/provenance.md`. Tests: `prov_cut`
+  (`tests/tools/test_prov_cut.py`).
 - `read_verilog -P NAME=VALUE` overrides a parameter of the top module at elaboration, as a project `param` line does (and ahead
   of the project's lines): a Verilog number (`16`, `-3`, `8'hFF`), else a string (`'12'` forces one); several allowed; an unknown
   name is the located error `param '-P Q' does not name a parameter`; not for SystemVerilog files. With it a testbench `dut #(.W(12))`

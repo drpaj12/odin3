@@ -25,7 +25,9 @@ FLOW = (
 )
 
 
-def flow(work: Path, design: str, top: str, abc: str = "abc --lut 6") -> list[list[str]]:
+def flow(
+    work: Path, design: str, top: str, abc: str = "abc --lut 6", env: dict[str, str] | None = None
+) -> list[list[str]]:
     """Runs the Verilog flow on a fixture; returns the TAB-split lines of the name map."""
     out = work / f"{top}.blif"
     script = (
@@ -34,7 +36,11 @@ def flow(work: Path, design: str, top: str, abc: str = "abc --lut 6") -> list[li
         + FLOW.format(abc=abc, out=out)
     )
     done = subprocess.run(
-        [str(ODIN3), "--top", top, "-p", script], capture_output=True, text=True, cwd=ROOT
+        [str(ODIN3), "--top", top, "-p", script],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env=dict(os.environ, **(env or {})),
     )
     assert done.returncode == 0, done.stderr
     return [ln.split("\t") for ln in (work / f"{top}.blif.names").read_text().splitlines()]
@@ -46,6 +52,31 @@ def records(rows: list[list[str]]) -> dict[str, list[str]]:
 
 def flags(p: list[str]) -> list[str]:
     return p[9].split(",") if len(p) > 9 and p[9] else []
+
+
+def lut_cells(rows: list[list[str]]) -> list[tuple[str, list[str]]]:
+    """For each LUT (an O line of level lut): its cut flag and the sorted cell types of the first
+    records on its parent chain that name a cell."""
+    rec = records(rows)
+    out = []
+    for p in rows:
+        # an O line has recs and level at 8 and 9, an N line (a net that keeps its name) at 4, 5
+        at = {"O": 8, "N": 4}.get(p[0])
+        if at is not None and len(p) > at + 1 and p[at + 1] == "lut":
+            todo, seen, cells = [p[at]], set(), []
+            while todo:
+                rid = todo.pop()
+                if rid in seen or rid not in rec:
+                    continue
+                seen.add(rid)
+                kind = next((f for f in flags(rec[rid]) if f.startswith("cell=")), None)
+                if kind:
+                    cells.append(kind[5:])
+                else:
+                    todo += [q for q in rec[rid][6].split(",") if q]
+            cut = next((f for f in flags(rec[p[at]]) if f.startswith("cut=")), "")
+            out.append((cut, sorted(cells)))
+    return out
 
 
 @unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest prov_cut)")
@@ -82,6 +113,77 @@ class CellType(unittest.TestCase):
             if p[0] == "R":
                 self.assertEqual(10, len(p), p)
                 self.assertTrue(re.fullmatch(r"r\d+", p[1]))
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest prov_cut)")
+class Cut(unittest.TestCase):
+    def test_exact_cuts_of_muxtest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            luts = lut_cells(flow(Path(tmp), "muxtest.v", "muxtest", "abc --lut 6 --prov-cut on"))
+        self.assertEqual(14, len(luts))
+        self.assertTrue(all(cut == "cut=exact" for cut, _ in luts), luts)
+        by_cells = sorted({tuple(cells) for _, cells in luts})
+        self.assertIn(("$and",), by_cells)  # z <= a & c
+        self.assertIn(("$mux",), by_cells)  # y <= s ? a : b: the mux alone
+        self.assertIn(("$eq", "$mux"), by_cells)  # w <= (a == b) ? c : d: compare and mux
+
+    def test_netlist_is_unchanged(self) -> None:
+        def body(path: Path) -> list[str]:
+            return [ln for ln in path.read_text().splitlines() if not ln.startswith("# abc:")]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            a, b = Path(tmp) / "a", Path(tmp) / "b"
+            a.mkdir()
+            b.mkdir()
+            flow(a, "muxtest.v", "muxtest")
+            flow(b, "muxtest.v", "muxtest", "abc --lut 6 --prov-cut on")
+            self.assertEqual(body(a / "muxtest.blif"), body(b / "muxtest.blif"))
+
+    def test_without_the_option_nothing_is_labelled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            luts = lut_cells(flow(Path(tmp), "muxtest.v", "muxtest"))
+        self.assertTrue(all(cut == "" for cut, _ in luts), luts)
+
+    def test_blif_exchange_is_approximate_for_inner_luts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            luts = lut_cells(
+                flow(Path(tmp), "muxtest.v", "muxtest", "abc --lut 6 --prov-cut on",
+                     {"ODIN3_ABC_EXCHANGE": "blif"})
+            )
+        cuts = {cut for cut, _ in luts}
+        self.assertEqual({"cut=exact", "cut=approx"}, cuts)
+
+    def test_bad_option_value(self) -> None:
+        script = (
+            f"read_techlib {ROOT}/lib/vtr.o3lib; read_verilog {FIX / 'case2.v'}; "
+            "proc; lower; abc --prov-cut maybe"
+        )
+        done = subprocess.run([str(ODIN3), "-p", script], capture_output=True, text=True)
+        self.assertNotEqual(0, done.returncode)
+        self.assertIn("--prov-cut must be on or off", done.stderr)
+
+
+@unittest.skipUnless(ODIN3, "ODIN3_BIN not set (run CTest prov_cut)")
+class PerInstance(unittest.TestCase):
+    def test_flatten_gives_each_instance_its_own_cell_record(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = flow(Path(tmp), "inst2.v", "inst2", "abc --lut 6 --prov-cut on")
+        rec = records(rows)
+        muxes = [p for p in rec.values() if "cell=$mux" in flags(p)]
+        self.assertEqual(2, len(muxes))
+        # each hangs on a context record that names its instance path
+        paths = set()
+        for mux in muxes:
+            parent = rec[mux[6]]
+            self.assertIn("ctx=1", flags(parent))
+            paths |= {f for f in flags(parent) if f.startswith("hier=")}
+        self.assertEqual({"hier=inst2/u0", "hier=inst2/u1"}, paths)
+        # the LUTs of the two instances are told apart: each has an exact cut on one mux record
+        luts = lut_cells(rows)
+        self.assertEqual(8, len(luts))
+        self.assertTrue(all(cells == ["$mux"] and cut == "cut=exact" for cut, cells in luts))
+        parents = {p[6] for p in rec.values() if "cut=exact" in flags(p)}
+        self.assertEqual({m[1] for m in muxes}, parents)
 
 
 if __name__ == "__main__":
