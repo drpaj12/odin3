@@ -513,6 +513,7 @@ static void point_views(odin3_sim *sim) {
         flat->view.values = sim->values;
         flat->view.ports = spans;
         flat->view.state = flat->view.n_state > 0 ? sim->state + flat->state_first : NULL;
+        flat->view.aux = flat->has_aux ? sim->state + flat->aux_first : NULL;
         flat->view.scratch = sim->scratch;
         flat->view.n_scratch = sim->n_scratch;
     }

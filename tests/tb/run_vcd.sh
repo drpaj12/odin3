@@ -41,9 +41,11 @@ for tb in *_tb.v; do
     fi
     lf=""
     [ -f "$n.flags" ] && lf=$(cat "$n.flags")
+    rf=""
+    [ -f "$n.rflags" ] && rf=$(cat "$n.rflags")
     xf=""
     case "$n" in x*) xf="--4state" ;; esac
-    script="read_verilog $n.v; proc; opt; lower $lf; sim_tb $xf --out $work/$n.out --vcd $work/$n.vcd $work/$n.tb.v"
+    script="read_verilog $rf $n.v; proc; opt; lower $lf; sim_tb $xf --out $work/$n.out --vcd $work/$n.vcd $work/$n.tb.v"
     if ! "$odin3" -p "$script" >"$work/$n.log" 2>&1; then
         echo "FAIL $n (odin3 error)"; tail -3 "$work/$n.log"; fail=1; continue
     fi

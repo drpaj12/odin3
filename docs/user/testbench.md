@@ -65,16 +65,26 @@ and a 256-byte activation RAM, 30,395 cycles) it runs 13 times faster. The netli
 simulation: `abc`, `write_blif` and the other netlist-view passes need the default `lower`.
 
 Supported: asynchronous and synchronous read ports (RD_EN, `RD_TRANSPARENT`), several write ports (the later port wins),
-per-bit write enables, OFFSET, ABITS above or below log2(SIZE), `INIT`, either clock edge. The rules for x and z are those
+per-bit write enables, OFFSET, ABITS above or below log2(SIZE), `INIT`, either clock edge, and ports on different clock
+nets or edges (below). The rules for x and z are those
 of the lowered netlist: an address that reaches no word reads x (0 with `--2state`) and a write to it is lost; an
 address with x or z bits reads x unless every word it may reach holds the same known value, and a write through it
 makes the words it may reach x (iverilog drops that write); an x write enable makes the written bit x unless the data
 equals the old value. A synchronous read with RD_EN x merges the new word with the old one bit by bit (the lowered
 netlist registers the pieces of a transparent read separately, so the two can differ there).
 
-Refused, with a located error `cannot simulate `$mem` (node ...)`: write and synchronous read ports on several clock
-nets or both clock edges, and an asynchronous write port. Multi-clock memories are a later step. A `$mem` with no read
-port is ignored.
+Several clocks: every live write port and every synchronous read port runs on its own clock net and edge
+(`WR_CLK`/`RD_CLK` per port, with `WR_CLK_POLARITY`/`RD_CLK_POLARITY`), so a dual-port RAM written on `wclk` and read on
+`rclk`, or written on the rising and read on the falling edge, simulates as the RTL does. All the edges of one instant
+(`odin3_sim_clock_edges`, a testbench that raises two clocks in one time step) see the memory as it was before the
+instant, and then the writes are applied in write-port-index order, the later port winning a same-address conflict, as
+for one clock. A transparent read port sees the write ports on its own clock net and edge only (what `lower` builds). Two
+differences from `lower`: write ports on different clocks simulate (`lower` refuses them, so there is no gate-level
+reference; `tests/tb/run_memclk.sh` compares them with iverilog), and the cell state is one shared array. Limit: 16
+different (clock net, edge) pairs per memory.
+
+Refused, with a located error `cannot simulate `$mem` (node ...)`: an asynchronous write port (a write with no clock has
+no event to apply it on; `lower` refuses it too) and a memory over 4 GiB of state. A `$mem` with no read port is ignored.
 
 `$readmemh` / `$readmemb` into a DUT memory works as with `--keep-mem` (above) and needs no extra flag: the words of a
 `$mem` are named `<memory>[<index>]`, the index being the declared one (OFFSET added). `--keep-mem` is not needed with
@@ -184,21 +194,25 @@ most 1024 bits wide (signals, literals, concatenations, DUT ports, hierarchical 
 with several drivers (two `assign`s, an `assign` and a DUT output) takes the resolution of them: z
 gives way, equal values stay, a 0 against a 1 or an x gives x. Anything else stops the run with
 `tb.v:LINE: unsupported: <construct>`: real numbers, tasks and functions, generate, a parameter override on the DUT
-instance that differs from the default (see "DUT parameter overrides"), ordered port connections, several modules in the testbench file, compiler directives
+instance that differs from the elaborated value (see "DUT parameter overrides"), ordered port connections, several modules in the testbench file, compiler directives
 other than `` `timescale ``.
 
 ## DUT parameter overrides
 
-The DUT was elaborated by `read_verilog` with its default parameters, so `sim_tb` cannot change them. A DUT
-instance may still repeat the defaults: `dut #(.W(8), .N(3)) u (...)` and the ordered `dut #(8, 3) u (...)` are accepted
-when each value equals the default, compared by value and width-insensitively (`8`, `8'd8` and `32'd8` are the same; a
-string parameter compares as 8 bits per character). A value that differs, a name the module does not have, more ordered
-values than parameters, or a non-constant value stops the run with a located error, for example
-`tb.v:8: unsupported: DUT instance u (module dut): parameter N is given 4 but the DUT was elaborated with 3; pass it to
-read_verilog (-P, not yet)`. Elaboration records each parameter as the module attribute `odin3 param default:<NAME>` (not
-written by `write_json`, `write_verilog` or `write_rtlil`). A module without a `#(parameter ...)` header list has its body
-`parameter` declarations counted, and its body `localparam`s with them (the elaborated form keeps no difference). Tests:
-`tests/tb/micro/dutparams*_tb.v` (compared with iverilog), `tests/tb/errors/dutparam*_tb.v`.
+The DUT was elaborated by `read_verilog` before `sim_tb` runs, so `sim_tb` cannot change its parameters; it checks the
+testbench against them. A DUT instance may repeat the elaborated values: `dut #(.W(8), .N(3)) u (...)` and the ordered
+`dut #(8, 3) u (...)` are accepted when each value equals the value the module was elaborated with, compared by value and
+width-insensitively (`8`, `8'd8` and `32'd8` are the same; a string parameter compares as 8 bits per character). To use a
+non-default value, give the same value to the read: `read_verilog -P W=12 -P N=9 dut.v; ...; sim_tb tb.v` with
+`dut #(.W(12), .N(9)) u (...)` in the testbench (`-P NAME=VALUE` overrides a parameter of the top module, see `docs/user/inputs.md`;
+a project's `param` lines do the same). A value that differs, a name the module does not have, more ordered values than
+parameters, or a non-constant value stops the run with a located error, for example
+`tb.v:8: unsupported: DUT instance u (module dut): parameter N is given 4 but the DUT was elaborated with 3; read the DUT
+with 'read_verilog -P N=4'`. Elaboration records each parameter as the module attribute `odin3 param default:<NAME>`, holding
+the value of the elaboration (not written by `write_json`, `write_verilog` or `write_rtlil`). A module without a
+`#(parameter ...)` header list has its body `parameter` declarations counted, and its body `localparam`s with them (the
+elaborated form keeps no difference). Tests: `tests/tb/micro/dutparams*_tb.v` (compared with iverilog; `dutparamp` reads the DUT
+with `-P`, through `dutparamp.rflags`), `tests/tb/errors/dutparam*_tb.v`.
 
 ## What is not modelled
 

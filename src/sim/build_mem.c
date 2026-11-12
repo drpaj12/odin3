@@ -8,15 +8,25 @@
 #include <stddef.h>
 #include <stdint.h>
 
-enum { MEM_MAX_SPANS = 16 }; /* spans a node adds at most (7 + 2, with room) */
+enum {
+    MEM_MAX_GROUPS = 16, /* distinct (clock net, polarity) pairs of one memory */
+    MEM_E_SPANS = 9,     /* spans of an edge cell */
+    MEM_A_SPANS = 2      /* spans of the asynchronous read cell */
+};
+
+/* One clock net and polarity that live ports use: one edge cell. */
+typedef struct mem_group {
+    uint32_t clk_slot; /* root slot of the clock net */
+    bool negative;     /* the falling edge */
+    uint32_t n_sync;   /* synchronous read ports of the group */
+} mem_group;
 
 /* What the node needs, found by the scan of its ports. */
 typedef struct mem_plan {
     odin3_sim_mem_geo geo;
     const odin3_value *params;
-    bool has_edge;      /* a live write port or a synchronous read port */
-    bool negative;      /* the memory's clock edge is the falling one */
-    uint32_t clk_slot;  /* root slot of the common clock */
+    mem_group groups[MEM_MAX_GROUPS];
+    uint32_t n_groups;  /* edge cells: 0 for a ROM or a memory of asynchronous reads only */
     uint32_t n_async;   /* asynchronous read ports */
     const char *refuse; /* why the memory cannot be simulated, NULL when it can */
 } mem_plan;
@@ -52,48 +62,58 @@ static bool bit_flag(const odin3_value *val, uint32_t idx) {
     return val->kind == ODIN3_VAL_BITS && idx < val->len && val->bits[idx] == ODIN3_BIT_1;
 }
 
-/* One clocked port joins the plan: its clock net and polarity must equal those before it. */
-static void note_clock(odin3_sim_builder *bld, uint32_t frame, odin3_net_id net, bool negative,
-                       mem_plan *plan) {
+/* One clocked port joins the plan: its group is the one on its clock net and polarity (made when
+ * it is the first). Returns the group, or the group count when there is no room. */
+static uint32_t note_clock(odin3_sim_builder *bld, uint32_t frame, odin3_net_id net, bool negative,
+                           mem_plan *plan) {
     uint32_t slot = odin3_net_valid(net)
                         ? odin3_sim_slot_root(bld, odin3_sim_net_slot(bld, frame, net))
                         : (uint32_t)ODIN3_SIM_SLOT_ZERO;
-    if (!plan->has_edge) {
-        plan->has_edge = true;
-        plan->negative = negative;
-        plan->clk_slot = slot;
-    } else if (plan->clk_slot != slot || plan->negative != negative) {
-        plan->refuse = "its ports are on several clocks or clock polarities (one clock per memory "
-                       "is supported); `lower` handles write ports on one clock only too";
+    for (uint32_t grp = 0; grp < plan->n_groups; grp++) {
+        if (plan->groups[grp].clk_slot == slot && plan->groups[grp].negative == negative) {
+            return grp;
+        }
     }
+    if (plan->n_groups == MEM_MAX_GROUPS) {
+        plan->refuse = "has ports on more than 16 different clock nets or polarities";
+        return plan->n_groups;
+    }
+    plan->groups[plan->n_groups] = (mem_group){slot, negative, 0};
+    return plan->n_groups++;
 }
 
 static void scan_write_ports(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
                              mem_plan *plan) {
     const odin3_module *mod = odin3_sim_frame_module(bld, frame);
-    for (uint32_t wport = 0; wport < plan->geo.n_wr; wport++) {
+    for (uint32_t wport = 0; wport < plan->geo.n_wr && plan->refuse == NULL; wport++) {
         if (write_dead(mod, node, plan, wport)) {
             continue;
         }
         if (!bit_flag(&plan->params[ODIN3_SIM_MEM_P_WR_CLK_ENABLE], wport)) {
-            plan->refuse = "has an asynchronous write port";
+            plan->refuse = "has an asynchronous write port (a write with no clock has no event to "
+                           "apply it on; `lower` refuses it too)";
             return;
         }
-        note_clock(bld, frame, port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_WR_CLK, wport}),
-                   !bit_flag(&plan->params[ODIN3_SIM_MEM_P_WR_CLK_POLARITY], wport), plan);
+        (void)note_clock(bld, frame,
+                         port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_WR_CLK, wport}),
+                         !bit_flag(&plan->params[ODIN3_SIM_MEM_P_WR_CLK_POLARITY], wport), plan);
     }
 }
 
 static void scan_read_ports(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
                             mem_plan *plan) {
     const odin3_module *mod = odin3_sim_frame_module(bld, frame);
-    for (uint32_t rport = 0; rport < plan->geo.n_rd; rport++) {
+    for (uint32_t rport = 0; rport < plan->geo.n_rd && plan->refuse == NULL; rport++) {
         if (!bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], rport)) {
             plan->n_async++;
             continue;
         }
-        note_clock(bld, frame, port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_RD_CLK, rport}),
-                   !bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_POLARITY], rport), plan);
+        uint32_t grp =
+            note_clock(bld, frame, port_net(mod, node, (pin_at){ODIN3_SIM_MEM_PORT_RD_CLK, rport}),
+                       !bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_POLARITY], rport), plan);
+        if (grp < plan->n_groups) {
+            plan->groups[grp].n_sync++;
+        }
     }
 }
 
@@ -137,29 +157,87 @@ static odin3_status begin_span(odin3_sim_builder *bld, uint32_t width) {
     return ODIN3_OK;
 }
 
-/* One span holding all ports of `port` whose read-port flag equals `sync` (sync < 0: every port),
- * `per` pins each. */
+/* The node being built: builder, frame, node and plan, passed together. */
+typedef struct mem_at {
+    odin3_sim_builder *bld;
+    uint32_t frame;
+    odin3_node_id node;
+    const mem_plan *plan;
+} mem_at;
+
+/* A clocked port: its clock port (ODIN3_SIM_MEM_PORT_WR_CLK or _RD_CLK) and index. */
+typedef struct port_ref {
+    uint32_t clk_port;
+    uint32_t port;
+} port_ref;
+
+/* The group of a clocked port (the scan made it): the number of groups when the port is on none (a
+ * dead write port, an asynchronous read port). */
+static uint32_t group_of(const mem_at *at, port_ref ref) {
+    const mem_plan *plan = at->plan;
+    const odin3_module *mod = odin3_sim_frame_module(at->bld, at->frame);
+    bool write = ref.clk_port == ODIN3_SIM_MEM_PORT_WR_CLK;
+    if (write ? write_dead(mod, at->node, plan, ref.port)
+              : !bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], ref.port)) {
+        return plan->n_groups;
+    }
+    odin3_net_id net = port_net(mod, at->node, (pin_at){ref.clk_port, ref.port});
+    uint32_t slot = odin3_net_valid(net)
+                        ? odin3_sim_slot_root(at->bld, odin3_sim_net_slot(at->bld, at->frame, net))
+                        : (uint32_t)ODIN3_SIM_SLOT_ZERO;
+    bool negative = !bit_flag(
+        &plan->params[write ? ODIN3_SIM_MEM_P_WR_CLK_POLARITY : ODIN3_SIM_MEM_P_RD_CLK_POLARITY],
+        ref.port);
+    for (uint32_t grp = 0; grp < plan->n_groups; grp++) {
+        if (plan->groups[grp].clk_slot == slot && plan->groups[grp].negative == negative) {
+            return grp;
+        }
+    }
+    return plan->n_groups;
+}
+
+/* One span holding all read ports of `port` that belong to group `group` (the synchronous ones on
+ * that clock; group == n_groups: the asynchronous ones), `per` pins each. */
 typedef struct sel_spec {
     uint32_t port;
     uint32_t per;
-    int sync; /* 1: synchronous read ports, 0: asynchronous, -1: all */
+    uint32_t group;
     uint32_t open;
 } sel_spec;
 
-static odin3_status push_selected(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
-                                  const mem_plan *plan, sel_spec spec) {
-    uint32_t count = 0;
-    for (uint32_t rport = 0; rport < plan->geo.n_rd; rport++) {
-        bool sync = bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], rport);
-        count += spec.sync < 0 || sync == (spec.sync == 1) ? 1U : 0U;
+static bool selected(const mem_at *at, uint32_t group, uint32_t rport) {
+    bool sync = bit_flag(&at->plan->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], rport);
+    if (group == at->plan->n_groups) {
+        return !sync;
     }
-    odin3_status st = begin_span(bld, count * spec.per);
-    for (uint32_t rport = 0; st == ODIN3_OK && rport < plan->geo.n_rd; rport++) {
-        bool sync = bit_flag(&plan->params[ODIN3_SIM_MEM_P_RD_CLK_ENABLE], rport);
-        if (spec.sync < 0 || sync == (spec.sync == 1)) {
-            st = push_run(bld, frame, node, (pin_run){spec.port, rport * spec.per, spec.per},
-                          spec.open);
+    return sync && group_of(at, (port_ref){ODIN3_SIM_MEM_PORT_RD_CLK, rport}) == group;
+}
+
+static odin3_status push_selected(const mem_at *at, sel_spec spec) {
+    uint32_t count = 0;
+    for (uint32_t rport = 0; rport < at->plan->geo.n_rd; rport++) {
+        count += selected(at, spec.group, rport) ? 1U : 0U;
+    }
+    odin3_status st = begin_span(at->bld, count * spec.per);
+    for (uint32_t rport = 0; st == ODIN3_OK && rport < at->plan->geo.n_rd; rport++) {
+        if (selected(at, spec.group, rport)) {
+            st = push_run(at->bld, at->frame, at->node,
+                          (pin_run){spec.port, rport * spec.per, spec.per}, spec.open);
         }
+    }
+    return st;
+}
+
+/* The per-port clock span of group `group`: its clock slot for a port on it, the zero slot for any
+ * other (the hook tells which ports are its own by comparing with its CLK pin). */
+static odin3_status push_membership(const mem_at *at, uint32_t clk_port, uint32_t group) {
+    bool write = clk_port == ODIN3_SIM_MEM_PORT_WR_CLK;
+    uint32_t count = write ? at->plan->geo.n_wr : at->plan->geo.n_rd;
+    odin3_status st = begin_span(at->bld, count);
+    for (uint32_t port = 0; st == ODIN3_OK && port < count; port++) {
+        bool mine = group_of(at, (port_ref){clk_port, port}) == group;
+        st = odin3_sim_push_u32(&at->bld->idx, mine ? at->plan->groups[group].clk_slot
+                                                    : (uint32_t)ODIN3_SIM_SLOT_ZERO);
     }
     return st;
 }
@@ -196,15 +274,16 @@ static odin3_sim_flat *last_cell(odin3_sim_builder *bld) {
     return odin3_vec_at(&bld->cells, bld->cells.len - 1U);
 }
 
+/* The edge cell of group `grp`. Its state is the registers of its synchronous read ports. */
 static odin3_status add_edge(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
-                             const mem_plan *plan) {
+                             const mem_plan *plan, uint32_t grp) {
     const odin3_sim_mem_geo *geo = &plan->geo;
+    const mem_group *group = &plan->groups[grp];
     if (begin_cell(bld, frame, node, &odin3_sim_mem_edge_def) == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
     odin3_status st = begin_span(bld, 1);
-    /* the clock: the first clocked port's pin; its root slot is what the other ports share */
-    st = st != ODIN3_OK ? st : odin3_sim_push_u32(&bld->idx, plan->clk_slot);
+    st = st != ODIN3_OK ? st : odin3_sim_push_u32(&bld->idx, group->clk_slot);
     st = st != ODIN3_OK
              ? st
              : push_whole(bld, frame, node,
@@ -224,39 +303,34 @@ static odin3_status add_edge(odin3_sim_builder *bld, uint32_t frame, odin3_node_
              ? st
              : push_whole(bld, frame, node,
                           (pin_run){ODIN3_SIM_MEM_PORT_RD_ADDR, 0, geo->n_rd * geo->abits});
+    const mem_at at = {bld, frame, node, plan};
     st = st != ODIN3_OK ? st
-                        : push_selected(bld, frame, node, plan,
-                                        (sel_spec){ODIN3_SIM_MEM_PORT_RD_DATA, geo->width, 1,
-                                                   ODIN3_SIM_SLOT_DISCARD});
+                        : push_selected(&at, (sel_spec){ODIN3_SIM_MEM_PORT_RD_DATA, geo->width, grp,
+                                                        ODIN3_SIM_SLOT_DISCARD});
+    st = st != ODIN3_OK ? st : push_membership(&at, ODIN3_SIM_MEM_PORT_WR_CLK, grp);
+    st = st != ODIN3_OK ? st : push_membership(&at, ODIN3_SIM_MEM_PORT_RD_CLK, grp);
     odin3_sim_flat *flat = last_cell(bld);
-    flat->view.flags = ODIN3_SIM_CELL_MEM_INIT | (plan->negative ? ODIN3_SIM_CELL_MEM_NEG : 0U);
+    flat->view.flags = (group->negative ? ODIN3_SIM_CELL_MEM_NEG : 0U) |
+                       (plan->n_groups > 1 ? ODIN3_SIM_CELL_MEM_DEFER : 0U);
     flat->sim4 = bld->four_state ? odin3_sim_mem_edge4 : NULL;
-    flat->view.n_state = (uint32_t)geo->state_size;
+    flat->view.n_state = group->n_sync * geo->width;
+    bld->n_state += flat->view.n_state;
     return st;
 }
 
 static odin3_status add_async(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node,
-                              const mem_plan *plan, bool owner) {
+                              const mem_plan *plan) {
     const odin3_sim_mem_geo *geo = &plan->geo;
-    uint32_t first_state = bld->n_state;
-    if (!owner) {
-        first_state = last_cell(bld)->state_first; /* E was added just before */
-    }
     if (begin_cell(bld, frame, node, &odin3_sim_mem_async_def) == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    odin3_status st =
-        push_selected(bld, frame, node, plan,
-                      (sel_spec){ODIN3_SIM_MEM_PORT_RD_ADDR, geo->abits, 0, ODIN3_SIM_SLOT_ZERO});
+    const mem_at at = {bld, frame, node, plan};
+    odin3_status st = push_selected(&at, (sel_spec){ODIN3_SIM_MEM_PORT_RD_ADDR, geo->abits,
+                                                    plan->n_groups, ODIN3_SIM_SLOT_ZERO});
     st = st != ODIN3_OK ? st
-                        : push_selected(bld, frame, node, plan,
-                                        (sel_spec){ODIN3_SIM_MEM_PORT_RD_DATA, geo->width, 0,
-                                                   ODIN3_SIM_SLOT_DISCARD});
-    odin3_sim_flat *flat = last_cell(bld);
-    flat->state_first = first_state;
-    flat->view.flags = owner ? ODIN3_SIM_CELL_MEM_INIT : 0U;
-    flat->sim4 = bld->four_state ? odin3_sim_mem_async4 : NULL;
-    flat->view.n_state = (uint32_t)geo->state_size;
+                        : push_selected(&at, (sel_spec){ODIN3_SIM_MEM_PORT_RD_DATA, geo->width,
+                                                        plan->n_groups, ODIN3_SIM_SLOT_DISCARD});
+    last_cell(bld)->sim4 = bld->four_state ? odin3_sim_mem_async4 : NULL;
     return st;
 }
 
@@ -269,8 +343,26 @@ static void plan_init(odin3_sim_builder *bld, uint32_t frame, odin3_node_id node
     if (plan->refuse == NULL) {
         scan_read_ports(bld, frame, node, plan);
     }
-    if (plan->refuse == NULL && plan->geo.state_size > UINT32_MAX - bld->n_state) {
+    uint64_t regs = 0;
+    for (uint32_t grp = 0; grp < plan->n_groups; grp++) {
+        regs += (uint64_t)plan->groups[grp].n_sync * plan->geo.width;
+    }
+    if (plan->refuse == NULL && (plan->geo.shared_size > UINT32_MAX ||
+                                 plan->geo.shared_size + regs > UINT32_MAX - bld->n_state)) {
         plan->refuse = "is too large to simulate (more than 4 GiB of state)";
+    }
+}
+
+/* The cells just added share the block of the memory: the next shared_size bytes of state. The
+ * first cell of the node owns it (sets it from INIT). */
+static void share_block(odin3_sim_builder *bld, const mem_plan *plan, size_t first_cell) {
+    uint32_t block = bld->n_state;
+    bld->n_state += (uint32_t)plan->geo.shared_size;
+    for (size_t k = first_cell; k < bld->cells.len; k++) {
+        odin3_sim_flat *flat = odin3_vec_at(&bld->cells, k);
+        flat->has_aux = true;
+        flat->aux_first = block;
+        flat->view.flags |= k == first_cell ? (uint32_t)ODIN3_SIM_CELL_MEM_INIT : 0U;
     }
 }
 
@@ -285,23 +377,25 @@ odin3_status odin3_sim_add_mem(odin3_sim_builder *bld, uint32_t frame, odin3_nod
     if (plan.geo.n_rd == 0) {
         return ODIN3_OK; /* nothing can observe it (`lower` deletes it too) */
     }
-    odin3_sim_growth grow = {2, odin3_node_pins(mod, node).count + 1U};
+    uint64_t cells = plan.n_groups + (plan.n_async > 0 ? 1U : 0U);
+    odin3_sim_growth grow = {cells, (cells + 1U) * (odin3_node_pins(mod, node).count + 1U) +
+                                        (uint64_t)plan.n_groups * (plan.geo.n_wr + plan.geo.n_rd)};
     if (!odin3_sim_check_budget(bld, frame, node, grow)) {
         return ODIN3_ERR_INVALID_ARG;
     }
-    if (bld->cells.len + 2U >= ODIN3_SIM_UNSET ||
-        bld->spans.len + MEM_MAX_SPANS >= ODIN3_SIM_UNSET) {
+    if (bld->cells.len + cells >= ODIN3_SIM_UNSET ||
+        bld->spans.len + (uint64_t)plan.n_groups * MEM_E_SPANS + MEM_A_SPANS >= ODIN3_SIM_UNSET) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    size_t first_cell = bld->cells.len;
     odin3_status st = ODIN3_OK;
-    uint32_t state = (uint32_t)plan.geo.state_size;
-    if (plan.has_edge) {
-        st = add_edge(bld, frame, node, &plan);
+    for (uint32_t grp = 0; st == ODIN3_OK && grp < plan.n_groups; grp++) {
+        st = add_edge(bld, frame, node, &plan, grp);
     }
     if (st == ODIN3_OK && plan.n_async > 0) {
-        st = add_async(bld, frame, node, &plan, !plan.has_edge);
+        st = add_async(bld, frame, node, &plan);
     }
-    bld->n_state += state;
+    share_block(bld, &plan, first_cell);
     if (plan.geo.width > bld->n_scratch) {
         bld->n_scratch = plan.geo.width;
     }

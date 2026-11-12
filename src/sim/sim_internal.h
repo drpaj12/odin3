@@ -38,6 +38,8 @@ typedef struct odin3_sim_flat {
     uint32_t span_first;
     uint32_t idx_first;
     uint32_t state_first;
+    uint32_t aux_first; /* has_aux: offset of the shared block in the state array */
+    bool has_aux;       /* a $mem cell (mem_sim.h) */
 } odin3_sim_flat;
 
 /* A net-map entry not yet given a slot, and "no frame" (the top's parent). */

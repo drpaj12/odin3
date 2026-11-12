@@ -72,6 +72,7 @@ static void setup(harness *hns, const char *name, const odin3_value *params, uin
                                  NULL,
                                  0,
                                  0,
+                                 NULL,
                                  NULL};
 }
 

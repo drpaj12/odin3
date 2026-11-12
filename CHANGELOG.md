@@ -4,7 +4,25 @@ All notable changes to Odin III. The format follows [Keep a Changelog](https://k
 Odin III has no API stability promise before a later release (`docs/PHASE7.md`, decision 4).
 PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` hold the evidence.
 
-## 1.6.1 (ready to tag; release notes `docs/V1.6.1.md`)
+## Unreleased
+
+### Added
+- `read_verilog -P NAME=VALUE` overrides a parameter of the top module at elaboration, as a project `param` line does (and ahead
+  of the project's lines): a Verilog number (`16`, `-3`, `8'hFF`), else a string (`'12'` forces one); several allowed; an unknown
+  name is the located error `param '-P Q' does not name a parameter`; not for SystemVerilog files. With it a testbench `dut #(.W(12))`
+  runs: `read_verilog -P W=12 dut.v; proc; opt; lower; sim_tb tb.v` (the `sim_tb` check compares the `#()` value with the
+  elaborated one; its refusal now says `read the DUT with 'read_verilog -P W=16'`). A project file's `param` key already existed.
+  Tests: four cases in `test_read_verilog_lib`, `tests/tb/micro/dutparamp_tb.v` (iverilog), the two `dutparam*_differ` error tests.
+- The simulator's `$mem` cell (`lower --keep-mem-cells`) takes ports on different clocks and edges: one edge cell per clock net
+  and polarity, all sharing the array; a dual-port RAM written on `wclk` and read on `rclk`, mixed rising and falling edges, and
+  write ports on different clocks (which `lower` refuses) simulate. The edges of one instant read the memory as it was before the
+  instant and the writes then apply in write-port order (later port wins). A transparent read sees the writes on its own clock
+  and edge only, as in `lower`. Still refused: an asynchronous write port (a write with no clock), over 16 clock/edge pairs.
+  Tests: `test_lower_mem` (cell against the lowered netlist, random clock subsets, every polarity mix), micros `mem2clk`,
+  `mem2clkm`, `mem2pol` (4-state, 2-state, lowered, cell; iverilog), `tests/tb/run_memclk.sh` (`tb_memclk`: two write clocks vs
+  iverilog).
+
+## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
 
 ### Added
 - `lpmmap` maps a ROM to `altsyncram` in `ROM` mode (`--target lpm`, `write_verilog --quartus`): an inferred `$mem` with one read

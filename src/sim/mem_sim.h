@@ -1,13 +1,17 @@
 /*
- * mem_sim.h — simulating a `$mem` without `lower` (design note
- * docs/specs/2026-11-11-sim-mem-hook-design.md).
+ * mem_sim.h — simulating a `$mem` without `lower` (design notes
+ * docs/specs/2026-11-11-sim-mem-hook-design.md and docs/specs/2026-11-11-sim-mem-multiclock.md).
  *
- * One `$mem` node becomes up to two flat cells that share one state block:
- *   E  (edge cell)    write ports and synchronous read ports; pins CLK, WR_EN, WR_ADDR, WR_DATA,
- * RD_EN, RD_ADDR (all read ports), RD_DATA (synchronous ports only, output). A  (level cell)
- * asynchronous read ports; pins RD_ADDR, RD_DATA (those ports only). State block: [synchronous read
- * registers: n_sync * WIDTH][array: words * WIDTH], one byte per bit (codes 0/1, and x = 2, z = 3
- * in 4-state mode). The semantics are those of src/passes/lower/mem.c.
+ * One `$mem` node becomes flat cells that share one block (the `aux` of every cell):
+ *   E  (edge cells)   one per clock net and polarity that a live write port or a synchronous read
+ *                     port uses. Pins CLK, WR_EN, WR_ADDR, WR_DATA, RD_EN, RD_ADDR (all ports),
+ *                     RD_DATA (the synchronous ports of this clock only, output), WR_CLK and
+ *                     RD_CLK (per port: this cell's clock slot when the port belongs to it, else
+ *                     the zero slot). The state of an E cell is the registers of its read ports.
+ *   A  (level cell)   the asynchronous read ports; pins RD_ADDR, RD_DATA (those ports only).
+ * The shared block holds [array: words * WIDTH][staged writes: per write port a pending flag, the
+ * WR_EN, WR_DATA and WR_ADDR codes of its edge], one byte per bit (codes 0/1, and x = 2, z = 3 in
+ * 4-state mode). The semantics are those of src/passes/lower/mem.c.
  */
 #ifndef ODIN3_SIM_MEM_SIM_H
 #define ODIN3_SIM_MEM_SIM_H
@@ -30,9 +34,12 @@ typedef struct odin3_sim_mem_geo {
     uint32_t width;
     uint32_t n_rd;
     uint32_t n_wr;
-    uint32_t n_sync;     /* synchronous read ports */
-    uint64_t state_size; /* n_sync * WIDTH + words * WIDTH */
+    uint32_t n_sync;      /* synchronous read ports */
+    uint64_t shared_size; /* the shared block: words * WIDTH + n_wr * stage stride */
 } odin3_sim_mem_geo;
+
+/* Bytes of one write port's staged write: pending flag, WR_EN and WR_DATA (WIDTH each), WR_ADDR. */
+uint64_t odin3_sim_mem_stage_stride(const odin3_sim_mem_geo *geo);
 
 /* Fills geo from the `$mem` parameter list. */
 void odin3_sim_mem_geometry(const odin3_value *params, odin3_sim_mem_geo *geo);
