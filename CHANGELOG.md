@@ -17,6 +17,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `ODIN3_ABC_EXCHANGE=blif` is set. The abc INFO line `LUT cuts: N exact, M approximate` gives the counts. Default behaviour of
   `--prov fine|cone` is unchanged. `odin3-flow --prov-cut` passes it on. Docs: `docs/user/provenance.md`. Tests: `prov_cut`
   (`tests/tools/test_prov_cut.py`).
+- `odin3-flow --keep-results` after a route retry keeps one usable run directory: `vpr/run` is now the routed run and the failed
+  first attempt moves to `vpr/run-failed-W<W>` (before, `vpr/run` held the failed attempt, which `vpr --analysis` cannot use, and
+  the routed files sat in `vpr/retry-<W>/run`). Test: `RouteRetry.test_keep_results_after_retry_leaves_one_usable_run_dir`.
 - `read_verilog -P NAME=VALUE` overrides a parameter of the top module at elaboration, as a project `param` line does (and ahead
   of the project's lines): a Verilog number (`16`, `-3`, `8'hFF`), else a string (`'12'` forces one); several allowed; an unknown
   name is the located error `param '-P Q' does not name a parameter`; not for SystemVerilog files. With it a testbench `dut #(.W(12))`
