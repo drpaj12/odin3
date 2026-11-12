@@ -442,7 +442,8 @@ class RouteRetry(FlowCase):
         result, out = self.run_vpr("route_failed", "38,40")
         vpr = self.tmp / "out" / "vpr"
         self.assertIn("routed at 38", (vpr / "run" / "vpr.out").read_text())
-        self.assertIn("channel width factor of 28", (vpr / "run-failed-W36" / "vpr.out").read_text())
+        failed = (vpr / "run-failed-W36" / "vpr.out").read_text()
+        self.assertIn("channel width factor of 28", failed)
         self.assertFalse((vpr / "retry-38" / "run").exists())
         self.assertEqual(result.vpr_run_dir, vpr / "run")
         self.assertIn("vpr/run", out)
