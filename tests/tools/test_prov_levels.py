@@ -172,6 +172,14 @@ class BudgetAndOptions(ProvCase):
         self.assertFalse(run.has_v2_map)
         self.assertEqual(run.step_bytes, 0)
 
+    def test_budget_dropping_to_depth_0_keeps_readable_names(self) -> None:
+        run = self.flow(MUX16, "--prov-budget", "1")
+        self.assertEqual(run.code, 0, run.stderr)
+        self.assertIn("using depth 0 (off)", run.log)
+        self.assertFalse(run.has_v2_map)
+        self.assertEqual(run.blif, self.flow(MUX16).blif)  # the names and the netlist: as today
+        self.assertIsNone(HASH_NAME.search(run.blif))
+
     def test_budget_picks_the_highest_depth_that_fits(self) -> None:
         sizes = {d: self.flow(MUX16, "--prov-level", str(d)).total for d in (1, 2, 3, 4)}
         budget = sizes[2] * 3 // 2  # room for depth 2 with its own estimate's margin

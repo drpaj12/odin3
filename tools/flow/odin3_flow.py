@@ -716,10 +716,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     if args.prov:
         script = prov_script(script, k)
-    elif args.prov_level not in ("", "0") or args.prov_budget:
-        # the depth asks for the map (--prov-map and --prov-ast come from it): only the names
-        script = script.replace(f"write_blif --vtr --lut-k {k}",
-                                f"write_blif --vtr --lut-k {k} --name-style hash")
+    # a depth that resolves above 0 makes write_blif use hash names and write the map by itself
+    # (--name-style and --prov-map come from it), so the BLIF never has hash names without a map
     if args.prov_cut:
         script = script.replace(f"abc --lut {k}", f"abc --lut {k} --prov-cut on")
     script = with_read_options(args, script, step_dir)
