@@ -733,13 +733,13 @@ project (`prov_level 3` and `prov_budget 500M`, once each; the command line wins
 
 ### Estimating the size first
 
-The pass `prov-estimate` prints, from the cells of the design as it is (best after `proc`), the
+The pass `prov_estimate` prints, from the cells of the design as it is (best after `proc`), the
 records, parent edges and bytes of each depth, for the name map and for the step files:
 
 ```text
-prov-estimate: design: 1371 cells, 29439 pins (estimate of the data each provenance depth writes)
-prov-estimate: depth 0 (off): 0 records, 0 edges, name map 0 bytes, step files 0 bytes, total 0 bytes
-prov-estimate: depth 1 (statement): ...
+prov_estimate: design: 1371 cells, 29439 pins (estimate of the data each provenance depth writes)
+prov_estimate: depth 0 (off): 0 records, 0 edges, name map 0 bytes, step files 0 bytes, total 0 bytes
+prov_estimate: depth 1 (statement): ...
 ```
 
 When a depth or a budget is requested, `proc` ends with the same figures for the depth in force

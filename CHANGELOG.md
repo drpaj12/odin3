@@ -12,7 +12,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `read_verilog --prov-ast`, `abc --prov-edges` and `--prov-cut`, the name map of the hash-name writers and, in `odin3-flow
   --prov-level`, the `prov/` step files (depth 4); every older option stays and wins over the depth. `--prov-budget SIZE` (K, M, G)
   bounds the output: `auto` takes the highest depth that fits, a fixed depth over the budget drops to the highest that fits with a
-  WARNING. The project keys `prov_level` and `prov_budget` do the same (the command line wins). The new pass `prov-estimate` and an
+  WARNING. The project keys `prov_level` and `prov_budget` do the same (the command line wins). The new pass `prov_estimate` and an
   INFO line at the end of `proc` give the predicted records, edges and bytes of each depth; the estimate is an order-of-magnitude figure, within 2x
   of the real name map on 38 to 25 of 43 calibration designs (depths 1 to 4; worst 2.2x to 3.9x) and up to 9x off for the step files
   (`docs/specs/2026-11-13-prov-levels-calibration.md`). New public function

@@ -111,7 +111,7 @@ uint64_t odin3_prov_estimate_total(const odin3_prov_estimate *est, uint32_t dept
 /*
  * The depth in force, or -1 when neither a depth nor a budget is requested (today's behaviour).
  * `auto` and a budget are resolved against the estimate of the design as it is now, once per
- * design and request: the first call (proc's end, `prov-estimate`, or abc) decides and logs; a
+ * design and request: the first call (proc's end, `prov_estimate`, or abc) decides and logs; a
  * fixed depth over the budget drops to the highest that fits with a WARNING naming both sizes.
  */
 int odin3_prov_depth_effective(odin3_design *design);

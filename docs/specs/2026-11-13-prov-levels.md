@@ -91,7 +91,7 @@ the names of a netlist. Writers with other names ignore it. `odin3-flow --prov-l
 
 ## The estimate
 
-The pass `prov-estimate` (any time; best after `proc`) logs, per depth, the predicted records
+The pass `prov_estimate` (any time; best after `proc`) logs, per depth, the predicted records
 (`R` lines of the name map), parent edges, bytes of the name map and bytes of the step files. The
 inputs are ten counts of the design as it is, over its live cells: cells, pins, output pins,
 registers, and the **work** of the arithmetic, logic, mux, shift and multiply cells (output bits;
@@ -144,8 +144,9 @@ a later drop only means the table was kept for nothing. The depth is resolved on
 ## Agent defaults (Peter may override)
 
 - Level 0 and 1 both use bulk records: level 0 differs by writing no map and keeping no AST.
-- The project keys and the `prov-estimate` pass name follow the brief; `prov-estimate` takes no
-  arguments.
+- The brief names the pass `prov-estimate`; it is `prov_estimate` because every pass name in
+  `docs/PASSES.md` is an identifier (tests/tools/test_passes_ref.py). It takes no arguments. The
+  project keys follow the brief.
 - The estimate's inputs are the ten counts above (cells, pins, outputs, registers, the work of five
   cell classes, construct rows), not the width and arms of each cell separately.
 - The depth is kept in a process-wide cache keyed by design and request, not in the IR (no IR or

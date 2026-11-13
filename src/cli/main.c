@@ -246,6 +246,9 @@ static bool is_directory(const char *path) {
  * refused. */
 static int scan_prov(const char *arg, const char *value) {
     bool is_level = strcmp(arg, "--prov-level") == 0;
+    if (!is_level && strcmp(arg, "--prov-budget") != 0) {
+        return EXIT_OK;
+    }
     odin3_status st =
         is_level ? odin3_pass_set_prov_level(value) : odin3_pass_set_prov_budget(value);
     if (st != ODIN3_OK) {
@@ -254,6 +257,18 @@ static int scan_prov(const char *arg, const char *value) {
                                   : "expects a size such as 500M or 2G");
     }
     return EXIT_OK;
+}
+
+/* The options that name a path (--abc-script a file, --opt-snapshot a directory) and the
+ * provenance depth options, whose value must be good before the scan goes on. */
+static int check_path_option(const char *arg, const char *value) {
+    if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
+        return bad_value(arg, value, "no such file");
+    }
+    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
+        return bad_value(arg, value, "no such directory");
+    }
+    return scan_prov(arg, value);
 }
 
 /* An option with its value (loads a plugin, records the rest). */
@@ -267,17 +282,12 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
         }
         state->resolved = strcmp(value, "resolved") == 0;
     }
-    if (strcmp(arg, "--prov-level") == 0 || strcmp(arg, "--prov-budget") == 0) {
-        return scan_prov(arg, value);
-    }
     if (is_project_option(arg) && strchr(value, '"') != NULL) {
         return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
     }
-    if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
-        return bad_value(arg, value, "no such file");
-    }
-    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
-        return bad_value(arg, value, "no such directory");
+    int checked = check_path_option(arg, value);
+    if (checked != EXIT_OK) {
+        return checked;
     }
     state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);

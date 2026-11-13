@@ -184,21 +184,28 @@ static uint64_t bit_length(uint64_t value) {
     return bits;
 }
 
+/* One cell as the measure sees it: where it is, its type, and its output bits. */
+typedef struct cell_ref {
+    const odin3_module *module;
+    odin3_node_id node;
+    const odin3_celltype_def *def;
+    uint64_t out_bits;
+} cell_ref;
+
 /* The work of one cell of class which: see odin3_prov_shape. */
-static uint64_t cell_work(const odin3_module *module, odin3_node_id node,
-                          const odin3_celltype_def *def, odin3_prov_feature which,
-                          uint64_t out_bits) {
+static uint64_t cell_work(const cell_ref *cell, odin3_prov_feature which) {
     switch (which) {
     case ODIN3_PROV_F_MUX: {
-        uint64_t sel = port_bits(module, node, def, "S");
-        return out_bits * (sel > 0 ? sel : 1U);
+        uint64_t sel = port_bits(cell->module, cell->node, cell->def, "S");
+        return cell->out_bits * (sel > 0 ? sel : 1U);
     }
     case ODIN3_PROV_F_SHIFT:
-        return out_bits * bit_length(out_bits);
+        return cell->out_bits * bit_length(cell->out_bits);
     case ODIN3_PROV_F_MUL:
-        return port_bits(module, node, def, "A") * port_bits(module, node, def, "B");
+        return port_bits(cell->module, cell->node, cell->def, "A") *
+               port_bits(cell->module, cell->node, cell->def, "B");
     default:
-        return out_bits;
+        return cell->out_bits;
     }
 }
 
@@ -221,7 +228,8 @@ static void measure_node(const odin3_design *design, const odin3_module *module,
     if (which == ODIN3_PROV_F_REGS) {
         shape->f[ODIN3_PROV_F_REGS]++;
     } else if (which != ODIN3_PROV_F_CELLS) {
-        shape->f[which] += cell_work(module, node, def, which, out_bits);
+        const cell_ref cell = {module, node, def, out_bits};
+        shape->f[which] += cell_work(&cell, which);
     }
 }
 

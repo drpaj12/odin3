@@ -112,8 +112,8 @@ static void expect_size(const char *text, uint64_t want) {
 
 static void test_parse_size(void) {
     expect_size("1", 1);
-    expect_size("500K", 500U * KIB);
-    expect_size("2M", 2U * MIB);
+    expect_size("500K", (uint64_t)500 * KIB);
+    expect_size("2M", (uint64_t)2 * MIB);
     expect_size("3G", 3ULL * MIB * KIB);
 }
 
@@ -138,38 +138,34 @@ static void test_parse_size_rejects(void) {
     }
 }
 
+static void expect_knobs(uint32_t depth, odin3_prov_knobs want) {
+    odin3_prov_knobs got = odin3_prov_depth_knobs(depth);
+    TEST_ASSERT_EQUAL_INT(want.ast, got.ast);
+    TEST_ASSERT_EQUAL_INT(want.edges, got.edges);
+    TEST_ASSERT_EQUAL_INT(want.cut, got.cut);
+    TEST_ASSERT_EQUAL_INT(want.map, got.map);
+    TEST_ASSERT_EQUAL_INT(want.steps, got.steps);
+}
+
 static void test_knobs_off_and_statement(void) {
-    odin3_prov_knobs off = odin3_prov_depth_knobs(0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_OFF, off.ast);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, off.edges);
-    TEST_ASSERT_FALSE(off.map);
-    TEST_ASSERT_FALSE(off.cut);
-    TEST_ASSERT_FALSE(off.steps);
-    odin3_prov_knobs statement = odin3_prov_depth_knobs(1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, statement.ast);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, statement.edges);
-    TEST_ASSERT_TRUE(statement.map);
-    TEST_ASSERT_FALSE(statement.cut);
+    expect_knobs(0, (odin3_prov_knobs){ODIN3_CONSTRUCT_MODE_OFF, ODIN3_PROV_EDGES_BULK, false,
+                                       false, false});
+    expect_knobs(1, (odin3_prov_knobs){ODIN3_CONSTRUCT_MODE_REFS, ODIN3_PROV_EDGES_BULK, false,
+                                       true, false});
 }
 
 static void test_knobs_ancestry_and_cut(void) {
-    odin3_prov_knobs ancestry = odin3_prov_depth_knobs(2);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, ancestry.edges);
-    TEST_ASSERT_FALSE(ancestry.cut);
-    TEST_ASSERT_FALSE(ancestry.steps);
-    odin3_prov_knobs cut = odin3_prov_depth_knobs(3);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, cut.edges);
-    TEST_ASSERT_TRUE(cut.cut);
-    TEST_ASSERT_FALSE(cut.steps);
+    expect_knobs(2, (odin3_prov_knobs){ODIN3_CONSTRUCT_MODE_REFS, ODIN3_PROV_EDGES_DEFAULT, false,
+                                       true, false});
+    expect_knobs(3, (odin3_prov_knobs){ODIN3_CONSTRUCT_MODE_REFS, ODIN3_PROV_EDGES_DEFAULT, true,
+                                       true, false});
 }
 
 static void test_knobs_full(void) {
-    odin3_prov_knobs full = odin3_prov_depth_knobs(4);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_UNLIMITED, full.edges);
-    TEST_ASSERT_TRUE(full.cut);
-    TEST_ASSERT_TRUE(full.steps);
-    TEST_ASSERT_TRUE(full.map);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_UNLIMITED, odin3_prov_depth_knobs(9).edges);
+    odin3_prov_knobs full = {ODIN3_CONSTRUCT_MODE_REFS, ODIN3_PROV_EDGES_UNLIMITED, true, true,
+                             true};
+    expect_knobs(ODIN3_PROV_DEPTH_FULL, full);
+    expect_knobs(9, full);
 }
 
 static void test_request_level_and_budget(void) {
@@ -180,8 +176,11 @@ static void test_request_level_and_budget(void) {
     TEST_ASSERT_TRUE(req.set);
     TEST_ASSERT_FALSE(req.autolevel);
     TEST_ASSERT_EQUAL_UINT32(3, req.level);
-    TEST_ASSERT_EQUAL_UINT64(2U * MIB, req.budget);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)2 * MIB, req.budget);
     TEST_ASSERT_EQUAL_INT(3, odin3_prov_depth_requested(design));
+}
+
+static void test_request_auto_and_none(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"auto", NULL}));
     TEST_ASSERT_TRUE(odin3_prov_depth_request(design).autolevel);
     TEST_ASSERT_EQUAL_INT(4, odin3_prov_depth_requested(design));
@@ -195,7 +194,7 @@ static void test_setters_reject_and_keep(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_budget("0"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_budget("12X"));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_prov_depth_request(design).level);
-    TEST_ASSERT_EQUAL_UINT64(5U * KIB, odin3_prov_depth_request(design).budget);
+    TEST_ASSERT_EQUAL_UINT64((uint64_t)5 * KIB, odin3_prov_depth_request(design).budget);
     TEST_ASSERT_TRUE(log_has("prov-level must be"));
     TEST_ASSERT_TRUE(log_has("prov-budget must be"));
 }
@@ -289,19 +288,19 @@ static void test_budget_alone_is_auto_and_auto_alone_warns(void) {
 
 static void test_prov_estimate_pass(void) {
     read_tiny();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "prov-estimate", ""));
-    TEST_ASSERT_TRUE(log_has("prov-estimate: depth 0 (off): 0 records"));
-    TEST_ASSERT_TRUE(log_has("prov-estimate: depth 4 (full)"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "prov_estimate", ""));
+    TEST_ASSERT_TRUE(log_has("prov_estimate: depth 0 (off): 0 records"));
+    TEST_ASSERT_TRUE(log_has("prov_estimate: depth 4 (full)"));
     TEST_ASSERT_FALSE(log_has("in force"));
 }
 
 static void test_prov_estimate_pass_arguments_and_depth(void) {
     read_tiny();
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
-                          odin3_design_run_pass(design, "prov-estimate", "x"));
+                          odin3_design_run_pass(design, "prov_estimate", "x"));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"2", NULL}));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "prov-estimate", ""));
-    TEST_ASSERT_TRUE(log_has("prov-estimate: in force: depth 2 (ancestry)"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "prov_estimate", ""));
+    TEST_ASSERT_TRUE(log_has("prov_estimate: in force: depth 2 (ancestry)"));
 }
 
 int main(void) {
@@ -314,6 +313,7 @@ int main(void) {
     RUN_TEST(test_knobs_ancestry_and_cut);
     RUN_TEST(test_knobs_full);
     RUN_TEST(test_request_level_and_budget);
+    RUN_TEST(test_request_auto_and_none);
     RUN_TEST(test_setters_reject_and_keep);
     RUN_TEST(test_estimate_is_monotone);
     RUN_TEST(test_estimate_grows_with_the_design);

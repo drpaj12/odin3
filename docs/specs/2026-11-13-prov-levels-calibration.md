@@ -84,7 +84,7 @@ Depths 2 to 4 are never estimated below the depth before them.
   on the ten counts is off by 18x (`LU32PEEng` makes 66 933 LUTs from 591 103 mux work).
 
 What would help, and was not done (it needs the netlist after `lower` or abc, not the cells after
-`proc`): run `prov-estimate` after `lower`, where the count of bit cells is within a small factor of
+`proc`): run `prov_estimate` after `lower`, where the count of bit cells is within a small factor of
 the LUT count. The estimate's measure is "the design as it is now", so it already follows the
 design to that point; the calibration is of the end of `proc` because that is where the INFO line
 and the budget decision are.

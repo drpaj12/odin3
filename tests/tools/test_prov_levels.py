@@ -1,4 +1,4 @@
-"""Tests for the provenance depth (--prov-level, --prov-budget, prov-estimate): docs/specs/
+"""Tests for the provenance depth (--prov-level, --prov-budget, prov_estimate): docs/specs/
 2026-11-13-prov-levels.md. Every test needs ODIN3_CLI (CTest python_tools); none needs VTR."""
 
 from __future__ import annotations
@@ -202,12 +202,12 @@ class BudgetAndOptions(ProvCase):
             self.assertNotEqual(proc.returncode, 0, argv)
 
     def test_prov_estimate_pass_prints_every_depth(self) -> None:
-        proc = self.odin3("-p", f"read_verilog --nolatches {MUX16}; proc; prov-estimate")
+        proc = self.odin3("-p", f"read_verilog --nolatches {MUX16}; proc; prov_estimate")
         text = proc.stderr + proc.stdout
         self.assertEqual(proc.returncode, 0, text)
         for depth in DEPTHS:
-            self.assertRegex(text, rf"prov-estimate: depth {depth} \(\w+\): \d+ records")
-        self.assertNotIn("provenance depth", text.split("prov-estimate: design")[0])
+            self.assertRegex(text, rf"prov_estimate: depth {depth} \(\w+\): \d+ records")
+        self.assertNotIn("provenance depth", text.split("prov_estimate: design")[0])
 
 
 @needs_odin3
