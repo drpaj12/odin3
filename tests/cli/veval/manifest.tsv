@@ -159,11 +159,11 @@ Prob147_circuit10_ref.sv	ok
 Prob148_2013_q2afsm_ref.sv	ok
 Prob149_ece241_2013_q4_ref.sv	ok
 Prob150_review2015_fsmonehot_ref.sv	ok
-Prob151_review2015_fsm_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported
+Prob151_review2015_fsm_ref.sv	ok
 # Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob152_lemmings3_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
 Prob153_gshare_ref.sv	ok
 Prob154_fsm_ps2data_ref.sv	ok
 # Expected to flip to ok when lib/cmos6.o3lib gains a latch cell (dfflibmap).
 Prob155_lemmings4_ref.sv	refused:other	dfflibmap: module 'RefModule': no cell of library 'cmos6' implements $_DLATCH_N_ 'next.dlatch_n0' (low, INIT 3)
-Prob156_review2015_fancytimer_ref.sv	refused:explicit_cast	an explicit 4-bit cast is not supported
+Prob156_review2015_fancytimer_ref.sv	ok

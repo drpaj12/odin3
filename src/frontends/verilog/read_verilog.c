@@ -133,12 +133,40 @@ static odin3_status add_command_config(const odin3_rv_opts *opts, rv_config *con
     return ODIN3_OK;
 }
 
+/* Yosys defines SYNTHESIS for every read (its read_verilog adds -D SYNTHESIS unless
+ * -nosynthesis), so `ifdef SYNTHESIS code is the synthesis branch; so do we. A user's own define
+ * of the name (project or -D) wins and is left alone. */
+static const char k_synthesis[] = "SYNTHESIS";
+
+static bool defines_synthesis(const odin3_pp_define *defs, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (defs[i].name.len == sizeof k_synthesis - 1 &&
+            memcmp(defs[i].name.ptr, k_synthesis, defs[i].name.len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static odin3_status add_synthesis(rv_config *config) {
+    if (defines_synthesis(config->defines.data, config->defines.len)) {
+        return ODIN3_OK;
+    }
+    odin3_pp_define *slot = odin3_vec_push(&config->defines);
+    if (slot == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    *slot = (odin3_pp_define){odin3_bytes_cstr(k_synthesis), {NULL, 0}, false};
+    return ODIN3_OK;
+}
+
 static odin3_status create_pp(odin3_rv *rv, const odin3_rv_opts *opts) {
     rv_config config;
     odin3_vec_init(&config.defines, sizeof(odin3_pp_define));
     odin3_vec_init(&config.incdirs, sizeof(const char *));
     odin3_status st = fill_config(rv->design, rv->proj, &config);
     st = st != ODIN3_OK ? st : add_command_config(opts, &config);
+    st = st != ODIN3_OK ? st : add_synthesis(&config);
     if (st == ODIN3_OK) {
         odin3_pp_config pc = {config.defines.data, (uint32_t)config.defines.len,
                               (const char *const *)config.incdirs.data,
@@ -858,61 +886,145 @@ static const char *sv_top_name(const odin3_design *design) {
     return NULL;
 }
 
-/* The SystemVerilog read's options: the project's include directories and defines (so a
- * project's `include and `ifdef reach slang as they reach the Verilog preprocessor) and the
- * elaboration options. The two arrays are allocated for the call and returned through dirs/defs
- * for the caller to free. */
-static odin3_status sv_options_of(const odin3_design *design, const rv_args *args,
-                                  const char ***dirs, odin3_sv_define **defs,
-                                  odin3_sv_options *opts) {
-    *dirs = NULL;
-    *defs = NULL;
-    memset(opts, 0, sizeof *opts);
-    opts->elab.nolatches = args->elab.nolatches;
-    opts->elab.nomem2reg = args->elab.nomem2reg;
-    opts->elab.auto_blackbox = args->elab.auto_blackbox;
+/* Everything one read_verilog call owns. */
+typedef struct rv_call {
+    rv_args parsed;
+    odin3_vec cmd_defs; /* odin3_pp_define, from -D */
+    odin3_vec cmd_dirs; /* const char *, from -I */
+    odin3_vec srcs;     /* Verilog sources */
+    odin3_vec svs;      /* SystemVerilog sources */
+} rv_call;
+
+/* The SystemVerilog read's include directories (the project's, then the command's -I) as a
+ * malloc'd array for the caller to free; *n is the count. */
+static odin3_status sv_dirs_of(const odin3_design *design, const rv_call *call, const char ***out,
+                               uint32_t *n) {
     const odin3_project *proj = finished_record(design);
-    if (proj == NULL) {
+    size_t nproj = proj != NULL ? proj->incdirs.len : 0;
+    size_t total = nproj + call->cmd_dirs.len;
+    *out = NULL;
+    *n = (uint32_t)total;
+    if (total == 0) {
         return ODIN3_OK;
     }
-    if (proj->incdirs.len > 0) {
-        const char **dir_list =
-            (const char **)odin3_util_malloc(proj->incdirs.len * sizeof *dir_list);
-        if (dir_list == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        for (size_t i = 0; i < proj->incdirs.len; i++) {
-            const odin3_proj_path *dir = odin3_vec_cat(&proj->incdirs, i);
-            dir_list[i] = text_of(design, dir->resolved);
-        }
-        *dirs = dir_list;
-        opts->incdirs = dir_list;
-        opts->nincdirs = (uint32_t)proj->incdirs.len;
+    const char **list = (const char **)odin3_util_malloc(total * sizeof *list);
+    if (list == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
     }
-    if (proj->defines.len > 0) {
-        odin3_sv_define *def_list =
-            (odin3_sv_define *)odin3_util_malloc(proj->defines.len * sizeof *def_list);
-        if (def_list == NULL) {
-            return ODIN3_ERR_NO_MEMORY;
-        }
-        for (size_t i = 0; i < proj->defines.len; i++) {
-            const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
-            def_list[i].name = text_of(design, def->name);
-            def_list[i].value = def->has_value ? text_of(design, def->value) : "";
-            def_list[i].has_value = def->has_value;
-            def_list[i].reserved_pad = 0;
-        }
-        *defs = def_list;
-        opts->defines = def_list;
-        opts->ndefines = (uint32_t)proj->defines.len;
+    for (size_t i = 0; i < nproj; i++) {
+        const odin3_proj_path *dir = odin3_vec_cat(&proj->incdirs, i);
+        list[i] = text_of(design, dir->resolved);
     }
+    for (size_t i = 0; i < call->cmd_dirs.len; i++) {
+        list[nproj + i] = *(const char *const *)odin3_vec_cat(&call->cmd_dirs, i);
+    }
+    *out = list;
     return ODIN3_OK;
+}
+
+/* One command-line define as an SV define: name and value interned (NUL-terminated). */
+static odin3_status sv_command_define(odin3_design *design, const odin3_pp_define *def,
+                                      odin3_sv_define *out) {
+    uint32_t name = 0;
+    uint32_t value = 0;
+    odin3_status st = odin3_design_intern(design, def->name, &name);
+    if (st == ODIN3_OK && def->has_value) {
+        st = odin3_design_intern(design, def->value, &value);
+    }
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    out->name = text_of(design, name);
+    out->value = def->has_value ? text_of(design, value) : "";
+    out->has_value = def->has_value;
+    out->reserved_pad = 0;
+    return ODIN3_OK;
+}
+
+/* True when the project record or the command defines SYNTHESIS itself. */
+static bool sv_user_defines_synthesis(const odin3_design *design, const rv_call *call) {
+    const odin3_project *proj = finished_record(design);
+    for (size_t i = 0; i < call->cmd_defs.len; i++) {
+        if (defines_synthesis(odin3_vec_cat(&call->cmd_defs, i), 1)) {
+            return true;
+        }
+    }
+    for (size_t i = 0; proj != NULL && i < proj->defines.len; i++) {
+        const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
+        const odin3_pp_define one = {
+            odin3_bytes_cstr(text_of(design, def->name)), {NULL, 0}, false};
+        if (defines_synthesis(&one, 1)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* The SystemVerilog read's defines (the project's, then the command's -D) as a malloc'd array for
+ * the caller to free; *n is the count. */
+static odin3_status sv_defines_of(odin3_design *design, const rv_call *call, odin3_sv_define **out,
+                                  uint32_t *n) {
+    const odin3_project *proj = finished_record(design);
+    size_t nproj = proj != NULL ? proj->defines.len : 0;
+    size_t total = nproj + call->cmd_defs.len;
+    const bool synth = !sv_user_defines_synthesis(design, call);
+    total += synth ? 1U : 0U;
+    *out = NULL;
+    *n = (uint32_t)total;
+    if (total == 0) {
+        return ODIN3_OK;
+    }
+    odin3_sv_define *list = (odin3_sv_define *)odin3_util_malloc(total * sizeof *list);
+    if (list == NULL) {
+        return ODIN3_ERR_NO_MEMORY;
+    }
+    for (size_t i = 0; i < nproj; i++) {
+        const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
+        list[i].name = text_of(design, def->name);
+        list[i].value = def->has_value ? text_of(design, def->value) : "";
+        list[i].has_value = def->has_value;
+        list[i].reserved_pad = 0;
+    }
+    odin3_status st = ODIN3_OK;
+    for (size_t i = 0; st == ODIN3_OK && i < call->cmd_defs.len; i++) {
+        st = sv_command_define(design, odin3_vec_cat(&call->cmd_defs, i), &list[nproj + i]);
+    }
+    if (st != ODIN3_OK) {
+        odin3_util_free(list);
+        return st;
+    }
+    if (synth) {
+        list[total - 1] = (odin3_sv_define){k_synthesis, "", false, 0};
+    }
+    *out = list;
+    return ODIN3_OK;
+}
+
+/* The SystemVerilog read's options: the include directories and defines (the project's, then the
+ * command's -I and -D, so `include and `ifdef reach slang as they reach the Verilog
+ * preprocessor) and the elaboration options. The two arrays are allocated for the call and
+ * returned through dirs/defs for the caller to free. */
+static odin3_status sv_options_of(odin3_design *design, const rv_call *call, const char ***dirs,
+                                  odin3_sv_define **defs, odin3_sv_options *opts) {
+    memset(opts, 0, sizeof *opts);
+    opts->elab.nolatches = call->parsed.elab.nolatches;
+    opts->elab.nomem2reg = call->parsed.elab.nomem2reg;
+    opts->elab.auto_blackbox = call->parsed.elab.auto_blackbox;
+    odin3_status st = sv_dirs_of(design, call, dirs, &opts->nincdirs);
+    opts->incdirs = *dirs;
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    st = sv_defines_of(design, call, defs, &opts->ndefines);
+    opts->defines = *defs;
+    return st;
 }
 
 /* The SystemVerilog branch of the read: the registered reader (the slang adapter, CLI start-up)
  * builds and elaborates the store itself, in this pass's run. */
-static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_args *args,
-                            const odin3_vec *svs) {
+static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_call *call) {
+    const rv_args *args = &call->parsed;
+    const odin3_vec *svs = &call->svs;
     if (args->parse_only || args->lib) {
         odin3_log(ODIN3_LOG_ERROR, "read_verilog: %s is not supported for SystemVerilog yet",
                   args->parse_only ? "--parse-only" : "--lib");
@@ -947,7 +1059,7 @@ static odin3_status read_sv(odin3_design *design, odin3_pass_ctx *ctx, const rv_
     const char **dirs = NULL;
     odin3_sv_define *defs = NULL;
     odin3_sv_options opts;
-    odin3_status st = sv_options_of(design, args, &dirs, &defs, &opts);
+    odin3_status st = sv_options_of(design, call, &dirs, &defs, &opts);
     if (st == ODIN3_OK) {
         opts.paths = paths;
         opts.npaths = (uint32_t)svs->len;
@@ -970,15 +1082,6 @@ static odin3_pp_define make_define(odin3_bytes word) {
     return (odin3_pp_define){
         {text, (size_t)(eq - text)}, {eq + 1, word.len - (size_t)(eq - text) - 1U}, true};
 }
-
-/* Everything one read_verilog call owns. */
-typedef struct rv_call {
-    rv_args parsed;
-    odin3_vec cmd_defs; /* odin3_pp_define, from -D */
-    odin3_vec cmd_dirs; /* const char *, from -I */
-    odin3_vec srcs;     /* Verilog sources */
-    odin3_vec svs;      /* SystemVerilog sources */
-} rv_call;
 
 /* One -I word: resolved against cwd, interned, pushed on dirs. */
 static odin3_status add_incdir(odin3_design *design, const char *cwd, odin3_bytes word,
@@ -1054,13 +1157,6 @@ static odin3_status call_sources(odin3_design *design, rv_call *call) {
                   "read_verilog: a mixed Verilog and SystemVerilog read is not supported yet");
         return ODIN3_ERR_PARSE;
     }
-    if (st == ODIN3_OK && call->svs.len > 0 &&
-        call->parsed.defines.len + call->parsed.incdirs.len > 0) {
-        odin3_log(
-            ODIN3_LOG_ERROR,
-            "read_verilog: -D and -I are not supported for SystemVerilog yet (use a project)");
-        return ODIN3_ERR_INVALID_ARG;
-    }
     if (st == ODIN3_OK && call->svs.len > 0 && call->parsed.params.len > 0) {
         odin3_log(ODIN3_LOG_ERROR,
                   "read_verilog: -P is not supported for SystemVerilog yet (use a project)");
@@ -1113,7 +1209,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     }
     st = st != ODIN3_OK ? st : call_sources(design, &call);
     if (st == ODIN3_OK && call.svs.len > 0) {
-        st = read_sv(design, ctx, &call.parsed, &call.svs);
+        st = read_sv(design, ctx, &call);
     } else if (st == ODIN3_OK) {
         st = call_verilog(ctx, design, &call);
     }

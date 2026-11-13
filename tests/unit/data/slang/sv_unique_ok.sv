@@ -1,5 +1,5 @@
-// Fixture: `unique case` is refused with a located error, never silently dropped.
-module refused_unique (
+// Fixture: `unique case` is accepted; the qualifier is dropped.
+module unique_ok (
     input  logic [1:0] sel,
     output logic       y
 );

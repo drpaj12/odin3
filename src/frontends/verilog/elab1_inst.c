@@ -877,7 +877,7 @@ static odin3_status by_union(odin3_elab1 *e1, const odin3_elab_inst *inst) {
     uint64_t self = (uint64_t)inst->instance.v << E1_KEY_SHIFT;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < conns.n; i++) {
-        uint32_t name = odin3_ast_name(e1->parsed, conns.ids[i]);
+        uint32_t name = odin3_elab1_conn_port_name(e1, conns.ids[i], i);
         st = odin3_u64map_put(e1->conn_seen, (odin3_kv){self | name, conns.ids[i].v});
     }
     uint32_t pos = 0;
@@ -893,7 +893,8 @@ static odin3_status by_union(odin3_elab1 *e1, const odin3_elab_inst *inst) {
         st = push_conn(e1, &rec);
     }
     for (uint32_t i = 0; i < conns.n; i++) {
-        (void)odin3_u64map_remove(e1->conn_seen, self | odin3_ast_name(e1->parsed, conns.ids[i]));
+        (void)odin3_u64map_remove(e1->conn_seen,
+                                  self | odin3_elab1_conn_port_name(e1, conns.ids[i], i));
     }
     return st;
 }

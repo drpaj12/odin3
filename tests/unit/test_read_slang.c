@@ -371,13 +371,17 @@ static void test_sv_diagnostics(void) {
     expect_read_error(files, ODIN3_ERR_PARSE, "expected expression");
 }
 
-/* An explicit cast has no Odin AST node: the adapter refuses it with a located error rather
- * than emitting the untruncated operand. */
-static void test_sv_refused_cast(void) {
-    char files[SV_PATH_MAX];
-    (void)snprintf(files, sizeof files, "%s/sv_bad_cast.sv", D);
-    expect_read_error(files, ODIN3_ERR_PARSE, "sv_bad_cast.sv:");
-    expect_read_error(files, ODIN3_ERR_PARSE, "explicit 4-bit cast is not supported");
+/* An explicit width cast, unique/priority and a packed assignment pattern are read (survey gap 4).
+ */
+static void test_sv_gap4_constructs(void) {
+    const char *files[] = {D "/sv_cast_ok.sv", D "/sv_unique_ok.sv", D "/sv_priority_ok.sv",
+                           D "/sv_gap4.sv"};
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+        fresh_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, odin3_design_run_pass(design, "read_verilog", files[i]), files[i]);
+    }
 }
 
 static void test_sv_missing_file(void) {
@@ -464,11 +468,31 @@ static void test_sv_project_config(void) {
     expect_read_error(D "/project/inc_top.sv", ODIN3_ERR_PARSE, "defs.svh");
 }
 
+/* The command's -D and -I reach slang as a project's do (survey gap 2): the include does not
+ * resolve and the macro stays undefined without them. */
+static void test_sv_command_line_config(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_verilog",
+                                                          "-D CMD_DEF -I " D "/project/inc " D
+                                                          "/cmdline_top.sv"));
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    expect_read_error("-I " D "/project/inc " D "/cmdline_top.sv", ODIN3_ERR_PARSE, "CMD_DEF");
+    expect_read_error("-D CMD_DEF " D "/cmdline_top.sv", ODIN3_ERR_PARSE, "defs.svh");
+}
+
+/* SYNTHESIS is predefined for SystemVerilog too (survey gap 3). */
+static void test_sv_synthesis_predefined(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_run_pass(design, "read_verilog", D "/synthesis_top.sv"));
+}
+
 /* The constructs the docs list as refused are refused, each with its own located message. */
 static void test_sv_refused_constructs(void) {
-    expect_read_error(D "/sv_refused_unique.sv", ODIN3_ERR_PARSE, "'unique case' is not supported");
-    expect_read_error(D "/sv_refused_priority.sv", ODIN3_ERR_PARSE,
-                      "'priority if' is not supported");
     expect_read_error(D "/sv_refused_timing.sv", ODIN3_ERR_PARSE,
                       "intra-assignment timing control is not supported");
     expect_read_error(D "/sv_refused_strength.sv", ODIN3_ERR_PARSE,
@@ -511,11 +535,13 @@ int main(void) {
     RUN_TEST(test_sv_interface);
     RUN_TEST(test_sv_signed);
     RUN_TEST(test_sv_diagnostics);
-    RUN_TEST(test_sv_refused_cast);
+    RUN_TEST(test_sv_gap4_constructs);
     RUN_TEST(test_sv_missing_file);
     RUN_TEST(test_sv_net_types);
     RUN_TEST(test_sv_specialization_names);
     RUN_TEST(test_sv_project_config);
+    RUN_TEST(test_sv_command_line_config);
+    RUN_TEST(test_sv_synthesis_predefined);
     RUN_TEST(test_sv_refused_constructs);
     RUN_TEST(test_read_slang_arguments);
     return UNITY_END();

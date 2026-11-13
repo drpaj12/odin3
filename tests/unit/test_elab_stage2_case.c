@@ -693,13 +693,27 @@ static void test_z_index_blocking_write_is_ignored_with_a_warning(void) {
                       "S always [O0..O3<-O4..O7]\n");
 }
 
-/* A non-constant select inside a concatenation: Yosys 0.55 silently drops the write (spec 17). */
-static void test_variable_index_in_concatenation_is_an_error(void) {
-    pt_read_failing("module t(input c, input [1:0] s, d2, output reg [3:0] y, output reg z);\n"
-                    "  always @(posedge c) {y[s], z} <= d2;\nendmodule\n");
-    pt_expect_error((at_loc){2, 24},
-                    "non-constant index into 'y' is not supported in a concatenation target");
-    TEST_ASSERT_EQUAL_UINT32_MESSAGE(1, pt_diag_errors(), et_log(&pt_rs));
+/* A non-constant select inside a concatenation (survey gap 8): the assignment is split per part,
+ * as for a memory word, so each part is the case method's own target. Spec 17 #55 made it an
+ * error because Yosys 0.55 silently dropped the write; the front-end survey asked for it. */
+static void test_variable_index_in_concatenation_is_split(void) {
+    pt_read_clean("module t(input c, input [1:0] s, d2, output reg [3:0] y, output reg z);\n"
+                  "  always @(posedge c) {y[s], z} <= d2;\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
+}
+
+/* ... also in nested loops, where the inner loop variable is not yet constant when the outer
+ * loop is scanned (picorv32 ENABLE_MUL). */
+static void test_variable_index_in_concatenation_in_nested_loops(void) {
+    pt_read_clean("module t(input [7:0] a, b, output reg [7:0] y, output reg [7:0] r);\n"
+                  "  integer i, j;\n"
+                  "  always @* begin\n"
+                  "    y = a; r = 0;\n"
+                  "    for (i = 0; i < 2; i = i + 1)\n"
+                  "      for (j = 0; j < 8; j = j + 4)\n"
+                  "        {r[j+3], y[j +: 3]} = y[j +: 3] + b[j +: 3];\n"
+                  "  end\nendmodule\n");
+    TEST_ASSERT_EQUAL_UINT32(1, pt_count_of("$proc"));
 }
 
 /* --- memory writes under if and case (Task 24) -----------------------------------------------
@@ -1026,7 +1040,8 @@ static void test_public_entry_points_refuse_misuse(void) {
     X(test_index_that_selects_nothing)                                                             \
     X(test_x_index_write_is_ignored_with_a_warning)                                                \
     X(test_z_index_blocking_write_is_ignored_with_a_warning)                                       \
-    X(test_variable_index_in_concatenation_is_an_error)                                            \
+    X(test_variable_index_in_concatenation_is_split)                                               \
+    X(test_variable_index_in_concatenation_in_nested_loops)                                        \
     X(test_memory_write_in_if_arm_is_a_port)                                                       \
     X(test_memory_write_in_case_arm_is_a_port)                                                     \
     X(test_public_entry_points_refuse_misuse)                                                      \

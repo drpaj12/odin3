@@ -530,6 +530,27 @@ static void test_command_line_defines(void) {
     TEST_ASSERT_NOT_NULL(module_like("dd"));
 }
 
+/* SYNTHESIS is predefined, as Yosys does (survey gap 3): the `ifndef SYNTHESIS branch is skipped.
+ */
+static void test_synthesis_is_predefined(void) {
+    et_src srcs[] = {{"d.v", "module dd (output y);\n`ifndef SYNTHESIS\n  bad bad bad;\n`endif\n"
+                             "`ifdef SYNTHESIS\n  assign y = 1'b1;\n`endif\nendmodule\n"}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "d.v"), et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    TEST_ASSERT_NOT_NULL(module_like("dd"));
+}
+
+/* ... and a -D SYNTHESIS=0 of the user is kept, not defined twice. */
+static void test_synthesis_user_define_wins(void) {
+    et_src srcs[] = {{"d.v", "module dd (output y);\n  assign y = `SYNTHESIS;\nendmodule\n"}};
+    setup_files(srcs, 1, NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, run("read_verilog", "-D SYNTHESIS=1'b0 d.v"),
+                                  et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, rs.errors, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(0, et_count_with(&rs, ODIN3_LOG_WARN, "redefin"), et_log(&rs));
+}
+
 static void test_command_line_define_needs_a_value(void) {
     et_src srcs[] = {{"d.v", "module dd (output y);\n  assign y = 1'b0;\nendmodule\n"}};
     setup_files(srcs, 1, NULL);
@@ -663,6 +684,8 @@ static void test_command_line_param_syntax(void) {
     X(test_earlier_read_module_resolves)                                                           \
     X(test_earlier_read_module_has_no_parameters)                                                  \
     X(test_command_line_defines)                                                                   \
+    X(test_synthesis_is_predefined)                                                                \
+    X(test_synthesis_user_define_wins)                                                             \
     X(test_command_line_define_needs_a_value)                                                      \
     X(test_command_line_params)                                                                    \
     X(test_command_line_param_forced_string)                                                       \

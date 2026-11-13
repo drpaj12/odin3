@@ -213,7 +213,7 @@ static void test_cond_misuse(void) {
     assert_error("`ifdef X `endif `endif\n", "t.v:1:17: error: syntax: `endif without `ifdef");
     assert_error("`ifdef\nX `endif\n",
                  "t.v:1:7: error: syntax: expected a macro name after `ifdef");
-    assert_error("`ifndef 9 `endif\n",
+    assert_error("`ifndef + `endif\n",
                  "t.v:1:9: error: syntax: expected a macro name after `ifndef");
     assert_error("`ifdef A `elsif\n",
                  "t.v:1:16: error: syntax: expected a macro name after `elsif");

@@ -127,6 +127,14 @@ static void test_plain_define(void) {
     TEST_ASSERT_EQUAL_INT(0, errors);
 }
 
+/* A macro name may start with a digit, as Yosys accepts (VTR adder_tree files: `define 2_X). */
+static void test_digit_leading_macro_name(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define 2_X 5\nwire [`2_X:0] w;\n"));
+    assert_body(macro("2_X"), "5");
+    assert_text("\nwire [5:0] w;\n");
+    TEST_ASSERT_EQUAL_INT(0, errors);
+}
+
 static void test_define_with_args(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, run("`define ADD(a, b ) a + b\n"));
     assert_body(macro("ADD"), "a + b");
@@ -298,7 +306,7 @@ static void test_undef_then_redefine(void) {
 }
 
 static void test_undef_errors(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("`undef 3\n"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("`undef +\n"));
     assert_error("t.v:1:8: error: syntax: expected a macro name after `undef");
     errors = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, run("\n  `undef timescale\n"));
@@ -317,7 +325,7 @@ typedef struct bad_case {
 
 static void test_define_errors(void) {
     static const bad_case cases[] = {
-        {"`define 9X 1\n", "t.v:1:9: error: syntax: expected a macro name after `define"},
+        {"`define +X 1\n", "t.v:1:9: error: syntax: expected a macro name after `define"},
         {"`define\n", "t.v:1:8: error: syntax: expected a macro name after `define"},
         {"`define \\esc 1\n", "t.v:1:9: error: syntax: expected a macro name after `define"},
         {"`define ifdef 1\n",
@@ -529,7 +537,7 @@ static void test_command_line_errors(void) {
         const char *name, *value;
         const char *want;
     } cases[] = {
-        {"9bad", "1", "<command line>:3:9: error: syntax: expected a macro name after `define"},
+        {"+bad", "1", "<command line>:3:9: error: syntax: expected a macro name after `define"},
         {"S", "\"abc", "<command line>:3:11: error: syntax: unterminated string in macro text"},
         {"F(a b)", "a",
          "<command line>:3:13: error: syntax: expected ',' or ')' in the formal list of macro 'F'"},
@@ -661,6 +669,7 @@ static void test_out_of_memory(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_plain_define);
+    RUN_TEST(test_digit_leading_macro_name);
     RUN_TEST(test_define_with_args);
     RUN_TEST(test_empty_formal_list);
     RUN_TEST(test_paren_after_blank_is_body);

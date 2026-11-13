@@ -376,8 +376,24 @@ static void test_net_ids(void) {
     odin3_util_free(with);
 }
 
+/* --skip-flattened (survey gap 9): a module flatten marked unused is left out; off, it is written.
+ */
+static void test_skip_flattened(void) {
+    build_design();
+    odin3_module *mod = odin3_module_get(rj_design, (odin3_module_id){1});
+    set_int_attr(mod, (odin3_objref){ODIN3_OBJ_MODULE, 1}, "odin3 flattened away", 1);
+    const odin3_json_write_opts skip = {.skip_flattened = true};
+    char *all = write_text("s0.json", &k_plain);
+    char *less = write_text("s1.json", &skip);
+    assert_has(all, "\"top\": {");
+    assert_lacks(less, "\"top\": {");
+    odin3_util_free(all);
+    odin3_util_free(less);
+}
+
 int main(void) {
     UNITY_BEGIN();
+    RUN_TEST(test_skip_flattened);
     RUN_TEST(test_net_ids);
     RUN_TEST(test_default_is_byte_identical);
     RUN_TEST(test_keys_and_order);

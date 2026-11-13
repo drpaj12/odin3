@@ -95,20 +95,6 @@ struct BitSlice {
     uint32_t width;
 };
 
-/* The spelling of a unique/priority check, for the refusal message. */
-const char *checkName(UniquePriorityCheck check) {
-    switch (check) {
-    case UniquePriorityCheck::Unique:
-        return "unique";
-    case UniquePriorityCheck::Unique0:
-        return "unique0";
-    case UniquePriorityCheck::Priority:
-        return "priority";
-    default:
-        return "";
-    }
-}
-
 /* The Odin NET_DECL sub for a slang net type; false for a kind with no Odin net declaration. */
 bool netSub(const NetType &netType, uint32_t &sub) {
     switch (netType.netKind) {
@@ -254,6 +240,9 @@ class Adapter {
     uint32_t exprConcat(const ConcatenationExpression &cc, uint32_t loc, uint32_t end);
     uint32_t exprReplication(const ReplicationExpression &re, uint32_t loc, uint32_t end);
     uint32_t exprConversion(const ConversionExpression &cv, uint32_t loc, uint32_t end);
+    uint32_t partSelect(uint32_t value, uint32_t high, LocSpan span);
+    uint32_t widthCast(const ConversionExpression &cv, uint32_t to, LocSpan span);
+    uint32_t exprPattern(const SimpleAssignmentPatternExpression &pat, uint32_t loc, uint32_t end);
     uint32_t exprCall(const CallExpression &call, uint32_t loc, uint32_t end);
     uint32_t stmt(const Statement &stat);
     uint32_t stmtList(const StatementList &sl, uint32_t loc, uint32_t end);
@@ -916,6 +905,9 @@ bool Adapter::exprOper(const Expression &ex, uint32_t &out) {
     case ExpressionKind::Call:
         out = exprCall(ex.as<CallExpression>(), loc, end);
         return true;
+    case ExpressionKind::SimpleAssignmentPattern:
+        out = exprPattern(ex.as<SimpleAssignmentPatternExpression>(), loc, end);
+        return true;
     default:
         return false;
     }
@@ -1066,22 +1058,77 @@ uint32_t Adapter::exprReplication(const ReplicationExpression &re, uint32_t loc,
     return node({ODIN3_AST_REPLICATE, 0, 0, loc, end, 0, 0}, {count, concat});
 }
 
-uint32_t Adapter::exprConversion(const ConversionExpression &cv, uint32_t loc, uint32_t end) {
-    if (!cv.isImplicit()) {
-        /* An explicit cast (sized, signed, streaming) carries a width or sign the Odin AST has
-         * no node for; dropping it would change the value silently. */
-        failf(ODIN3_ERR_PARSE, loc, "an explicit %d-bit cast is not supported",
-              (int)cv.type->getBitWidth());
-        return 0;
+/* A part select [high:low] of node (constant bounds). */
+uint32_t Adapter::partSelect(uint32_t value, uint32_t high, LocSpan span) {
+    return node({ODIN3_AST_SELECT, ODIN3_AST_SELECT_PART, 0, span.loc, span.end, 0, 0},
+                {value, numberI64((int64_t)high, span), numberI64(0, span)});
+}
+
+/* An explicit cast to a different width: truncation keeps the low bits (a part select),
+ * extension pads with zeros or, for a signed operand, copies of its top bit (the operand is
+ * lowered again for that bit; slang expressions have no side effects the adapter supports). */
+uint32_t Adapter::widthCast(const ConversionExpression &cv, uint32_t to, LocSpan span) {
+    const Expression &operand = cv.operand();
+    const uint32_t from = (uint32_t)operand.type->getBitWidth();
+    const uint32_t value = expr(operand);
+    if (to < from) {
+        return partSelect(value, to - 1, span);
     }
-    const uint32_t sub = expr(cv.operand());
-    const bool from_signed = cv.operand().type->isSigned();
-    const bool to_signed = cv.type->isSigned();
-    if (!from_signed && to_signed) {
-        const uint32_t name = intern("$signed");
+    const uint32_t pad = to - from;
+    uint32_t fill = 0;
+    if (operand.type->isSigned()) {
+        fill = node({ODIN3_AST_SELECT, ODIN3_AST_SELECT_BIT, 0, span.loc, span.end, 0, 0},
+                    std::vector<uint32_t>{expr(operand), numberI64((int64_t)from - 1, span), 0});
+    } else {
+        fill = number(SVInt(1, 0, false), false, span.loc, span.end);
+    }
+    const uint32_t count = numberI64((int64_t)pad, span);
+    const uint32_t inner = node({ODIN3_AST_CONCAT, 0, 0, span.loc, span.end, 0, 0}, {fill});
+    const uint32_t repl =
+        node({ODIN3_AST_REPLICATE, 0, 0, span.loc, span.end, 0, 0}, {count, inner});
+    return node({ODIN3_AST_CONCAT, 0, 0, span.loc, span.end, 0, 0}, {repl, value});
+}
+
+uint32_t Adapter::exprConversion(const ConversionExpression &cv, uint32_t loc, uint32_t end) {
+    const Type &from_type = *cv.operand().type;
+    const Type &to_type = *cv.type;
+    uint32_t sub = 0;
+    if (!cv.isImplicit()) {
+        /* An explicit cast is a width change (sized cast), a sign change, or a retyping of the
+         * same bits (an enum or typedef cast). Integral types only. */
+        if (!from_type.isIntegral() || !to_type.isIntegral()) {
+            failf(ODIN3_ERR_PARSE, loc,
+                  "an explicit cast between non-integral types is not supported");
+            return 0;
+        }
+        const uint32_t to = (uint32_t)to_type.getBitWidth();
+        sub = to == (uint32_t)from_type.getBitWidth() ? expr(cv.operand())
+                                                      : widthCast(cv, to, {loc, end});
+    } else {
+        sub = expr(cv.operand());
+    }
+    const bool from_signed = from_type.isSigned();
+    const bool to_signed = to_type.isSigned();
+    if (from_signed != to_signed && (!from_signed || !cv.isImplicit())) {
+        const uint32_t name = intern(to_signed ? "$signed" : "$unsigned");
         return node({ODIN3_AST_CALL, 0, ODIN3_AST_F_CALL_SYSTEM, loc, end, name, 0}, {sub});
     }
     return sub;
+}
+
+/* A simple assignment pattern '{a, b, c}: for a packed array or struct the elements in order are
+ * the concatenation, most significant first. An unpacked one has no Odin AST value form. */
+uint32_t Adapter::exprPattern(const SimpleAssignmentPatternExpression &pat, uint32_t loc,
+                              uint32_t end) {
+    if (!pat.type->isIntegral()) {
+        failf(ODIN3_ERR_PARSE, loc,
+              "an assignment pattern for an unpacked array or struct is not supported");
+        return 0;
+    }
+    std::vector<uint32_t> ops;
+    std::transform(pat.elements().begin(), pat.elements().end(), std::back_inserter(ops),
+                   [this](const Expression *el) { return expr(*el); });
+    return node({ODIN3_AST_CONCAT, 0, 0, loc, end, 0, 0}, ops);
 }
 
 uint32_t Adapter::exprCall(const CallExpression &call, uint32_t loc, uint32_t end) {
@@ -1323,10 +1370,9 @@ uint32_t Adapter::stmtDecl(const VariableDeclStatement &vd, uint32_t loc, uint32
 }
 
 uint32_t Adapter::stmtConditional(const ConditionalStatement &cs, uint32_t loc, uint32_t end) {
-    if (cs.check != UniquePriorityCheck::None) {
-        failf(ODIN3_ERR_PARSE, loc, "'%s if' is not supported", checkName(cs.check));
-        return 0;
-    }
+    /* unique / unique0 / priority only assert that the branches do not overlap or are complete
+     * (Yosys turns them into full_case / parallel_case hints); the branches themselves decide the
+     * value, so the qualifier is dropped. */
     if (cs.conditions.size() != 1 || cs.conditions[0].pattern != nullptr) {
         failf(ODIN3_ERR_PARSE, loc, "if with a pattern or several conditions is not supported");
         return 0;
@@ -1352,10 +1398,7 @@ bool Adapter::caseSub(CaseStatementCondition condition, uint32_t loc, uint32_t &
 }
 
 uint32_t Adapter::stmtCase(const CaseStatement &cs, uint32_t loc, uint32_t end) {
-    if (cs.check != UniquePriorityCheck::None) {
-        failf(ODIN3_ERR_PARSE, loc, "'%s case' is not supported", checkName(cs.check));
-        return 0;
-    }
+    /* unique / unique0 / priority: dropped, as for if (see stmtConditional). */
     uint32_t sub = 0;
     if (!caseSub(cs.condition, loc, sub)) {
         return 0;

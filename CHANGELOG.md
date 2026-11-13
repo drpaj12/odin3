@@ -43,6 +43,33 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `mem2clkm`, `mem2pol` (4-state, 2-state, lowered, cell; iverilog), `tests/tb/run_memclk.sh` (`tb_memclk`: two write clocks vs
   iverilog).
 
+### Fixed
+- Front-end gaps found on VTR and OpenCores sources (purpose: Odin III goal 1, front-end and elaboration correctness, VTR comparable).
+  (1) A macro name may start with a digit (`` `define 2_X 5 `` and `` `2_X ``; Yosys accepts it, the VTR `adder_tree` files use it).
+  Formal argument names still must start with a letter or `_`. A backtick followed by a digit is now an undefined-macro error
+  (before, a stray-backtick error). Tests: `test_pp_define` (`test_digit_leading_macro_name`).
+  (2) `read_verilog -D` and `-I` now work for SystemVerilog (`.sv`) files: they reach slang's preprocessor after the project's own
+  defines and include directories (before, the read was refused with "use a project"). `-P` is still refused for `.sv`. Test:
+  `test_read_slang` (`test_sv_command_line_config`).
+  (3) `SYNTHESIS` is predefined for every Verilog and SystemVerilog read, as Yosys does (so `ifndef SYNTHESIS` simulation-only code is
+  skipped); a project or `-D` define of the name wins. Tests: `test_read_verilog_lib` (`test_synthesis_*`), `test_read_slang`
+  (`test_sv_synthesis_predefined`).
+  (4) slang adapter: explicit cast `W'(x)` (same width: no change; narrower: part select; wider: zero or sign padding), `unique`/
+  `unique0`/`priority` on `case` and `if` (qualifier dropped), and a simple assignment pattern `'{...}` for a packed array or
+  struct. An assignment pattern for an unpacked array or struct is still refused with a clearer message (VTR `hdmi` stays failed).
+  The VerilogEval references Prob151 and Prob156 now read (`tests/cli/veval/manifest.tsv`: refused to ok). Tests: `test_read_slang`
+  (`test_sv_gap4_constructs`), `cli_veval_corpus`.
+  (7) An instance of an implicit black box (`--auto-blackbox`; for example `ROM32X1 u (a, b, c)`) may use positional connections: the
+  ports are named `$1`, `$2`, ... in order, as Yosys names the ports of a cell of an unknown module, with a WARNING; a mix of named
+  and positional connections is an error as for a module. Before, any positional connection was `needs named connections`. Test:
+  `test_elab_stage1_inst` (`test_implicit_positional`, `test_implicit_mixed_connections`).
+  (9) `write_json --skip-flattened` leaves out the modules `flatten` marked as no longer instantiated (they stay in the design, as
+  `flatten` says in its INFO line). Off by default, so the file readers see does not change. Test: `test_json_odin3`
+  (`test_skip_flattened`).
+  (8) A concatenation target with a select whose index is not constant (`{a[j+3], b[j +: 4]} = ...` inside nested loops, picorv32
+  `ENABLE_MUL`) is split per part as a memory word already was, instead of the error `non-constant index into ... in a
+  concatenation target`. Test: `test_elab_stage2_case` (`test_variable_index_in_concatenation_*`).
+
 ## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
 
 ### Added
