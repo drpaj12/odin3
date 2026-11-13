@@ -1,6 +1,7 @@
 /* tb_run.c — the testbench scheduler: processes as explicit-stack interpreters, the event wheel,
  * the active/NBA/postponed regions (spec section 3) and the system tasks. */
 #include "sim/tb_internal.h"
+#include "util/clock.h"
 #include "util/log.h"
 
 #include <stdlib.h>
@@ -9,7 +10,8 @@
 enum {
     STEP_LIMIT = 20000000,
     DEFAULT_DELTA_LIMIT = 100000, /* active-region rounds in one region pass */
-    TIME_DELTA_LIMIT = 100000,    /* consecutive time steps at one time (#0 loops) */
+    MS_PER_S = 1000,
+    TIME_DELTA_LIMIT = 100000, /* consecutive time steps at one time (#0 loops) */
     ERR_BUF = 256,
     STROBE_CAP0 = 8,
     NBA_CAP0 = 16,
@@ -70,6 +72,9 @@ typedef struct run {
     bool finished, failed, hit_limit;
     uint64_t max_time;
     tb_vcd *vcd;
+    uint32_t progress_s;        /* seconds between progress lines, 0: none */
+    double started_ms, last_ms; /* wall clock of the start and of the last progress line */
+    uint64_t steps;             /* time steps taken */
 } run;
 
 static void rfail(run *rt, const tb_stmt *stmt, const char *msg) {
@@ -1015,6 +1020,24 @@ static void wake_at(run *rt, uint64_t when) {
     }
 }
 
+/* A progress line when progress_s seconds have passed since the last one: simulated time against
+ * the limit, time steps, wall seconds and the rate in simulated time units per second. */
+static void progress_line(run *rt) {
+    double now = odin3_now_ms();
+    if (rt->progress_s == 0 || now - rt->last_ms < (double)rt->progress_s * MS_PER_S) {
+        return;
+    }
+    rt->last_ms = now;
+    double wall = (now - rt->started_ms) / MS_PER_S;
+    double rate = wall > 0.0 ? (double)rt->ev.time / wall : 0.0;
+    odin3_log(ODIN3_LOG_INFO,
+              "sim_tb: progress: time %llu of %llu (%.1f%% of --max-time), %llu time steps, "
+              "%.0f s, %.0f time units/s",
+              (unsigned long long)rt->ev.time, (unsigned long long)rt->max_time,
+              rt->max_time > 0 ? 100.0 * (double)rt->ev.time / (double)rt->max_time : 0.0,
+              (unsigned long long)rt->steps, wall, rate);
+}
+
 /* Advances time from wake to wake; fails when time stays put for TIME_DELTA_LIMIT steps. */
 static void event_loop(run *rt) {
     uint64_t next = 0;
@@ -1028,6 +1051,8 @@ static void event_loop(run *rt) {
         rt->ev.time = next;
         wake_at(rt, next);
         time_step(rt);
+        rt->steps++;
+        progress_line(rt);
     }
 }
 
@@ -1037,6 +1062,9 @@ odin3_status tb_run_end(odin3_design *design, tb_module *tb, const tb_options *o
     rt.ev.tb = tb;
     rt.ev.seed = (int32_t)opts->seed;
     rt.max_time = opts->max_time;
+    rt.progress_s = opts->progress_s;
+    rt.started_ms = odin3_now_ms();
+    rt.last_ms = rt.started_ms;
     rt.mon_on = true;
     tb->out = opts->out;
     tb->plusargs = opts->plusargs;

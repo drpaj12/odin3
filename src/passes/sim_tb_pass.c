@@ -42,6 +42,7 @@ typedef struct tb_args {
     char out[PATH_MAX_LEN];
     char vcd[PATH_MAX_LEN];
     uint64_t max_time;
+    uint64_t progress; /* --progress SEC: seconds between progress lines, 0: none */
     uint64_t seed;
     char plusarg[TB_MAX_PLUSARGS][TB_PLUSARG_LEN];
     const char *plusarg_ptr[TB_MAX_PLUSARGS];
@@ -118,7 +119,7 @@ static bool take_style(odin3_bytes *args, odin3_blif_name_style *style) {
 
 static odin3_status usage(void) {
     odin3_log(ODIN3_LOG_ERROR,
-              "sim_tb: expects [--top <module>] [--max-time N] [--seed N] [--out "
+              "sim_tb: expects [--top <module>] [--max-time N] [--progress SEC] [--seed N] [--out "
               "<file>] [--vcd <file> [--vcd-all] [--vcd-names short|provenance|hash]] [--plusarg "
               "<text>]... [--2state] [-I "
               "<dir>]... [-D <name[=value]>]... <tb.v>...");
@@ -168,21 +169,31 @@ static bool check_vcd_options(const tb_args *out) {
     return !bad;
 }
 
+/* --max-time, --progress and --seed: true when word is one of them (*ok: its value was good). */
+static bool take_number_option(odin3_bytes word, odin3_bytes *args, tb_args *out, bool *ok) {
+    if (word_is(word, "--max-time")) {
+        *ok = take_number(args, &out->max_time);
+    } else if (word_is(word, "--progress")) {
+        *ok = take_number(args, &out->progress) && out->progress <= UINT32_MAX;
+    } else if (word_is(word, "--seed")) {
+        *ok = take_number(args, &out->seed);
+    } else {
+        return false;
+    }
+    return true;
+}
+
 static odin3_status parse_args(odin3_bytes args, tb_args *out) {
     out->max_time = DEFAULT_MAX_TIME;
     for (odin3_bytes word = odin3_pass_arg_next(&args); word.ptr != NULL;
          word = odin3_pass_arg_next(&args)) {
         bool ok = true;
-        if (take_vcd_option(word, &args, out, &ok)) {
+        if (take_vcd_option(word, &args, out, &ok) || take_number_option(word, &args, out, &ok)) {
             /* handled */
         } else if (word_is(word, "--top")) {
             ok = take(&args, out->top, sizeof out->top);
         } else if (word_is(word, "--out")) {
             ok = take(&args, out->out, sizeof out->out);
-        } else if (word_is(word, "--max-time")) {
-            ok = take_number(&args, &out->max_time);
-        } else if (word_is(word, "--seed")) {
-            ok = take_number(&args, &out->seed);
         } else if (word_is(word, "--plusarg")) {
             ok = take_plusarg(&args, out);
         } else if (word_is(word, "--4state")) {
@@ -376,7 +387,8 @@ static odin3_status run_parsed(odin3_design *design, const tb_args *parsed, tb_m
                        parsed->n_plusarg,
                        false,
                        NULL,
-                       NULL};
+                       NULL,
+                       (uint32_t)parsed->progress};
     odin3_sim_netnames names;
     odin3_sim_netnames_init(&names, design, "sim_tb", parsed->vcd_names);
     if (parsed->vcd_all) {
@@ -384,15 +396,23 @@ static odin3_status run_parsed(odin3_design *design, const tb_args *parsed, tb_m
         opts.namer = odin3_sim_netnames_name;
         opts.namer_ctx = &names;
     }
-    uint64_t end_time = 0;
-    odin3_status st = tb_run(design, tb, &opts, &end_time);
+    tb_end end = {0, false};
+    odin3_status st = tb_run_end(design, tb, &opts, &end);
     odin3_sim_netnames_free(&names);
     (void)fflush(out);
     if (out != stdout) {
         (void)fclose(out);
     }
-    if (st == ODIN3_OK) {
-        odin3_log(ODIN3_LOG_INFO, "sim_tb: finished at time %llu", (unsigned long long)end_time);
+    if (st == ODIN3_OK && end.hit_limit) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "sim_tb: stopped at the time limit --max-time %llu (default %d): the testbench "
+                  "had not reached $finish; the next event lay beyond it. Raise it with --max-time "
+                  "N if the run is meant to be longer",
+                  (unsigned long long)parsed->max_time, DEFAULT_MAX_TIME);
+        odin3_log(ODIN3_LOG_INFO, "sim_tb: stopped at time %llu (time limit)",
+                  (unsigned long long)end.time);
+    } else if (st == ODIN3_OK) {
+        odin3_log(ODIN3_LOG_INFO, "sim_tb: finished at time %llu", (unsigned long long)end.time);
     }
     return st;
 }

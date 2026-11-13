@@ -30,6 +30,15 @@ interpreter: every value starts 0 and the DUT is simulated with 0 and 1 only; th
 best with `lower --keep-sel`; `--4state` is accepted and changes nothing). A register with no reset whose hold or enable is computed from its own value (`HLT ? X : next` with `HLT` depending on `X`) stays x in 4-state mode, as in iverilog, and the old 2-state mode (Odin III 1.4.0 and earlier) hides it as 0; compare two traces in one mode, and treat x as a don't-care or reset that state first. Python: `design.run("sim_tb --out run.txt tb.v")`
 after the design is built.
 
+The time limit and progress. A run ends at `$finish`, or when the next event lies beyond `--max-time`. When the limit ends
+it, `sim_tb` prints a WARNING that names the limit and `--max-time`, then the summary line `sim_tb: stopped at time T (time
+limit)` (a run that reaches `$finish` prints `sim_tb: finished at time T`). A testbench with a free-running clock and no
+`$finish` always ends that way; the warning is then expected and `--max-time` is the length of the run. The default stays
+10,000,000: `run_testbenches` shares it as its hang limit, and a longer default would make a hung testbench slower to
+report. `--progress SEC` prints an INFO line every SEC seconds of wall time, `sim_tb: progress: time 2844569 of 3000000
+(94.8% of --max-time), 2844569 time steps, 1 s, 2844569 time units/s`, so a long run can be told from a hang; it is off by
+default and prints nothing for a run shorter than SEC seconds.
+
 Several files and directives: `sim_tb a.v b.v ...` joins the files (after the Verilog preprocessor,
 run once over all of them, so a `` `define`` reaches the files after it). `` `include`` is searched
 in the directories given by `-I <dir>` (repeatable), and `-D name[=value]` (repeatable) predefines a
