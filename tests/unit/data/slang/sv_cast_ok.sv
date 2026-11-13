@@ -1,6 +1,5 @@
-// Fixture for the explicit-cast review finding: the Odin AST has no cast node, so the adapter
-// must refuse `4'(a)` with a located error rather than silently compare `a` untruncated.
-module bad_cast (
+// Fixture: an explicit width cast is accepted (truncation is a part select).
+module cast_ok (
     input  logic [7:0] a,
     input  logic [3:0] b,
     output logic       y

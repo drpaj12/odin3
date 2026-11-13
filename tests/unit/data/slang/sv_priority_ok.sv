@@ -1,5 +1,5 @@
-// Fixture: `priority if` is refused with a located error, never silently dropped.
-module refused_priority (
+// Fixture: `priority if` is accepted; the qualifier is dropped.
+module priority_ok (
     input  logic a,
     output logic y
 );

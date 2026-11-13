@@ -54,6 +54,14 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   (3) `SYNTHESIS` is predefined for every Verilog and SystemVerilog read, as Yosys does (so `ifndef SYNTHESIS` simulation-only code is
   skipped); a project or `-D` define of the name wins. Tests: `test_read_verilog_lib` (`test_synthesis_*`), `test_read_slang`
   (`test_sv_synthesis_predefined`).
+  (4) slang adapter: explicit cast `W'(x)` (same width: no change; narrower: part select; wider: zero or sign padding), `unique`/
+  `unique0`/`priority` on `case` and `if` (qualifier dropped), and a simple assignment pattern `'{...}` for a packed array or
+  struct. An assignment pattern for an unpacked array or struct is still refused with a clearer message (VTR `hdmi` stays failed).
+  The VerilogEval references Prob151 and Prob156 now read (`tests/cli/veval/manifest.tsv`: refused to ok). Tests: `test_read_slang`
+  (`test_sv_gap4_constructs`), `cli_veval_corpus`.
+  (8) A concatenation target with a select whose index is not constant (`{a[j+3], b[j +: 4]} = ...` inside nested loops, picorv32
+  `ENABLE_MUL`) is split per part as a memory word already was, instead of the error `non-constant index into ... in a
+  concatenation target`. Test: `test_elab_stage2_case` (`test_variable_index_in_concatenation_*`).
 
 ## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
 

@@ -50,12 +50,17 @@ Defaults taken while implementing, all visible here and in the lane's `## Result
   through the adapter's offsets, so the model is self-consistent.
 - **Unsupported, a located `ODIN3_ERR_PARSE`, never a silent drop**: functions and tasks (and their
   calls), `foreach`/`do while`/`forever`, `break`/`continue`/`return`, `case inside`,
-  `unique/priority`, intra-assignment timing, delays/strength, real/realtime/string variables,
+  intra-assignment timing, delays/strength, real/realtime/string variables,
   assertions, processes/final, `ref` ports, interface-port pass-through (a parent port connected
   to a child interface port), and `--auto-blackbox`.
+- Accepted since the front-end survey fixes: `unique`/`unique0`/`priority` on `case` and `if` (the qualifier is dropped; Yosys only
+  turns it into full/parallel-case hints), an explicit cast (a same-width cast changes nothing, a narrower one is a part select of the
+  operand, a wider one pads with zeros or, for a signed operand, copies of its top bit), and a simple assignment pattern `'{a, b}` for a
+  packed array or struct (a concatenation, first element most significant). A pattern for an unpacked array or struct (for example
+  `logic [9:0] a [2:0] = '{...}`) is refused: `an assignment pattern for an unpacked array or struct is not supported`.
 - `--lib`, `--parse-only`, `-icells`, `-netlist`, `--vtr-compat` and mixed
   Verilog/SystemVerilog reads are refused for SystemVerilog. A project's include directories
-  and defines do reach slang's preprocessor (`odin3_sv_options`).
+  and defines, and the command's `-D` and `-I`, reach slang's preprocessor (`odin3_sv_options`); `SYNTHESIS` is predefined.
 - A library gate instance read back from structural Verilog binds to a registered
   bit-granularity cell type (`src/frontends/verilog/elab1_lookup.c`, `resolve_outside`): this is
   what makes `write_verilog`'s gate-cell netlists (BUF/INV/NAND2/NOR2/DFF) readable by Odin III

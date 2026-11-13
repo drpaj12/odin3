@@ -371,13 +371,16 @@ static void test_sv_diagnostics(void) {
     expect_read_error(files, ODIN3_ERR_PARSE, "expected expression");
 }
 
-/* An explicit cast has no Odin AST node: the adapter refuses it with a located error rather
- * than emitting the untruncated operand. */
-static void test_sv_refused_cast(void) {
-    char files[SV_PATH_MAX];
-    (void)snprintf(files, sizeof files, "%s/sv_bad_cast.sv", D);
-    expect_read_error(files, ODIN3_ERR_PARSE, "sv_bad_cast.sv:");
-    expect_read_error(files, ODIN3_ERR_PARSE, "explicit 4-bit cast is not supported");
+/* An explicit width cast, unique/priority and a packed assignment pattern are read (survey gap 4). */
+static void test_sv_gap4_constructs(void) {
+    const char *files[] = {D "/sv_cast_ok.sv", D "/sv_unique_ok.sv", D "/sv_priority_ok.sv",
+                           D "/sv_gap4.sv"};
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
+        TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+        fresh_design();
+        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_design_run_pass(design, "read_verilog", files[i]),
+                                      files[i]);
+    }
 }
 
 static void test_sv_missing_file(void) {
@@ -490,9 +493,6 @@ static void test_sv_synthesis_predefined(void) {
 
 /* The constructs the docs list as refused are refused, each with its own located message. */
 static void test_sv_refused_constructs(void) {
-    expect_read_error(D "/sv_refused_unique.sv", ODIN3_ERR_PARSE, "'unique case' is not supported");
-    expect_read_error(D "/sv_refused_priority.sv", ODIN3_ERR_PARSE,
-                      "'priority if' is not supported");
     expect_read_error(D "/sv_refused_timing.sv", ODIN3_ERR_PARSE,
                       "intra-assignment timing control is not supported");
     expect_read_error(D "/sv_refused_strength.sv", ODIN3_ERR_PARSE,
@@ -535,7 +535,7 @@ int main(void) {
     RUN_TEST(test_sv_interface);
     RUN_TEST(test_sv_signed);
     RUN_TEST(test_sv_diagnostics);
-    RUN_TEST(test_sv_refused_cast);
+    RUN_TEST(test_sv_gap4_constructs);
     RUN_TEST(test_sv_missing_file);
     RUN_TEST(test_sv_net_types);
     RUN_TEST(test_sv_specialization_names);
