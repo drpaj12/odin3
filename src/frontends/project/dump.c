@@ -657,6 +657,28 @@ static void dump_flows(json *jw) {
     dump_kind(jw, "flows", ODIN3_PROJ_FLOW_DEF, write_flow);
 }
 
+/* prov_level and prov_budget, only when the project gives them (the dump of other projects is
+ * unchanged). */
+static void write_prov(json *jw) {
+    const odin3_project *proj = jw->proj;
+    if (proj->prov_set) {
+        field(jw, "prov_level");
+        if (proj->prov_auto) {
+            raw(jw, "\"auto\"");
+        } else {
+            number(jw, proj->prov_level);
+        }
+        raw(jw, ",\n");
+    }
+    if (proj->prov_budget != 0) {
+        field(jw, "prov_budget");
+        if (jw->st == ODIN3_OK) {
+            jw->st = odin3_strbuf_appendf(jw->out, "%" PRIu64, proj->prov_budget);
+        }
+        raw(jw, ",\n");
+    }
+}
+
 odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {
     odin3_strbuf text;
     odin3_strbuf_init(&text);
@@ -672,6 +694,7 @@ odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {
     field(&jw, "abc_script");
     string_or_null(&jw, proj->abc_script.given != 0, proj->abc_script.resolved);
     raw(&jw, ",\n");
+    write_prov(&jw);
     field(&jw, "output");
     write_output(&jw);
     raw(&jw, ",\n");

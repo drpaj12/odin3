@@ -37,37 +37,41 @@ enum { MSG_BUF = 1024 };
 enum { PROJECT_ARGS_BUF = 4096 + 32 };
 
 static void print_usage(FILE *out) {
-    (void)fputs("usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
-                "       odin3 [options] --parse-only [file.v]...\n"
-                "       odin3 [options] --elab-only [file.v]...\n"
-                "\n"
-                "Runs pass scripts on one design, in command-line order, after looking up\n"
-                "every pass name in all of them. A script holds commands separated by ';' or\n"
-                "newlines; '#' starts a comment; \"double quotes\" keep blanks, ';' and '#'.\n"
-                "  --version        print the version and ABI version\n"
-                "  --help           print this help and the registered passes; run nothing\n"
-                "  --plugin FILE    load a shared-object plugin (repeatable)\n"
-                "  --top NAME       the top module (wins over the BLIF first model)\n"
-                "  --check          check the IR before and after every pass (always in Debug)\n"
-                "  --keep-ast       keep the elaborated AST of every read (write_verilog_ast)\n"
-                "  --keep-ast=all   keep the parsed AST too\n"
-                "  --project FILE   read a project first (read_project FILE, before every script)\n"
-                "  -f LIST          read a file list first (read_project --format f LIST)\n"
-                "  --revision R     the Quartus revision every read_project reads\n"
-                "  --abc-script FILE the ABC script of every abc pass (below abc --script)\n"
-                "  --opt-snapshot DIR write the design before and after every changing opt step\n"
-                "                   (DIR must exist: NNNN-<sub>-before.il, -after.il)\n"
-                "  --dump-project   write the project record as JSON after the scripts\n"
-                "  --diag-paths given|resolved\n"
-                "                   name files in diagnostics as given (default) or absolute\n"
-                "  -p SCRIPT        run the passes given inline\n"
-                "  --parse-only     parse the files given (else the project's) and stop:\n"
-                "                   read_verilog --parse-only FILE... (no script allowed)\n"
-                "  --elab-only      elaborate the files given (else the project's), then stats:\n"
-                "                   read_verilog FILE...; stats (no script allowed)\n"
-                "\n"
-                "passes:\n",
-                out);
+    (void)fputs(
+        "usage: odin3 [options] [-p \"pass args; pass args\"]... [script.o3]...\n"
+        "       odin3 [options] --parse-only [file.v]...\n"
+        "       odin3 [options] --elab-only [file.v]...\n"
+        "\n"
+        "Runs pass scripts on one design, in command-line order, after looking up\n"
+        "every pass name in all of them. A script holds commands separated by ';' or\n"
+        "newlines; '#' starts a comment; \"double quotes\" keep blanks, ';' and '#'.\n"
+        "  --version        print the version and ABI version\n"
+        "  --help           print this help and the registered passes; run nothing\n"
+        "  --plugin FILE    load a shared-object plugin (repeatable)\n"
+        "  --top NAME       the top module (wins over the BLIF first model)\n"
+        "  --check          check the IR before and after every pass (always in Debug)\n"
+        "  --keep-ast       keep the elaborated AST of every read (write_verilog_ast)\n"
+        "  --keep-ast=all   keep the parsed AST too\n"
+        "  --project FILE   read a project first (read_project FILE, before every script)\n"
+        "  -f LIST          read a file list first (read_project --format f LIST)\n"
+        "  --revision R     the Quartus revision every read_project reads\n"
+        "  --abc-script FILE the ABC script of every abc pass (below abc --script)\n"
+        "  --prov-level L    provenance depth 0 (off) .. 4 (full) or auto (see --prov-budget)\n"
+        "  --prov-budget SIZE most provenance bytes to write (K, M, G); with auto or a fixed "
+        "level\n"
+        "  --opt-snapshot DIR write the design before and after every changing opt step\n"
+        "                   (DIR must exist: NNNN-<sub>-before.il, -after.il)\n"
+        "  --dump-project   write the project record as JSON after the scripts\n"
+        "  --diag-paths given|resolved\n"
+        "                   name files in diagnostics as given (default) or absolute\n"
+        "  -p SCRIPT        run the passes given inline\n"
+        "  --parse-only     parse the files given (else the project's) and stop:\n"
+        "                   read_verilog --parse-only FILE... (no script allowed)\n"
+        "  --elab-only      elaborate the files given (else the project's), then stats:\n"
+        "                   read_verilog FILE...; stats (no script allowed)\n"
+        "\n"
+        "passes:\n",
+        out);
     for (uint32_t i = 0; i < odin3_pass_get_count(); i++) {
         const char *help = "";
         (void)odin3_pass_get_help(i, &help);
@@ -113,7 +117,8 @@ typedef struct cli_state {
 /* The options that take a value. */
 static const char *const k_value_options[] = {"--plugin",     "--top",        "-p",
                                               "--project",    "-f",           "--revision",
-                                              "--diag-paths", "--abc-script", "--opt-snapshot"};
+                                              "--diag-paths", "--abc-script", "--opt-snapshot",
+                                              "--prov-level", "--prov-budget"};
 
 /* An option that takes a value: true (and *value) when argv[*at] is one; advances *at. */
 static bool option_value(char **argv, int argc, int *at, const char **value) {
@@ -237,6 +242,35 @@ static bool is_directory(const char *path) {
     return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
 }
 
+/* --prov-level and --prov-budget set their process option at once; a value that does not parse is
+ * refused. */
+static int scan_prov(const char *arg, const char *value) {
+    bool is_level = strcmp(arg, "--prov-level") == 0;
+    if (!is_level && strcmp(arg, "--prov-budget") != 0) {
+        return EXIT_OK;
+    }
+    odin3_status st =
+        is_level ? odin3_pass_set_prov_level(value) : odin3_pass_set_prov_budget(value);
+    if (st != ODIN3_OK) {
+        return bad_value(arg, value,
+                         is_level ? "expects 0, 1, 2, 3, 4 or auto"
+                                  : "expects a size such as 500M or 2G");
+    }
+    return EXIT_OK;
+}
+
+/* The options that name a path (--abc-script a file, --opt-snapshot a directory) and the
+ * provenance depth options, whose value must be good before the scan goes on. */
+static int check_path_option(const char *arg, const char *value) {
+    if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
+        return bad_value(arg, value, "no such file");
+    }
+    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
+        return bad_value(arg, value, "no such directory");
+    }
+    return scan_prov(arg, value);
+}
+
 /* An option with its value (loads a plugin, records the rest). */
 static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--plugin") == 0) {
@@ -251,11 +285,9 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (is_project_option(arg) && strchr(value, '"') != NULL) {
         return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
     }
-    if (strcmp(arg, "--abc-script") == 0 && !is_regular_file(value)) {
-        return bad_value(arg, value, "no such file");
-    }
-    if (strcmp(arg, "--opt-snapshot") == 0 && !is_directory(value)) {
-        return bad_value(arg, value, "no such directory");
+    int checked = check_path_option(arg, value);
+    if (checked != EXIT_OK) {
+        return checked;
     }
     state->inline_script |= strcmp(arg, "-p") == 0;
     state->project |= is_project_option(arg);

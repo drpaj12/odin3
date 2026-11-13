@@ -137,6 +137,7 @@ struct odin3_design {
     struct odin3_arch *arch;       /* owned; NULL until odin3_design_get_arch (Phase 4.1) */
     odin3_srcfmt diag_paths;       /* file naming in diagnostics; GIVEN by default */
     uint32_t sim_holds;            /* S1: open odin3_simulation handles (SA-11) */
+    uint64_t serial; /* unique per design ever created in the process (never reused) */
 };
 
 /* --- module stores (IR-18) ----------------------------------------------------------------- */

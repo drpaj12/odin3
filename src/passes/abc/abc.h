@@ -119,6 +119,8 @@ typedef struct odin3_abc_opts {
     const char *gates;   /* --gates: the library name (gatemap spec G-4), NULL without */
     bool prov_given;     /* --prov was given (its value is in prov) */
     bool prov_cut;       /* --prov-cut on: the exact cut of each LUT (cut.c) */
+    bool prov_cut_given; /* --prov-cut was an argument (it then wins over the provenance depth) */
+    bool prov_bulk;      /* the provenance depth chose one shared record for the run's LUTs */
     uint64_t prov_edges; /* --prov-edges N, or UINT64_MAX for `unlimited`; 0: not given */
 } odin3_abc_opts;
 

@@ -12,6 +12,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/prov_depth.h"
 #include "util/log.h"
 #include "util/str.h"
 
@@ -279,6 +280,11 @@ static odin3_status write_format_run(odin3_design *design, odin3_bytes args, wri
     odin3_strbuf_init(&parsed.sim_file);
     odin3_status st = parse_write_args(FORMAT_PASS[format], args, &parsed);
     st = st == ODIN3_OK ? check_name_map(FORMAT_PASS[format], &parsed) : st;
+    if (st == ODIN3_OK && parsed.json.name_style == ODIN3_JSON_NAMES_HASH &&
+        parsed.json.prov_map == ODIN3_PROV_MAP_NONE && odin3_prov_depth_wants_map(design)) {
+        parsed.json.prov_map = ODIN3_PROV_MAP_ANY; /* the provenance depth asks for the name map */
+        parsed.verilog.prov_map = ODIN3_PROV_MAP_ANY;
+    }
     odin3_module_id top = odin3_design_top(design);
     if (st == ODIN3_OK && odin3_module_valid(top)) {
         odin3_log(ODIN3_LOG_DEBUG, "%s: %s: top %s", FORMAT_PASS[format], parsed.path.data,

@@ -66,6 +66,11 @@ odin3_module_id odin3_design_top(const odin3_design *design);
  * above 0.
  */
 uint32_t odin3_design_sim_holds(const odin3_design *design);
+
+/* A number no other design of this process has had (a created or cloned design gets the next one);
+ * 0 for a NULL design. A cache keyed on the design pointer also keys on this, because a new design
+ * can get the address of a destroyed one. */
+uint64_t odin3_design_serial(const odin3_design *design);
 void odin3_design_sim_hold(odin3_design *design);
 void odin3_design_sim_release(odin3_design *design);
 

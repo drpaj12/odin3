@@ -2,6 +2,7 @@
 #include "passes/manager.h"
 
 #include "passes/builtin.h"
+#include "passes/prov_depth.h"
 
 #include "ir/check.h"
 #include "ir/design.h"
@@ -267,6 +268,9 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
         return refused; /* a refused call changes nothing, the keep level included */
     }
     raise_keep(design, def);
+    if (strncmp(name, "read_", strlen("read_")) == 0) {
+        odin3_prov_depth_reset(); /* a design read afresh is resolved afresh (prov_depth.h) */
+    }
     return run_def(design, def, args);
 }
 

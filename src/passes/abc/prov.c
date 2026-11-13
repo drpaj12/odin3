@@ -469,10 +469,13 @@ static odin3_status coarse_records(odin3_abc_run *run, const odin3_abc_result *r
                                    odin3_vec *obj_prov) {
     char domain[TEXT_BYTES];
     odin3_abc_domain_text(run->module, run->domain, domain, sizeof domain);
-    odin3_log(ODIN3_LOG_WARN,
-              "abc: module '%s', %s: provenance needs %" PRIu64 " parent edges (budget %" PRIu64
-              "); the run's LUTs share one record (--prov-edges N or unlimited raises the budget)",
-              module_text(run), domain, edges, edge_budget(run, res));
+    if (!run->opts.prov_bulk) { /* a provenance depth that chose bulk records does not warn */
+        odin3_log(ODIN3_LOG_WARN,
+                  "abc: module '%s', %s: provenance needs %" PRIu64 " parent edges (budget %" PRIu64
+                  "); the run's LUTs share one record (--prov-edges N or unlimited raises the "
+                  "budget)",
+                  module_text(run), domain, edges, edge_budget(run, res));
+    }
     odin3_prov_id rec = {0};
     odin3_status st = odin3_abc_coarse_record(run, &rec);
     uint32_t first_new = FIRST_OBJ + res->n_cis;
@@ -607,11 +610,12 @@ odin3_status odin3_abc_records(odin3_abc_run *run, const odin3_abc_result *res,
     odin3_vec_free(obj_prov);
     odin3_status st = pv_init(&pw, run, res, anchors);
     uint64_t edges = 0;
-    st = st == ODIN3_OK ? walk_all(&pw, false, &edges) : st;
+    st = st == ODIN3_OK && !run->opts.prov_bulk ? walk_all(&pw, false, &edges) : st;
     run->stats.edges = edges;
     if (st == ODIN3_OK) {
-        st = edges > edge_budget(run, res) ? coarse_records(run, res, edges, obj_prov)
-                                           : precise_records(&pw, obj_prov);
+        st = run->opts.prov_bulk || edges > edge_budget(run, res)
+                 ? coarse_records(run, res, edges, obj_prov)
+                 : precise_records(&pw, obj_prov);
     }
     pv_free(&pw);
     return st;

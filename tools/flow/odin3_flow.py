@@ -2,8 +2,9 @@
 section 2.1).
 
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
-        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--timing-attr]
-        [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
+        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--prov-level L]
+        [--prov-budget SIZE] [--timing-attr] [--timing-paths N] [--timing-legacy]
+        [--odin3 PATH] [--out DIR]
         [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
@@ -82,6 +83,8 @@ class FlowArgs:
     read_opts: tuple[str, ...] = ()  # --read-opt: extra read_verilog options
     strict_tristate: bool = False  # --strict-tristate: a tri-state conversion is an error
     prov_cut: bool = False  # --prov-cut: abc keeps the exact cut of each LUT (needs --prov)
+    prov_level: str = ""  # --prov-level 0..4|auto: the provenance depth (odin3 --prov-level)
+    prov_budget: str = ""  # --prov-budget SIZE: the most provenance bytes (odin3 --prov-budget)
 
 
 @dataclass(frozen=True)
@@ -382,7 +385,45 @@ def tristate_script(script: str, strict: bool) -> str:
 
 
 def odin3_command(args: FlowArgs, top: str, script: str) -> list[str]:
-    return [str(args.odin3), "--diag-paths", "resolved", "--top", top, "-p", script]
+    depth = (["--prov-level", args.prov_level] if args.prov_level else []) + \
+        (["--prov-budget", args.prov_budget] if args.prov_budget else [])
+    return [str(args.odin3), "--diag-paths", "resolved", *depth, "--top", top, "-p", script]
+
+
+DEPTH_RE = re.compile(r"proc: provenance depth (\d) ")
+
+
+def resolved_depth(odin3_log: Path) -> int | None:
+    """The provenance depth odin3 used (its ``proc`` INFO line), None when it printed none."""
+    match = DEPTH_RE.search(odin3_log.read_text(errors="replace")) if odin3_log.is_file() else None
+    return int(match.group(1)) if match else None
+
+
+SIZE_RE = re.compile(r"([0-9]+)([KMGkmg]?)")
+SIZE_SHIFT = {"": 0, "K": 10, "M": 20, "G": 30}
+BYTES_RE = re.compile(r"proc: provenance depth \d \(\w+\): estimated \d+ records, \d+ edges, "
+                      r"\d+ bytes \(name map (\d+), step files (\d+)\)")
+
+
+def parse_size(text: str) -> int | None:
+    """``--prov-budget`` text as bytes (digits, then an optional K, M or G of either case, powers
+    of 1024), None when it is anything else or zero (as ``odin3 --prov-budget`` reads it)."""
+    match = SIZE_RE.fullmatch(text)
+    if match is None:
+        return None
+    size = int(match.group(1)) << SIZE_SHIFT[match.group(2).upper()]
+    return size if 0 < size < 1 << 64 else None
+
+
+def steps_over_budget(odin3_log: Path, budget: str) -> tuple[int, int, int] | None:
+    """(name map bytes, step file bytes, budget bytes) when the depth 4 estimate of the odin3 log
+    puts the step files over the budget (odin3 itself counts the name map only), else None."""
+    limit = parse_size(budget) if budget else None
+    match = BYTES_RE.search(odin3_log.read_text(errors="replace")) if odin3_log.is_file() else None
+    if limit is None or match is None:
+        return None
+    map_bytes, step_bytes = int(match.group(1)), int(match.group(2))
+    return (map_bytes, step_bytes, limit) if map_bytes + step_bytes > limit else None
 
 
 LUTS_NOTE = ".names with two or more inputs (constants and one-input buffers or inverters excluded)"
@@ -702,6 +743,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     script = qor_legs.odin3_script("O", design, quote(blif), k, "short")
     if args.prov:
         script = prov_script(script, k)
+    # a depth that resolves above 0 makes write_blif use hash names and write the map by itself
+    # (--name-style and --prov-map come from it), so the BLIF never has hash names without a map
     if args.prov_cut:
         script = script.replace(f"abc --lut {k}", f"abc --lut {k} --prov-cut on")
     script = with_read_options(args, script, step_dir)
@@ -721,7 +764,9 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         return None
     result.summary["luts"] = count_luts(blif)
     result.summary["luts_note"] = LUTS_NOTE
-    if args.prov:
+    depth = resolved_depth(step.log)
+    names = args.prov or (map_path(blif).is_file() and depth is not None and depth > 0)
+    if names:
         prov_step(blif, result)
         if not result.steps[-1].ok:
             return None
@@ -733,7 +778,14 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         vpr_step(args, blif, k, result)
         if args.timing_attr and result.steps[-1].ok and result.vpr_run_dir is not None:
             timing_step(args, top, blif, result.vpr_run_dir, result)
-    if args.prov and result.steps[-1].ok:
+    steps = args.prov or (names and depth == 4)  # the step files are depth 4 (or --prov)
+    over = None if args.prov or not steps else steps_over_budget(step.log, args.prov_budget)
+    if over is not None:
+        print(f"WARNING: the prov/ step files are skipped: estimated at {over[1]} bytes, which "
+              f"with the name map ({over[0]} bytes) is over the --prov-budget of {over[2]} bytes",
+              file=sys.stderr)
+        steps = False
+    if steps and result.steps[-1].ok:
         prov_steps.fpga_steps(map_path(blif), args.out, top, top,
                               prov_steps.odin3_version(args.odin3), blif.name,
                               root=design_root(args.designs))
@@ -931,6 +983,15 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--prov-cut", action="store_true",
                     help="with --prov: give each LUT the record of the gates its function covers "
                          "(abc --prov-cut on; the netlist is the same); needs --target vtr")
+    ap.add_argument("--prov-level", default="", metavar="L",
+                    help="provenance depth for odin3: 0 off, 1 statement, 2 ancestry, 3 cut, "
+                         "4 full (hash names, name map and, at 4, the prov/ step files), or auto "
+                         "(the highest that fits --prov-budget); --prov and --prov-cut still "
+                         "override; needs --target vtr")
+    ap.add_argument("--prov-budget", default="", metavar="SIZE",
+                    help="the most provenance bytes (K, M, G, either case): a level over it "
+                         "drops to the highest that fits, with a WARNING in odin3/odin3.log; "
+                         "the last --prov-level or --prov-budget given is used")
     ap.add_argument("--timing-attr", action="store_true",
                     help="attribute the critical path to HDL statements, modules and words "
                          "(timing/attribution.json and summary.txt); needs VPR")
@@ -984,11 +1045,19 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     vpr = resolve_vpr(ns.vpr, ns.target)
     if ns.prov_cut and not (ns.prov or ns.timing_attr or ns.timing_paths is not None):
         ap.error("--prov-cut needs --prov (or --timing-attr)")
+    if ns.prov_level and ns.prov_level not in ("0", "1", "2", "3", "4", "auto"):
+        ap.error("--prov-level expects 0, 1, 2, 3, 4 or auto")
+    if ns.prov_budget and parse_size(ns.prov_budget) is None:
+        ap.error("--prov-budget expects a positive size with an optional K, M or G (1M, 500k)")
+    if (ns.prov_level or ns.prov_budget) and ns.target != "vtr":
+        ap.error("--prov-level and --prov-budget need --target vtr")
     if ns.keep_results and not vpr:
         ap.error("--keep-results needs VPR (--vpr)")
     arch = ns.arch.resolve() if ns.arch else None
     attr = ns.timing_attr or ns.timing_paths is not None
     prov = ns.prov or (attr and not ns.timing_legacy)
+    if prov:  # an explicit older option wins: --prov (also from --timing-attr) runs as before
+        ns.prov_level, ns.prov_budget = prov_depth_ignored(ns.prov_level, ns.prov_budget)
     paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
@@ -996,7 +1065,18 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     ns.tools.resolve() if ns.tools else None,
                     ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
                     tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
-                    ns.strict_tristate, ns.prov_cut)
+                    ns.strict_tristate, ns.prov_cut, ns.prov_level, ns.prov_budget)
+
+
+def prov_depth_ignored(level: str, budget: str) -> tuple[str, str]:
+    """``--prov`` keeps its own behaviour (hash names, the map, the step files, abc's default edge
+    budget): the depth options given with it are dropped, one WARNING naming them."""
+    ignored = [f"{opt} {val}" for opt, val in (("--prov-level", level), ("--prov-budget", budget))
+               if val]
+    if ignored:
+        print(f"WARNING: {' and '.join(ignored)} ignored: --prov (or --timing-attr, which implies "
+              f"it) keeps its own provenance behaviour", file=sys.stderr)
+    return "", ""
 
 
 def main(argv: Sequence[str] | None = None) -> int:

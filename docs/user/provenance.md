@@ -695,6 +695,82 @@ default, with the work directory written as `<work>` in every file; a run with a
 other hash names. Running the script twice gives
 byte-identical files. The work directory is never emptied.
 
+## Provenance depth: how much data to keep
+
+Provenance data can be large. A design of a few thousand cells writes a name map of a few
+megabytes; the step files of `odin3-flow --prov` (the `prov/` directory) are ten times that, and a
+netlist of two million cells wrote 15.9 GB in one file. One option sets how much is kept:
+`--prov-level 0|1|2|3|4|auto`. This page calls it the **provenance depth** so that it is not
+confused with the [levels](#levels) above, which are the granularity of an object (`module`
+... `lut`); the option keeps the name `--prov-level` and the project key `prov_level`.
+
+| Depth | Name | What is kept |
+|---|---|---|
+| 0 | off | nothing beyond what the IR needs: no construct table from the read, no name map; the LUTs of an abc run share one bulk record |
+| 1 | statement | the HDL construct chain to word cells (`cell=`, `cw=`, `ca=` on the records `lower` makes) and the name map; the LUTs of an abc run share one `lossy=bulk` record |
+| 2 | ancestry | depth 1 plus each LUT's region record (the logic that went into the ABC box), with the default edge budget |
+| 3 | cut | depth 2 plus `abc --prov-cut on` (the exact cut of a LUT where provable, else its region) |
+| 4 | full | depth 3 plus `abc --prov-edges unlimited` and, in `odin3-flow`, the step files |
+
+The depth sets the older options together; each stays as fine control and wins over the depth:
+
+| Depth sets | Option that wins over it |
+|---|---|
+| the construct table of the read (`off` at depth 0, else `refs`) | `read_verilog --prov-ast`, `ODIN3_PROV_AST` |
+| the abc edge budget (bulk at 0 and 1, the formula at 2 and 3, `unlimited` at 4) | `abc --prov-edges` |
+| the exact cut (on at 3 and 4) | `abc --prov-cut on\|off` |
+| the name map, where the netlist is written with hash names (depth 1 and above) | `write_blif`, `write_json`, `write_verilog` `--prov-map MODE` |
+| the step files of `odin3-flow` (depth 4) | `odin3-flow --prov` (always writes them; with `--prov` the `--prov-level` and `--prov-budget` of `odin3-flow` are dropped with a WARNING and abc runs exactly as `--prov` does) |
+
+With no depth requested nothing changes. A depth never changes the netlist: the LUTs and the
+critical path are the same at every depth (a test checks this). It never changes names either: the
+name map is written only with hash names. With a depth above 0 (resolved, after any budget drop),
+`write_blif --vtr` with no `--name-style` uses hash names and writes the map; with an explicit
+`--name-style` the style you gave is kept, and the map follows only for `hash`. At depth 0 (also a
+budget that drops to 0) the names stay readable and no map is written. `odin3-flow` adds neither
+option itself.
+
+Where to give it: the command line (`odin3 --prov-level 3 --prov-budget 500M -p "..."`), the
+project (`prov_level 3` and `prov_budget 500M`, once each; the command line wins), or `odin3-flow
+--prov-level 3 --prov-budget 500M`. The size has an optional `K`, `M` or `G` (powers of 1024;
+lower case `k`, `m`, `g` works too, and `odin3-flow` checks it and exits with a usage error, status
+2, when it is not a positive size). Given twice on one command line, `--prov-level` and
+`--prov-budget` each take the last value.
+
+### Estimating the size first
+
+The pass `prov_estimate` prints, from the cells of the design as it is (best after `proc`), the
+records, parent edges and bytes of each depth, for the name map and for the step files:
+
+```text
+prov_estimate: design: 1371 cells, 29439 pins (estimate of the data each provenance depth writes)
+prov_estimate: depth 0 (off): 0 records, 0 edges, name map 0 bytes, step files 0 bytes, total 0 bytes
+prov_estimate: depth 1 (statement): ...
+```
+
+When a depth or a budget is requested, `proc` ends with the same figures for the depth in force
+(`proc: provenance depth 2 (ancestry): estimated ...`). The estimate is a fit on 43
+calibration designs. It is **not** accurate to a factor of two everywhere: the name map is within
+2x on 38 of the 43 designs at depth 1, 30 at depth 2, 27 at depth 3 and 25 at depth 4 (worst 2.2x,
+2.8x, 3.4x, 3.9x), and the step files of depth 4 are within 2x on 12 and off by up to 9x. Use it
+for the order of magnitude and to keep a budget safe, not to the byte. Two things the cells of a
+design cannot show cause most of the error: whether abc runs over its edge budget (depths 2 and 3
+then write what depth 1 writes), and how big the logic cones are (the records and the step files
+list them). The table, the factors and the reasons are in
+`docs/specs/2026-11-13-prov-levels-calibration.md`. A design unlike the calibration set (mostly
+memories, tri-state buses or black boxes) can be further off.
+
+`--prov-budget SIZE` bounds the data. With `--prov-level auto` Odin III takes the highest depth whose
+estimated name map fits. Odin III counts the name map only, because only `odin3-flow` writes the step
+files: at depth 4 with a budget, `odin3-flow` also checks the step-file estimate and, when name map
+plus step files do not fit, skips the `prov/` step files with a WARNING naming both sizes (the name
+map stays). With a fixed depth over the budget it prints a
+WARNING that names both sizes and drops to the highest depth that fits (depth 0 writes nothing, so
+one always fits); it does not stop. `read_verilog` comes before `proc`, so it uses the depth
+**requested** (`auto` as 4), not the depth a budget later drops to: after a drop to 0 the construct
+table of the read is still kept at `refs` (it is data the budget never counted). A budget with no
+depth is `auto`; `auto` with no budget is a WARNING and depth 4.
+
 ## Limits: what the chain cannot give
 
 - A record with no AST (a restored location, an imported one) has no construct; its `cons` is empty

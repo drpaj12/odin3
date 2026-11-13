@@ -17,6 +17,7 @@
 #include "ir/prov.h"
 #include "odin3/odin3.h"
 #include "passes/manager.h"
+#include "passes/prov_depth.h"
 #include "techlib/reader.h"
 #include "util/alloc.h"
 #include "util/file.h"
@@ -480,6 +481,15 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
                   module_name(design, top),
                   parsed.opts.dialect == ODIN3_BLIF_DIALECT_VTR ? "alone" : "first");
     }
+    if (st == ODIN3_OK && (parsed.seen & WB_NAME_STYLE) == 0 && (parsed.seen & WB_VTR) != 0 &&
+        odin3_prov_depth_wants_map(design)) {
+        parsed.opts.name_style =
+            ODIN3_BLIF_NAMES_HASH; /* the depth asks for hash names and the map */
+    }
+    if (st == ODIN3_OK && parsed.opts.name_style == ODIN3_BLIF_NAMES_HASH &&
+        parsed.opts.prov_map == ODIN3_PROV_MAP_NONE && odin3_prov_depth_wants_map(design)) {
+        parsed.opts.prov_map = ODIN3_PROV_MAP_ANY; /* the provenance depth asks for the name map */
+    }
     if (st == ODIN3_OK) {
         parsed.opts.name_map = parsed.name_map.len > 0 ? parsed.name_map.data : NULL;
         st = odin3_blif_write_with(design, parsed.path.data, &parsed.opts);
@@ -920,6 +930,7 @@ const odin3_pass_def *const odin3_builtin_passes[] = {&READ_BLIF,
                                                       &odin3_pass_read_arch,
                                                       &odin3_pass_write_techlib,
                                                       &odin3_pass_dump_locs,
+                                                      &odin3_pass_prov_estimate,
                                                       &odin3_pass_names,
                                                       &odin3_pass_read_json,
                                                       &odin3_pass_levelize,

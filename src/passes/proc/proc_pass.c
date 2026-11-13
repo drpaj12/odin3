@@ -18,6 +18,7 @@
 #include "passes/proc/proc_internal.h"
 #include "passes/proc/proc_test.h"
 #include "passes/proc/pw.h"
+#include "passes/prov_depth.h"
 #include "util/clock.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -559,7 +560,11 @@ static odin3_status proc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odi
     (void)user;
     odin3_proc_opts opts = {false, ODIN3_PROC_STOP_NONE, false};
     odin3_status st = parse_opts(args, &opts);
-    return st == ODIN3_OK ? odin3_proc_run(ctx, design, &opts, NULL) : st;
+    st = st == ODIN3_OK ? odin3_proc_run(ctx, design, &opts, NULL) : st;
+    if (st == ODIN3_OK) {
+        odin3_prov_depth_after_proc(design); /* the INFO line, only when a depth is requested */
+    }
+    return st;
 }
 
 const odin3_pass_def odin3_pass_proc = {
