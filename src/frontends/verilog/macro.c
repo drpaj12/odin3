@@ -93,14 +93,19 @@ static void skip_blanks(odin3_pp_deftext *txt) {
     }
 }
 
-static odin3_bytes read_ident(odin3_pp_deftext *txt) {
+static odin3_bytes read_name(odin3_pp_deftext *txt, bool macro_name) {
     uint32_t start = txt->pos;
-    if (odin3_pp_is_ident_start(byte_at(txt, txt->pos))) {
+    int first = byte_at(txt, txt->pos);
+    if (macro_name ? odin3_pp_is_macro_start(first) : odin3_pp_is_ident_start(first)) {
         while (odin3_pp_is_ident_char(byte_at(txt, txt->pos))) {
             txt->pos++;
         }
     }
     return (odin3_bytes){txt->bytes + start, txt->pos - start};
+}
+
+static odin3_bytes read_ident(odin3_pp_deftext *txt) {
+    return read_name(txt, false);
 }
 
 /* A "..." string with \ escapes; a newline (or the text's end) before the quote is an error. */
@@ -528,7 +533,7 @@ static odin3_status scan_head(def_state *ds) {
     odin3_pp_deftext *txt = ds->txt;
     skip_spaces(txt);
     ds->name_loc = loc_of(txt, txt->pos);
-    ds->name = read_ident(txt);
+    ds->name = read_name(txt, true);
     if (ds->name.len == 0) {
         return odin3_pp_error(ds->pp, ds->name_loc, "syntax: expected a macro name after `define");
     }

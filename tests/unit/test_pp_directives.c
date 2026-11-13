@@ -182,7 +182,7 @@ static void test_sv_operators_in_text(void) {
 
 static void test_stray_backticks(void) {
     assert_error("wire ` a;\n", "t.v:1:6: error: syntax: stray backtick");
-    assert_error("x = `8;\n", "t.v:1:5: error: syntax: stray backtick");
+    assert_error("x = `8;\n", "t.v:1:5: error: syntax: undefined macro '8'");
     assert_error("x = `\n", "t.v:1:5: error: syntax: stray backtick");
     assert_error("x = `", "t.v:1:5: error: syntax: stray backtick");
     assert_error("x = `(a);\n", "t.v:1:5: error: syntax: stray backtick");

@@ -43,6 +43,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   `mem2clkm`, `mem2pol` (4-state, 2-state, lowered, cell; iverilog), `tests/tb/run_memclk.sh` (`tb_memclk`: two write clocks vs
   iverilog).
 
+### Fixed
+- Front-end gaps found on VTR and OpenCores sources (purpose: Odin III goal 1, front-end and elaboration correctness, VTR comparable).
+  (1) A macro name may start with a digit (`` `define 2_X 5 `` and `` `2_X ``; Yosys accepts it, the VTR `adder_tree` files use it).
+  Formal argument names still must start with a letter or `_`. A backtick followed by a digit is now an undefined-macro error
+  (before, a stray-backtick error). Tests: `test_pp_define` (`test_digit_leading_macro_name`).
+
 ## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
 
 ### Added

@@ -84,6 +84,10 @@ bool odin3_pp_is_ident_start(int ch) {
     return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch == '_';
 }
 
+bool odin3_pp_is_macro_start(int ch) {
+    return odin3_pp_is_ident_start(ch) || (ch >= '0' && ch <= '9');
+}
+
 bool odin3_pp_is_ident_char(int ch) {
     return odin3_pp_is_ident_start(ch) || (ch >= '0' && ch <= '9') || ch == '$';
 }
@@ -226,7 +230,7 @@ odin3_bytes odin3_pp_read_ident(odin3_pp *pp) {
     }
     uint32_t start = odin3_pp_top(pp)->cur.offset;
     uint32_t end = start;
-    if (odin3_pp_is_ident_start(run->bytes[start])) {
+    if (odin3_pp_is_macro_start(run->bytes[start])) {
         while (end < run->len && odin3_pp_is_ident_char(run->bytes[end])) {
             end++;
         }
@@ -690,7 +694,7 @@ odin3_bytes odin3_pp_ident_ahead(const odin3_pp *pp, uint32_t ahead) {
     }
     const odin3_pp_textrun *text = frame_run(pp, frame, run);
     uint32_t end = (uint32_t)offset;
-    if (odin3_pp_is_ident_start(text->bytes[end])) {
+    if (odin3_pp_is_macro_start(text->bytes[end])) {
         while (end < text->len && odin3_pp_is_ident_char(text->bytes[end])) {
             end++;
         }
@@ -872,7 +876,7 @@ static odin3_status scan_backtick(odin3_pp *pp) {
     if (next == '\\' && odin3_pp_peek(pp, 2) == '`' && odin3_pp_peek(pp, 3) == '"') {
         return odin3_pp_sv_operator(pp, at, "`\\`\"");
     }
-    if (!odin3_pp_is_ident_start(next)) {
+    if (!odin3_pp_is_macro_start(next)) {
         return odin3_pp_error(pp, at, "syntax: stray backtick");
     }
     return backtick_word(pp, at);

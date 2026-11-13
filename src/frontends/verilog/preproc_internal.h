@@ -216,6 +216,8 @@ odin3_status odin3_pp_emit(odin3_pp *pp, odin3_pp_text text);
 /* Counts a blank for the protective space and actual trimming: space, tab, CR, LF, VT, FF. */
 bool odin3_pp_is_blank(int ch);
 bool odin3_pp_is_ident_start(int ch);
+/* A macro name may also start with a digit (`define 2_X), as Yosys accepts. */
+bool odin3_pp_is_macro_start(int ch);
 bool odin3_pp_is_ident_char(int ch);
 
 /* The end of the item of a definition's text at at (text[0, len), already checked by the
