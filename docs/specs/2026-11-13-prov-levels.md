@@ -81,9 +81,11 @@ the names of a netlist. Writers with other names ignore it. `odin3-flow --prov-l
   integer with an optional `K`, `M` or `G`, powers of 1024). Invalid values are an option error.
 - Project statements `prov_level <0..4|auto>` and `prov_budget <size>`, each at most once;
   `--dump-project` shows them (only when given).
-- `odin3-flow --prov-level L --prov-budget SIZE` passes them to odin3 and adds the hash names; the
-  step files (`prov/`) are written at depth 4, or with `--prov`. It reads the depth actually used
-  from the `proc` INFO line.
+- `odin3-flow --prov-level L --prov-budget SIZE` passes them to odin3; a depth above 0 makes
+  `write_blif --vtr` (no `--name-style` given) use hash names and write the map, so a depth that
+  resolves to 0 keeps readable names. The step files (`prov/`) are written at depth 4, or with
+  `--prov`. It reads the depth actually used from the `proc` INFO line. `--prov` (also implied by
+  `--timing-attr`) wins: the depth options are then not passed and a WARNING names them.
 - Python: `odin3_pass_set_prov_level(level)` and `odin3_pass_set_prov_budget(budget)`, the setters the CLI uses. It is additive; **the
   ABI stays 7**. The depth is not part of the IR, the design handle or any plugin-visible struct. A
   pass sees it through the internal `odin3_prov_depth_effective(design)`
@@ -124,9 +126,14 @@ estimate, and the counts.
 
 Budget (decision 3): with `--prov-budget SIZE`,
 
-- `--prov-level auto` takes the highest depth whose estimated total (name map plus step files) fits;
+- `--prov-level auto` takes the highest depth whose estimated name map fits;
 - a fixed depth over the budget prints a WARNING naming both sizes and drops to the highest depth
   that fits (depth 0 writes nothing, so one always fits). It does not stop with an error.
+
+The core counts the name map only, because the step files are written by `odin3-flow`, not by
+odin3. `odin3-flow`, at depth 4 with a budget, checks the step-file estimate of the `proc` line: when
+name map plus step files do not fit, it skips the `prov/` step files with a WARNING naming both
+sizes (the name map stays).
 
 The read comes before `proc`, so the construct table is kept for the requested depth (`auto` as 4);
 a later drop only means the table was kept for nothing. The depth is resolved once, at the end of

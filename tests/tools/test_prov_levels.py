@@ -167,10 +167,27 @@ class BudgetAndOptions(ProvCase):
     def test_fixed_depth_over_budget_drops_with_a_warning(self) -> None:
         run = self.flow(MUX16, "--prov-level", "4", "--prov-budget", "1")
         self.assertEqual(run.code, 0, run.stderr)
-        self.assertRegex(run.log, r"provenance depth 4 \(full\) is estimated at \d+ bytes, over "
-                                  r"the budget of 1 bytes; using depth 0 \(off\)")
+        self.assertRegex(run.log, r"provenance depth 4 \(full\) is estimated at \d+ bytes of "
+                                  r"name map, over the budget of 1 bytes; using depth 0 \(off\)")
         self.assertFalse(run.has_v2_map)
         self.assertEqual(run.step_bytes, 0)
+
+    def test_depth_4_skips_the_step_files_that_do_not_fit(self) -> None:
+        full = self.flow(MUX16, "--prov-level", "4")
+        match = ESTIMATE_RE.search(full.log)
+        assert match is not None
+        est_map, est_steps = int(match.group(5)), int(match.group(6))
+        budget = est_map + est_steps // 2  # the name map fits, the step files on top do not
+        run = self.flow(MUX16, "--prov-level", "4", "--prov-budget", str(budget))
+        self.assertEqual(run.code, 0, run.stderr)
+        self.assertIn("proc: provenance depth 4 (full)", run.log)  # odin3 counts the map only
+        self.assertTrue(run.has_v2_map)
+        self.assertEqual(run.step_bytes, 0)
+        self.assertRegex(run.stderr, rf"WARNING: the prov/ step files are skipped: estimated at "
+                                     rf"{est_steps} bytes.*name map \({est_map} bytes\).*"
+                                     rf"budget of {budget} bytes")
+        fits = self.flow(MUX16, "--prov-level", "4", "--prov-budget", str(est_map + est_steps))
+        self.assertGreater(fits.step_bytes, 0)
 
     def test_budget_dropping_to_depth_0_keeps_readable_names(self) -> None:
         run = self.flow(MUX16, "--prov-budget", "1")
@@ -189,7 +206,7 @@ class BudgetAndOptions(ProvCase):
         assert depth is not None
         picked = int(depth.group(1))
         self.assertIn(picked, (1, 2, 3, 4))
-        self.assertLessEqual(int(depth.group(4)), budget)
+        self.assertLessEqual(int(depth.group(5)), budget)  # the core budget: the name map
         if picked < 4:
             # the next depth up is over the budget by the estimate
             est = self.odin3("--prov-level", str(picked + 1), "-p",
@@ -197,7 +214,7 @@ class BudgetAndOptions(ProvCase):
             nxt = ESTIMATE_RE.search(est.stderr + est.stdout)
             self.assertIsNotNone(nxt)
             assert nxt is not None
-            self.assertGreater(int(nxt.group(4)), budget)
+            self.assertGreater(int(nxt.group(5)), budget)
 
     def test_budget_alone_is_auto(self) -> None:
         run = self.flow(MUX16, "--prov-budget", "1G")

@@ -341,6 +341,8 @@ enum { METRIC_RECORDS, METRIC_EDGES, METRIC_MAP, METRIC_STEPS, METRIC_COUNT };
 
 #include "passes/prov_depth_fit.h"
 
+static const double k_u64_limit = 18446744073709551616.0; /* 2^64 */
+
 static uint64_t fit_eval(const fit_row *row, const odin3_prov_shape *shape) {
     if (!row->used) {
         return 0;
@@ -349,7 +351,9 @@ static uint64_t fit_eval(const fit_row *row, const odin3_prov_shape *shape) {
     for (uint32_t feature = 0; feature < ODIN3_PROV_F_COUNT; feature++) {
         logv += row->exponent[feature] * log1p((double)shape->f[feature]);
     }
-    return (uint64_t)exp(logv);
+    double value = exp(logv);
+    /* a fit far outside the calibration (or NaN) must not reach the cast: UINT64_MAX is "huge" */
+    return value >= 0.0 && value < k_u64_limit ? (uint64_t)value : UINT64_MAX;
 }
 
 static uint64_t max_u64(uint64_t lhs, uint64_t rhs) {
@@ -373,7 +377,7 @@ void odin3_prov_depth_estimate(const odin3_prov_shape *shape, odin3_prov_estimat
 }
 
 uint64_t odin3_prov_estimate_total(const odin3_prov_estimate *est, uint32_t depth) {
-    return est->map_bytes[depth] + est->step_bytes[depth];
+    return sat_add(est->map_bytes[depth], est->step_bytes[depth]);
 }
 
 /* --- the resolved depth -------------------------------------------------------------------- */
@@ -396,12 +400,14 @@ static bool same_request(const odin3_prov_request *lhs, const odin3_prov_request
            lhs->budget == rhs->budget;
 }
 
-/* Highest depth up to want whose total fits the budget; 0 always fits (it writes nothing). */
+/* Highest depth up to want whose name map fits the budget; 0 always fits (it writes nothing). The
+ * core budget counts the name map only: the step files are written by odin3-flow, which checks
+ * them against the same budget itself (tools/flow/odin3_flow.py). */
 static uint32_t fit_depth(const odin3_prov_estimate *est, const odin3_prov_request *req,
                           uint32_t want) {
     uint32_t depth = want;
     uint64_t budget = req->budget;
-    while (depth > 0 && budget != 0 && odin3_prov_estimate_total(est, depth) > budget) {
+    while (depth > 0 && budget != 0 && est->map_bytes[depth] > budget) {
         depth--;
     }
     return depth;
@@ -427,17 +433,15 @@ static int resolve(odin3_design *design, const odin3_prov_request *req) {
     if (depth < want) {
         odin3_log(ODIN3_LOG_WARN,
                   "provenance depth %u (%s) is estimated at %" PRIu64
-                  " bytes, over the budget of %" PRIu64 " bytes; using depth %u (%s), estimated "
-                  "at %" PRIu64 " bytes",
-                  (unsigned)want, k_depth_names[want], odin3_prov_estimate_total(&est, want),
-                  req->budget, (unsigned)depth, k_depth_names[depth],
-                  odin3_prov_estimate_total(&est, depth));
+                  " bytes of name map, over the budget of %" PRIu64
+                  " bytes; using depth %u (%s), estimated at %" PRIu64 " bytes",
+                  (unsigned)want, k_depth_names[want], est.map_bytes[want], req->budget,
+                  (unsigned)depth, k_depth_names[depth], est.map_bytes[depth]);
     } else if (req->autolevel) {
         odin3_log(ODIN3_LOG_INFO,
-                  "prov-level auto: depth %u (%s), estimated at %" PRIu64
+                  "prov-level auto: depth %u (%s), name map estimated at %" PRIu64
                   " bytes, within the budget of %" PRIu64 " bytes",
-                  (unsigned)depth, k_depth_names[depth], odin3_prov_estimate_total(&est, depth),
-                  req->budget);
+                  (unsigned)depth, k_depth_names[depth], est.map_bytes[depth], req->budget);
     }
     return (int)depth;
 }

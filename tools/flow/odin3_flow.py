@@ -399,6 +399,33 @@ def resolved_depth(odin3_log: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
+SIZE_RE = re.compile(r"([0-9]+)([KMGkmg]?)")
+SIZE_SHIFT = {"": 0, "K": 10, "M": 20, "G": 30}
+BYTES_RE = re.compile(r"proc: provenance depth \d \(\w+\): estimated \d+ records, \d+ edges, "
+                      r"\d+ bytes \(name map (\d+), step files (\d+)\)")
+
+
+def parse_size(text: str) -> int | None:
+    """``--prov-budget`` text as bytes (digits, then an optional K, M or G of either case, powers
+    of 1024), None when it is anything else or zero (as ``odin3 --prov-budget`` reads it)."""
+    match = SIZE_RE.fullmatch(text)
+    if match is None:
+        return None
+    size = int(match.group(1)) << SIZE_SHIFT[match.group(2).upper()]
+    return size if 0 < size < 1 << 64 else None
+
+
+def steps_over_budget(odin3_log: Path, budget: str) -> tuple[int, int, int] | None:
+    """(name map bytes, step file bytes, budget bytes) when the depth 4 estimate of the odin3 log
+    puts the step files over the budget (odin3 itself counts the name map only), else None."""
+    limit = parse_size(budget) if budget else None
+    match = BYTES_RE.search(odin3_log.read_text(errors="replace")) if odin3_log.is_file() else None
+    if limit is None or match is None:
+        return None
+    map_bytes, step_bytes = int(match.group(1)), int(match.group(2))
+    return (map_bytes, step_bytes, limit) if map_bytes + step_bytes > limit else None
+
+
 LUTS_NOTE = ".names with two or more inputs (constants and one-input buffers or inverters excluded)"
 
 
@@ -752,6 +779,12 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         if args.timing_attr and result.steps[-1].ok and result.vpr_run_dir is not None:
             timing_step(args, top, blif, result.vpr_run_dir, result)
     steps = args.prov or (names and depth == 4)  # the step files are depth 4 (or --prov)
+    over = None if args.prov or not steps else steps_over_budget(step.log, args.prov_budget)
+    if over is not None:
+        print(f"WARNING: the prov/ step files are skipped: estimated at {over[1]} bytes, which "
+              f"with the name map ({over[0]} bytes) is over the --prov-budget of {over[2]} bytes",
+              file=sys.stderr)
+        steps = False
     if steps and result.steps[-1].ok:
         prov_steps.fpga_steps(map_path(blif), args.out, top, top,
                               prov_steps.odin3_version(args.odin3), blif.name,

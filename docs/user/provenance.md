@@ -720,12 +720,15 @@ The depth sets the older options together; each stays as fine control and wins o
 | the abc edge budget (bulk at 0 and 1, the formula at 2 and 3, `unlimited` at 4) | `abc --prov-edges` |
 | the exact cut (on at 3 and 4) | `abc --prov-cut on\|off` |
 | the name map, where the netlist is written with hash names (depth 1 and above) | `write_blif`, `write_json`, `write_verilog` `--prov-map MODE` |
-| the step files of `odin3-flow` (depth 4) | `odin3-flow --prov` (always writes them) |
+| the step files of `odin3-flow` (depth 4) | `odin3-flow --prov` (always writes them; with `--prov` the `--prov-level` and `--prov-budget` of `odin3-flow` are dropped with a WARNING and abc runs exactly as `--prov` does) |
 
 With no depth requested nothing changes. A depth never changes the netlist: the LUTs and the
 critical path are the same at every depth (a test checks this). It never changes names either: the
-name map is written only by a writer already told `--name-style hash`; `odin3-flow --prov-level L`
-(L above 0) tells the BLIF writer that.
+name map is written only with hash names. With a depth above 0 (resolved, after any budget drop),
+`write_blif --vtr` with no `--name-style` uses hash names and writes the map; with an explicit
+`--name-style` the style you gave is kept, and the map follows only for `hash`. At depth 0 (also a
+budget that drops to 0) the names stay readable and no map is written. `odin3-flow` adds neither
+option itself.
 
 Where to give it: the command line (`odin3 --prov-level 3 --prov-budget 500M -p "..."`), the
 project (`prov_level 3` and `prov_budget 500M`, once each; the command line wins), or `odin3-flow
@@ -755,7 +758,10 @@ list them). The table, the factors and the reasons are in
 memories, tri-state buses or black boxes) can be further off.
 
 `--prov-budget SIZE` bounds the data. With `--prov-level auto` Odin III takes the highest depth whose
-estimated total (name map plus step files) fits. With a fixed depth over the budget it prints a
+estimated name map fits. Odin III counts the name map only, because only `odin3-flow` writes the step
+files: at depth 4 with a budget, `odin3-flow` also checks the step-file estimate and, when name map
+plus step files do not fit, skips the `prov/` step files with a WARNING naming both sizes (the name
+map stays). With a fixed depth over the budget it prints a
 WARNING that names both sizes and drops to the highest depth that fits (depth 0 writes nothing, so
 one always fits); it does not stop. A budget with no depth is `auto`; `auto` with no budget is a
 WARNING and depth 4.
