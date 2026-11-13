@@ -732,7 +732,10 @@ option itself.
 
 Where to give it: the command line (`odin3 --prov-level 3 --prov-budget 500M -p "..."`), the
 project (`prov_level 3` and `prov_budget 500M`, once each; the command line wins), or `odin3-flow
---prov-level 3 --prov-budget 500M`. The size has an optional `K`, `M` or `G` (powers of 1024).
+--prov-level 3 --prov-budget 500M`. The size has an optional `K`, `M` or `G` (powers of 1024;
+lower case `k`, `m`, `g` works too, and `odin3-flow` checks it and exits with a usage error, status
+2, when it is not a positive size). Given twice on one command line, `--prov-level` and
+`--prov-budget` each take the last value.
 
 ### Estimating the size first
 
@@ -763,8 +766,10 @@ files: at depth 4 with a budget, `odin3-flow` also checks the step-file estimate
 plus step files do not fit, skips the `prov/` step files with a WARNING naming both sizes (the name
 map stays). With a fixed depth over the budget it prints a
 WARNING that names both sizes and drops to the highest depth that fits (depth 0 writes nothing, so
-one always fits); it does not stop. A budget with no depth is `auto`; `auto` with no budget is a
-WARNING and depth 4.
+one always fits); it does not stop. `read_verilog` comes before `proc`, so it uses the depth
+**requested** (`auto` as 4), not the depth a budget later drops to: after a drop to 0 the construct
+table of the read is still kept at `refs` (it is data the budget never counted). A budget with no
+depth is `auto`; `auto` with no budget is a WARNING and depth 4.
 
 ## Limits: what the chain cannot give
 
