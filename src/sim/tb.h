@@ -300,6 +300,9 @@ typedef struct tb_options {
     bool vcd_all;
     odin3_sim_net_namer namer;
     void *namer_ctx;
+    /* progress_s: seconds of wall time between progress lines (INFO `sim_tb: progress: ...`); 0
+     * (the default) prints none. */
+    uint32_t progress_s;
 } tb_options;
 
 /* How a run ended: the last simulation time, and whether it stopped because the next event lay

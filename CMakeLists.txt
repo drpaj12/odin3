@@ -3755,6 +3755,12 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_tb_diag
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(sim_tb_diag PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
+    # sim_tb: --progress lines, and the warning when --max-time ends a run.
+    add_test(NAME sim_tb_progress
+        COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
+                ${ODIN3_PLUGIN_PYTHON} -m unittest -v tests.tools.test_sim_tb_progress
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(sim_tb_progress PROPERTIES LABELS tools SKIP_REGULAR_EXPRESSION "skipped '")
     # sim_tb: a <= #d b (intra-assignment delay on a nonblocking write).
     add_test(NAME sim_tb_nba_delay
         COMMAND ${CMAKE_COMMAND} -E env "ODIN3_CLI=$<TARGET_FILE:odin3>"
