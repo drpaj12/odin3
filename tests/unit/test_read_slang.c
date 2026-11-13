@@ -464,6 +464,30 @@ static void test_sv_project_config(void) {
     expect_read_error(D "/project/inc_top.sv", ODIN3_ERR_PARSE, "defs.svh");
 }
 
+/* The command's -D and -I reach slang as a project's do (survey gap 2): the include does not
+ * resolve and the macro stays undefined without them. */
+static void test_sv_command_line_config(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_run_pass(design, "read_verilog",
+                                                "-D CMD_DEF -I " D "/project/inc " D
+                                                "/cmdline_top.sv"));
+    uint32_t count = 0;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
+    TEST_ASSERT_EQUAL_UINT32(1, count);
+    expect_read_error("-I " D "/project/inc " D "/cmdline_top.sv", ODIN3_ERR_PARSE, "CMD_DEF");
+    expect_read_error("-D CMD_DEF " D "/cmdline_top.sv", ODIN3_ERR_PARSE, "defs.svh");
+}
+
+/* SYNTHESIS is predefined for SystemVerilog too (survey gap 3). */
+static void test_sv_synthesis_predefined(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
+    fresh_design();
+    TEST_ASSERT_EQUAL_INT(
+        ODIN3_OK, odin3_design_run_pass(design, "read_verilog", D "/synthesis_top.sv"));
+}
+
 /* The constructs the docs list as refused are refused, each with its own located message. */
 static void test_sv_refused_constructs(void) {
     expect_read_error(D "/sv_refused_unique.sv", ODIN3_ERR_PARSE, "'unique case' is not supported");
@@ -516,6 +540,8 @@ int main(void) {
     RUN_TEST(test_sv_net_types);
     RUN_TEST(test_sv_specialization_names);
     RUN_TEST(test_sv_project_config);
+    RUN_TEST(test_sv_command_line_config);
+    RUN_TEST(test_sv_synthesis_predefined);
     RUN_TEST(test_sv_refused_constructs);
     RUN_TEST(test_read_slang_arguments);
     return UNITY_END();

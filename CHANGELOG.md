@@ -48,6 +48,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   (1) A macro name may start with a digit (`` `define 2_X 5 `` and `` `2_X ``; Yosys accepts it, the VTR `adder_tree` files use it).
   Formal argument names still must start with a letter or `_`. A backtick followed by a digit is now an undefined-macro error
   (before, a stray-backtick error). Tests: `test_pp_define` (`test_digit_leading_macro_name`).
+  (2) `read_verilog -D` and `-I` now work for SystemVerilog (`.sv`) files: they reach slang's preprocessor after the project's own
+  defines and include directories (before, the read was refused with "use a project"). `-P` is still refused for `.sv`. Test:
+  `test_read_slang` (`test_sv_command_line_config`).
+  (3) `SYNTHESIS` is predefined for every Verilog and SystemVerilog read, as Yosys does (so `ifndef SYNTHESIS` simulation-only code is
+  skipped); a project or `-D` define of the name wins. Tests: `test_read_verilog_lib` (`test_synthesis_*`), `test_read_slang`
+  (`test_sv_synthesis_predefined`).
 
 ## 1.6.1 (released 2026-11-11, tag v1.6.1; release notes `docs/V1.6.1.md`)
 
