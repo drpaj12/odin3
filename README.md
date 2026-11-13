@@ -7,7 +7,7 @@ architecture files, into one hierarchical, provenance-tracked IR. It does archit
 writes BLIF for VPR, LPM Verilog for an Altera-style flow, and dot and JSON for analysis. Every
 object in the output can be traced to the HDL text it came from.
 
-Version 1.6.1 (ready to tag; the last tagged release is [v1.6.0](https://github.com/drpaj12/odin3/releases/tag/v1.6.0), 2026-11-09; hub snapshot: [v1.6.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.6.0/docs/versions.md)).
+Version 1.6.1 (tag `v1.6.1`, 2026-11-11; the last GitHub release is [v1.6.0](https://github.com/drpaj12/odin3/releases/tag/v1.6.0), 2026-11-09; `main` has changes after the tag, listed under Unreleased in [`CHANGELOG.md`](CHANGELOG.md); hub snapshot: [v1.6.0](https://github.com/drpaj12/YggdrasilIII/blob/v1.6.0/docs/versions.md)).
 
 **What it is today.** The trunk of Yggdrasil III (hub: <https://github.com/drpaj12/YggdrasilIII>). A C17 framework with
 one provenance-tracked IR and a versioned C ABI (7) for plugins and AI tools. Stages: front ends (SystemVerilog over slang,
@@ -19,7 +19,7 @@ produced for the 15 VTR benchmarks that fit the development laptop routes in VPR
 wirelength ratios against the Parmys flow inside a 1.20 gate, but two designs differ from Parmys in multiplier count and
 five lose adders, so the equal-or-explained rule is not met; power is not measured.
 
-**Status: version 1.6.1 (ready to tag; 1.6.1 is 1.6.0 plus front-end, Quartus-leg and simulator gap fixes, docs/V1.6.1.md). Version 1.6.0 (released 2026-11-09; adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); tag `v1.6.0`).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
+**Status: version 1.6.1 (tag `v1.6.1`; 1.6.1 is 1.6.0 plus front-end, Quartus-leg and simulator gap fixes, docs/V1.6.1.md). Version 1.6.0 (released 2026-11-09; adds the vectorless `activity` pass, docs/V1.6.0.md, on top of 1.5.1 (two provenance performance fixes, docs/V1.5.1.md); tag `v1.6.0`).** Version 1.5.0 adds simulator parity: 4-state `sim_tb` by default, OpenCores testbench support (7 of 11 Mimir benches pass, text equal to iverilog), `--vcd-all`, graphlet instances and metrics, C ABI still 7 (additive functions only). Version 1.2.0 added provenance at every granularity; 1.3.0 added netlist editing, simulation toggle counting, graphlets and front-end fixes; 1.4.0 adds the silicon flow, project-file flow descriptions and provenance step files, C ABI still 7 (SystemVerilog via the vendored slang adapter, structural Verilog netlists, as in 1.1.x). User manual: <https://drpaj12.github.io/odin3/> (source `docs/user/`).
 Release notes: [v1.6.1](docs/V1.6.1.md) (Quartus leg, ROM to `altsyncram`, simulator `$mem`), [v1.6.0](docs/V1.6.0.md) (switching activity pass), [v1.5.1](docs/V1.5.1.md) (provenance tool memory and speed), [v1.5.0](docs/V1.5.0.md) (simulator parity, OpenCores testbenches), [v1.4.0](docs/V1.4.0.md) (silicon flow, provenance step files), [v1.3.0 changes](CHANGELOG.md), [v1.2.0](docs/V1.2.0.md) (provenance as a two-way granularity DAG, ABI 7), [v1.1.1](docs/V1.1.1.md) (critical-path attribution to HDL), [v1.1.0](docs/V1.1.0.md) (SystemVerilog, gate mapping, unmap, simulation API; rolls up v1.0.1 to v1.0.5) and
 [v1.0](docs/RELEASE-NOTES-1.0.md). Changes: [`CHANGELOG.md`](CHANGELOG.md). Design:
 [`docs/DESIGN.md`](docs/DESIGN.md). Paper: kept locally by the author. Token, model and
@@ -43,6 +43,25 @@ Start at the Yggdrasil III hub; every manual links to the others.
 - [The Norns III](https://github.com/drpaj12/nornsIII) (repository; plan under `docs/`).
 - [Set up the whole suite](https://drpaj12.github.io/YggdrasilIII/getting-started.html) on a clean
   Linux or Windows machine, and [drive it with Claude Code](https://drpaj12.github.io/YggdrasilIII/ai-agent.html).
+
+## Simulation
+
+Odin III simulates what it elaborates, with no outside simulator. Start at the manual's
+[testbench page](docs/user/testbench.md) (the whole simulation reference).
+
+- `sim`: cycle simulator over the lowered netlist (vectors, random inputs, VCD, toggle counting, derived clocks) and its
+  Python API (`Design.simulate()`: set inputs, step, read, reset; the S1 simulation API, [python-api](docs/user/python-api.md)).
+- `sim_tb`: interprets a Verilog testbench against RTL or a netlist, 4-state by default, with plusargs, force and release,
+  testbench-side modules and DUT memories by path. `run_testbenches` runs the testbenches declared in a project;
+  `testbench_gen` writes one; `tools/tb-compare` runs one testbench on two designs.
+- Waveforms: `--vcd`, `--vcd-all` (every DUT net, named as the VTR netlist) and `--vcd-names short|provenance|hash`.
+- Long runs: `--progress SEC` prints progress lines; when `--max-time` ends a run `sim_tb` prints a WARNING that names it.
+- Memories: `lower --keep-mem-cells` keeps each `$mem` as a cell for fast simulation, with ports on several clocks;
+  `read_verilog -P NAME=VALUE` overrides a parameter of the top module (both on `main` after v1.6.1, see `CHANGELOG.md`).
+- Switching activity with no vectors: the `activity` pass ([activity](docs/user/activity.md)), comparable to ACE 2.0, with
+  VPR `.act` output.
+- Above Odin III: Bifrost III (`wyrd.bifrost` in [Wyrd III](https://drpaj12.github.io/wyrd/simulation.html)) wraps the S1 API
+  for `wyrd sim`, the Simulate tab, testbench mode and power runs.
 
 ## Features
 

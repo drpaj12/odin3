@@ -21,9 +21,16 @@ and the [token, model and time cost](https://github.com/drpaj12/odin3/blob/main/
 of building Odin III. The other Yggdrasil III pieces are linked in the sidebar; setting up the whole
 suite is on the [hub getting-started page](https://drpaj12.github.io/YggdrasilIII/getting-started.html).
 
+## Simulation
+
+Simulation reference: {doc}`testbench` (`sim`, `sim_tb`, `run_testbenches`, `--vcd`, `--vcd-all`, `--progress`, the
+`--max-time` WARNING, `lower --keep-mem-cells`, `read_verilog -P`), {doc}`python-api` (the S1 simulation API) and
+{doc}`activity` (vectorless switching activity). Bifrost III in
+[Wyrd III](https://drpaj12.github.io/wyrd/simulation.html) is the bridge over the S1 API.
+
 ## Features at a glance
 
-Version 1.6.1, C ABI 7. Everything below is on `main` with tests; the table with links is in the
+Version 1.6.1 plus `main`, C ABI 7. Everything below is on `main` with tests; the table with links is in the
 [repository README](https://github.com/drpaj12/odin3#features).
 
 - Inputs and outputs: {doc}`inputs`, {doc}`outputs`, {doc}`odin3-flow`.
