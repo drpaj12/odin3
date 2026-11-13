@@ -7,6 +7,11 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- `sim_tb --progress SEC` prints an INFO line every SEC seconds of wall time (simulated time against `--max-time`, time steps,
+  wall seconds, simulated time units per second), so a long run can be told from a hang. Off by default.
+- `sim_tb` now says so when the time limit ends a run: a WARNING names the limit (`--max-time`, default 10,000,000) and the
+  option to raise it, then the summary line `sim_tb: stopped at time T (time limit)`; before, the run ended silently with
+  `finished at time T`. The default limit is unchanged (`run_testbenches` shares it as its hang limit). Tests: `sim_tb_progress`.
 - `read_verilog -P NAME=VALUE` overrides a parameter of the top module at elaboration, as a project `param` line does (and ahead
   of the project's lines): a Verilog number (`16`, `-3`, `8'hFF`), else a string (`'12'` forces one); several allowed; an unknown
   name is the located error `param '-P Q' does not name a parameter`; not for SystemVerilog files. With it a testbench `dut #(.W(12))`
