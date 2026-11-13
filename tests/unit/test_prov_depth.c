@@ -115,6 +115,9 @@ static void test_parse_size(void) {
     expect_size("500K", (uint64_t)500 * KIB);
     expect_size("2M", (uint64_t)2 * MIB);
     expect_size("3G", 3ULL * MIB * KIB);
+    expect_size("500k", (uint64_t)500 * KIB);
+    expect_size("2m", (uint64_t)2 * MIB);
+    expect_size("3g", 3ULL * MIB * KIB);
 }
 
 static void test_parse_size_rejects(void) {
@@ -123,7 +126,7 @@ static void test_parse_size_rejects(void) {
                                "0K",
                                "K",
                                "1.5G",
-                               "1g",
+                               "1kk",
                                "1T",
                                "-1",
                                "1KB",
