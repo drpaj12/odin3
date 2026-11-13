@@ -240,10 +240,11 @@ void odin3_prov_depth_after_proc(odin3_design *design) {
     int depth = odin3_prov_depth_effective(design);
     odin3_log(ODIN3_LOG_INFO,
               "proc: provenance depth %d (%s): estimated %" PRIu64 " records, %" PRIu64
-              " edges, %" PRIu64 " bytes (name map %" PRIu64 ", step files %" PRIu64 ")",
+              " edges, %" PRIu64 " bytes (name map %" PRIu64 ", step files %" PRIu64
+              ") from %" PRIu64 " cells, %" PRIu64 " pins",
               depth, k_depth_names[depth], est.records[depth], est.edges[depth],
               odin3_prov_estimate_total(&est, (uint32_t)depth), est.map_bytes[depth],
-              est.step_bytes[depth]);
+              est.step_bytes[depth], shape.nodes, shape.pins);
 }
 
 const char *odin3_prov_depth_name(uint32_t depth) {

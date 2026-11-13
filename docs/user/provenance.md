@@ -695,6 +695,65 @@ default, with the work directory written as `<work>` in every file; a run with a
 other hash names. Running the script twice gives
 byte-identical files. The work directory is never emptied.
 
+## Provenance depth: how much data to keep
+
+Provenance data can be large. A design of a few thousand cells writes a name map of a few
+megabytes; the step files of `odin3-flow --prov` (the `prov/` directory) are ten times that, and a
+netlist of two million cells wrote 15.9 GB in one file. One option sets how much is kept:
+`--prov-level 0|1|2|3|4|auto`. This page calls it the **provenance depth** so that it is not
+confused with the [levels](#levels) above, which are the granularity of an object (`module`
+... `lut`); the option keeps the name `--prov-level` and the project key `prov_level`.
+
+| Depth | Name | What is kept |
+|---|---|---|
+| 0 | off | nothing beyond what the IR needs: no construct table from the read, no name map; the LUTs of an abc run share one bulk record |
+| 1 | statement | the HDL construct chain to word cells (`cell=`, `cw=`, `ca=` on the records `lower` makes) and the name map; the LUTs of an abc run share one `lossy=bulk` record |
+| 2 | ancestry | depth 1 plus each LUT's region record (the logic that went into the ABC box), with the default edge budget |
+| 3 | cut | depth 2 plus `abc --prov-cut on` (the exact cut of a LUT where provable, else its region) |
+| 4 | full | depth 3 plus `abc --prov-edges unlimited` and, in `odin3-flow`, the step files |
+
+The depth sets the older options together; each stays as fine control and wins over the depth:
+
+| Depth sets | Option that wins over it |
+|---|---|
+| the construct table of the read (`off` at depth 0, else `refs`) | `read_verilog --prov-ast`, `ODIN3_PROV_AST` |
+| the abc edge budget (bulk at 0 and 1, the formula at 2 and 3, `unlimited` at 4) | `abc --prov-edges` |
+| the exact cut (on at 3 and 4) | `abc --prov-cut on\|off` |
+| the name map, where the netlist is written with hash names (depth 1 and above) | `write_blif`, `write_json`, `write_verilog` `--prov-map MODE` |
+| the step files of `odin3-flow` (depth 4) | `odin3-flow --prov` (always writes them) |
+
+With no depth requested nothing changes. A depth never changes the netlist: the LUTs and the
+critical path are the same at every depth (a test checks this). It never changes names either: the
+name map is written only by a writer already told `--name-style hash`; `odin3-flow --prov-level L`
+(L above 0) tells the BLIF writer that.
+
+Where to give it: the command line (`odin3 --prov-level 3 --prov-budget 500M -p "..."`), the
+project (`prov_level 3` and `prov_budget 500M`, once each; the command line wins), or `odin3-flow
+--prov-level 3 --prov-budget 500M`. The size has an optional `K`, `M` or `G` (powers of 1024).
+
+### Estimating the size first
+
+The pass `prov-estimate` prints, from the cells of the design as it is (best after `proc`), the
+records, parent edges and bytes of each depth, for the name map and for the step files:
+
+```text
+prov-estimate: design: 1371 cells, 29439 pins (estimate of the data each provenance depth writes)
+prov-estimate: depth 0 (off): 0 records, 0 edges, name map 0 bytes, step files 0 bytes, total 0 bytes
+prov-estimate: depth 1 (statement): ...
+```
+
+When a depth or a budget is requested, `proc` ends with the same figures for the depth in force
+(`proc: provenance depth 2 (ancestry): estimated ...`). The estimate is a least-squares fit on the
+calibration designs and is within 2x of the real size on every one of them; the table and the
+factors are in `docs/specs/2026-11-13-prov-levels-calibration.md`. A design unlike those (mostly
+memories, tri-state buses or black boxes) can be further off.
+
+`--prov-budget SIZE` bounds the data. With `--prov-level auto` Odin III takes the highest depth whose
+estimated total (name map plus step files) fits. With a fixed depth over the budget it prints a
+WARNING that names both sizes and drops to the highest depth that fits (depth 0 writes nothing, so
+one always fits); it does not stop. A budget with no depth is `auto`; `auto` with no budget is a
+WARNING and depth 4.
+
 ## Limits: what the chain cannot give
 
 - A record with no AST (a restored location, an imported one) has no construct; its `cons` is empty
