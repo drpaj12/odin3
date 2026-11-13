@@ -743,9 +743,15 @@ prov-estimate: depth 1 (statement): ...
 ```
 
 When a depth or a budget is requested, `proc` ends with the same figures for the depth in force
-(`proc: provenance depth 2 (ancestry): estimated ...`). The estimate is a least-squares fit on the
-calibration designs and is within 2x of the real size on every one of them; the table and the
-factors are in `docs/specs/2026-11-13-prov-levels-calibration.md`. A design unlike those (mostly
+(`proc: provenance depth 2 (ancestry): estimated ...`). The estimate is a fit on 43
+calibration designs. It is **not** accurate to a factor of two everywhere: the name map is within
+2x on 38 of the 43 designs at depth 1, 30 at depth 2, 27 at depth 3 and 25 at depth 4 (worst 2.2x,
+2.8x, 3.4x, 3.9x), and the step files of depth 4 are within 2x on 12 and off by up to 9x. Use it
+for the order of magnitude and to keep a budget safe, not to the byte. Two things the cells of a
+design cannot show cause most of the error: whether abc runs over its edge budget (depths 2 and 3
+then write what depth 1 writes), and how big the logic cones are (the records and the step files
+list them). The table, the factors and the reasons are in
+`docs/specs/2026-11-13-prov-levels-calibration.md`. A design unlike the calibration set (mostly
 memories, tri-state buses or black boxes) can be further off.
 
 `--prov-budget SIZE` bounds the data. With `--prov-level auto` Odin III takes the highest depth whose

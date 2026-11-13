@@ -36,7 +36,7 @@ tuning the table to one set of designs.
   provenance depth ...`) with the read keeping the construct table, over the **flat** design (each
   module's cells times how often it is instantiated below the top, so that a design of a thousand
   instances of one module is not read as one module).
-- The LUT count (and so the netlist) is the same at every depth on all 43 designs; the BLIF of
+- The LUT count is the same at every depth on all 43 designs. On the micros of the tools test the BLIF of
   depths 2, 3 and 4 is byte-identical, and the BLIF of depth 1 equals it up to the hash names (a
   shared bulk record gives a LUT another hash).
 

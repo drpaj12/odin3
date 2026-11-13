@@ -103,9 +103,10 @@ depth on the read, not after it).
 Each measure of each depth is a power law in these counts, `exp(scale + sum(exponent x ln(1 +
 count)))` with at most three counts (a straight line fits badly from a few cells to hundreds of
 thousands). The factors are the fit of `docs/specs/2026-11-13-prov-levels-calibration.md`, written
-by `tools/prov-calibrate/prov_fit.py` into `src/passes/prov_depth_fit.h`. Target (decision 4):
-within 2x of the real size on every calibration design; the calibration doc reports the worst
-ratio per measure, including the ones that miss the target.
+by `tools/prov-calibrate/prov_fit.py` into `src/passes/prov_depth_fit.h`. Target (decision
+4): within 2x of the real size on every calibration design. **Not met**, and reported as such: the
+calibration doc has the worst ratio per measure (name map 2.2x, 2.8x, 3.4x, 3.9x at depths 1 to 4;
+step files 9.4x) and the count of designs within 2x (38, 30, 27, 25 of 43; 12 for the step files).
 
 Two things the estimate cannot see from the cells, both visible in the calibration:
 
