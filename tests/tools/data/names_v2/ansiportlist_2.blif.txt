@@ -1,6 +1,6 @@
 == --lookup h25334sckqj
 O	ansiportlist	net	h25334sckqj	ansiportlist/$n211@tests/micro/verilog/full/ansiportlist_2.v:22	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	22	r3	gate$
-  R	r3	D	gate	refine:word	t3.7	r2			$
+  R	r3	D	gate	refine:word	t3.7	r2			cell=$eq,cw=1$
     R	r2	D	word	rewrite:word	t2.1	r1			$
       R	r1	S	expr	origin	t1.1		f1:22.18-22.30	c4	hier=ansiportlist$
   C	c4	BINARY	expr	c3	f1	22.18-22.30	$
@@ -19,7 +19,7 @@ C	c1	MODULE	module		f1	1.1-30.10	ansiportlist$
 F	f1	tests/micro/verilog/full/ansiportlist_2.v$
 == --lookup and_o[0]
 N	ansiportlist	net	and_o[0]	r36	gate$
-  R	r36	D	gate	refine:word	t3.6	r35			$
+  R	r36	D	gate	refine:word	t3.6	r35			cell=$and,cw=4$
     R	r35	D	word	coarsen:word	t5.2	r33,r34		c31,c34	join$
       R	r33	S	expr	origin	t1.1		f1:12.18-12.30	c32	hier=ansiportlist$
       R	r34	S	expr	origin	t1.1		f1:13.18-13.30	c36	hier=ansiportlist$
@@ -47,7 +47,7 @@ C	c33	CONT_ASSIGN	block	c1	f1	13.1-13.31	$
 F	f1	tests/micro/verilog/full/ansiportlist_2.v$
 == --lookup hzi35ajswu5
 O	ansiportlist	net	hzi35ajswu5	ansiportlist/$n228@tests/micro/verilog/full/ansiportlist_2.v:25	ansiportlist	tests/micro/verilog/full/ansiportlist_2.v	25	r6	gate$
-  R	r6	D	gate	refine:word	t3.9	r5			$
+  R	r6	D	gate	refine:word	t3.9	r5			cell=$gt,cw=1$
     R	r5	D	word	rewrite:word	t2.3	r4			$
       R	r4	S	expr	origin	t1.1		f1:25.18-25.30	c7	hier=ansiportlist$
   C	c7	BINARY	expr	c6	f1	25.18-25.30	$
