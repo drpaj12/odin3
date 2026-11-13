@@ -189,6 +189,10 @@ static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_byte
         out->json.net_ids = true;
         return ODIN3_OK;
     }
+    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--skip-flattened")) {
+        out->json.skip_flattened = true;
+        return ODIN3_OK;
+    }
     if (strcmp(pass, "write_verilog") == 0 && is_quartus_option(word)) {
         return parse_quartus_option(rest, word, out);
     }
@@ -321,13 +325,14 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",
-    "write_json <file> [--odin3] [--net-ids] [--name-style short|provenance|hash [--name-map "
+    "write_json <file> [--odin3] [--net-ids] [--skip-flattened] [--name-style short|provenance|hash [--name-map "
     "<file>]] "
     "[--prov-map [refs|constructs|full]]: write the design as Yosys-schema JSON (file - is "
     "stdout); hash names write the name map to <file>.names or --name-map; --prov-map (hash "
     "names only) writes the version 2 map with the records and the AST layer; --odin3 adds "
     "odin3_version, and per module, cell and netname odin3_prov and "
-    "odin3_level; --net-ids adds odin3_nets (the net ID of each bit) to every netname",
+    "odin3_level; --net-ids adds odin3_nets (the net ID of each bit) to every netname; "
+    "--skip-flattened leaves out the modules flatten left unused (default: every module is written)",
     write_json_run,
     NULL,
     false,

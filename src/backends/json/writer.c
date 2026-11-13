@@ -770,6 +770,17 @@ static odin3_status write_implicit_blackboxes(jw *out, jw_list *modules) {
     return status;
 }
 
+/* True when flatten marked mod as left unused (ODIN3_ATTR_FLATTENED_AWAY). */
+static bool flattened_away(const jw *out, odin3_module *mod) {
+    uint32_t key = 0;
+    if (!odin3_strtab_find(out->strtab, odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key)) {
+        return false;
+    }
+    uint32_t id = odin3_module_id_of(mod).v;
+    const odin3_value *val = odin3_attr_get(mod, (odin3_objref){ODIN3_OBJ_MODULE, id}, key);
+    return val != NULL && val->kind == ODIN3_VAL_INT && val->i != 0;
+}
+
 static odin3_status write_design(jw *out) {
     jw_list top = {false, 1};
     jw_list modules = {false, MODULE_DEPTH};
@@ -786,7 +797,8 @@ static odin3_status write_design(jw *out) {
     const uint32_t end = odin3_design_module_end(out->design);
     for (uint32_t i = 1; i < end && status == ODIN3_OK; i++) {
         odin3_module *mod = odin3_module_get(out->design, (odin3_module_id){i});
-        status = mod != NULL ? write_module(out, &modules, mod) : ODIN3_OK;
+        bool skip = mod != NULL && out->skip_flattened && flattened_away(out, mod);
+        status = mod != NULL && !skip ? write_module(out, &modules, mod) : ODIN3_OK;
     }
     if (status == ODIN3_OK) {
         write_blackboxes(out, &modules);
@@ -908,7 +920,8 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
                 .status = ODIN3_OK,
                 .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE,
                 .odin3_keys = opts != NULL && opts->odin3_keys,
-                .net_ids = opts != NULL && opts->net_ids};
+                .net_ids = opts != NULL && opts->net_ids,
+                .skip_flattened = opts != NULL && opts->skip_flattened};
     (void)odin3_strtab_find(state.strtab, odin3_bytes_cstr("odin3_level"), &state.level_key);
     odin3_strbuf_init(&state.key);
     odin3_strbuf_init(&state.src);

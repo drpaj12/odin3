@@ -67,6 +67,10 @@ typedef struct odin3_json_write_opts {
      * (0 for a constant), the numbers the scoap output and the provenance records use. false: the
      * output is unchanged. */
     bool net_ids;
+    /* `write_json --skip-flattened`: a module `flatten` marked as no longer instantiated
+     * (ODIN3_ATTR_FLATTENED_AWAY) is not written. false: every module is written (the default,
+     * so existing readers see the same file). */
+    bool skip_flattened;
     odin3_prov_map_mode prov_map; /* HASH only: the name map is version 2 (V1.2.0 3.5) */
 } odin3_json_write_opts;
 

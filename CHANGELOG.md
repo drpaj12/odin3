@@ -63,6 +63,9 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   ports are named `$1`, `$2`, ... in order, as Yosys names the ports of a cell of an unknown module, with a WARNING; a mix of named
   and positional connections is an error as for a module. Before, any positional connection was `needs named connections`. Test:
   `test_elab_stage1_inst` (`test_implicit_positional`, `test_implicit_mixed_connections`).
+  (9) `write_json --skip-flattened` leaves out the modules `flatten` marked as no longer instantiated (they stay in the design, as
+  `flatten` says in its INFO line). Off by default, so the file readers see does not change. Test: `test_json_odin3`
+  (`test_skip_flattened`).
   (8) A concatenation target with a select whose index is not constant (`{a[j+3], b[j +: 4]} = ...` inside nested loops, picorv32
   `ENABLE_MUL`) is split per part as a memory word already was, instead of the error `non-constant index into ... in a
   concatenation target`. Test: `test_elab_stage2_case` (`test_variable_index_in_concatenation_*`).
