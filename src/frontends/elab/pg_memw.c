@@ -521,6 +521,25 @@ static bool part_is_memw(const odin3_pg *pg, odin3_ast_id part) {
     return mem != NULL && !mem->to_regs;
 }
 
+/* Whether the part is a select chain (bit, [b +: w], [b -: w], or the words of a register array)
+ * with an index that is not constant by the AST. Alone as the whole target such a select is the
+ * case method's (lv->var, lv->regs); inside a concatenation it is split like a memory word. */
+static bool part_has_variable_index(const odin3_pg *pg, odin3_ast_id part) {
+    const odin3_elab2 *e2 = pg->e2;
+    odin3_ast_id node = part;
+    while (node.v != 0 && odin3_ast_kind_of(e2->elab, node) == ODIN3_AST_SELECT) {
+        bool constant = true;
+        if (odin3_ast_sub(e2->elab, node) != ODIN3_AST_SELECT_PART &&
+            odin3_elab2_expr_is_const(e2, odin3_ast_child(e2->elab, node, 1), &constant) ==
+                ODIN3_OK &&
+            !constant) {
+            return true;
+        }
+        node = odin3_ast_child(e2->elab, node, 0);
+    }
+    return false;
+}
+
 bool pg_lhs_has_memw(const odin3_pg *pg, odin3_ast_id lhs) {
     const odin3_ast *ast = pg->e2->elab;
     if (lhs.v == 0 || odin3_ast_kind_of(ast, lhs) != ODIN3_AST_CONCAT) {
@@ -528,7 +547,8 @@ bool pg_lhs_has_memw(const odin3_pg *pg, odin3_ast_id lhs) {
     }
     odin3_ast_span parts = odin3_ast_children(ast, lhs);
     for (uint32_t i = 0; i < parts.n; i++) {
-        if (parts.ids[i].v != 0 && part_is_memw(pg, parts.ids[i])) {
+        if (parts.ids[i].v != 0 &&
+            (part_is_memw(pg, parts.ids[i]) || part_has_variable_index(pg, parts.ids[i]))) {
             return true;
         }
     }

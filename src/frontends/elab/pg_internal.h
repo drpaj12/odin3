@@ -565,7 +565,9 @@ odin3_status pg_sw_end(odin3_pg *pg);
  */
 
 /* Whether lhs is a concatenation with a direct part that is a word (or a select of a word) of a
- * memory that stays one: Yosys splits such an assignment into one per part. */
+ * memory that stays one, or a select with an index that is not constant by the AST: Yosys splits
+ * such an assignment into one per part (the value goes to a temporary, each part takes its
+ * slice, the least significant first). */
 bool pg_lhs_has_memw(const odin3_pg *pg, odin3_ast_id lhs);
 
 /* The write of the word pg->lvs.memw names (the lvalue already taken apart): rhs is as wide as the
