@@ -84,7 +84,7 @@ the names of a netlist. Writers with other names ignore it. `odin3-flow --prov-l
 - `odin3-flow --prov-level L --prov-budget SIZE` passes them to odin3 and adds the hash names; the
   step files (`prov/`) are written at depth 4, or with `--prov`. It reads the depth actually used
   from the `proc` INFO line.
-- Python: `odin3_pass_set_prov_depth(level, budget)`, the setter the CLI uses. It is additive; **the
+- Python: `odin3_pass_set_prov_level(level)` and `odin3_pass_set_prov_budget(budget)`, the setters the CLI uses. It is additive; **the
   ABI stays 7**. The depth is not part of the IR, the design handle or any plugin-visible struct. A
   pass sees it through the internal `odin3_prov_depth_effective(design)`
   (`src/passes/prov_depth.h`).

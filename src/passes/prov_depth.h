@@ -2,7 +2,7 @@
  * prov_depth.h — provenance depth: one number (0..4, or auto) that sets the older provenance
  * options together, and an up-front estimate of how much data each depth writes. Spec:
  * docs/specs/2026-11-13-prov-levels.md. Private to src/passes; no public ABI beyond
- * odin3_pass_set_prov_depth (odin3.h).
+ * odin3_pass_set_prov_level and _budget (odin3.h).
  *
  * The word "level" also names the granularity ladder (module, block, ..., lut) of the provenance
  * chain; this feature is the "provenance depth" in prose, `--prov-level` on the command line.
@@ -15,6 +15,7 @@
 #include "odin3/odin3.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 enum {
@@ -62,13 +63,37 @@ bool odin3_prov_depth_parse_level(const char *text, bool *autolevel, uint32_t *l
  * false for anything else. */
 bool odin3_prov_depth_parse_size(const char *text, uint64_t *bytes);
 
-/* Size of a design in the units the estimate uses. */
+/*
+ * Size of a design in the units the estimate uses, counted over the live cells. The work of a cell
+ * is what it costs to map: ARITH, LOGIC and OTHER cells their output bits; MUX output bits times
+ * (arms - 1) (the width of S for $pmux, 1 for $mux); SHIFT output bits times the bit length of the
+ * output width; MUL the widths of A times B ($mul, $div, $mod, $pow).
+ */
+typedef enum odin3_prov_feature {
+    ODIN3_PROV_F_CELLS,      /* live nodes */
+    ODIN3_PROV_F_PINS,       /* their pins */
+    ODIN3_PROV_F_OUTS,       /* their output pins */
+    ODIN3_PROV_F_REGS,       /* flip-flops and latches (type name has dff, latch or $sr) */
+    ODIN3_PROV_F_ARITH,      /* work of $add $sub $neg and the comparisons */
+    ODIN3_PROV_F_LOGIC,      /* work of the bitwise, logic, reduce and gate cells */
+    ODIN3_PROV_F_MUX,        /* work of $mux and $pmux */
+    ODIN3_PROV_F_SHIFT,      /* work of the shifts */
+    ODIN3_PROV_F_MUL,        /* work of the multiply, divide, modulo and power cells */
+    ODIN3_PROV_F_CONSTRUCTS, /* rows of the construct table the read kept (0 with --prov-ast off) */
+    ODIN3_PROV_F_COUNT
+} odin3_prov_feature;
+
 typedef struct odin3_prov_shape {
-    uint64_t nodes; /* live nodes (cells) */
-    uint64_t pins;  /* their pins */
+    uint64_t f[ODIN3_PROV_F_COUNT];
 } odin3_prov_shape;
 
+/* The feature's name as the log prints it (cells, pins, outs, regs, arith, ...). */
+const char *odin3_prov_feature_name(uint32_t feature);
+
 odin3_prov_shape odin3_prov_depth_measure(odin3_design *design);
+
+/* The shape as `cells=N pins=N outs=N ...` (every feature, in enum order) in out (cap bytes). */
+void odin3_prov_shape_text(const odin3_prov_shape *shape, char *out, size_t cap);
 
 /* The predicted output of each depth. */
 typedef struct odin3_prov_estimate {

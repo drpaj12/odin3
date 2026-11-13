@@ -15,7 +15,7 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   WARNING. The project keys `prov_level` and `prov_budget` do the same (the command line wins). The new pass `prov-estimate` and an
   INFO line at the end of `proc` give the predicted records, edges and bytes of each depth; the estimate is within 2x of the real
   size on every calibration design (`docs/specs/2026-11-13-prov-levels-calibration.md`). New public function
-  `odin3_pass_set_prov_depth`; the ABI stays 7. Spec `docs/specs/2026-11-13-prov-levels.md`; docs `docs/user/provenance.md`
+  `odin3_pass_set_prov_level` and `odin3_pass_set_prov_budget`; the ABI stays 7. Spec `docs/specs/2026-11-13-prov-levels.md`; docs `docs/user/provenance.md`
   ("Provenance depth"). Tests: `test_prov_depth`, `tests/tools/test_prov_levels.py`.
 - Provenance gaps for per-LUT cell attribution (additive; netlists and the name map version are unchanged). (1) The records
   `lower` makes for a word cell now carry the cell type, its width and, for muxes, the number of arms, written in the `flags`

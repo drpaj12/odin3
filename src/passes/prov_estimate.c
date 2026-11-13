@@ -11,6 +11,8 @@
 #include <inttypes.h>
 #include <stdint.h>
 
+enum { SHAPE_TEXT_BYTES = 256 };
+
 static odin3_status prov_estimate_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                       void *user) {
     (void)ctx;
@@ -22,17 +24,19 @@ static odin3_status prov_estimate_run(odin3_pass_ctx *ctx, odin3_design *design,
     odin3_prov_shape shape = odin3_prov_depth_measure(design);
     odin3_prov_estimate est;
     odin3_prov_depth_estimate(&shape, &est);
+    char text[SHAPE_TEXT_BYTES];
+    odin3_prov_shape_text(&shape, text, sizeof text);
     odin3_log(ODIN3_LOG_INFO,
-              "prov-estimate: design: %" PRIu64 " cells, %" PRIu64 " pins (estimate of the data "
-              "each provenance depth writes)",
-              shape.nodes, shape.pins);
-    for (uint32_t d = 0; d < ODIN3_PROV_DEPTH_COUNT; d++) {
+              "prov-estimate: design: %s (estimate of the data each provenance depth writes)",
+              text);
+    for (uint32_t depth = 0; depth < ODIN3_PROV_DEPTH_COUNT; depth++) {
         odin3_log(ODIN3_LOG_INFO,
                   "prov-estimate: depth %u (%s): %" PRIu64 " records, %" PRIu64
                   " edges, name map %" PRIu64 " bytes, step files %" PRIu64 " bytes, total %" PRIu64
                   " bytes",
-                  (unsigned)d, odin3_prov_depth_name(d), est.records[d], est.edges[d],
-                  est.map_bytes[d], est.step_bytes[d], odin3_prov_estimate_total(&est, d));
+                  (unsigned)depth, odin3_prov_depth_name(depth), est.records[depth],
+                  est.edges[depth], est.map_bytes[depth], est.step_bytes[depth],
+                  odin3_prov_estimate_total(&est, depth));
     }
     int depth = odin3_prov_depth_effective(design);
     if (depth >= 0) {

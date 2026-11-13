@@ -108,14 +108,24 @@ ODIN3_EXPORT odin3_status odin3_pass_set_abc_script(const char *path) {
     return ODIN3_OK;
 }
 
-ODIN3_EXPORT odin3_status odin3_pass_set_prov_depth(const char *level, const char *budget) {
+ODIN3_EXPORT odin3_status odin3_pass_set_prov_level(const char *level) {
     bool autolevel = false;
     uint32_t depth = 0;
-    uint64_t bytes = 0;
     if (level != NULL && !odin3_prov_depth_parse_level(level, &autolevel, &depth)) {
         odin3_log(ODIN3_LOG_ERROR, "prov-level must be 0, 1, 2, 3, 4 or auto, not '%s'", level);
         return ODIN3_ERR_INVALID_ARG;
     }
+    odin3_pass_options opts = odin3_pass_get_options();
+    opts.prov_set = level != NULL;
+    opts.prov_auto = autolevel;
+    opts.prov_level = depth;
+    odin3_pass_set_options(opts);
+    odin3_prov_depth_reset();
+    return ODIN3_OK;
+}
+
+ODIN3_EXPORT odin3_status odin3_pass_set_prov_budget(const char *budget) {
+    uint64_t bytes = 0;
     if (budget != NULL && !odin3_prov_depth_parse_size(budget, &bytes)) {
         odin3_log(ODIN3_LOG_ERROR,
                   "prov-budget must be a positive size with an optional K, M or G, not '%s'",
@@ -123,9 +133,6 @@ ODIN3_EXPORT odin3_status odin3_pass_set_prov_depth(const char *level, const cha
         return ODIN3_ERR_INVALID_ARG;
     }
     odin3_pass_options opts = odin3_pass_get_options();
-    opts.prov_set = level != NULL;
-    opts.prov_auto = autolevel;
-    opts.prov_level = depth;
     opts.prov_budget = bytes;
     odin3_pass_set_options(opts);
     odin3_prov_depth_reset();

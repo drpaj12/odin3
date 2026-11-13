@@ -55,6 +55,17 @@ void tearDown(void) {
     (void)remove(BLIF_PATH);
 }
 
+typedef struct depth_req {
+    const char *level;
+    const char *budget;
+} depth_req;
+
+/* Both setters; the first failure's status. */
+static odin3_status set_depth(depth_req req) {
+    odin3_status st = odin3_pass_set_prov_level(req.level);
+    return st == ODIN3_OK ? odin3_pass_set_prov_budget(req.budget) : st;
+}
+
 static void read_tiny(void) {
     FILE *file = fopen(BLIF_PATH, "w");
     TEST_ASSERT_NOT_NULL(file);
@@ -63,123 +74,169 @@ static void read_tiny(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_blif", BLIF_PATH));
 }
 
-static void test_parse_level(void) {
-    bool autolevel = true;
+static void expect_level(const char *text, bool want_auto, uint32_t want_level) {
+    bool autolevel = !want_auto;
     uint32_t level = 99;
-    for (uint32_t i = 0; i <= 4; i++) {
-        char text[2] = {(char)('0' + i), '\0'};
-        TEST_ASSERT_TRUE(odin3_prov_depth_parse_level(text, &autolevel, &level));
-        TEST_ASSERT_FALSE(autolevel);
-        TEST_ASSERT_EQUAL_UINT32(i, level);
+    TEST_ASSERT_TRUE_MESSAGE(odin3_prov_depth_parse_level(text, &autolevel, &level), text);
+    TEST_ASSERT_EQUAL_INT(want_auto, autolevel);
+    TEST_ASSERT_EQUAL_UINT32(want_level, level);
+}
+
+static void expect_bad_level(const char *text) {
+    bool autolevel = false;
+    uint32_t level = 0;
+    TEST_ASSERT_FALSE_MESSAGE(odin3_prov_depth_parse_level(text, &autolevel, &level), text);
+}
+
+static void test_parse_level(void) {
+    expect_level("0", false, 0);
+    expect_level("1", false, 1);
+    expect_level("2", false, 2);
+    expect_level("3", false, 3);
+    expect_level("4", false, 4);
+    expect_level("auto", true, ODIN3_PROV_DEPTH_FULL);
+}
+
+static void test_parse_level_rejects(void) {
+    const char *const bad[] = {"", "5", "-1", "01", "10", "Auto", "full", " 2", "2 ", NULL};
+    for (size_t at = 0; at < sizeof bad / sizeof bad[0]; at++) {
+        expect_bad_level(bad[at]);
     }
-    TEST_ASSERT_TRUE(odin3_prov_depth_parse_level("auto", &autolevel, &level));
-    TEST_ASSERT_TRUE(autolevel);
-    const char *const bad[] = {"", "5", "-1", "01", "10", "Auto", "full", " 2", "2 "};
-    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
-        TEST_ASSERT_FALSE_MESSAGE(odin3_prov_depth_parse_level(bad[i], &autolevel, &level), bad[i]);
-    }
-    TEST_ASSERT_FALSE(odin3_prov_depth_parse_level(NULL, &autolevel, &level));
+}
+
+static void expect_size(const char *text, uint64_t want) {
+    uint64_t bytes = 0;
+    TEST_ASSERT_TRUE_MESSAGE(odin3_prov_depth_parse_size(text, &bytes), text);
+    TEST_ASSERT_EQUAL_UINT64(want, bytes);
 }
 
 static void test_parse_size(void) {
+    expect_size("1", 1);
+    expect_size("500K", 500U * KIB);
+    expect_size("2M", 2U * MIB);
+    expect_size("3G", 3ULL * MIB * KIB);
+}
+
+static void test_parse_size_rejects(void) {
+    const char *const bad[] = {"",
+                               "0",
+                               "0K",
+                               "K",
+                               "1.5G",
+                               "1g",
+                               "1T",
+                               "-1",
+                               "1KB",
+                               "1 K",
+                               "G1",
+                               "99999999999999999999",
+                               "17179869184G",
+                               NULL};
     uint64_t bytes = 0;
-    TEST_ASSERT_TRUE(odin3_prov_depth_parse_size("1", &bytes));
-    TEST_ASSERT_EQUAL_UINT64(1, bytes);
-    TEST_ASSERT_TRUE(odin3_prov_depth_parse_size("500K", &bytes));
-    TEST_ASSERT_EQUAL_UINT64(500U * KIB, bytes);
-    TEST_ASSERT_TRUE(odin3_prov_depth_parse_size("2M", &bytes));
-    TEST_ASSERT_EQUAL_UINT64(2U * MIB, bytes);
-    TEST_ASSERT_TRUE(odin3_prov_depth_parse_size("3G", &bytes));
-    TEST_ASSERT_EQUAL_UINT64(3ULL * MIB * KIB, bytes);
-    const char *const bad[] = {"",    "0",   "0K",  "K",    "1.5G",  "1g", "1T",
-                               "-1",  "1KB", "1 K", "G1",   "99999999999999999999",
-                               "17179869184G"};
-    for (size_t i = 0; i < sizeof bad / sizeof bad[0]; i++) {
-        TEST_ASSERT_FALSE_MESSAGE(odin3_prov_depth_parse_size(bad[i], &bytes), bad[i]);
+    for (size_t at = 0; at < sizeof bad / sizeof bad[0]; at++) {
+        TEST_ASSERT_FALSE(odin3_prov_depth_parse_size(bad[at], &bytes));
     }
-    TEST_ASSERT_FALSE(odin3_prov_depth_parse_size(NULL, &bytes));
 }
 
-static void test_knobs(void) {
-    odin3_prov_knobs k0 = odin3_prov_depth_knobs(0);
-    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_OFF, k0.ast);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, k0.edges);
-    TEST_ASSERT_FALSE(k0.map);
-    TEST_ASSERT_FALSE(k0.cut);
-    TEST_ASSERT_FALSE(k0.steps);
-    odin3_prov_knobs k1 = odin3_prov_depth_knobs(1);
-    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, k1.ast);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, k1.edges);
-    TEST_ASSERT_TRUE(k1.map);
-    TEST_ASSERT_FALSE(k1.cut);
-    odin3_prov_knobs k2 = odin3_prov_depth_knobs(2);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, k2.edges);
-    TEST_ASSERT_FALSE(k2.cut);
-    TEST_ASSERT_FALSE(k2.steps);
-    odin3_prov_knobs k3 = odin3_prov_depth_knobs(3);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, k3.edges);
-    TEST_ASSERT_TRUE(k3.cut);
-    TEST_ASSERT_FALSE(k3.steps);
-    odin3_prov_knobs k4 = odin3_prov_depth_knobs(4);
-    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_UNLIMITED, k4.edges);
-    TEST_ASSERT_TRUE(k4.cut);
-    TEST_ASSERT_TRUE(k4.steps);
-    TEST_ASSERT_TRUE(k4.map);
+static void test_knobs_off_and_statement(void) {
+    odin3_prov_knobs off = odin3_prov_depth_knobs(0);
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_OFF, off.ast);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, off.edges);
+    TEST_ASSERT_FALSE(off.map);
+    TEST_ASSERT_FALSE(off.cut);
+    TEST_ASSERT_FALSE(off.steps);
+    odin3_prov_knobs statement = odin3_prov_depth_knobs(1);
+    TEST_ASSERT_EQUAL_INT(ODIN3_CONSTRUCT_MODE_REFS, statement.ast);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_BULK, statement.edges);
+    TEST_ASSERT_TRUE(statement.map);
+    TEST_ASSERT_FALSE(statement.cut);
 }
 
-static void test_request_and_setter(void) {
+static void test_knobs_ancestry_and_cut(void) {
+    odin3_prov_knobs ancestry = odin3_prov_depth_knobs(2);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, ancestry.edges);
+    TEST_ASSERT_FALSE(ancestry.cut);
+    TEST_ASSERT_FALSE(ancestry.steps);
+    odin3_prov_knobs cut = odin3_prov_depth_knobs(3);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_DEFAULT, cut.edges);
+    TEST_ASSERT_TRUE(cut.cut);
+    TEST_ASSERT_FALSE(cut.steps);
+}
+
+static void test_knobs_full(void) {
+    odin3_prov_knobs full = odin3_prov_depth_knobs(4);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_UNLIMITED, full.edges);
+    TEST_ASSERT_TRUE(full.cut);
+    TEST_ASSERT_TRUE(full.steps);
+    TEST_ASSERT_TRUE(full.map);
+    TEST_ASSERT_EQUAL_INT(ODIN3_PROV_EDGES_UNLIMITED, odin3_prov_depth_knobs(9).edges);
+}
+
+static void test_request_level_and_budget(void) {
     TEST_ASSERT_FALSE(odin3_prov_depth_request(NULL).set);
     TEST_ASSERT_EQUAL_INT(-1, odin3_prov_depth_requested(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("3", "2M"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"3", "2M"}));
     odin3_prov_request req = odin3_prov_depth_request(design);
     TEST_ASSERT_TRUE(req.set);
     TEST_ASSERT_FALSE(req.autolevel);
     TEST_ASSERT_EQUAL_UINT32(3, req.level);
     TEST_ASSERT_EQUAL_UINT64(2U * MIB, req.budget);
     TEST_ASSERT_EQUAL_INT(3, odin3_prov_depth_requested(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("auto", NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"auto", NULL}));
     TEST_ASSERT_TRUE(odin3_prov_depth_request(design).autolevel);
     TEST_ASSERT_EQUAL_INT(4, odin3_prov_depth_requested(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth(NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){NULL, NULL}));
     TEST_ASSERT_FALSE(odin3_prov_depth_request(design).set);
 }
 
-static void test_setter_rejects_and_keeps(void) {
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("2", NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_depth("7", NULL));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_depth("1", "0"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_depth("1", "12X"));
+static void test_setters_reject_and_keep(void) {
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"2", "5K"}));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_level("7"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_budget("0"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_pass_set_prov_budget("12X"));
     TEST_ASSERT_EQUAL_UINT32(2, odin3_prov_depth_request(design).level);
+    TEST_ASSERT_EQUAL_UINT64(5U * KIB, odin3_prov_depth_request(design).budget);
     TEST_ASSERT_TRUE(log_has("prov-level must be"));
     TEST_ASSERT_TRUE(log_has("prov-budget must be"));
 }
 
+/* Depth 1 shares one bulk record per abc run, which can be bigger than the per-LUT records of
+ * depth 2, so the estimate is not asked to rise from 1 to 2 (docs/specs/2026-11-13-prov-levels.md).
+ */
+static void expect_not_smaller(const odin3_prov_estimate *est, uint32_t depth) {
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(odin3_prov_estimate_total(est, depth - 1),
+                                        odin3_prov_estimate_total(est, depth));
+}
+
 static void test_estimate_is_monotone(void) {
-    odin3_prov_shape shape = {1000, 5000};
+    odin3_prov_shape shape = {{1000, 5000, 2000, 100, 300, 300, 300, 10, 10, 500}};
     odin3_prov_estimate est;
     odin3_prov_depth_estimate(&shape, &est);
     TEST_ASSERT_EQUAL_UINT64(0, odin3_prov_estimate_total(&est, 0));
-    for (uint32_t d = 1; d < ODIN3_PROV_DEPTH_COUNT; d++) {
-        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(odin3_prov_estimate_total(&est, d - 1),
-                                            odin3_prov_estimate_total(&est, d));
-        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(est.records[d - 1], est.records[d]);
-        TEST_ASSERT_GREATER_OR_EQUAL_UINT64(est.edges[d - 1], est.edges[d]);
-    }
+    TEST_ASSERT_GREATER_THAN_UINT64(0, odin3_prov_estimate_total(&est, 1));
+    expect_not_smaller(&est, 3);
+    expect_not_smaller(&est, ODIN3_PROV_DEPTH_FULL);
     TEST_ASSERT_GREATER_THAN_UINT64(0, est.map_bytes[1]);
     TEST_ASSERT_EQUAL_UINT64(0, est.step_bytes[3]);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, est.step_bytes[4]);
-    odin3_prov_shape bigger = {2000, 10000};
-    odin3_prov_estimate more;
-    odin3_prov_depth_estimate(&bigger, &more);
-    TEST_ASSERT_GREATER_THAN_UINT64(odin3_prov_estimate_total(&est, 4),
-                                    odin3_prov_estimate_total(&more, 4));
+    TEST_ASSERT_GREATER_THAN_UINT64(0, est.step_bytes[ODIN3_PROV_DEPTH_FULL]);
+}
+
+static void test_estimate_grows_with_the_design(void) {
+    odin3_prov_shape shape = {{1000, 5000, 2000, 100, 300, 300, 300, 10, 10, 500}};
+    odin3_prov_shape bigger = {{2000, 10000, 4000, 200, 600, 600, 600, 20, 20, 1000}};
+    odin3_prov_estimate small_est;
+    odin3_prov_estimate big_est;
+    odin3_prov_depth_estimate(&shape, &small_est);
+    odin3_prov_depth_estimate(&bigger, &big_est);
+    TEST_ASSERT_GREATER_THAN_UINT64(odin3_prov_estimate_total(&small_est, ODIN3_PROV_DEPTH_FULL),
+                                    odin3_prov_estimate_total(&big_est, ODIN3_PROV_DEPTH_FULL));
 }
 
 static void test_measure_counts_cells(void) {
     read_tiny();
     odin3_prov_shape shape = odin3_prov_depth_measure(design);
-    TEST_ASSERT_GREATER_THAN_UINT64(0, shape.nodes);
-    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(shape.nodes, shape.pins);
+    TEST_ASSERT_GREATER_THAN_UINT64(0, shape.f[ODIN3_PROV_F_CELLS]);
+    TEST_ASSERT_GREATER_OR_EQUAL_UINT64(shape.f[ODIN3_PROV_F_CELLS], shape.f[ODIN3_PROV_F_PINS]);
 }
 
 static void test_no_request_is_today(void) {
@@ -193,17 +250,17 @@ static void test_no_request_is_today(void) {
 
 static void test_fixed_depth_without_budget(void) {
     read_tiny();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("3", NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"3", NULL}));
     TEST_ASSERT_EQUAL_INT(3, odin3_prov_depth_effective(design));
     TEST_ASSERT_TRUE(odin3_prov_depth_wants_map(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("0", NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"0", NULL}));
     TEST_ASSERT_EQUAL_INT(0, odin3_prov_depth_effective(design));
     TEST_ASSERT_FALSE(odin3_prov_depth_wants_map(design));
 }
 
 static void test_budget_drops_a_fixed_depth_with_a_warning(void) {
     read_tiny();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("4", "1"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"4", "1"}));
     TEST_ASSERT_EQUAL_INT(0, odin3_prov_depth_effective(design));
     TEST_ASSERT_TRUE(log_has("provenance depth 4 (full) is estimated at"));
     TEST_ASSERT_TRUE(log_has("over the budget of 1 bytes; using depth 0 (off)"));
@@ -214,18 +271,18 @@ static void test_budget_drops_a_fixed_depth_with_a_warning(void) {
 
 static void test_auto_takes_the_highest_that_fits(void) {
     read_tiny();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("auto", "1G"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"auto", "1G"}));
     TEST_ASSERT_EQUAL_INT(4, odin3_prov_depth_effective(design));
     TEST_ASSERT_TRUE(log_has("prov-level auto: depth 4 (full)"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("auto", "1"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"auto", "1"}));
     TEST_ASSERT_EQUAL_INT(0, odin3_prov_depth_effective(design));
 }
 
 static void test_budget_alone_is_auto_and_auto_alone_warns(void) {
     read_tiny();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth(NULL, "1G"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){NULL, "1G"}));
     TEST_ASSERT_EQUAL_INT(4, odin3_prov_depth_effective(design));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("auto", NULL));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"auto", NULL}));
     TEST_ASSERT_EQUAL_INT(4, odin3_prov_depth_effective(design));
     TEST_ASSERT_TRUE(log_has("prov-level auto needs --prov-budget"));
 }
@@ -236,8 +293,13 @@ static void test_prov_estimate_pass(void) {
     TEST_ASSERT_TRUE(log_has("prov-estimate: depth 0 (off): 0 records"));
     TEST_ASSERT_TRUE(log_has("prov-estimate: depth 4 (full)"));
     TEST_ASSERT_FALSE(log_has("in force"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(design, "prov-estimate", "x"));
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_prov_depth("2", NULL));
+}
+
+static void test_prov_estimate_pass_arguments_and_depth(void) {
+    read_tiny();
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
+                          odin3_design_run_pass(design, "prov-estimate", "x"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, set_depth((depth_req){"2", NULL}));
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "prov-estimate", ""));
     TEST_ASSERT_TRUE(log_has("prov-estimate: in force: depth 2 (ancestry)"));
 }
@@ -245,11 +307,16 @@ static void test_prov_estimate_pass(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_level);
+    RUN_TEST(test_parse_level_rejects);
     RUN_TEST(test_parse_size);
-    RUN_TEST(test_knobs);
-    RUN_TEST(test_request_and_setter);
-    RUN_TEST(test_setter_rejects_and_keeps);
+    RUN_TEST(test_parse_size_rejects);
+    RUN_TEST(test_knobs_off_and_statement);
+    RUN_TEST(test_knobs_ancestry_and_cut);
+    RUN_TEST(test_knobs_full);
+    RUN_TEST(test_request_level_and_budget);
+    RUN_TEST(test_setters_reject_and_keep);
     RUN_TEST(test_estimate_is_monotone);
+    RUN_TEST(test_estimate_grows_with_the_design);
     RUN_TEST(test_measure_counts_cells);
     RUN_TEST(test_no_request_is_today);
     RUN_TEST(test_fixed_depth_without_budget);
@@ -257,5 +324,6 @@ int main(void) {
     RUN_TEST(test_auto_takes_the_highest_that_fits);
     RUN_TEST(test_budget_alone_is_auto_and_auto_alone_warns);
     RUN_TEST(test_prov_estimate_pass);
+    RUN_TEST(test_prov_estimate_pass_arguments_and_depth);
     return UNITY_END();
 }

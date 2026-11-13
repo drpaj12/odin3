@@ -112,8 +112,6 @@ typedef struct cli_state {
     const char *abc_script;
     bool linked_abc;          /* the linked ABC engine is registered (--version names it) */
     const char *opt_snapshot; /* --opt-snapshot DIR, NULL for none */
-    const char *prov_level;   /* --prov-level 0..4|auto, NULL for none */
-    const char *prov_budget;  /* --prov-budget SIZE, NULL for none */
 } cli_state;
 
 /* The options that take a value. */
@@ -244,6 +242,20 @@ static bool is_directory(const char *path) {
     return stat(path, &info) == 0 && S_ISDIR(info.st_mode);
 }
 
+/* --prov-level and --prov-budget set their process option at once; a value that does not parse is
+ * refused. */
+static int scan_prov(const char *arg, const char *value) {
+    bool is_level = strcmp(arg, "--prov-level") == 0;
+    odin3_status st =
+        is_level ? odin3_pass_set_prov_level(value) : odin3_pass_set_prov_budget(value);
+    if (st != ODIN3_OK) {
+        return bad_value(arg, value,
+                         is_level ? "expects 0, 1, 2, 3, 4 or auto"
+                                  : "expects a size such as 500M or 2G");
+    }
+    return EXIT_OK;
+}
+
 /* An option with its value (loads a plugin, records the rest). */
 static int scan_value(const char *arg, const char *value, cli_state *state) {
     if (strcmp(arg, "--plugin") == 0) {
@@ -254,6 +266,9 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
             return bad_value(arg, value, "expects given or resolved");
         }
         state->resolved = strcmp(value, "resolved") == 0;
+    }
+    if (strcmp(arg, "--prov-level") == 0 || strcmp(arg, "--prov-budget") == 0) {
+        return scan_prov(arg, value);
     }
     if (is_project_option(arg) && strchr(value, '"') != NULL) {
         return bad_value(arg, value, "a path holding '\"' cannot be passed to read_project");
@@ -270,13 +285,6 @@ static int scan_value(const char *arg, const char *value, cli_state *state) {
     state->revision = strcmp(arg, "--revision") == 0 ? value : state->revision;
     state->abc_script = strcmp(arg, "--abc-script") == 0 ? value : state->abc_script;
     state->opt_snapshot = strcmp(arg, "--opt-snapshot") == 0 ? value : state->opt_snapshot;
-    state->prov_level = strcmp(arg, "--prov-level") == 0 ? value : state->prov_level;
-    state->prov_budget = strcmp(arg, "--prov-budget") == 0 ? value : state->prov_budget;
-    if ((strcmp(arg, "--prov-level") == 0 || strcmp(arg, "--prov-budget") == 0) &&
-        odin3_pass_set_prov_depth(state->prov_level, state->prov_budget) != ODIN3_OK) {
-        return bad_value(arg, value,
-                         "expects 0, 1, 2, 3, 4 or auto (level); K, M or G size (budget)");
-    }
     return EXIT_OK;
 }
 
@@ -492,8 +500,7 @@ static bool apply_string_options(const cli_state *state) {
     return odin3_pass_set_top_name(state->top) == ODIN3_OK &&
            odin3_pass_set_revision(state->revision) == ODIN3_OK &&
            odin3_pass_set_abc_script(state->abc_script) == ODIN3_OK &&
-           odin3_pass_set_opt_snapshot(state->opt_snapshot) == ODIN3_OK &&
-           odin3_pass_set_prov_depth(state->prov_level, state->prov_budget) == ODIN3_OK;
+           odin3_pass_set_opt_snapshot(state->opt_snapshot) == ODIN3_OK;
 }
 
 int main(int argc, char **argv) {

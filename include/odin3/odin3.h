@@ -29,7 +29,7 @@
  *   (odin3_design_construct_count, odin3_design_get_construct), odin3_obj_get_prov,
  *   odin3_prov_get_info, odin3_prov_visit_parents, _joined and _chain. Plugins built for ABI 6
  *   must be rebuilt: odin3_plugin_init refuses a host of another ABI number.
- * After v1.2.0, additive, ABI stays 7: odin3_pass_set_prov_depth (--prov-level), odin3_edit_*
+ * After v1.2.0, additive, ABI stays 7: odin3_pass_set_prov_level and _budget (--prov-level, --prov-budget), odin3_edit_*
  * (netlist editing), odin3_simulation_ set_toggle_counting, _get_toggles and _run_vectors (spec
  * 2026-10-31-netlist-edit-sim-design).
  *
@@ -376,14 +376,22 @@ odin3_status odin3_pass_set_abc_script(const char *path);
 odin3_status odin3_pass_set_opt_snapshot(const char *dir);
 
 /*
- * Sets the provenance depth for every later pass (the CLI's --prov-level and --prov-budget;
- * docs/specs/2026-11-13-prov-levels.md). level: "0" to "4", or "auto"; NULL for none (today's
- * behaviour). budget: a positive integer with an optional K, M or G suffix (powers of 1024), the
- * most provenance bytes the run may write; NULL for none. A project's prov_level and prov_budget
- * apply only where this was not given. Process-wide; both arguments are parsed, not kept. Fails
- * with ODIN3_ERR_INVALID_ARG (logged, nothing changed) for a level or budget that does not parse.
+ * Sets the provenance depth for every later pass (the CLI's --prov-level; docs/specs/
+ * 2026-11-13-prov-levels.md): "0" to "4", or "auto"; NULL for none (today's behaviour). A project's
+ * prov_level applies only where this was not given. Process-wide; the string is parsed, not kept.
+ * Fails with ODIN3_ERR_INVALID_ARG (logged, nothing changed) for a value that does not parse.
  */
-odin3_status odin3_pass_set_prov_depth(const char *level, const char *budget);
+odin3_status odin3_pass_set_prov_level(const char *level);
+
+/*
+ * Sets the most provenance bytes a run may write (the CLI's --prov-budget): a positive integer
+ * with an optional K, M or G suffix (powers of 1024); NULL for none. With a level `auto` the run
+ * takes the highest depth that fits; a fixed level over the budget drops to the highest that fits,
+ * with a WARNING. A project's prov_budget applies only where this was not given. Process-wide; the
+ * string is parsed, not kept. Fails with ODIN3_ERR_INVALID_ARG (logged, nothing changed) for a
+ * value that does not parse.
+ */
+odin3_status odin3_pass_set_prov_budget(const char *budget);
 
 /*
  * How later passes' located diagnostics name files (the CLI's --diag-paths; 2B PRJ-18): false

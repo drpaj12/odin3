@@ -2,8 +2,9 @@
 section 2.1).
 
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
-        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--prov-level L] [--prov-budget SIZE] [--timing-attr]
-        [--timing-paths N] [--timing-legacy] [--odin3 PATH] [--out DIR]
+        [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--prov-level L]
+        [--prov-budget SIZE] [--timing-attr] [--timing-paths N] [--timing-legacy]
+        [--odin3 PATH] [--out DIR]
         [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 
 Target ``vtr``: the Odin III script of the vtr-qor O leg (imported from tools/vtr-qor, never
