@@ -211,6 +211,21 @@ class BudgetAndOptions(ProvCase):
 
 
 @needs_odin3
+class ProvWins(ProvCase):
+    def test_prov_keeps_its_own_behaviour_with_depth_options(self) -> None:
+        plain = self.flow(MUX16, "--prov")
+        both = self.flow(MUX16, "--prov", "--prov-level", "0", "--prov-budget", "1")
+        self.assertEqual((plain.code, both.code), (0, 0), both.stderr)
+        self.assertEqual(plain.blif, both.blif)
+        self.assertEqual(plain.names_text, both.names_text)
+        self.assertEqual(plain.step_bytes, both.step_bytes)
+        self.assertGreater(both.step_bytes, 0)
+        self.assertNotIn("provenance depth", both.log)
+        self.assertIn("WARNING: --prov-level 0 and --prov-budget 1 ignored", both.stderr)
+        self.assertNotIn("WARNING", plain.stderr)
+
+
+@needs_odin3
 class Precedence(ProvCase):
     def script(self, abc_extra: str, write_extra: str) -> str:
         return (f"read_verilog --nolatches {MUX16}; proc; opt; flatten; opt -full; wreduce; "

@@ -1022,6 +1022,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     arch = ns.arch.resolve() if ns.arch else None
     attr = ns.timing_attr or ns.timing_paths is not None
     prov = ns.prov or (attr and not ns.timing_legacy)
+    if prov:  # an explicit older option wins: --prov (also from --timing-attr) runs as before
+        ns.prov_level, ns.prov_budget = prov_depth_ignored(ns.prov_level, ns.prov_budget)
     paths = ns.timing_paths if ns.timing_paths is not None else VPR_DEFAULT_PATHS
     return FlowArgs([d.resolve() for d in ns.designs], ns.top, ns.target, arch, ns.family, vpr,
                     ns.analysis, (ns.odin3 or default_odin3()).resolve(), out.resolve(),
@@ -1030,6 +1032,17 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
                     tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
                     ns.strict_tristate, ns.prov_cut, ns.prov_level, ns.prov_budget)
+
+
+def prov_depth_ignored(level: str, budget: str) -> tuple[str, str]:
+    """``--prov`` keeps its own behaviour (hash names, the map, the step files, abc's default edge
+    budget): the depth options given with it are dropped, one WARNING naming them."""
+    ignored = [f"{opt} {val}" for opt, val in (("--prov-level", level), ("--prov-budget", budget))
+               if val]
+    if ignored:
+        print(f"WARNING: {' and '.join(ignored)} ignored: --prov (or --timing-attr, which implies "
+              f"it) keeps its own provenance behaviour", file=sys.stderr)
+    return "", ""
 
 
 def main(argv: Sequence[str] | None = None) -> int:
