@@ -12,9 +12,12 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   field of the `R` line as `cell=<type>`, `cw=<width>` and `ca=<arms>` (`$mux` has 2 arms, `$pmux` its selects plus the default);
   restore reads them back. Two cells from one HDL statement have two such records (one `lower` operation per cell). (2) `abc
   --prov-cut on` gives each LUT a record whose parents are the records of the old gates its function covers, flagged `cut=exact`;
-  a LUT whose leaves or root have no old equivalent net gets a one-parent record on its region record, flagged `cut=approx`. The
-  option selects the in-memory exchange (the name map finds the equivalent nets; the netlist is the same) unless
-  `ODIN3_ABC_EXCHANGE=blif` is set. The abc INFO line `LUT cuts: N exact, M approximate` gives the counts. Default behaviour of
+  a LUT whose inputs or output have no old equivalent net, or whose proof fails, gets a one-parent record on its region record,
+  flagged `cut=approx`. The old region is built as an AIG and simulated on 256 random patterns to find old nets with the same
+  function as the LUT's inputs and output; a cut is accepted only after a local proof that the old function of the root net over
+  the leaf nets is the LUT's truth table (LUTs up to 12 inputs). It works with either ABC exchange and changes no netlist. The
+  abc INFO line `LUT cuts: N exact, M approximate; approximate: ...` gives the counts and the reasons. LUTs ABC built from a
+  restructured function that no old net has stay approximate. Default behaviour of
   `--prov fine|cone` is unchanged. `odin3-flow --prov-cut` passes it on. Docs: `docs/user/provenance.md`. Tests: `prov_cut`
   (`tests/tools/test_prov_cut.py`).
 - `odin3-flow --keep-results` after a route retry keeps one usable run directory: `vpr/run` is now the routed run and the failed

@@ -230,14 +230,7 @@ odin3_status odin3_abc_choose_script(const odin3_design *design, const odin3_abc
 odin3_status odin3_abc_exchange_choice(const odin3_abc_opts *opts, uint32_t *exchange) {
     *exchange = ODIN3_ABC_EXCHANGE_BLIF;
     const char *env = getenv("ODIN3_ABC_EXCHANGE");
-    if (opts->via_blif != NULL) {
-        return ODIN3_OK;
-    }
-    if (env == NULL) {
-        /* --prov-cut on needs the name map, which only the in-memory exchange makes; the netlist
-         * is the same. ODIN3_ABC_EXCHANGE=blif still wins (the cuts are then mostly approximate).
-         */
-        *exchange = opts->prov_cut ? ODIN3_ABC_EXCHANGE_AIG : ODIN3_ABC_EXCHANGE_BLIF;
+    if (opts->via_blif != NULL || env == NULL) {
         return ODIN3_OK;
     }
     if (strcmp(env, "aig") == 0) {

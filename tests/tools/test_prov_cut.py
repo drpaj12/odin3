@@ -144,14 +144,17 @@ class Cut(unittest.TestCase):
             luts = lut_cells(flow(Path(tmp), "muxtest.v", "muxtest"))
         self.assertTrue(all(cut == "" for cut, _ in luts), luts)
 
-    def test_blif_exchange_is_approximate_for_inner_luts(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            luts = lut_cells(
-                flow(Path(tmp), "muxtest.v", "muxtest", "abc --lut 6 --prov-cut on",
-                     {"ODIN3_ABC_EXCHANGE": "blif"})
-            )
-        cuts = {cut for cut, _ in luts}
-        self.assertEqual({"cut=exact", "cut=approx"}, cuts)
+    def test_both_exchanges_give_the_same_exact_cuts(self) -> None:
+        found = []
+        for exchange in ("blif", "aig"):
+            with tempfile.TemporaryDirectory() as tmp:
+                luts = lut_cells(
+                    flow(Path(tmp), "muxtest.v", "muxtest", "abc --lut 6 --prov-cut on",
+                         {"ODIN3_ABC_EXCHANGE": exchange})
+                )
+            self.assertEqual({"cut=exact"}, {cut for cut, _ in luts}, exchange)
+            found.append(sorted(tuple(cells) for _, cells in luts))
+        self.assertEqual(found[0], found[1])
 
     def test_bad_option_value(self) -> None:
         script = (

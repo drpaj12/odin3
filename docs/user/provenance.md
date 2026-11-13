@@ -315,18 +315,26 @@ flag `cut=exact`. Because `lower` makes one record per word cell, with `cell=`, 
 parents of an exact record are the word cells the LUT's function covers. A LUT of a mux alone has one
 parent `cell=$mux`; a LUT of a compare feeding a mux has two, `cell=$eq` and `cell=$mux`.
 
-A LUT whose root or whose leaves have no old equivalent net, or whose walk from the root reaches an
-input that is not a leaf, is **approximate**: its record has the region record as its only parent and the
-flag `cut=approx`. The abc INFO line gives the counts: `abc: module 'm': LUT cuts: N exact, M
-approximate`. The option changes no netlist. It selects the in-memory exchange between Odin III and ABC,
-which is the way ABC finds the equivalent nets (the `name map` of ABC); with `ODIN3_ABC_EXCHANGE=blif`, a
-`--via-blif` directory or a script other than the built-in ones there is no such map and only the LUTs
-at outputs, registers and inputs can be exact. `--prov fine|cone` is not changed.
+How the cut is found. Odin III builds the old region as an AIG and simulates it on 256 random patterns. An old
+net and a LUT input, or the LUT's output, are candidates for the same function when their patterns are equal (or
+complements). The cut is then accepted only after a **proof**: the AIG function of the root net over the leaf nets,
+evaluated on every input pattern, is exactly the LUT's truth table (LUTs of up to 12 inputs). The gates the walk meets
+between the root net and the leaf nets are the cut.
 
-Two limits. The name map shows the record of a **net**. A LUT that drives a net that keeps its name (a
+A LUT is **approximate** when one of its inputs, or its output, has no old net with the same function (ABC rebuilt
+the function), when the walk from the root reaches something that is not a leaf, or when the proof fails (for example
+ABC used a don't-care the old gates do not have). Its record then has the region record as its only parent and the flag
+`cut=approx`. The abc INFO line gives the counts and the reasons: `abc: module 'm': LUT cuts: N exact, M
+approximate; approximate: a without an old net for an input, b without one for the output, c whose walk left the
+leaves, d not proved`. The option works with either exchange between Odin III and ABC and changes no netlist
+structure. `--prov fine|cone` is not changed.
+
+Three limits. The name map shows the record of a **net**. A LUT that drives a net that keeps its name (a
 port, or a net with `keep`) shows that net's older record, not the LUT's: read the LUT records from a
 net that has no name of its own (a register input, an inner net). And `cell=` is on the records of
-`lower` only; a cell mapped by `hardmap` keeps the record of its mapping.
+`lower` only; a cell mapped by `hardmap` keeps the record of its mapping. And a net name that Odin III builds from a
+record (the hash, or the `@file:line` part of a full name) can change with `--prov-cut on`, because the LUT's output
+net now carries the cut record; the netlist structure, the LUT count and the critical path do not change.
 
 ### Cells of one statement, and instances
 

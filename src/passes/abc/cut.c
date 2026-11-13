@@ -1,15 +1,16 @@
 /*
  * cut.c — the exact cut of each LUT (v1.6.2, `abc --prov-cut on`): which old gates a LUT's function
- * covers. A LUT has leaves (its fan-in objects) and a root (itself); when each of those has an old
- * net that computes the same function (an anchor), the old gates between the root net and the leaf
- * nets are the cut. The LUT then carries one record whose parents are the records of those gates,
- * labelled cut=exact. Where a leaf or the root has no old net, or the walk from the root reaches
- * something that is not a leaf, the LUT keeps its region record under a one-parent record labelled
- * cut=approx.
+ * covers. cutsig.c finds, for the LUT's inputs and for the LUT, old nets with the same function
+ * (equal signatures on random patterns) and proves the cut: the AIG function of the root net over
+ * the leaf nets is the LUT's truth table. The gates between the root net and the leaf nets are the
+ * cut; the LUT then carries one record whose parents are the records of those gates, labelled
+ * cut=exact. A LUT with no such nets, or whose proof fails, keeps its region record under a
+ * one-parent record labelled cut=approx.
  */
 #include "ir/module.h"
 #include "ir/prov.h"
 #include "passes/abc/abc.h"
+#include "passes/abc/cut_int.h"
 #include "passes/abc/prov.h"
 #include "passes/abc/region.h"
 #include "util/log.h"
@@ -18,28 +19,10 @@
 #include <stdint.h>
 #include <string.h>
 
-/* Gates one walk may visit before the LUT is called approximate. */
-enum { CUT_WALK_CAP = 4096, FIRST_OBJECT = 2, STACK_PARENTS = 16 };
-
 static const odin3_opclass cut_class = {ODIN3_DIR_COARSEN, ODIN3_LEVEL_GATE, ODIN3_LEVEL_LUT, false,
                                         0};
 static const odin3_opclass approx_class = {ODIN3_DIR_REWRITE, ODIN3_LEVEL_LUT, ODIN3_LEVEL_LUT,
                                            false, 0};
-
-typedef struct cut {
-    odin3_abc_run *run;
-    const odin3_abc_result *res;
-    const odin3_module *mod;
-    const odin3_abc_anchor *anchors;
-    odin3_vec first; /* uint32_t per object + 1: where its anchors start in order */
-    odin3_vec order; /* uint32_t: anchor indexes grouped by object */
-    odin3_vec leaf;  /* uint32_t per net: 1 + the LUT whose leaf the net is */
-    odin3_vec seen;  /* uint32_t per node: 1 + the LUT that visited it */
-    odin3_vec stack; /* uint32_t */
-    odin3_vec gates; /* uint32_t: nodes of the cut found so far */
-    uint32_t exact, approx;
-    uint32_t cur; /* the LUT being walked */
-} cut;
 
 static uint32_t at32(const odin3_vec *vec, size_t idx) {
     return ((const uint32_t *)vec->data)[idx];
@@ -64,37 +47,6 @@ static odin3_status zero32(odin3_vec *vec, size_t count) {
     return st;
 }
 
-static void cut_free(cut *ct) {
-    odin3_vec_free(&ct->first);
-    odin3_vec_free(&ct->order);
-    odin3_vec_free(&ct->leaf);
-    odin3_vec_free(&ct->seen);
-    odin3_vec_free(&ct->stack);
-    odin3_vec_free(&ct->gates);
-}
-
-/* Groups the anchor indexes by object (counting sort). */
-static odin3_status group_anchors(cut *ct, size_t n_anchors, uint32_t n_objs) {
-    odin3_status st = zero32(&ct->first, (size_t)n_objs + 1U);
-    for (size_t at = 0; at < n_anchors; at++) {
-        ((uint32_t *)ct->first.data)[ct->anchors[at].obj + 1U]++;
-    }
-    for (uint32_t obj = 0; obj < n_objs; obj++) {
-        ((uint32_t *)ct->first.data)[obj + 1U] += at32(&ct->first, obj);
-    }
-    odin3_vec fill;
-    odin3_vec_init(&fill, sizeof(uint32_t));
-    st = st == ODIN3_OK ? zero32(&ct->order, n_anchors) : st;
-    st = st == ODIN3_OK ? zero32(&fill, n_objs) : st;
-    for (size_t at = 0; st == ODIN3_OK && at < n_anchors; at++) {
-        uint32_t obj = ct->anchors[at].obj;
-        ((uint32_t *)ct->order.data)[at32(&ct->first, obj) + at32(&fill, obj)] = (uint32_t)at;
-        ((uint32_t *)fill.data)[obj]++;
-    }
-    odin3_vec_free(&fill);
-    return st;
-}
-
 static bool is_soft(const cut *ct, odin3_node_id node) {
     return ((const uint8_t *)ct->run->region->role.data)[node.v] == ODIN3_ABC_ROLE_SOFT;
 }
@@ -108,60 +60,55 @@ static uint32_t soft_driver(const cut *ct, odin3_net_id net) {
     return is_soft(ct, node) ? node.v : 0;
 }
 
-/* Marks the old nets of the fan-in objects of LUT lut as its leaves. False when a fan-in object
- * (not a constant) has no old net. */
+/* --- the leaves of one LUT ------------------------------------------------------------------ */
+
+/* Marks the candidate nets of every input of LUT lut as its leaves. False when an input has none
+ * (or is a constant): the cut cannot be found. */
 static bool mark_leaves(cut *ct, uint32_t lut) {
     uint32_t inputs = at32(&ct->res->lut_k, lut);
     const uint32_t *fanins =
         (const uint32_t *)ct->res->fanins.data + at32(&ct->res->fanin_start, lut);
+    odin3_vec cands;
+    odin3_vec_init(&cands, sizeof(cut_net));
+    odin3_vec_clear(&ct->leafs);
     bool all = true;
-    for (uint32_t var = 0; var < inputs; var++) {
-        uint32_t obj = fanins[var];
-        if (obj < FIRST_OBJECT) {
-            continue;
-        }
-        bool any = false;
-        for (uint32_t k = at32(&ct->first, obj); k < at32(&ct->first, obj + 1U); k++) {
-            odin3_net_id net = ct->anchors[at32(&ct->order, k)].old_net;
-            if (odin3_net_valid(net)) {
-                ((uint32_t *)ct->leaf.data)[net.v] = lut + 1U;
-                any = true;
+    for (uint32_t var = 0; all && var < inputs; var++) {
+        all = fanins[var] >= CUT_FIRST_OBJ && cut_candidates(ct, fanins[var], &cands) == ODIN3_OK &&
+              cands.len > 0;
+        for (size_t at = 0; all && at < cands.len; at++) {
+            const cut_net *cn = odin3_vec_cat(&cands, at);
+            cut_leaf *slot = odin3_vec_push(&ct->leafs);
+            all = slot != NULL;
+            if (all) {
+                *slot = (cut_leaf){cn->net, var, cn->inv};
+                ((uint32_t *)ct->leaf.data)[cn->net] = lut + 1U;
             }
         }
-        all = all && any;
     }
+    odin3_vec_free(&cands);
     return all;
 }
 
-/* The first old net of the LUT's own object, or none. */
-static odin3_net_id root_net(const cut *ct, uint32_t obj) {
-    for (uint32_t k = at32(&ct->first, obj); k < at32(&ct->first, obj + 1U); k++) {
-        odin3_net_id net = ct->anchors[at32(&ct->order, k)].old_net;
-        if (odin3_net_valid(net)) {
-            return net;
-        }
-    }
-    return (odin3_net_id){0};
-}
+/* --- the walk over the old gates ------------------------------------------------------------ */
 
 /* Visits one gate of the cut: adds it and queues the drivers of its inputs that are not leaves.
  * Sets *escape when an input is neither a leaf, a constant nor driven by one soft cell. */
 static odin3_status visit_gate(cut *ct, uint32_t node, bool *escape) {
-    const uint32_t lut = ct->cur;
-    ((uint32_t *)ct->seen.data)[node] = lut + 1U;
+    const uint32_t mark = ct->cur + 1U;
+    ((uint32_t *)ct->seen.data)[node] = mark;
     odin3_status st = push32(&ct->gates, node);
     odin3_pinslice pins = odin3_node_pins(ct->mod, (odin3_node_id){node});
     for (uint32_t i = 0; st == ODIN3_OK && i < pins.count; i++) {
         odin3_pin_id pin = {pins.first.v + i};
         odin3_net_id net = odin3_pin_net(ct->mod, pin);
         if (!odin3_pin_reads(ct->mod, pin) || !odin3_net_valid(net) ||
-            at32(&ct->leaf, net.v) == lut + 1U || odin3_abc_pin_literal(ct->run, net) >= 0) {
+            at32(&ct->leaf, net.v) == mark || odin3_abc_pin_literal(ct->run, net) >= 0) {
             continue;
         }
         uint32_t drv = soft_driver(ct, net);
         if (drv == 0) {
             *escape = true;
-        } else if (at32(&ct->seen, drv) != lut + 1U) {
+        } else if (at32(&ct->seen, drv) != mark) {
             st = push32(&ct->stack, drv);
         }
     }
@@ -170,14 +117,13 @@ static odin3_status visit_gate(cut *ct, uint32_t node, bool *escape) {
 
 /* Walks from the root cell. *escape is set when the walk leaves the leaves or runs too long. */
 static odin3_status walk_cut(cut *ct, uint32_t root, bool *escape) {
-    const uint32_t lut = ct->cur;
     odin3_vec_clear(&ct->stack);
     odin3_vec_clear(&ct->gates);
     odin3_status st = push32(&ct->stack, root);
     while (st == ODIN3_OK && ct->stack.len > 0 && !*escape) {
         uint32_t node = at32(&ct->stack, ct->stack.len - 1U);
         odin3_vec_pop(&ct->stack);
-        if (at32(&ct->seen, node) == lut + 1U) {
+        if (at32(&ct->seen, node) == ct->cur + 1U) {
             continue;
         }
         st = visit_gate(ct, node, escape);
@@ -185,6 +131,8 @@ static odin3_status walk_cut(cut *ct, uint32_t root, bool *escape) {
     }
     return st;
 }
+
+/* --- the records ---------------------------------------------------------------------------- */
 
 /* The distinct nonzero records of the gates found, in node order, as parents of one record. */
 static odin3_status derive_cut(cut *ct, odin3_prov_id *out) {
@@ -205,6 +153,7 @@ static odin3_status derive_cut(cut *ct, odin3_prov_id *out) {
         }
     }
     if (st == ODIN3_OK && parents.len > 0) {
+        odin3_prov_begin_op_class(ct->run->ctx, &cut_class);
         st = odin3_prov_derive_class(ct->run->ctx,
                                      (odin3_prov_list){parents.data, (uint32_t)parents.len}, 0,
                                      &cut_class, out);
@@ -218,23 +167,39 @@ static odin3_status annotate_cut(const cut *ct, odin3_prov_id rec, uint32_t kind
     return odin3_prov_annotate(ct->run->design, rec, &annot);
 }
 
+/* Tries one root candidate: the walk, then the proof. *rec stays 0 when it fails. */
+static odin3_status try_root(cut *ct, uint32_t lut, const cut_net *root, odin3_prov_id *rec) {
+    uint32_t drv = soft_driver(ct, (odin3_net_id){root->net});
+    bool escape = drv == 0 || at32(&ct->leaf, root->net) == lut + 1U;
+    odin3_status st = ODIN3_OK;
+    ct->why = CUT_WHY_WALK;
+    if (!escape) {
+        st = walk_cut(ct, drv, &escape);
+        ct->why = CUT_WHY_PROOF;
+    }
+    if (st == ODIN3_OK && !escape && cut_prove(ct, lut, root)) {
+        st = derive_cut(ct, rec);
+        st = st == ODIN3_OK && rec->v != 0 ? annotate_cut(ct, *rec, ODIN3_PROV_CUT_EXACT) : st;
+    }
+    return st;
+}
+
 /* Tries the exact cut of one LUT. *rec stays 0 when it cannot be exact. */
 static odin3_status exact_record(cut *ct, uint32_t lut, odin3_prov_id *rec) {
     uint32_t obj = odin3_abc_result_first_lut(ct->res) + lut;
     ct->cur = lut;
-    odin3_net_id root = root_net(ct, obj);
-    bool leaves = mark_leaves(ct, lut);
-    uint32_t drv = leaves ? soft_driver(ct, root) : 0;
-    bool escape = drv == 0;
+    ct->why = CUT_WHY_INPUT;
+    odin3_vec roots;
+    odin3_vec_init(&roots, sizeof(cut_net));
     odin3_status st = ODIN3_OK;
-    if (!escape) {
-        st = walk_cut(ct, drv, &escape);
+    if (mark_leaves(ct, lut)) {
+        ct->why = CUT_WHY_ROOT;
+        st = cut_candidates(ct, obj, &roots);
     }
-    if (st == ODIN3_OK && !escape) {
-        odin3_prov_begin_op_class(ct->run->ctx, &cut_class);
-        st = derive_cut(ct, rec);
-        st = st == ODIN3_OK && rec->v != 0 ? annotate_cut(ct, *rec, ODIN3_PROV_CUT_EXACT) : st;
+    for (size_t at = 0; st == ODIN3_OK && rec->v == 0 && at < roots.len; at++) {
+        st = try_root(ct, lut, odin3_vec_cat(&roots, at), rec);
     }
+    odin3_vec_free(&roots);
     return st;
 }
 
@@ -262,6 +227,7 @@ static odin3_status all_luts(cut *ct, odin3_vec *obj_prov) {
         } else if (st == ODIN3_OK) {
             st = approx_record(ct, current, &rec);
             ct->approx += current != 0 ? 1U : 0U;
+            ct->miss[ct->why] += current != 0 ? 1U : 0U;
         }
         if (st == ODIN3_OK && rec.v != 0) {
             ((uint32_t *)obj_prov->data)[first_lut + lut] = rec.v;
@@ -270,25 +236,47 @@ static odin3_status all_luts(cut *ct, odin3_vec *obj_prov) {
     return st;
 }
 
+static odin3_status cut_setup(cut *ct) {
+    odin3_vec_init(&ct->table, sizeof(cut_cand));
+    odin3_vec_init(&ct->stack, sizeof(uint32_t));
+    odin3_vec_init(&ct->gates, sizeof(uint32_t));
+    odin3_vec_init(&ct->vpool, sizeof(uint64_t));
+    odin3_vec_init(&ct->leafs, sizeof(cut_leaf));
+    odin3_status st = zero32(&ct->leaf, odin3_module_net_end(ct->mod));
+    st = st == ODIN3_OK ? zero32(&ct->seen, odin3_module_node_end(ct->mod)) : st;
+    st = st == ODIN3_OK ? cut_sigs_build(ct) : st;
+    size_t n_aig = ct->aig.objs.len / 2U;
+    st = st == ODIN3_OK ? zero32(&ct->vstamp, n_aig) : st;
+    return st == ODIN3_OK ? zero32(&ct->voff, n_aig) : st;
+}
+
 odin3_status odin3_abc_cut_records(odin3_abc_run *run, const odin3_abc_result *res,
                                    const odin3_vec *anchors, odin3_vec *obj_prov) {
+    (void)anchors;
     cut ct = {0};
     ct.run = run;
     ct.res = res;
     ct.mod = run->module;
-    ct.anchors = anchors->data;
-    odin3_vec_init(&ct.stack, sizeof(uint32_t));
-    odin3_vec_init(&ct.gates, sizeof(uint32_t));
-    uint32_t n_objs = odin3_abc_result_first_lut(res) + res->n_luts;
-    odin3_status st = group_anchors(&ct, anchors->len, n_objs);
-    st = st == ODIN3_OK ? zero32(&ct.leaf, odin3_module_net_end(run->module)) : st;
-    st = st == ODIN3_OK ? zero32(&ct.seen, odin3_module_node_end(run->module)) : st;
-    st = st == ODIN3_OK ? all_luts(&ct, obj_prov) : st;
+    odin3_vec_init(&ct.asig, sizeof(uint64_t));
+    odin3_vec_init(&ct.osig, sizeof(uint64_t));
+    odin3_status st = cut_setup(&ct);
+    if (st == ODIN3_ERR_PARSE) {
+        odin3_log(ODIN3_LOG_WARN, "abc: --prov-cut: the region is too large for the cut proof; "
+                                  "the LUTs keep their region records");
+        st = ODIN3_OK;
+    } else {
+        st = st == ODIN3_OK ? all_luts(&ct, obj_prov) : st;
+    }
     if (st == ODIN3_OK) {
-        odin3_log(
-            ODIN3_LOG_INFO, "abc: module '%s': LUT cuts: %u exact, %u approximate (--prov-cut on)",
-            odin3_strtab_get(odin3_design_strtab(run->design), odin3_module_name(run->module)),
-            (unsigned)ct.exact, (unsigned)ct.approx);
+        const char *name =
+            odin3_strtab_get(odin3_design_strtab(run->design), odin3_module_name(run->module));
+        odin3_log(ODIN3_LOG_INFO,
+                  "abc: module '%s': LUT cuts: %u exact, %u approximate (--prov-cut on); "
+                  "approximate: %u without an old net for an input, %u without one for the output, "
+                  "%u whose walk left the leaves, %u not proved",
+                  name, (unsigned)ct.exact, (unsigned)ct.approx, (unsigned)ct.miss[CUT_WHY_INPUT],
+                  (unsigned)ct.miss[CUT_WHY_ROOT], (unsigned)ct.miss[CUT_WHY_WALK],
+                  (unsigned)ct.miss[CUT_WHY_PROOF]);
         run->stats.cut_exact = ct.exact;
         run->stats.cut_approx = ct.approx;
     }

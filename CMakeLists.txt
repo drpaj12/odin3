@@ -312,6 +312,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/restore.c
     src/passes/abc/prov.c
     src/passes/abc/cut.c
+    src/passes/abc/cutsig.c
     src/passes/abc/depth.c
     src/passes/abc/run.c
     src/ir/value.c
