@@ -66,6 +66,7 @@ static odin3_status build_cell(lw_ctx *lw, odin3_node_id node, const lw_rule *ru
                                lw_bits *outs) {
     odin3_status st = lw_begin(lw, node);
     st = st == ODIN3_OK ? lw_load_cell(lw, node, cell) : st;
+    st = st == ODIN3_OK ? lw_annotate(lw, cell) : st;
     st = st == ODIN3_OK ? lw_check_size(lw, cell, rule->estimate(cell)) : st;
     return st == ODIN3_OK ? rule->build(lw, cell, outs) : st;
 }

@@ -118,6 +118,7 @@ typedef struct odin3_abc_opts {
     uint8_t prov;        /* an odin3_abc_prov_mode */
     const char *gates;   /* --gates: the library name (gatemap spec G-4), NULL without */
     bool prov_given;     /* --prov was given (its value is in prov) */
+    bool prov_cut;       /* --prov-cut on: the exact cut of each LUT (cut.c) */
     uint64_t prov_edges; /* --prov-edges N, or UINT64_MAX for `unlimited`; 0: not given */
 } odin3_abc_opts;
 

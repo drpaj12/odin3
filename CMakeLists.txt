@@ -311,6 +311,8 @@ add_library(odin3_core OBJECT
     src/passes/abc/splice_d.c
     src/passes/abc/restore.c
     src/passes/abc/prov.c
+    src/passes/abc/cut.c
+    src/passes/abc/cutsig.c
     src/passes/abc/depth.c
     src/passes/abc/run.c
     src/ir/value.c
@@ -3141,6 +3143,13 @@ test \"$rc\" -eq 1 && printf '%s\\n' \"$out\" | grep -q ' exports odin3_abi_vers
                 ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_lineage
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
     set_tests_properties(lineage PROPERTIES LABELS tools)
+    # Per-cell and per-LUT provenance records: cell type in the name map, one record per cell,
+    # exact LUT cuts (v1.6.2).
+    add_test(NAME prov_cut
+        COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>
+                ${Python3_EXECUTABLE} -m unittest -v tests.tools.test_prov_cut
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+    set_tests_properties(prov_cut PROPERTIES LABELS tools)
     # write_blif writes the top and what it reaches, not modules nothing instantiates.
     add_test(NAME write_blif_reach
         COMMAND ${CMAKE_COMMAND} -E env ODIN3_BIN=$<TARGET_FILE:odin3>

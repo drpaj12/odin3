@@ -302,6 +302,10 @@ odin3_status lw_begin(lw_ctx *lw, odin3_node_id node);
  * name, wire bits and aliases become aliases of keep. A no-op when keep == drop (the output fed
  * back to its own input: it is left undriven) or either is none. NO_MEMORY as odin3_net_merge.
  */
+/* Tags the open cell's record with the word cell's type, width and mux arms (additive
+ * provenance, v1.6.2). Call after lw_begin and lw_load_cell. NO_MEMORY. */
+odin3_status lw_annotate(lw_ctx *lw, const lw_cell *cell);
+
 odin3_status lw_connect(lw_ctx *lw, odin3_net_id keep, odin3_net_id drop);
 
 /*

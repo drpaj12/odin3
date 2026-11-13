@@ -5,6 +5,7 @@ The tests that run odin3 need ODIN3_CLI (CTest python_tools); none needs VTR."""
 
 from __future__ import annotations
 
+import dataclasses
 import io
 import json
 import os
@@ -435,6 +436,17 @@ class RouteRetry(FlowCase):
         self.assertEqual(result.summary["wirelength"], 28)
         self.assertTrue((self.tmp / "out" / "vpr" / "retry-38" / "vpr.log").is_file())
         self.assertFalse((self.tmp / "out" / "vpr" / "retry-40").exists())
+
+    def test_keep_results_after_retry_leaves_one_usable_run_dir(self) -> None:
+        self.args = dataclasses.replace(self.args, keep_results=True)
+        result, out = self.run_vpr("route_failed", "38,40")
+        vpr = self.tmp / "out" / "vpr"
+        self.assertIn("routed at 38", (vpr / "run" / "vpr.out").read_text())
+        failed = (vpr / "run-failed-W36" / "vpr.out").read_text()
+        self.assertIn("channel width factor of 28", failed)
+        self.assertFalse((vpr / "retry-38" / "run").exists())
+        self.assertEqual(result.vpr_run_dir, vpr / "run")
+        self.assertIn("vpr/run", out)
 
     def test_retry_later_width(self) -> None:
         result, _ = self.run_vpr("route_failed", "56")

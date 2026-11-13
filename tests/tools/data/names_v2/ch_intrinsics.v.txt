@@ -1,6 +1,6 @@
 == --lookup h22xqkihndi
 O	memset	net	h22xqkihndi	memset/$n2343@tests/micro/verilog/full/ch_intrinsics.v:149	memset	tests/micro/verilog/full/ch_intrinsics.v	149	r19	gate$
-  R	r19	D	gate	refine:word	t4.34	r18			$
+  R	r19	D	gate	refine:word	t4.34	r18			cell=$pmux,cw=4,ca=15$
     R	r18	D	word	rewrite:word	t3.2	r17			$
       R	r17	D	word	refine:stmt	t2.1	r1,r2,r3,r4,r5,r6,r7,r8,r9,r10,r11,r12,r13,r14,r15,r16			$
         R	r1	S	stmt	origin	t1.1		f1:149.1-275.8	c6	hier=memset$

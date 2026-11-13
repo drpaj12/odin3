@@ -161,6 +161,31 @@ typedef struct odin3_prov_record {
     odin3_prov_list parents; /* DERIVED only; empty otherwise */
 } odin3_prov_record;
 
+/*
+ * Optional facts about one record, kept beside it and not part of its identity (additive
+ * provenance, v1.6.2). cell is the strtab ID of the word-level cell type the record stands for
+ * (0: none), with width (0: unknown) and, for muxes, arms (0: not a mux). cut says how the record
+ * of a LUT was found: 0 none, ODIN3_PROV_CUT_EXACT (its parents are the gates of the LUT's cut)
+ * or ODIN3_PROV_CUT_APPROX (its parent is the region record).
+ */
+enum { ODIN3_PROV_CUT_NONE = 0, ODIN3_PROV_CUT_EXACT = 1, ODIN3_PROV_CUT_APPROX = 2 };
+typedef struct odin3_prov_annot {
+    uint32_t cell;
+    uint32_t width;
+    uint32_t arms;
+    uint32_t cut;
+} odin3_prov_annot;
+
+/*
+ * Sets the annotation of a record (a copy; a later call replaces the view, the old row stays
+ * unused). INVALID_ARG for a NULL design or annot or an unknown record; NO_MEMORY.
+ */
+odin3_status odin3_prov_annotate(odin3_design *design, odin3_prov_id id,
+                                 const odin3_prov_annot *annot);
+
+/* The annotation of a record, NULL when it has none. Valid until the next annotate. */
+const odin3_prov_annot *odin3_prov_annotation(const odin3_design *design, odin3_prov_id id);
+
 /* The record with ID id, NULL for 0 or an unknown ID. Valid as long as the design. */
 const odin3_prov_record *odin3_prov_get(const odin3_design *design, odin3_prov_id id);
 

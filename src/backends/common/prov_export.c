@@ -1762,10 +1762,30 @@ static odin3_status flags_tail(const pm_rec *pr, const pm *st, odin3_strbuf *out
     return status;
 }
 
+/* cell=<type>, cw=<width>, ca=<arms> and cut=exact|approx, from the record's annotation (v1.6.2):
+ * the word-level cell the record stands for, and how the record of a LUT was found. */
+static odin3_status flags_annot(const pm_rec *pr, const pm *st, odin3_strbuf *out) {
+    const odin3_prov_annot *an = odin3_prov_annotation(st->design, (odin3_prov_id){pr->id});
+    odin3_status status = ODIN3_OK;
+    if (an == NULL) {
+        return status;
+    }
+    if (an->cell != 0) {
+        status = add_flag(out, "cell=");
+        status =
+            status == ODIN3_OK ? odin3_name_map_escape(out, str_of(st->design, an->cell)) : status;
+    }
+    status = status == ODIN3_OK && an->width != 0 ? add_flag_num(out, "cw=%u", an->width) : status;
+    status = status == ODIN3_OK && an->arms != 0 ? add_flag_num(out, "ca=%u", an->arms) : status;
+    if (status == ODIN3_OK && an->cut != ODIN3_PROV_CUT_NONE) {
+        status = add_flag(out, an->cut == ODIN3_PROV_CUT_EXACT ? "cut=exact" : "cut=approx");
+    }
+    return status;
+}
+
 /* The flags of one record, in the order of 3.2: join, join=instance, lossy=bulk, lossy=cap,
- * n=<total>, chain=span, capped, hier=<text>, call=c<n>, ctx=<n>, bulk, uid=<store ID>.
- * (`cell=<type>` is not written: a record does not know the type of the hard cell it made; agent
- * default.) */
+ * n=<total>, chain=span, capped, hier=<text>, call=c<n>, ctx=<n>, bulk, cell=<type>, cw=<n>,
+ * ca=<n>, cut=exact|approx, uid=<store ID>. */
 static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, const pm *st,
                                 odin3_strbuf *out) {
     odin3_status status = flags_join(pr, out);
@@ -1776,6 +1796,7 @@ static odin3_status build_flags(const pm_rec *pr, const odin3_prov_record *rec, 
     status = status == ODIN3_OK && (pr->flags & ODIN3_PROV_F_LOSSY_BULK) != 0
                  ? add_flag(out, "bulk")
                  : status;
+    status = status == ODIN3_OK ? flags_annot(pr, st, out) : status;
     status = status == ODIN3_OK ? flag_uid(pr, out) : status;
     return status == ODIN3_OK ? flags_tail(pr, st, out) : status;
 }
@@ -2244,7 +2265,7 @@ odin3_status odin3_prov_map_text(const odin3_prov_map_req *req, const odin3_prov
     if (status == ODIN3_OK) {
         odin3_log(ODIN3_LOG_INFO,
                   "name map: %zu object(s), %zu record(s); defaults: BLIF N lines are nets only, "
-                  "cell= not written, %u locations and %u joined rows at most",
+                  "cell= on lowered cells only, %u locations and %u joined rows at most",
                   count, st.recs.len, (unsigned)ORIGIN_CAP, (unsigned)ODIN3_PROV_JOIN_CAP);
         log_cons_skipped(st.cons_skipped);
     }

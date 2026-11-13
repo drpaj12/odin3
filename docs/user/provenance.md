@@ -124,7 +124,9 @@ location, an imported one) never makes one.
 | `chain=span` | some leaves reached have no construct (span-only leaves); the location is known, the construct is not |
 | `capped` | the record holds more than 8 locations; the first 8 are written (`ODIN3_HDL_LOC_MAX`) |
 | `call=c<n>` | the record is a call-site record (an inlined function or task body) |
-| `cell=<type>` | the cell type of a hard or black-box object |
+| `cell=<type>` | the word-level cell type a record stands for: set on the records `lower` makes (one per word cell), with `cw=<width>` and, for muxes, `ca=<arms>` |
+| `cw=<n>`, `ca=<n>` | with `cell=`: the width of the cell's output, and the arms of a `$mux` (2) or `$pmux` (selects plus the default) |
+| `cut=exact`, `cut=approx` | on the record of a LUT made with `abc --prov-cut on`: see [The exact cut of a LUT](#the-exact-cut-of-a-lut) |
 | `ctx=<n>` | the number of context parents at the end of the parent list (flatten); absent when 0 |
 | `bulk` | the operation class was declared bulk |
 
@@ -186,10 +188,9 @@ keeps them in a separate list of the same table, beside their record, and writes
 | `x=<n>`, `y=<n>`, `sub=<n>` | `odin3-prov-post` | the grid column, row and subtile of a `site` record, from the `.place` |
 | `layer=<n>` | `odin3-prov-post` | the layer, when the `.place` has the column |
 
-The full flag list, then, is `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`,
+The full flag list, then, is `cell=<type>`, `cw=<n>`, `ca=<n>`, `cut=exact`, `cut=approx`, `join`, `join=instance`, `lossy=bulk`, `lossy=cap`, `n=<total>`,
 `chain=span`, `capped`, `hier=<text>`, `call=c<n>`, `cell=<type>`, `ctx=<n>`, `bulk`, `uid=<n>`, `stale=t<n>`,
-`x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. (`stale=t<n>` is a flag of `R` records only; an `A`, `Q` or `K` line has the field `stale`, `-` when current, else `t<n>`.) The writers do not yet write `cell=<type>` (a record
-does not know the cell type of the hard object it made).
+`x=<n>`, `y=<n>`, `sub=<n>` and `layer=<n>`. (`stale=t<n>` is a flag of `R` records only; an `A`, `Q` or `K` line has the field `stale`, `-` when current, else `t<n>`.) `cell=<type>` is written for the records `lower` makes. The records of hard and black-box cells do not have it yet.
 
 ### Examples of each line type
 
@@ -299,6 +300,51 @@ script (`i`). The `T` row of the run carries the script's hash:
 ```{literalinclude} examples/provenance/out/abc_cons.txt
 :language: text
 ```
+
+## The exact cut of a LUT
+
+`abc` gives each LUT a record whose parents are all the old gates of the LUT's **region**: every gate
+between the LUT's output and the nearest nets that have an equivalent in the new netlist. A region is
+usually larger than the logic the LUT really computes, because ABC packs a compare and the mux it feeds
+into one LUT, or a gate that two outputs share into both.
+
+With `abc --prov-cut on` (and `odin3-flow --prov --prov-cut`) each LUT also gets the **cut**: the old gates
+between the LUT's root net and its leaf nets, where the leaves are the old nets that compute the same
+function as the LUT's inputs. The LUT's record then has those gates' records as parents and carries the
+flag `cut=exact`. Because `lower` makes one record per word cell, with `cell=`, `cw=` and `ca=`, the
+parents of an exact record are the word cells the LUT's function covers. A LUT of a mux alone has one
+parent `cell=$mux`; a LUT of a compare feeding a mux has two, `cell=$eq` and `cell=$mux`.
+
+How the cut is found. Odin III builds the old region as an AIG and simulates it on 256 random patterns. An old
+net and a LUT input, or the LUT's output, are candidates for the same function when their patterns are equal (or
+complements). The cut is then accepted only after a **proof**: the AIG function of the root net over the leaf nets,
+evaluated on every input pattern, is exactly the LUT's truth table (LUTs of up to 12 inputs). The gates the walk meets
+between the root net and the leaf nets are the cut.
+
+A LUT is **approximate** when one of its inputs, or its output, has no old net with the same function (ABC rebuilt
+the function), when the walk from the root reaches something that is not a leaf, or when the proof fails (for example
+ABC used a don't-care the old gates do not have). Its record then has the region record as its only parent and the flag
+`cut=approx`. The abc INFO line gives the counts and the reasons: `abc: module 'm': LUT cuts: N exact, M
+approximate; approximate: a without an old net for an input, b without one for the output, c whose walk left the
+leaves, d not proved`. The option works with either exchange between Odin III and ABC and changes no netlist
+structure. `--prov fine|cone` is not changed.
+
+Three limits. The name map shows the record of a **net**. A LUT that drives a net that keeps its name (a
+port, or a net with `keep`) shows that net's older record, not the LUT's: read the LUT records from a
+net that has no name of its own (a register input, an inner net). And `cell=` is on the records of
+`lower` only; a cell mapped by `hardmap` keeps the record of its mapping. And a net name that Odin III builds from a
+record (the hash, or the `@file:line` part of a full name) can change with `--prov-cut on`, because the LUT's output
+net now carries the cut record; the netlist structure, the LUT count and the critical path do not change.
+
+### Cells of one statement, and instances
+
+A `case` that drives two outputs makes two `$pmux` cells from one statement. They share the record of
+the statement and have two records of their own, made by `lower` in two operations (`t3.1` and
+`t3.2` in the map), so the cut of a LUT tells them apart. For a module used several times, count
+**after** `flatten`: before it a module's cell is one cell; after it each instance has its own cell and
+its own `lower` record, hung on a `context` record with `hier=<instance path>` and `ctx=1`. To count
+the cells of every instance, write the map after `lower` (as `odin3-flow --prov` does), not after
+`proc`.
 
 ## Why a join was made: `Q` and `K` lines
 

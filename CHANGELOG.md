@@ -7,6 +7,22 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- Provenance gaps for per-LUT cell attribution (additive; netlists and the name map version are unchanged). (1) The records
+  `lower` makes for a word cell now carry the cell type, its width and, for muxes, the number of arms, written in the `flags`
+  field of the `R` line as `cell=<type>`, `cw=<width>` and `ca=<arms>` (`$mux` has 2 arms, `$pmux` its selects plus the default);
+  restore reads them back. Two cells from one HDL statement have two such records (one `lower` operation per cell). (2) `abc
+  --prov-cut on` gives each LUT a record whose parents are the records of the old gates its function covers, flagged `cut=exact`;
+  a LUT whose inputs or output have no old equivalent net, or whose proof fails, gets a one-parent record on its region record,
+  flagged `cut=approx`. The old region is built as an AIG and simulated on 256 random patterns to find old nets with the same
+  function as the LUT's inputs and output; a cut is accepted only after a local proof that the old function of the root net over
+  the leaf nets is the LUT's truth table (LUTs up to 12 inputs). It works with either ABC exchange and changes no netlist. The
+  abc INFO line `LUT cuts: N exact, M approximate; approximate: ...` gives the counts and the reasons. LUTs ABC built from a
+  restructured function that no old net has stay approximate. Default behaviour of
+  `--prov fine|cone` is unchanged. `odin3-flow --prov-cut` passes it on. Docs: `docs/user/provenance.md`. Tests: `prov_cut`
+  (`tests/tools/test_prov_cut.py`).
+- `odin3-flow --keep-results` after a route retry keeps one usable run directory: `vpr/run` is now the routed run and the failed
+  first attempt moves to `vpr/run-failed-W<W>` (before, `vpr/run` held the failed attempt, which `vpr --analysis` cannot use, and
+  the routed files sat in `vpr/retry-<W>/run`). Test: `RouteRetry.test_keep_results_after_retry_leaves_one_usable_run_dir`.
 - `sim_tb --progress SEC` prints an INFO line every SEC seconds of wall time (simulated time against `--max-time`, time steps,
   wall seconds, simulated time units per second), so a long run can be told from a hang. Off by default.
 - `sim_tb` now says so when the time limit ends a run: a WARNING names the limit (`--max-time`, default 10,000,000) and the
