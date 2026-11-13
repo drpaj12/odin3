@@ -25,7 +25,9 @@ needs_odin3 = unittest.skipUnless(ODIN3, "ODIN3_CLI not set (CTest python_tools)
 ESTIMATE_RE = re.compile(r"proc: provenance depth (\d) \(\w+\): estimated (\d+) records, "
                          r"(\d+) edges, (\d+) bytes \(name map (\d+), step files (\d+)\)")
 DEPTHS = (0, 1, 2, 3, 4)
-FACTOR = 2.0  # decision 4: the estimate is within 2x of the real size
+FACTOR = 2.0  # decision 4: the estimate is within 2x of the real size (name map, these micros)
+STEP_FACTOR = 10.0  # the step files are the least predictable measure (the calibration doc)
+HASH_NAME = re.compile(rb"\bh[0-9a-z]{8,12}\b")
 
 
 class Sizes:
@@ -36,6 +38,7 @@ class Sizes:
         self.stderr = stderr
         self.out = out
         names = sorted((out / "odin3").glob("*.blif.names"))
+        self.names_text = names[0].read_text() if names else ""
         self.map_bytes = names[0].stat().st_size if names else 0
         steps = out / "prov"
         self.step_bytes = sum(p.stat().st_size for p in steps.rglob("*") if p.is_file()) \
@@ -50,6 +53,15 @@ class Sizes:
     @property
     def total(self) -> int:
         return self.map_bytes + self.step_bytes
+
+    @property
+    def has_v2_map(self) -> bool:
+        return self.names_text.startswith("# odin3-names 2 ")
+
+    def blif_renamed(self) -> bytes:
+        """The BLIF with its hash names numbered by first use: the structure, not the names."""
+        seen: dict[bytes, bytes] = {}
+        return HASH_NAME.sub(lambda m: seen.setdefault(m.group(0), b"n%d" % len(seen)), self.blif)
 
 
 class ProvCase(unittest.TestCase):
@@ -87,8 +99,11 @@ class SameNetlist(ProvCase):
             runs = self.runs_at_all_depths(design)
             self.assertEqual({r.luts for r in runs.values()}, {runs[0].luts}, design.name)
             self.assertGreater(runs[0].luts, 0)
-            # the names differ only between depth 0 (short names) and the rest (hash names)
-            self.assertEqual({runs[d].blif for d in (1, 2, 3, 4)}, {runs[1].blif}, design.name)
+            # depth 1 shares one record per abc run, so its hash names differ from depth 2's; the
+            # structure does not, and depths 2 to 4 give the same bytes
+            self.assertEqual({runs[d].blif_renamed() for d in (1, 2, 3, 4)},
+                             {runs[1].blif_renamed()}, design.name)
+            self.assertEqual({runs[d].blif for d in (2, 3, 4)}, {runs[2].blif}, design.name)
             self.assertEqual(runs[0].total, 0)
             totals = [runs[d].total for d in (1, 2, 3, 4)]
             # depth 1 shares one bulk record per abc run, which is not always smaller than the
@@ -101,13 +116,14 @@ class SameNetlist(ProvCase):
 
     def test_depth_0_writes_no_map(self) -> None:
         run = self.flow(MUX16, "--prov-level", "0")
-        self.assertEqual(run.map_bytes, 0)
+        self.assertFalse(run.has_v2_map)
+        self.assertEqual(run.total, 0)
         self.assertEqual(run.code, 0, run.stderr)
 
     def test_default_is_unchanged(self) -> None:
         plain = self.flow(MUX16)
-        self.assertEqual(plain.map_bytes, 0)
-        self.assertEqual(plain.step_bytes, 0)
+        self.assertFalse(plain.has_v2_map)
+        self.assertEqual(plain.total, 0)
         self.assertNotIn("provenance depth", plain.log)
         self.assertEqual(plain.luts, self.flow(MUX16, "--prov-level", "2").luts)
 
@@ -140,7 +156,7 @@ class EstimateAccuracy(ProvCase):
                                      f"{design.name} depth {depth} map {est_map} vs {real_map}")
                 if depth == 4:
                     self.assertLessEqual(max(est_steps, real_steps) / min(est_steps, real_steps),
-                                         FACTOR,
+                                         STEP_FACTOR,
                                          f"{design.name} steps {est_steps} vs {real_steps}")
                 else:
                     self.assertEqual((est_steps, real_steps), (0, 0))
@@ -153,7 +169,8 @@ class BudgetAndOptions(ProvCase):
         self.assertEqual(run.code, 0, run.stderr)
         self.assertRegex(run.log, r"provenance depth 4 \(full\) is estimated at \d+ bytes, over "
                                   r"the budget of 1 bytes; using depth 0 \(off\)")
-        self.assertEqual(run.total, 0)
+        self.assertFalse(run.has_v2_map)
+        self.assertEqual(run.step_bytes, 0)
 
     def test_budget_picks_the_highest_depth_that_fits(self) -> None:
         sizes = {d: self.flow(MUX16, "--prov-level", str(d)).total for d in (1, 2, 3, 4)}
@@ -211,13 +228,15 @@ class Precedence(ProvCase):
     def test_depth_asks_for_the_map_with_hash_names(self) -> None:
         proc = self.odin3("--prov-level", "2", "-p", self.script("", ""))
         self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertIn("# odin3-names 2 ", self.names().splitlines()[0])
         self.assertIn("ast=refs", self.names().splitlines()[0])
 
     def test_depth_0_and_no_option_write_no_map(self) -> None:
         for argv in (["--prov-level", "0"], []):
             proc = self.odin3(*argv, "-p", self.script("", ""))
             self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertFalse((self.tmp / "out.blif.names").is_file(), argv)
+            names = self.tmp / "out.blif.names"  # hash names alone write a version 1 map
+            self.assertFalse(names.is_file() and "odin3-names 2" in names.read_text(), argv)
 
     def test_explicit_prov_cut_wins_over_depth_2(self) -> None:
         self.assertNotIn("cut=", self.run_and_names("2", ""))

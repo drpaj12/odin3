@@ -1,2 +1,31 @@
-/* Placeholder until the calibration step writes the fit. */
-static const fit_row k_fit[ODIN3_PROV_DEPTH_COUNT][METRIC_COUNT] = {{{false, 0.0, {0.0}}}};
+/* Written by tools/prov-calibrate/prov_fit.py from the calibration table. */
+static const fit_row k_fit[ODIN3_PROV_DEPTH_COUNT][METRIC_COUNT] = {
+    [0] = {[METRIC_RECORDS] = {false, 0.0, {0.0}},
+           [METRIC_EDGES] = {false, 0.0, {0.0}},
+           [METRIC_MAP] = {false, 0.0, {0.0}},
+           [METRIC_STEPS] = {false, 0.0, {0.0}}},
+    [1] = {[METRIC_RECORDS] = {true,
+                               -0.581619,
+                               {0, 0.242567, 0, 0, 0.153857, 0, 0, 0, 0, 0.676164}},
+           [METRIC_EDGES] = {true, -1.35862, {0, 0.463639, 0, 0, 0, 0.0319439, 0, 0, 0, 0.663596}},
+           [METRIC_MAP] = {true, 5.25374, {0, 0, 0.401434, 0, 0, 0, 0, 0, 0.0472834, 0.578794}},
+           [METRIC_STEPS] = {false, 0.0, {0.0}}},
+    [2] = {[METRIC_RECORDS] = {true,
+                               -0.676368,
+                               {0, 0.353014, 0, 0, 0, 0, 0, 0, 0.0668412, 0.655168}},
+           [METRIC_EDGES] = {true, 0.852573, {0, 0.0851587, 0, 0, 0, 0.579433, 0, 0, 0, 0.518109}},
+           [METRIC_MAP] = {true, 4.93574, {0, 0.267341, 0, 0, 0, 0.155271, 0, 0, 0, 0.644755}},
+           [METRIC_STEPS] = {false, 0.0, {0.0}}},
+    [3] = {[METRIC_RECORDS] = {true,
+                               -0.399269,
+                               {0, 0.271245, 0, 0, 0, 0, 0, 0, 0.0905092, 0.761449}},
+           [METRIC_EDGES] = {true, 1.70205, {0, 0, 0, 0.047542, 0, 0.943379, 0, 0, 0, 0.222227}},
+           [METRIC_MAP] = {true, 5.74504, {0, 0, 0, 0.13055, 0, 0.287485, 0, 0, 0, 0.747433}},
+           [METRIC_STEPS] = {false, 0.0, {0.0}}},
+    [4] = {[METRIC_RECORDS] = {true,
+                               -0.399263,
+                               {0, 0.271244, 0, 0, 0, 0, 0, 0, 0.0905085, 0.761449}},
+           [METRIC_EDGES] = {true, 0.760277, {0, 0.528191, 0, 0, 0, 0.676884, 0, 0, 0, 0}},
+           [METRIC_MAP] = {true, 6.19475, {0, 0, 0, 0, 0, 0.477558, 0.148267, 0, 0, 0.470884}},
+           [METRIC_STEPS] = {true, 7.66086, {0, 0.224786, 0, 0, 0, 0.350918, 0, 0, 0, 0.560797}}},
+};

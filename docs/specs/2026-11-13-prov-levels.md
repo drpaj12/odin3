@@ -93,14 +93,33 @@ the names of a netlist. Writers with other names ignore it. `odin3-flow --prov-l
 
 The pass `prov-estimate` (any time; best after `proc`) logs, per depth, the predicted records
 (`R` lines of the name map), parent edges, bytes of the name map and bytes of the step files. The
-inputs are the live cells and pins of the design as it is (word cells after `proc`: count, widths and
-mux arms show up as pins). The factors are a least-squares fit on the calibration designs
-(`docs/specs/2026-11-13-prov-levels-calibration.md`): value = base + per_cell x cells + per_pin x
-pins, one row per depth and measure. Target (decision 4): within 2x of the real size on every
-calibration design.
+inputs are ten counts of the design as it is, over its live cells: cells, pins, output pins,
+registers, and the **work** of the arithmetic, logic, mux, shift and multiply cells (output bits;
+for a mux the output bits times its select width; for a shift the output bits times the bit length
+of the width; for a multiply the width of A times the width of B), plus the rows of the construct
+table the read kept (0 when `--prov-ast off`; a depth of 1 or more keeps `refs`, so ask for the
+depth on the read, not after it).
 
-When a depth or a budget is requested, `proc` ends with one INFO line: the depth in force and its
-estimate.
+Each measure of each depth is a power law in these counts, `exp(scale + sum(exponent x ln(1 +
+count)))` with at most three counts (a straight line fits badly from a few cells to hundreds of
+thousands). The factors are the fit of `docs/specs/2026-11-13-prov-levels-calibration.md`, written
+by `tools/prov-calibrate/prov_fit.py` into `src/passes/prov_depth_fit.h`. Target (decision 4):
+within 2x of the real size on every calibration design; the calibration doc reports the worst
+ratio per measure, including the ones that miss the target.
+
+Two things the estimate cannot see from the cells, both visible in the calibration:
+
+- **Edge budget overflow.** When the cone walk of an abc run needs more than the default edge
+  budget (about 4.7 million for arm_core and bgm), depths 2 and 3 fall back to one shared record
+  and write the same bytes as depth 1. Which designs overflow is not predictable from the cells;
+  the fit absorbs it for the calibration set.
+- **Bulk against per-LUT records.** Depth 1's one shared record lists every old cell of the run as
+  parents; with few LUTs and many old cells it is larger than depth 2's per-LUT records. So the
+  size is **not** monotone from depth 1 to depth 2 on every design (it is from 2 to 3 to 4). The
+  estimate is not asked to be, and `auto` takes the highest depth that fits, not the first.
+
+When a depth or a budget is requested, `proc` ends with one INFO line: the depth in force, its
+estimate, and the counts.
 
 Budget (decision 3): with `--prov-budget SIZE`,
 
@@ -116,7 +135,9 @@ a later drop only means the table was kept for nothing. The depth is resolved on
 
 - The estimate is a size of the output, not of memory.
 - Designs far from the calibration set (mostly tri-state, memory-heavy, black boxes) may be off by
-  more than 2x; the calibration doc lists the worst ratio found.
+  more than 2x; the calibration doc lists the worst ratio found. The step files are the least
+  predictable measure: their size follows the number of HDL constructs in each LUT's ancestry,
+  which the cell counts only hint at.
 - `auto` without a budget is a WARNING and depth 4.
 
 ## Agent defaults (Peter may override)
@@ -124,4 +145,7 @@ a later drop only means the table was kept for nothing. The depth is resolved on
 - Level 0 and 1 both use bulk records: level 0 differs by writing no map and keeping no AST.
 - The project keys and the `prov-estimate` pass name follow the brief; `prov-estimate` takes no
   arguments.
-- The estimate uses cells and pins, not widths and arms separately: those are inside the pin count.
+- The estimate's inputs are the ten counts above (cells, pins, outputs, registers, the work of five
+  cell classes, construct rows), not the width and arms of each cell separately.
+- The depth is kept in a process-wide cache keyed by design and request, not in the IR (no IR or
+  ABI change).

@@ -8,7 +8,9 @@
 #include "ir/celltype.h"
 #include "ir/construct.h"
 #include "ir/module.h"
+#include "passes/flatten/flatten.h"
 #include "passes/manager.h"
+#include "util/alloc.h"
 #include "util/log.h"
 
 #include <inttypes.h>
@@ -223,16 +225,81 @@ static void measure_node(const odin3_design *design, const odin3_module *module,
     }
 }
 
-odin3_prov_shape odin3_prov_depth_measure(odin3_design *design) {
-    odin3_prov_shape shape = {{0}};
-    for (uint32_t mid = 1; mid < odin3_design_module_end(design); mid++) {
-        const odin3_module *module = odin3_module_get(design, (odin3_module_id){mid});
-        for (uint32_t nid = 1; module != NULL && nid < odin3_module_node_end(module); nid++) {
-            if (odin3_node_live(module, (odin3_node_id){nid})) {
-                measure_node(design, module, (odin3_node_id){nid}, &shape);
-            }
+/* The cells of module mid, as own work (instances of other modules left out) added to *own; the
+ * module IDs of its instances (via the graph) are counted in child_count when it is not NULL. */
+typedef struct hier {
+    const odin3_flatten_graph *graph;
+    uint64_t *mult; /* per module ID: instances in the flat design (saturating) */
+} hier;
+
+static uint64_t sat_add(uint64_t lhs, uint64_t rhs) {
+    return lhs > UINT64_MAX - rhs ? UINT64_MAX : lhs + rhs;
+}
+
+static uint64_t sat_mul(uint64_t lhs, uint64_t rhs) {
+    return rhs != 0 && lhs > UINT64_MAX / rhs ? UINT64_MAX : lhs * rhs;
+}
+
+/* Adds the work of the cells of module mid to own, and its instances to the multiplicity of their
+ * modules (each as often as mid is instantiated). */
+static void measure_module(odin3_design *design, uint32_t mid, const hier *hr,
+                           odin3_prov_shape *own) {
+    const odin3_module *module = odin3_module_get(design, (odin3_module_id){mid});
+    for (uint32_t nid = 1; module != NULL && nid < odin3_module_node_end(module); nid++) {
+        odin3_node_id node = {nid};
+        if (!odin3_node_live(module, node)) {
+            continue;
+        }
+        uint32_t child =
+            hr->graph != NULL
+                ? odin3_flatten_graph_module_of(hr->graph, odin3_node_type(module, node))
+                : 0;
+        if (child != 0) {
+            hr->mult[child] = sat_add(hr->mult[child], hr->mult[mid]);
+        } else {
+            measure_node(design, module, node, own);
         }
     }
+}
+
+static void scale_into(const odin3_prov_shape *own, uint64_t times, odin3_prov_shape *total) {
+    for (uint32_t feature = 0; feature < ODIN3_PROV_F_COUNT; feature++) {
+        total->f[feature] = sat_add(total->f[feature], sat_mul(own->f[feature], times));
+    }
+}
+
+/* The flat design's counts: every module's cells times how often it is instantiated below the top
+ * (no flatten needed). Without a top, or with a cycle, the modules are summed once each. */
+static void measure_cells(odin3_design *design, odin3_prov_shape *shape) {
+    uint32_t end = odin3_design_module_end(design);
+    odin3_flatten_graph *graph = NULL;
+    odin3_module_id top = odin3_design_top(design);
+    uint64_t *mult = odin3_util_calloc((size_t)end * sizeof *mult);
+    if (mult == NULL) {
+        return;
+    }
+    if (odin3_module_valid(top) && odin3_flatten_graph_build(design, top, &graph) != ODIN3_OK) {
+        graph = NULL;
+    }
+    hier hr = {graph, mult};
+    uint32_t count = 0;
+    const uint32_t *order = graph != NULL ? odin3_flatten_graph_order(graph, &count) : NULL;
+    if (graph != NULL) {
+        mult[top.v] = 1;
+    }
+    for (uint32_t at = 0; graph != NULL ? at < count : at + 1 < end; at++) {
+        uint32_t mid = graph != NULL ? order[at] : at + 1;
+        odin3_prov_shape own = {{0}};
+        measure_module(design, mid, &hr, &own);
+        scale_into(&own, graph != NULL ? mult[mid] : 1U, shape);
+    }
+    odin3_flatten_graph_free(graph);
+    odin3_util_free(mult);
+}
+
+odin3_prov_shape odin3_prov_depth_measure(odin3_design *design) {
+    odin3_prov_shape shape = {{0}};
+    measure_cells(design, &shape);
     uint32_t rows = odin3_construct_end(design);
     shape.f[ODIN3_PROV_F_CONSTRUCTS] = rows > 0 ? rows - 1U : 0U;
     return shape;
@@ -277,12 +344,23 @@ static uint64_t fit_eval(const fit_row *row, const odin3_prov_shape *shape) {
     return (uint64_t)exp(logv);
 }
 
+static uint64_t max_u64(uint64_t lhs, uint64_t rhs) {
+    return lhs > rhs ? lhs : rhs;
+}
+
 void odin3_prov_depth_estimate(const odin3_prov_shape *shape, odin3_prov_estimate *out) {
     for (uint32_t depth = 0; depth < ODIN3_PROV_DEPTH_COUNT; depth++) {
         out->records[depth] = fit_eval(&k_fit[depth][METRIC_RECORDS], shape);
         out->edges[depth] = fit_eval(&k_fit[depth][METRIC_EDGES], shape);
         out->map_bytes[depth] = fit_eval(&k_fit[depth][METRIC_MAP], shape);
         out->step_bytes[depth] = fit_eval(&k_fit[depth][METRIC_STEPS], shape);
+    }
+    /* Depths 2 to 4 only add to each other (depth 1 is a different form, see the spec): a fit that
+     * dips below the depth before it is raised to it. */
+    for (uint32_t depth = 3; depth < ODIN3_PROV_DEPTH_COUNT; depth++) {
+        out->records[depth] = max_u64(out->records[depth], out->records[depth - 1]);
+        out->edges[depth] = max_u64(out->edges[depth], out->edges[depth - 1]);
+        out->map_bytes[depth] = max_u64(out->map_bytes[depth], out->map_bytes[depth - 1]);
     }
 }
 

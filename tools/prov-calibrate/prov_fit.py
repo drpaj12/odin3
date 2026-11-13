@@ -28,6 +28,9 @@ SLOTS = {"records": "METRIC_RECORDS", "edges": "METRIC_EDGES", "map_bytes": "MET
 REFINE_ROUNDS = 200
 
 
+Table = dict[tuple[int, str], tuple[tuple[int, ...], list[float]]]
+
+
 class Row:
     def __init__(self, record: dict[str, str]) -> None:
         self.design = record["design"]
@@ -76,7 +79,8 @@ def worst_ratio(coef: list[float], rows: list[Row], subset: tuple[int, ...], mea
 
 
 def fit_subset(rows: list[Row], subset: tuple[int, ...], measure: str) -> list[float] | None:
-    """Least squares in log space, then a few reweighting rounds that pull the worst row in."""
+    """Least squares in log space, then a few reweighting rounds that pull the worst row in.
+    None when an exponent comes out negative: a bigger design never writes less."""
     mat = [design_row(r, subset) for r in rows]
     target = [math.log(max(r.y[measure], 1.0)) for r in rows]
     weight = [1.0] * len(rows)
@@ -84,7 +88,7 @@ def fit_subset(rows: list[Row], subset: tuple[int, ...], measure: str) -> list[f
     best_worst = math.inf
     for _ in range(REFINE_ROUNDS):
         coef = least_squares(mat, target, weight)
-        if coef is None:
+        if coef is None or any(c < 0.0 for c in coef[1:]):
             return best
         res = [abs(sum(c * v for c, v in zip(coef, m, strict=True)) - t)
                for m, t in zip(mat, target, strict=True)]
@@ -134,7 +138,7 @@ def c_row(subset: tuple[int, ...], coef: list[float]) -> str:
     return f"{{true, {coef[0]:.6g}, {{{inner}}}}}"
 
 
-def header(table: dict[tuple[int, str], tuple[tuple[int, ...], list[float]]]) -> str:
+def header(table: Table) -> str:
     lines = ["/* Written by tools/prov-calibrate/prov_fit.py from the calibration table. */",
              "static const fit_row k_fit[ODIN3_PROV_DEPTH_COUNT][METRIC_COUNT] = {"]
     unused = "{false, 0.0, {0.0}}"
@@ -149,6 +153,41 @@ def header(table: dict[tuple[int, str], tuple[tuple[int, ...], list[float]]]) ->
     return "\n".join(lines) + "\n"
 
 
+def predict(row: Row, entry: tuple[tuple[int, ...], list[float]]) -> float:
+    subset, coef = entry
+    return math.exp(sum(c * v for c, v in zip(coef, design_row(row, subset), strict=True)))
+
+
+def markdown(rows: list[Row], table: Table) -> str:
+    """One line per design: the real name-map bytes at depths 1 to 4 and the estimate/real ratio
+    of every measure; the last column is the step files at depth 4."""
+    out = ["| design | map1 real | est/real d1 | d2 | d3 | d4 | steps4 real | est/real |",
+           "|---|---|---|---|---|---|---|---|"]
+    by_design: dict[str, dict[int, Row]] = {}
+    for row in rows:
+        by_design.setdefault(row.design, {})[row.depth] = row
+    for design, depths in by_design.items():
+        cells = [design, f"{depths[1].y['map_bytes']:.0f}" if 1 in depths else "-"]
+        floor = 0.0  # depths 2 to 4 never drop below the depth before (src/passes/prov_depth.c)
+        for depth in (1, 2, 3, 4):
+            entry = table.get((depth, "map_bytes"))
+            if entry and depth in depths:
+                row = depths[depth]
+                guess = predict(row, entry)
+                guess = max(guess, floor) if depth >= 3 else guess
+                floor = guess if depth >= 2 else floor
+                cells.append(f"{guess / max(row.y['map_bytes'], 1.0):.2f}")
+            else:
+                cells.append("-")
+        entry = table.get((4, "step_bytes"))
+        real = depths[4].y["step_bytes"] if 4 in depths else 0.0
+        cells.append(f"{real:.0f}")
+        cells.append(f"{predict(depths[4], entry) / max(real, 1.0):.2f}" if entry and 4 in depths
+                     else "-")
+        out.append("| " + " | ".join(cells) + " |")
+    return "\n".join(out) + "\n"
+
+
 def load(path: Path) -> list[Row]:
     with path.open(newline="", encoding="utf-8") as handle:
         return [Row(rec) for rec in csv.DictReader(handle, delimiter="\t")]
@@ -158,10 +197,11 @@ def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n", maxsplit=1)[0])
     ap.add_argument("table", type=Path)
     ap.add_argument("--header", type=Path)
+    ap.add_argument("--markdown", type=Path)
     ap.add_argument("--max-terms", type=int, default=3)
     ns = ap.parse_args(argv)
     rows = load(ns.table)
-    table: dict[tuple[int, str], tuple[tuple[int, ...], list[float]]] = {}
+    table: Table = {}
     for depth in (1, 2, 3, 4):
         for measure in MEASURES:
             if measure == "step_bytes" and depth != 4:
@@ -180,6 +220,8 @@ def main(argv: list[str]) -> int:
             table[(depth, measure)] = (subset, coef)
     if ns.header:
         ns.header.write_text(header(table), encoding="utf-8")
+    if ns.markdown:
+        ns.markdown.write_text(markdown(rows, table), encoding="utf-8")
     return 0
 
 
