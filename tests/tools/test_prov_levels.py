@@ -226,6 +226,26 @@ class BudgetAndOptions(ProvCase):
             proc = self.odin3(*argv, "-p", "stats")
             self.assertNotEqual(proc.returncode, 0, argv)
 
+    def test_size_suffix_is_either_case_and_the_last_option_wins(self) -> None:
+        for size in ("1k", "1K", "2m", "1g"):
+            proc = self.odin3("--prov-budget", size, "-p", "stats")
+            self.assertEqual(proc.returncode, 0, (size, proc.stderr))
+        for size in ("0k", "1kk", "1t", "k", ""):
+            self.assertNotEqual(self.odin3("--prov-budget", size, "-p", "stats").returncode, 0)
+        script = f"read_verilog --nolatches {MUX16}; proc"
+        proc = self.odin3("--prov-level", "1", "--prov-level", "3", "-p", script)
+        self.assertIn("proc: provenance depth 3 (cut)", proc.stderr + proc.stdout)
+        proc = self.odin3("--prov-budget", "1", "--prov-budget", "1G", "--prov-level", "4", "-p",
+                          script)
+        self.assertIn("proc: provenance depth 4 (full)", proc.stderr + proc.stdout)
+
+    def test_flow_rejects_a_bad_budget_with_a_usage_error(self) -> None:
+        for bad in ("0", "1T", "x", "-5", "1.5M"):
+            run = self.flow(MUX16, "--prov-budget", bad)
+            self.assertEqual(run.code, 2, bad)
+            self.assertIn("--prov-budget expects", run.stderr)
+        self.assertEqual(self.flow(MUX16, "--prov-budget", "1g").code, 0)
+
     def test_prov_estimate_pass_prints_every_depth(self) -> None:
         proc = self.odin3("-p", f"read_verilog --nolatches {MUX16}; proc; prov_estimate")
         text = proc.stderr + proc.stdout

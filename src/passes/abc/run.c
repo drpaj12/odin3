@@ -647,14 +647,16 @@ static void apply_prov_depth(odin3_abc_run *run) {
         return;
     }
     odin3_prov_knobs knobs = odin3_prov_depth_knobs((uint32_t)depth);
-    if (run->opts.prov_edges == 0 && knobs.edges == ODIN3_PROV_EDGES_UNLIMITED) {
+    /* an edge budget from the arguments or from the run limits (odin3_abc_run_limits_set) wins */
+    bool edges_given = run->opts.prov_edges != 0 || odin3_abc_run_limits_get()->prov_edges != 0;
+    if (!edges_given && knobs.edges == ODIN3_PROV_EDGES_UNLIMITED) {
         run->opts.prov_edges = UINT64_MAX;
     }
     if (!run->opts.prov_cut_given) {
         run->opts.prov_cut = knobs.cut;
     }
     run->opts.prov_bulk =
-        run->opts.prov_edges == 0 && knobs.edges == ODIN3_PROV_EDGES_BULK && !run->opts.prov_cut;
+        !edges_given && knobs.edges == ODIN3_PROV_EDGES_BULK && !run->opts.prov_cut;
 }
 
 odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_abc_run **out) {

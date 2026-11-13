@@ -483,7 +483,8 @@ static odin3_status write_blif_run(odin3_pass_ctx *ctx, odin3_design *design, od
     }
     if (st == ODIN3_OK && (parsed.seen & WB_NAME_STYLE) == 0 && (parsed.seen & WB_VTR) != 0 &&
         odin3_prov_depth_wants_map(design)) {
-        parsed.opts.name_style = ODIN3_BLIF_NAMES_HASH; /* the depth asks for hash names and the map */
+        parsed.opts.name_style =
+            ODIN3_BLIF_NAMES_HASH; /* the depth asks for hash names and the map */
     }
     if (st == ODIN3_OK && parsed.opts.name_style == ODIN3_BLIF_NAMES_HASH &&
         parsed.opts.prov_map == ODIN3_PROV_MAP_NONE && odin3_prov_depth_wants_map(design)) {

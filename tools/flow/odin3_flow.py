@@ -989,8 +989,9 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                          "(the highest that fits --prov-budget); --prov and --prov-cut still "
                          "override; needs --target vtr")
     ap.add_argument("--prov-budget", default="", metavar="SIZE",
-                    help="the most provenance bytes (K, M, G): a level over it drops to the "
-                         "highest that fits, with a WARNING in odin3/odin3.log")
+                    help="the most provenance bytes (K, M, G, either case): a level over it "
+                         "drops to the highest that fits, with a WARNING in odin3/odin3.log; "
+                         "the last --prov-level or --prov-budget given is used")
     ap.add_argument("--timing-attr", action="store_true",
                     help="attribute the critical path to HDL statements, modules and words "
                          "(timing/attribution.json and summary.txt); needs VPR")
@@ -1046,6 +1047,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
         ap.error("--prov-cut needs --prov (or --timing-attr)")
     if ns.prov_level and ns.prov_level not in ("0", "1", "2", "3", "4", "auto"):
         ap.error("--prov-level expects 0, 1, 2, 3, 4 or auto")
+    if ns.prov_budget and parse_size(ns.prov_budget) is None:
+        ap.error("--prov-budget expects a positive size with an optional K, M or G (1M, 500k)")
     if (ns.prov_level or ns.prov_budget) and ns.target != "vtr":
         ap.error("--prov-level and --prov-budget need --target vtr")
     if ns.keep_results and not vpr:

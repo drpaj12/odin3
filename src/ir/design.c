@@ -22,15 +22,23 @@
 #include "util/vec.h"
 
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+static atomic_uint_fast64_t g_next_serial = 1;
+
+uint64_t odin3_design_serial(const odin3_design *design) {
+    return design != NULL ? design->serial : 0;
+}
 
 ODIN3_EXPORT odin3_design *odin3_design_create(void) {
     odin3_design *design = odin3_util_calloc(sizeof *design);
     if (design == NULL) {
         return NULL;
     }
+    design->serial = atomic_fetch_add(&g_next_serial, 1);
     odin3_vec_init(&design->asts, sizeof(odin3_ast *));
     design->arena = odin3_arena_create(0);
     design->strtab = odin3_strtab_create();
@@ -95,6 +103,7 @@ odin3_status odin3_design_clone(const odin3_design *src, odin3_design **out) {
     if (dst == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
+    dst->serial = atomic_fetch_add(&g_next_serial, 1);
     odin3_vec_init(&dst->asts, sizeof(odin3_ast *));
     odin3_status st = clone_into(dst, src);
     if (st != ODIN3_OK) {

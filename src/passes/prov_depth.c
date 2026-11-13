@@ -7,6 +7,7 @@
 #include "frontends/project/project.h"
 #include "ir/celltype.h"
 #include "ir/construct.h"
+#include "ir/design.h"
 #include "ir/module.h"
 #include "passes/flatten/flatten.h"
 #include "passes/manager.h"
@@ -25,7 +26,8 @@ enum {
     SIZE_SHIFT = 10,
     DECIMAL_BASE = 10,
     DEPTH_AUTO_TOP = ODIN3_PROV_DEPTH_FULL,
-    SHAPE_TEXT_BYTES = 256
+    SHAPE_TEXT_BYTES = 256,
+    SUFFIX_KINDS = 3 /* K, M, G (each also in lower case) */
 };
 
 static const char *const k_depth_names[ODIN3_PROV_DEPTH_COUNT] = {"off", "statement", "ancestry",
@@ -81,9 +83,9 @@ bool odin3_prov_depth_parse_size(const char *text, uint64_t *bytes) {
         value = value * DECIMAL_BASE + digit;
     }
     unsigned shift = 0;
-    const char *suffix = strchr("KMG", *cur);
-    if (*cur != '\0' && suffix != NULL) {
-        shift = SIZE_SHIFT * (unsigned)(suffix - "KMG" + 1);
+    const char *suffix = *cur != '\0' ? strchr("KMGkmg", *cur) : NULL;
+    if (suffix != NULL) {
+        shift = SIZE_SHIFT * (((unsigned)(suffix - "KMGkmg") % SUFFIX_KINDS) + 1);
         cur++;
     }
     if (*cur != '\0' || value == 0 || value > (UINT64_MAX >> shift)) {
@@ -284,10 +286,25 @@ static void measure_cells(odin3_design *design, odin3_prov_shape *shape) {
     odin3_module_id top = odin3_design_top(design);
     uint64_t *mult = odin3_util_calloc((size_t)end * sizeof *mult);
     if (mult == NULL) {
+        /* an all-zero shape would read as "nothing to write": say it is unknown, and huge */
+        odin3_log(ODIN3_LOG_WARN,
+                  "provenance estimate: out of memory; the size is unknown and treated as huge");
+        for (uint32_t feature = 0; feature < ODIN3_PROV_F_COUNT; feature++) {
+            shape->f[feature] = UINT64_MAX;
+        }
         return;
     }
-    if (odin3_module_valid(top) && odin3_flatten_graph_build(design, top, &graph) != ODIN3_OK) {
-        graph = NULL;
+    if (odin3_module_valid(top)) {
+        odin3_log_mute(true); /* a cycle is reported by flatten itself; here it is one WARNING */
+        odin3_status built = odin3_flatten_graph_build(design, top, &graph);
+        odin3_log_mute(false);
+        if (built != ODIN3_OK) {
+            graph = NULL;
+            odin3_log(ODIN3_LOG_WARN,
+                      "provenance estimate: the module hierarchy could not be read (a recursive "
+                      "instantiation, or out of memory); the estimate ignores it and counts each "
+                      "module once");
+        }
     }
     hier hr = {graph, mult};
     uint32_t count = 0;
@@ -384,6 +401,7 @@ uint64_t odin3_prov_estimate_total(const odin3_prov_estimate *est, uint32_t dept
 
 typedef struct resolved {
     const odin3_design *design;
+    uint64_t serial; /* odin3_design_serial: a new design at a freed address does not match */
     odin3_prov_request req;
     int depth;
     bool valid;
@@ -459,11 +477,12 @@ int odin3_prov_depth_effective(odin3_design *design) {
     if (!req.set && req.budget == 0) {
         return -1;
     }
-    if (g_resolved.valid && g_resolved.design == design && same_request(&g_resolved.req, &req)) {
+    if (g_resolved.valid && g_resolved.design == design &&
+        g_resolved.serial == odin3_design_serial(design) && same_request(&g_resolved.req, &req)) {
         return g_resolved.depth;
     }
     int depth = resolve(design, &req);
-    g_resolved = (resolved){design, req, depth, true};
+    g_resolved = (resolved){design, odin3_design_serial(design), req, depth, true};
     return depth;
 }
 
