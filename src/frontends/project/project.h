@@ -213,6 +213,10 @@ typedef struct odin3_project {
     odin3_loc top_at;
     odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
     odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
+    bool prov_set;              /* prov_level given: prov_auto, or prov_level 0..4 */
+    bool prov_auto;
+    uint32_t prov_level;
+    uint64_t prov_budget; /* prov_budget, in bytes; 0 = none */
     struct {
         bool present;
         uint32_t path, format; /* path: normalized absolute; format: lower-cased */

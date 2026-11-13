@@ -31,6 +31,7 @@
 #include "odin3/odin3.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/prov_depth.h"
 #include "util/alloc.h"
 #include "util/clock.h"
 #include "util/hash.h"
@@ -535,6 +536,14 @@ static const char *const k_prov_modes[] = {"off", "refs", "constructs", "full"};
 /* ODIN3_PROV_AST=refs|constructs|full|off: the mode of a read that gives no --prov-ast. The Python
  * module sets it to refs (the CLI default is off, V1.2.0 5.3). An unknown value is ignored with a
  * warning. */
+static void prov_ast_from_depth(const odin3_design *design, rv_args *args) {
+    int depth = odin3_prov_depth_requested(design);
+    if (depth >= 0 && !args->prov_set) {
+        args->prov_set = true;
+        args->prov_ast = odin3_prov_depth_knobs((uint32_t)depth).ast;
+    }
+}
+
 static void prov_ast_from_env(rv_args *args) {
     const char *text = getenv("ODIN3_PROV_AST");
     for (size_t i = 0; text != NULL && !args->prov_set && i < 4; i++) {
@@ -1202,6 +1211,7 @@ static odin3_status read_verilog_run(odin3_pass_ctx *ctx, odin3_design *design, 
     odin3_status st = parse_args(args, &call.parsed);
     if (st == ODIN3_OK) {
         prov_ast_from_env(&call.parsed);
+        prov_ast_from_depth(design, &call.parsed); /* the argument and the variable win */
     }
     const odin3_construct_mode prov_before = odin3_construct_read_mode(design);
     if (call.parsed.prov_set) {

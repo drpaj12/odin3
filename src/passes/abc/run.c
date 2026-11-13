@@ -17,6 +17,7 @@
 #include "passes/budget.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
+#include "passes/prov_depth.h"
 #include "util/alloc.h"
 #include "util/clock.h"
 #include "util/log.h"
@@ -638,11 +639,32 @@ static odin3_status run_all(odin3_abc_run *run) {
 
 /* --- the pass ------------------------------------------------------------------------------ */
 
+/* The provenance depth (--prov-level, project prov_level) sets the edge budget and the exact cut
+ * of a run unless the abc arguments gave them. */
+static void apply_prov_depth(odin3_abc_run *run) {
+    int depth = odin3_prov_depth_effective(run->design);
+    if (depth < 0) {
+        return;
+    }
+    odin3_prov_knobs knobs = odin3_prov_depth_knobs((uint32_t)depth);
+    if (run->opts.prov_edges == 0 && knobs.edges == ODIN3_PROV_EDGES_UNLIMITED) {
+        run->opts.prov_edges = UINT64_MAX;
+    }
+    if (!run->opts.prov_cut_given) {
+        run->opts.prov_cut = knobs.cut;
+    }
+    run->opts.prov_bulk =
+        run->opts.prov_edges == 0 && knobs.edges == ODIN3_PROV_EDGES_BULK && !run->opts.prov_cut;
+}
+
 odin3_status odin3_abc_run_start(odin3_pass_ctx *ctx, odin3_bytes args, odin3_abc_run **out) {
     const odin3_abc_opts none = {0};
     odin3_abc_run *run = NULL;
     odin3_status st = odin3_abc_run_create(ctx, &none, &run);
     st = st == ODIN3_OK ? odin3_abc_parse_args(args, run->arena, &run->opts) : st;
+    if (st == ODIN3_OK) {
+        apply_prov_depth(run);
+    }
     st = st == ODIN3_OK ? startup_checks(run) : st;
     if (st != ODIN3_OK) {
         odin3_abc_run_destroy(run);

@@ -81,6 +81,12 @@ typedef struct odin3_pass_options {
     bool has_revision;
     odin3_srcfmt diag_paths;
     const char *abc_script;
+    /* `--prov-level` and `--prov-budget` (prov_depth.h): prov_set when a depth or auto was given;
+     * prov_budget in bytes, 0 for none. */
+    bool prov_set;
+    bool prov_auto;
+    uint32_t prov_level;
+    uint64_t prov_budget;
 } odin3_pass_options;
 
 void odin3_pass_set_options(odin3_pass_options opts);

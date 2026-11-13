@@ -124,6 +124,7 @@ static odin3_status set_option(abc_option which, const char *value, odin3_abc_op
             return ODIN3_ERR_INVALID_ARG;
         }
         out->prov_cut = strcmp(value, "on") == 0;
+        out->prov_cut_given = true;
         return ODIN3_OK;
     case OPT_PROV_EDGES:
         if (!parse_prov_edges(value, &out->prov_edges)) {

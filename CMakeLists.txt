@@ -118,6 +118,8 @@ add_library(odin3_core OBJECT
     src/passes/testbench_gen.c
     src/passes/project_pass.c
     src/passes/dump_locs.c
+    src/passes/prov_depth.c
+    src/passes/prov_estimate.c
     src/passes/names.c
     src/passes/names_v2.c
     src/passes/levelize/levelize.c

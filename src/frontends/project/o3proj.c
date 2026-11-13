@@ -8,6 +8,7 @@
 #include "ast/srcman.h"
 #include "frontends/project/paths.h"
 #include "frontends/project/words.h"
+#include "passes/prov_depth.h"
 #include "util/hash.h"
 #include "util/str.h"
 #include "util/vec.h"
@@ -20,7 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 
-enum { MAX_ARGS = 99, DETAIL_MAX = 256 };
+enum { MAX_ARGS = 99, DETAIL_MAX = 256, PROV_WORD_BYTES = 32 };
 
 typedef struct o3_reader {
     odin3_project *proj;
@@ -555,6 +556,50 @@ static odin3_status key_abc_script(o3_reader *rd, const o3_stmt *st) {
         rd->proj->abc_script = script;
     }
     return res;
+}
+
+/* prov_level <0..4|auto> and prov_budget <size>: once each (provenance depth; the CLI wins). */
+static odin3_status key_prov_level(o3_reader *rd, const o3_stmt *st) {
+    if (rd->proj->prov_set) {
+        odin3_bytes key = odin3_bytes_cstr("prov_level");
+        return syntax(rd, st, "prov_level given twice", &key);
+    }
+    char text[PROV_WORD_BYTES];
+    odin3_bytes word = st->args[0].text;
+    bool autolevel = false;
+    uint32_t level = 0;
+    if (word.len >= sizeof text) {
+        return usage(rd, st, NULL);
+    }
+    memcpy(text, word.ptr, word.len);
+    text[word.len] = '\0';
+    if (!odin3_prov_depth_parse_level(text, &autolevel, &level)) {
+        return usage(rd, st, NULL);
+    }
+    rd->proj->prov_set = true;
+    rd->proj->prov_auto = autolevel;
+    rd->proj->prov_level = level;
+    return ODIN3_OK;
+}
+
+static odin3_status key_prov_budget(o3_reader *rd, const o3_stmt *st) {
+    if (rd->proj->prov_budget != 0) {
+        odin3_bytes key = odin3_bytes_cstr("prov_budget");
+        return syntax(rd, st, "prov_budget given twice", &key);
+    }
+    char text[PROV_WORD_BYTES];
+    odin3_bytes word = st->args[0].text;
+    uint64_t bytes = 0;
+    if (word.len >= sizeof text) {
+        return usage(rd, st, NULL);
+    }
+    memcpy(text, word.ptr, word.len);
+    text[word.len] = '\0';
+    if (!odin3_prov_depth_parse_size(text, &bytes)) {
+        return usage(rd, st, NULL);
+    }
+    rd->proj->prov_budget = bytes;
+    return ODIN3_OK;
 }
 
 /*
@@ -1117,6 +1162,8 @@ static const o3_key k_keys[] = {
      key_testbench},
     {"flow", 1, 1, "flow <script.o3>", key_flow},
     {"abc_script", 1, 1, "abc_script <file>", key_abc_script},
+    {"prov_level", 1, 1, "prov_level <0|1|2|3|4|auto>", key_prov_level},
+    {"prov_budget", 1, 1, "prov_budget <size>[K|M|G]", key_prov_budget},
     {"schema", 1, 1, "schema <1|2>", key_schema},
     {"tool", 3, MAX_ARGS,
      "tool <id> required|optional <exe> [version-arg <a>] [module <m>] [env <VAR>]", key_tool},
