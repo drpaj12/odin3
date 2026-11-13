@@ -1084,8 +1084,8 @@ uint32_t Adapter::widthCast(const ConversionExpression &cv, uint32_t to, LocSpan
     }
     const uint32_t count = numberI64((int64_t)pad, span);
     const uint32_t inner = node({ODIN3_AST_CONCAT, 0, 0, span.loc, span.end, 0, 0}, {fill});
-    const uint32_t repl = node({ODIN3_AST_REPLICATE, 0, 0, span.loc, span.end, 0, 0},
-                               {count, inner});
+    const uint32_t repl =
+        node({ODIN3_AST_REPLICATE, 0, 0, span.loc, span.end, 0, 0}, {count, inner});
     return node({ODIN3_AST_CONCAT, 0, 0, span.loc, span.end, 0, 0}, {repl, value});
 }
 
@@ -1097,7 +1097,8 @@ uint32_t Adapter::exprConversion(const ConversionExpression &cv, uint32_t loc, u
         /* An explicit cast is a width change (sized cast), a sign change, or a retyping of the
          * same bits (an enum or typedef cast). Integral types only. */
         if (!from_type.isIntegral() || !to_type.isIntegral()) {
-            failf(ODIN3_ERR_PARSE, loc, "an explicit cast between non-integral types is not supported");
+            failf(ODIN3_ERR_PARSE, loc,
+                  "an explicit cast between non-integral types is not supported");
             return 0;
         }
         const uint32_t to = (uint32_t)to_type.getBitWidth();

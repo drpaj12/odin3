@@ -951,7 +951,8 @@ static bool sv_user_defines_synthesis(const odin3_design *design, const rv_call 
     }
     for (size_t i = 0; proj != NULL && i < proj->defines.len; i++) {
         const odin3_proj_define *def = odin3_vec_cat(&proj->defines, i);
-        const odin3_pp_define one = {odin3_bytes_cstr(text_of(design, def->name)), {NULL, 0}, false};
+        const odin3_pp_define one = {
+            odin3_bytes_cstr(text_of(design, def->name)), {NULL, 0}, false};
         if (defines_synthesis(&one, 1)) {
             return true;
         }

@@ -376,7 +376,8 @@ static void test_net_ids(void) {
     odin3_util_free(with);
 }
 
-/* --skip-flattened (survey gap 9): a module flatten marked unused is left out; off, it is written. */
+/* --skip-flattened (survey gap 9): a module flatten marked unused is left out; off, it is written.
+ */
 static void test_skip_flattened(void) {
     build_design();
     odin3_module *mod = odin3_module_get(rj_design, (odin3_module_id){1});

@@ -771,7 +771,7 @@ static odin3_status write_implicit_blackboxes(jw *out, jw_list *modules) {
 }
 
 /* True when flatten marked mod as left unused (ODIN3_ATTR_FLATTENED_AWAY). */
-static bool flattened_away(const jw *out, odin3_module *mod) {
+static bool flattened_away(const jw *out, const odin3_module *mod) {
     uint32_t key = 0;
     if (!odin3_strtab_find(out->strtab, odin3_bytes_cstr(ODIN3_ATTR_FLATTENED_AWAY), &key)) {
         return false;
@@ -906,8 +906,11 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
         odin3_log(ODIN3_LOG_ERROR, "odin3_json_write: no design or no path");
         return ODIN3_ERR_INVALID_ARG;
     }
-    odin3_json_name_style style = opts != NULL ? opts->name_style : ODIN3_JSON_NAMES_SHORT;
-    odin3_prov_map_mode prov_map = opts != NULL ? opts->prov_map : ODIN3_PROV_MAP_NONE;
+    static const odin3_json_write_opts k_defaults = {.name_style = ODIN3_JSON_NAMES_SHORT,
+                                                     .prov_map = ODIN3_PROV_MAP_NONE};
+    const odin3_json_write_opts *opt = opts != NULL ? opts : &k_defaults;
+    odin3_json_name_style style = opt->name_style;
+    odin3_prov_map_mode prov_map = opt->prov_map;
     if (!style_valid(style) || prov_map_needs_hash(prov_map, style)) {
         return ODIN3_ERR_INVALID_ARG;
     }
@@ -919,9 +922,9 @@ odin3_status odin3_json_write_with(const odin3_design *design, const char *path,
                 .strtab = odin3_design_strtab(design),
                 .status = ODIN3_OK,
                 .names = style == ODIN3_JSON_NAMES_SHORT ? JW_NAMES_SHORT : JW_NAMES_PROVENANCE,
-                .odin3_keys = opts != NULL && opts->odin3_keys,
-                .net_ids = opts != NULL && opts->net_ids,
-                .skip_flattened = opts != NULL && opts->skip_flattened};
+                .odin3_keys = opt->odin3_keys,
+                .net_ids = opt->net_ids,
+                .skip_flattened = opt->skip_flattened};
     (void)odin3_strtab_find(state.strtab, odin3_bytes_cstr("odin3_level"), &state.level_key);
     odin3_strbuf_init(&state.key);
     odin3_strbuf_init(&state.src);

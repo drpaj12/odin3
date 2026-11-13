@@ -176,21 +176,28 @@ static odin3_status parse_quartus_option(odin3_bytes *rest, odin3_bytes word, wr
     return st == ODIN3_OK ? odin3_strbuf_append(&out->sim_file, value) : st;
 }
 
+/* write_json's flags without a value: --odin3, --net-ids, --skip-flattened. */
+static bool json_flag(odin3_bytes word, odin3_json_write_opts *json) {
+    bool *flag = NULL;
+    if (odin3_pass_arg_is(word, "--odin3")) {
+        flag = &json->odin3_keys;
+    } else if (odin3_pass_arg_is(word, "--net-ids")) {
+        flag = &json->net_ids;
+    } else if (odin3_pass_arg_is(word, "--skip-flattened")) {
+        flag = &json->skip_flattened;
+    }
+    if (flag != NULL) {
+        *flag = true;
+    }
+    return flag != NULL;
+}
+
 /* Handles option word of pass (its value read from rest); unknown options are INVALID_ARG. */
 static odin3_status parse_option(const char *pass, odin3_bytes *rest, odin3_bytes word,
                                  write_args *out) {
     bool names = strcmp(pass, "write_verilog") == 0 || strcmp(pass, "write_json") == 0;
     bool dot = strcmp(pass, "write_dot") == 0;
-    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--odin3")) {
-        out->json.odin3_keys = true;
-        return ODIN3_OK;
-    }
-    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--net-ids")) {
-        out->json.net_ids = true;
-        return ODIN3_OK;
-    }
-    if (strcmp(pass, "write_json") == 0 && odin3_pass_arg_is(word, "--skip-flattened")) {
-        out->json.skip_flattened = true;
+    if (strcmp(pass, "write_json") == 0 && json_flag(word, &out->json)) {
         return ODIN3_OK;
     }
     if (strcmp(pass, "write_verilog") == 0 && is_quartus_option(word)) {
@@ -263,7 +270,7 @@ static odin3_status check_name_map(const char *pass, write_args *parsed) {
 static odin3_status write_format_run(odin3_design *design, odin3_bytes args, write_format format) {
     write_args parsed = {
         .verilog = {ODIN3_VERILOG_NAMES_SHORT, NULL, ODIN3_PROV_MAP_NONE, false, NULL},
-        .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, false, ODIN3_PROV_MAP_NONE},
+        .json = {ODIN3_JSON_NAMES_SHORT, NULL, false, false, false, ODIN3_PROV_MAP_NONE},
         .dot = {ODIN3_DOT_FOCUS_NONE, NULL, 0, NULL, false}};
     odin3_strbuf_init(&parsed.path);
     odin3_strbuf_init(&parsed.focus);
@@ -325,14 +332,16 @@ static odin3_status write_rtlil_run(odin3_pass_ctx *ctx, odin3_design *design, o
 
 const odin3_pass_def odin3_pass_write_json = {
     "write_json",
-    "write_json <file> [--odin3] [--net-ids] [--skip-flattened] [--name-style short|provenance|hash [--name-map "
+    "write_json <file> [--odin3] [--net-ids] [--skip-flattened] [--name-style "
+    "short|provenance|hash [--name-map "
     "<file>]] "
     "[--prov-map [refs|constructs|full]]: write the design as Yosys-schema JSON (file - is "
     "stdout); hash names write the name map to <file>.names or --name-map; --prov-map (hash "
     "names only) writes the version 2 map with the records and the AST layer; --odin3 adds "
     "odin3_version, and per module, cell and netname odin3_prov and "
     "odin3_level; --net-ids adds odin3_nets (the net ID of each bit) to every netname; "
-    "--skip-flattened leaves out the modules flatten left unused (default: every module is written)",
+    "--skip-flattened leaves out the modules flatten left unused (default: every module is "
+    "written)",
     write_json_run,
     NULL,
     false,

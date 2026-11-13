@@ -20,8 +20,8 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <stdio.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 enum { E1_ITEMS = 2, E1_KEY_SHIFT = 32 };
@@ -353,12 +353,14 @@ odin3_status odin3_elab1_write_carriers(odin3_elab1 *e1) {
 
 /* The port name of a connection to an implicit black box: its own, or for a positional one
  * `$<pos+1>` (what Yosys calls the ports of a cell of an unknown module); 0 on no memory. */
+enum { POS_NAME_MAX = 16 };
+
 uint32_t odin3_elab1_conn_port_name(odin3_elab1 *e1, odin3_ast_id conn, uint32_t pos) {
     uint32_t name = odin3_ast_name(e1->parsed, conn);
     if (name != 0) {
         return name;
     }
-    char text[16];
+    char text[POS_NAME_MAX];
     int len = snprintf(text, sizeof text, "$%" PRIu32, pos + 1U);
     odin3_design_intern(e1->design, (odin3_bytes){text, (size_t)len}, &name);
     return name;
@@ -492,7 +494,8 @@ static odin3_status auto_ports(e1b_auto *ax, uint32_t box) {
         st = st != ODIN3_OK ? st : auto_port(ax, box, conns.ids[i], i);
     }
     for (uint32_t i = 0; i < conns.n; i++) {
-        (void)odin3_u64map_remove(e1->conn_seen, self | odin3_elab1_conn_port_name(e1, conns.ids[i], i));
+        (void)odin3_u64map_remove(e1->conn_seen,
+                                  self | odin3_elab1_conn_port_name(e1, conns.ids[i], i));
     }
     return st;
 }

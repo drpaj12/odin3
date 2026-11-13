@@ -371,15 +371,16 @@ static void test_sv_diagnostics(void) {
     expect_read_error(files, ODIN3_ERR_PARSE, "expected expression");
 }
 
-/* An explicit width cast, unique/priority and a packed assignment pattern are read (survey gap 4). */
+/* An explicit width cast, unique/priority and a packed assignment pattern are read (survey gap 4).
+ */
 static void test_sv_gap4_constructs(void) {
     const char *files[] = {D "/sv_cast_ok.sv", D "/sv_unique_ok.sv", D "/sv_priority_ok.sv",
                            D "/sv_gap4.sv"};
     for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) {
         TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
         fresh_design();
-        TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, odin3_design_run_pass(design, "read_verilog", files[i]),
-                                      files[i]);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(
+            ODIN3_OK, odin3_design_run_pass(design, "read_verilog", files[i]), files[i]);
     }
 }
 
@@ -472,10 +473,9 @@ static void test_sv_project_config(void) {
 static void test_sv_command_line_config(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
     fresh_design();
-    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_design_run_pass(design, "read_verilog",
-                                                "-D CMD_DEF -I " D "/project/inc " D
-                                                "/cmdline_top.sv"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_run_pass(design, "read_verilog",
+                                                          "-D CMD_DEF -I " D "/project/inc " D
+                                                          "/cmdline_top.sv"));
     uint32_t count = 0;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_design_get_module_count(design, &count));
     TEST_ASSERT_EQUAL_UINT32(1, count);
@@ -487,8 +487,8 @@ static void test_sv_command_line_config(void) {
 static void test_sv_synthesis_predefined(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_pass_set_top_name(NULL));
     fresh_design();
-    TEST_ASSERT_EQUAL_INT(
-        ODIN3_OK, odin3_design_run_pass(design, "read_verilog", D "/synthesis_top.sv"));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_design_run_pass(design, "read_verilog", D "/synthesis_top.sv"));
 }
 
 /* The constructs the docs list as refused are refused, each with its own located message. */

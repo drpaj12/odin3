@@ -530,7 +530,8 @@ static void test_command_line_defines(void) {
     TEST_ASSERT_NOT_NULL(module_like("dd"));
 }
 
-/* SYNTHESIS is predefined, as Yosys does (survey gap 3): the `ifndef SYNTHESIS branch is skipped. */
+/* SYNTHESIS is predefined, as Yosys does (survey gap 3): the `ifndef SYNTHESIS branch is skipped.
+ */
 static void test_synthesis_is_predefined(void) {
     et_src srcs[] = {{"d.v", "module dd (output y);\n`ifndef SYNTHESIS\n  bad bad bad;\n`endif\n"
                              "`ifdef SYNTHESIS\n  assign y = 1'b1;\n`endif\nendmodule\n"}};
