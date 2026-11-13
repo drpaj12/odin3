@@ -1169,9 +1169,21 @@ static void test_blackbox_port_signed(void) {
     TEST_ASSERT_EQUAL_UINT8(1 + ODIN3_AST_PORT_DECL_INOUT, io->dir);
 }
 
-static void test_implicit_needs_named(void) {
-    run_req("module top; wire x;\n  foo u3 (x);\nendmodule\n", &k_auto, NULL);
-    expect_only_error("t.v:2:7: error: implicit black box 'foo' needs named connections");
+/* Positional connections to an implicit black box name its ports $1, $2, ... in order (as Yosys
+ * does) with a warning; a mix of named and positional is the module rule's error (survey gap 7). */
+static void test_implicit_positional(void) {
+    run_req("module top; wire x, y;\n  foo u3 (x, y);\n  foo u4 (y, x);\nendmodule\n", &k_auto,
+            NULL);
+    TEST_ASSERT_EQUAL_INT_MESSAGE(ODIN3_OK, rs.status, et_log(&rs));
+    TEST_ASSERT_EQUAL_UINT32_MESSAGE(
+        2, et_count_with(&rs, ODIN3_LOG_WARN, "implicit black box 'foo' has positional"),
+        et_log(&rs));
+    expect_blackbox("foo", 2);
+}
+
+static void test_implicit_mixed_connections(void) {
+    run_req("module top; wire x, y;\n  foo u3 (x, .b(y));\nendmodule\n", &k_auto, NULL);
+    expect_only_error("t.v:2:7: error: instance 'u3' mixes ordered and named connections");
 }
 
 static void test_implicit_width_mismatch(void) {
@@ -1342,7 +1354,8 @@ int main(void) {
     run_implicit_tests();
     RUN_TEST(test_blackbox_body_not_in_union);
     RUN_TEST(test_blackbox_port_signed);
-    RUN_TEST(test_implicit_needs_named);
+    RUN_TEST(test_implicit_positional);
+    RUN_TEST(test_implicit_mixed_connections);
     RUN_TEST(test_implicit_width_mismatch);
     RUN_TEST(test_instance_cap);
     RUN_TEST(test_oom);

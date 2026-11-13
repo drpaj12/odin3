@@ -20,6 +20,7 @@
 #include <inttypes.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -350,6 +351,19 @@ odin3_status odin3_elab1_write_carriers(odin3_elab1 *e1) {
 
 /* --- implicit black boxes (--auto-blackbox) ------------------------------------------------- */
 
+/* The port name of a connection to an implicit black box: its own, or for a positional one
+ * `$<pos+1>` (what Yosys calls the ports of a cell of an unknown module); 0 on no memory. */
+uint32_t odin3_elab1_conn_port_name(odin3_elab1 *e1, odin3_ast_id conn, uint32_t pos) {
+    uint32_t name = odin3_ast_name(e1->parsed, conn);
+    if (name != 0) {
+        return name;
+    }
+    char text[16];
+    int len = snprintf(text, sizeof text, "$%" PRIu32, pos + 1U);
+    odin3_design_intern(e1->design, (odin3_bytes){text, (size_t)len}, &name);
+    return name;
+}
+
 /* The connections of every INSTANCE of item add their names to black box box (first use). */
 static odin3_status union_of(odin3_elab1 *e1, uint32_t box, odin3_ast_id item) {
     odin3_ast_span kids = odin3_ast_children(e1->parsed, item);
@@ -358,7 +372,7 @@ static odin3_status union_of(odin3_elab1 *e1, uint32_t box, odin3_ast_id item) {
          i++) {
         odin3_ast_span conns = inst_conns(e1, kids.ids[i]);
         for (uint32_t j = 0; st == ODIN3_OK && j < conns.n; j++) {
-            uint32_t name = odin3_ast_name(e1->parsed, conns.ids[j]);
+            uint32_t name = odin3_elab1_conn_port_name(e1, conns.ids[j], j);
             odin3_elab1_port port = {.name = name, .dir = ODIN3_DIR_INOUT};
             bool fresh = name != 0 && odin3_elab1_bbox_port(e1, box, name) == 0;
             st = fresh ? bbport_add(e1, box, &port, conns.ids[j]) : ODIN3_OK;
@@ -401,9 +415,9 @@ typedef struct e1b_auto {
 /* One named connection's width against its port's (fixed by the first connection with an
  * expression: from an array of n elements, a width that n divides is n slices of width / n, as
  * for a declared port (EL-11); a later connection may be one element's width or all of them). */
-static odin3_status auto_port(e1b_auto *ax, uint32_t box, odin3_ast_id conn) {
+static odin3_status auto_port(e1b_auto *ax, uint32_t box, odin3_ast_id conn, uint32_t pos) {
     odin3_elab1 *e1 = ax->e1;
-    uint32_t name = odin3_ast_name(e1->parsed, conn);
+    uint32_t name = odin3_elab1_conn_port_name(e1, conn, pos);
     uint32_t at = odin3_elab1_bbox_port(e1, box, name);
     odin3_ast_id expr = odin3_ast_child(e1->parsed, conn, 0);
     uint32_t width = 0;
@@ -434,17 +448,27 @@ static odin3_status auto_port(e1b_auto *ax, uint32_t box, odin3_ast_id conn) {
     return ODIN3_OK;
 }
 
-/* An implicit black box's instance needs named connections. */
+/* An implicit black box's instance is all named or all positional (a mix is an error, as for a
+ * module). Positional connections name the ports `$1`, `$2`, ... in order, as Yosys does, with
+ * a warning: the real port names are not known. */
 static odin3_status auto_named(const e1b_auto *ax) {
     odin3_elab1 *e1 = ax->e1;
     odin3_ast_span conns = inst_conns(e1, ax->inst->instance);
+    uint32_t positional = 0;
     for (uint32_t i = 0; i < conns.n; i++) {
-        if (odin3_ast_name(e1->parsed, conns.ids[i]) == 0) {
-            odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, ax->inst->instance),
-                              "implicit black box '%s' needs named connections",
+        positional += odin3_ast_name(e1->parsed, conns.ids[i]) == 0 ? 1U : 0U;
+    }
+    if (positional != 0 && positional != conns.n) {
+        odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, ax->inst->instance),
+                          "instance '%s' mixes ordered and named connections",
+                          odin3_ast_name_str(e1->parsed, ax->inst->instance));
+        return ODIN3_ERR_PARSE;
+    }
+    if (positional != 0) {
+        odin3_elab1_warn_once(e1, ax->inst->instance,
+                              "implicit black box '%s' has positional connections: its ports "
+                              "are named $1, $2, ... in order",
                               odin3_ast_name_str(e1->parsed, ax->inst->instantiation));
-            return ODIN3_ERR_PARSE;
-        }
     }
     return ODIN3_OK;
 }
@@ -456,7 +480,7 @@ static odin3_status auto_ports(e1b_auto *ax, uint32_t box) {
     uint64_t self = (uint64_t)ax->inst->instance.v << E1_KEY_SHIFT;
     odin3_status st = ODIN3_OK;
     for (uint32_t i = 0; st == ODIN3_OK && i < conns.n; i++) {
-        uint32_t port = odin3_ast_name(e1->parsed, conns.ids[i]);
+        uint32_t port = odin3_elab1_conn_port_name(e1, conns.ids[i], i);
         if (odin3_u64map_get(e1->conn_seen, self | port, NULL)) {
             odin3_elab1_error(e1, odin3_ast_loc(e1->parsed, conns.ids[i]),
                               "port '%s' of instance '%s' is connected twice", str_of(e1, port),
@@ -465,10 +489,10 @@ static odin3_status auto_ports(e1b_auto *ax, uint32_t box) {
             continue;
         }
         st = odin3_u64map_put(e1->conn_seen, (odin3_kv){self | port, 1});
-        st = st != ODIN3_OK ? st : auto_port(ax, box, conns.ids[i]);
+        st = st != ODIN3_OK ? st : auto_port(ax, box, conns.ids[i], i);
     }
     for (uint32_t i = 0; i < conns.n; i++) {
-        (void)odin3_u64map_remove(e1->conn_seen, self | odin3_ast_name(e1->parsed, conns.ids[i]));
+        (void)odin3_u64map_remove(e1->conn_seen, self | odin3_elab1_conn_port_name(e1, conns.ids[i], i));
     }
     return st;
 }

@@ -661,6 +661,10 @@ odin3_status odin3_elab1_auto_blackbox(odin3_elab1 *e1, const odin3_elab_inst *i
 const odin3_elab1_bbox *odin3_elab1_bbox_at(const odin3_elab1 *e1, uint32_t idx);
 const odin3_elab1_bbport *odin3_elab1_bbport_at(const odin3_elab1 *e1, uint32_t idx);
 uint32_t odin3_elab1_implicit_box(const odin3_elab1 *e1, uint32_t name);
+
+/* The port a connection to an implicit black box names: its own name, or `$<pos+1>` for a
+ * positional one (0 when out of memory). */
+uint32_t odin3_elab1_conn_port_name(odin3_elab1 *e1, odin3_ast_id conn, uint32_t pos);
 uint32_t odin3_elab1_bbox_port(const odin3_elab1 *e1, uint32_t box, uint32_t name);
 
 /* Every port of specialization spec into ports (room for its definition's positions), evaluated

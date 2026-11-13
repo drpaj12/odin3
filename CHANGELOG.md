@@ -59,6 +59,10 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   struct. An assignment pattern for an unpacked array or struct is still refused with a clearer message (VTR `hdmi` stays failed).
   The VerilogEval references Prob151 and Prob156 now read (`tests/cli/veval/manifest.tsv`: refused to ok). Tests: `test_read_slang`
   (`test_sv_gap4_constructs`), `cli_veval_corpus`.
+  (7) An instance of an implicit black box (`--auto-blackbox`; for example `ROM32X1 u (a, b, c)`) may use positional connections: the
+  ports are named `$1`, `$2`, ... in order, as Yosys names the ports of a cell of an unknown module, with a WARNING; a mix of named
+  and positional connections is an error as for a module. Before, any positional connection was `needs named connections`. Test:
+  `test_elab_stage1_inst` (`test_implicit_positional`, `test_implicit_mixed_connections`).
   (8) A concatenation target with a select whose index is not constant (`{a[j+3], b[j +: 4]} = ...` inside nested loops, picorv32
   `ENABLE_MUL`) is split per part as a memory word already was, instead of the error `non-constant index into ... in a
   concatenation target`. Test: `test_elab_stage2_case` (`test_variable_index_in_concatenation_*`).
