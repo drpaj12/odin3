@@ -258,7 +258,9 @@ static double pick(double a, double b, bool want_min) {
 
 /* Sorts, then merges duplicates keeping the worst. */
 static void merge_dups(odin3_hints *h) {
-    qsort(h->cells, h->n_cells, sizeof *h->cells, cmp_cell);
+    if (h->n_cells > 1) {
+        qsort(h->cells, h->n_cells, sizeof *h->cells, cmp_cell);
+    }
     size_t out = 0;
     for (size_t i = 0; i < h->n_cells; i++) {
         if (out > 0 && h->cells[out - 1].uid == h->cells[i].uid) {
@@ -272,7 +274,9 @@ static void merge_dups(odin3_hints *h) {
         }
     }
     h->n_cells = out;
-    qsort(h->nets, h->n_nets, sizeof *h->nets, cmp_net);
+    if (h->n_nets > 1) {
+        qsort(h->nets, h->n_nets, sizeof *h->nets, cmp_net);
+    }
     out = 0;
     for (size_t i = 0; i < h->n_nets; i++) {
         if (out > 0 && strcmp(h->nets[out - 1].name, h->nets[i].name) == 0) {
@@ -372,8 +376,9 @@ void odin3_hints_free(odin3_hints *hints) {
 
 const odin3_hint_cell *odin3_hints_find_cell(odin3_hints *hints, uint32_t uid) {
     const odin3_hint_cell key = {.uid = uid};
-    odin3_hint_cell *hit =
-        bsearch(&key, hints->cells, hints->n_cells, sizeof *hints->cells, cmp_cell);
+    odin3_hint_cell *hit = hints->n_cells == 0 ? NULL
+                                               : bsearch(&key, hints->cells, hints->n_cells,
+                                                         sizeof *hints->cells, cmp_cell);
     if (hit != NULL) {
         hints->cell_used[hit - hints->cells] = 1;
     }
@@ -382,7 +387,9 @@ const odin3_hint_cell *odin3_hints_find_cell(odin3_hints *hints, uint32_t uid) {
 
 const odin3_hint_net *odin3_hints_find_net(odin3_hints *hints, const char *name) {
     const odin3_hint_net key = {.name = (char *)name};
-    odin3_hint_net *hit = bsearch(&key, hints->nets, hints->n_nets, sizeof *hints->nets, cmp_net);
+    odin3_hint_net *hit = hints->n_nets == 0 ? NULL
+                                             : bsearch(&key, hints->nets, hints->n_nets,
+                                                       sizeof *hints->nets, cmp_net);
     if (hit != NULL) {
         hints->net_used[hit - hints->nets] = 1;
     }

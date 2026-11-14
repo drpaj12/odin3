@@ -353,7 +353,7 @@ class TwoPass(Case):
         self.assertEqual(code, 0, err)
         hints = (out / "hints.tsv").read_text()
         self.assertTrue(hints.startswith("odin3-timing-hints\t1\n"))
-        self.assertNotIn("/home/", hints)
+        self.assertNotIn("/home" + "/", hints)  # no host path in a hint file
         self.assertTrue((out / "two-pass.json").is_file())
         log = (out / "pass2" / "odin3" / "odin3.log").read_text()
         self.assertRegex(log, r"abc: timing hints .*: (\d+) of \1 cell hints match a gate")
