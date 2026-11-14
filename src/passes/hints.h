@@ -66,7 +66,8 @@ typedef struct odin3_hints {
  * A duplicate cell or net keeps the worst (smallest slack, smallest required, largest arrival).
  * ODIN3_ERR_PARSE after logging one `read_hints: <label>:<line>: <what>` error for a wrong first
  * line, an unknown record kind, a wrong field count, a number that is not one, a cell with
- * depth 0 and luts 0 together, or a file whose cell or net records need a `cpd_ps`, `depth`
+ * depth 0 and luts 0 together, a NUL byte, a cell slack below `slack_min_ps`, an `ns_per_level`
+ * (given or cpd/depth) below 1e-6, or a file whose cell or net records need a `cpd_ps`, `depth`
  * and `slack_min_ps` meta line that is missing. NO_MEMORY. *out is NULL on failure.
  */
 odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, odin3_hints **out);
@@ -85,9 +86,14 @@ size_t odin3_hints_nets_used(const odin3_hints *hints);
 
 /*
  * The hints of design: those the `read_hints` pass loaded, else (loaded now, once) the file the
- * project's `timing_hints` key names; NULL when there are none. A project file that cannot be
- * read is an error logged once, and NULL. Valid until the next read_* pass or hints_set.
+ * project's `timing_hints` key names; *out is NULL when there are none. A project file that
+ * cannot be read or parsed is an error (ERR_IO, ERR_PARSE, NO_MEMORY, logged with the file name)
+ * and is tried again on the next call. Hints loaded for an older design (another serial) are
+ * dropped with a WARNING. Valid until the next read_* pass, a reset or a load.
  */
+odin3_status odin3_hints_fetch(const odin3_design *design, odin3_hints **out);
+
+/* odin3_hints_fetch for a caller with no error path: NULL for none and for an error. */
 odin3_hints *odin3_hints_of(const odin3_design *design);
 
 /* Loads path and makes it the hints of design (replacing any). ODIN3_ERR_IO, _PARSE, NO_MEMORY. */

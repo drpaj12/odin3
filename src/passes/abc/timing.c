@@ -41,12 +41,13 @@ uint32_t odin3_abc_timing_slot(const odin3_abc_script *script) {
     return UINT32_MAX;
 }
 
-void odin3_abc_timing_start(odin3_abc_run *run) {
+odin3_status odin3_abc_timing_start(odin3_abc_run *run) {
     run->hints = NULL;
     run->timing_slot = UINT32_MAX;
-    odin3_hints *hints = odin3_hints_of(run->design);
-    if (hints == NULL) {
-        return;
+    odin3_hints *hints = NULL;
+    odin3_status st = odin3_hints_fetch(run->design, &hints);
+    if (st != ODIN3_OK || hints == NULL) {
+        return st;
     }
     const char *why = NULL;
     if (run->gates_mode) {
@@ -63,10 +64,11 @@ void odin3_abc_timing_start(odin3_abc_run *run) {
                   "abc: timing hints are loaded (%s) but this run cannot use "
                   "them: %s; they are ignored",
                   hints->label, why);
-        return;
+        return ODIN3_OK;
     }
     run->hints = hints;
     run->timing_slot = odin3_abc_timing_slot(&run->script);
+    return ODIN3_OK;
 }
 
 /* --- one region ------------------------------------------------------------------------------- */

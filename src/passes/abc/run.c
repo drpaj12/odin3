@@ -385,7 +385,10 @@ static odin3_status startup_checks(odin3_abc_run *run) {
     if (run->route == ODIN3_ABC_ROUTE_CHILD) {
         run->exchange = ODIN3_ABC_EXCHANGE_BLIF; /* the subprocess always uses the BLIF exchange */
     }
-    odin3_abc_timing_start(run);
+    st = odin3_abc_timing_start(run);
+    if (st != ODIN3_OK) {
+        return st;
+    }
     st = odin3_abc_check_views(run->design);
     st = st == ODIN3_OK ? open_log(run) : st;
     st = st == ODIN3_OK ? make_given_dir(run) : st;

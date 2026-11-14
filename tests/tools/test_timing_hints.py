@@ -274,6 +274,13 @@ class Hook(Case):
         dump = self.odin3("read_project p.o3proj; dump_project")
         self.assertIn("timing_hints", dump.stdout + dump.stderr)
         (self.tmp / "p2.o3proj").write_text("timing_hints h.tsv\ntiming_hints h.tsv\n")
+        (self.tmp / "p3.o3proj").write_text("timing_hints bad.tsv\n")
+        (self.tmp / "bad.tsv").write_text("not a hint file\n")
+        gone = self.odin3("read_project p3.o3proj; read_verilog and11.v; proc; flatten; lower; "
+                          "abc --lut 6")
+        self.assertNotEqual(gone.returncode, 0)
+        self.assertIn("bad.tsv:1: not a timing hint file", gone.stderr)
+        self.assertIn("timing_hints file", gone.stderr)
         twice = self.odin3("read_project p2.o3proj")
         self.assertNotEqual(twice.returncode, 0)
         self.assertIn("timing_hints given twice", twice.stderr)

@@ -21,9 +21,10 @@ uint32_t odin3_abc_timing_slot(const odin3_abc_script *script);
 /*
  * Start-up: finds the hints of the design and decides whether this run can use them. They need the
  * BLIF exchange, the linked engine, no --gates and a script with an `if` command; otherwise one
- * WARNING says why and run->hints stays NULL. Sets run->hints and run->timing_slot.
+ * WARNING says why and run->hints stays NULL. Sets run->hints and run->timing_slot. A project
+ * hint file that cannot be read or parsed fails the run (the status of odin3_hints_fetch).
  */
-void odin3_abc_timing_start(odin3_abc_run *run);
+odin3_status odin3_abc_timing_start(odin3_abc_run *run);
 
 /*
  * For the current region (run->module, run->region): marks the hints that match a gate, computes

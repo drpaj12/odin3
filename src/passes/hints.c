@@ -13,10 +13,15 @@
 
 #include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* The smallest ns per LUT level a file may state or imply: below it the times in levels reach
+ * inf in the float timing file. */
+static const double NS_PER_LEVEL_FLOOR = 1e-6;
 
 enum {
     MAX_HINT_BYTES = 1U << 30,
@@ -156,6 +161,9 @@ static odin3_status cell_line(hparse *hp, char **f, size_t n) {
     }
     if (!uint_of(f[5], &rec.luts)) {
         return perr(hp, "not an unsigned number", f[5]);
+    }
+    if (rec.depth == 0 && rec.luts == 0) {
+        return perr(hp, "a cell hint with depth 0 and luts 0 together", f[1]);
     }
     rec.slack_ps = slack;
     rec.crit = crit;
@@ -307,7 +315,23 @@ static odin3_status finish_parse(hparse *hp, bool first) {
     if ((h->n_cells != 0 || h->n_nets != 0) && !(h->ns_per_level > 0.0)) {
         return perr(hp, "ns_per_level (cpd_ps / depth) must be positive", NULL);
     }
+    if ((h->n_cells != 0 || h->n_nets != 0) && h->ns_per_level < NS_PER_LEVEL_FLOOR) {
+        odin3_log(ODIN3_LOG_ERROR,
+                  "read_hints: %s: ns_per_level %g is below the floor %g ns (a level is the unit "
+                  "the ABC timing file is written in)",
+                  hp->label, h->ns_per_level, NS_PER_LEVEL_FLOOR);
+        return ODIN3_ERR_PARSE;
+    }
     merge_dups(h);
+    for (size_t i = 0; i < h->n_cells; i++) {
+        if (h->cells[i].slack_ps < h->slack_min_ps) {
+            odin3_log(ODIN3_LOG_ERROR,
+                      "read_hints: %s: cell %" PRIu32 " has slack %.1f ps, below the file's "
+                      "slack_min_ps %.1f",
+                      hp->label, h->cells[i].uid, h->cells[i].slack_ps, h->slack_min_ps);
+            return ODIN3_ERR_PARSE;
+        }
+    }
     h->cell_used = odin3_util_calloc(h->n_cells + 1);
     h->net_used = odin3_util_calloc(h->n_nets + 1);
     return h->cell_used != NULL && h->net_used != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
@@ -328,6 +352,16 @@ odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, 
     }
     memcpy(copy, text, len);
     copy[len] = '\0';
+    if (strlen(copy) != len) {
+        hp.line = 1;
+        for (const char *c = copy; *c != '\0'; c++) {
+            hp.line += *c == '\n' ? 1U : 0U;
+        }
+        odin3_status bad = perr(&hp, "a NUL byte in the file", NULL);
+        odin3_util_free(hp.hints);
+        odin3_util_free(copy);
+        return bad;
+    }
     hp.hints->label = dup_str(label);
     odin3_status st = hp.hints->label != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
     bool first = true;
@@ -456,23 +490,43 @@ odin3_status odin3_hints_load(const odin3_design *design, const char *path) {
     return ODIN3_OK;
 }
 
-odin3_hints *odin3_hints_of(const odin3_design *design) {
+odin3_status odin3_hints_fetch(const odin3_design *design, odin3_hints **out) {
+    *out = NULL;
     uint64_t serial = odin3_design_serial(design);
     if (g_cache.serial != serial) {
+        if (g_cache.hints != NULL) {
+            odin3_log(ODIN3_LOG_WARN,
+                      "read_hints: the hints of %s were loaded for an older design (serial "
+                      "%" PRIu64 ", this design is %" PRIu64 "); they are dropped",
+                      g_cache.hints->label, g_cache.serial, serial);
+        }
         odin3_hints_reset();
         g_cache.serial = serial;
     }
     if (g_cache.hints != NULL || g_cache.project_tried) {
-        return g_cache.hints;
+        *out = g_cache.hints;
+        return ODIN3_OK;
     }
-    g_cache.project_tried = true;
     const odin3_project *proj = odin3_design_project(design);
     if (proj != NULL && proj->timing_hints.given != 0) {
         const char *path =
             odin3_strtab_get(odin3_design_strtab(design), proj->timing_hints.resolved);
-        (void)read_file(path, &g_cache.hints);
+        odin3_status st = read_file(path, &g_cache.hints);
+        if (st != ODIN3_OK) {
+            odin3_log(ODIN3_LOG_ERROR, "read_hints: the project's timing_hints file %s is not "
+                                       "usable; fix it or remove the key",
+                      path);
+            return st;
+        }
     }
-    return g_cache.hints;
+    g_cache.project_tried = true;
+    *out = g_cache.hints;
+    return ODIN3_OK;
+}
+
+odin3_hints *odin3_hints_of(const odin3_design *design) {
+    odin3_hints *hints = NULL;
+    return odin3_hints_fetch(design, &hints) == ODIN3_OK ? hints : NULL;
 }
 
 /* --- the read_hints pass -----------------------------------------------------------------------
