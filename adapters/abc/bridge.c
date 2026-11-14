@@ -108,6 +108,87 @@ static void adp_reset_generators(unsigned int seed) {
     srand(seed);
 }
 
+/* --- timing hints (src/passes/abc/timing.h) ---------------------------------------------------- */
+
+enum {
+    ADP_TIMING_LINE = 256 /* a line of the timing file: a keyword, a net name and a number */
+};
+
+/* The counts of one o3_timing run, printed as one line the core logs. */
+typedef struct adp_timing_counts {
+    int arrivals, requireds, missing;
+} adp_timing_counts;
+
+/* One line `<kind> <name> <levels>` of the timing file; kind pi (an input arrival), po (an
+ * output's required time) or li (a register's input required time, the register named by its
+ * output). A name the network no longer has (scorr merged the register) is counted, not an error. */
+static void adp_timing_apply(Abc_Ntk_t *ntk, const char *kind, const char *name, float value,
+                             adp_timing_counts *cnt) {
+    char buf[ADP_TIMING_LINE];
+    (void)snprintf(buf, sizeof buf, "%s", name);
+    Abc_Obj_t *obj = strcmp(kind, "po") == 0 ? Abc_NtkFindCo(ntk, buf) : Abc_NtkFindCi(ntk, buf);
+    if (obj != NULL && strcmp(kind, "li") == 0) {
+        Abc_Obj_t *latch = Abc_ObjFaninNum(obj) > 0 ? Abc_ObjFanin0(obj) : NULL;
+        obj = latch != NULL && Abc_ObjIsLatch(latch) && Abc_ObjFaninNum(latch) > 0
+                  ? Abc_ObjFanin0(latch)
+                  : NULL;
+    }
+    if (obj == NULL) {
+        cnt->missing++;
+    } else if (strcmp(kind, "pi") == 0) {
+        Abc_NtkTimeSetArrival(ntk, (int)Abc_ObjId(obj), value, value);
+        cnt->arrivals++;
+    } else {
+        Abc_NtkTimeSetRequired(ntk, (int)Abc_ObjId(obj), value, value);
+        cnt->requireds++;
+    }
+}
+
+/* o3_timing <file>: sets CI arrival and CO required times, in LUT levels, on the current network
+ * (the mapper `if` reads them: abcIf.c, Abc_NtkGetCiArrivalFloats and Abc_NtkGetCoRequiredFloats).
+ * `default_required <v>` first gives every CO that required time, because a CO without one would
+ * have none (ABC_INFINITY) and `if` would map for area. Run just before `if`: scorr changes the
+ * registers and drops timing. */
+static int adp_cmd_timing(Abc_Frame_t *frame, int argc, char **argv) {
+    Abc_Ntk_t *ntk = Abc_FrameReadNtk(frame);
+    if (argc == 2 && ntk != NULL && strcmp(argv[1], "-c") == 0) {
+        if (ntk->pManTime != NULL) { /* o3_timing -c: drop the timing, so write_hie prints none */
+            Abc_ManTimeStop(ntk->pManTime);
+            ntk->pManTime = NULL;
+        }
+        return 0;
+    }
+    if (argc != 2 || ntk == NULL) {
+        Abc_Print(-1, "usage: o3_timing <file> (needs a network)\n");
+        return 1;
+    }
+    FILE *fp = fopen(argv[1], "r");
+    if (fp == NULL) {
+        Abc_Print(-1, "o3_timing: cannot open %s\n", argv[1]);
+        return 1;
+    }
+    adp_timing_counts cnt = {0, 0, 0};
+    char line[ADP_TIMING_LINE * 2];
+    while (fgets(line, sizeof line, fp) != NULL) {
+        char kind[ADP_TIMING_LINE];
+        char name[ADP_TIMING_LINE];
+        double value = 0;
+        if (sscanf(line, "default_required %lf", &value) == 1) {
+            Abc_NtkTimeSetDefaultRequired(ntk, (float)value, (float)value);
+        } else if (sscanf(line, "%255s %255s %lf", kind, name, &value) == 3) {
+            adp_timing_apply(ntk, kind, name, (float)value, &cnt);
+        }
+    }
+    (void)fclose(fp);
+    Abc_Print(1, "o3_timing: %d arrival and %d required times set, %d names not in the network\n",
+              cnt.arrivals, cnt.requireds, cnt.missing);
+    return 0;
+}
+
+static void adp_timing_add_command(Abc_Frame_t *frame) {
+    Cmd_CommandAdd(frame, "Odin3", "o3_timing", adp_cmd_timing, 0);
+}
+
 #ifdef ODIN3_ABC_TEST_HOOKS
 static void adp_test_add_commands(Abc_Frame_t *frame);
 #endif
@@ -123,6 +204,7 @@ odin3_status odin3_bridge_frame_open(void) {
     int set_check = Cmd_CommandExecute(adp_frame, "set check");
     ODIN3_ADAPTER_ASSERT(set_check == 0);
     adp_reset_generators(ADP_LIBC_SEED);
+    adp_timing_add_command(adp_frame);
 #ifdef ODIN3_ABC_TEST_HOOKS
     adp_test_add_commands(adp_frame);
 #endif

@@ -120,6 +120,7 @@ add_library(odin3_core OBJECT
     src/passes/dump_locs.c
     src/passes/prov_depth.c
     src/passes/prov_estimate.c
+    src/passes/hints.c
     src/passes/names.c
     src/passes/names_v2.c
     src/passes/levelize/levelize.c
@@ -302,6 +303,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/result.c
     src/passes/abc/cells.c
     src/passes/abc/xblif.c
+    src/passes/abc/timing.c
     src/passes/abc/xblif_read.c
     src/passes/abc/aig.c
     src/passes/abc/aligned.c

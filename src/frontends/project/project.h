@@ -213,6 +213,7 @@ typedef struct odin3_project {
     odin3_loc top_at;
     odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
     odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
+    odin3_proj_path timing_hints; /* timing_hints <file>: given 0 = none (src/passes/hints.h) */
     bool prov_set;              /* prov_level given: prov_auto, or prov_level 0..4 */
     bool prov_auto;
     uint32_t prov_level;

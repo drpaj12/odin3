@@ -453,8 +453,16 @@ odin3_status odin3_abc_xblif_write(odin3_abc_run *run, const odin3_abc_region *r
 
 /* --- commands ------------------------------------------------------------------------------ */
 
+/* Timing hints add two internal commands: `o3_timing "<file>"` at the script position of the
+ * mapper `if` (the script from there on moves one later) and `o3_timing -c`, which drops ABC's
+ * timing data so that write_hie does not print it, just before the final &put or write_hie. */
+static bool has_clear(const odin3_abc_run *run) {
+    return run->timing_on && run->script.final_space != ODIN3_ABC_SPACE_GIA;
+}
+
 uint32_t odin3_abc_xblif_command_count(const odin3_abc_run *run) {
-    return 2U + run->script.n_cmds + (run->script.final_space == ODIN3_ABC_SPACE_GIA ? 1U : 0U);
+    return 2U + run->script.n_cmds + (run->script.final_space == ODIN3_ABC_SPACE_GIA ? 1U : 0U) +
+           (run->timing_on ? 1U : 0U) + (has_clear(run) ? 1U : 0U);
 }
 
 odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
@@ -462,14 +470,27 @@ odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
                                      const odin3_abc_cmd **src) {
     *src = NULL;
     uint32_t n_cmds = run->script.n_cmds;
+    bool timing = run->timing_on && paths->timing != NULL;
+    uint32_t extra = timing ? 1U : 0U;
     if (index == 0) {
         return odin3_strbuf_appendf(out, "read \"%s\"", paths->in);
     }
-    if (index <= n_cmds) {
-        *src = odin3_abc_script_cmd(&run->script, index - 1U);
+    uint32_t pos = index - 1U;
+    if (timing && pos == run->timing_slot) {
+        return odin3_strbuf_appendf(out, "o3_timing \"%s\"", paths->timing);
+    }
+    if (timing && pos > run->timing_slot) {
+        pos--;
+    }
+    if (index <= n_cmds + extra) {
+        *src = odin3_abc_script_cmd(&run->script, pos);
         return odin3_strbuf_append(out, odin3_bytes_cstr((*src)->line));
     }
-    if (run->script.final_space == ODIN3_ABC_SPACE_GIA && index == n_cmds + 1U) {
+    uint32_t tail = index - (n_cmds + extra); /* 1: the first command after the script */
+    if (timing && has_clear(run) && tail == 1U) {
+        return odin3_strbuf_append(out, odin3_bytes_cstr("o3_timing -c"));
+    }
+    if (run->script.final_space == ODIN3_ABC_SPACE_GIA && tail == 1U) {
         return odin3_strbuf_append(out, odin3_bytes_cstr("&put"));
     }
     return odin3_strbuf_appendf(out, "write_hie \"%s\" \"%s\"", paths->in, paths->out);

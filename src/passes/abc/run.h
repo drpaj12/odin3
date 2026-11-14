@@ -15,6 +15,7 @@
 #include "passes/abc/aig.h"
 #include "passes/abc/region.h"
 #include "passes/abc/script.h"
+#include "passes/hints.h"
 #include "techlib/libcells.h"
 #include "util/arena.h"
 #include "util/str.h"
@@ -54,6 +55,7 @@ typedef struct odin3_abc_run_stats {
     uint64_t edges;
     uint32_t namemap_hit, namemap_total;
     uint32_t cut_exact, cut_approx; /* --prov-cut: LUTs with an exact or an approximate cut */
+    uint32_t hint_req, hint_arr;    /* timing hints: required times and arrival times set */
 } odin3_abc_run_stats;
 
 struct odin3_abc_run {
@@ -89,6 +91,12 @@ struct odin3_abc_run {
         aig; /* the in-memory exchange's AIG of the run in progress (net_lit NULL: none) */
     char nomap_reason[ODIN3_ABC_REASON_BYTES]; /* why the run has no name map, "" when it has one */
     odin3_abc_run_stats stats;                 /* reset by each run (run_domain) */
+    /* timing hints (timing.h): the table (NULL: none or unusable), where the `o3_timing` command
+     * goes in the script, whether this run has a timing file, and the totals over the pass */
+    odin3_hints *hints;
+    uint32_t timing_slot;
+    bool timing_on;
+    uint64_t hint_req_total, hint_arr_total;
     /* abc --gates (gatemap spec 3, 4; plan Task 10): gates_mode (the plan's `gates`, a name the
      * type table above already has), the library's cells, its genlib text and the text's SHA-256
      * (64 hex digits). Without --gates: lib and genlib empty, the digest "". */
@@ -136,13 +144,14 @@ odin3_status odin3_abc_check_views(const odin3_design *design);
 
 /*
  * The names of the files of run r in run->dir: dir/abc<r>.in.blif (kind 0), .cmd (1), .log (2),
- * .out.blif (3). ODIN3_ERR_INVALID_ARG for a longer path than cap.
+ * .out.blif (3), .timing (4). ODIN3_ERR_INVALID_ARG for a longer path than cap.
  */
 enum odin3_abc_file_kind {
     ODIN3_ABC_FILE_IN = 0,
     ODIN3_ABC_FILE_CMD,
     ODIN3_ABC_FILE_LOG,
-    ODIN3_ABC_FILE_OUT
+    ODIN3_ABC_FILE_OUT,
+    ODIN3_ABC_FILE_TIMING /* abc<r>.timing, only with timing hints (timing.h) */
 };
 odin3_status odin3_abc_run_path(const odin3_abc_run *run, uint32_t file_kind, char *path,
                                 size_t cap);

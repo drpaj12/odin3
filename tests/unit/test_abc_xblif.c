@@ -140,7 +140,7 @@ static void test_command_file(void) {
     odin3_strbuf cmds;
     odin3_strbuf_init(&cmds);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out}, &cmds));
+                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out, NULL}, &cmds));
     char want[2048];
     (void)snprintf(want, sizeof want,
                    "read \"%s\"\nstrash\nifraig -v\nscorr -v\ndc2 -v\ndch -f\nif -K 6 -v\nmfs2 -v\n"
@@ -371,7 +371,7 @@ static void test_oom_sweep(void) {
                    "1\n.latch w o3q0 0\n.names o3q0 o3co0\n1 1\n.end\n");
     uint32_t failures = 0;
     long at = 0;
-    while (at < OOM_LIMIT && !oom_round(at, &(odin3_abc_paths){in, out})) {
+    while (at < OOM_LIMIT && !oom_round(at, &(odin3_abc_paths){in, out, NULL})) {
         failures++;
         at++;
     }
