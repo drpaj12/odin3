@@ -646,7 +646,7 @@ install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
               tools/flow/timing_report.py tools/flow/name_map_v2.py tools/flow/prov_post.py
               tools/flow/prov_why.py tools/flow/runrecord.py tools/flow/flow_record.py
-              tools/flow/prov_steps.py
+              tools/flow/prov_steps.py tools/flow/timing_hints.py tools/flow/two_pass.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post tools/flow/odin3-prov-steps
         DESTINATION ${_odin3_share_dir}/tools/flow)
