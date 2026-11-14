@@ -202,7 +202,7 @@ SHARE_FILES = ("lib/lpm.o3lib", "lib/vtr.o3lib", "lib/abc/vtr.abc", "tools/flow/
                "tools/flow/odin3_flow.py", "tools/flow/timing_attr.py",
                "tools/flow/timing_report.py", "tools/flow/name_map_v2.py",
                "tools/flow/runrecord.py", "tools/flow/flow_record.py",
-               "tools/flow/prov_steps.py")
+               "tools/flow/prov_steps.py", "tools/flow/timing_hints.py", "tools/flow/two_pass.py")
 
 
 def share_tree(dest: Path) -> Path:
@@ -213,6 +213,16 @@ def share_tree(dest: Path) -> Path:
     shutil.copytree(ROOT / "tools" / "vtr-qor", dest / "tools" / "vtr-qor",
                     ignore=shutil.ignore_patterns("__pycache__", "offload", "systemd"))
     return dest
+
+
+class InstallList(unittest.TestCase):
+    def test_every_flow_module_the_flow_imports_is_installed(self) -> None:
+        cmake = (ROOT / "CMakeLists.txt").read_text()
+        flow_dir = ROOT / "tools" / "flow"
+        for name in ("odin3_flow.py", "two_pass.py", "timing_hints.py"):
+            for mod in re.findall(r"^\s*import (\w+)", (flow_dir / name).read_text(), re.M):
+                if (flow_dir / f"{mod}.py").is_file():
+                    self.assertIn(f"tools/flow/{mod}.py", cmake, mod)
 
 
 class HelpText(unittest.TestCase):

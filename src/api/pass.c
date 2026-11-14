@@ -8,6 +8,7 @@
 #include "ir/design.h"
 #include "ir/prov.h"
 #include "odin3/odin3.h"
+#include "passes/hints.h"
 #include "passes/manager.h"
 #include "passes/prov_depth.h"
 #include "util/alloc.h"
@@ -121,6 +122,7 @@ ODIN3_EXPORT odin3_status odin3_pass_set_prov_level(const char *level) {
     opts.prov_level = depth;
     odin3_pass_set_options(opts);
     odin3_prov_depth_reset();
+    odin3_hints_reset();
     return ODIN3_OK;
 }
 
@@ -136,6 +138,7 @@ ODIN3_EXPORT odin3_status odin3_pass_set_prov_budget(const char *budget) {
     opts.prov_budget = bytes;
     odin3_pass_set_options(opts);
     odin3_prov_depth_reset();
+    odin3_hints_reset();
     return ODIN3_OK;
 }
 

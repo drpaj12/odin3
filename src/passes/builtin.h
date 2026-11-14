@@ -37,6 +37,8 @@ extern const odin3_pass_def odin3_pass_names;
 extern const odin3_pass_def odin3_pass_dump_locs;
 /* prov_estimate.c: prov_estimate (provenance depth, docs/specs/2026-11-13-prov-levels.md). */
 extern const odin3_pass_def odin3_pass_prov_estimate;
+/* hints.c: read_hints (timing hints, docs/specs/2026-11-14-timing-hints.md). */
+extern const odin3_pass_def odin3_pass_read_hints;
 /* src/passes/levelize/levelize.c (Phase 6, 6.4): levelize. */
 extern const odin3_pass_def odin3_pass_levelize;
 extern const odin3_pass_def odin3_pass_graphlets;

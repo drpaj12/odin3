@@ -14,6 +14,7 @@
 #include "passes/abc/result.h"
 #include "passes/abc/run.h"
 #include "passes/abc/script.h"
+#include "passes/abc/timing.h"
 #include "passes/abc/xblif.h"
 #include "passes/builtin.h"
 #include "util/clock.h"
@@ -152,23 +153,27 @@ typedef struct xfiles {
     char in[PATH_BYTES];
     char cmd[PATH_BYTES];
     char out[PATH_BYTES];
+    char timing[PATH_BYTES]; /* the timing hints file, used when run->timing_on */
 } xfiles;
 
 static odin3_status run_paths(const odin3_abc_run *run, xfiles *files) {
     odin3_status st = odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, files->in, PATH_BYTES);
     st = st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_CMD, files->cmd, PATH_BYTES) : st;
-    return st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, files->out, PATH_BYTES)
-                          : st;
+    st = st == ODIN3_OK ? odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, files->out, PATH_BYTES) : st;
+    return st == ODIN3_OK
+               ? odin3_abc_run_path(run, ODIN3_ABC_FILE_TIMING, files->timing, PATH_BYTES)
+               : st;
 }
 
 /* Writes in.blif and the command file. */
 static odin3_status write_inputs(odin3_abc_run *run, const xfiles *files) {
     odin3_status st = odin3_abc_xblif_write(run, run->region, files->in);
+    st = st == ODIN3_OK ? odin3_abc_timing_region(run, files->timing) : st;
     odin3_strbuf cmds;
     odin3_strbuf_init(&cmds);
-    st = st == ODIN3_OK
-             ? odin3_abc_xblif_commands(run, &(odin3_abc_paths){files->in, files->out}, &cmds)
-             : st;
+    st = st == ODIN3_OK ? odin3_abc_xblif_commands(
+                              run, &(odin3_abc_paths){files->in, files->out, files->timing}, &cmds)
+                        : st;
     st = st == ODIN3_OK ? odin3_pass_write_text(files->cmd, &cmds) : st;
     odin3_strbuf_free(&cmds);
     return st;
@@ -210,7 +215,7 @@ static odin3_status exec_line(odin3_abc_run *run, const char *line, const odin3_
 
 /* Every command of the run through exec; the first failure is reported. */
 static odin3_status exec_commands(odin3_abc_run *run, const xfiles *files) {
-    const odin3_abc_paths paths = {files->in, files->out};
+    const odin3_abc_paths paths = {files->in, files->out, files->timing};
     odin3_strbuf line;
     odin3_strbuf_init(&line);
     odin3_status st = ODIN3_OK;

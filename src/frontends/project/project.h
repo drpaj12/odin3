@@ -211,9 +211,10 @@ typedef struct odin3_project {
     uint8_t schema;        /* 0 = no schema statement (schema 1), else 1 or 2 */
     uint32_t top;          /* "mod" or "lib.mod" as given; 0 = auto */
     odin3_loc top_at;
-    odin3_proj_path flow;       /* given 0 = none ("" is never a word) */
-    odin3_proj_path abc_script; /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
-    bool prov_set;              /* prov_level given: prov_auto, or prov_level 0..4 */
+    odin3_proj_path flow;         /* given 0 = none ("" is never a word) */
+    odin3_proj_path abc_script;   /* given 0 = none; from --abc-script: at {0} (3D AB-27) */
+    odin3_proj_path timing_hints; /* timing_hints <file>: given 0 = none (src/passes/hints.h) */
+    bool prov_set;                /* prov_level given: prov_auto, or prov_level 0..4 */
     bool prov_auto;
     uint32_t prov_level;
     uint64_t prov_budget; /* prov_budget, in bytes; 0 = none */
@@ -449,7 +450,8 @@ odin3_status odin3_project_finish(odin3_project *proj);
  * Appends the record as JSON: "{\n", one `  "key": value` line per README key in README order
  * (files libfiles libdirs libext incdirs defines top params arch rules inventory overrides flow
  * abc_script output ignored duplicates; "testbenches" between overrides and flow, only when the
- * project has one), each array or object on one line with Python's ", " and
+ * project has one; "timing_hints" after abc_script, then "prov_level" and "prov_budget", each only
+ * when the project gives it), each array or object on one line with Python's ", " and
  * ": " separators, "}\n". Paths are resolved; top, flow, abc_script, output and a bare define's
  * value are null when absent. Strings are UTF-8 with JSON escapes for '"', '\\' and control bytes;
  * a byte that is not part of valid UTF-8 is written as \u00XX. NO_MEMORY (out unchanged).

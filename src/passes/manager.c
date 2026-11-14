@@ -2,6 +2,7 @@
 #include "passes/manager.h"
 
 #include "passes/builtin.h"
+#include "passes/hints.h"
 #include "passes/prov_depth.h"
 
 #include "ir/check.h"
@@ -270,6 +271,7 @@ odin3_status odin3_pass_run(odin3_design *design, const char *name, odin3_bytes 
     raise_keep(design, def);
     if (strncmp(name, "read_", strlen("read_")) == 0) {
         odin3_prov_depth_reset(); /* a design read afresh is resolved afresh (prov_depth.h) */
+        odin3_hints_reset();      /* and its timing hints are those of the old design */
     }
     return run_def(design, def, args);
 }

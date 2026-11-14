@@ -37,6 +37,7 @@ Version 1.6.1 plus `main`, C ABI 7. Everything below is on `main` with tests; th
 - Passes: elaboration, `proc`, `opt`, `fsm`, `flatten`, `wreduce`, partial mapping, `lower` (with the `$tribuf` sole-driver
   rule), ABC, LPM, `unmap` ({doc}`passes`).
 - Provenance at every granularity ({doc}`provenance`), written as step files at every stage ({doc}`provenance-files`).
+- Timing hints: a two-pass flow that feeds routed timing back to the passes, `abc` first ({doc}`timing-hints`).
 - Silicon flow: Odin III to a routed SKY130 layout and back, no Yosys ({doc}`silicon-flow`); flows described in the project file ({doc}`project-flows`).
 - Graph features: graphlets and orbits, SCOAP, analysis and timing attribution ({doc}`graphlets`, {doc}`scoap`, switching activity ({doc}`activity`),
   {doc}`analysis`, {doc}`timing-attribution`).
@@ -57,6 +58,7 @@ inputs
 outputs
 provenance
 provenance-files
+timing-hints
 project-flows
 silicon-flow
 analysis

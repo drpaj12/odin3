@@ -694,6 +694,11 @@ odin3_status odin3_project_dump(const odin3_project *proj, odin3_strbuf *out) {
     field(&jw, "abc_script");
     string_or_null(&jw, proj->abc_script.given != 0, proj->abc_script.resolved);
     raw(&jw, ",\n");
+    if (proj->timing_hints.given != 0) {
+        field(&jw, "timing_hints");
+        string_or_null(&jw, true, proj->timing_hints.resolved);
+        raw(&jw, ",\n");
+    }
     write_prov(&jw);
     field(&jw, "output");
     write_output(&jw);
