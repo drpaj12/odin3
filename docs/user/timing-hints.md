@@ -58,6 +58,7 @@ net	top/c	3000	-
   through the cell, `crit` its criticality 0 to 1, `depth` the unit depth of the cell's shallowest LUT in
   pass 1, `luts` how many LUTs the numbers were taken over.
 - `net <module>/<net> <arrival_ps> <required_ps>`: a net by name; either time may be `-`.
+- Experimental (branch exp/hints-c): a `cell` line may carry a 7th field `relax`; the outputs of such a cell get the required time `depth + relax_levels` (meta `relax_levels`, default 1) instead of the slack formula, so `if` maps their cone for area.
 
 **Greedy.** Each LUT takes the worst slack over all its pins, each word cell the worst of its LUTs, each
 number the worst over seeds. A tie between pins is broken at random with a fixed recorded seed

@@ -133,6 +133,14 @@ static odin3_status meta_line(hparse *hp, char **fld, size_t nfld) {
         tbl->tighten_levels = val;
         return ODIN3_OK;
     }
+    if (strcmp(fld[1], "relax_levels") == 0) {
+        double val = 0;
+        if (!num_of(fld[2], false, &val) || val < 0.0) {
+            return perr(hp, "relax_levels must be a number from 0", fld[2]);
+        }
+        tbl->relax_levels = val;
+        return ODIN3_OK;
+    }
     if (strcmp(fld[1], "depth") == 0) {
         if (!uint_of(fld[2], &tbl->depth)) {
             return perr(hp, "not an unsigned number", fld[2]);
@@ -171,8 +179,14 @@ static odin3_status cell_line(hparse *hp, char **fld, size_t nfld) {
     odin3_hint_cell rec = {0};
     double slack = 0;
     double crit = 0;
-    if (nfld != CELL_FIELDS) {
-        return perr(hp, "a cell line has 6 fields", NULL);
+    if (nfld != CELL_FIELDS && nfld != CELL_FIELDS + 1) {
+        return perr(hp, "a cell line has 6 fields (7 with `relax`)", NULL);
+    }
+    if (nfld == CELL_FIELDS + 1) {
+        if (strcmp(fld[CELL_FIELDS], "relax") != 0) {
+            return perr(hp, "the 7th field of a cell line is `relax`", fld[CELL_FIELDS]);
+        }
+        rec.relax = 1;
     }
     if (!uint_of(fld[1], &rec.uid) || rec.uid == 0) {
         return perr(hp, "not a record ID", fld[1]);
@@ -309,6 +323,7 @@ static void merge_dups(odin3_hints *tbl) {
             to->crit = fmax(to->crit, tbl->cells[i].crit);
             to->depth = to->depth < tbl->cells[i].depth ? to->depth : tbl->cells[i].depth;
             to->luts += tbl->cells[i].luts;
+            to->relax = (uint8_t)(to->relax && tbl->cells[i].relax);
         } else {
             tbl->cells[out++] = tbl->cells[i];
         }
@@ -417,6 +432,7 @@ odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, 
     hp.hints = odin3_util_calloc(sizeof *hp.hints);
     if (hp.hints != NULL) {
         hp.hints->tighten_levels = ODIN3_HINTS_TIGHTEN_DEFAULT;
+        hp.hints->relax_levels = 1.0;
     }
     char *copy = odin3_util_malloc(len + 1);
     if (hp.hints == NULL || copy == NULL) {

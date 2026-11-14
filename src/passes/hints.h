@@ -30,6 +30,8 @@ typedef struct odin3_hint_cell {
     double crit;     /* routed criticality, 0..1, worst over the object's LUTs */
     uint32_t depth;  /* pass-1 unit depth (LUT levels) of the object's shallowest LUT */
     uint32_t luts;   /* LUTs the object's hint took its worst slack from */
+    uint8_t relax;   /* experimental (exp/hints-c, V4): the optional 7th field `relax`: the cell's
+                      * outputs get the required time depth + meta relax_levels (area recovery) */
 } odin3_hint_cell;
 
 /* A hint for one net by name, "<module>/<net>": a routed arrival and/or required time in ps. A
@@ -47,6 +49,7 @@ typedef struct odin3_hints {
     uint32_t depth;        /* mapped unit depth of pass 1 (whole design) */
     double ns_per_level;   /* ns per LUT level: cpd / depth unless the file gives it */
     double tighten_levels; /* levels asked for on top of pass 1's depth (meta tighten_levels) */
+    double relax_levels;   /* experimental: extra levels over `depth` for a `relax` cell (meta relax_levels) */
     char source[ODIN3_HINTS_SOURCE_BYTES]; /* the `meta` lines as `key=value` words, for the log */
     odin3_hint_cell *cells;                /* sorted by uid, unique */
     size_t n_cells;

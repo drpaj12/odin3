@@ -115,6 +115,10 @@ static bool required_of(tctx *tc, odin3_net_id net, double *req) {
     if (ch == NULL) {
         return false;
     }
+    if (ch->relax != 0) { /* V4: loose required time, so `if` maps the cone for area */
+        *req = (double)tc->hints->depth + tc->hints->relax_levels;
+        return true;
+    }
     double want = (double)ch->depth + levels(tc, ch->slack_ps - tc->hints->slack_min_ps) -
                   tc->hints->tighten_levels;
     *req = want > 0.0 ? want : 0.0;
