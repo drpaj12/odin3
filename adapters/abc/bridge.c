@@ -121,14 +121,22 @@ typedef struct adp_timing_counts {
     int arrivals, requireds, missing;
 } adp_timing_counts;
 
-/* One line `<kind> <name> <levels>` of the timing file; kind pi (an input arrival), po (an
- * output's required time) or li (a register's input required time, the register named by its
- * output). A name the network no longer has (scorr merged the register) is counted, not an error.
- */
+/* One line of the timing file: `default_required <levels>` (a default) or `<kind> <name>
+ * <levels>`: kind pi (an input arrival), po (an output's required time) or li (a register's input
+ * required time, the register named by its output). */
+typedef struct adp_timing_entry {
+    char kind[ADP_TIMING_LINE];
+    char name[ADP_TIMING_LINE];
+    float time;
+    bool is_default;
+} adp_timing_entry;
+
 /* A time in levels as a float, clamped to +-ADP_TIMING_LIMIT (a double beyond the float range is
- * undefined to convert). NaN gives false: the line is skipped. */
-static bool adp_timing_value(double value, float *out) {
-    if (value != value) { /* NaN */
+ * undefined to convert). False for text that is not a number, and for NaN. */
+static bool adp_timing_value(const char *text, float *out) {
+    char *end = NULL;
+    double value = strtod(text, &end);
+    if (end == text || value != value) { /* no number, or NaN */
         return false;
     }
     value = value > ADP_TIMING_LIMIT ? ADP_TIMING_LIMIT : value;
@@ -137,11 +145,28 @@ static bool adp_timing_value(double value, float *out) {
     return true;
 }
 
-static void adp_timing_apply(Abc_Ntk_t *ntk, const char *kind, const char *name, float value,
-                             adp_timing_counts *cnt) {
-    char buf[ADP_TIMING_LINE];
-    (void)snprintf(buf, sizeof buf, "%s", name);
-    Abc_Obj_t *obj = strcmp(kind, "po") == 0 ? Abc_NtkFindCo(ntk, buf) : Abc_NtkFindCi(ntk, buf);
+/* Reads one line into entry; false for a line that is neither form. */
+static bool adp_timing_parse(const char *line, adp_timing_entry *entry) {
+    static const char default_key[] = "default_required ";
+    if (strncmp(line, default_key, sizeof default_key - 1) == 0) {
+        entry->is_default = true;
+        return adp_timing_value(line + sizeof default_key - 1, &entry->time);
+    }
+    int used = 0;
+    entry->is_default = false;
+    if (sscanf(line, "%255s %255s %n", entry->kind, entry->name, &used) < 2 || used <= 0) {
+        return false;
+    }
+    return adp_timing_value(line + used, &entry->time);
+}
+
+/* Sets one entry on the network. A name the network no longer has (scorr merged the register) is
+ * counted, not an error. */
+static void adp_timing_apply(Abc_Ntk_t *ntk, adp_timing_entry *entry, adp_timing_counts *cnt) {
+    const char *kind = entry->kind;
+    float value = entry->time;
+    Abc_Obj_t *obj =
+        strcmp(kind, "po") == 0 ? Abc_NtkFindCo(ntk, entry->name) : Abc_NtkFindCi(ntk, entry->name);
     if (obj != NULL && strcmp(kind, "li") == 0) {
         Abc_Obj_t *latch = Abc_ObjFaninNum(obj) > 0 ? Abc_ObjFanin0(obj) : NULL;
         obj = latch != NULL && Abc_ObjIsLatch(latch) && Abc_ObjFaninNum(latch) > 0
@@ -156,6 +181,22 @@ static void adp_timing_apply(Abc_Ntk_t *ntk, const char *kind, const char *name,
     } else {
         Abc_NtkTimeSetRequired(ntk, (int)Abc_ObjId(obj), value, value);
         cnt->requireds++;
+    }
+}
+
+/* The lines of the open timing file, applied to the network. */
+static void adp_timing_read(Abc_Ntk_t *ntk, FILE *fp, adp_timing_counts *cnt) {
+    char line[ADP_TIMING_LINE * 2];
+    adp_timing_entry entry;
+    while (fgets(line, sizeof line, fp) != NULL) {
+        if (!adp_timing_parse(line, &entry)) {
+            continue;
+        }
+        if (entry.is_default) {
+            Abc_NtkTimeSetDefaultRequired(ntk, entry.time, entry.time);
+        } else {
+            adp_timing_apply(ntk, &entry, cnt);
+        }
     }
 }
 
@@ -183,22 +224,7 @@ static int adp_cmd_timing(Abc_Frame_t *frame, int argc, char **argv) {
         return 1;
     }
     adp_timing_counts cnt = {0, 0, 0};
-    char line[ADP_TIMING_LINE * 2];
-    while (fgets(line, sizeof line, fp) != NULL) {
-        char kind[ADP_TIMING_LINE];
-        char name[ADP_TIMING_LINE];
-        double value = 0;
-        float time = 0;
-        if (sscanf(line, "default_required %lf", &value) == 1) {
-            if (adp_timing_value(value, &time)) {
-                Abc_NtkTimeSetDefaultRequired(ntk, time, time);
-            }
-        } else if (sscanf(line, "%255s %255s %lf", kind, name, &value) == 3) {
-            if (adp_timing_value(value, &time)) {
-                adp_timing_apply(ntk, kind, name, time, &cnt);
-            }
-        }
-    }
+    adp_timing_read(ntk, fp, &cnt);
     (void)fclose(fp);
     Abc_Print(1, "o3_timing: %d arrival and %d required times set, %d names not in the network\n",
               cnt.arrivals, cnt.requireds, cnt.missing);

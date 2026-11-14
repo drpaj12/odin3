@@ -41,11 +41,11 @@ typedef struct odin3_hint_net {
 } odin3_hint_net;
 
 typedef struct odin3_hints {
-    char *label;         /* the file name, for messages */
-    double cpd_ps;       /* routed critical path delay of pass 1 */
-    double slack_min_ps; /* the worst slack of pass 1 (the reference: slack - slack_min >= 0) */
-    uint32_t depth;      /* mapped unit depth of pass 1 (whole design) */
-    double ns_per_level; /* ns per LUT level: cpd / depth unless the file gives it */
+    char *label;           /* the file name, for messages */
+    double cpd_ps;         /* routed critical path delay of pass 1 */
+    double slack_min_ps;   /* the worst slack of pass 1 (the reference: slack - slack_min >= 0) */
+    uint32_t depth;        /* mapped unit depth of pass 1 (whole design) */
+    double ns_per_level;   /* ns per LUT level: cpd / depth unless the file gives it */
     double tighten_levels; /* levels asked for on top of pass 1's depth (meta tighten_levels) */
     char source[ODIN3_HINTS_SOURCE_BYTES]; /* the `meta` lines as `key=value` words, for the log */
     odin3_hint_cell *cells;                /* sorted by uid, unique */
@@ -59,9 +59,8 @@ typedef struct odin3_hints {
 /*
  * Parses hint text (len bytes; label names it in messages). Format: line 1 `odin3-timing-hints`
  * TAB `1`; then lines of TAB-separated fields, blank lines and lines starting with `#` ignored:
- *   meta TAB key TAB value        keys cpd_ps, slack_min_ps, depth, ns_per_level, tighten_levels are read, any
- *                                 other key is kept in `source`
- *   cell TAB uid TAB slack_ps TAB crit TAB depth TAB luts
+ *   meta TAB key TAB value        keys cpd_ps, slack_min_ps, depth, ns_per_level, tighten_levels
+ * are read, any other key is kept in `source` cell TAB uid TAB slack_ps TAB crit TAB depth TAB luts
  *   net  TAB <module>/<net> TAB arrival_ps TAB required_ps      (a time may be `-`)
  * A duplicate cell or net keeps the worst (smallest slack, smallest required, largest arrival).
  * ODIN3_ERR_PARSE after logging one `read_hints: <label>:<line>: <what>` error for a wrong first

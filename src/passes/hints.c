@@ -29,7 +29,11 @@ enum {
     CELL_FIELDS = 6,
     NET_FIELDS = 4,
     META_FIELDS = 3,
-    PS_PER_NS = 1000
+    PS_PER_NS = 1000,
+    DECIMAL = 10,
+    FIRST_CAP = 64,
+    WANT_BYTES = 32,
+    CELL_LUTS_FIELD = 5 /* cell TAB uid TAB slack TAB crit TAB depth TAB luts */
 };
 
 static char *dup_str(const char *text) {
@@ -76,7 +80,7 @@ static bool num_of(const char *text, bool allow_dash, double *out) {
 static bool uint_of(const char *text, uint32_t *out) {
     char *end = NULL;
     errno = 0;
-    unsigned long val = strtoul(text, &end, 10);
+    unsigned long val = strtoul(text, &end, DECIMAL);
     if (text[0] == '\0' || !isdigit((unsigned char)text[0]) || *end != '\0' || errno != 0 ||
         val > UINT32_MAX) {
         return false;
@@ -85,127 +89,152 @@ static bool uint_of(const char *text, uint32_t *out) {
     return true;
 }
 
-static odin3_status meta_line(hparse *hp, char **f, size_t n) {
-    if (n != META_FIELDS) {
+/* cpd_ps, slack_min_ps, ns_per_level: a number; false when fld[1] is none of them. */
+static bool meta_number(hparse *hp, char **fld, odin3_status *st) {
+    const char *key = fld[1];
+    odin3_hints *tbl = hp->hints;
+    double val = 0;
+    bool is_cpd = strcmp(key, "cpd_ps") == 0;
+    bool is_min = strcmp(key, "slack_min_ps") == 0;
+    if (!is_cpd && !is_min && strcmp(key, "ns_per_level") != 0) {
+        return false;
+    }
+    if (!num_of(fld[2], false, &val)) {
+        *st = perr(hp, "not a number", fld[2]);
+        return true;
+    }
+    if (is_cpd) {
+        tbl->cpd_ps = val;
+    } else if (is_min) {
+        tbl->slack_min_ps = val;
+    } else {
+        tbl->ns_per_level = val;
+    }
+    hp->have_cpd = hp->have_cpd || is_cpd;
+    hp->have_min = hp->have_min || is_min;
+    hp->have_npl = hp->have_npl || (!is_cpd && !is_min);
+    return true;
+}
+
+static odin3_status meta_line(hparse *hp, char **fld, size_t nfld) {
+    if (nfld != META_FIELDS) {
         return perr(hp, "a meta line has 3 fields", NULL);
     }
-    odin3_hints *h = hp->hints;
-    double val = 0;
-    uint32_t num = 0;
-    if (strcmp(f[1], "cpd_ps") == 0 || strcmp(f[1], "slack_min_ps") == 0 ||
-        strcmp(f[1], "ns_per_level") == 0) {
-        if (!num_of(f[2], false, &val)) {
-            return perr(hp, "not a number", f[2]);
-        }
-        if (f[1][0] == 'c') {
-            h->cpd_ps = val;
-            hp->have_cpd = true;
-        } else if (f[1][0] == 's') {
-            h->slack_min_ps = val;
-            hp->have_min = true;
-        } else {
-            h->ns_per_level = val;
-            hp->have_npl = true;
-        }
-    } else if (strcmp(f[1], "tighten_levels") == 0) {
-        if (!num_of(f[2], false, &val) || val < 0.0) {
-            return perr(hp, "tighten_levels must be a number from 0", f[2]);
-        }
-        h->tighten_levels = val;
-    } else if (strcmp(f[1], "depth") == 0) {
-        if (!uint_of(f[2], &num)) {
-            return perr(hp, "not an unsigned number", f[2]);
-        }
-        h->depth = num;
-        hp->have_depth = true;
-    } else {
-        size_t used = strlen(h->source);
-        (void)snprintf(h->source + used, sizeof h->source - used, "%s%s=%s", used != 0 ? " " : "",
-                       f[1], f[2]);
+    odin3_hints *tbl = hp->hints;
+    odin3_status st = ODIN3_OK;
+    if (meta_number(hp, fld, &st)) {
+        return st;
     }
+    if (strcmp(fld[1], "tighten_levels") == 0) {
+        double val = 0;
+        if (!num_of(fld[2], false, &val) || val < 0.0) {
+            return perr(hp, "tighten_levels must be a number from 0", fld[2]);
+        }
+        tbl->tighten_levels = val;
+        return ODIN3_OK;
+    }
+    if (strcmp(fld[1], "depth") == 0) {
+        if (!uint_of(fld[2], &tbl->depth)) {
+            return perr(hp, "not an unsigned number", fld[2]);
+        }
+        hp->have_depth = true;
+        return ODIN3_OK;
+    }
+    size_t used = strlen(tbl->source);
+    (void)snprintf(tbl->source + used, sizeof tbl->source - used, "%s%s=%s", used != 0 ? " " : "",
+                   fld[1], fld[2]);
     return ODIN3_OK;
 }
 
-static odin3_status grow(void **arr, size_t *cap, size_t need, size_t elem) {
-    if (need <= *cap) {
+/* A growable array: where its pointer and capacity live, and its element size. */
+typedef struct vec_ref {
+    void **arr;
+    size_t *cap;
+    size_t elem;
+} vec_ref;
+
+static odin3_status grow(vec_ref vec, size_t need) {
+    if (need <= *vec.cap) {
         return ODIN3_OK;
     }
-    size_t ncap = *cap != 0 ? *cap * 2 : 64;
-    void *mem = odin3_util_realloc(*arr, ncap * elem);
+    size_t ncap = *vec.cap != 0 ? *vec.cap * 2 : FIRST_CAP;
+    void *mem = odin3_util_realloc(*vec.arr, ncap * vec.elem);
     if (mem == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    *arr = mem;
-    *cap = ncap;
+    *vec.arr = mem;
+    *vec.cap = ncap;
     return ODIN3_OK;
 }
 
-static odin3_status cell_line(hparse *hp, char **f, size_t n) {
+static odin3_status cell_line(hparse *hp, char **fld, size_t nfld) {
     odin3_hint_cell rec = {0};
     double slack = 0;
     double crit = 0;
-    if (n != CELL_FIELDS) {
+    if (nfld != CELL_FIELDS) {
         return perr(hp, "a cell line has 6 fields", NULL);
     }
-    if (!uint_of(f[1], &rec.uid) || rec.uid == 0) {
-        return perr(hp, "not a record ID", f[1]);
+    if (!uint_of(fld[1], &rec.uid) || rec.uid == 0) {
+        return perr(hp, "not a record ID", fld[1]);
     }
-    if (!num_of(f[2], false, &slack)) {
-        return perr(hp, "not a number", f[2]);
+    if (!num_of(fld[2], false, &slack)) {
+        return perr(hp, "not a number", fld[2]);
     }
-    if (!num_of(f[3], false, &crit)) {
-        return perr(hp, "not a number", f[3]);
+    if (!num_of(fld[3], false, &crit)) {
+        return perr(hp, "not a number", fld[3]);
     }
-    if (!uint_of(f[4], &rec.depth)) {
-        return perr(hp, "not an unsigned number", f[4]);
+    if (!uint_of(fld[4], &rec.depth)) {
+        return perr(hp, "not an unsigned number", fld[4]);
     }
-    if (!uint_of(f[5], &rec.luts)) {
-        return perr(hp, "not an unsigned number", f[5]);
+    if (!uint_of(fld[CELL_LUTS_FIELD], &rec.luts)) {
+        return perr(hp, "not an unsigned number", fld[CELL_LUTS_FIELD]);
     }
     if (rec.depth == 0 && rec.luts == 0) {
-        return perr(hp, "a cell hint with depth 0 and luts 0 together", f[1]);
+        return perr(hp, "a cell hint with depth 0 and luts 0 together", fld[1]);
     }
     rec.slack_ps = slack;
     rec.crit = crit;
-    odin3_hints *h = hp->hints;
-    if (grow((void **)&h->cells, &hp->cap_cells, h->n_cells + 1, sizeof *h->cells) != ODIN3_OK) {
+    odin3_hints *tbl = hp->hints;
+    if (grow((vec_ref){(void **)&tbl->cells, &hp->cap_cells, sizeof *tbl->cells},
+             tbl->n_cells + 1) != ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    h->cells[h->n_cells++] = rec;
+    tbl->cells[tbl->n_cells++] = rec;
     return ODIN3_OK;
 }
 
-static odin3_status net_line(hparse *hp, char **f, size_t n) {
+static odin3_status net_line(hparse *hp, char **fld, size_t nfld) {
     odin3_hint_net rec = {0};
-    if (n != NET_FIELDS) {
+    if (nfld != NET_FIELDS) {
         return perr(hp, "a net line has 4 fields", NULL);
     }
-    if (strchr(f[1], '/') == NULL) {
-        return perr(hp, "a net name is <module>/<net>", f[1]);
+    if (strchr(fld[1], '/') == NULL) {
+        return perr(hp, "a net name is <module>/<net>", fld[1]);
     }
-    if (!num_of(f[2], true, &rec.arrival_ps)) {
-        return perr(hp, "not a number", f[2]);
+    if (!num_of(fld[2], true, &rec.arrival_ps)) {
+        return perr(hp, "not a number", fld[2]);
     }
-    if (!num_of(f[3], true, &rec.required_ps)) {
-        return perr(hp, "not a number", f[3]);
+    if (!num_of(fld[3], true, &rec.required_ps)) {
+        return perr(hp, "not a number", fld[3]);
     }
-    odin3_hints *h = hp->hints;
-    if (grow((void **)&h->nets, &hp->cap_nets, h->n_nets + 1, sizeof *h->nets) != ODIN3_OK) {
+    odin3_hints *tbl = hp->hints;
+    if (grow((vec_ref){(void **)&tbl->nets, &hp->cap_nets, sizeof *tbl->nets}, tbl->n_nets + 1) !=
+        ODIN3_OK) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    rec.name = dup_str(f[1]);
+    rec.name = dup_str(fld[1]);
     if (rec.name == NULL) {
         return ODIN3_ERR_NO_MEMORY;
     }
-    h->nets[h->n_nets++] = rec;
+    tbl->nets[tbl->n_nets++] = rec;
     return ODIN3_OK;
 }
 
-static size_t split_tabs(char *line, char **f) {
-    size_t n = 0;
+static size_t split_tabs(char *line, char **fld) {
+    size_t count = 0;
     char *at = line;
-    while (n < MAX_FIELDS) {
-        f[n++] = at;
+    while (count < MAX_FIELDS) {
+        fld[count++] = at;
         char *tab = strchr(at, '\t');
         if (tab == NULL) {
             break;
@@ -213,17 +242,17 @@ static size_t split_tabs(char *line, char **f) {
         *tab = '\0';
         at = tab + 1;
     }
-    return n;
+    return count;
 }
 
 static odin3_status one_line(hparse *hp, char *line, bool *first) {
-    char *f[MAX_FIELDS] = {0};
-    size_t n = split_tabs(line, f);
+    char *fld[MAX_FIELDS] = {0};
+    size_t nfld = split_tabs(line, fld);
     if (*first) {
         *first = false;
-        char want[32];
+        char want[WANT_BYTES];
         (void)snprintf(want, sizeof want, "%d", ODIN3_HINTS_VERSION);
-        if (n != 2 || strcmp(f[0], ODIN3_HINTS_MAGIC) != 0 || strcmp(f[1], want) != 0) {
+        if (nfld != 2 || strcmp(fld[0], ODIN3_HINTS_MAGIC) != 0 || strcmp(fld[1], want) != 0) {
             return perr(hp,
                         "not a timing hint file (first line must be "
                         "`" ODIN3_HINTS_MAGIC "<TAB>1`)",
@@ -231,22 +260,25 @@ static odin3_status one_line(hparse *hp, char *line, bool *first) {
         }
         return ODIN3_OK;
     }
-    if (strcmp(f[0], "meta") == 0) {
-        return meta_line(hp, f, n);
+    if (strcmp(fld[0], "meta") == 0) {
+        return meta_line(hp, fld, nfld);
     }
-    if (strcmp(f[0], "cell") == 0) {
-        return cell_line(hp, f, n);
+    if (strcmp(fld[0], "cell") == 0) {
+        return cell_line(hp, fld, nfld);
     }
-    if (strcmp(f[0], "net") == 0) {
-        return net_line(hp, f, n);
+    if (strcmp(fld[0], "net") == 0) {
+        return net_line(hp, fld, nfld);
     }
-    return perr(hp, "unknown record kind", f[0]);
+    return perr(hp, "unknown record kind", fld[0]);
 }
 
 static int cmp_cell(const void *lhs, const void *rhs) {
-    const odin3_hint_cell *a = lhs;
-    const odin3_hint_cell *b = rhs;
-    return a->uid < b->uid ? -1 : (a->uid > b->uid ? 1 : 0);
+    const odin3_hint_cell *left = lhs;
+    const odin3_hint_cell *right = rhs;
+    if (left->uid != right->uid) {
+        return left->uid < right->uid ? -1 : 1;
+    }
+    return 0;
 }
 
 static int cmp_net(const void *lhs, const void *rhs) {
@@ -254,87 +286,129 @@ static int cmp_net(const void *lhs, const void *rhs) {
 }
 
 /* The worse of two NANs-aware values: smaller wins when want_min, else larger. */
-static double pick(double a, double b, bool want_min) {
-    if (isnan(a)) {
-        return b;
+static double pick(double first, double second, bool want_min) {
+    if (isnan(first)) {
+        return second;
     }
-    if (isnan(b)) {
-        return a;
+    if (isnan(second)) {
+        return first;
     }
-    return want_min ? fmin(a, b) : fmax(a, b);
+    return want_min ? fmin(first, second) : fmax(first, second);
 }
 
 /* Sorts, then merges duplicates keeping the worst. */
-static void merge_dups(odin3_hints *h) {
-    if (h->n_cells > 1) {
-        qsort(h->cells, h->n_cells, sizeof *h->cells, cmp_cell);
+static void merge_dups(odin3_hints *tbl) {
+    if (tbl->n_cells > 1) {
+        qsort(tbl->cells, tbl->n_cells, sizeof *tbl->cells, cmp_cell);
     }
     size_t out = 0;
-    for (size_t i = 0; i < h->n_cells; i++) {
-        if (out > 0 && h->cells[out - 1].uid == h->cells[i].uid) {
-            odin3_hint_cell *to = &h->cells[out - 1];
-            to->slack_ps = fmin(to->slack_ps, h->cells[i].slack_ps);
-            to->crit = fmax(to->crit, h->cells[i].crit);
-            to->depth = to->depth < h->cells[i].depth ? to->depth : h->cells[i].depth;
-            to->luts += h->cells[i].luts;
+    for (size_t i = 0; i < tbl->n_cells; i++) {
+        if (out > 0 && tbl->cells[out - 1].uid == tbl->cells[i].uid) {
+            odin3_hint_cell *to = &tbl->cells[out - 1];
+            to->slack_ps = fmin(to->slack_ps, tbl->cells[i].slack_ps);
+            to->crit = fmax(to->crit, tbl->cells[i].crit);
+            to->depth = to->depth < tbl->cells[i].depth ? to->depth : tbl->cells[i].depth;
+            to->luts += tbl->cells[i].luts;
         } else {
-            h->cells[out++] = h->cells[i];
+            tbl->cells[out++] = tbl->cells[i];
         }
     }
-    h->n_cells = out;
-    if (h->n_nets > 1) {
-        qsort(h->nets, h->n_nets, sizeof *h->nets, cmp_net);
+    tbl->n_cells = out;
+    if (tbl->n_nets > 1) {
+        qsort(tbl->nets, tbl->n_nets, sizeof *tbl->nets, cmp_net);
     }
     out = 0;
-    for (size_t i = 0; i < h->n_nets; i++) {
-        if (out > 0 && strcmp(h->nets[out - 1].name, h->nets[i].name) == 0) {
-            odin3_hint_net *to = &h->nets[out - 1];
-            to->arrival_ps = pick(to->arrival_ps, h->nets[i].arrival_ps, false);
-            to->required_ps = pick(to->required_ps, h->nets[i].required_ps, true);
-            odin3_util_free(h->nets[i].name);
+    for (size_t i = 0; i < tbl->n_nets; i++) {
+        if (out > 0 && strcmp(tbl->nets[out - 1].name, tbl->nets[i].name) == 0) {
+            odin3_hint_net *to = &tbl->nets[out - 1];
+            to->arrival_ps = pick(to->arrival_ps, tbl->nets[i].arrival_ps, false);
+            to->required_ps = pick(to->required_ps, tbl->nets[i].required_ps, true);
+            odin3_util_free(tbl->nets[i].name);
         } else {
-            h->nets[out++] = h->nets[i];
+            tbl->nets[out++] = tbl->nets[i];
         }
     }
-    h->n_nets = out;
+    tbl->n_nets = out;
 }
 
-static odin3_status finish_parse(hparse *hp, bool first) {
-    odin3_hints *h = hp->hints;
-    if (first) {
-        hp->line = 1;
-        return perr(hp, "empty file", NULL);
-    }
-    if ((h->n_cells != 0 || h->n_nets != 0) && !(hp->have_cpd && hp->have_depth && hp->have_min)) {
+/* The meta numbers the records need, and the ns per level they give. */
+static odin3_status check_units(hparse *hp) {
+    odin3_hints *tbl = hp->hints;
+    bool records = tbl->n_cells != 0 || tbl->n_nets != 0;
+    if (records && !(hp->have_cpd && hp->have_depth && hp->have_min)) {
         return perr(hp, "cell and net records need meta lines cpd_ps, depth and slack_min_ps",
                     NULL);
     }
     if (!hp->have_npl) {
-        h->ns_per_level = h->depth != 0 ? h->cpd_ps / PS_PER_NS / (double)h->depth : 0.0;
+        tbl->ns_per_level = tbl->depth != 0 ? tbl->cpd_ps / PS_PER_NS / (double)tbl->depth : 0.0;
     }
-    if ((h->n_cells != 0 || h->n_nets != 0) && !(h->ns_per_level > 0.0)) {
+    if (records && !(tbl->ns_per_level > 0.0)) {
         return perr(hp, "ns_per_level (cpd_ps / depth) must be positive", NULL);
     }
-    if ((h->n_cells != 0 || h->n_nets != 0) && h->ns_per_level < NS_PER_LEVEL_FLOOR) {
+    if (records && tbl->ns_per_level < NS_PER_LEVEL_FLOOR) {
         odin3_log(ODIN3_LOG_ERROR,
                   "read_hints: %s: ns_per_level %g is below the floor %g ns (a level is the unit "
                   "the ABC timing file is written in)",
-                  hp->label, h->ns_per_level, NS_PER_LEVEL_FLOOR);
+                  hp->label, tbl->ns_per_level, NS_PER_LEVEL_FLOOR);
         return ODIN3_ERR_PARSE;
     }
-    merge_dups(h);
-    for (size_t i = 0; i < h->n_cells; i++) {
-        if (h->cells[i].slack_ps < h->slack_min_ps) {
+    return ODIN3_OK;
+}
+
+static odin3_status finish_parse(hparse *hp, bool first) {
+    odin3_hints *tbl = hp->hints;
+    if (first) {
+        hp->line = 1;
+        return perr(hp, "empty file", NULL);
+    }
+    odin3_status st = check_units(hp);
+    if (st != ODIN3_OK) {
+        return st;
+    }
+    merge_dups(tbl);
+    for (size_t i = 0; i < tbl->n_cells; i++) {
+        if (tbl->cells[i].slack_ps < tbl->slack_min_ps) {
             odin3_log(ODIN3_LOG_ERROR,
                       "read_hints: %s: cell %" PRIu32 " has slack %.1f ps, below the file's "
                       "slack_min_ps %.1f",
-                      hp->label, h->cells[i].uid, h->cells[i].slack_ps, h->slack_min_ps);
+                      hp->label, tbl->cells[i].uid, tbl->cells[i].slack_ps, tbl->slack_min_ps);
             return ODIN3_ERR_PARSE;
         }
     }
-    h->cell_used = odin3_util_calloc(h->n_cells + 1);
-    h->net_used = odin3_util_calloc(h->n_nets + 1);
-    return h->cell_used != NULL && h->net_used != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    tbl->cell_used = odin3_util_calloc(tbl->n_cells + 1);
+    tbl->net_used = odin3_util_calloc(tbl->n_nets + 1);
+    return tbl->cell_used != NULL && tbl->net_used != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+}
+
+/* The records of copy (split in place), one line at a time; first says no line was read yet. */
+static odin3_status scan_lines(hparse *hp, char *copy, bool *first) {
+    odin3_status st = ODIN3_OK;
+    char *at = copy;
+    while (st == ODIN3_OK && *at != '\0') {
+        char *eol = strchr(at, '\n');
+        if (eol != NULL) {
+            *eol = '\0';
+        }
+        size_t ll = strlen(at);
+        if (ll > 0 && at[ll - 1] == '\r') {
+            at[ll - 1] = '\0';
+        }
+        hp->line++;
+        if (at[0] != '\0' && (at[0] != '#' || *first)) {
+            st = one_line(hp, at, first);
+        }
+        at = eol != NULL ? eol + 1 : at + strlen(at);
+    }
+    return st;
+}
+
+/* The error for a NUL byte in the text: the line it is on. */
+static odin3_status nul_error(hparse *hp, const char *copy) {
+    hp->line = 1;
+    for (const char *ch = copy; *ch != '\0'; ch++) {
+        hp->line += *ch == '\n' ? 1U : 0U;
+    }
+    return perr(hp, "a NUL byte in the file", NULL);
 }
 
 odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, odin3_hints **out) {
@@ -352,34 +426,13 @@ odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, 
     }
     memcpy(copy, text, len);
     copy[len] = '\0';
-    if (strlen(copy) != len) {
-        hp.line = 1;
-        for (const char *c = copy; *c != '\0'; c++) {
-            hp.line += *c == '\n' ? 1U : 0U;
-        }
-        odin3_status bad = perr(&hp, "a NUL byte in the file", NULL);
-        odin3_util_free(hp.hints);
-        odin3_util_free(copy);
-        return bad;
-    }
-    hp.hints->label = dup_str(label);
-    odin3_status st = hp.hints->label != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
+    odin3_status st = ODIN3_OK;
     bool first = true;
-    char *at = copy;
-    while (st == ODIN3_OK && *at != '\0') {
-        char *nl = strchr(at, '\n');
-        if (nl != NULL) {
-            *nl = '\0';
-        }
-        size_t ll = strlen(at);
-        if (ll > 0 && at[ll - 1] == '\r') {
-            at[ll - 1] = '\0';
-        }
-        hp.line++;
-        if (at[0] != '\0' && (at[0] != '#' || first)) {
-            st = one_line(&hp, at, &first);
-        }
-        at = nl != NULL ? nl + 1 : at + strlen(at);
+    if (strlen(copy) != len) {
+        st = nul_error(&hp, copy);
+    } else {
+        hp.hints->label = dup_str(label);
+        st = hp.hints->label != NULL ? scan_lines(&hp, copy, &first) : ODIN3_ERR_NO_MEMORY;
     }
     st = st == ODIN3_OK ? finish_parse(&hp, first) : st;
     odin3_util_free(copy);
@@ -430,9 +483,9 @@ const odin3_hint_net *odin3_hints_find_net(odin3_hints *hints, const char *name)
     return hit;
 }
 
-static size_t count_used(const uint8_t *used, size_t n) {
+static size_t count_used(const uint8_t *used, size_t count) {
     size_t total = 0;
-    for (size_t i = 0; i < n; i++) {
+    for (size_t i = 0; i < count; i++) {
         total += used[i];
     }
     return total;
@@ -513,8 +566,9 @@ odin3_status odin3_hints_fetch(const odin3_design *design, odin3_hints **out) {
             odin3_strtab_get(odin3_design_strtab(design), proj->timing_hints.resolved);
         odin3_status st = read_file(path, &g_cache.hints);
         if (st != ODIN3_OK) {
-            odin3_log(ODIN3_LOG_ERROR, "read_hints: the project's timing_hints file %s is not "
-                                       "usable; fix it or remove the key",
+            odin3_log(ODIN3_LOG_ERROR,
+                      "read_hints: the project's timing_hints file %s is not "
+                      "usable; fix it or remove the key",
                       path);
             return st;
         }
@@ -550,12 +604,12 @@ static odin3_status read_hints_run(odin3_pass_ctx *ctx, odin3_design *design, od
     path[file.len] = '\0';
     odin3_status st = odin3_hints_load(ctx->design, path);
     if (st == ODIN3_OK) {
-        const odin3_hints *h = odin3_hints_of(ctx->design);
+        const odin3_hints *tbl = odin3_hints_of(ctx->design);
         odin3_log(ODIN3_LOG_INFO,
                   "read_hints: %s: %zu cell hints, %zu net hints, pass-1 cpd %.0f ps, depth %u, "
                   "%.4f ns per LUT level%s%s",
-                  path, h->n_cells, h->n_nets, h->cpd_ps, (unsigned)h->depth, h->ns_per_level,
-                  h->source[0] != '\0' ? "; " : "", h->source);
+                  path, tbl->n_cells, tbl->n_nets, tbl->cpd_ps, (unsigned)tbl->depth,
+                  tbl->ns_per_level, tbl->source[0] != '\0' ? "; " : "", tbl->source);
     }
     odin3_util_free(path);
     return st;

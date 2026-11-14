@@ -194,22 +194,23 @@ odin3_status odin3_abc_timing_region(odin3_abc_run *run, const char *path) {
 }
 
 void odin3_abc_timing_report(const odin3_abc_run *run) {
-    const odin3_hints *h = run->hints;
-    if (h == NULL) {
+    const odin3_hints *tbl = run->hints;
+    if (tbl == NULL) {
         return;
     }
-    size_t cells = odin3_hints_cells_used(h);
-    size_t nets = odin3_hints_nets_used(h);
-    odin3_log(
-        ODIN3_LOG_INFO,
-        "abc: timing hints (%s): %zu of %zu cell hints match a gate of the design, %zu of "
-        "%zu net hints match a net; %" PRIu64 " required times and %" PRIu64 " arrival times set",
-        h->label, cells, h->n_cells, nets, h->n_nets, run->hint_req_total, run->hint_arr_total);
-    if (cells < h->n_cells || nets < h->n_nets) {
+    size_t cells = odin3_hints_cells_used(tbl);
+    size_t nets = odin3_hints_nets_used(tbl);
+    odin3_log(ODIN3_LOG_INFO,
+              "abc: timing hints (%s): %zu of %zu cell hints match a gate of the design, %zu of "
+              "%zu net hints match a net; %" PRIu64 " required times and %" PRIu64
+              " arrival times set",
+              tbl->label, cells, tbl->n_cells, nets, tbl->n_nets, run->hint_req_total,
+              run->hint_arr_total);
+    if (cells < tbl->n_cells || nets < tbl->n_nets) {
         odin3_log(ODIN3_LOG_WARN,
                   "abc: timing hints: %zu cell hints and %zu net hints match nothing in the "
                   "design (hints must come from the same design, flow and provenance depth); "
                   "they are ignored",
-                  h->n_cells - cells, h->n_nets - nets);
+                  tbl->n_cells - cells, tbl->n_nets - nets);
     }
 }

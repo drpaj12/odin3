@@ -57,13 +57,39 @@ static odin3_hints *parse_ok(const char *text) {
     return hints;
 }
 
-static void expect_error(const char *text, const char *needle) {
+/* Unity's double asserts are off in this build. */
+#define EXPECT_NEAR(want, got) TEST_ASSERT_EQUAL_INT(1, fabs((want) - (got)) < 1e-9)
+
+static void expect_log(const char *needle) {
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, needle), log_text);
+}
+
+typedef struct err_case {
+    const char *text;   /* hint text that must not parse */
+    const char *needle; /* what the error log must contain */
+} err_case;
+
+static void expect_error_case(err_case want) {
     odin3_hints *hints = (odin3_hints *)1;
     log_len = 0;
     log_text[0] = '\0';
-    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_hints_parse(text, strlen(text), "t.tsv", &hints));
+    TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
+                          odin3_hints_parse(want.text, strlen(want.text), "t.tsv", &hints));
     TEST_ASSERT_NULL(hints);
-    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, needle), log_text);
+    TEST_ASSERT_NOT_NULL_MESSAGE(strstr(log_text, want.needle), log_text);
+}
+
+#define expect_error(text, needle) expect_error_case((err_case){(text), (needle)})
+
+/* The net hint of top/a and the used counts of test_parse_reads_meta_cells_and_nets. */
+static void check_net_a(odin3_hints *hints) {
+    const odin3_hint_net *net = odin3_hints_find_net(hints, "top/a");
+    TEST_ASSERT_NOT_NULL(net);
+    EXPECT_NEAR(3000.0, net->arrival_ps);
+    TEST_ASSERT_EQUAL_INT(1, isnan(net->required_ps) != 0);
+    TEST_ASSERT_NOT_NULL(strstr(hints->source, "arch=k6"));
+    TEST_ASSERT_EQUAL_size_t(1, odin3_hints_cells_used(hints));
+    TEST_ASSERT_EQUAL_size_t(1, odin3_hints_nets_used(hints));
 }
 
 static void test_parse_reads_meta_cells_and_nets(void) {
@@ -74,24 +100,18 @@ static void test_parse_reads_meta_cells_and_nets(void) {
                    "meta\tarch\tk6\n",
                    HEAD);
     odin3_hints *hints = parse_ok(text);
-    TEST_ASSERT_TRUE(fabs((2000.0) - (hints->cpd_ps)) < 1e-9);
+    EXPECT_NEAR(2000.0, hints->cpd_ps);
     TEST_ASSERT_EQUAL_UINT32(4, hints->depth);
-    TEST_ASSERT_TRUE(fabs((0.5) - (hints->ns_per_level)) < 1e-9); /* 2000 ps / 1000 / depth 4 */
+    EXPECT_NEAR(0.5, hints->ns_per_level); /* 2000 ps / 1000 / depth 4 */
     TEST_ASSERT_EQUAL_size_t(2, hints->n_cells);
     TEST_ASSERT_EQUAL_UINT32(3, hints->cells[0].uid); /* sorted by uid */
     TEST_ASSERT_EQUAL_UINT32(7, hints->cells[1].uid);
     const odin3_hint_cell *hit = odin3_hints_find_cell(hints, 7);
     TEST_ASSERT_NOT_NULL(hit);
-    TEST_ASSERT_TRUE(fabs((120.5) - (hit->slack_ps)) < 1e-9);
+    EXPECT_NEAR(120.5, hit->slack_ps);
     TEST_ASSERT_EQUAL_UINT32(2, hit->depth);
     TEST_ASSERT_NULL(odin3_hints_find_cell(hints, 8));
-    const odin3_hint_net *net = odin3_hints_find_net(hints, "top/a");
-    TEST_ASSERT_NOT_NULL(net);
-    TEST_ASSERT_TRUE(fabs((3000.0) - (net->arrival_ps)) < 1e-9);
-    TEST_ASSERT_TRUE(isnan(net->required_ps));
-    TEST_ASSERT_NOT_NULL(strstr(hints->source, "arch=k6"));
-    TEST_ASSERT_EQUAL_size_t(1, odin3_hints_cells_used(hints));
-    TEST_ASSERT_EQUAL_size_t(1, odin3_hints_nets_used(hints));
+    check_net_a(hints);
     odin3_hints_free(hints);
 }
 
@@ -99,18 +119,18 @@ static void test_explicit_ns_per_level_wins(void) {
     char text[256];
     (void)snprintf(text, sizeof text, "%smeta\tns_per_level\t0.25\ncell\t1\t0\t1\t1\t1\n", HEAD);
     odin3_hints *hints = parse_ok(text);
-    TEST_ASSERT_TRUE(fabs((0.25) - (hints->ns_per_level)) < 1e-9);
+    EXPECT_NEAR(0.25, hints->ns_per_level);
     odin3_hints_free(hints);
 }
 
 static void test_tighten_levels_meta(void) {
     odin3_hints *hints = parse_ok("odin3-timing-hints\t1\n");
-    TEST_ASSERT_TRUE(fabs(1.0 - hints->tighten_levels) < 1e-9); /* the default */
+    EXPECT_NEAR(1.0, hints->tighten_levels); /* the default */
     odin3_hints_free(hints);
     char text[256];
     (void)snprintf(text, sizeof text, "%smeta\ttighten_levels\t2.5\n", HEAD);
     hints = parse_ok(text);
-    TEST_ASSERT_TRUE(fabs(2.5 - hints->tighten_levels) < 1e-9);
+    EXPECT_NEAR(2.5, hints->tighten_levels);
     odin3_hints_free(hints);
     (void)snprintf(text, sizeof text, "%smeta\ttighten_levels\t-1\n", HEAD);
     expect_error(text, "tighten_levels must be a number from 0");
@@ -124,13 +144,13 @@ static void test_duplicates_keep_the_worst(void) {
                    HEAD);
     odin3_hints *hints = parse_ok(text);
     TEST_ASSERT_EQUAL_size_t(1, hints->n_cells);
-    TEST_ASSERT_TRUE(fabs((20.0) - (hints->cells[0].slack_ps)) < 1e-9);
-    TEST_ASSERT_TRUE(fabs((0.8) - (hints->cells[0].crit)) < 1e-9);
+    EXPECT_NEAR(20.0, hints->cells[0].slack_ps);
+    EXPECT_NEAR(0.8, hints->cells[0].crit);
     TEST_ASSERT_EQUAL_UINT32(2, hints->cells[0].depth);
     TEST_ASSERT_EQUAL_UINT32(3, hints->cells[0].luts);
     TEST_ASSERT_EQUAL_size_t(1, hints->n_nets);
-    TEST_ASSERT_TRUE(fabs((400.0) - (hints->nets[0].arrival_ps)) < 1e-9);
-    TEST_ASSERT_TRUE(fabs((700.0) - (hints->nets[0].required_ps)) < 1e-9);
+    EXPECT_NEAR(400.0, hints->nets[0].arrival_ps);
+    EXPECT_NEAR(700.0, hints->nets[0].required_ps);
     odin3_hints_free(hints);
 }
 
@@ -165,8 +185,7 @@ static void test_errors_name_file_and_line(void) {
     (void)snprintf(text, sizeof text, "%scell\t1\t-5\t1\t1\t1\n", HEAD);
     expect_error(text, "cell 1 has slack -5.0 ps, below the file's slack_min_ps 0.0");
     /* ns_per_level below the floor (it would print as inf in the ABC timing file) */
-    (void)snprintf(text, sizeof text, "%smeta\tns_per_level\t1e-300\ncell\t1\t1\t1\t1\t1\n",
-                   HEAD);
+    (void)snprintf(text, sizeof text, "%smeta\tns_per_level\t1e-300\ncell\t1\t1\t1\t1\t1\n", HEAD);
     expect_error(text, "ns_per_level 1e-300 is below the floor");
 }
 
@@ -176,7 +195,7 @@ static void test_a_nul_byte_is_an_error(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE,
                           odin3_hints_parse(text, sizeof text - 1, "t.tsv", &hints));
     TEST_ASSERT_NULL(hints);
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "t.tsv:2: a NUL byte in the file"));
+    expect_log("t.tsv:2: a NUL byte in the file");
 }
 
 static void test_header_only_file_is_fine(void) {
@@ -202,21 +221,21 @@ static void test_read_hints_pass_loads_and_caches_per_design(void) {
     odin3_hints *hints = odin3_hints_of(design);
     TEST_ASSERT_NOT_NULL(hints);
     TEST_ASSERT_EQUAL_size_t(1, hints->n_cells);
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "read_hints: odin3_hints_test.tsv: 1 cell hints"));
+    expect_log("read_hints: odin3_hints_test.tsv: 1 cell hints");
     odin3_design *other = odin3_design_create();
     TEST_ASSERT_NULL(odin3_hints_of(other)); /* another design has none */
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "loaded for an older design"));
+    expect_log("loaded for an older design");
     odin3_design_destroy(other);
 }
 
 static void test_read_hints_pass_errors(void) {
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG, odin3_design_run_pass(design, "read_hints", ""));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "usage: read_hints <file>"));
+    expect_log("usage: read_hints <file>");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_INVALID_ARG,
                           odin3_design_run_pass(design, "read_hints", "a.tsv b.tsv"));
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_IO,
                           odin3_design_run_pass(design, "read_hints", "no_such_hint_file.tsv"));
-    TEST_ASSERT_NOT_NULL(strstr(log_text, "cannot read the file"));
+    expect_log("cannot read the file");
     write_file("not a hint file\n");
     TEST_ASSERT_EQUAL_INT(ODIN3_ERR_PARSE, odin3_design_run_pass(design, "read_hints", PATH));
     TEST_ASSERT_NULL(odin3_hints_of(design));
