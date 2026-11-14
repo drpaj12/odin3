@@ -133,13 +133,22 @@ long routes the factor is larger and hints weigh more; where it is shallow and r
 ### Outputs and register inputs (required times)
 
 For a region output or register input driven by a gate with a cell hint (`depth` d, `slack` s, worst
-slack `s_min`): `required = d + (s - s_min) / ns_per_level` levels. The worst routed path gets exactly
-the depth it had in pass 1; a path with 1 ns of extra slack may be `1 / ns_per_level` levels deeper.
-Required times below what ABC can reach make `if` map that output for minimum depth ("the earliest
-arrival times are used"). Every other output keeps the budget of pass 1, `depth` (the default required
-time, `if` would otherwise treat an output without one as unconstrained and map for area); in a design
-with one region this is what ABC's own estimate gives. A `net` hint's `required_ps` gives the required
-time directly.
+slack `s_min`):
+
+    required = max(0, d + (s - s_min) / ns_per_level - tighten_levels)     levels
+
+`tighten_levels` is a `meta` value of the file (default 1). First version of this spec had no such
+term (required = depth + extra slack): the pilot showed why it cannot work. `depth` is the depth pass 1
+reached with ABC's own area recovery, so asking for it again reproduces pass 1, and the request can only
+relax paths that have slack, never help the critical one. With the term, every path within
+`tighten_levels` of the routed critical path is asked to be that many levels shallower than it was
+(a path with 1 ns of extra slack at 0.5 ns per level has 2 levels of room, so it is not asked for
+anything unless `tighten_levels` exceeds 2). Required times below what ABC can reach make `if` map that
+output for minimum depth ("the earliest arrival times are used"), so the request is "as shallow as
+possible, one level better if you can". Every other output keeps the budget of pass 1, `depth` (the
+default required time; `if` would otherwise treat an output without one as unconstrained and map for
+area); in a design with one region this is what ABC's own estimate gives. A `net` hint's
+`required_ps` gives the required time directly.
 
 ### Inputs (arrival times)
 
@@ -194,7 +203,8 @@ cell's own record (`odin3_node_prov`), and each keeps its own estimate when ther
 
 1. Key = provenance record ID (section 2); not names and not spans.
 2. Store = side table; ABI stays 7.
-3. Units = `cpd / depth` ns per level (section 6); the default required time = pass-1 depth.
+3. Units = `cpd / depth` ns per level (section 6); the default required time = pass-1 depth;
+   `tighten_levels` = 1 (agent default: one level; Peter may override).
 4. Approximate and wide cuts give no hint by default (section 5).
 5. Hints only change the mapper's required and arrival times; ABC's script is unchanged.
 6. Timing command goes immediately before `if`.

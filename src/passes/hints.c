@@ -102,6 +102,11 @@ static odin3_status meta_line(hparse *hp, char **f, size_t n) {
             h->ns_per_level = val;
             hp->have_npl = true;
         }
+    } else if (strcmp(f[1], "tighten_levels") == 0) {
+        if (!num_of(f[2], false, &val) || val < 0.0) {
+            return perr(hp, "tighten_levels must be a number from 0", f[2]);
+        }
+        h->tighten_levels = val;
     } else if (strcmp(f[1], "depth") == 0) {
         if (!uint_of(f[2], &num)) {
             return perr(hp, "not an unsigned number", f[2]);
@@ -308,6 +313,9 @@ odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, 
     *out = NULL;
     hparse hp = {.label = label};
     hp.hints = odin3_util_calloc(sizeof *hp.hints);
+    if (hp.hints != NULL) {
+        hp.hints->tighten_levels = ODIN3_HINTS_TIGHTEN_DEFAULT;
+    }
     char *copy = odin3_util_malloc(len + 1);
     if (hp.hints == NULL || copy == NULL) {
         odin3_util_free(hp.hints);

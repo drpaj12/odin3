@@ -103,6 +103,19 @@ static void test_explicit_ns_per_level_wins(void) {
     odin3_hints_free(hints);
 }
 
+static void test_tighten_levels_meta(void) {
+    odin3_hints *hints = parse_ok("odin3-timing-hints\t1\n");
+    TEST_ASSERT_TRUE(fabs(1.0 - hints->tighten_levels) < 1e-9); /* the default */
+    odin3_hints_free(hints);
+    char text[256];
+    (void)snprintf(text, sizeof text, "%smeta\ttighten_levels\t2.5\n", HEAD);
+    hints = parse_ok(text);
+    TEST_ASSERT_TRUE(fabs(2.5 - hints->tighten_levels) < 1e-9);
+    odin3_hints_free(hints);
+    (void)snprintf(text, sizeof text, "%smeta\ttighten_levels\t-1\n", HEAD);
+    expect_error(text, "tighten_levels must be a number from 0");
+}
+
 static void test_duplicates_keep_the_worst(void) {
     char text[512];
     (void)snprintf(text, sizeof text,
@@ -193,6 +206,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_parse_reads_meta_cells_and_nets);
     RUN_TEST(test_explicit_ns_per_level_wins);
+    RUN_TEST(test_tighten_levels_meta);
     RUN_TEST(test_duplicates_keep_the_worst);
     RUN_TEST(test_errors_name_file_and_line);
     RUN_TEST(test_header_only_file_is_fine);

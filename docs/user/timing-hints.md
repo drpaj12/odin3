@@ -51,7 +51,7 @@ net	top/c	3000	-
 
 - `meta`: `cpd_ps` (pass 1's routed critical path delay), `slack_min_ps` (its worst slack; every slack is
   read as `slack - slack_min`), `depth` (pass 1's mapped unit depth), `ns_per_level` (default `cpd_ps / 1000 /
-  depth`); any other key is kept for the log (`pass`, `seeds`, `reduce`, `cut`, `max_cells`, `tie_seed`).
+  depth`), `tighten_levels` (default 1); any other key is kept for the log (`pass`, `seeds`, `reduce`, `cut`, `max_cells`, `tie_seed`).
 - `cell <uid> <slack_ps> <crit> <depth> <luts>`: the gates of one word cell (a mux, a comparator, a
   flop's next-state logic, any logic). `uid` is the provenance record ID of the cell's gates (the `uid=`
   flag of a name map written with `ODIN3_PROV_UID=1`). `slack_ps` is the routed slack of the worst path
@@ -83,9 +83,11 @@ prints one INFO line (how many cell and net hints matched) and one WARNING with 
 levels, where `ns_per_level` is pass 1's routed critical path delay over its mapped depth (the cost of
 one level, routing included, along the critical path of that design).
 
-- An output or register input driven by a gate of a hinted cell gets the required time `depth + (slack -
-  slack_min) / ns_per_level` levels: the worst routed path may not get deeper than it was in pass 1, a
-  path with slack may.
+- An output or register input driven by a gate of a hinted cell gets the required time `max(0, depth +
+  (slack - slack_min) / ns_per_level - tighten_levels)` levels (`tighten_levels` is a `meta` value,
+  default 1): a path within one level of the routed critical path is asked to be one level shallower
+  than pass 1 made it, a path with more room than that is not asked for anything. ABC maps an output
+  whose request it cannot meet for the least depth it can.
 - Every other output keeps the depth of pass 1 as its required time (without one, ABC would treat it as
   unconstrained and map it for area).
 - A `net` hint's arrival time (an input) or required time (an output or register input) is used as given

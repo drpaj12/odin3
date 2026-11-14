@@ -8,10 +8,14 @@
  * A cell hint (the gate record of a word cell) says how much slack the routed pass 1 left on the
  * worst path through the cell, and the unit depth the cell had there. An output or register input
  * driven by a gate of such a cell may be as deep as that depth plus the slack the path had over
- * the worst path of the design: required = depth + (slack - slack_min) / ns_per_level. Every other
- * output keeps the depth budget of pass 1, `depth` (the default required time), which is what ABC's
- * own estimate gives a design with one region. A net hint gives an arrival (inputs) or required
- * time (outputs) directly.
+ * the worst path of the design, less `tighten_levels` (default 1):
+ *   required = max(0, depth + (slack - slack_min) / ns_per_level - tighten_levels).
+ * Without the last term the request would only repeat the depth pass 1 reached (area recovery
+ * included) and could never help; with it, every path within `tighten_levels` of the routed
+ * critical path is asked to get that much shallower, and ABC maps an output whose request it cannot
+ * meet for the least depth it can. Every other output keeps the depth budget of pass 1, `depth`
+ * (the default required time), which is what ABC's own estimate gives a design with one region.
+ * A net hint gives an arrival (inputs) or required time (outputs) directly.
  */
 #include "passes/abc/timing.h"
 
@@ -109,7 +113,9 @@ static bool required_of(tctx *tc, odin3_net_id net, double *req) {
     if (ch == NULL) {
         return false;
     }
-    *req = (double)ch->depth + levels(tc, ch->slack_ps - tc->hints->slack_min_ps);
+    double want = (double)ch->depth + levels(tc, ch->slack_ps - tc->hints->slack_min_ps) -
+                  tc->hints->tighten_levels;
+    *req = want > 0.0 ? want : 0.0;
     return true;
 }
 

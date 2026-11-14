@@ -20,6 +20,7 @@
 /* The first line of a hint file: this word, a TAB and the format version. */
 #define ODIN3_HINTS_MAGIC "odin3-timing-hints"
 enum { ODIN3_HINTS_VERSION = 1, ODIN3_HINTS_SOURCE_BYTES = 512 };
+#define ODIN3_HINTS_TIGHTEN_DEFAULT 1.0
 
 /* A hint for one provenance record: the gate-level record of a word cell (its `uid=` in a name map
  * written with ODIN3_PROV_UID=1, which is the record ID of the cell's gates in the design). */
@@ -45,6 +46,7 @@ typedef struct odin3_hints {
     double slack_min_ps; /* the worst slack of pass 1 (the reference: slack - slack_min >= 0) */
     uint32_t depth;      /* mapped unit depth of pass 1 (whole design) */
     double ns_per_level; /* ns per LUT level: cpd / depth unless the file gives it */
+    double tighten_levels; /* levels asked for on top of pass 1's depth (meta tighten_levels) */
     char source[ODIN3_HINTS_SOURCE_BYTES]; /* the `meta` lines as `key=value` words, for the log */
     odin3_hint_cell *cells;                /* sorted by uid, unique */
     size_t n_cells;
@@ -57,7 +59,7 @@ typedef struct odin3_hints {
 /*
  * Parses hint text (len bytes; label names it in messages). Format: line 1 `odin3-timing-hints`
  * TAB `1`; then lines of TAB-separated fields, blank lines and lines starting with `#` ignored:
- *   meta TAB key TAB value        keys cpd_ps, slack_min_ps, depth, ns_per_level are read, any
+ *   meta TAB key TAB value        keys cpd_ps, slack_min_ps, depth, ns_per_level, tighten_levels are read, any
  *                                 other key is kept in `source`
  *   cell TAB uid TAB slack_ps TAB crit TAB depth TAB luts
  *   net  TAB <module>/<net> TAB arrival_ps TAB required_ps      (a time may be `-`)

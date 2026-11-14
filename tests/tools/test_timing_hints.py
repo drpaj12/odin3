@@ -59,9 +59,9 @@ class Case(unittest.TestCase):
         self.assertEqual(code, 0, err)
         return out
 
-    def odin3(self, script: str, *opts: str, env: dict[str, str] | None = None
-              ) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([ODIN3, *opts, "--top", "top", "-p", script], capture_output=True,
+    def odin3(self, script: str, *opts: str, env: dict[str, str] | None = None,
+              top: str = "top") -> subprocess.CompletedProcess[str]:
+        return subprocess.run([ODIN3, *opts, "--top", top, "-p", script], capture_output=True,
                               text=True, cwd=self.tmp, check=False, timeout=120,
                               env={**os.environ, **(env or {})})
 
@@ -276,6 +276,52 @@ class Hook(Case):
         twice = self.odin3("read_project p2.o3proj")
         self.assertNotEqual(twice.returncode, 0)
         self.assertIn("timing_hints given twice", twice.stderr)
+
+
+class Required(Case):
+    """The required times the abc hook writes: depth + slack in levels - tighten_levels."""
+
+    SCRIPT = ("read_verilog --nolatches --vtr-compat --prov-ast refs hint_demo.v; proc; flatten; "
+              "lower; {pre}abc --lut 6 --prov-cut on{via}; write_blif --vtr --lut-k 6 "
+              "--name-style hash --prov-map out.blif")
+
+    def run_demo(self, pre: str = "", via: str = "") -> subprocess.CompletedProcess[str]:
+        (self.tmp / "hint_demo.v").write_text(DEMO.read_text())
+        return self.odin3(self.SCRIPT.format(pre=pre, via=via), env={"ODIN3_PROV_UID": "1"},
+                         top="hint_demo")
+
+    @needs_odin3
+    def test_required_time_formula(self) -> None:
+        first = self.run_demo()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        blif = self.tmp / "out.blif"
+        atoms = luts_of(blif)
+        csv = self.tmp / "net.csv"
+        fake_net_timing(csv, atoms, {a: 10.0 * i for i, a in enumerate(atoms)})
+        hints = th.build(blif, blif.with_name("out.blif.names"), [csv], [1.0])[2]
+        self.assertGreater(len(hints), 0)
+        # every cell by hand: on the worst path (slack 0), pass-1 depth 3, 0.5 ns/level
+        def table(slack: int) -> str:
+            head = (HEAD.replace("cpd_ps\t1000", "cpd_ps\t1500").replace("depth\t2", "depth\t3")
+                    + "meta\ttighten_levels\t1\n")
+            return head + "".join(f"cell\t{h.uid}\t{slack}\t1\t3\t1\n" for h in hints)
+
+        (self.tmp / "h.tsv").write_text(table(0))
+        via = self.tmp / "via"
+        second = self.run_demo("read_hints h.tsv; ", f" --via-blif {via}")
+        self.assertEqual(second.returncode, 0, second.stderr)
+        lines = (via / "abc0.timing").read_text().splitlines()
+        self.assertEqual(lines[0], "default_required 3.000000")
+        values = sorted(float(ln.split()[2]) for ln in lines[1:])
+        self.assertTrue(values, "no required time written for the hinted cell")
+        self.assertEqual(set(values), {2.0})  # 3 + 0 - 1: asked to be one level shallower
+        self.assertIn(f"{len(hints)} of {len(hints)} cell hints match a gate", second.stderr)
+        # more slack: 1000 ps over the worst at 0.5 ns per level is 2 levels of room
+        (self.tmp / "h.tsv").write_text(table(1000))
+        third = self.run_demo("read_hints h.tsv; ", f" --via-blif {self.tmp / 'via3'}")
+        self.assertEqual(third.returncode, 0, third.stderr)
+        more = (self.tmp / "via3" / "abc0.timing").read_text().splitlines()
+        self.assertEqual({float(ln.split()[2]) for ln in more[1:]}, {4.0})  # 3 + 2 - 1
 
 
 class FlowOptions(Case):
