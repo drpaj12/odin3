@@ -17,3 +17,6 @@ mkDelayWorker32B.v unproven ABC dsec undecided within the 600 s equiv-check budg
 #   mkSMAdapter4B.v    counts: latch +4 against Parmys
 #   stereovision0.v    DIFFERS (equiv-check: not equivalent), counts equal
 #   stereovision2.v    UNPAIRED (102 unnamed multiply blocks only in each file)
+
+# D20 (2026-11-14): Parmys leaves `-x` in soft logic (alumacc $alu with constant A, no adder cell); Odin III maps $neg as 0 - A on an adder chain (A_WIDTH + 2 cells, Peter: fix, mux micro pairs).
+operators/twobits_arithmetic_uminus.v counts:+4 adder D20: Parmys leaves the negation in soft logic, Odin III puts 0 - A on a 4-cell adder chain

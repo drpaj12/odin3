@@ -221,6 +221,13 @@ static odin3_status transact(hm_ctx *hc, odin3_node_id src, const add_shape *sh)
     return st;
 }
 
+static const char *shape_word(const add_shape *sh) {
+    if (sh->neg) {
+        return "$neg";
+    }
+    return sh->sub ? "$sub" : "$add";
+}
+
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     add_shape sh = shape_of(hc, src);
     if (sh.n == 0 || sh.y == 0 || sh.n < hc->rules.min_add) {
@@ -233,7 +240,7 @@ odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
                 "partial_map: '%s' cell '%s' has Y_WIDTH %" PRIu32
                 " above max(A_WIDTH, B_WIDTH) + 1 (%" PRIu32
                 "); left soft for lower (run wreduce first)",
-                sh.neg ? "$neg" : (sh.sub ? "$sub" : "$add"), label, sh.y, sh.n + 1);
+                shape_word(&sh), label, sh.y, sh.n + 1);
         hc->stats.soft++;
         return ODIN3_OK;
     }

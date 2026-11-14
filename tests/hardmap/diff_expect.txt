@@ -47,3 +47,6 @@ common/bram.v counts:+9 latch D9: Parmys drops RD_EN (the read data changes on e
 # (top module) against the golden's hard blocks. Cell type owed by lower: `$pow`. Not hardmap's.
 operators/eightbit_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
 operators/twobits_arithmetic_power.v lower-gap `$pow` has no bit-level form in lower (not hardmap's)
+
+# D20 (2026-11-14): Parmys leaves `-x` in soft logic (alumacc $alu with constant A, no adder cell); Odin III maps $neg as 0 - A on an adder chain (A_WIDTH + 2 cells, Peter: fix, mux micro pairs).
+operators/twobits_arithmetic_uminus.v counts:+4 adder D20: Parmys leaves the negation in soft logic, Odin III puts 0 - A on a 4-cell adder chain

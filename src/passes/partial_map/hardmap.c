@@ -140,8 +140,17 @@ static odin3_status all_mul_phases(hm_ctx *hc) {
     return st == ODIN3_OK ? each_module(hc, "multiply", explicit_phase) : st;
 }
 
-/* The `$add` / `$sub` phase of one module (H-8, after every `$mul`): the cells live at the start,
- * in node-ID order. */
+static bool is_adder_type(odin3_celltype_id type, const odin3_celltype_id types[3]) {
+    return type.v == types[0].v || type.v == types[1].v || type.v == types[2].v;
+}
+
+static const char *type_word(const hm_ctx *hc, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(hc->design, type);
+    return def != NULL ? def->name : "?";
+}
+
+/* The `$add` / `$sub` / `$neg` phase of one module (H-8, after every `$mul`): the cells live at the
+ * start, in node-ID order. */
 static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltype_id types[3]) {
     uint32_t end = odin3_module_node_end(mod);
     hm_set_module(hc, mod);
@@ -149,8 +158,7 @@ static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};
         odin3_celltype_id type = odin3_node_type(mod, node);
-        if (!odin3_node_live(mod, node) ||
-            (type.v != types[0].v && type.v != types[1].v && type.v != types[2].v)) {
+        if (!odin3_node_live(mod, node) || !is_adder_type(type, types)) {
             continue;
         }
         uint64_t before = hc->stats.chains;
@@ -159,8 +167,7 @@ static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
             char label[ODIN3_LOG_BUF / 4];
             hm_label(hc, node, label, sizeof label);
             odin3_log(ODIN3_LOG_DEBUG, "partial_map: '%s' cell '%s' mapped to an adder chain",
-                      type.v == types[0].v ? "$add" : (type.v == types[1].v ? "$sub" : "$neg"),
-                      label);
+                      type_word(hc, type), label);
         }
     }
     return st;

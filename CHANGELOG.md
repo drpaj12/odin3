@@ -55,6 +55,13 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
   iverilog).
 
 ### Fixed
+- `-x` and `s ? -x : x` now use the carry chain (purpose: Odin III goal 1, VTR comparable QoR; found by the mux micro pairs). `partial_map`
+  left every `$neg` to `lower`, so a negation became soft LUTs (32-bit `s ? -x : x`: 42 LUTs, 7 LUT levels, 3.53 ns, no adder cells), while the
+  equal `(x ^ {32{s}}) + s` gave a 34-cell chain at 1 level. `$neg` is now mapped as `0 - A` (`$sub` with a = gnd) on `A_WIDTH + 2`
+  adder cells (`src/passes/partial_map/adder.c`, spec 3C decision D20); a `Y_WIDTH` above `A_WIDTH + 1` stays soft. Parmys leaves a
+  negation soft, so `partial_map` gives one WARNING per design. 32-bit `-x`: 38 to 32 LUTs, 3.16 to 1.91 ns; 32-bit `s ? -x : x`: 42 to
+  64 LUTs (the chain plus the mux), 3.53 to 2.42 ns. No design of the 14 small VTR set has a `$neg`, so their netlists do not change. Tests:
+  `test_hardmap_adder` (`test_neg_chain`, `test_neg_y_wider_soft`, `test_neg_sim_matrix`).
 - Front-end gaps found on VTR and OpenCores sources (purpose: Odin III goal 1, front-end and elaboration correctness, VTR comparable).
   (1) A macro name may start with a digit (`` `define 2_X 5 `` and `` `2_X ``; Yosys accepts it, the VTR `adder_tree` files use it).
   Formal argument names still must start with a letter or `_`. A backtick followed by a digit is now an undefined-macro error

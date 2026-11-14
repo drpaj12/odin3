@@ -535,15 +535,19 @@ static void test_neg_y_wider_soft(void) {
     pb_free(&res);
 }
 
+static void neg_sim_width(uint32_t width) {
+    const uint32_t ys[3] = {1, width, width + 1}; /* Y above width + 1 stays soft */
+    for (uint32_t sgn = 0; sgn < 2; sgn++) {
+        for (uint32_t yi = 0; yi < 3; yi++) {
+            g_neg = (negcase){width, ys[yi], sgn != 0};
+            TEST_ASSERT_TRUE(hm_sim_exhaustive(build_neg_g));
+        }
+    }
+}
+
 static void test_neg_sim_matrix(void) {
     for (uint32_t width = 1; width <= MAX_WIDTH; width++) {
-        const uint32_t ys[4] = {1, width, width + 1, width + 2};
-        for (uint32_t sgn = 0; sgn < 2; sgn++) {
-            for (uint32_t yi = 0; yi < 3; yi++) { /* Y above width + 1 stays soft: not hardmapped */
-                g_neg = (negcase){width, ys[yi], sgn != 0};
-                TEST_ASSERT_TRUE(hm_sim_exhaustive(build_neg_g));
-            }
-        }
+        neg_sim_width(width);
     }
 }
 
