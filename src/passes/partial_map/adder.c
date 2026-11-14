@@ -8,7 +8,9 @@
  * warning, as M-3 does for `$mul`: aliasing the extra Y bits onto a net, or onto gnd, would
  * allocate after the source is deleted (H-9); 3G's wreduce caps Y at n + 1. An `$add` that the
  * multiplier split made (hm_is_nocarry) has Y_WIDTH = n and no top stage: head and n stages, n + 1
- * cells, the chain Parmys builds for the adders of a split multiplier (X-4).
+ * cells, the chain Parmys builds for the adders of a split multiplier (X-4). A `$neg` is the
+ * `$sub` of 0 - A (alumacc turns a lone negation into 0 - A): the a operand is gnd, the b operand
+ * is port A, widths A_WIDTH and Y_WIDTH, so `-x` and `s ? -x : x` use the carry chain.
  */
 #include "passes/partial_map/hm_kit.h"
 
@@ -22,6 +24,7 @@
 
 enum { P_A_WIDTH = 2, P_B_WIDTH = 3, P_Y_WIDTH = 4 };
 enum { PORT_A, PORT_B, PORT_Y };
+enum { P_NEG_A_WIDTH = 1, P_NEG_Y_WIDTH = 2, PORT_NEG_Y = 1 };
 enum { ROLE_SIZE = 32, INV_CAP = 16, ADDER_IN = 3, ADDER_PINS = 5, FRESH_PER_ADDER = 2 };
 enum { HEAD_A, HEAD_B, HEAD_CIN };
 
@@ -32,6 +35,7 @@ typedef struct add_shape {
     bool is_signed;
     bool sub;
     bool no_top; /* a split multiplier's adder: no top stage (X-4) */
+    bool neg;    /* a `$neg`: 0 - A, a = gnd, b = port A, Y is port 1 */
 } add_shape;
 
 /* The state of one chain being built. */
@@ -50,6 +54,18 @@ static uint32_t param_u32(const hm_ctx *hc, odin3_node_id node, uint32_t index) 
     return val != NULL && val->i > 0 ? (uint32_t)val->i : 0;
 }
 
+static add_shape neg_shape(const hm_ctx *hc, odin3_node_id node) {
+    add_shape sh;
+    sh.n = param_u32(hc, node, P_NEG_A_WIDTH);
+    sh.y = param_u32(hc, node, P_NEG_Y_WIDTH);
+    const odin3_value *flag = odin3_node_param(hc->module, node, 0);
+    sh.is_signed = flag != NULL && flag->i != 0;
+    sh.sub = true;
+    sh.no_top = false;
+    sh.neg = true;
+    return sh;
+}
+
 static add_shape shape_of(const hm_ctx *hc, odin3_node_id node) {
     uint32_t awidth = param_u32(hc, node, P_A_WIDTH);
     uint32_t bwidth = param_u32(hc, node, P_B_WIDTH);
@@ -59,7 +75,11 @@ static add_shape shape_of(const hm_ctx *hc, odin3_node_id node) {
     sh.n = awidth > bwidth ? awidth : bwidth;
     sh.y = param_u32(hc, node, P_Y_WIDTH);
     sh.is_signed = odin3_opt_both_signed(hc->module, node);
+    if (def != NULL && strcmp(def->name, "$neg") == 0) {
+        return neg_shape(hc, node);
+    }
     sh.sub = def != NULL && strcmp(def->name, "$sub") == 0;
+    sh.neg = false;
     sh.no_top = !sh.sub && sh.y <= sh.n && hm_is_nocarry(hc, node);
     return sh;
 }
@@ -68,7 +88,10 @@ static add_shape shape_of(const hm_ctx *hc, odin3_node_id node) {
  * gnd. */
 static odin3_status ext_bit(const chain *ch, uint32_t port, odin3_net_id *out, uint32_t bit) {
     hm_ctx *hc = ch->hc;
-    odin3_pinslice pins = odin3_node_port(hc->module, ch->src, port);
+    if (ch->shape.neg && port == PORT_A) {
+        return hm_const(hc, HM_GND, out); /* 0 - A: the a operand */
+    }
+    odin3_pinslice pins = odin3_node_port(hc->module, ch->src, ch->shape.neg ? PORT_A : port);
     if (bit < pins.count) {
         *out = odin3_pin_net(hc->module, (odin3_pin_id){pins.first.v + bit});
         return ODIN3_OK;
@@ -155,7 +178,8 @@ static odin3_status add_stage(chain *ch, uint32_t bit) {
         (void)snprintf(role, sizeof role, "s%" PRIu32, bit);
     }
     st = st == ODIN3_OK ? add_adder(ch, role, in, &sum) : st;
-    odin3_pinslice ypins = odin3_node_port(ch->hc->module, ch->src, PORT_Y);
+    odin3_pinslice ypins =
+        odin3_node_port(ch->hc->module, ch->src, ch->shape.neg ? PORT_NEG_Y : PORT_Y);
     if (st == ODIN3_OK && bit < ch->shape.y && bit < ypins.count) {
         hm_tie *tie = odin3_vec_push(ch->ties); /* reserved by build: never NULL */
         odin3_net_id ynet = odin3_pin_net(ch->hc->module, (odin3_pin_id){ypins.first.v + bit});
@@ -197,6 +221,13 @@ static odin3_status transact(hm_ctx *hc, odin3_node_id src, const add_shape *sh)
     return st;
 }
 
+static const char *shape_word(const add_shape *sh) {
+    if (sh->neg) {
+        return "$neg";
+    }
+    return sh->sub ? "$sub" : "$add";
+}
+
 odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     add_shape sh = shape_of(hc, src);
     if (sh.n == 0 || sh.y == 0 || sh.n < hc->rules.min_add) {
@@ -209,7 +240,7 @@ odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
                 "partial_map: '%s' cell '%s' has Y_WIDTH %" PRIu32
                 " above max(A_WIDTH, B_WIDTH) + 1 (%" PRIu32
                 "); left soft for lower (run wreduce first)",
-                sh.sub ? "$sub" : "$add", label, sh.y, sh.n + 1);
+                shape_word(&sh), label, sh.y, sh.n + 1);
         hc->stats.soft++;
         return ODIN3_OK;
     }
@@ -217,6 +248,7 @@ odin3_status hm_map_adder(hm_ctx *hc, odin3_node_id src) {
     if (st == ODIN3_OK) {
         hc->stats.adder += (uint64_t)sh.n + (sh.no_top ? 1U : 2U);
         hc->stats.chains++;
+        hc->neg_chains += sh.neg ? 1U : 0U;
     }
     return st;
 }

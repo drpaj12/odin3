@@ -61,6 +61,7 @@ typedef struct hm_ctx {
     bool allow_unknown_blocks;           /* `--allow-unknown-blocks`: B-6 is a warning */
     bool parmys_split_ext;               /* `--parmys-split-ext`: sign-extend as Parmys (D19) */
     uint64_t b_splits;                   /* multipliers split on B alone (D19 warning) */
+    uint64_t neg_chains;                 /* `$neg` cells put on a carry chain (D20 warning) */
     odin3_celltype_id hard[HM_N_HARD];   /* found by hm_need; {0} until then */
     odin3_celltype_id glue[HM_N_GLUE];   /* found on first use */
     odin3_celltype_id konst[HM_N_CONST]; /* $_CONST0_, $_CONST1_, $_CONSTX_ */

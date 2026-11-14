@@ -140,16 +140,25 @@ static odin3_status all_mul_phases(hm_ctx *hc) {
     return st == ODIN3_OK ? each_module(hc, "multiply", explicit_phase) : st;
 }
 
-/* The `$add` / `$sub` phase of one module (H-8, after every `$mul`): the cells live at the start,
- * in node-ID order. */
-static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltype_id types[2]) {
+static bool is_adder_type(odin3_celltype_id type, const odin3_celltype_id types[3]) {
+    return type.v == types[0].v || type.v == types[1].v || type.v == types[2].v;
+}
+
+static const char *type_word(const hm_ctx *hc, odin3_celltype_id type) {
+    const odin3_celltype_def *def = odin3_celltype_get(hc->design, type);
+    return def != NULL ? def->name : "?";
+}
+
+/* The `$add` / `$sub` / `$neg` phase of one module (H-8, after every `$mul`): the cells live at the
+ * start, in node-ID order. */
+static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltype_id types[3]) {
     uint32_t end = odin3_module_node_end(mod);
     hm_set_module(hc, mod);
     odin3_status st = hm_budget_check(hc);
     for (uint32_t id = 1; st == ODIN3_OK && id < end; id++) {
         odin3_node_id node = {id};
         odin3_celltype_id type = odin3_node_type(mod, node);
-        if (!odin3_node_live(mod, node) || (type.v != types[0].v && type.v != types[1].v)) {
+        if (!odin3_node_live(mod, node) || !is_adder_type(type, types)) {
             continue;
         }
         uint64_t before = hc->stats.chains;
@@ -158,16 +167,17 @@ static odin3_status add_phase(hm_ctx *hc, odin3_module *mod, const odin3_celltyp
             char label[ODIN3_LOG_BUF / 4];
             hm_label(hc, node, label, sizeof label);
             odin3_log(ODIN3_LOG_DEBUG, "partial_map: '%s' cell '%s' mapped to an adder chain",
-                      type.v == types[0].v ? "$add" : "$sub", label);
+                      type_word(hc, type), label);
         }
     }
     return st;
 }
 
 static odin3_status all_add_phases(hm_ctx *hc) {
-    odin3_celltype_id types[2] = {{0}, {0}};
+    odin3_celltype_id types[3] = {{0}, {0}, {0}};
     if (!hm_find_type(hc->design, "$add", &types[0]) ||
-        !hm_find_type(hc->design, "$sub", &types[1])) {
+        !hm_find_type(hc->design, "$sub", &types[1]) ||
+        !hm_find_type(hc->design, "$neg", &types[2])) {
         return ODIN3_OK;
     }
     odin3_status st = ODIN3_OK;
@@ -314,7 +324,7 @@ static void carry_report(hm_ctx *hc, const odin3_arch *arch) {
         return;
     }
     if (!odin3_arch_chain_pattern_reaches_adder(arch)) {
-        if (count_cells(hc, "$add") + count_cells(hc, "$sub") == 0) {
+        if (count_cells(hc, "$add") + count_cells(hc, "$sub") + count_cells(hc, "$neg") == 0) {
             return; /* nothing to chain: the warning would be noise */
         }
         odin3_log(ODIN3_LOG_WARN,
@@ -387,6 +397,13 @@ static void report(hm_ctx *hc) {
                   " '$mul' cells split on operand B alone; Parmys sign-extends the low product "
                   "there (wrong when its top bit is set), partial_map zero-extends (D19)",
                   hc->b_splits);
+    }
+    if (hc->neg_chains > 0) {
+        odin3_log(ODIN3_LOG_WARN,
+                  "partial_map: %" PRIu64
+                  " '$neg' cells put on a carry chain as 0 - A; Parmys leaves a negation in soft "
+                  "logic, partial_map matches Odin II (D20)",
+                  hc->neg_chains);
     }
     odin3_log(ODIN3_LOG_INFO,
               "partial_map: %" PRIu64 " multiply, %" PRIu64 " adder in %" PRIu64 " chains, %" PRIu64
