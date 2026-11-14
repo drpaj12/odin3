@@ -120,6 +120,7 @@ add_library(odin3_core OBJECT
     src/passes/dump_locs.c
     src/passes/prov_depth.c
     src/passes/prov_estimate.c
+    src/passes/hints.c
     src/passes/names.c
     src/passes/names_v2.c
     src/passes/levelize/levelize.c
@@ -302,6 +303,7 @@ add_library(odin3_core OBJECT
     src/passes/abc/result.c
     src/passes/abc/cells.c
     src/passes/abc/xblif.c
+    src/passes/abc/timing.c
     src/passes/abc/xblif_read.c
     src/passes/abc/aig.c
     src/passes/abc/aligned.c
@@ -644,7 +646,7 @@ install(FILES lib/abc/vtr.abc lib/abc/gates.abc DESTINATION ${_odin3_share_dir}/
 install(FILES tools/flow/odin3_flow.py tools/flow/lpm.script tools/flow/timing_attr.py
               tools/flow/timing_report.py tools/flow/name_map_v2.py tools/flow/prov_post.py
               tools/flow/prov_why.py tools/flow/runrecord.py tools/flow/flow_record.py
-              tools/flow/prov_steps.py
+              tools/flow/prov_steps.py tools/flow/timing_hints.py tools/flow/two_pass.py
         DESTINATION ${_odin3_share_dir}/tools/flow)
 install(PROGRAMS tools/flow/odin3-flow tools/flow/odin3-timing tools/flow/odin3-prov-post tools/flow/odin3-prov-steps
         DESTINATION ${_odin3_share_dir}/tools/flow)
@@ -2047,6 +2049,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pass_outputs PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_prov_depth)
+    odin3_add_unit_test(test_hints)
     odin3_add_unit_test(test_pass_manager)
     target_sources(test_pass_manager PRIVATE tests/unit/proc_fixture.c
                                              tests/unit/proc_fixture_core.c)

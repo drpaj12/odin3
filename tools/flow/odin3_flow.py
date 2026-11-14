@@ -4,6 +4,7 @@ section 2.1).
     odin3_flow.py design.v [more.v ...] --top TOP [--target vtr|lpm] [--arch ARCH.xml]
         [--family NAME] [--vpr | --no-vpr] [--analysis] [--prov] [--prov-cut] [--prov-level L]
         [--prov-budget SIZE] [--timing-attr] [--timing-paths N] [--timing-legacy]
+        [--hints FILE | --two-pass [--hint-seeds N] [--hint-cut exact|all] [--hint-max-cells N]]
         [--odin3 PATH] [--out DIR]
         [--target silicon --tools DIR --pdk DIR --steps a,b --clock PORT]
 
@@ -18,6 +19,7 @@ The module is importable with tools/vtr-qor on PYTHONPATH (the wrapper sets it):
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -85,6 +87,13 @@ class FlowArgs:
     prov_cut: bool = False  # --prov-cut: abc keeps the exact cut of each LUT (needs --prov)
     prov_level: str = ""  # --prov-level 0..4|auto: the provenance depth (odin3 --prov-level)
     prov_budget: str = ""  # --prov-budget SIZE: the most provenance bytes (odin3 --prov-budget)
+    hints: Path | None = None  # --hints FILE: read_hints before abc (docs/user/timing-hints.md)
+    net_timing: bool = False  # VPR also writes report_net_timing.csv (pass 1 of --two-pass)
+    vpr_seed: int = 0  # VPR --seed (0: VPR's default, which is 1)
+    two_pass: bool = False  # --two-pass: pass 1 to routing, hint file, pass 2 with it
+    hint_seeds: int = 1  # --hint-seeds N: hints from the worst over VPR seeds 1..N
+    hint_cut: str = "exact"  # --hint-cut exact|all
+    hint_max_cells: int = 8  # --hint-max-cells N (0: no limit)
 
 
 @dataclass(frozen=True)
@@ -541,6 +550,10 @@ def vpr_run(args: FlowArgs, vtr_root: Path, arch: Path, k: int, blif: Path, job_
         argv = [a for a in argv if a != "-delete_result_files"]
     if args.timing_attr and args.timing_paths != VPR_DEFAULT_PATHS:
         argv += ["--timing_report_npaths", str(args.timing_paths)]
+    if args.net_timing:
+        argv += ["--generate_net_timing_report", "on"]
+    if args.vpr_seed:
+        argv += ["--seed", str(args.vpr_seed)]
     started = time.time()
     step = run_step("vpr", argv, job_dir, {**os.environ, **dict(cmd.env)},
                     timeout if timeout is not None else qor_legs.stage_timeout("A") + 60)
@@ -559,6 +572,24 @@ def promote_retry_run(job_dir: Path, retry: dict[str, int], result: FlowResult) 
     result.vpr_run_dir = job_dir / "run"
     print(f"NOTE: --keep-results: the routed run (W={retry['used_width']}) is vpr/run; the failed "
           f"one is {failed.name}")
+
+
+def vpr_seed_run(args: FlowArgs, blif: Path, job_dir: Path) -> tuple[Path | None, float | None]:
+    """One more VPR run of ``blif`` with ``args.vpr_seed`` (``--two-pass`` with ``--hint-seeds N``).
+    It follows the procedure of seed 1 (``vpr_step``: minimum width, relaxed-width route, route
+    retries) in ``job_dir / "vpr"``. Returns its run directory and routed CPD in ns, None where
+    it failed. ``args.net_timing`` must be set for the net timing report to be written."""
+    vtr_root = vtr_root_from_env()
+    if vtr_root is None:
+        raise UsageError("--vpr needs VTR_ROOT")
+    job_dir.mkdir(parents=True, exist_ok=True)
+    k = lut_k(args, vtr_root, job_dir / "k.log")
+    scratch = FlowResult(ok=False)
+    vpr_step(dataclasses.replace(args, out=job_dir), blif, k, scratch)
+    cpd = scratch.summary.get("crit_path_ns")
+    if scratch.vpr_run_dir is None or not isinstance(cpd, (int, float)):
+        return None, None
+    return scratch.vpr_run_dir, float(cpd)
 
 
 def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:
@@ -682,6 +713,14 @@ def timing_script(k: int, tdir: Path, legacy: bool = False) -> str:
             f"{quote(tdir / timing_attr.PROV_BLIF_NAME)}; {json_write}")
 
 
+def hints_script(script: str, hints: Path, k: int) -> str:
+    """``script`` with ``read_hints <file>`` just before its abc pass."""
+    abc = f"abc --lut {k}"
+    if script.count(abc) != 1:
+        raise UsageError("internal: the odin3 script has no single abc pass to put hints before")
+    return script.replace(abc, f"read_hints {quote(hints)}; {abc}")
+
+
 def map_path(blif: Path) -> Path:
     """The version 2 name map the writer puts next to the BLIF (``<blif>.names``)."""
     return blif.with_name(blif.name + ".names")
@@ -749,6 +788,8 @@ def vtr_steps(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
         script = script.replace(f"abc --lut {k}", f"abc --lut {k} --prov-cut on")
     script = with_read_options(args, script, step_dir)
     script = tristate_script(script, args.strict_tristate)
+    if args.hints is not None:
+        script = hints_script(script, args.hints, k)
     adir = args.out / "analysis"
     if args.analysis:
         adir.mkdir(parents=True, exist_ok=True)
@@ -865,6 +906,21 @@ def silicon_run(args: FlowArgs, top: str, result: FlowResult) -> Path | None:
     return args.out if code == 0 else None
 
 
+def check_hint_args(args: FlowArgs) -> None:
+    """The usage errors of --hints and --two-pass."""
+    if args.hints is not None and not args.hints.is_file():
+        raise UsageError(f"no such hint file: {args.hints}")
+    if (args.hints is not None or args.two_pass) and args.target != "vtr":
+        raise UsageError("--hints and --two-pass apply to --target vtr only")
+    if args.two_pass and not args.vpr:
+        raise UsageError("--two-pass needs VPR (--vpr, VTR_ROOT): pass 1 goes to routing")
+    if args.two_pass and args.hints is not None:
+        raise UsageError("--two-pass writes its own hint file: not with --hints")
+    if args.two_pass and (args.prov or args.timing_attr):
+        raise UsageError("--two-pass sets the provenance depth itself: not with --prov or "
+                         "--timing-attr")
+
+
 def run_flow(args: FlowArgs) -> FlowResult:
     """Run every step; stop at the first that fails. UsageError for a bad input."""
     if args.target not in TARGETS:
@@ -888,6 +944,7 @@ def run_flow(args: FlowArgs) -> FlowResult:
         raise UsageError("--timing-legacy needs --timing-attr")
     if args.timing_legacy and args.prov:
         raise UsageError("--timing-legacy is the route without the name map: not with --prov")
+    check_hint_args(args)
     if not args.odin3.is_file():
         raise UsageError(f"no odin3 binary at {args.odin3}: build it, put it on PATH or give "
                          f"--odin3")
@@ -898,6 +955,11 @@ def run_flow(args: FlowArgs) -> FlowResult:
     qor_legs.REPO_ROOT = resource_root()  # the module seam: where $LIB (lib/vtr.o3lib) is
     result = FlowResult(ok=False)
     args.out.mkdir(parents=True, exist_ok=True)
+    if args.two_pass:
+        import two_pass
+
+        done: FlowResult = two_pass.run(args, top, run_flow, vpr_seed_run)
+        return done
     step_fn = {"vtr": vtr_steps, "lpm": lpm_steps, "silicon": silicon_run}[args.target]
     result.ok = step_fn(args, top, result) is not None
     result.summary["seconds"] = {st.name: round(st.seconds, 3) for st in result.steps}
@@ -1013,6 +1075,22 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
     ap.add_argument("--strict-tristate", action="store_true",
                     help="make a tri-state conversion an error (default: the tristate pass runs "
                          "after flatten and warns once per conversion)")
+    ap.add_argument("--hints", type=Path, metavar="FILE",
+                    help="a timing hint file for the abc pass (read_hints before abc); "
+                         "needs --target vtr")
+    ap.add_argument("--two-pass", action="store_true",
+                    help="pass 1 through routing, back-annotate the routed timing into a hint "
+                         "file, pass 2 with it; writes pass1/, pass2/, hints.tsv and "
+                         "two-pass.json; needs VPR")
+    ap.add_argument("--hint-seeds", type=int, default=1, metavar="N",
+                    help="with --two-pass: hints from VPR seed 1 (default) or the worst over "
+                         "seeds 1..N")
+    ap.add_argument("--hint-cut", choices=("exact", "all"), default="exact",
+                    help="with --two-pass: LUTs with an exact cut only (default) or also "
+                         "approximate cuts")
+    ap.add_argument("--hint-max-cells", type=int, default=8, metavar="N",
+                    help="with --two-pass: skip a LUT whose cut covers more than N word cells "
+                         "(default 8; 0: no limit)")
     ap.add_argument("--odin3", type=Path, default=None,
                     help="odin3 binary (default: odin3 on PATH, else build/release/odin3)")
     ap.add_argument("--out", type=Path, help="output directory (default: odin3_out/<top>)")
@@ -1053,6 +1131,8 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
         ap.error("--prov-level and --prov-budget need --target vtr")
     if ns.keep_results and not vpr:
         ap.error("--keep-results needs VPR (--vpr)")
+    if ns.hint_seeds < 1:
+        ap.error("--hint-seeds needs a positive number")
     arch = ns.arch.resolve() if ns.arch else None
     attr = ns.timing_attr or ns.timing_paths is not None
     prov = ns.prov or (attr and not ns.timing_legacy)
@@ -1065,7 +1145,10 @@ def parse_args(argv: Sequence[str]) -> FlowArgs:
                     ns.tools.resolve() if ns.tools else None,
                     ns.pdk.resolve() if ns.pdk else None, ns.steps, ns.clock,
                     tuple(dict.fromkeys(incdirs)), tuple(defines), tuple(ns.read_opt),
-                    ns.strict_tristate, ns.prov_cut, ns.prov_level, ns.prov_budget)
+                    ns.strict_tristate, ns.prov_cut, ns.prov_level, ns.prov_budget,
+                    ns.hints.resolve() if ns.hints else None, two_pass=ns.two_pass,
+                    hint_seeds=ns.hint_seeds, hint_cut=ns.hint_cut,
+                    hint_max_cells=ns.hint_max_cells)
 
 
 def prov_depth_ignored(level: str, budget: str) -> tuple[str, str]:

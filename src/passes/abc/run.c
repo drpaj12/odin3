@@ -3,6 +3,7 @@
  * §7.1, §7.8, AB-19, AB-24; plan Task 14 with Tasks 15 and 16's pieces).
  */
 #include "passes/abc/run.h"
+#include "passes/abc/timing.h"
 
 #include "passes/abc/abc.h"
 #include "passes/abc/abc_test.h"
@@ -50,7 +51,7 @@ enum {
     DEPTH_TEXT_BYTES = 16
 };
 
-static const char *const k_file_suffix[] = {"in.blif", "cmd", "log", "out.blif"};
+static const char *const k_file_suffix[] = {"in.blif", "cmd", "log", "out.blif", "timing"};
 
 /* --- the run ------------------------------------------------------------------------------- */
 
@@ -82,7 +83,7 @@ odin3_status odin3_abc_run_create(odin3_pass_ctx *ctx, const odin3_abc_opts *opt
 
 odin3_status odin3_abc_run_path(const odin3_abc_run *run, uint32_t file_kind, char *path,
                                 size_t cap) {
-    if (file_kind > ODIN3_ABC_FILE_OUT) {
+    if (file_kind > ODIN3_ABC_FILE_TIMING) {
         return ODIN3_ERR_INVALID_ARG;
     }
     int len = snprintf(path, cap, "%s/abc%" PRIu32 ".%s", run->dir, run->run_no,
@@ -93,7 +94,7 @@ odin3_status odin3_abc_run_path(const odin3_abc_run *run, uint32_t file_kind, ch
 /* Removes the files a mkdtemp directory holds, then the directory (the pass made them all). */
 static void remove_temp_dir(const odin3_abc_run *run) {
     for (uint32_t number = 0; number < run->run_no; number++) {
-        for (uint32_t kind = ODIN3_ABC_FILE_IN; kind <= ODIN3_ABC_FILE_OUT; kind++) {
+        for (uint32_t kind = ODIN3_ABC_FILE_IN; kind <= ODIN3_ABC_FILE_TIMING; kind++) {
             char path[ODIN3_ABC_DIR_BYTES + FILE_NAME_BYTES];
             (void)snprintf(path, sizeof path, "%s/abc%" PRIu32 ".%s", run->dir, number,
                            k_file_suffix[kind]);
@@ -383,6 +384,10 @@ static odin3_status startup_checks(odin3_abc_run *run) {
     run->route = run->gates_mode ? ODIN3_ABC_ROUTE_LINKED : odin3_abc_route(run->digest);
     if (run->route == ODIN3_ABC_ROUTE_CHILD) {
         run->exchange = ODIN3_ABC_EXCHANGE_BLIF; /* the subprocess always uses the BLIF exchange */
+    }
+    st = odin3_abc_timing_start(run);
+    if (st != ODIN3_OK) {
+        return st;
     }
     st = odin3_abc_check_views(run->design);
     st = st == ODIN3_OK ? open_log(run) : st;
@@ -727,6 +732,9 @@ odin3_status odin3_abc_pass_run(odin3_pass_ctx *ctx, odin3_design *design, odin3
         st = odin3_design_compact(ctx, ctx->design);
     }
     st = st == ODIN3_OK ? finish_info(run) : st;
+    if (st == ODIN3_OK) {
+        odin3_abc_timing_report(run);
+    }
     odin3_abc_run_destroy(run);
     return st;
 }

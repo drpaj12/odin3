@@ -14,6 +14,7 @@
 #include "passes/abc/region.h"
 #include "passes/abc/result.h"
 #include "passes/abc/run.h"
+#include "passes/abc/timing.h"
 #include "passes/abc/xblif.h"
 #include "passes/manager.h"
 #include "util/alloc.h"
@@ -140,13 +141,44 @@ static void test_command_file(void) {
     odin3_strbuf cmds;
     odin3_strbuf_init(&cmds);
     TEST_ASSERT_EQUAL_INT(ODIN3_OK,
-                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out}, &cmds));
+                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out, NULL}, &cmds));
     char want[2048];
     (void)snprintf(want, sizeof want,
                    "read \"%s\"\nstrash\nifraig -v\nscorr -v\ndc2 -v\ndch -f\nif -K 6 -v\nmfs2 -v\n"
                    "print_stats\nwrite_hie \"%s\" \"%s\"\n",
                    in, in, out);
     TEST_ASSERT_EQUAL_STRING(want, cmds.data);
+    odin3_strbuf_free(&cmds);
+}
+
+/* With a timing file the run has `o3_timing "<file>"` in the place of the mapper `if` (the script
+ * moves one later) and `o3_timing -c` before write_hie; a run without it has neither. */
+static void test_command_file_with_timing(void) {
+    build_t1(0);
+    start_region("--lut 6");
+    char in[AFX_PATH];
+    char out[AFX_PATH];
+    char tim[AFX_PATH];
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_IN, in, sizeof in));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, odin3_abc_run_path(run, ODIN3_ABC_FILE_OUT, out, sizeof out));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_abc_run_path(run, ODIN3_ABC_FILE_TIMING, tim, sizeof tim));
+    TEST_ASSERT_NOT_NULL(strstr(tim, ".timing"));
+    run->timing_on = true;
+    run->timing_slot = odin3_abc_timing_slot(&run->script);
+    TEST_ASSERT_EQUAL_UINT32(5, run->timing_slot); /* strash ifraig scorr dc2 dch, then if */
+    odin3_strbuf cmds;
+    odin3_strbuf_init(&cmds);
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK,
+                          odin3_abc_xblif_commands(run, &(odin3_abc_paths){in, out, tim}, &cmds));
+    char want[2048];
+    (void)snprintf(want, sizeof want,
+                   "read \"%s\"\nstrash\nifraig -v\nscorr -v\ndc2 -v\ndch -f\n"
+                   "o3_timing \"%s\"\nif -K 6 -v\nmfs2 -v\nprint_stats\no3_timing -c\n"
+                   "write_hie \"%s\" \"%s\"\n",
+                   in, tim, in, out);
+    TEST_ASSERT_EQUAL_STRING(want, cmds.data);
+    TEST_ASSERT_EQUAL_UINT32(12, odin3_abc_xblif_command_count(run));
     odin3_strbuf_free(&cmds);
 }
 
@@ -371,7 +403,7 @@ static void test_oom_sweep(void) {
                    "1\n.latch w o3q0 0\n.names o3q0 o3co0\n1 1\n.end\n");
     uint32_t failures = 0;
     long at = 0;
-    while (at < OOM_LIMIT && !oom_round(at, &(odin3_abc_paths){in, out})) {
+    while (at < OOM_LIMIT && !oom_round(at, &(odin3_abc_paths){in, out, NULL})) {
         failures++;
         at++;
     }
@@ -385,6 +417,7 @@ int main(void) {
     RUN_TEST(test_input_init1);
     RUN_TEST(test_input_init0_2_3);
     RUN_TEST(test_command_file);
+    RUN_TEST(test_command_file_with_timing);
     RUN_TEST(test_write_is_deterministic);
     RUN_TEST(test_readback_errors);
     RUN_TEST(test_readback_missing_file);

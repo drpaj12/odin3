@@ -558,6 +558,20 @@ static odin3_status key_abc_script(o3_reader *rd, const o3_stmt *st) {
     return res;
 }
 
+/* timing_hints <file>: once, a path to a timing hint file (src/passes/hints.h). */
+static odin3_status key_timing_hints(o3_reader *rd, const o3_stmt *st) {
+    if (rd->proj->timing_hints.given != 0) {
+        odin3_bytes key = odin3_bytes_cstr("timing_hints");
+        return syntax(rd, st, "timing_hints given twice", &key);
+    }
+    odin3_proj_path path = {0, 0, {0}};
+    odin3_status res = arg_path(rd, &st->args[0], ODIN3_PROJ_WANT_FILE, &path);
+    if (res == ODIN3_OK) {
+        rd->proj->timing_hints = path;
+    }
+    return res;
+}
+
 /* prov_level <0..4|auto> and prov_budget <size>: once each (provenance depth; the CLI wins). */
 static odin3_status key_prov_level(o3_reader *rd, const o3_stmt *st) {
     if (rd->proj->prov_set) {
@@ -1162,6 +1176,7 @@ static const o3_key k_keys[] = {
      key_testbench},
     {"flow", 1, 1, "flow <script.o3>", key_flow},
     {"abc_script", 1, 1, "abc_script <file>", key_abc_script},
+    {"timing_hints", 1, 1, "timing_hints <file>", key_timing_hints},
     {"prov_level", 1, 1, "prov_level <0|1|2|3|4|auto>", key_prov_level},
     {"prov_budget", 1, 1, "prov_budget <size>[K|M|G]", key_prov_budget},
     {"schema", 1, 1, "schema <1|2>", key_schema},
