@@ -55,8 +55,9 @@ void odin3_abc_timing_start(odin3_abc_run *run) {
         why = "the script has no `if` command";
     }
     if (why != NULL) {
-        odin3_log(ODIN3_LOG_WARN, "abc: timing hints are loaded (%s) but this run cannot use "
-                                     "them: %s; they are ignored",
+        odin3_log(ODIN3_LOG_WARN,
+                  "abc: timing hints are loaded (%s) but this run cannot use "
+                  "them: %s; they are ignored",
                   hints->label, why);
         return;
     }
@@ -81,8 +82,8 @@ static double levels(const tctx *tc, double ps) {
 static void net_key(const tctx *tc, odin3_net_id net, char *out, size_t cap) {
     char text[NET_TEXT_BYTES];
     odin3_abc_net_text(tc->module, net, text, sizeof text);
-    const char *mod = odin3_strtab_get(odin3_design_strtab(tc->run->design),
-                                       odin3_module_name(tc->module));
+    const char *mod =
+        odin3_strtab_get(odin3_design_strtab(tc->run->design), odin3_module_name(tc->module));
     (void)snprintf(out, cap, "%s/%s", mod, text);
 }
 
@@ -191,12 +192,11 @@ void odin3_abc_timing_report(const odin3_abc_run *run) {
     }
     size_t cells = odin3_hints_cells_used(h);
     size_t nets = odin3_hints_nets_used(h);
-    odin3_log(ODIN3_LOG_INFO,
-              "abc: timing hints (%s): %zu of %zu cell hints match a gate of the design, %zu of "
-              "%zu net hints match a net; %" PRIu64 " required times and %" PRIu64
-              " arrival times set",
-              h->label, cells, h->n_cells, nets, h->n_nets, run->hint_req_total,
-              run->hint_arr_total);
+    odin3_log(
+        ODIN3_LOG_INFO,
+        "abc: timing hints (%s): %zu of %zu cell hints match a gate of the design, %zu of "
+        "%zu net hints match a net; %" PRIu64 " required times and %" PRIu64 " arrival times set",
+        h->label, cells, h->n_cells, nets, h->n_nets, run->hint_req_total, run->hint_arr_total);
     if (cells < h->n_cells || nets < h->n_nets) {
         odin3_log(ODIN3_LOG_WARN,
                   "abc: timing hints: %zu cell hints and %zu net hints match nothing in the "

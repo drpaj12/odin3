@@ -14,7 +14,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* The first script command that is the mapper `if` (its index), or UINT32_MAX when there is none. */
+/* The first script command that is the mapper `if` (its index), or UINT32_MAX when there is none.
+ */
 uint32_t odin3_abc_timing_slot(const odin3_abc_script *script);
 
 /*

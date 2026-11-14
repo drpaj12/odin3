@@ -108,7 +108,8 @@ static void adp_reset_generators(unsigned int seed) {
     srand(seed);
 }
 
-/* --- timing hints (src/passes/abc/timing.h) ---------------------------------------------------- */
+/* --- timing hints (src/passes/abc/timing.h) ----------------------------------------------------
+ */
 
 enum {
     ADP_TIMING_LINE = 256 /* a line of the timing file: a keyword, a net name and a number */
@@ -121,7 +122,8 @@ typedef struct adp_timing_counts {
 
 /* One line `<kind> <name> <levels>` of the timing file; kind pi (an input arrival), po (an
  * output's required time) or li (a register's input required time, the register named by its
- * output). A name the network no longer has (scorr merged the register) is counted, not an error. */
+ * output). A name the network no longer has (scorr merged the register) is counted, not an error.
+ */
 static void adp_timing_apply(Abc_Ntk_t *ntk, const char *kind, const char *name, float value,
                              adp_timing_counts *cnt) {
     char buf[ADP_TIMING_LINE];

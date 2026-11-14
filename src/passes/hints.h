@@ -40,13 +40,13 @@ typedef struct odin3_hint_net {
 } odin3_hint_net;
 
 typedef struct odin3_hints {
-    char *label;     /* the file name, for messages */
-    double cpd_ps;   /* routed critical path delay of pass 1 */
+    char *label;         /* the file name, for messages */
+    double cpd_ps;       /* routed critical path delay of pass 1 */
     double slack_min_ps; /* the worst slack of pass 1 (the reference: slack - slack_min >= 0) */
     uint32_t depth;      /* mapped unit depth of pass 1 (whole design) */
     double ns_per_level; /* ns per LUT level: cpd / depth unless the file gives it */
     char source[ODIN3_HINTS_SOURCE_BYTES]; /* the `meta` lines as `key=value` words, for the log */
-    odin3_hint_cell *cells; /* sorted by uid, unique */
+    odin3_hint_cell *cells;                /* sorted by uid, unique */
     size_t n_cells;
     odin3_hint_net *nets; /* sorted by name, unique */
     size_t n_nets;
@@ -67,8 +67,7 @@ typedef struct odin3_hints {
  * depth 0 and luts 0 together, or a file whose cell or net records need a `cpd_ps`, `depth`
  * and `slack_min_ps` meta line that is missing. NO_MEMORY. *out is NULL on failure.
  */
-odin3_status odin3_hints_parse(const char *text, size_t len, const char *label,
-                               odin3_hints **out);
+odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, odin3_hints **out);
 
 void odin3_hints_free(odin3_hints *hints);
 

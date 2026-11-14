@@ -4,6 +4,7 @@
 #include "passes/hints.h"
 
 #include "frontends/project/project.h"
+#include "ir/prov.h"
 #include "passes/builtin.h"
 #include "passes/manager.h"
 #include "util/alloc.h"
@@ -210,8 +211,9 @@ static odin3_status one_line(hparse *hp, char *line, bool *first) {
         char want[32];
         (void)snprintf(want, sizeof want, "%d", ODIN3_HINTS_VERSION);
         if (n != 2 || strcmp(f[0], ODIN3_HINTS_MAGIC) != 0 || strcmp(f[1], want) != 0) {
-            return perr(hp, "not a timing hint file (first line must be "
-                            "`" ODIN3_HINTS_MAGIC "<TAB>1`)",
+            return perr(hp,
+                        "not a timing hint file (first line must be "
+                        "`" ODIN3_HINTS_MAGIC "<TAB>1`)",
                         NULL);
         }
         return ODIN3_OK;
@@ -287,7 +289,8 @@ static odin3_status finish_parse(hparse *hp, bool first) {
         return perr(hp, "empty file", NULL);
     }
     if ((h->n_cells != 0 || h->n_nets != 0) && !(hp->have_cpd && hp->have_depth && hp->have_min)) {
-        return perr(hp, "cell and net records need meta lines cpd_ps, depth and slack_min_ps", NULL);
+        return perr(hp, "cell and net records need meta lines cpd_ps, depth and slack_min_ps",
+                    NULL);
     }
     if (!hp->have_npl) {
         h->ns_per_level = h->depth != 0 ? h->cpd_ps / PS_PER_NS / (double)h->depth : 0.0;
@@ -301,8 +304,7 @@ static odin3_status finish_parse(hparse *hp, bool first) {
     return h->cell_used != NULL && h->net_used != NULL ? ODIN3_OK : ODIN3_ERR_NO_MEMORY;
 }
 
-odin3_status odin3_hints_parse(const char *text, size_t len, const char *label,
-                               odin3_hints **out) {
+odin3_status odin3_hints_parse(const char *text, size_t len, const char *label, odin3_hints **out) {
     *out = NULL;
     hparse hp = {.label = label};
     hp.hints = odin3_util_calloc(sizeof *hp.hints);
@@ -451,18 +453,21 @@ odin3_hints *odin3_hints_of(const odin3_design *design) {
     g_cache.project_tried = true;
     const odin3_project *proj = odin3_design_project(design);
     if (proj != NULL && proj->timing_hints.given != 0) {
-        const char *path = odin3_strtab_get(odin3_design_strtab(design), proj->timing_hints.resolved);
+        const char *path =
+            odin3_strtab_get(odin3_design_strtab(design), proj->timing_hints.resolved);
         (void)read_file(path, &g_cache.hints);
     }
     return g_cache.hints;
 }
 
-/* --- the read_hints pass ----------------------------------------------------------------------- */
+/* --- the read_hints pass -----------------------------------------------------------------------
+ */
 
 static odin3_status read_hints_run(odin3_pass_ctx *ctx, odin3_design *design, odin3_bytes args,
                                    void *user) {
-    (void)ctx;
+    (void)design;
     (void)user;
+    odin3_prov_begin_op_lazy(ctx); /* the run is one operation; it makes no record */
     odin3_bytes file = odin3_pass_arg_next(&args);
     if (file.ptr == NULL || odin3_pass_arg_next(&args).ptr != NULL) {
         odin3_log(ODIN3_LOG_ERROR, "read_hints: usage: read_hints <file>");
@@ -474,9 +479,9 @@ static odin3_status read_hints_run(odin3_pass_ctx *ctx, odin3_design *design, od
     }
     memcpy(path, file.ptr, file.len);
     path[file.len] = '\0';
-    odin3_status st = odin3_hints_load(design, path);
+    odin3_status st = odin3_hints_load(ctx->design, path);
     if (st == ODIN3_OK) {
-        const odin3_hints *h = odin3_hints_of(design);
+        const odin3_hints *h = odin3_hints_of(ctx->design);
         odin3_log(ODIN3_LOG_INFO,
                   "read_hints: %s: %zu cell hints, %zu net hints, pass-1 cpd %.0f ps, depth %u, "
                   "%.4f ns per LUT level%s%s",

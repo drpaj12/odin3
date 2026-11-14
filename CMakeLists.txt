@@ -2049,6 +2049,7 @@ if(BUILD_TESTING)
     target_compile_definitions(test_pass_outputs PRIVATE
         ODIN3_BLIF_FIXTURES="${PROJECT_SOURCE_DIR}/tests/golden/blif")
     odin3_add_unit_test(test_prov_depth)
+    odin3_add_unit_test(test_hints)
     odin3_add_unit_test(test_pass_manager)
     target_sources(test_pass_manager PRIVATE tests/unit/proc_fixture.c
                                              tests/unit/proc_fixture_core.c)

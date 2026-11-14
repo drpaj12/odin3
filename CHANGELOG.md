@@ -7,6 +7,15 @@ PR numbers are GitHub pull requests; the phase checklists in `docs/PHASE*.md` ho
 ## Unreleased
 
 ### Added
+- Timing hints and a two-pass flow (additive; with no hint file nothing changes and the output is byte for byte what it was; ABI stays 7).
+  The new pass `read_hints <file>` and the project key `timing_hints <file>` load a plain-text hint file (routed slack per word cell,
+  keyed by the provenance record ID `uid`; arrival and required times per named net) into a side table. The `abc` pass uses it: required
+  times of outputs and register inputs driven by hinted cells and arrival times of hinted input nets reach ABC's mapper through a new ABC command
+  `o3_timing`, in LUT levels (`ns_per_level` = pass 1's routed CPD over its mapped depth). `odin3-flow --two-pass` runs pass 1 to routing,
+  writes `hints.tsv` from the routed net timing (`tools/flow/timing_hints.py`: greedy, the worst slack over a LUT's pins, a cell's LUTs and
+  `--hint-seeds N` seeds, ties at random with a recorded seed) and runs pass 2 with it; `--hints FILE` runs one pass with a given file.
+  Spec `docs/specs/2026-11-14-timing-hints.md`; docs `docs/user/timing-hints.md`. Tests: `test_hints`, `test_abc_xblif`,
+  `tests/tools/test_timing_hints.py`.
 - Provenance depth: one option for how much provenance data to keep, with a size estimate up front (additive; with no depth requested
   nothing changes, and a depth never changes the netlist). `--prov-level 0|1|2|3|4|auto` (off, statement, ancestry, cut, full) sets
   `read_verilog --prov-ast`, `abc --prov-edges` and `--prov-cut`, the name map of the hash-name writers and, in `odin3-flow

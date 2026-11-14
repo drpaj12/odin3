@@ -35,10 +35,11 @@ odin3_status odin3_abc_xblif_write(odin3_abc_run *run, const odin3_abc_region *r
                                    const char *path);
 
 /*
- * The commands of the run in order (AB-22): `read "<in>"`, the script's lines (with `o3_timing "<timing>"` before the mapper `if` when the run has hints), `&put` when the
- * script ends in the & space, `write_hie "<in>" "<out>"`. odin3_abc_xblif_command_count gives
- * their number; odin3_abc_xblif_command renders command index (appended to out, no line end) and
- * sets *src to the script command that produced it, or NULL for the three internal ones.
+ * The commands of the run in order (AB-22): `read "<in>"`, the script's lines (with `o3_timing
+ * "<timing>"` before the mapper `if` when the run has hints), `&put` when the script ends in the &
+ * space, `write_hie "<in>" "<out>"`. odin3_abc_xblif_command_count gives their number;
+ * odin3_abc_xblif_command renders command index (appended to out, no line end) and sets *src to the
+ * script command that produced it, or NULL for the three internal ones.
  */
 uint32_t odin3_abc_xblif_command_count(const odin3_abc_run *run);
 odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
