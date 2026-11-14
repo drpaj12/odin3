@@ -487,6 +487,66 @@ static void test_adder_sim_matrix(void) {
     }
 }
 
+/* --- $neg (D20): 0 - A on a carry chain -------------------------------------------------- */
+
+typedef struct negcase {
+    uint32_t a_width;
+    uint32_t y_width;
+    bool is_signed;
+} negcase;
+
+static negcase g_neg;
+
+static odin3_status build_neg_g(pb_result *out) {
+    char text[512];
+    (void)snprintf(text, sizeof text,
+                   "module \\m\n  wire width %" PRIu32 " input 1 \\a\n  wire width %" PRIu32
+                   " output 2 \\y\n  cell $neg \\u\n    parameter \\A_SIGNED %d\n"
+                   "    parameter \\A_WIDTH %" PRIu32 "\n    parameter \\Y_WIDTH %" PRIu32
+                   "\n    connect \\A \\a\n    connect \\Y \\y\n  end\nend\n",
+                   g_neg.a_width, g_neg.y_width, g_neg.is_signed ? 1 : 0, g_neg.a_width,
+                   g_neg.y_width);
+    odin3_status st = hm_build(text, out);
+    return st == ODIN3_OK ? odin3_design_set_top(out->design, odin3_module_id_of(out->module)) : st;
+}
+
+static void test_neg_chain(void) {
+    g_neg = (negcase){4, 5, false};
+    pb_result res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, build_neg_g(&res));
+    odin3_hardmap_stats stats;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$neg"));
+    TEST_ASSERT_EQUAL_UINT32(6, hm_count(res.module, "adder"));
+    TEST_ASSERT_EQUAL_UINT64(1, stats.chains);
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "'$neg' cells put on a carry chain"));
+    pb_free(&res);
+}
+
+/* Y_WIDTH above A_WIDTH + 1 stays soft with the warning, like a wide `$add`. */
+static void test_neg_y_wider_soft(void) {
+    g_neg = (negcase){4, 7, false};
+    pb_result res;
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, build_neg_g(&res));
+    TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, NULL));
+    TEST_ASSERT_EQUAL_UINT32(1, hm_count(res.module, "$neg"));
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "adder"));
+    TEST_ASSERT_NOT_NULL(strstr(log_text, "'$neg' cell"));
+    pb_free(&res);
+}
+
+static void test_neg_sim_matrix(void) {
+    for (uint32_t width = 1; width <= MAX_WIDTH; width++) {
+        const uint32_t ys[4] = {1, width, width + 1, width + 2};
+        for (uint32_t sgn = 0; sgn < 2; sgn++) {
+            for (uint32_t yi = 0; yi < 3; yi++) { /* Y above width + 1 stays soft: not hardmapped */
+                g_neg = (negcase){width, ys[yi], sgn != 0};
+                TEST_ASSERT_TRUE(hm_sim_exhaustive(build_neg_g));
+            }
+        }
+    }
+}
+
 /* --- A-1: candidates; A-9: explicit instances --------------------------------------------- */
 
 static void test_a1_const_operand_goes_hard(void) {
@@ -498,7 +558,7 @@ static void test_a1_const_operand_goes_hard(void) {
     pb_free(&res);
 }
 
-/* `$neg` and `$lt` are not candidates (S-1); an `$add` beside them still maps. */
+/* `$neg` is `0 - A` and maps (D20); `$lt` is not a candidate; an `$add` beside them maps too. */
 static void test_a1_other_cells_untouched(void) {
     static const char *text =
         "module \\m\n  wire width 4 input 1 \\a\n  wire width 4 input 2 \\b\n"
@@ -513,13 +573,12 @@ static void test_a1_other_cells_untouched(void) {
         "    connect \\A \\a\n    connect \\B \\b\n    connect \\Y \\s\n  end\nend\n";
     pb_result res;
     hm_build_ok(text, &res);
-    odin3_node_id neg = hm_nth(res.module, "$neg", 0);
     odin3_node_id lt = hm_nth(res.module, "$lt", 0);
     odin3_hardmap_stats stats;
     TEST_ASSERT_EQUAL_INT(ODIN3_OK, hm_run(&res, &stats));
-    TEST_ASSERT_EQUAL_UINT32(neg.v, hm_nth(res.module, "$neg", 0).v);
+    TEST_ASSERT_EQUAL_UINT32(0, hm_count(res.module, "$neg"));
     TEST_ASSERT_EQUAL_UINT32(lt.v, hm_nth(res.module, "$lt", 0).v);
-    TEST_ASSERT_EQUAL_UINT32(6, hm_count(res.module, "adder"));
+    TEST_ASSERT_EQUAL_UINT32(12, hm_count(res.module, "adder"));
     TEST_ASSERT_EQUAL_UINT64(0, stats.soft);
     pb_free(&res);
 }
@@ -841,6 +900,9 @@ int main(void) {
     RUN_TEST(test_a6_sx_add);
     RUN_TEST(test_a7_y_wider_soft);
     RUN_TEST(test_adder_sim_matrix);
+    RUN_TEST(test_neg_chain);
+    RUN_TEST(test_neg_y_wider_soft);
+    RUN_TEST(test_neg_sim_matrix);
     RUN_TEST(test_a1_const_operand_goes_hard);
     RUN_TEST(test_a1_other_cells_untouched);
     RUN_TEST(test_a9_explicit_adder_untouched);
