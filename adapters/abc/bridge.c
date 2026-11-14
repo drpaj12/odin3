@@ -114,6 +114,7 @@ static void adp_reset_generators(unsigned int seed) {
 enum {
     ADP_TIMING_LINE = 256 /* a line of the timing file: a keyword, a net name and a number */
 };
+#define ADP_TIMING_LIMIT 1.0e6 /* levels: the clamp of an arrival or required time */
 
 /* The counts of one o3_timing run, printed as one line the core logs. */
 typedef struct adp_timing_counts {
@@ -124,6 +125,18 @@ typedef struct adp_timing_counts {
  * output's required time) or li (a register's input required time, the register named by its
  * output). A name the network no longer has (scorr merged the register) is counted, not an error.
  */
+/* A time in levels as a float, clamped to +-ADP_TIMING_LIMIT (a double beyond the float range is
+ * undefined to convert). NaN gives false: the line is skipped. */
+static bool adp_timing_value(double value, float *out) {
+    if (value != value) { /* NaN */
+        return false;
+    }
+    value = value > ADP_TIMING_LIMIT ? ADP_TIMING_LIMIT : value;
+    value = value < -ADP_TIMING_LIMIT ? -ADP_TIMING_LIMIT : value;
+    *out = (float)value;
+    return true;
+}
+
 static void adp_timing_apply(Abc_Ntk_t *ntk, const char *kind, const char *name, float value,
                              adp_timing_counts *cnt) {
     char buf[ADP_TIMING_LINE];
@@ -175,10 +188,15 @@ static int adp_cmd_timing(Abc_Frame_t *frame, int argc, char **argv) {
         char kind[ADP_TIMING_LINE];
         char name[ADP_TIMING_LINE];
         double value = 0;
+        float time = 0;
         if (sscanf(line, "default_required %lf", &value) == 1) {
-            Abc_NtkTimeSetDefaultRequired(ntk, (float)value, (float)value);
+            if (adp_timing_value(value, &time)) {
+                Abc_NtkTimeSetDefaultRequired(ntk, time, time);
+            }
         } else if (sscanf(line, "%255s %255s %lf", kind, name, &value) == 3) {
-            adp_timing_apply(ntk, kind, name, (float)value, &cnt);
+            if (adp_timing_value(value, &time)) {
+                adp_timing_apply(ntk, kind, name, time, &cnt);
+            }
         }
     }
     (void)fclose(fp);

@@ -219,6 +219,12 @@ class Hook(Case):
         self.assertIn("1 arrival times set", err)
 
     @needs_odin3
+    def test_a_huge_time_is_clamped_not_undefined(self) -> None:
+        _, err = self.run_and11(HEAD + "net\ttop/c\t1e300\t-\n")
+        self.assertNotIn("runtime error", err)
+        self.assertIn("1 arrival times set", err)
+
+    @needs_odin3
     def test_no_matching_hint_leaves_the_netlist_alone(self) -> None:
         plain, _ = self.run_and11(None)
         same, err = self.run_and11(HEAD + "cell\t4294967295\t0\t1\t1\t1\nnet\ttop/nosuch\t900\t-\n")

@@ -470,13 +470,16 @@ odin3_status odin3_abc_xblif_command(const odin3_abc_run *run, uint32_t index,
                                      const odin3_abc_cmd **src) {
     *src = NULL;
     uint32_t n_cmds = run->script.n_cmds;
-    bool timing = run->timing_on && paths->timing != NULL;
+    bool timing = run->timing_on; /* the same condition as odin3_abc_xblif_command_count */
     uint32_t extra = timing ? 1U : 0U;
     if (index == 0) {
         return odin3_strbuf_appendf(out, "read \"%s\"", paths->in);
     }
     uint32_t pos = index - 1U;
     if (timing && pos == run->timing_slot) {
+        if (paths->timing == NULL) {
+            return ODIN3_ERR_INVALID_ARG; /* timing_on needs the timing file path */
+        }
         return odin3_strbuf_appendf(out, "o3_timing \"%s\"", paths->timing);
     }
     if (timing && pos > run->timing_slot) {

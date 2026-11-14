@@ -450,7 +450,8 @@ odin3_status odin3_project_finish(odin3_project *proj);
  * Appends the record as JSON: "{\n", one `  "key": value` line per README key in README order
  * (files libfiles libdirs libext incdirs defines top params arch rules inventory overrides flow
  * abc_script output ignored duplicates; "testbenches" between overrides and flow, only when the
- * project has one), each array or object on one line with Python's ", " and
+ * project has one; "timing_hints" after abc_script, then "prov_level" and "prov_budget", each only
+ * when the project gives it), each array or object on one line with Python's ", " and
  * ": " separators, "}\n". Paths are resolved; top, flow, abc_script, output and a bare define's
  * value are null when absent. Strings are UTF-8 with JSON escapes for '"', '\\' and control bytes;
  * a byte that is not part of valid UTF-8 is written as \u00XX. NO_MEMORY (out unchanged).
