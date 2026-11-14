@@ -14,6 +14,7 @@ from unittest import mock
 
 import odin3_flow as flow
 import timing_hints as th
+import two_pass
 
 from .helpers import run_main
 
@@ -340,6 +341,31 @@ class FlowOptions(Case):
             code, _, err = run_main(flow.main, [*base, "--hint-seeds", "0"])
             self.assertNotEqual(code, 0)
             self.assertIn("--hint-seeds needs a positive number", err)
+
+
+class SeedRuns(Case):
+    def test_extra_seeds_ask_for_the_net_timing_report(self) -> None:
+        out = self.tmp / "tp"
+        run_dir = out / "pass1" / "vpr" / "run"
+        run_dir.mkdir(parents=True)
+        (run_dir / two_pass.NET_TIMING).write_text("x\n")
+        args = flow.FlowArgs([], "top", "vtr", None, "", True, False, Path("odin3"), out,
+                             hint_seeds=3)
+        seen: list[tuple[int, bool]] = []
+
+        def run_flow(a: flow.FlowArgs) -> flow.FlowResult:
+            return flow.FlowResult(True, summary={"crit_path_ns": 5.0}, vpr_run_dir=run_dir)
+
+        def seed_run(a: flow.FlowArgs, blif: Path, job: Path) -> tuple[Path, float]:
+            seen.append((a.vpr_seed, a.net_timing))
+            job.mkdir(parents=True)
+            (job / two_pass.NET_TIMING).write_text("x\n")
+            return job, 6.0
+
+        stop = th.HintError("stop here")
+        with mock.patch.object(th, "build", side_effect=stop):
+            two_pass.run(args, "top", run_flow, seed_run)
+        self.assertEqual(seen, [(2, True), (3, True)])
 
 
 @unittest.skipUnless(ODIN3 and VTR_ROOT, "ODIN3_CLI and VTR_ROOT needed (VPR runs)")

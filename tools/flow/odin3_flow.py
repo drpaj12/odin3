@@ -19,6 +19,7 @@ The module is importable with tools/vtr-qor on PYTHONPATH (the wrapper sets it):
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import math
 import os
@@ -574,19 +575,21 @@ def promote_retry_run(job_dir: Path, retry: dict[str, int], result: FlowResult) 
 
 
 def vpr_seed_run(args: FlowArgs, blif: Path, job_dir: Path) -> tuple[Path | None, float | None]:
-    """One more VPR run of ``blif`` with ``args.vpr_seed`` in ``job_dir`` (``--two-pass`` with
-    ``--hint-seeds N``): its run directory and routed CPD in ns, None where it failed."""
+    """One more VPR run of ``blif`` with ``args.vpr_seed`` (``--two-pass`` with ``--hint-seeds N``).
+    It follows the procedure of seed 1 (``vpr_step``: minimum width, relaxed-width route, route
+    retries) in ``job_dir / "vpr"``. Returns its run directory and routed CPD in ns, None where
+    it failed. ``args.net_timing`` must be set for the net timing report to be written."""
     vtr_root = vtr_root_from_env()
     if vtr_root is None:
         raise UsageError("--vpr needs VTR_ROOT")
-    arch = args.arch or qor_legs.arch_xml_path(vtr_root, DEFAULT_ARCH)
-    ctx, step, _ = vpr_run(args, vtr_root, arch, lut_k(args, vtr_root, job_dir / "k.log"), blif,
-                           job_dir, None)
-    if not step.ok:
+    job_dir.mkdir(parents=True, exist_ok=True)
+    k = lut_k(args, vtr_root, job_dir / "k.log")
+    scratch = FlowResult(ok=False)
+    vpr_step(dataclasses.replace(args, out=job_dir), blif, k, scratch)
+    cpd = scratch.summary.get("crit_path_ns")
+    if scratch.vpr_run_dir is None or not isinstance(cpd, (int, float)):
         return None, None
-    text = (ctx.job_dir / "run" / "vpr.out").read_text(errors="replace")
-    cpd = _FINAL_CPD.findall(text)
-    return ctx.job_dir / "run", float(cpd[-1]) if cpd else None
+    return scratch.vpr_run_dir, float(cpd)
 
 
 def vpr_step(args: FlowArgs, blif: Path, k: int, result: FlowResult) -> None:

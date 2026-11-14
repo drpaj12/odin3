@@ -41,7 +41,7 @@ def pass_one_reports(args: Any, top: str, result: Any, seed_run: Callable[..., A
     csvs, cpds = [run_dir / NET_TIMING], [float(cpd)]
     blif = out / "odin3" / f"{top}.blif"
     for seed in range(2, args.hint_seeds + 1):
-        extra = dataclasses.replace(args, vpr_seed=seed)
+        extra = dataclasses.replace(args, vpr_seed=seed, net_timing=True)
         seed_dir, seed_cpd = seed_run(extra, blif, out / f"vpr-seed{seed}")
         if seed_dir is None or seed_cpd is None or not (seed_dir / NET_TIMING).is_file():
             raise timing_hints.HintError(f"VPR seed {seed} of pass 1 did not give a net timing "
