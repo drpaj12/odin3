@@ -123,6 +123,14 @@ class Annotator(Case):
         empty.write_text("src_pin_name,src_pin_slack,sinks\n")
         with self.assertRaisesRegex(th.HintError, "no pin slack"):
             th.build(blif, names, [empty], [1.0])
+        wrong = self.tmp / "wrong.csv"
+        wrong.write_text("a,b\n1,2\n")
+        with self.assertRaisesRegex(th.HintError, "no column src_pin_name"):
+            th.build(blif, names, [wrong], [1.0])
+        for meta in ({"a": "x\ny"}, {"a\tb": "1"}, {"": "1"}, {"cpd_ps": "1"}, {"depth": "1"},
+                     {"slack_min_ps": "1"}):
+            with self.assertRaisesRegex(th.HintError, "--meta"):
+                th.build(blif, names, [csv], [1.0], extra_meta=meta)
         # a name map without uid flags (ODIN3_PROV_UID unset) gives no key
         out = self.flow(DEMO, "--prov-level", "3")
         nouid = out / "odin3" / f"{DEMO.stem}.blif"
@@ -130,6 +138,11 @@ class Annotator(Case):
         fake_net_timing(csv, atoms, {a: 10.0 for a in atoms})
         with self.assertRaisesRegex(th.HintError, "no LUT record gave a hint key"):
             th.build(nouid, nouid.with_name(nouid.name + ".names"), [csv], [1.0])
+
+    def test_meta_check_without_odin(self) -> None:
+        th.check_meta({"arch": "k6", "vpr": "9.0 x"})
+        with self.assertRaises(th.HintError):
+            th.check_meta({"k": "a\rb"})
 
     def test_depth_of_a_small_blif(self) -> None:
         path = self.tmp / "d.blif"

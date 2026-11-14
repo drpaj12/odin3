@@ -115,6 +115,12 @@ class SeedSlack:
 def read_net_timing(path: Path, cpd_ns: float) -> SeedSlack:
     """The worst slack per atom of report_net_timing.csv (source pin and sink pins of every net)."""
     csv.field_size_limit(1 << 30)
+    with path.open(newline="") as fh:
+        names = csv.DictReader(fh).fieldnames or []
+    missing = [c for c in ("src_pin_name", "src_pin_slack", "sinks") if c not in names]
+    if missing:
+        raise HintError(f"{path}: no column {', '.join(missing)} (is it VPR's "
+                        f"report_net_timing.csv?)")
     best: dict[str, float] = {}
     pins: dict[str, list[tuple[float, str]]] = {}
 
@@ -246,11 +252,26 @@ def hint_text(hints: Iterable[Hint], meta: Mapping[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
+RESERVED_META = ("cpd_ps", "depth", "slack_min_ps", "ns_per_level")  # the numbers pass 1 measured
+
+
+def check_meta(extra: Mapping[str, str]) -> None:
+    """HintError for a meta key or value with a control character (it would add a record or a
+    field to the file), an empty key, or a key that overrides a measured number."""
+    for key, value in extra.items():
+        if not key or any(ord(c) < 32 or ord(c) == 127 for c in key + value):
+            raise HintError(f"--meta {key!r}={value!r}: a key must not be empty and neither "
+                            f"part may hold a control character (tab, newline, ...)")
+        if key in RESERVED_META:
+            raise HintError(f"--meta {key}: this key is measured from pass 1 and cannot be set")
+
+
 def build(blif_path: Path, map_path: Path, csvs: Sequence[Path], cpds: Sequence[float],
           cut_mode: str = "exact", max_cells: int = DEFAULT_MAX_CELLS,
           tie_seed: int = DEFAULT_TIE_SEED,
           extra_meta: Mapping[str, str] | None = None) -> tuple[str, Stats, list[Hint]]:
     """The hint file text for pass 1's BLIF, name map and routed net timing reports."""
+    check_meta(extra_meta or {})
     if len(csvs) != len(cpds) or not csvs:
         raise HintError("one --cpd-ns per net timing report is needed")
     blif = read_blif(blif_path)
